@@ -121,4 +121,67 @@ public class IAppSettingTests
 
         _ = Assert.Throws<ValidationException>(settings.Validate);
     }
+
+    [Fact]
+    public void SpoolCoverageSettings_SpoolSourceTimeoutMs_SerializesDefaultAndBoundaries()
+    {
+        var defaults = new SpoolCoverageSettings();
+
+        using JsonDocument defaultJson = JsonDocument.Parse(JsonSerializer.Serialize(defaults));
+        Assert.Equal(5000, defaultJson.RootElement.GetProperty("spoolSourceTimeoutMs").GetInt32());
+
+        foreach (int value in new[] { 250, 30000 })
+        {
+            var settings = new SpoolCoverageSettings { SpoolSourceTimeoutMs = value };
+            settings.Validate();
+            string json = JsonSerializer.Serialize(settings);
+            SpoolCoverageSettings? roundTrip = JsonSerializer.Deserialize<SpoolCoverageSettings>(json);
+            Assert.NotNull(roundTrip);
+            Assert.Equal(value, roundTrip.SpoolSourceTimeoutMs);
+        }
+    }
+
+    [Theory]
+    [InlineData(249)]
+    [InlineData(30001)]
+    public void SpoolCoverageSettings_SpoolSourceTimeoutMs_OutOfRangeThrows(int value)
+    {
+        var settings = new SpoolCoverageSettings { SpoolSourceTimeoutMs = value };
+
+        _ = Assert.Throws<ValidationException>(settings.Validate);
+    }
+
+    [Fact]
+    public void SpoolCoverageSettings_FleetResolveTimeoutMs_SerializesDefaultAndBoundaries()
+    {
+        var defaults = new SpoolCoverageSettings();
+
+        using JsonDocument defaultJson = JsonDocument.Parse(JsonSerializer.Serialize(defaults));
+        Assert.Equal(8000, defaultJson.RootElement.GetProperty("fleetResolveTimeoutMs").GetInt32());
+
+        // The fleet budget must stay under the mobile client's 10s per-probe readiness
+        // budget by default, or the app reports the coverage and attention services as
+        // unavailable at startup - the exact bug this setting exists to prevent.
+        Assert.True(defaults.FleetResolveTimeoutMs < 10000);
+
+        foreach (int value in new[] { 1000, 60000 })
+        {
+            var settings = new SpoolCoverageSettings { FleetResolveTimeoutMs = value };
+            settings.Validate();
+            string json = JsonSerializer.Serialize(settings);
+            SpoolCoverageSettings? roundTrip = JsonSerializer.Deserialize<SpoolCoverageSettings>(json);
+            Assert.NotNull(roundTrip);
+            Assert.Equal(value, roundTrip.FleetResolveTimeoutMs);
+        }
+    }
+
+    [Theory]
+    [InlineData(999)]
+    [InlineData(60001)]
+    public void SpoolCoverageSettings_FleetResolveTimeoutMs_OutOfRangeThrows(int value)
+    {
+        var settings = new SpoolCoverageSettings { FleetResolveTimeoutMs = value };
+
+        _ = Assert.Throws<ValidationException>(settings.Validate);
+    }
 }

@@ -9,6 +9,7 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Spoolman;
+using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -582,6 +583,465 @@ public class FilamentCoverageSpoolResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_DarkNativeSource_DegradesWithinConfiguredTimeout()
+    {
+        // Regression evidence for issue #2118 (re-opened): the previous fix bounded how
+        // many spool sources are read at once but never bounded how long a single source
+        // may take. A powered-down Moonraker printer that still holds its address
+        // black-holes packets, so the read inherited the backend's print-control timeout
+        // (BackendTimeoutSettings.PrintControlTimeoutSeconds = 60) and stalled the whole
+        // fleet projection. The mobile readiness gate allows 10s per probe, so both
+        // /api/attention and /api/printers/filament-coverage were reported unavailable.
+        const int sourceTimeoutMs = 300;
+        TimeSpan inheritedPrintControlTimeout = TimeSpan.FromSeconds(60);
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(DarkNativeClient().Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            settingsService: SettingsWithSourceTimeout(sourceTimeoutMs));
+        Printer printer = PrinterWithSpool("http://dark-moon.local", PrinterBackend.Moonraker, 7);
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result =
+            await resolver.ResolveAsync([printer], CancellationToken.None);
+        stopwatch.Stop();
+
+        stopwatch.Elapsed.Should().BeLessThan(inheritedPrintControlTimeout);
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5),
+            "the bounded read must resolve well inside the mobile client's 10s readiness budget");
+        result[printer.Id][7].Spool.Should().BeNull();
+        result[printer.Id][7].ErrorReason.Should().Be("spool-source-unavailable");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_DarkNativeSource_DoesNotStallHealthySources()
+    {
+        // The reported symptom was fleet-wide: one unreachable printer degraded coverage
+        // for every other printer because ResolveAsync awaits all sources together.
+        const string darkUrl = "http://dark-moon.local";
+        Mock<IBackendClient> native = new();
+        native.As<ISupportsSpoolman>()
+            .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string baseUrl, CancellationToken ct) =>
+            {
+                if (string.Equals(baseUrl, darkUrl, StringComparison.OrdinalIgnoreCase))
+                {
+                    await SwallowedHangAsync(ct);
+                    return null;
+                }
+
+                return JsonSerializer.Serialize(new[]
+                {
+                    new { id = 1, remaining_weight = 250, material = "PLA" },
+                });
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(native.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            settingsService: SettingsWithSourceTimeout(300));
+        Printer healthyPrinter = PrinterWithSpool("http://good-moon.local", PrinterBackend.Moonraker, 1);
+        Printer darkPrinter = PrinterWithSpool(darkUrl, PrinterBackend.Moonraker, 2);
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result =
+            await resolver.ResolveAsync([healthyPrinter, darkPrinter], CancellationToken.None);
+        stopwatch.Stop();
+
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
+        result[healthyPrinter.Id][1].Spool!.RemainingWeightG.Should().Be(250);
+        result[healthyPrinter.Id][1].ErrorReason.Should().BeNull();
+        result[darkPrinter.Id][2].ErrorReason.Should().Be("spool-source-unavailable");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_CallerCancellation_PropagatesInsteadOfDegrading()
+    {
+        // The Moonraker client swallows every exception from its Spoolman proxy and
+        // returns a null body, so without the resolver's explicit post-call cancellation
+        // check a genuine caller cancellation would be silently recorded as an unavailable
+        // source. The mock here swallows cancellation exactly as production does, so this
+        // test genuinely exercises that check rather than an exception escaping the mock.
+        using SemaphoreSlim sourceReadStarted = new(0);
+        Mock<IBackendClient> native = new();
+        native.As<ISupportsSpoolman>()
+            .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, CancellationToken ct) =>
+            {
+                sourceReadStarted.Release();
+                await SwallowedHangAsync(ct);
+                return (string?)null;
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(native.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            // Long enough that the per-source deadline cannot fire first, so the only
+            // possible cancellation is the caller's.
+            settingsService: SettingsWithSourceTimeout(30_000));
+        Printer printer = PrinterWithSpool("http://dark-moon.local", PrinterBackend.Moonraker, 7);
+        using CancellationTokenSource cts = new();
+
+        Task<IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>>> resolve =
+            resolver.ResolveAsync([printer], cts.Token);
+        // Cancel only once the source read is genuinely in flight, so this cannot pass by
+        // short-circuiting at the semaphore or before the request was ever issued.
+        (await sourceReadStarted.WaitAsync(UnreachableHostWatchdog)).Should().BeTrue(
+            "the source read must start before the caller cancels");
+        await cts.CancelAsync();
+
+        OperationCanceledException? canceled = null;
+        try
+        {
+            _ = await resolve;
+        }
+        catch (OperationCanceledException ex)
+        {
+            canceled = ex;
+        }
+
+        canceled.Should().NotBeNull("caller cancellation must propagate rather than degrade to an unavailable source");
+        canceled!.CancellationToken.Should().Be(cts.Token, "the caller's cancellation must surface, not a per-source timeout");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_UnreachableCentralSource_DegradesWithinConfiguredTimeout()
+    {
+        // Central Spoolman is read through the same fan-out, so an unreachable central
+        // host must not stall coverage any longer than a dark printer does.
+        Mock<ISpoolmanService> central = new();
+        central.Setup(s => s.GetConfig()).Returns(new SpoolmanConfigDto("http://central.local"));
+        central
+            .Setup(s => s.ListSpoolsAsync(It.IsAny<SpoolmanSpoolQueryParams>(), It.IsAny<CancellationToken>()))
+            .Returns(async (SpoolmanSpoolQueryParams _, CancellationToken ct) =>
+            {
+                // Mirrors the real SpoolmanService, which catches every exception -
+                // cancellation included - and reports SourceUnavailable rather than
+                // throwing (#2312). A mock that threw would exercise a failure path the
+                // real service never takes.
+                await SwallowedHangAsync(ct);
+                return SpoolmanReadResult.Unavailable<SpoolmanSpoolDto>();
+            });
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            new Mock<IBackendClientFactory>(MockBehavior.Strict).Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            settingsService: SettingsWithSourceTimeout(300));
+        Printer printer = PrinterWithSpool("http://octo.local", PrinterBackend.OctoPrint, 10);
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result =
+            await resolver.ResolveAsync([printer], CancellationToken.None);
+        stopwatch.Stop();
+
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
+        result[printer.Id][10].Spool.Should().BeNull();
+        result[printer.Id][10].ErrorReason.Should().Be("spool-source-unavailable");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_SourceFanOut_AllowsMoreThanFourConcurrentReads()
+    {
+        // Guards MaxConcurrentSourceRequests. The constant is load-bearing once each source
+        // carries its own deadline: dark sources serialise into ceil(sources / limit)
+        // timeout waves, so a silent regression back to 4 would double the worst-case wall
+        // clock for a farm with several printers powered down and push it back past the
+        // mobile client's 10s readiness budget. Nothing else in the suite fails if the
+        // limit changes, so assert it directly.
+        const int requiredConcurrency = 5;
+        int[] active = [0];
+        int[] peak = [0];
+        SemaphoreSlim arrivals = new(0);
+        using SemaphoreSlim release = new(0);
+        Mock<IBackendClient> native = new();
+        native.As<ISupportsSpoolman>()
+            .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string baseUrl, CancellationToken ct) =>
+            {
+                int inFlight = Interlocked.Increment(ref active[0]);
+                int observed = Volatile.Read(ref peak[0]);
+                while (inFlight > observed)
+                {
+                    int previous = Interlocked.CompareExchange(ref peak[0], inFlight, observed);
+                    if (previous == observed) { break; }
+                    observed = previous;
+                }
+
+                _ = arrivals.Release();
+                _ = await release.WaitAsync(UnreachableHostWatchdog, ct);
+                _ = Interlocked.Decrement(ref active[0]);
+                int spoolId = int.Parse(baseUrl.Split('-')[^1].Split('.')[0], CultureInfo.InvariantCulture);
+                return JsonSerializer.Serialize(new[]
+                {
+                    new { id = spoolId, remaining_weight = 100, material = "PLA" },
+                });
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(native.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            settingsService: SettingsWithSourceTimeout(30_000));
+        List<Printer> printers = Enumerable.Range(1, 8)
+            .Select(i => PrinterWithSpool($"http://moon-{i}.local", PrinterBackend.Moonraker, i))
+            .ToList();
+
+        Task<IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>>> resolve =
+            resolver.ResolveAsync(printers, CancellationToken.None);
+        for (int i = 0; i < requiredConcurrency; i++)
+        {
+            bool arrived = await arrivals.WaitAsync(TimeSpan.FromSeconds(10));
+            arrived.Should().BeTrue(
+                $"at least {requiredConcurrency} sources must be readable at once, but only {i} started");
+        }
+
+        release.Release(8);
+        _ = await resolve;
+
+        Volatile.Read(ref peak[0]).Should().BeGreaterThanOrEqualTo(requiredConcurrency);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_FleetOfDarkSources_StaysWithinFleetDeadline()
+    {
+        // The per-source deadline bounds a source, NOT the endpoint. Dark sources each hold
+        // a fan-out slot for their full timeout, so N of them serialise into
+        // ceil(N / MaxConcurrentSourceRequests) waves and total latency still grows with
+        // fleet size - which is exactly how the original bug reached the mobile client's 10s
+        // readiness budget.
+        //
+        // The numbers here are chosen so the test FAILS if the fleet deadline is removed:
+        // 24 dark sources at concurrency 8 is 3 waves, and at a 5s per-source timeout that
+        // is ~15s of pure source-wait. Only the 1s fleet budget can bring it under the 5s
+        // assertion below, so a per-source-only implementation cannot pass.
+        Mock<IBackendClient> native = new();
+        native.As<ISupportsSpoolman>()
+            .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, CancellationToken ct) =>
+            {
+                await SwallowedHangAsync(ct);
+                return (string?)null;
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(native.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            settingsService: SettingsWithSourceTimeout(5_000, fleetTimeoutMs: 1_000));
+        List<Printer> printers = Enumerable.Range(1, 24)
+            .Select(i => PrinterWithSpool($"http://dark-{i}.local", PrinterBackend.Moonraker, i))
+            .ToList();
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>> result =
+            await resolver.ResolveAsync(printers, CancellationToken.None);
+        stopwatch.Stop();
+
+        // Comfortably above the 1s budget so this asserts the bound exists rather than
+        // timing the CI host, but far below both the ~15s three-wave worst case and even a
+        // single 5s per-source wave, so neither can sneak past.
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
+
+        // Sources queued behind the gate when the deadline fired were never read at all.
+        // They must still be reported, and reported as unavailable - never as
+        // `spool-not-found`, which would be an affirmative claim about a source nobody
+        // reached, and never dropped from the projection.
+        result.Should().HaveCount(printers.Count);
+        foreach (Printer printer in printers)
+        {
+            FilamentCoverageSpoolSnapshot snapshot = result[printer.Id].Values.Single();
+            snapshot.Spool.Should().BeNull();
+            snapshot.ErrorReason.Should().Be(
+                "spool-source-unavailable",
+                "a source cut short by the fleet deadline was never reached, so it must not be reported as spool-not-found");
+        }
+
+        // Deliberately NOT asserting an upper bound on dispatch count here. A previous revision
+        // used Times.AtMost(MaxConcurrentSourceRequests) on the premise that each read holds its
+        // slot for the 5s per-source timeout, so only one wave could dispatch inside the 1s fleet
+        // budget. That premise is false, and the assertion was flaky: the fleet deadline cuts the
+        // in-flight reads FIRST, so all their slots are released at ~1s via the finally block.
+        // Queued waiters are then parked on WaitAsync with an already-cancelled token, and
+        // SemaphoreSlim completes a dequeued waiter concurrently with its cancellation callback -
+        // so a waiter that wins that race acquires a permit and dispatches. Observed at 9 and 14
+        // dispatches under a loaded suite while passing consistently when this class runs alone.
+        //
+        // Those late dispatches are harmless in production: the source links off an already
+        // cancelled budget token, the backend client returns immediately without network I/O, and
+        // the result still degrades to spool-source-unavailable. The invariant that actually
+        // matters - every source reported, none claimed spool-not-found - is asserted
+        // deterministically by the loop above, which is unaffected by the race.
+    }
+
+    [Fact]
+    public async Task ResolveAsync_CentralSourceCallerCancellation_PropagatesInsteadOfDegrading()
+    {
+        // The central path needs its own cancellation test because SpoolmanService swallows
+        // every exception - cancellation included - and reports SourceUnavailable rather
+        // than rethrowing (#2312). That is the right answer for a timed-out read, but it
+        // cannot distinguish the CALLER cancelling: without the resolver's explicit
+        // post-call check, a caller that cancelled its own request would get a fabricated
+        // `spool-source-unavailable` answer instead of an OperationCanceledException.
+        using SemaphoreSlim sourceReadStarted = new(0);
+        Mock<ISpoolmanService> central = new();
+        central.Setup(s => s.GetConfig()).Returns(new SpoolmanConfigDto("http://central.local"));
+        central
+            .Setup(s => s.ListSpoolsAsync(It.IsAny<SpoolmanSpoolQueryParams>(), It.IsAny<CancellationToken>()))
+            .Returns(async (SpoolmanSpoolQueryParams _, CancellationToken ct) =>
+            {
+                sourceReadStarted.Release();
+                await SwallowedHangAsync(ct);
+                return SpoolmanReadResult.Unavailable<SpoolmanSpoolDto>();
+            });
+        FilamentCoverageSpoolResolver resolver = new(
+            central.Object,
+            new Mock<IBackendClientFactory>(MockBehavior.Strict).Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            // Long enough that neither deadline can fire first, so the only possible
+            // cancellation is the caller's.
+            settingsService: SettingsWithSourceTimeout(30_000, fleetTimeoutMs: 60_000));
+        Printer printer = PrinterWithSpool("http://octo.local", PrinterBackend.OctoPrint, 10);
+        using CancellationTokenSource cts = new();
+
+        Task<IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>>> resolve =
+            resolver.ResolveAsync([printer], cts.Token);
+        (await sourceReadStarted.WaitAsync(UnreachableHostWatchdog)).Should().BeTrue(
+            "the central read must start before the caller cancels");
+        await cts.CancelAsync();
+
+        OperationCanceledException? canceled = null;
+        try
+        {
+            _ = await resolve;
+        }
+        catch (OperationCanceledException ex)
+        {
+            canceled = ex;
+        }
+
+        canceled.Should().NotBeNull("caller cancellation must propagate rather than degrade to an unavailable source");
+        canceled!.CancellationToken.Should().Be(cts.Token, "the caller's cancellation must surface, not a timeout");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_CallerCancellationWhileSourcesQueued_ReportsCallerTokenUniformly()
+    {
+        // UNIFORMITY GUARD, NOT A REGRESSION TEST - it cannot fail by construction, and that
+        // was verified by mutation: deleting the queued-path normalising catch arm in
+        // FilamentCoverageSpoolResolver leaves this test passing.
+        //
+        // ResolveAsync surfaces cancellation via Task.WhenAll, which reports the LOWEST-INDEX
+        // cancelled task's token. SemaphoreSlim.WaitAsync completes synchronously while permits
+        // remain, so indices 0..MaxConcurrentSourceRequests-1 always run straight through the
+        // gate and are always in flight; only higher indices park. A queued source therefore can
+        // never be the task whose token escapes, so the queued-path defect is unobservable here.
+        //
+        // Kept because it documents the intended contract across the fan-out and would catch a
+        // future change that consumed sources in COMPLETION order - Task.WhenEach, or a channel -
+        // since a source cancelled at the gate unwinds faster than one unwinding through a backend
+        // call, so a queued task could then be the first observed. Awaiting individually in index
+        // order would NOT expose it: index 0 is still in flight and still wins.
+        const int fleetSize = 20;
+        using SemaphoreSlim readsStarted = new(0);
+        Mock<IBackendClient> native = new();
+        native.As<ISupportsSpoolman>()
+            .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, CancellationToken ct) =>
+            {
+                readsStarted.Release();
+                await SwallowedHangAsync(ct);
+                return (string?)null;
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(native.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            // Both deadlines far out, so the only cancellation that can occur is the
+            // caller's - the fleet deadline must not be what ends this test.
+            settingsService: SettingsWithSourceTimeout(30_000, fleetTimeoutMs: 60_000));
+        List<Printer> printers = Enumerable.Range(1, fleetSize)
+            .Select(i => PrinterWithSpool($"http://moon-{i}.local", PrinterBackend.Moonraker, i))
+            .ToList();
+        using CancellationTokenSource cts = new();
+
+        Task<IReadOnlyDictionary<Guid, IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot>>> resolve =
+            resolver.ResolveAsync(printers, cts.Token);
+
+        // Fill the gate so the remaining sources are genuinely parked on WaitAsync, then
+        // cancel. fleetSize exceeds MaxConcurrentSourceRequests, so some must still be queued.
+        for (int i = 0; i < 8; i++)
+        {
+            (await readsStarted.WaitAsync(UnreachableHostWatchdog)).Should().BeTrue(
+                "the fan-out must saturate before the caller cancels");
+        }
+
+        await cts.CancelAsync();
+
+        OperationCanceledException? canceled = null;
+        try
+        {
+            _ = await resolve;
+        }
+        catch (OperationCanceledException ex)
+        {
+            canceled = ex;
+        }
+
+        canceled.Should().NotBeNull("caller cancellation must propagate rather than degrade to an unavailable source");
+        canceled!.CancellationToken.Should().Be(
+            cts.Token,
+            "cancellation must surface the caller's token, never the internal budget token");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ReadsSpoolBudgetOnceForTheWholeFleet()
+    {
+        // Every concurrent source used to read SpoolSourceTimeout independently.
+        // SettingsService.Get enumerates a shared dictionary, so a concurrent settings save
+        // could throw mid-enumeration and silently drop SOME sources back to the default
+        // timeout while others kept the configured one. Reading the budget once per resolve
+        // removes that race, so pin the call count.
+        Mock<ISettingsService> settings = new();
+        settings.Setup(s => s.Get<SpoolCoverageSettings>())
+            .Returns(new SpoolCoverageSettings { SpoolSourceTimeoutMs = 5_000, FleetResolveTimeoutMs = 60_000 });
+        Mock<IBackendClient> native = new();
+        native.As<ISupportsSpoolman>()
+            .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string baseUrl, CancellationToken _) =>
+            {
+                int spoolId = int.Parse(baseUrl.Split('-')[^1].Split('.')[0], CultureInfo.InvariantCulture);
+                return JsonSerializer.Serialize(new[]
+                {
+                    new { id = spoolId, remaining_weight = 100, material = "PLA" },
+                });
+            });
+        Mock<IBackendClientFactory> factory = new();
+        factory.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(native.Object);
+        FilamentCoverageSpoolResolver resolver = new(
+            new Mock<ISpoolmanService>(MockBehavior.Strict).Object,
+            factory.Object,
+            NullLogger<FilamentCoverageSpoolResolver>.Instance,
+            settingsService: settings.Object);
+        List<Printer> printers = Enumerable.Range(1, 6)
+            .Select(i => PrinterWithSpool($"http://moon-{i}.local", PrinterBackend.Moonraker, i))
+            .ToList();
+
+        _ = await resolver.ResolveAsync(printers, CancellationToken.None);
+
+        settings.Verify(s => s.Get<SpoolCoverageSettings>(), Times.Once);
+    }
+
+    [Fact]
     public async Task ResolveAsync_PrinterLevelSpoolBinding_IsIncludedForManagedPrimaryFallback()
     {
         Mock<ISpoolmanService> central = new();
@@ -662,6 +1122,76 @@ public class FilamentCoverageSpoolResolverTests
             .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(json);
         return client;
+    }
+
+    /// <summary>
+    /// A spool source that never answers, modelling a printer that is powered down but
+    /// still holds its address: it black-holes packets instead of refusing them, so the
+    /// read hangs rather than failing fast.
+    ///
+    /// <para>
+    /// Crucially this mirrors <c>MoonrakerClient.SpoolmanProxyRequestAsync</c>, which
+    /// catches EVERY exception - cancellation included - and returns a null body. A mock
+    /// that let <see cref="OperationCanceledException"/> escape would not exercise the
+    /// resolver's explicit post-call cancellation check at all.
+    /// </para>
+    ///
+    /// <para>
+    /// The delay is long-but-finite rather than infinite so that a regression which
+    /// removes the per-source deadline FAILS the elapsed-time assertion instead of
+    /// hanging the test host until CI's external job limit.
+    /// </para>
+    /// </summary>
+    private static Mock<IBackendClient> DarkNativeClient()
+    {
+        Mock<IBackendClient> client = new();
+        client.As<ISupportsSpoolman>()
+            .Setup(n => n.GetSpoolmanSpoolsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, CancellationToken ct) =>
+            {
+                await SwallowedHangAsync(ct);
+                return (string?)null;
+            });
+        return client;
+    }
+
+    /// <summary>
+    /// Watchdog bound for a mock that models an unreachable host. Comfortably longer than
+    /// any timeout configured in these tests, and far shorter than the 60s print-control
+    /// timeout the fix exists to avoid inheriting.
+    /// </summary>
+    private static readonly TimeSpan UnreachableHostWatchdog = TimeSpan.FromSeconds(20);
+
+    /// <summary>
+    /// Hangs until cancelled or the watchdog fires, then swallows the cancellation exactly
+    /// as the production Spoolman clients do.
+    /// </summary>
+    private static async Task SwallowedHangAsync(CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(UnreachableHostWatchdog, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // Swallowed on purpose: both MoonrakerClient.SpoolmanProxyRequestAsync and
+            // SpoolmanService.ListSpoolsAsync catch everything and return an empty result.
+        }
+    }
+
+    private static ISettingsService SettingsWithSourceTimeout(int timeoutMs, int fleetTimeoutMs = 60_000)
+    {
+        Mock<ISettingsService> settings = new();
+        settings.Setup(s => s.Get<SpoolCoverageSettings>())
+            .Returns(new SpoolCoverageSettings
+            {
+                SpoolSourceTimeoutMs = timeoutMs,
+                // Default the fleet budget to its maximum so a test that is specifically
+                // exercising the per-source deadline cannot be satisfied by the fleet
+                // deadline firing first. Tests for the fleet bound set it explicitly.
+                FleetResolveTimeoutMs = fleetTimeoutMs,
+            });
+        return settings.Object;
     }
 
     private static AppDbContext CreateContext()
