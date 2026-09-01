@@ -166,22 +166,37 @@ public class UrlCredentialRedactorTests
         result.Should().Be("<redacted>");
     }
 
-    [Theory]
-    [InlineData("admin:s3cr3t@printer.local/a://b")]
-    [InlineData("admin:s3cr3t@printer.local/x://y@z")]
-    public void Redact_StripsCredential_WhenPathContainsASchemeLikeSeparator(string input)
+    [Fact]
+    public void Redact_StripsCredential_WhenPathContainsASchemeLikeSeparator()
     {
         // Regression: a scheme separator must only be honored at the very start of the
         // string. Searching for "://" anywhere in the value let a later path/query segment
         // that itself contains "://" move the authority boundary past the real credentials,
-        // leaking the password either verbatim or, worse, appearing to succeed while still
-        // emitting it in the preserved prefix.
+        // leaking the password verbatim.
         const string password = "s3cr3t";
+        string input = $"admin:{password}@printer.local/a://b";
 
         string? result = UrlCredentialRedactor.Redact(input);
 
+        result.Should().Be("printer.local/a://b");
         result.Should().NotContain(password);
-        result.Should().StartWith("printer.local");
+    }
+
+    [Fact]
+    public void Redact_ReturnsPlaceholder_WhenAStraySchemeLikeSeparatorHidesALaterAtSign()
+    {
+        // Regression: when a later "@" appears at or beyond the first path/query/fragment
+        // delimiter (here inside "x://y@z"), the real userinfo boundary can no longer be
+        // trusted -- attempting a partial strip risks landing in the wrong place (e.g.
+        // stripping far more of the path than intended, or leaving part of the password
+        // behind). Fail closed to the placeholder instead.
+        const string password = "s3cr3t";
+        string input = $"admin:{password}@printer.local/x://y@z";
+
+        string? result = UrlCredentialRedactor.Redact(input);
+
+        result.Should().Be("<redacted>");
+        result.Should().NotContain(password);
     }
 
     [Fact]
@@ -196,6 +211,24 @@ public class UrlCredentialRedactorTests
 
         result.Should().Be("http://printer.local/api?redirect=http://evil.example");
         result.Should().NotContain(password);
+    }
+
+    [Fact]
+    public void Redact_ReturnsPlaceholder_WhenEarlierStrayAtSignPrecedesADelimiterBeforeTheRealSeparator()
+    {
+        // Regression: a naive "search only up to the first delimiter" scan would find the
+        // stray '@' inside "pa@ss" and treat it as the real separator, leaving "ss/word@..."
+        // -- including part of the password -- in the output. The true last '@' (the one
+        // before "printer.local") sits past the '/' delimiter, so this must fail closed
+        // instead of stripping to the wrong '@'.
+        const string password = "pa@ss";
+        string input = $"admin:{password}/word@printer.local";
+
+        string? result = UrlCredentialRedactor.Redact(input);
+
+        result.Should().Be("<redacted>");
+        result.Should().NotContain(password);
+        result.Should().NotContain("ss/word");
     }
 
     [Theory]

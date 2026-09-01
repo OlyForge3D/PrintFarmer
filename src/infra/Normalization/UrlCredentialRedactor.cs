@@ -37,11 +37,16 @@
 /// authority followed later by a path/query that itself contains "://" (for example a
 /// callback URL embedded in the query string) would otherwise move the authority boundary
 /// past the real credentials and let them leak through untouched.</item>
-/// <item>Malformed userinfo can itself contain an unescaped "/", "?", or "#", which would stop
-/// the authority scan before it ever reaches the real "@". Rather than trust that boundary and
-/// conclude "no credentials found", this helper checks whether an "@" exists anywhere later in
-/// the string; if so, the input is too ambiguous to safely strip, so the whole value is
-/// replaced with a placeholder instead of ever being echoed back.</item>
+/// <item>Malformed userinfo can itself contain an unescaped "/", "?", or "#". A second round of
+/// adversarial review (input such as <c>admin:pa@ss/word@printer.local</c>) showed that simply
+/// bounding the "last @" search to the segment before the first such delimiter is not enough:
+/// that segment can itself contain an earlier, spurious "@" (part of the password), which gets
+/// mistaken for the real separator while the true last "@" sits just past the delimiter,
+/// leaking part of the password. This helper therefore always searches for the last "@" across
+/// the <b>entire remainder</b> of the string, then checks whether any "/", "?", or "#" appears
+/// before that position. If one does, the userinfo boundary can no longer be trusted at all, so
+/// the whole value is replaced with a placeholder instead of attempting a partial strip that
+/// could itself mismatch the true boundary.</item>
 /// </list>
 /// </remarks>
 public static class UrlCredentialRedactor
@@ -81,26 +86,27 @@ public static class UrlCredentialRedactor
             }
         }
 
-        // Scan backward for the LAST '@' in the nominal authority segment (see remarks above
-        // for why this must not use Uri.UserInfo). Everything up to and including it is
-        // userinfo.
-        int lastAt = -1;
-        for (int i = authorityEnd - 1; i >= authorityStart; i--)
+        // Scan backward for the LAST '@' across the entire remainder of the string -- not just
+        // the nominal authority segment (see remarks above for why bounding this search is
+        // unsafe). Everything up to and including it is userinfo, per RFC 3986's "last
+        // unescaped '@'" rule.
+        int lastAt = serverUrl.LastIndexOf('@');
+
+        if (lastAt < authorityStart)
         {
-            if (serverUrl[i] == '@')
-            {
-                lastAt = i;
-                break;
-            }
+            // No credentials anywhere at/after the authority start; nothing to strip.
+            return serverUrl;
         }
 
-        if (lastAt < 0)
+        if (lastAt >= authorityEnd)
         {
-            // Nothing found within the nominal authority segment. Before concluding there are
-            // no credentials, check whether an '@' exists anywhere further into the string: if
-            // so, an unescaped '/', '?', or '#' inside malformed userinfo cut the scan short,
-            // and we cannot safely tell where the real host begins. Fail closed.
-            return serverUrl.IndexOf('@', authorityStart) >= 0 ? Placeholder : serverUrl;
+            // The true last '@' sits at or beyond the first path/query/fragment delimiter. This
+            // means either the delimiter is itself inside malformed userinfo (so the real host
+            // boundary can no longer be located reliably) or the '@' belongs to unrelated
+            // content past the authority (e.g. an address in a query string) that this helper
+            // cannot distinguish from the former. Either way, do not attempt a partial strip
+            // that could itself land in the wrong place -- fail closed instead.
+            return Placeholder;
         }
 
         // Degenerate input (e.g. an authority that is nothing but "@" characters) can strip
