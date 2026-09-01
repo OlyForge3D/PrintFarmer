@@ -122,6 +122,50 @@ public class EfPrintJobStatisticsRepository(AppDbContext context) : IPrintJobSta
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<PrintJobStatisticsAggregate> GetAggregateByPrinterModelAsync(
+        Guid modelId,
+        bool successfulOnly = true,
+        DateTime? fromDate = null,
+        CancellationToken cancellationToken = default)
+    {
+        IQueryable<PrintJobStatistics> query = context.PrintJobStatistics
+            .AsNoTracking()
+            .Where(s => s.PrinterModelId == modelId)
+            .AsQueryable();
+
+        if (successfulOnly)
+        {
+            query = query.Where(s => s.IsSuccess);
+        }
+
+        if (fromDate.HasValue)
+        {
+            query = query.Where(s => s.CompletedAtUtc >= fromDate);
+        }
+
+        // Single grouped aggregate query (COUNT + SUM pushed down to SQL) instead of
+        // materializing every matching row and aggregating in memory (issue #2329). Sum over a
+        // nullable selector already excludes nulls, matching the prior in-memory
+        // `.Where(j => j.ActualDurationMs.HasValue)` filter exactly. TotalDurationHours is summed
+        // per-row (ms converted to hours before summing) rather than derived from TotalDurationMs
+        // in one division, to use the SAME FORMULA as the removed in-memory
+        // `printerJobs.Sum(j => j.ActualDurationMs!.Value / 1000.0 / 3600.0)` computation - see
+        // PrintJobStatisticsAggregate.TotalDurationHours for why bit-for-bit identity with the old
+        // value is not achievable (SQL SUM row-iteration order is engine-defined) and what
+        // tolerance is tested and accepted instead.
+        PrintJobStatisticsAggregate? result = await query
+            .GroupBy(_ => 1)
+            .Select(g => new PrintJobStatisticsAggregate
+            {
+                JobCount = g.Count(),
+                TotalDurationMs = g.Sum(s => s.ActualDurationMs) ?? 0L,
+                TotalDurationHours = g.Sum(s => (double?)s.ActualDurationMs / 1000.0 / 3600.0) ?? 0.0,
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return result ?? new PrintJobStatisticsAggregate();
+    }
+
     public async Task<List<PrintJobStatistics>> GetByMaterialAsync(
         string material,
         bool successfulOnly = true,
