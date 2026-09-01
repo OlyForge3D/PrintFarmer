@@ -27,7 +27,7 @@ vi.mock('@/common/utils/apiUrlHelpers', () => ({
   getApiBaseUrl: vi.fn(() => 'http://localhost:5245/api'),
 }));
 
-describe('ApiClient.getQueueChanges', () => {
+describe('queueRealtimeApi.getQueueChanges', () => {
   beforeEach(() => {
     vi.resetModules();
     axiosTestState.get.mockReset();
@@ -37,10 +37,9 @@ describe('ApiClient.getQueueChanges', () => {
     axiosTestState.get.mockResolvedValueOnce({
       data: { afterSequence: 0, nextSequence: 3, hasMore: false, events: [] },
     });
-    const { ApiClient } = await import('../api');
-    const client = new ApiClient();
+    const { getQueueChanges } = await import('../api/queueRealtimeApi');
 
-    const feed = await client.getQueueChanges(0, 100);
+    const feed = await getQueueChanges(0, 100);
 
     expect(feed).toEqual({
       afterSequence: 0,
@@ -60,10 +59,9 @@ describe('ApiClient.getQueueChanges', () => {
       },
     };
     axiosTestState.get.mockRejectedValueOnce(goneError);
-    const { ApiClient } = await import('../api');
-    const client = new ApiClient();
+    const { getQueueChanges } = await import('../api/queueRealtimeApi');
 
-    const feed = await client.getQueueChanges(5, 100);
+    const feed = await getQueueChanges(5, 100);
 
     expect(feed.expired).toBe(true);
     expect(feed.currentSequence).toBe(42);
@@ -78,10 +76,9 @@ describe('ApiClient.getQueueChanges', () => {
       response: { status: 410, data: {} },
     };
     axiosTestState.get.mockRejectedValueOnce(goneError);
-    const { ApiClient } = await import('../api');
-    const client = new ApiClient();
+    const { getQueueChanges } = await import('../api/queueRealtimeApi');
 
-    const feed = await client.getQueueChanges(7, 100);
+    const feed = await getQueueChanges(7, 100);
 
     expect(feed.expired).toBe(true);
     expect(feed.currentSequence).toBe(7);
@@ -93,9 +90,8 @@ describe('ApiClient.getQueueChanges', () => {
       response: { status: 500, data: { error: 'internal' } },
     };
     axiosTestState.get.mockRejectedValueOnce(serverError);
-    const { ApiClient } = await import('../api');
-    const client = new ApiClient();
+    const { getQueueChanges } = await import('../api/queueRealtimeApi');
 
-    await expect(client.getQueueChanges(0, 100)).rejects.toBe(serverError);
+    await expect(getQueueChanges(0, 100)).rejects.toBe(serverError);
   });
 });

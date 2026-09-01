@@ -32,11 +32,9 @@ const apiTestState = vi.hoisted(() => ({
   setAutoDispatchEnabled: vi.fn(),
 }));
 
-vi.mock('@/services/api', () => ({
-  apiClient: {
-    getAutoDispatchStatus: apiTestState.getAutoDispatchStatus,
-    setAutoDispatchEnabled: apiTestState.setAutoDispatchEnabled,
-  },
+vi.mock('@/services/api/autoDispatchApi', () => ({
+  getAutoDispatchStatus: apiTestState.getAutoDispatchStatus,
+  setAutoDispatchEnabled: apiTestState.setAutoDispatchEnabled,
 }));
 
 vi.mock('@/services/printer-signalr', () => ({

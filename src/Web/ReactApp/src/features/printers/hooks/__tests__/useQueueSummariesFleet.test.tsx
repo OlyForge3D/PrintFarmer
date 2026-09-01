@@ -8,8 +8,8 @@ const hoisted = vi.hoisted(() => ({
   getPrinterQueueSummaries: vi.fn(),
 }));
 
-vi.mock('@/services/api', () => ({
-  apiClient: { getPrinterQueueSummaries: hoisted.getPrinterQueueSummaries },
+vi.mock('@/services/api/queueSummariesApi', () => ({
+  getPrinterQueueSummaries: hoisted.getPrinterQueueSummaries,
 }));
 
 import {

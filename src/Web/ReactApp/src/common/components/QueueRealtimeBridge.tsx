@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { queryKeys } from '@/common/hooks/useApi';
-import { apiClient } from '@/services/api';
+import { queryKeys } from '@/common/hooks/queryKeys';
+import { getQueueSubscriptionResources } from '@/services/api/queueRealtimeApi';
+import { getPrinters } from '@/services/api/printerApi';
 import { printerSignalRService } from '@/services/printer-signalr';
 import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
 
@@ -188,7 +189,7 @@ export function QueueRealtimeBridge() {
 
     const reconcileSubscriptions = async () => {
       const [resources, printers] = await Promise.all([
-        apiClient.getQueueSubscriptionResources(),
+        getQueueSubscriptionResources(),
         // #1731 (Vasquez review): ensureQueryData() returns already-cached data
         // unconditionally whenever it is defined, regardless of invalidation/staleness,
         // unless revalidateIfStale is set -- and even then it still returns the stale
@@ -201,7 +202,7 @@ export function QueueRealtimeBridge() {
         // triggered) and returning the cached value untouched when it is still fresh.
         queryClient.fetchQuery({
           queryKey: queryKeys.printers,
-          queryFn: () => apiClient.getPrinters(),
+          queryFn: () => getPrinters(),
           staleTime: 30000,
         }),
       ]);

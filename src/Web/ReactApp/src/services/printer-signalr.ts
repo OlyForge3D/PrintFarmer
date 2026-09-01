@@ -15,7 +15,8 @@ import {
   FailureDetectionEvent,
   QueueEventEnvelope,
 } from "@/types/api";
-import { apiClient } from "@/services/api";
+import { fetchSettingsValues } from "@/services/settingsApi";
+import { getQueueChanges, getQueueChangeWatermark } from "@/services/api/queueRealtimeApi";
 import {
   getHubUrl,
   getSignalRAccessToken,
@@ -486,7 +487,7 @@ export class PrinterSignalRService {
     };
     try {
       // UnifiedSettingsController exposes /api/settings/{keyName}
-      nextSettings = await apiClient.getSettings<{
+      nextSettings = await fetchSettingsValues<{
         logLevel: string;
         consoleLoggingEnabled: boolean;
       }>("SignalR"); // calls /api/settings/SignalR
@@ -1071,7 +1072,7 @@ export class PrinterSignalRService {
       let cursor = this.lastQueueSequence;
       let hasMore = true;
       while (hasMore && cursor < event.sequence) {
-        const feed = await apiClient.getQueueChanges(cursor);
+        const feed = await getQueueChanges(cursor);
         if (feed.expired) {
           this.handleQueueCursorExpired(feed.currentSequence ?? cursor);
           return;
@@ -1112,7 +1113,7 @@ export class PrinterSignalRService {
   private async ensureQueueCursorSeeded(): Promise<void> {
     if (this.cursorSeeded) return;
     try {
-      const watermark = await apiClient.getQueueChangeWatermark();
+      const watermark = await getQueueChangeWatermark();
       this.lastQueueSequence = Math.max(
         this.lastQueueSequence,
         watermark.latestSequence
@@ -1141,7 +1142,7 @@ export class PrinterSignalRService {
     let cursor = this.lastQueueSequence;
     let hasMore = true;
     while (hasMore) {
-      const feed = await apiClient.getQueueChanges(cursor);
+      const feed = await getQueueChanges(cursor);
       if (feed.expired) {
         this.handleQueueCursorExpired(feed.currentSequence ?? cursor);
         return;

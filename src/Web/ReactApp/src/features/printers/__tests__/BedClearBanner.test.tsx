@@ -8,11 +8,14 @@ import type { AutoDispatchReadyResult, AutoDispatchStatus } from '@/types/api';
 vi.mock('@/services/api', () => ({
   apiClient: {
     getSettings: vi.fn().mockResolvedValue({ logLevel: 'Information', consoleLoggingEnabled: false }),
-    confirmAutoDispatchReady: vi.fn().mockResolvedValue({}),
-    skipAutoDispatchJob: vi.fn().mockResolvedValue(undefined),
-    cancelAutoDispatch: vi.fn().mockResolvedValue(undefined),
-    preClearAutoDispatchBed: vi.fn().mockResolvedValue({}),
   },
+}));
+
+vi.mock('@/services/api/autoDispatchApi', () => ({
+  confirmAutoDispatchReady: vi.fn().mockResolvedValue({}),
+  skipAutoDispatchJob: vi.fn().mockResolvedValue(undefined),
+  cancelAutoDispatch: vi.fn().mockResolvedValue(undefined),
+  preClearAutoDispatchBed: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock('sonner', () => ({
@@ -75,7 +78,12 @@ vi.mock('@/features/printers/components/FilamentOverrideModal', () => ({
 }));
 
 import { BedClearBanner } from '../components/BedClearBanner';
-import { apiClient } from '@/services/api';
+import {
+  confirmAutoDispatchReady,
+  skipAutoDispatchJob,
+  cancelAutoDispatch,
+  preClearAutoDispatchBed,
+} from '@/services/api/autoDispatchApi';
 import { toast } from 'sonner';
 import { usePreClearBed } from '@/features/printers/hooks/useAutoDispatch';
 
@@ -368,14 +376,14 @@ describe('BedClearBanner', () => {
   });
 
   it('confirms bed clear and shows dispatch toast without manual dispatch call', async () => {
-    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultWithJob);
+    vi.mocked(confirmAutoDispatchReady).mockResolvedValueOnce(readyResultWithJob);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
     await waitFor(() => {
-      expect(apiClient.confirmAutoDispatchReady).toHaveBeenCalledWith(
+      expect(confirmAutoDispatchReady).toHaveBeenCalledWith(
         'printer-1',
         'dispatch-v1',
       );
@@ -386,7 +394,7 @@ describe('BedClearBanner', () => {
   });
 
   it('optimistically updates printer cache to Starting state on dispatch', async () => {
-    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultWithJob);
+    vi.mocked(confirmAutoDispatchReady).mockResolvedValueOnce(readyResultWithJob);
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
@@ -419,7 +427,7 @@ describe('BedClearBanner', () => {
   });
 
   it('does not optimistically update cache when no next job', async () => {
-    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultNoJob);
+    vi.mocked(confirmAutoDispatchReady).mockResolvedValueOnce(readyResultNoJob);
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
@@ -465,7 +473,7 @@ describe('BedClearBanner', () => {
   });
 
   it('shows success without dispatch when no jobs queued', async () => {
-    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultNoJob);
+    vi.mocked(confirmAutoDispatchReady).mockResolvedValueOnce(readyResultNoJob);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
@@ -477,7 +485,7 @@ describe('BedClearBanner', () => {
   });
 
   it('shows the server mismatch in an explicit override modal without claiming dispatch', async () => {
-    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultMaterialMismatch);
+    vi.mocked(confirmAutoDispatchReady).mockResolvedValueOnce(readyResultMaterialMismatch);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
@@ -495,7 +503,7 @@ describe('BedClearBanner', () => {
   });
 
   it('retries with an explicit server override and only reports dispatch after acceptance', async () => {
-    vi.mocked(apiClient.confirmAutoDispatchReady)
+    vi.mocked(confirmAutoDispatchReady)
       .mockResolvedValueOnce(readyResultMaterialMismatch)
       .mockResolvedValueOnce(readyResultOverrideDispatched);
     render(
@@ -508,7 +516,7 @@ describe('BedClearBanner', () => {
     });
     fireEvent.click(screen.getByTestId('print-anyway-btn'));
     await waitFor(() => {
-      expect(apiClient.confirmAutoDispatchReady).toHaveBeenNthCalledWith(
+      expect(confirmAutoDispatchReady).toHaveBeenNthCalledWith(
         2,
         'printer-1',
         'dispatch-v2',
@@ -525,7 +533,7 @@ describe('BedClearBanner', () => {
   });
 
   it('reports reconciliation pending without claiming dispatch was rejected', async () => {
-    vi.mocked(apiClient.confirmAutoDispatchReady)
+    vi.mocked(confirmAutoDispatchReady)
       .mockResolvedValueOnce(readyResultMaterialMismatch)
       .mockResolvedValueOnce(readyResultOverrideReconciliationPending);
     render(
@@ -559,7 +567,7 @@ describe('BedClearBanner', () => {
         message: 'Only 20g remaining, job requires 100g',
       },
     };
-    vi.mocked(apiClient.confirmAutoDispatchReady)
+    vi.mocked(confirmAutoDispatchReady)
       .mockResolvedValueOnce(readyResultUnknownFilament)
       .mockResolvedValueOnce(changedChallenge);
     render(
@@ -574,7 +582,7 @@ describe('BedClearBanner', () => {
     fireEvent.click(screen.getByTestId('print-anyway-btn'));
 
     await waitFor(() => {
-      expect(apiClient.confirmAutoDispatchReady).toHaveBeenNthCalledWith(
+      expect(confirmAutoDispatchReady).toHaveBeenNthCalledWith(
         2,
         'printer-1',
         'dispatch-v1',
@@ -590,7 +598,7 @@ describe('BedClearBanner', () => {
   });
 
   it('closes modal when user cancels material mismatch', async () => {
-    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultMaterialMismatch);
+    vi.mocked(confirmAutoDispatchReady).mockResolvedValueOnce(readyResultMaterialMismatch);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
@@ -606,7 +614,7 @@ describe('BedClearBanner', () => {
   });
 
   it('requires explicit confirmation for known insufficient filament', async () => {
-    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultInsufficientFilament);
+    vi.mocked(confirmAutoDispatchReady).mockResolvedValueOnce(readyResultInsufficientFilament);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
@@ -622,7 +630,7 @@ describe('BedClearBanner', () => {
   });
 
   it('requires explicit confirmation when filament data is unknown', async () => {
-    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultUnknownFilament);
+    vi.mocked(confirmAutoDispatchReady).mockResolvedValueOnce(readyResultUnknownFilament);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
@@ -641,14 +649,14 @@ describe('BedClearBanner', () => {
   });
 
   it('calls skip endpoint when Skip button is clicked', async () => {
-    vi.mocked(apiClient.skipAutoDispatchJob).mockResolvedValueOnce(undefined);
+    vi.mocked(skipAutoDispatchJob).mockResolvedValueOnce(undefined);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Skip next queued job'));
     await waitFor(() => {
-      expect(apiClient.skipAutoDispatchJob).toHaveBeenCalledWith(
+      expect(skipAutoDispatchJob).toHaveBeenCalledWith(
         'printer-1',
         'dispatch-v1',
         'job-v1',
@@ -660,14 +668,14 @@ describe('BedClearBanner', () => {
   });
 
   it('calls cancel endpoint when Cancel button is clicked', async () => {
-    vi.mocked(apiClient.cancelAutoDispatch).mockResolvedValueOnce(undefined);
+    vi.mocked(cancelAutoDispatch).mockResolvedValueOnce(undefined);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Cancel auto-dispatch'));
     await waitFor(() => {
-      expect(apiClient.cancelAutoDispatch).toHaveBeenCalledWith(
+      expect(cancelAutoDispatch).toHaveBeenCalledWith(
         'printer-1',
         'dispatch-v1',
       );
@@ -678,7 +686,7 @@ describe('BedClearBanner', () => {
   });
 
   it('shows error toast on confirm failure', async () => {
-    vi.mocked(apiClient.confirmAutoDispatchReady).mockRejectedValueOnce(new Error('Network error'));
+    vi.mocked(confirmAutoDispatchReady).mockRejectedValueOnce(new Error('Network error'));
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
@@ -699,7 +707,7 @@ describe('BedClearBanner', () => {
   });
 
   it('does not announce successful pre-clear when filament confirmation blocks it', async () => {
-    vi.mocked(apiClient.preClearAutoDispatchBed).mockResolvedValueOnce({
+    vi.mocked(preClearAutoDispatchBed).mockResolvedValueOnce({
       ...baseStatus,
       bedPreConfirmed: false,
       attentionMessage: 'Filament confirmation is required before dispatch.',

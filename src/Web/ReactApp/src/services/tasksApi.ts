@@ -1,4 +1,4 @@
-import { apiClient } from './api';
+import { client } from '@/services/api/httpClient';
 import type { ApiError } from '@/types/api';
 
 /**
@@ -212,7 +212,7 @@ export const tasksApi = {
    * Get all pending tasks (flat list, legacy contract).
    */
   async getPendingTasks(): Promise<UserTask[]> {
-    const response = await apiClient.get<UserTask[]>('/tasks');
+    const response = await client.get<UserTask[]>('/tasks');
     return response.data.map(normalizeTask);
   },
 
@@ -224,7 +224,7 @@ export const tasksApi = {
    */
   async getShiftPlan(): Promise<ShiftPlanResult> {
     try {
-      const response = await apiClient.get<ShiftPlan>('/tasks?view=shift');
+      const response = await client.get<ShiftPlan>('/tasks?view=shift');
       const plan = response.data;
       return {
         mode: 'shift',
@@ -246,7 +246,7 @@ export const tasksApi = {
    * Get task by ID.
    */
   async getTask(taskId: string): Promise<UserTask> {
-    const response = await apiClient.get<UserTask>(`/tasks/${taskId}`);
+    const response = await client.get<UserTask>(`/tasks/${taskId}`);
     return normalizeTask(response.data);
   },
 
@@ -254,7 +254,7 @@ export const tasksApi = {
    * Get pending task count.
    */
   async getPendingCount(): Promise<number> {
-    const response = await apiClient.get<TaskCountResponse>('/tasks/count');
+    const response = await client.get<TaskCountResponse>('/tasks/count');
     return response.data.count;
   },
 
@@ -262,28 +262,28 @@ export const tasksApi = {
    * Complete a task.
    */
   async completeTask(taskId: string): Promise<void> {
-    await apiClient.post(`/tasks/${taskId}/complete`);
+    await client.post(`/tasks/${taskId}/complete`);
   },
 
   /**
    * Dismiss a task (hide but can be shown again).
    */
   async dismissTask(taskId: string): Promise<void> {
-    await apiClient.post(`/tasks/${taskId}/dismiss`);
+    await client.post(`/tasks/${taskId}/dismiss`);
   },
 
   /**
    * Skip a task (won't be shown again).
    */
   async skipTask(taskId: string): Promise<void> {
-    await apiClient.post(`/tasks/${taskId}/skip`);
+    await client.post(`/tasks/${taskId}/skip`);
   },
 
   /**
    * Create a new manual task.
    */
   async createTask(dto: CreateTaskDto): Promise<UserTask> {
-    const response = await apiClient.post<UserTask>('/tasks', dto);
+    const response = await client.post<UserTask>('/tasks', dto);
     return normalizeTask(response.data);
   }
 };

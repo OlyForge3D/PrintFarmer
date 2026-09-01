@@ -3,7 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { useAdminOverview } from '../useAdminOverview';
-import { apiClient } from '@/services/api';
+import { client } from '@/services/api/httpClient';
 import { loadWireContractFixture } from '@/test/wireContracts';
 import type { AdminOverviewDto } from '@/types/adminOverview';
 
@@ -16,8 +16,8 @@ import type { AdminOverviewDto } from '@/types/adminOverview';
 // see src/Web/ReactApp/src/test/wireContracts.ts.
 // -----------------------------------------------------------------------------
 
-vi.mock('@/services/api', () => ({
-  apiClient: {
+vi.mock('@/services/api/httpClient', () => ({
+  client: {
     get: vi.fn(),
   },
 }));
@@ -45,7 +45,7 @@ describe('useAdminOverview — canonical wire-contract corpus (#2240)', () => {
     const fixture = loadWireContractFixture<AdminOverviewDto>(
       'api/admin-overview/overview.live-shape.json'
     );
-    vi.mocked(apiClient.get).mockResolvedValue({ data: fixture });
+    vi.mocked(client.get).mockResolvedValue({ data: fixture });
 
     const { result } = renderHook(() => useAdminOverview(), {
       wrapper: makeWrapper(makeClient()),
@@ -53,7 +53,7 @@ describe('useAdminOverview — canonical wire-contract corpus (#2240)', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    expect(apiClient.get).toHaveBeenCalledWith(
+    expect(client.get).toHaveBeenCalledWith(
       '/admin/overview',
       expect.objectContaining({ signal: expect.anything() })
     );
@@ -66,7 +66,7 @@ describe('useAdminOverview — canonical wire-contract corpus (#2240)', () => {
   });
 
   it('surfaces a backend error instead of returning stale/empty data', async () => {
-    vi.mocked(apiClient.get).mockRejectedValue(new Error('backend down'));
+    vi.mocked(client.get).mockRejectedValue(new Error('backend down'));
 
     const { result } = renderHook(() => useAdminOverview(), {
       wrapper: makeWrapper(makeClient()),

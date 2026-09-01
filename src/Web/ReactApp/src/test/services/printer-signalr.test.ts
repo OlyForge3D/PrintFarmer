@@ -88,8 +88,13 @@ vi.mock("@microsoft/signalr", () => ({
   },
 }));
 
-vi.mock("@/services/api", () => ({
-  apiClient: api,
+vi.mock("@/services/settingsApi", () => ({
+  fetchSettingsValues: api.getSettings,
+}));
+
+vi.mock("@/services/api/queueRealtimeApi", () => ({
+  getQueueChanges: api.getQueueChanges,
+  getQueueChangeWatermark: api.getQueueChangeWatermark,
 }));
 
 vi.mock("@/common/utils/apiUrlHelpers", () => ({

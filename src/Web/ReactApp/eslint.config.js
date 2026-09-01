@@ -45,6 +45,17 @@ export default tseslint.config([
       'local/pf-require-apiclient': 'off',
     },
   },
+  // Exclude httpClient.ts from apiClient rule: it is the sanctioned shared
+  // axios instance + interceptors that api.ts and every per-domain module
+  // under src/services/api/ build on (see issue #2343). It legitimately
+  // creates the axios instance the rule is designed to guard against
+  // elsewhere.
+  {
+    files: ['src/services/api/httpClient.ts'],
+    rules: {
+      'local/pf-require-apiclient': 'off',
+    },
+  },
   // Disable raw HTML controls rule in test files (tests often need raw elements for testing)
   {
     files: ['src/test/**/*.{ts,tsx}', '**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}'],

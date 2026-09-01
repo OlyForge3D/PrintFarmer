@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
 import { CloseIcon, CheckIcon } from '@/common/components/icons/MdiIcons';
-import { useNotifications, useMarkNotificationAsRead, useMarkAllNotificationsAsRead, useDeleteNotification } from '@/common/hooks/useApi';
+import { useNotifications, useMarkNotificationAsRead, useMarkAllNotificationsAsRead, useDeleteNotification } from '@/common/hooks/useNotificationsList';
 import { NotificationDto, NotificationType } from '@/types/api';
 import { formatDistanceToNow } from 'date-fns';
 

@@ -24,14 +24,12 @@ vi.mock('@/services/passkeyService', () => ({
   loginWithPasskey: vi.fn(),
 }));
 
-// Mock apiClient so AuthContext's getCurrentUser (on mount) doesn't hit network
-vi.mock('@/services/api', () => ({
-  apiClient: {
-    getCurrentUser: vi.fn().mockRejectedValue(new Error('no session')),
-    login: vi.fn(),
-    register: vi.fn(),
-    logout: vi.fn(),
-  },
+// Mock authApi so AuthContext's getCurrentUser (on mount) doesn't hit network
+vi.mock('@/services/api/authApi', () => ({
+  getCurrentUser: vi.fn().mockRejectedValue(new Error('no session')),
+  login: vi.fn(),
+  register: vi.fn(),
+  logout: vi.fn(),
 }));
 
 import { loginWithPasskey as mockPasskeyLogin } from '@/services/passkeyService';

@@ -1,4 +1,4 @@
-import { apiClient } from "@/services/api";
+import { client } from "@/services/api/httpClient";
 import {
   OrcaBundlePreview,
   ImportOrcaBundleRequest,
@@ -13,7 +13,7 @@ export const orcaProfilesService = {
    * Returns structured preview of all detected presets.
    */
   async previewBundle(bundleJson: string): Promise<OrcaBundlePreview> {
-    return apiClient.post<OrcaBundlePreview>(
+    return client.post<OrcaBundlePreview>(
       `/slicer/profiles/import/orca/preview`,
       { bundleJson }
     );
@@ -26,7 +26,7 @@ export const orcaProfilesService = {
   async importBundle(
     request: ImportOrcaBundleRequest
   ): Promise<ImportOrcaBundleResult> {
-    return apiClient.post<ImportOrcaBundleResult>(
+    return client.post<ImportOrcaBundleResult>(
       `/slicer/profiles/import/orca`,
       request
     );
@@ -37,7 +37,7 @@ export const orcaProfilesService = {
    * Returns a valid OrcaSlicer JSON bundle string.
    */
   async exportBundle(request?: ExportOrcaBundleRequest): Promise<string> {
-    return apiClient.post<string>(
+    return client.post<string>(
       `/slicer/profiles/export/orca`,
       request || {}
     );
@@ -49,7 +49,7 @@ export const orcaProfilesService = {
   async mapBundlePresets(
     preview: OrcaBundlePreview
   ): Promise<OrcaBundleMappingResult> {
-    return apiClient.post<OrcaBundleMappingResult>(
+    return client.post<OrcaBundleMappingResult>(
       `/slicer/profiles/import/orca/map`,
       preview
     );

@@ -1,11 +1,8 @@
 /* eslint-disable local/pf-no-unguarded-console */
 // Get hash for a G-code file (returns string)
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
-import { extractValidationErrorMessage } from "@/common/utils/apiErrors";
 import {
-  ApiError,
   PrintJobStatusDto,
-  AuthenticationResult,
   BedType,
   CatalogContext,
   CommandResult,
@@ -33,7 +30,6 @@ import {
   HotendModelDefinition,
   JobStateHistoryDto,
   JobQueuePrintJob,
-  LoginRequest,
   ManufacturerDto,
   ManufacturersByContext,
   MoveRequest,
@@ -55,18 +51,12 @@ import {
   PrinterGroupDetail,
   PrinterModelDto,
   PrinterVersionInfo,
-  PrinterQueueSummaryDto,
   QueuedPrintJobWithFileMetaDto,
   QueuedPrintJobDto,
   DispatchClientResult,
-  BedClearAcknowledgementResult,
-  QueueChangeFeed,
-  QueueSubscriptionResources,
-  QueueChangeWatermark,
   QueueHistoryPageDto,
   QueueOverviewDto,
   QueueStatsDto,
-  RegisterRequest,
   SystemInfo,
   ResolveHostnameRequest,
   RoleDto,
@@ -85,7 +75,6 @@ import {
   ProfileTypeSchema,
   RegisterDiscoveredPrinterRequest,
   SlicerModelAliasDto,
-  SpoolmanDiscoveryResult,
   SpoolmanFilamentImportResult,
   TempTargets,
   TestConnectionRequest,
@@ -101,7 +90,6 @@ import {
   UpdatePrinterDto,
   UpdatePrinterGroupRequest,
   UpdateToolheadModelDefDto,
-  UserDto,
   DiscoveredGcodeFileDto,
   SetModelDispatchDefaultsRequest,
   ApplyModelDefaultsResult,
@@ -130,10 +118,8 @@ import {
   OfdImportResult,
   ConnectionDiagnosticsResponse,
   PagedResponse,
-  SystemCapabilities,
   DispatchHistoryPageDto,
   FailureDetectionEvent,
-  NotificationDto,
   NotificationCapabilitiesResponse,
   NotificationPreferencesDto,
   TelegramSettingsDto,
@@ -141,15 +127,11 @@ import {
   UpdateBedTypeRequest,
   UpdateTelegramSettingsRequest,
   UpdateNotificationPreferencesRequest,
-  UnreadCountResponse,
   ScheduledJob,
   JobExecution,
   ScheduleJobRequest,
   RescheduleJobRequest,
-  AutoDispatchGlobalStatus,
   AutoDispatchDetailedStatus,
-  AutoDispatchReadyResult,
-  AutoDispatchStatus,
   ObicoServer,
   CreateObicoServerRequest,
   UpdateObicoServerRequest,
@@ -252,10 +234,9 @@ import type {
   PrintablesPagedResponse,
   ThreeMfMetadata
 } from "@/types/models";
-import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
+import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
-import { resetAuthenticatedSignalRSession } from "@/common/auth/authenticatedSignalRSession";
-import { notifyAuthenticationExpired } from "@/common/auth/authenticationExpiration";
+import { client as sharedHttpClient, type PfRequestConfig } from "@/services/api/httpClient";
 import type {
   ModelCollection,
   ModelCollectionMembership,
@@ -264,25 +245,11 @@ import type {
 } from "@/types/models";
 import type { TagOption, UpdateTagRequest } from "@/types/admin";
 
-/**
- * Extended Axios request config with PrintFarmer-specific interceptor bypass flags.
- * Pass a `PfRequestConfig` to `apiClient.request()` when you need to suppress the
- * default 401 redirect behaviour for endpoints that signal soft failures via 401
- * (e.g. passkey assertion completion).
- */
-export interface PfRequestConfig extends AxiosRequestConfig {
-  /**
-   * When `true`, a 401 response will not trigger the global token-clear and
-   * redirect-to-/login behaviour in the response interceptor.  Use this for
-   * endpoints that legitimately return 401 to indicate a failed operation
-   * rather than an expired session.
-   */
-  skipAuthRedirect?: boolean;
-}
-
-interface PfInternalRequestConfig extends PfRequestConfig {
-  authTokenAtRequest?: string | null;
-}
+// `PfRequestConfig` now lives in `services/api/httpClient.ts` alongside the
+// shared axios instance/interceptors it configures. Re-exported here so
+// existing consumers (`passkeyService.ts`, tests) importing it from
+// `@/services/api` keep working unchanged. See issue #2343.
+export type { PfRequestConfig } from "@/services/api/httpClient";
 
 const AUTO_DISPATCH_API_BASE = "/auto-dispatch";
 
@@ -578,124 +545,7 @@ export class ApiClient {
     return res.data;
   }
 
-  private client: AxiosInstance;
-
-  constructor() {
-    // Use shared utility to properly construct API base URL
-    const apiBaseUrl = getApiBaseUrl();
-
-    this.client = axios.create({
-      baseURL: apiBaseUrl,
-      timeout: 30000,
-      paramsSerializer: {
-        // ASP.NET Core expects repeated keys for arrays: tagIds=a&tagIds=b
-        // Axios v1+ defaults to bracket notation (tagIds[]=a) which .NET ignores
-        indexes: null,
-      },
-    });
-
-    // Request interceptor for authentication and correlationId
-    this.client.interceptors.request.use((config) => {
-      const token = localStorage.getItem("auth-token");
-      (config as PfInternalRequestConfig).authTokenAtRequest = token;
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-      // Add correlationId header to every request
-      config.headers["X-Correlation-Id"] = ApiClient.generateCorrelationId();
-
-      // Set Content-Type for non-FormData requests
-      // FormData has its own Content-Type with boundary, so we let the browser/axios handle it
-      if (!(config.data instanceof FormData)) {
-        config.headers["Content-Type"] = "application/json";
-      }
-
-      return config;
-    });
-
-    // Response interceptor for error handling
-    this.client.interceptors.response.use(
-      (response) => response,
-      async (error: AxiosError) => {
-        const requestConfig = error.config as PfInternalRequestConfig | undefined;
-        // Handle 401 Unauthorized — clear token and redirect to login unless
-        // the caller set skipAuthRedirect:true on the request config to handle
-        // the 401 inline (e.g. passkey assertion, which the backend signals
-        // with 401 for failed credentials rather than as a session expiry).
-        if (
-          error.response?.status === 401 &&
-          !requestConfig?.skipAuthRedirect &&
-          requestConfig?.authTokenAtRequest === localStorage.getItem("auth-token")
-        ) {
-          let invalidatedCurrentSession = false;
-          try {
-            await resetAuthenticatedSignalRSession();
-          } catch (resetError) {
-            console.error(
-              "Failed to reset authenticated SignalR session after a 401 response.",
-              resetError,
-            );
-          }
-          if (requestConfig.authTokenAtRequest === localStorage.getItem("auth-token")) {
-            localStorage.removeItem("auth-token");
-            notifyAuthenticationExpired();
-            invalidatedCurrentSession = true;
-          }
-          // Only redirect if not already on auth pages
-          if (
-            invalidatedCurrentSession &&
-            window.location.pathname !== "/login" &&
-            window.location.pathname !== "/register"
-          ) {
-            window.location.href = "/login";
-          }
-        }
-
-        const responseData = error.response?.data;
-
-        // Legacy string-shape `details`: keep this behavior for existing
-        // callers. Only surface a string when the body itself is a string or
-        // carries `{ error: string }`. Never stringify objects into `details`.
-        const detailMessage = typeof responseData === 'string'
-          ? responseData
-          : (responseData as { error?: string })?.error ?? undefined;
-
-        // Prefer a ProblemDetails-style top-level message from the body:
-        // backend emits `{ message: "..." }` for some endpoints and
-        // `{ detail: "..." }` for `application/problem+json`. Fall back to the
-        // axios error message only when neither exists. Preserve the raw body
-        // and the axios-error flag so feature callers (e.g. partsHarvest,
-        // partsInventory) can recover canonical `code`/`mismatches`/`details`
-        // extensions instead of collapsing every failure into an opaque error.
-        const bodyRecord =
-          responseData && typeof responseData === 'object'
-            ? (responseData as { message?: unknown; detail?: unknown })
-            : undefined;
-        const bodyMessage =
-          typeof bodyRecord?.message === 'string' && bodyRecord.message.length > 0
-            ? bodyRecord.message
-            : typeof bodyRecord?.detail === 'string' && bodyRecord.detail.length > 0
-              ? bodyRecord.detail
-              : undefined;
-
-        // ASP.NET Core model-binding failures (e.g. a malformed request body
-        // field, such as a non-GUID string sent for a `Guid?` property) return
-        // a `ValidationProblemDetails`-shaped `errors` dictionary with no
-        // top-level `message`/`detail` — surface that detail instead of
-        // falling through to the generic axios error message (issue #1973).
-        const validationMessage = extractValidationErrorMessage(responseData);
-
-        const apiError: ApiError = {
-          message: bodyMessage ?? (detailMessage || validationMessage || error.message),
-          statusCode: error.response?.status || 500,
-          details: detailMessage ?? validationMessage,
-          data: responseData,
-          isAxiosError: axios.isAxiosError(error),
-        };
-        return Promise.reject(apiError);
-      }
-    );
-  }
+  private client: AxiosInstance = sharedHttpClient;
 
   // ===== Generic HTTP methods for ad-hoc API calls =====
   /**
@@ -2191,13 +2041,6 @@ export class ApiClient {
     return response.data;
   }
 
-  async scanNetworkForSpoolman(): Promise<SpoolmanDiscoveryResult[]> {
-    const response = await this.client.post<SpoolmanDiscoveryResult[]>(
-      "/spoolman/scan-network"
-    );
-    return response.data;
-  }
-
   // ============ Material Clusters ============
 
   async getMaterialClusters(): Promise<MaterialClusterDto[]> {
@@ -2991,56 +2834,6 @@ export class ApiClient {
     return etag.trim().replace(/^W\//, "").replace(/^"|"$/g, "");
   }
 
-  async getQueueChanges(
-    afterSequence = 0,
-    limit = 100
-  ): Promise<QueueChangeFeed> {
-    try {
-      const response = await this.client.get<QueueChangeFeed>("/job-queue/changes", {
-          params: { afterSequence, limit },
-      });
-      return response.data;
-    } catch (error) {
-      // 410 Gone: the requested cursor is older than the retention window.
-      // The server still returns a structured body (error: "cursor_expired",
-      // currentSequence) — surface it as a QueueChangeFeed with expired=true so
-      // callers resynchronize instead of treating this like a network failure.
-      if (axios.isAxiosError(error) && error.response?.status === 410) {
-        const body = error.response.data as { currentSequence?: number } | undefined;
-        const currentSequence = body?.currentSequence ?? afterSequence;
-        return {
-          afterSequence,
-          nextSequence: currentSequence,
-          hasMore: false,
-          events: [],
-          expired: true,
-          currentSequence,
-        };
-      }
-      throw error;
-    }
-  }
-
-  async getQueueSubscriptionResources(): Promise<QueueSubscriptionResources> {
-    const response = await this.client.get<QueueSubscriptionResources>(
-      "/job-queue/subscription-resources"
-    );
-    return response.data;
-  }
-
-  /**
-   * Fetches the current outbox watermark so the SignalR client can seed its
-   * change-feed cursor at connect time instead of replaying the entire
-   * durable outbox history from sequence 0 on every fresh page load
-   * (issue #1727).
-   */
-  async getQueueChangeWatermark(): Promise<QueueChangeWatermark> {
-    const response = await this.client.get<QueueChangeWatermark>(
-      "/job-queue/changes/watermark"
-    );
-    return response.data;
-  }
-
   /**
    * Get queue overview for available printers with compatibility filtering.
    * All filtering is done server-side for consistency with auto-assign.
@@ -3083,19 +2876,10 @@ export class ApiClient {
   }
 
   /**
-   * Batched fleet queue-summary read (#1146 item 9). One flat call replaces
-   * the N per-printer `getJobQueue(printerId)` round trips the compact
-   * printer grid previously made only to derive its "X of Y" queue label.
-   * Printers with no active (queued or printing) job are simply absent from
-   * the response.
+   * `getPrinterQueueSummaries` moved to `@/services/api/queueSummariesApi`
+   * (issue #2343) — its only consumer, `useQueueSummariesFleet.ts`, is
+   * statically reachable from `App.tsx`.
    */
-  async getPrinterQueueSummaries(signal?: AbortSignal): Promise<PrinterQueueSummaryDto[]> {
-    const response = await this.client.get<PrinterQueueSummaryDto[]>(
-      "/job-queue-analytics/printer-summaries",
-      { signal }
-    );
-    return response.data ?? [];
-  }
 
   async queuePrintJob(
     printerId: string,
@@ -3335,11 +3119,6 @@ export class ApiClient {
 
   // ============ System capabilities ============
 
-  async getSystemCapabilities(): Promise<SystemCapabilities> {
-    const response = await this.client.get<SystemCapabilities>('/system/capabilities');
-    return response.data;
-  }
-
   async getSystemInfo(): Promise<SystemInfo> {
     const response = await this.client.get<SystemInfo>('/system/info');
     return response.data;
@@ -3347,91 +3126,6 @@ export class ApiClient {
 
   async getFeatureFlags(): Promise<Record<string, boolean>> {
     const response = await this.client.get<Record<string, boolean>>('/system/feature-flags');
-    return response.data;
-  }
-
-  // ============ Authentication API methods ============
-
-  async login(credentials: LoginRequest): Promise<AuthenticationResult> {
-    // Backend expects the field name `UsernameOrEmail` (model uses UsernameOrEmail).
-    // Frontend `LoginRequest` type historically used `username` so map that to
-    // `usernameOrEmail` to remain backwards-compatible and avoid model binding
-    // validation errors (400 Bad Request).
-    const usernameOrEmail =
-      (credentials as LoginRequest & { username?: string }).usernameOrEmail ??
-      (credentials as LoginRequest & { username?: string }).username;
-
-    const payload = {
-      usernameOrEmail,
-      password: credentials.password,
-    } as Record<string, string>;
-
-    const response = await this.client.post<AuthenticationResult>(
-      "/auth/login",
-      payload,
-      { skipAuthRedirect: true },
-    );
-    return response.data;
-  }
-
-  async register(userData: RegisterRequest): Promise<AuthenticationResult> {
-    const response = await this.client.post<AuthenticationResult>(
-      "/auth/register",
-      userData
-    );
-    return response.data;
-  }
-
-  async getCurrentUser(): Promise<UserDto> {
-    const response = await this.client.get<UserDto>("/auth/me");
-    return response.data;
-  }
-
-  async logout(): Promise<void> {
-    await this.client.post("/auth/logout");
-  }
-
-  async forgotPassword(
-    email: string
-  ): Promise<{ success: boolean; message: string }> {
-    const response = await this.client.post<{
-      success: boolean;
-      message: string;
-    }>("/auth/forgot-password", { email });
-    return response.data;
-  }
-
-  async resetPassword(
-    token: string,
-    email: string,
-    newPassword: string,
-    confirmPassword: string
-  ): Promise<{ success: boolean; message: string }> {
-    const response = await this.client.post<{
-      success: boolean;
-      message: string;
-    }>("/auth/reset-password", { token, email, newPassword, confirmPassword });
-    return response.data;
-  }
-
-  async confirmEmail(
-    token: string
-  ): Promise<{ success: boolean; message: string }> {
-    const response = await this.client.post<{
-      success: boolean;
-      message: string;
-    }>("/auth/confirm-email", { token });
-    return response.data;
-  }
-
-  async resendEmailConfirmation(): Promise<{
-    success: boolean;
-    message: string;
-  }> {
-    const response = await this.client.post<{
-      success: boolean;
-      message: string;
-    }>("/auth/resend-confirmation");
     return response.data;
   }
 
@@ -3917,44 +3611,7 @@ export class ApiClient {
     return response.data;
   }
 
-  // ============ Setup & Initialization API methods ============
-
-  /**
-   * Get setup status
-   */
-  async getSetupStatus(): Promise<Record<string, unknown>> {
-    const response = await this.client.get('/setup/status');
-    return response.data;
-  }
-
-  /**
-   * Get non-secret deployment defaults while first-run setup is required.
-   */
-  async getSetupBootstrap(signal?: AbortSignal): Promise<import("@/types/api").SetupBootstrapResponse> {
-    const response = await this.client.get<import("@/types/api").SetupBootstrapResponse>(
-      '/setup/bootstrap',
-      { signal },
-    );
-    return response.data;
-  }
-
-  /**
-   * Create initial admin account
-   */
-  async createInitialAdmin(adminData: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const response = await this.client.post('/setup/initial-admin', adminData);
-    return response.data;
-  }
-
   // ============ Spoolman Integration API methods ============
-
-  /**
-   * Test Spoolman connection
-   */
-  async testSpoolmanConnection(baseUrl: string): Promise<Record<string, unknown>> {
-    const response = await this.client.post('/spoolman/test', { baseUrl });
-    return response.data;
-  }
 
   /**
    * Get Spoolman health status
@@ -3969,14 +3626,6 @@ export class ApiClient {
    */
   async getSpoolmanConfig(): Promise<Record<string, unknown>> {
     const response = await this.client.get('/spoolman/config');
-    return response.data;
-  }
-
-  /**
-   * Save Spoolman configuration
-   */
-  async saveSpoolmanConfig(config: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const response = await this.client.post('/spoolman/config', config);
     return response.data;
   }
 
@@ -5183,33 +4832,12 @@ export class ApiClient {
   }
 
   // ============ Notification API methods ============
-  async getNotifications(limit?: number): Promise<NotificationDto[]> {
-    const params = limit ? `?limit=${limit}` : '';
-    const response = await this.client.get(`/notifications${params}`);
-    return response.data || [];
-  }
-
-  async getUnreadNotifications(): Promise<NotificationDto[]> {
-    const response = await this.client.get('/notifications/unread');
-    return response.data || [];
-  }
-
-  async getUnreadCount(): Promise<number> {
-    const response = await this.client.get<UnreadCountResponse>('/notifications/unread/count');
-    return response.data.unreadCount;
-  }
-
-  async markNotificationAsRead(notificationId: string): Promise<void> {
-    await this.client.put(`/notifications/${notificationId}/mark-read`);
-  }
-
-  async markMultipleNotificationsAsRead(notificationIds: string[]): Promise<void> {
-    await this.client.put('/notifications/mark-read-batch', { notificationIds });
-  }
-
-  async deleteNotification(notificationId: string): Promise<void> {
-    await this.client.delete(`/notifications/${notificationId}`);
-  }
+  // getNotifications, getUnreadCount, markNotificationAsRead,
+  // markMultipleNotificationsAsRead, and deleteNotification moved to
+  // `@/services/api/notificationsApi.ts` (issue #2343) — their only consumers
+  // were the eagerly-mounted NotificationBell/NotificationDrawer hooks.
+  // getUnreadNotifications was unused dead code (no consumers anywhere in the
+  // repo) and was removed rather than migrated.
 
   async getNotificationPreferences(): Promise<NotificationPreferencesDto> {
     const response = await this.client.get('/notifications/preferences');
@@ -5282,232 +4910,9 @@ export class ApiClient {
     return etag.trim().replace(/^W\//, '').replace(/^"|"$/g, '');
   }
 
-  private autoDispatchIfMatch(dispatchStateETag: string): string {
-    const value = dispatchStateETag.trim();
-    if (!value) {
-      throw new Error("The reviewed auto-dispatch status does not have an ETag");
-    }
-    return value.startsWith('"') ? value : `"${value}"`;
-  }
-
-  async getAutoDispatchStatus(): Promise<AutoDispatchGlobalStatus> {
-    const response = await this.client.get(`${AUTO_DISPATCH_API_BASE}/status`);
-    return response.data;
-  }
-
   async getAutoDispatchPrinterStatus(printerId: string): Promise<AutoDispatchDetailedStatus> {
     const response = await this.client.get(`${AUTO_DISPATCH_API_BASE}/${printerId}/status`);
     return response.data;
-  }
-
-  async confirmAutoDispatchReady(
-    printerId: string,
-    dispatchStateETag: string,
-    confirmFilamentOverride = false,
-    overrideJobETag?: string | null,
-    filamentCheckETag?: string | null
-  ): Promise<AutoDispatchReadyResult> {
-    const etag = this.autoDispatchIfMatch(dispatchStateETag);
-    const overrideQuery = confirmFilamentOverride
-      ? "?confirmFilamentOverride=true"
-      : "";
-    const response = await this.client.post(
-      `${AUTO_DISPATCH_API_BASE}/${printerId}/ready${overrideQuery}`,
-      undefined,
-      {
-        headers: {
-          "If-Match": etag,
-          ...(confirmFilamentOverride
-            ? {
-                "X-Job-If-Match": this.reviewedEtag(
-                  overrideJobETag,
-                  "The reviewed filament override job"
-                ),
-                "X-Filament-Check-If-Match": this.reviewedEtag(
-                  filamentCheckETag,
-                  "The reviewed filament check"
-                ),
-              }
-            : {}),
-        },
-        validateStatus: (status) =>
-          status === 200 || status === 202 || status === 409,
-      }
-    );
-    if (
-      response.status === 409 &&
-      (
-        (
-          response.data?.requiresFilamentOverride !== true &&
-          response.data?.filamentCheckChanged !== true
-        ) ||
-        typeof response.data?.status !== "object" ||
-        response.data?.status === null
-      )
-    ) {
-      const data = response.data as { detail?: string; error?: string } | undefined;
-      throw Object.assign(
-        new Error(data?.detail ?? data?.error ?? "The ready request conflicted with the current queue state."),
-        {
-          statusCode: response.status,
-          data: response.data,
-        }
-      );
-    }
-    return response.data;
-  }
-
-  async skipAutoDispatchJob(
-    printerId: string,
-    dispatchStateETag: string,
-    jobETag: string
-  ): Promise<void> {
-    const etag = this.autoDispatchIfMatch(dispatchStateETag);
-    const jobEtag = this.reviewedEtag(jobETag, "The reviewed next job");
-    await this.client.post(
-      `${AUTO_DISPATCH_API_BASE}/${printerId}/skip`,
-      undefined,
-      {
-        headers: {
-          "If-Match": etag,
-          "X-Job-If-Match": jobEtag,
-        },
-      }
-    );
-  }
-
-  async cancelAutoDispatch(
-    printerId: string,
-    dispatchStateETag: string
-  ): Promise<void> {
-    const etag = this.autoDispatchIfMatch(dispatchStateETag);
-    await this.client.post(
-      `${AUTO_DISPATCH_API_BASE}/${printerId}/cancel`,
-      undefined,
-      { headers: { "If-Match": etag } }
-    );
-  }
-
-  async setAutoDispatchEnabled(
-    printerId: string,
-    enabled: boolean,
-    dispatchStateETag: string,
-    printerETag: string
-  ): Promise<void> {
-    const etag = this.autoDispatchIfMatch(dispatchStateETag);
-    const printerEtag = this.reviewedEtag(
-      printerETag,
-      "The reviewed printer"
-    );
-    await this.client.put(
-      `${AUTO_DISPATCH_API_BASE}/${printerId}/enabled`,
-      { enabled },
-      {
-        headers: {
-          "If-Match": etag,
-          "X-Printer-If-Match": printerEtag,
-        },
-      }
-    );
-  }
-
-  async setAutoDispatchGlobalEnabled(
-    enabled: boolean,
-    statuses: AutoDispatchStatus[]
-  ): Promise<void> {
-    const expectedVersions = Object.fromEntries(
-      statuses.map((status) => {
-        if (!status.dispatchStateETag || !status.printerETag) {
-          throw new Error(
-            `Printer ${status.printerId} does not have reviewed ETags`
-          );
-        }
-        return [
-          status.printerId,
-          {
-            dispatchStateETag: status.dispatchStateETag,
-            printerETag: status.printerETag,
-          },
-        ];
-      })
-    );
-    await this.client.put(`${AUTO_DISPATCH_API_BASE}/enabled`, {
-      enabled,
-      expectedVersions,
-    });
-  }
-
-  async preClearAutoDispatchBed(
-    printerId: string,
-    dispatchStateETag: string
-  ): Promise<AutoDispatchStatus> {
-    const etag = this.autoDispatchIfMatch(dispatchStateETag);
-    const response = await this.client.post(
-      `${AUTO_DISPATCH_API_BASE}/${printerId}/pre-clear`,
-      undefined,
-      { headers: { "If-Match": etag } }
-    );
-    return response.data;
-  }
-
-  async acknowledgeBedClearAndStart(input: {
-    jobId: string;
-    printerId: string;
-    jobETag: string;
-    dispatchStateETag: string;
-    expectedPrinterConfigRevision?: number | null;
-    idempotencyKey: string;
-  }): Promise<BedClearAcknowledgementResult> {
-    const response = await this.client.post<
-      {
-        message?: string;
-        jobETag?: string | null;
-        dispatchStateETag?: string | null;
-        error?: string;
-        detail?: string;
-      }
-    >(
-      `/job-queue/${input.jobId}/acknowledge-bed-clear-and-start`,
-      {
-        printerId: input.printerId,
-        expectedPrinterConfigRevision:
-          input.expectedPrinterConfigRevision ?? null,
-      },
-      {
-        headers: {
-          "Idempotency-Key": input.idempotencyKey,
-          "If-Match": this.reviewedEtag(input.jobETag, "The reviewed job"),
-          "X-Dispatch-State-If-Match": this.reviewedEtag(
-            input.dispatchStateETag,
-            "The reviewed dispatch state"
-          ),
-        },
-        validateStatus: (status) =>
-          [200, 202, 409, 412, 422, 503].includes(status),
-      }
-    );
-    if (response.status === 200 || response.status === 202) {
-      return {
-        kind: response.status === 202 ? 'accepted' : 'replayed',
-        httpStatus: response.status,
-        message: response.data.message,
-        jobETag: response.data.jobETag,
-        dispatchStateETag: response.data.dispatchStateETag,
-      };
-    }
-    return {
-      kind:
-        response.status === 409
-          ? 'conflict'
-          : response.status === 412
-            ? 'stale'
-            : response.status === 422
-              ? 'incompatible'
-              : 'unavailable',
-      httpStatus: response.status as 409 | 412 | 422 | 503,
-      errorCode: response.data.error ?? 'bed_clear_acknowledgement_failed',
-      detail: response.data.detail,
-    };
   }
 
   // ============ Job Scheduling API methods ============

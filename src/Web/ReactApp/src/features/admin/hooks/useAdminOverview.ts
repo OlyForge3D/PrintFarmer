@@ -1,5 +1,5 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import { apiClient } from '@/services/api';
+import { client } from '@/services/api/httpClient';
 import type { AdminOverviewDto } from '@/types/adminOverview';
 
 /**
@@ -9,7 +9,7 @@ import type { AdminOverviewDto } from '@/types/adminOverview';
 export const ADMIN_OVERVIEW_QUERY_KEY = ['admin', 'overview'] as const;
 
 async function fetchAdminOverview(signal?: AbortSignal): Promise<AdminOverviewDto> {
-  const response = await apiClient.get<AdminOverviewDto>('/admin/overview', { signal });
+  const response = await client.get<AdminOverviewDto>('/admin/overview', { signal });
   return response.data;
 }
 

@@ -10,8 +10,8 @@ import type { AdminOverviewDto } from '@/types/adminOverview';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
-vi.mock('@/services/api', () => ({
-  apiClient: {
+vi.mock('@/services/api/httpClient', () => ({
+  client: {
     get: vi.fn(),
   },
 }));
@@ -43,10 +43,10 @@ vi.mock('@/common/components/PageTemplate', () => ({
   ),
 }));
 
-import { apiClient } from '@/services/api';
+import { client } from '@/services/api/httpClient';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 
-const mockedApiGet = vi.mocked(apiClient.get);
+const mockedApiGet = vi.mocked(client.get);
 const mockedUseAuth = vi.mocked(useAuth);
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────

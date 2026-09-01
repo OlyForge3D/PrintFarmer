@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { SlicerState, SlicerContextValue, SlicerContext } from './SlicerTypes';
 import { slicerRegistry } from '@/services/slicerRegistry';
-import { apiClient } from '@/services/api';
+import { fetchSettingsValues } from '@/services/settingsApi';
 import { AUTH_SESSION_ESTABLISHED_EVENT } from '@/services/authEvents';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 
@@ -71,7 +71,7 @@ function loadAuthenticatedSnapshot(authToken: string): Promise<SlicerSnapshot> {
   }
 
   const promise = Promise.all([
-    apiClient.getSettings<SlicerSettings>('Slicer').catch(error => {
+    fetchSettingsValues<SlicerSettings>('Slicer').catch(error => {
       console.warn('[SlicerContext] Failed to fetch slicer settings, using defaults:', error);
       return { enabled: true };
     }),

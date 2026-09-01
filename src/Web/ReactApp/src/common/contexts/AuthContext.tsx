@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useEffect, useState, ReactNode, useCallback, useRef } from 'react';
-import { apiClient } from '@/services/api';
+import { getCurrentUser, login as authLogin, register as authRegister, logout as authLogout } from '@/services/api/authApi';
 import { UserDto, LoginRequest, RegisterRequest } from '@/types/api';
 import { loginWithPasskey as passkeyLogin } from '@/services/passkeyService';
 import { queryClient } from '@/services/queryClient';
@@ -46,7 +46,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       try {
         // Try to get current user from API
-        const userData = await apiClient.getCurrentUser();
+        const userData = await getCurrentUser();
         if (isCurrentToken()) {
           setUser(userData);
           setError(null);
@@ -90,7 +90,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             return;
           }
 
-          const userData = await apiClient.getCurrentUser();
+          const userData = await getCurrentUser();
           if (isCurrentTransition()) {
             setUser(userData);
             window.dispatchEvent(new Event(AUTH_SESSION_ESTABLISHED_EVENT));
@@ -128,7 +128,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
 
     try {
-      const result = await apiClient.login(credentials);
+      const result = await authLogin(credentials);
       if (generation !== authTransitionGeneration.current) {
         return false;
       }
@@ -223,7 +223,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setError(null);
 
     try {
-      const result = await apiClient.register(userData);
+      const result = await authRegister(userData);
       if (generation !== authTransitionGeneration.current) {
         return false;
       }
@@ -278,7 +278,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return;
       }
 
-      await apiClient.logout();
+      await authLogout();
     } catch (err) {
       console.error('Logout error:', err);
     } finally {

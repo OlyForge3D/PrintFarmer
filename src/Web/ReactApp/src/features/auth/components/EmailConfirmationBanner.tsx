@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { apiClient } from '@/services/api';
+import { resendEmailConfirmation } from '@/services/api/authApi';
 import { toast } from 'sonner';
 import { CloseIcon, EmailIcon, RefreshIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
@@ -18,7 +18,7 @@ export function EmailConfirmationBanner() {
   const handleResend = async () => {
     setSending(true);
     try {
-      const result = await apiClient.resendEmailConfirmation();
+      const result = await resendEmailConfirmation();
       if (result.success) {
         toast.success(result.message || 'Confirmation email sent!');
       } else {

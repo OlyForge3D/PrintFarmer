@@ -12,7 +12,7 @@ import {
 import { Badge, Button } from '@/common/components/ui';
 import { formatFileSize } from '@/common/utils/stlFileUtils';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { apiClient } from '@/services/api';
+import { getSystemInfo } from '@/services/api/systemApi';
 import type { SystemInfo, SystemServiceHealth } from '@/types/api';
 
 const EMPTY_VALUE = '—';
@@ -221,7 +221,7 @@ export function SystemPulsePill({ onClick, className, compact = false }: SystemP
 
   const { data, error } = useQuery({
     queryKey: SYSTEM_INFO_QUERY_KEY,
-    queryFn: () => apiClient.getSystemInfo(),
+    queryFn: () => getSystemInfo(),
     enabled: isFarmAdmin,
     refetchInterval: SYSTEM_INFO_REFETCH_INTERVAL_MS,
     staleTime: SYSTEM_INFO_STALE_TIME_MS,

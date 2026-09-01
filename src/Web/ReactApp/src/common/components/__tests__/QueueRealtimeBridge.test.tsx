@@ -4,7 +4,7 @@ import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueueRealtimeBridge } from '../QueueRealtimeBridge';
 import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
-import { queryKeys } from '@/common/hooks/useApi';
+import { queryKeys } from '@/common/hooks/queryKeys';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -67,11 +67,12 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('@/services/api', () => ({
-  apiClient: {
-    getQueueSubscriptionResources: mocks.getQueueSubscriptionResources,
-    getPrinters: mocks.getPrinters,
-  },
+vi.mock('@/services/api/queueRealtimeApi', () => ({
+  getQueueSubscriptionResources: mocks.getQueueSubscriptionResources,
+}));
+
+vi.mock('@/services/api/printerApi', () => ({
+  getPrinters: mocks.getPrinters,
 }));
 
 vi.mock('@/services/printer-signalr', () => ({

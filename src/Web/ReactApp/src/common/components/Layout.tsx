@@ -1,7 +1,7 @@
 import { LoginModal } from '@/features/auth/components/LoginModal';
 import { RegisterModal } from '@/features/auth/components/RegisterModal';
 import { EmailConfirmationBanner } from '@/features/auth/components/EmailConfirmationBanner';
-import { TasksBadge } from '@/features/tasks';
+import { TasksBadge } from '@/features/tasks/components/TasksBadge';
 import { InstallBanner } from '@/common/components/InstallBanner';
 import clsx from 'clsx';
 import { Button } from '@/common/components/ui';

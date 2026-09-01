@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NotificationBell } from '@/common/components/NotificationBell';
 
 // Mock the API hooks
-vi.mock('@/common/hooks/useApi', () => ({
+vi.mock('@/common/hooks/useUnreadCount', () => ({
   useUnreadCount: vi.fn(),
 }));
 
@@ -22,7 +22,7 @@ vi.mock('@/common/components/NotificationDrawer', () => ({
 }));
 
 // Dynamic import after mocks
-const { useUnreadCount } = await import('@/common/hooks/useApi');
+const { useUnreadCount } = await import('@/common/hooks/useUnreadCount');
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({

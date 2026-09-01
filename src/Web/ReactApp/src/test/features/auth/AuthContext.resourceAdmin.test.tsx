@@ -11,16 +11,14 @@ import { AuthProvider } from '@/common/contexts/AuthContext';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { UserDto } from '@/types/api';
 
-vi.mock('@/services/api', () => ({
-  apiClient: {
-    getCurrentUser: vi.fn(),
-    login: vi.fn(),
-    register: vi.fn(),
-    logout: vi.fn(),
-  },
+vi.mock('@/services/api/authApi', () => ({
+  getCurrentUser: vi.fn(),
+  login: vi.fn(),
+  register: vi.fn(),
+  logout: vi.fn(),
 }));
 
-import { apiClient } from '@/services/api';
+import { getCurrentUser } from '@/services/api/authApi';
 
 function PermissionProbe({ resource, action }: { resource: string; action: string }) {
   const { hasPermission, isLoading } = useAuth();
@@ -38,7 +36,7 @@ async function renderWithUser(permissions: string[], resource: string, action: s
     roles: ['farm_user'],
     permissions,
   } as UserDto;
-  vi.mocked(apiClient.getCurrentUser).mockResolvedValue(user);
+  vi.mocked(getCurrentUser).mockResolvedValue(user);
   localStorage.setItem('auth-token', 'test-token');
 
   render(

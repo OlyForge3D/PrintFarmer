@@ -12,7 +12,7 @@ vi.mock('date-fns', () => ({
 }));
 
 // Mock the API hooks
-vi.mock('@/common/hooks/useApi', () => ({
+vi.mock('@/common/hooks/useNotificationsList', () => ({
   useNotifications: vi.fn(),
   useMarkNotificationAsRead: vi.fn(),
   useMarkAllNotificationsAsRead: vi.fn(),
@@ -25,7 +25,7 @@ const {
   useMarkNotificationAsRead,
   useMarkAllNotificationsAsRead,
   useDeleteNotification,
-} = await import('@/common/hooks/useApi');
+} = await import('@/common/hooks/useNotificationsList');
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({

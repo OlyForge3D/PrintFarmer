@@ -7,11 +7,9 @@ vi.mock('@/common/hooks/useUnifiedLogging', () => ({
   useUnifiedLogging: () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }),
 }));
 
-// Mock the apiClient used by App to check setup status
-vi.mock('@/services/api', () => ({
-  apiClient: {
-    getSetupStatus: vi.fn().mockResolvedValue({ needsSetup: true }),
-  },
+// Mock the setupApi used by App to check setup status
+vi.mock('@/services/api/setupApi', () => ({
+  getSetupStatus: vi.fn().mockResolvedValue({ needsSetup: true }),
 }));
 
 // Mock services that perform network or SignalR work

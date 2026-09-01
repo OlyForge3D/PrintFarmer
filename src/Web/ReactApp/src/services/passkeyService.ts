@@ -3,8 +3,8 @@ import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
 } from '@simplewebauthn/browser';
-import { apiClient } from '@/services/api';
-import type { PfRequestConfig } from '@/services/api';
+import { request } from '@/services/api/httpClient';
+import type { PfRequestConfig } from '@/services/api/httpClient';
 import type { AuthenticationResult } from '@/types/api';
 
 export interface PasskeyCredentialDto {
@@ -20,21 +20,21 @@ export interface RenamePasskeyRequest {
 }
 
 export async function listPasskeys(): Promise<PasskeyCredentialDto[]> {
-  return apiClient.request<PasskeyCredentialDto[]>({
+  return request<PasskeyCredentialDto[]>({
     method: 'GET',
     url: '/auth/passkey/credentials',
   });
 }
 
 export async function deletePasskey(id: number): Promise<void> {
-  await apiClient.request<void>({
+  await request<void>({
     method: 'DELETE',
     url: `/auth/passkey/credentials/${id}`,
   });
 }
 
 export async function renamePasskey(id: number, deviceName: string): Promise<void> {
-  await apiClient.request<void>({
+  await request<void>({
     method: 'PATCH',
     url: `/auth/passkey/credentials/${id}`,
     data: { deviceName } satisfies RenamePasskeyRequest,
@@ -48,14 +48,14 @@ export async function renamePasskey(id: number, deviceName: string): Promise<voi
  * 3. Sends the attestation response back to the server for verification.
  */
 export async function registerPasskey(): Promise<{ credentialId: string; newCredentialId: number }> {
-  const optionsJSON = await apiClient.request<PublicKeyCredentialCreationOptionsJSON>({
+  const optionsJSON = await request<PublicKeyCredentialCreationOptionsJSON>({
     method: 'POST',
     url: '/auth/passkey/register/begin',
   });
 
   const attestationResponse = await startRegistration({ optionsJSON });
 
-  return apiClient.request<{ credentialId: string }>({
+  return request<{ credentialId: string }>({
     method: 'POST',
     url: '/auth/passkey/register/complete',
     data: attestationResponse,
@@ -72,7 +72,7 @@ export async function registerPasskey(): Promise<{ credentialId: string; newCred
  * @remarks Brady policy: username hint is required (fully discoverable credentials are out of scope).
  */
 export async function loginWithPasskey(username: string): Promise<AuthenticationResult> {
-  const optionsJSON = await apiClient.request<PublicKeyCredentialRequestOptionsJSON>({
+  const optionsJSON = await request<PublicKeyCredentialRequestOptionsJSON>({
     method: 'POST',
     url: '/auth/passkey/login/begin',
     data: { username },
@@ -80,7 +80,7 @@ export async function loginWithPasskey(username: string): Promise<Authentication
 
   const assertionResponse = await startAuthentication({ optionsJSON });
 
-  return apiClient.request<AuthenticationResult>({
+  return request<AuthenticationResult>({
     method: 'POST',
     url: '/auth/passkey/login/complete',
     data: { username, assertionResponse },

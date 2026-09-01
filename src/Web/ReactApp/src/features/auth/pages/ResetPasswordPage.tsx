@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { EyeIcon, EyeOffIcon, LockIcon, CheckCircleIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogo } from '@/common/components/PrintFarmerLogo';
 import { Button, Input, FormField, Alert } from '@/common/components/ui';
-import { apiClient } from '@/services/api';
+import { resetPassword } from '@/services/api/authApi';
 
 export function ResetPasswordPage() {
   const [searchParams] = useSearchParams();
@@ -63,7 +63,7 @@ export function ResetPasswordPage() {
     setIsLoading(true);
 
     try {
-      const response = await apiClient.resetPassword(token, email, newPassword, confirmPassword);
+      const response = await resetPassword(token, email, newPassword, confirmPassword);
       
       if (response.success) {
         setSuccess(true);

@@ -81,10 +81,8 @@ vi.mock('@microsoft/signalr', () => ({
   },
 }));
 
-vi.mock('@/services/api', () => ({
-  apiClient: {
-    getSettings: signalRTestState.getSettings,
-  },
+vi.mock('@/services/settingsApi', () => ({
+  fetchSettingsValues: signalRTestState.getSettings,
 }));
 
 vi.mock('@/common/utils/apiUrlHelpers', () => ({

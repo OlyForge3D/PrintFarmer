@@ -23,17 +23,21 @@ vi.mock('@/common/hooks/useUnifiedLogging', () => ({
   useUnifiedLogging: () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }),
 }));
 
-vi.mock('@/services/api', () => ({
-  apiClient: {
-    getSetupStatus: vi.fn().mockResolvedValue({ needsSetup: false }),
-    // QueueRealtimeBridge mounts with every authenticated <App>. Without these
-    // it throws and enters a 100/250/500ms retry loop that races the route
-    // assertions below.
-    getQueueSubscriptionResources: vi
-      .fn()
-      .mockResolvedValue({ printerIds: [], jobIds: [], projectIds: [] }),
-    getPrinters: vi.fn().mockResolvedValue([]),
-  },
+vi.mock('@/services/api/setupApi', () => ({
+  getSetupStatus: vi.fn().mockResolvedValue({ needsSetup: false }),
+}));
+
+vi.mock('@/services/api/queueRealtimeApi', () => ({
+  // QueueRealtimeBridge mounts with every authenticated <App>. Without these
+  // it throws and enters a 100/250/500ms retry loop that races the route
+  // assertions below.
+  getQueueSubscriptionResources: vi
+    .fn()
+    .mockResolvedValue({ printerIds: [], jobIds: [], projectIds: [] }),
+}));
+
+vi.mock('@/services/api/printerApi', () => ({
+  getPrinters: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('@/services/assetService', () => ({
