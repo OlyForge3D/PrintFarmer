@@ -351,9 +351,20 @@ function JobTableRow({
   return (
     <>
       <tr
-        className="bg-pf-bg-0 hover:bg-pf-bg-1/50 cursor-pointer transition-colors"
+        className="bg-pf-bg-0 hover:bg-pf-bg-1/50 cursor-pointer transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-pf-accent"
         onClick={onToggleExpand}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) {
+            return;
+          }
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggleExpand();
+          }
+        }}
         role="row"
+        tabIndex={0}
+        aria-expanded={isExpanded}
       >
         <td className="px-4 py-3 font-mono text-xs text-pf-text-secondary" title={job.id}>
           {truncateId(job.id)}
