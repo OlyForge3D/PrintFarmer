@@ -351,7 +351,7 @@ function JobTableRow({
   return (
     <>
       <tr
-        className="bg-pf-bg-0 hover:bg-pf-bg-1/50 cursor-pointer transition-colors focus:outline-hidden focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-pf-accent"
+        className="bg-pf-bg-0 hover:bg-pf-bg-1/50 cursor-pointer transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-pf-accent"
         onClick={onToggleExpand}
         onKeyDown={(e) => {
           if (e.target !== e.currentTarget) {
