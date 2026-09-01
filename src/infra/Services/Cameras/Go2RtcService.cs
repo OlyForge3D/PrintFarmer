@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Logging;
+using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Settings;
 using Farm.Settings;
 using Microsoft.Extensions.Logging;
@@ -125,14 +126,11 @@ public class Go2RtcService : IGo2RtcService
     /// Strips any embedded userinfo (e.g. "user:pass@") from an RTSP URL before it is written to logs,
     /// since RTSP URLs may carry camera credentials.
     /// </summary>
-    private static string RedactUserInfo(string url)
-    {
-        if (Uri.TryCreate(url, UriKind.Absolute, out Uri? parsed) && !string.IsNullOrEmpty(parsed.UserInfo))
-        {
-            UriBuilder builder = new(parsed) { UserName = string.Empty, Password = string.Empty };
-            return builder.Uri.ToString();
-        }
-
-        return url;
-    }
+    /// <remarks>
+    /// Delegates to <see cref="UrlCredentialRedactor.Redact"/> rather than parsing with
+    /// <see cref="Uri"/> directly: a scheme-less RTSP host string parses as an opaque URI with
+    /// empty <see cref="Uri.UserInfo"/>, letting a password fall through unredacted — the same
+    /// credential-leak pattern fixed for the Spoolman log call sites (issue #2316).
+    /// </remarks>
+    private static string RedactUserInfo(string url) => UrlCredentialRedactor.Redact(url) ?? url;
 }

@@ -81,7 +81,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 {
                     logger.LogWarning(
                         "Spoolman probe blocked by egress guard for {Url}: {Reason}",
-                        LogSanitizer.Sanitize(candidateBaseUrl),
+                        LogSanitizer.Sanitize(UrlCredentialRedactor.Redact(candidateBaseUrl)),
                         LogSanitizer.Sanitize(egressCheck.DenyReason));
 
                     // Do not echo egressCheck.DenyReason to the caller: it can reveal internal
@@ -144,7 +144,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 if (path == probePaths[^1])
                 {
                     (string? Category, string? Message) = CategorizeException(ex);
-                    logger.LogError(ex, "Probe failed for {Url}", LogSanitizer.Sanitize(candidateBaseUrl));
+                    logger.LogError(ex, "Probe failed for {Url}", LogSanitizer.Sanitize(UrlCredentialRedactor.Redact(candidateBaseUrl)));
                     return new SpoolmanProbeResult(false, NormalizedUrl: normalized, EndpointTried: path, StatusCode: null, Version: null, Message: Message, ErrorCategory: Category);
                 }
             }
@@ -2038,7 +2038,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to fetch external filaments from Spoolman at {Url}", LogSanitizer.Sanitize(url));
+            logger.LogError(ex, "Failed to fetch external filaments from Spoolman at {Url}", LogSanitizer.Sanitize(UrlCredentialRedactor.Redact(url)));
             throw;
         }
     }
@@ -2070,7 +2070,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to fetch external materials from Spoolman at {Url}", LogSanitizer.Sanitize(url));
+            logger.LogError(ex, "Failed to fetch external materials from Spoolman at {Url}", LogSanitizer.Sanitize(UrlCredentialRedactor.Redact(url)));
             throw;
         }
     }
