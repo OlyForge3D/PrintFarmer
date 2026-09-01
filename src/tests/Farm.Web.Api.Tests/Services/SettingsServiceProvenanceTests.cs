@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Reflection;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Settings;
@@ -56,16 +57,18 @@ public sealed class SettingsServiceProvenanceTests
 
     /// <summary>
     /// Regression test for #2320: Save&lt;T&gt;() used to mutate the shared _settings
-    /// dictionary in place instead of atomically swapping it. That meant a concurrent
-    /// enumeration of <see cref="ISettingsService.All"/> (e.g. via Get/GetByKey callers
-    /// iterating settings while another request calls Save) could observe a
-    /// "Collection was modified" InvalidOperationException. With the atomic swap, a
-    /// reader captures a reference to the current dictionary instance up front, so
-    /// concurrent Save calls that replace _settings with a new instance never affect
-    /// an in-flight enumeration.
+    /// dictionary in place (`_settings[key] = value`) instead of atomically swapping it
+    /// out for a new instance, unlike the existing LoadSettings/Reload pattern. A caller
+    /// that captured a reference to the dictionary before Save (e.g. via reflection, or
+    /// any future code that snapshots the field) would see that same reference mutated
+    /// underneath it. This test captures the private _settings field before Save and
+    /// asserts Save replaces the field with a new dictionary instance rather than
+    /// mutating the previously-captured one - the failure mode a "Collection was
+    /// modified" test cannot reliably catch, because overwriting a value for an
+    /// already-present key does not invalidate .NET's Dictionary enumerator/version.
     /// </summary>
     [Fact]
-    public void Save_DuringConcurrentEnumeration_DoesNotThrowOrCorruptState()
+    public void Save_ReplacesSettingsDictionaryInstance_InsteadOfMutatingPreviousReference()
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -74,7 +77,7 @@ public sealed class SettingsServiceProvenanceTests
         dbFactory
             .Setup(factory => factory.CreateDbContext())
             .Returns(() => new AppDbContext(options));
-        Mock<IAppSettingsRepository> repository = new(MockBehavior.Loose);
+        Mock<IAppSettingsRepository> repository = new(MockBehavior.Strict);
         repository
             .Setup(repo => repo.SetAsync(
                 SpoolCoverageSettings.SectionName,
@@ -91,46 +94,20 @@ public sealed class SettingsServiceProvenanceTests
             NullLogger<SettingsService>.Instance,
             repository.Object);
 
-        const int iterations = 200;
-        using ManualResetEventSlim start = new(initialState: false);
-        Exception? readerException = null;
+        FieldInfo settingsField = typeof(SettingsService)
+            .GetField("_settings", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?? throw new InvalidOperationException("SettingsService no longer has a private _settings field; update this test.");
 
-        var readerThread = new Thread(() =>
-        {
-            start.Wait();
-            for (int i = 0; i < iterations; i++)
-            {
-                try
-                {
-                    foreach (object value in service.All)
-                    {
-                        _ = value;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    readerException = ex;
-                    return;
-                }
-            }
-        });
+        var settingsBeforeSave = (Dictionary<string, object>)settingsField.GetValue(service)!;
+        object previousSpoolCoverageSettings = settingsBeforeSave[SpoolCoverageSettings.SectionName];
 
-        var writerThread = new Thread(() =>
-        {
-            start.Wait();
-            for (int i = 0; i < iterations; i++)
-            {
-                service.Save(new SpoolCoverageSettings());
-            }
-        });
+        var newSpoolCoverageSettings = new SpoolCoverageSettings();
+        service.Save(newSpoolCoverageSettings);
 
-        readerThread.Start();
-        writerThread.Start();
-        start.Set();
-        readerThread.Join();
-        writerThread.Join();
+        var settingsAfterSave = (Dictionary<string, object>)settingsField.GetValue(service)!;
 
-        readerException.Should().BeNull("concurrent Save calls must not mutate the dictionary an in-flight enumeration is iterating over");
-        service.GetByKey(SpoolCoverageSettings.SectionName).Should().NotBeNull();
+        settingsAfterSave.Should().NotBeSameAs(settingsBeforeSave, "Save must atomically swap in a new dictionary rather than mutate the existing one");
+        settingsBeforeSave[SpoolCoverageSettings.SectionName].Should().BeSameAs(previousSpoolCoverageSettings, "a previously-captured dictionary reference must not observe later Save calls");
+        settingsAfterSave[SpoolCoverageSettings.SectionName].Should().BeSameAs(newSpoolCoverageSettings);
     }
 }

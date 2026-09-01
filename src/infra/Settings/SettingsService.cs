@@ -50,9 +50,11 @@ public class SettingsService : ISettingsService
         AppSettingAttribute? appAttr = type.GetCustomAttribute<AppSettingAttribute>() ?? throw new InvalidOperationException($"Type {type.FullName} is not marked with [AppSetting]. Only AppSettings can be persisted to DB.");
         _settingsOriginWatermarks[appAttr.Key] = CaptureOriginWatermark();
 
-        // Atomic swap: replace the whole dictionary rather than mutating it in place, so a
-        // concurrent reader holding a reference to the previous _settings (e.g. via Get<T>)
-        // never observes a partially-updated dictionary. Mirrors the pattern in LoadSettings.
+        // Atomic swap: replace the whole dictionary rather than mutating the existing
+        // instance, so a caller holding a reference to the previous _settings (e.g. a
+        // snapshot taken via reflection, or an in-flight enumeration of All) keeps
+        // seeing that instance unchanged instead of observing this update land inside
+        // it. Mirrors the pattern already used by LoadSettings/Reload.
         _settings = new Dictionary<string, object>(_settings) { [appAttr.Key] = settings };
 
         // Persist to DB (AppSettings only)
