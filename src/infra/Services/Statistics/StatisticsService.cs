@@ -238,17 +238,7 @@ public class StatisticsService(AppDbContext db, IPrintFarmerTelemetryService? te
         // Core cannot translate a grouped SUM over ActualPrintTime.Ticks (its TimeSpan value
         // converter blocks translation). The "ActualPrintTimeTicks" shadow column carries no
         // converter, so the duration SUM can be pushed to SQL too (issue #2346 / spike #2333).
-        var rows = await query
-            .GroupBy(j => j.AssignedPrinterId!.Value)
-            .Select(g => new
-            {
-                PrinterId = g.Key,
-                TotalJobs = g.Count(),
-                Completed = g.Count(j => j.Status == PrintJobStatus.Completed),
-                Failed = g.Count(j => j.Status == PrintJobStatus.Failed),
-                TotalTicks = g.Sum(j => EF.Property<long?>(j, "ActualPrintTimeTicks")) ?? 0L,
-            })
-            .ToListAsync(ct);
+        var rows = await BuildPrinterUtilizationAggregateQuery(query).ToListAsync(ct);
 
         var printerIds = rows.Select(r => r.PrinterId).ToList();
         var printerNames = await _db.Printers
@@ -272,6 +262,24 @@ public class StatisticsService(AppDbContext db, IPrintFarmerTelemetryService? te
         .ToList();
 
         return result;
+    }
+
+    /// <summary>
+    /// Builds the grouped per-printer aggregate query used by <see cref="GetPrinterUtilizationAsync"/>.
+    /// Extracted as a static builder (mirrors <see cref="BuildSummaryAggregateQuery"/>) so tests can
+    /// assert the query actually translates to a single server-side GROUP BY across providers,
+    /// rather than only observing round-trip counts (issue #2346 / spike #2333).
+    /// </summary>
+    internal static IQueryable<PrinterUtilizationAggregate> BuildPrinterUtilizationAggregateQuery(IQueryable<PrintJob> query)
+    {
+        return query
+            .GroupBy(j => j.AssignedPrinterId!.Value)
+            .Select(g => new PrinterUtilizationAggregate(
+                g.Key,
+                g.Count(),
+                g.Count(j => j.Status == PrintJobStatus.Completed),
+                g.Count(j => j.Status == PrintJobStatus.Failed),
+                g.Sum(j => EF.Property<long?>(j, "ActualPrintTimeTicks")) ?? 0L));
     }
 
     /// <inheritdoc />
@@ -602,4 +610,11 @@ public class StatisticsService(AppDbContext db, IPrintFarmerTelemetryService? te
         decimal MachineCost,
         decimal LaborCost,
         int JobCount);
+
+    internal sealed record PrinterUtilizationAggregate(
+        Guid PrinterId,
+        int TotalJobs,
+        int Completed,
+        int Failed,
+        long TotalTicks);
 }

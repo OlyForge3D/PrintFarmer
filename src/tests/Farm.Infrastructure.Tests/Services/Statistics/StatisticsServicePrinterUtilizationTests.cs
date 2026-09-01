@@ -124,6 +124,15 @@ public class StatisticsServicePrinterUtilizationTests
         // printer-name lookup (already O(printers)). No per-job entity materialization.
         Assert.Equal(2, interceptor.CommandCount);
 
+        // The old client-side-grouped implementation also issued 2 round trips (a raw
+        // per-job SELECT, then the printer-name lookup), so a command-count assertion alone
+        // cannot distinguish the two implementations. Assert the aggregate query itself was
+        // pushed to SQL: exactly one captured command groups and sums server-side.
+        Assert.Contains(interceptor.CommandTexts, sql =>
+            sql.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase)
+            && sql.Contains("SUM", StringComparison.OrdinalIgnoreCase)
+            && sql.Contains("ActualPrintTimeTicks", StringComparison.OrdinalIgnoreCase));
+
         Assert.Equal(2, result.Count);
 
         PrinterUtilizationDto printerA = result.Single(r => r.PrinterId == printerAId);
@@ -149,8 +158,10 @@ public class StatisticsServicePrinterUtilizationTests
         await using SqliteConnection connection = new("Data Source=:memory:");
         await connection.OpenAsync();
 
+        var interceptor = new CommandCountingInterceptor();
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(connection)
+            .AddInterceptors(interceptor)
             .Options;
 
         await using var db = new AppDbContext(options);
@@ -198,12 +209,20 @@ public class StatisticsServicePrinterUtilizationTests
             }
         }
         await db.SaveChangesAsync();
+        interceptor.Reset();
 
         List<PrinterUtilizationDto> result = await new StatisticsService(db).GetPrinterUtilizationAsync(null);
 
         Assert.Equal(printerCount, result.Count);
         Assert.All(result, r => Assert.Equal(jobsPerPrinter, r.TotalJobs));
         Assert.Equal(printerCount * jobsPerPrinter, result.Sum(r => r.TotalJobs));
+
+        // Exactly one row per printer comes back from the aggregate query itself (not just
+        // the final DTO list) -- proves the DB never streams the underlying 600 job rows to
+        // the app process; SQLite's own GROUP BY collapses them before the ORM sees them.
+        Assert.Contains(interceptor.CommandTexts, sql =>
+            sql.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase)
+            && sql.Contains("SUM", StringComparison.OrdinalIgnoreCase));
     }
 
     [Theory]
@@ -228,22 +247,14 @@ public class StatisticsServicePrinterUtilizationTests
 
         using var db = new AppDbContext(optionsBuilder.Options);
 
-        // Mirrors the GroupBy/Select shape inside GetPrinterUtilizationAsync -- proves the
-        // grouped SUM over the ActualPrintTimeTicks shadow column (no value converter)
-        // translates to SQL across every supported provider, unlike a SUM over
-        // ActualPrintTime.Ticks directly, which throws InvalidOperationException at
-        // query-compile time because of its TimeSpan value converter (#2346 / #2333).
-        string sql = db.Set<PrintJob>()
-            .Where(j => j.AssignedPrinterId.HasValue)
-            .GroupBy(j => j.AssignedPrinterId!.Value)
-            .Select(g => new
-            {
-                PrinterId = g.Key,
-                TotalJobs = g.Count(),
-                Completed = g.Count(j => j.Status == PrintJobStatus.Completed),
-                Failed = g.Count(j => j.Status == PrintJobStatus.Failed),
-                TotalTicks = g.Sum(j => EF.Property<long?>(j, "ActualPrintTimeTicks")) ?? 0L,
-            })
+        // Invokes the exact production query builder used by GetPrinterUtilizationAsync
+        // (not a hand-duplicated shape), proving the grouped SUM over the
+        // ActualPrintTimeTicks shadow column (no value converter) translates to SQL across
+        // every supported provider, unlike a SUM over ActualPrintTime.Ticks directly, which
+        // throws InvalidOperationException at query-compile time because of its TimeSpan
+        // value converter (#2346 / #2333).
+        string sql = StatisticsService.BuildPrinterUtilizationAggregateQuery(
+            db.Set<PrintJob>().Where(j => j.AssignedPrinterId.HasValue))
             .ToQueryString();
 
         Assert.Contains("GROUP BY", sql, StringComparison.OrdinalIgnoreCase);
@@ -255,9 +266,12 @@ public class StatisticsServicePrinterUtilizationTests
     {
         public int CommandCount { get; private set; }
 
+        public List<string> CommandTexts { get; } = [];
+
         public void Reset()
         {
             CommandCount = 0;
+            CommandTexts.Clear();
         }
 
         public override InterceptionResult<DbDataReader> ReaderExecuting(
@@ -266,6 +280,7 @@ public class StatisticsServicePrinterUtilizationTests
             InterceptionResult<DbDataReader> result)
         {
             CommandCount++;
+            CommandTexts.Add(command.CommandText);
 
             return result;
         }
@@ -277,6 +292,7 @@ public class StatisticsServicePrinterUtilizationTests
             CancellationToken cancellationToken = default)
         {
             CommandCount++;
+            CommandTexts.Add(command.CommandText);
 
             return ValueTask.FromResult(result);
         }
