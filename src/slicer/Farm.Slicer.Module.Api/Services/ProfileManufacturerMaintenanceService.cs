@@ -97,6 +97,7 @@ public sealed class ProfileManufacturerMaintenanceService(
         int skipped = 0;
         HashSet<Guid> updatedVariantIds = [];
         DateTime updatedAt = DateTime.UtcNow;
+        List<(string ManufacturerName, int FamilyVariantsUpdated)> resolvedFamilies = [];
         foreach (MachineModelProfile family in families)
         {
             Guid modelId = family.PrinterModelId!.Value;
@@ -123,14 +124,25 @@ public sealed class ProfileManufacturerMaintenanceService(
                 familyVariantsUpdated++;
             }
 
-            _logger.LogInformation(
+            resolvedFamilies.Add((manufacturerName, familyVariantsUpdated));
+        }
+
+        _ = await _dbContext.SaveChangesAsync(ct);
+
+        // Per-family lines are logged only after the commit above succeeds, and at Debug
+        // severity: the bounded "completed" summary below is the single Information-level
+        // audit record for the whole run. Logging these before the save (or at Information)
+        // would leave a false-positive audit trail if the save failed, and would produce
+        // O(n) Information-level log volume for a single admin action.
+        foreach ((string manufacturerName, int familyVariantsUpdated) in resolvedFamilies)
+        {
+            _logger.LogDebug(
                 "Profile manufacturer backfill resolved {Manufacturer}: {FamiliesUpdated} family and {VariantsUpdated} variants updated",
                 LogSanitizer.Sanitize(manufacturerName),
                 1,
                 familyVariantsUpdated);
         }
 
-        _ = await _dbContext.SaveChangesAsync(ct);
         _logger.LogInformation(
             "Profile manufacturer backfill completed: {FamiliesExamined} families examined, {FamiliesUpdated} families updated, {VariantsUpdated} variants updated, {Skipped} skipped",
             families.Count,
