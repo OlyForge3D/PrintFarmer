@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using Farm.Infrastructure.Telemetry;
+using Microsoft.AspNetCore.Routing;
 
 namespace Farm.Web.Api.Middleware;
 
@@ -34,7 +35,7 @@ public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryServ
         }
 
         Stopwatch stopwatch = Stopwatch.StartNew();
-        string endpoint = context.Request.Path.Value ?? "unknown";
+        string endpoint = GetEndpointTag(context);
         string method = context.Request.Method;
 
         using Activity? activity = _telemetryService.StartActivity($"{method} {endpoint}", ActivityKind.Server);
@@ -64,6 +65,36 @@ public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryServ
             _telemetryService.RecordApiCall(endpoint, method, 500, stopwatch.Elapsed);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Resolves the telemetry "endpoint" dimension from the matched route TEMPLATE
+    /// (e.g. <c>/api/printers/{id}</c>) rather than the raw request path, so metric and
+    /// span cardinality stays bounded to the number of route templates instead of growing
+    /// per entity instance (printer/job/spool GUID, etc.) — see issue #2327.
+    ///
+    /// ASP.NET Core's minimal hosting model implicitly wraps the entire middleware
+    /// pipeline in endpoint routing: route matching happens before any middleware added
+    /// via <c>app.Use...</c> runs, regardless of where <c>MapControllers()</c> is called
+    /// relative to this middleware. That means <c>HttpContext.GetEndpoint()</c>
+    /// already reflects the matched route by the time this middleware executes, with no
+    /// explicit UseRouting/UseEndpoints reordering required.
+    /// </summary>
+    private static string GetEndpointTag(HttpContext context)
+    {
+        if (context.GetEndpoint() is RouteEndpoint routeEndpoint)
+        {
+            string? routeTemplate = routeEndpoint.RoutePattern.RawText;
+            if (!string.IsNullOrEmpty(routeTemplate))
+            {
+                return routeTemplate;
+            }
+        }
+
+        // No endpoint matched (404) or the matched endpoint has no route pattern (e.g. a
+        // fallback/non-route endpoint). Bucket all of these under a single value instead
+        // of the per-instance raw path to keep cardinality bounded.
+        return "unknown";
     }
 }
 
