@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
+using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Parsing;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Mutations;
@@ -100,25 +101,16 @@ public sealed class FilamentCoverageSpoolResolver(
 
     /// <summary>
     /// Renders a spool source's URL for logging with any embedded userinfo removed.
-    /// <see cref="LogSanitizer"/> only defeats log forging; it does not strip credentials,
-    /// and a server URL is free text an operator may have typed as
-    /// <c>http://user:secret@host</c>.
+    /// <see cref="LogSanitizer"/> only defeats log forging; it does not strip credentials.
+    /// Redaction is delegated to <see cref="UrlCredentialRedactor"/> rather than done here
+    /// via a direct <see cref="Uri"/> parse, because a scheme-less authority (e.g. a
+    /// username that happens to satisfy URI scheme grammar, followed by a colon, a
+    /// password, and a host) parses as an <i>opaque</i> <see cref="Uri"/> whose
+    /// <see cref="Uri.UserInfo"/> and <see cref="Uri.Host"/> both come back empty, letting
+    /// the raw string -- password included -- fall through unredacted. See
+    /// <see cref="UrlCredentialRedactor"/> for the full rationale.
     /// </summary>
-    private static string? DescribeSource(string? serverUrl)
-    {
-        if (string.IsNullOrWhiteSpace(serverUrl))
-        {
-            return LogSanitizer.Sanitize(serverUrl);
-        }
-
-        if (Uri.TryCreate(serverUrl, UriKind.Absolute, out Uri? uri) && !string.IsNullOrEmpty(uri.UserInfo))
-        {
-            UriBuilder redacted = new(uri) { UserName = string.Empty, Password = string.Empty };
-            return LogSanitizer.Sanitize(redacted.Uri.ToString());
-        }
-
-        return LogSanitizer.Sanitize(serverUrl);
-    }
+    private static string? DescribeSource(string? serverUrl) => LogSanitizer.Sanitize(UrlCredentialRedactor.Redact(serverUrl));
 
     public async Task<FilamentCoverageSpoolSnapshot> ResolveSpoolAsync(
         CanonicalSpoolIdentity identity,

@@ -769,7 +769,8 @@ public class FilamentCoverageSpoolResolverTests
                 while (inFlight > observed)
                 {
                     int previous = Interlocked.CompareExchange(ref peak[0], inFlight, observed);
-                    if (previous == observed) { break; }
+                    if (previous == observed)
+                    { break; }
                     observed = previous;
                 }
 
