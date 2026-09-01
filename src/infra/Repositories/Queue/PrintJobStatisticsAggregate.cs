@@ -17,6 +17,14 @@ public sealed class PrintJobStatisticsAggregate
     /// </summary>
     public long TotalDurationMs { get; init; }
 
-    /// <summary>Convenience conversion of <see cref="TotalDurationMs"/> to hours.</summary>
-    public double TotalDurationHours => TotalDurationMs / 1000.0 / 3600.0;
+    /// <summary>
+    /// Total duration in hours, summed row-by-row (each row converted from milliseconds to hours
+    /// before summing) rather than derived from <see cref="TotalDurationMs"/> in one division.
+    /// This mirrors the exact summation order of the prior in-memory computation
+    /// (<c>printerJobs.Sum(j =&gt; j.ActualDurationMs!.Value / 1000.0 / 3600.0)</c>) instead of
+    /// <c>TotalDurationMs / 1000.0 / 3600.0</c>, which can differ in the least-significant bits
+    /// due to floating-point summation order - see issue #2329's "identical aggregate values"
+    /// correctness requirement.
+    /// </summary>
+    public double TotalDurationHours { get; init; }
 }

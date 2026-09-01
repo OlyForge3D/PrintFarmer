@@ -101,6 +101,7 @@ public class PrintStatsExternalBaselineTests
             {
                 JobCount = pfJobs.Count,
                 TotalDurationMs = pfJobs.Sum(j => j.ActualDurationMs ?? 0),
+                TotalDurationHours = pfJobs.Sum(j => (j.ActualDurationMs ?? 0) / 1000.0 / 3600.0),
             });
 
         var gateMock = new Mock<IOperatorFeatureGate>();
@@ -201,6 +202,7 @@ public class PrintStatsExternalBaselineTests
             {
                 JobCount = pfJobs.Count,
                 TotalDurationMs = pfJobs.Sum(j => j.ActualDurationMs ?? 0),
+                TotalDurationHours = pfJobs.Sum(j => (j.ActualDurationMs ?? 0) / 1000.0 / 3600.0),
             });
         using ServiceProvider provider = new ServiceCollection().BuildServiceProvider();
         PrintStatsSyncHostedService service = CreateService(provider);
@@ -288,6 +290,7 @@ public class PrintStatsExternalBaselineTests
             {
                 JobCount = 1,
                 TotalDurationMs = (long)(50.0 * 3600 * 1000),
+                TotalDurationHours = 50.0,
             });
         PrintStatsSyncHostedService service = CreateService(provider);
         PrintStatsSyncSettings settings = new()
@@ -372,6 +375,7 @@ public class PrintStatsExternalBaselineTests
             {
                 JobCount = pfJobs.Count,
                 TotalDurationMs = pfJobs.Sum(j => j.ActualDurationMs ?? 0),
+                TotalDurationHours = pfJobs.Sum(j => (j.ActualDurationMs ?? 0) / 1000.0 / 3600.0),
             });
         using ServiceProvider provider = new ServiceCollection().BuildServiceProvider();
         PrintStatsSyncHostedService service = CreateService(provider);
