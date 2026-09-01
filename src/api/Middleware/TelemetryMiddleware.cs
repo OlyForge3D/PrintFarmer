@@ -87,7 +87,12 @@ public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryServ
             string? routeTemplate = routeEndpoint.RoutePattern.RawText;
             if (!string.IsNullOrEmpty(routeTemplate))
             {
-                return routeTemplate;
+                // Controller attribute routes (e.g. [Route("api/printers")]) produce a
+                // RawText with no leading slash, while minimal-API/hub route templates
+                // are registered with one (e.g. "/hubs/printers"). Normalize so the
+                // "endpoint" dimension has a consistent shape regardless of which
+                // routing style produced the match.
+                return routeTemplate.StartsWith('/') ? routeTemplate : $"/{routeTemplate}";
             }
         }
 
