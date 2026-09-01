@@ -770,6 +770,61 @@ describe('NewSliceJobPage', () => {
     });
   });
 
+  describe('Offline printer target guard (issue #2342)', () => {
+    // Root cause: the printer-restore fallback effect only checked whether
+    // the persisted/selected printer id still existed in the printers list —
+    // never whether it was online — so a printer that went offline between
+    // visits stayed silently selected as an eligible submission target.
+    const onlinePrinter = mockPrinters[0]; // 'printer-1', isOnline: true
+    const offlinePrinter = {
+      id: 'printer-offline-1',
+      name: 'Moonraker Offline',
+      manufacturerId: 'mfg-3',
+      manufacturerName: 'Generic',
+      modelId: 'model-3',
+      modelName: 'Voron 2.4',
+      thumbnailUrl: '/thumb/voron.png',
+      isOnline: false,
+      motionType: 'CoreXY',
+    };
+
+    it('auto-selects an online printer when the restored selection is offline', async () => {
+      localStorage.setItem('sliceJob.selectedPrinterId', offlinePrinter.id);
+      vi.mocked(apiClient.getPrinters).mockResolvedValue([offlinePrinter, onlinePrinter]);
+
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('printer-select')).toHaveValue(onlinePrinter.id);
+      });
+
+      // No offline warning once corrected onto the online printer.
+      expect(screen.queryByTestId('offline-printer-warning')).not.toBeInTheDocument();
+    });
+
+    it('keeps the offline printer selected, warns, and blocks submission when no online printer exists', async () => {
+      vi.mocked(apiClient.getPrinters).mockResolvedValue([offlinePrinter]);
+
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('printer-select')).toHaveValue(offlinePrinter.id);
+      });
+
+      expect(await screen.findByTestId('offline-printer-warning')).toHaveTextContent(/offline/i);
+
+      const onSlice = () =>
+        (slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as { onSlice?: (ids?: string[]) => void } | undefined)?.onSlice;
+      await waitFor(() => {
+        expect(onSlice()).toBeTypeOf('function');
+      });
+      await act(async () => { onSlice()!(); });
+
+      expect(await screen.findByText(/Selected printer is offline/i)).toBeInTheDocument();
+      expect(sliceJobService.submitJob).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Machine Profile Selection', () => {
     it('should fetch machine profiles when printer model is determined', async () => {
       renderWithProviders(<NewSliceJobPage />);
