@@ -291,7 +291,7 @@ function JobTable({
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-pf-border">
-      <table className="w-full text-sm" role="grid">
+      <table className="w-full text-sm" role="table" aria-label="Slice jobs">
         <thead>
           <tr className="bg-pf-bg-1 text-pf-text-secondary text-left">
             <th className="px-4 py-3 font-medium">Job ID</th>
@@ -351,7 +351,7 @@ function JobTableRow({
   return (
     <>
       <tr
-        className="bg-pf-bg-0 hover:bg-pf-bg-1/50 cursor-pointer transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-pf-accent"
+        className="bg-pf-bg-0 hover:bg-pf-bg-1/50 cursor-pointer transition-colors focus:outline-hidden focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-pf-accent"
         onClick={onToggleExpand}
         onKeyDown={(e) => {
           if (e.target !== e.currentTarget) {
