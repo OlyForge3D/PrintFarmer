@@ -2384,7 +2384,7 @@ public class ProfilesService(
     /// <returns>AllProfilesResponseDto with profiles organized by manufacturer hierarchy, or null if worker unavailable</returns>
     public async Task<AllProfilesResponseDto?> GetWorkerProfilesHierarchyAsync(HttpClient httpClient, CancellationToken ct)
     {
-        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync(cancellationToken: ct);
         if (string.IsNullOrEmpty(workerUrl))
         {
             throw new HttpRequestException("OrcaSlicer worker not found in registry");
@@ -2507,7 +2507,19 @@ public class ProfilesService(
         HashSet<string> catalogManufacturerNames =
             manufacturers.Select(manufacturer => manufacturer.Name)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        AllProfilesResponseDto attributed = new();
+        AllProfilesResponseDto attributed = new()
+        {
+            ByHierarchy = new Dictionary<string, ManufacturerProfilesDto>(
+                StringComparer.OrdinalIgnoreCase),
+            MachineModelProfiles = new Dictionary<string, IList<MachineModelProfileDto>>(
+                StringComparer.OrdinalIgnoreCase),
+            MachineProfiles = new Dictionary<string, IList<MachineProfileDto>>(
+                StringComparer.OrdinalIgnoreCase),
+            FilamentProfiles = new Dictionary<string, IList<FilamentProfileDto>>(
+                StringComparer.OrdinalIgnoreCase),
+            ProcessProfiles = new Dictionary<string, IList<ProcessProfileDto>>(
+                StringComparer.OrdinalIgnoreCase)
+        };
         Dictionary<string, HashSet<string>> resolvedByWorkerManufacturer =
             new(StringComparer.OrdinalIgnoreCase);
 
@@ -2538,8 +2550,8 @@ public class ProfilesService(
                 {
                     _logger.LogWarning(
                         "Worker profile model alias {Alias} could not be attributed; keeping manufacturer {Manufacturer}",
-                        alias,
-                        workerManufacturer);
+                        LogSanitizer.Sanitize(alias),
+                        LogSanitizer.Sanitize(workerManufacturer));
                 }
 
                 foreach (MachineProfileDto machineProfile in modelProfiles.MachineProfiles)
@@ -2564,6 +2576,14 @@ public class ProfilesService(
                             StringComparer.OrdinalIgnoreCase)
                     };
                     attributed.ByHierarchy[resolvedManufacturer] = targetManufacturer;
+                }
+
+                if (targetManufacturer.Models.ContainsKey(modelKey))
+                {
+                    _logger.LogWarning(
+                        "Catalog-attributed worker hierarchy model {Model} collides under manufacturer {Manufacturer}; using the last worker entry",
+                        LogSanitizer.Sanitize(modelKey),
+                        LogSanitizer.Sanitize(resolvedManufacturer));
                 }
 
                 targetManufacturer.Models[modelKey] = modelProfiles;
@@ -3623,12 +3643,16 @@ public class ProfilesService(
     /// caller does not care which version answers the query and any Online
     /// OrcaSlicer worker is acceptable.
     /// </param>
-    private async Task<string?> GetOrcaSlicerWorkerUrlAsync(string? engineVersion = null)
+    /// <param name="cancellationToken">Cancellation token for the registry lookup.</param>
+    private async Task<string?> GetOrcaSlicerWorkerUrlAsync(
+        string? engineVersion = null,
+        CancellationToken cancellationToken = default)
     {
         try
         {
             // Query SlicerService entities via ISlicersService (not the old Worker table)
-            IReadOnlyList<SlicerService> allSlicers = await _slicersService.ListAsync(CancellationToken.None);
+            IReadOnlyList<SlicerService> allSlicers =
+                await _slicersService.ListAsync(cancellationToken);
 
             // SlicerType 1 = OrcaSlicer (per SlicerType enum). Materialize once
             // to avoid multi-enumeration warnings when we probe four times.
@@ -3705,6 +3729,10 @@ public class ProfilesService(
 
             _logger.LogWarning("No OrcaSlicer worker found in slicer registry");
             return null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

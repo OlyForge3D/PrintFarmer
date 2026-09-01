@@ -15,6 +15,7 @@ using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -102,7 +103,9 @@ public sealed class ProfilesServiceLibraryHierarchyTests
         Guid manufacturerId = Guid.NewGuid();
         Guid modelId = Guid.NewGuid();
         const string workerManufacturer = "PrintFarmer-1234567890abcdef";
+        const string secondWorkerManufacturer = "PrintFarmer-fedcba0987654321";
         const string alias = "Micron Farm";
+        const string secondAlias = "Micron Farm Two";
         AllProfilesResponseDto workerResponse = new()
         {
             ByHierarchy =
@@ -127,6 +130,27 @@ public sealed class ProfilesServiceLibraryHierarchyTests
                             ]
                         }
                     }
+                },
+                [secondWorkerManufacturer] = new ManufacturerProfilesDto
+                {
+                    Name = secondWorkerManufacturer,
+                    Models =
+                    {
+                        [secondAlias] = new PrinterModelProfilesDto
+                        {
+                            Name = secondAlias,
+                            ModelId = secondAlias,
+                            MachineProfiles =
+                            [
+                                new MachineProfileDto
+                                {
+                                    Name = "Micron Farm Two 0.6 nozzle",
+                                    PrinterModel = secondAlias,
+                                    Manufacturer = secondWorkerManufacturer
+                                }
+                            ]
+                        }
+                    }
                 }
             },
             MachineProfiles =
@@ -147,7 +171,10 @@ public sealed class ProfilesServiceLibraryHierarchyTests
                 "OrcaSlicer",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(
-                [new SlicerModelAliasEntry(alias, "OrcaSlicer", modelId)]);
+            [
+                new SlicerModelAliasEntry(alias, "OrcaSlicer", modelId),
+                new SlicerModelAliasEntry(secondAlias, "OrcaSlicer", modelId)
+            ]);
         Mock<ICatalogService> catalog = new(MockBehavior.Strict);
         _ = catalog.Setup(service => service.GetModelsAsync(
                 null,
@@ -173,8 +200,12 @@ public sealed class ProfilesServiceLibraryHierarchyTests
 
         attributed.Should().NotBeNull();
         attributed!.ByHierarchy.Should().ContainKey("PrintersForAnts");
+        ReferenceEquals(attributed.ByHierarchy.Comparer, StringComparer.OrdinalIgnoreCase)
+            .Should().BeTrue();
         attributed.ByHierarchy.Should().NotContainKey(workerManufacturer);
         attributed.ByHierarchy["PrintersForAnts"].Models.Should().ContainKey(alias);
+        attributed.ByHierarchy["PrintersForAnts"].Models.Should().ContainKey(secondAlias);
+        attributed.ByHierarchy["PrintersForAnts"].Models.Should().HaveCount(2);
         attributed.ByHierarchy["PrintersForAnts"].Models[alias].MachineProfiles
             .Should().OnlyContain(profile => profile.Manufacturer == "PrintersForAnts");
         attributed.MachineProfiles.Should().ContainKey("PrintersForAnts");
@@ -182,9 +213,63 @@ public sealed class ProfilesServiceLibraryHierarchyTests
         raw.ByHierarchy.Should().NotContainKey("PrintersForAnts");
     }
 
+    [Fact]
+    public async Task GetCatalogAttributedWorkerHierarchyAsync_UnaliasedFamily_KeepsWorkerManufacturerAndWarns()
+    {
+        const string workerManufacturer = "PrintFarmer-1234567890abcdef";
+        const string alias = "Unmapped Family";
+        AllProfilesResponseDto workerResponse = new()
+        {
+            ByHierarchy =
+            {
+                [workerManufacturer] = new ManufacturerProfilesDto
+                {
+                    Name = workerManufacturer,
+                    Models =
+                    {
+                        [alias] = new PrinterModelProfilesDto
+                        {
+                            Name = alias,
+                            ModelId = alias
+                        }
+                    }
+                }
+            }
+        };
+        Mock<IPrinterModelAliasService> aliases = new(MockBehavior.Strict);
+        _ = aliases.Setup(service => service.ListAliasesAsync(
+                "OrcaSlicer",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        Mock<ICatalogService> catalog = new(MockBehavior.Strict);
+        _ = catalog.Setup(service => service.GetModelsAsync(
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(((IReadOnlyList<PrinterModelDto>)[], null));
+        _ = catalog.Setup(service => service.GetManufacturersAsync(
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(((IReadOnlyList<ManufacturerDto>)[], null));
+        var logger = new RecordingLogger<ProfilesService>();
+        ProfilesService service = CreateService(aliases.Object, catalog.Object, logger);
+        using HttpClient httpClient = new(new JsonHandler(workerResponse));
+
+        AllProfilesResponseDto? attributed =
+            await service.GetCatalogAttributedWorkerHierarchyAsync(
+                httpClient,
+                "all",
+                CancellationToken.None);
+
+        attributed!.ByHierarchy.Should().ContainKey(workerManufacturer);
+        logger.Entries.Should().Contain(entry =>
+            entry.Level == LogLevel.Warning
+            && entry.Message.Contains(alias, StringComparison.Ordinal)
+            && entry.Message.Contains(workerManufacturer, StringComparison.Ordinal));
+    }
+
     private static ProfilesService CreateService(
         IPrinterModelAliasService aliasService,
-        ICatalogService catalogService)
+        ICatalogService catalogService,
+        ILogger<ProfilesService>? logger = null)
     {
         Mock<ISlicersService> slicers = new(MockBehavior.Strict);
         _ = slicers.Setup(service => service.ListAsync(It.IsAny<CancellationToken>()))
@@ -206,7 +291,7 @@ public sealed class ProfilesServiceLibraryHierarchyTests
 
         return new ProfilesService(
             Mock.Of<IProfilesRepository>(),
-            NullLogger<ProfilesService>.Instance,
+            logger ?? NullLogger<ProfilesService>.Instance,
             Mock.Of<IProcessProfileRepository>(),
             Mock.Of<IMachineProfileRepository>(),
             Mock.Of<IFilamentProfileRepository>(),
@@ -216,6 +301,25 @@ public sealed class ProfilesServiceLibraryHierarchyTests
             Mock.Of<IHubContext<SlicerHub>>(),
             slicers.Object,
             aliasService);
+    }
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull =>
+            null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 
     private sealed class JsonHandler(AllProfilesResponseDto response) : HttpMessageHandler
