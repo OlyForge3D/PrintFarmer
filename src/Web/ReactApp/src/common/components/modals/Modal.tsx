@@ -460,7 +460,7 @@ export function Modal({
         )}
 
         {/* Content */}
-        <div className="overflow-y-auto flex-1 px-6 py-6">
+        <div data-testid="modal-content" className="overflow-y-auto flex-1 px-6 py-6">
           {children}
         </div>
 
