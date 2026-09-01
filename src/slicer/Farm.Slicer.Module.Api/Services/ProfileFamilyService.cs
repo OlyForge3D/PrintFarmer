@@ -121,7 +121,7 @@ public sealed class ProfileFamilyService(
             CreatedAt = now,
         };
         family.Name = familyName;
-        family.Manufacturer = "Custom";
+        family.Manufacturer = ResolveManufacturer(targetModel);
         family.Description = $"Custom OrcaSlicer profile family for {targetModel.Name}";
         family.SlicerType = SlicerType.OrcaSlicer;
         family.PrinterModelId = normalizedRequest.TargetPrinterModelId;
@@ -143,7 +143,7 @@ public sealed class ProfileFamilyService(
             {
                 Id = Guid.NewGuid(),
                 Name = variant.Name,
-                Manufacturer = "Custom",
+                Manufacturer = family.Manufacturer,
                 Description = $"Generated {FormatNozzle(variant.NozzleDiameter)} mm variant for {familyName}",
                 SlicerType = SlicerType.OrcaSlicer,
                 PrinterModelId = normalizedRequest.TargetPrinterModelId,
@@ -1238,6 +1238,7 @@ public sealed class ProfileFamilyService(
             {
                 _ = unmatched.Remove(match);
                 match.Name = variant.Name;
+                match.Manufacturer = family.Manufacturer;
                 match.Description = $"Generated {FormatNozzle(variant.NozzleDiameter)} mm variant for {family.Name}";
                 match.PrinterModelId = family.PrinterModelId;
                 match.Hash = ComputeHash(familyHash, variant.SourceSystemPresetName, variant.OverridesJson);
@@ -1253,7 +1254,7 @@ public sealed class ProfileFamilyService(
             {
                 Id = Guid.NewGuid(),
                 Name = variant.Name,
-                Manufacturer = "Custom",
+                Manufacturer = family.Manufacturer,
                 Description = $"Generated {FormatNozzle(variant.NozzleDiameter)} mm variant for {family.Name}",
                 SlicerType = SlicerType.OrcaSlicer,
                 PrinterModelId = family.PrinterModelId,
@@ -1278,6 +1279,11 @@ public sealed class ProfileFamilyService(
             _dbContext.MachineProfiles.RemoveRange(unmatched);
         }
     }
+
+    private static string ResolveManufacturer(CatalogModelInfo targetModel) =>
+        string.IsNullOrWhiteSpace(targetModel.ManufacturerName)
+            ? "Custom"
+            : targetModel.ManufacturerName.Trim();
 
     /// <summary>
     /// Re-checks the global name and alias collision rules for a rename, mirroring the create-time

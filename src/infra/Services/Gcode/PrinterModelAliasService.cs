@@ -14,6 +14,14 @@ namespace Farm.Infrastructure.Services.Gcode;
 public interface IPrinterModelAliasService
 {
     /// <summary>
+    /// Lists aliases for the requested slicer together with slicer-agnostic aliases.
+    /// Exact slicer aliases follow generic aliases so consumers can preserve exact-match precedence.
+    /// </summary>
+    Task<IReadOnlyList<SlicerModelAliasEntry>> ListAliasesAsync(
+        string? slicerType,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Resolves a slicer model name to its canonical PrinterModel ID.
     /// </summary>
     /// <param name="slicerModelName">The model name as it appears in gcode (e.g., "COREONEL")</param>
@@ -52,11 +60,45 @@ public interface IPrinterModelAliasService
 }
 
 /// <summary>
+/// Read model for a slicer model alias.
+/// </summary>
+public sealed record SlicerModelAliasEntry(
+    string SlicerModelName,
+    string? SlicerType,
+    Guid PrinterModelId);
+
+/// <summary>
 /// Default implementation of printer model alias resolution.
 /// </summary>
 public class PrinterModelAliasService(AppDbContext dbContext) : IPrinterModelAliasService
 {
     private readonly AppDbContext _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SlicerModelAliasEntry>> ListAliasesAsync(
+        string? slicerType,
+        CancellationToken ct = default)
+    {
+        string? normalizedSlicerType = string.IsNullOrWhiteSpace(slicerType)
+            ? null
+            : PrinterModelAlias.NormalizeLookupValue(slicerType);
+
+        IQueryable<PrinterModelAlias> query = _dbContext.PrinterModelAliases.AsNoTracking();
+        query = normalizedSlicerType is null
+            ? query.Where(alias => alias.SlicerTypeNormalized == null)
+            : query.Where(alias =>
+                alias.SlicerTypeNormalized == null
+                || alias.SlicerTypeNormalized == normalizedSlicerType);
+
+        return await query
+            .OrderBy(alias => alias.SlicerTypeNormalized != null)
+            .ThenBy(alias => alias.SlicerModelNameNormalized)
+            .Select(alias => new SlicerModelAliasEntry(
+                alias.SlicerModelName,
+                alias.SlicerType,
+                alias.PrinterModelId))
+            .ToListAsync(ct);
+    }
 
     /// <summary>
     /// Resolves a slicer model name to its canonical PrinterModel ID.

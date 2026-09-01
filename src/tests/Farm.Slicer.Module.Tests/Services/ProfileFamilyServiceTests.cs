@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -26,6 +27,38 @@ namespace Farm.Slicer.Module.Tests.Services;
 /// </summary>
 public sealed class ProfileFamilyServiceTests
 {
+    [Fact]
+    public void MergeVariants_ExistingVariant_UpdatesManufacturer()
+    {
+        using SlicerDbContext dbContext = new(
+            new DbContextOptionsBuilder<SlicerDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options);
+        MachineModelProfile family = MergeFamily();
+        MachineProfile existing = MergeVariant("Custom");
+        ProfileFamilyService service = MergeService(dbContext);
+
+        InvokeMergeVariants(service, family, [existing]);
+
+        existing.Manufacturer.Should().Be("PrintersForAnts");
+    }
+
+    [Fact]
+    public void MergeVariants_NewVariant_SetsManufacturer()
+    {
+        using SlicerDbContext dbContext = new(
+            new DbContextOptionsBuilder<SlicerDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options);
+        MachineModelProfile family = MergeFamily();
+        ProfileFamilyService service = MergeService(dbContext);
+
+        InvokeMergeVariants(service, family, []);
+
+        dbContext.MachineProfiles.Local.Should()
+            .ContainSingle(profile => profile.Manufacturer == "PrintersForAnts");
+    }
+
     [Fact]
     public async Task CloneFamilyAsync_PersistsNonNullHashesAndHealthyRenderState()
     {
@@ -107,9 +140,63 @@ public sealed class ProfileFamilyServiceTests
         family.RenderedForOrcaVersion.Should().Be("2.3.0");
         family.CreatedByUserId.Should().Be(userId);
         machine.SourceSystemPresetName.Should().Be("Stock 0.6 nozzle");
+        family.Manufacturer.Should().Be("Target");
+        machine.Manufacturer.Should().Be("Target");
         response.RenderStatus.Should().Be(ProfileFamilyRenderStatus.Healthy);
         request.FamilyName.Should().Be(" Farm Test ");
         aliasService.VerifyAll();
+    }
+
+    [Fact]
+    public async Task CloneFamilyAsync_MissingCatalogManufacturer_FallsBackToCustom()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<SlicerDbContext> options =
+            new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connection).Options;
+        await using SlicerDbContext dbContext = new(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        Guid modelId = Guid.NewGuid();
+        Mock<ICatalogServiceAdapter> catalog = Catalog(modelId);
+        _ = catalog
+            .Setup(service => service.GetModelByIdAsync(
+                modelId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CatalogModelInfo(modelId, "Target Model", " "));
+        Mock<IPrinterModelAliasService> aliases = new(MockBehavior.Loose);
+        Mock<IProfileFamilyRenderer> renderer = new(MockBehavior.Strict);
+        _ = renderer.Setup(service => service.Render(
+                It.IsAny<Guid>(),
+                It.IsAny<CloneProfileFamilyRequestDto>(),
+                It.IsAny<AllProfilesResponseDto>()))
+            .Returns((Guid id, CloneProfileFamilyRequestDto _, AllProfilesResponseDto _) =>
+                new ProfileFamilyRenderResult(
+                    new ProfileFamilyBundleDto(id, "Farm Test", "{}", []),
+                    "{}",
+                    [new RenderedMachineVariant("Farm Test 0.4 nozzle", 0.4, "Source", "{}")],
+                    1,
+                    0));
+        Mock<IProfileFamilyWorkerClient> worker = new(MockBehavior.Loose);
+        _ = worker.Setup(client => client.GetCatalogAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((new ProfileFamilyWorkerTarget("http://worker", "2.4.0"), new AllProfilesResponseDto()));
+
+        var service = new ProfileFamilyService(
+            dbContext,
+            catalog.Object,
+            aliases.Object,
+            renderer.Object,
+            worker.Object,
+            PrinterRefs().Object,
+            NullLogger<ProfileFamilyService>.Instance);
+
+        _ = await service.CloneFamilyAsync(Request(modelId), Guid.NewGuid(), CancellationToken.None);
+
+        (await dbContext.MachineModelProfiles.SingleAsync()).Manufacturer.Should().Be("Custom");
+        (await dbContext.MachineProfiles.SingleAsync()).Manufacturer.Should().Be("Custom");
     }
 
     [Fact]
@@ -3290,6 +3377,58 @@ public sealed class ProfileFamilyServiceTests
             SourceMachineModelName = "Prusa Test",
             NozzleDiameters = [0.6]
         };
+
+    private static ProfileFamilyService MergeService(SlicerDbContext dbContext) =>
+        new(
+            dbContext,
+            Mock.Of<ICatalogServiceAdapter>(),
+            Mock.Of<IPrinterModelAliasService>(),
+            Mock.Of<IProfileFamilyRenderer>(),
+            Mock.Of<IProfileFamilyWorkerClient>(),
+            PrinterRefs().Object,
+            NullLogger<ProfileFamilyService>.Instance);
+
+    private static MachineModelProfile MergeFamily() =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Micron Farm",
+            Manufacturer = "PrintersForAnts",
+            PrinterModelId = Guid.NewGuid(),
+            SlicerDistribution = "upstream",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+    private static MachineProfile MergeVariant(string manufacturer) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Micron Farm 0.4 nozzle",
+            Manufacturer = manufacturer,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+    private static void InvokeMergeVariants(
+        ProfileFamilyService service,
+        MachineModelProfile family,
+        List<MachineProfile> variants)
+    {
+        MethodInfo method = typeof(ProfileFamilyService).GetMethod(
+            "MergeVariants",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("MergeVariants was not found.");
+        ProfileFamilyRenderResult rendered = new(
+            new ProfileFamilyBundleDto(family.Id, family.Name, "{}", []),
+            "{}",
+            [new RenderedMachineVariant($"{family.Name} 0.4 nozzle", 0.4, "Source", "{}")],
+            1,
+            0);
+        _ = method.Invoke(
+            service,
+            [family, variants, rendered, "2.4.2", new string('a', 64), DateTime.UtcNow]);
+    }
 
     private static Mock<ICatalogServiceAdapter> Catalog(Guid modelId)
     {
