@@ -4,6 +4,10 @@ import XCTest
 
 @MainActor
 final class BackendReadinessDiagnosticsTests: XCTestCase {
+    func testHTTPStatusFailureKindUsesCamelCaseDiagnosticValue() {
+        XCTAssertEqual(BackendServiceFailureKind.httpStatus.rawValue, "httpStatus")
+    }
+
     func testAPIHealthProbePreservesTransportFailure() async throws {
         let mockAPIClient = MockAPIClient()
         mockAPIClient.stubError(.cannotConnectToHost)

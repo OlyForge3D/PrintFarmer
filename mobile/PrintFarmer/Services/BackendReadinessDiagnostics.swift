@@ -4,7 +4,7 @@ import OSLog
 enum BackendServiceFailureKind: String, Equatable, Sendable {
     case timeout
     case transport
-    case httpStatus = "http-status"
+    case httpStatus
     case decode
 }
 
