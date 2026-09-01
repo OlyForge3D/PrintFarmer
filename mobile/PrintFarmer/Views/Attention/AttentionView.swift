@@ -354,17 +354,17 @@ struct AttentionView: View {
             // honestly-stale Attention on a cold/offline launch. Idempotent.
             feedViewModel.configureCache(services.attentionReadCache)
 
-            // Single canonical GET per re-entry: bootstrap consumes any
-            // queued drain (from a signalR event while off-screen) and
-            // owns the refresh below — no duplicate dispatch. The
-            // lifecycle token check inside bootstrap makes this a
-            // no-op when the view is no longer present.
+            // Bootstrap consumes any queued drain and either applies the
+            // readiness handoff or owns one canonical GET — never both.
+            // The lifecycle token check makes this a no-op when the view
+            // is no longer present.
             await feedViewModel.bootstrap(
                 attentionService: services.attentionService,
                 signalRService: services.signalRService,
                 attentionEnabled: attentionEnabled,
                 lifecycleToken: token,
-                printerService: services.printerService
+                printerService: services.printerService,
+                startupPrefetchStore: services.startupPrefetchStore
             )
         }
         .onChange(of: feedItemCount) { _, newValue in

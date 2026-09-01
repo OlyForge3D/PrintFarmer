@@ -90,6 +90,9 @@ final class ServiceContainer: @unchecked Sendable {
     /// store's durable promotion, so no stale/cross-bound write can slip through.
     @ObservationIgnored let farmSnapshotAuthority: FarmSnapshotAuthority
     @ObservationIgnored let farmSnapshotStore: any FarmSnapshotStoring
+    /// Ephemeral canonical results captured by the current readiness gate.
+    /// Uses the same `(serverID, userID, generation, token)` authority as snapshots.
+    @ObservationIgnored let startupPrefetchStore: StartupPrefetchStore
     /// Non-secret per-server owner identity. Activation resolves the settled
     /// server's OWN owner from here — never a carried cross-server user id.
     @ObservationIgnored let farmSnapshotOwnerStore: FarmSnapshotOwnerStore
@@ -339,6 +342,7 @@ final class ServiceContainer: @unchecked Sendable {
         }
         let ownerStore = farmSnapshotOwnerStore ?? FarmSnapshotOwnerStore(userDefaults: userDefaultsBox.userDefaults)
         self.farmSnapshotAuthority = authority
+        self.startupPrefetchStore = StartupPrefetchStore(authority: authority)
         self.farmSnapshotDurableRecord = durableRecord
         self.farmSnapshotOwnerStore = ownerStore
         self.farmSnapshotStore = farmSnapshotStore ?? FarmSnapshotStore(
@@ -457,8 +461,10 @@ final class ServiceContainer: @unchecked Sendable {
     private func wireSnapshotPurgeHandler() {
         guard let serverRegistry else { return }
         let store = farmSnapshotStore
+        let startupPrefetchStore = startupPrefetchStore
         serverRegistry.snapshotPurgeHandler = { serverID in
-            await store.purge(serverID: serverID)
+            startupPrefetchStore.removeAll()
+            return await store.purge(serverID: serverID)
         }
         let pinStore = CertificatePinStore()
         serverRegistry.certificatePinPurgeHandler = { server, remainingServers in
@@ -562,6 +568,7 @@ final class ServiceContainer: @unchecked Sendable {
         // Revoke synchronously before advancing the generation so no stale
         // snapshot commit can apply across the demo transition.
         farmSnapshotAuthority.revoke()
+        startupPrefetchStore.removeAll()
         // C: capture the displaced real signalR and disconnect that EXACT instance so a
         // connected real receive loop cannot linger as an orphan under demo.
         let displacedSignalR = self.signalRService
@@ -620,6 +627,7 @@ final class ServiceContainer: @unchecked Sendable {
         recordTarget(server.map { .server($0) } ?? .none)
         // Revoke synchronously before the composition changes.
         farmSnapshotAuthority.revoke()
+        startupPrefetchStore.removeAll()
         let resolvedURL = server?.baseURL
             ?? baseURL
             ?? APIClient.savedBaseURL()
@@ -713,6 +721,7 @@ final class ServiceContainer: @unchecked Sendable {
     /// activation that lands during the store await survives — this never globally
     /// revokes (H3).
     func revokeFarmSnapshot() async {
+        startupPrefetchStore.removeAll()
         guard let session = farmSnapshotAuthority.currentSession() else { return }
         farmSnapshotAuthority.deactivate(session)
         _ = await farmSnapshotStore.deactivate(session: session)
@@ -899,6 +908,7 @@ final class ServiceContainer: @unchecked Sendable {
         if let outgoingSession {
             farmSnapshotAuthority.deactivate(outgoingSession)
         }
+        startupPrefetchStore.removeAll()
         activeServerGeneration = activeGeneration.advance()
         let capturedGeneration = activeServerGeneration
 
@@ -998,6 +1008,7 @@ final class ServiceContainer: @unchecked Sendable {
         if let outgoingSession {
             farmSnapshotAuthority.deactivate(outgoingSession)
         }
+        startupPrefetchStore.removeAll()
         activeServerGeneration = activeGeneration.advance()
         _ = rebuildRealServices(baseURL: APIClient.savedBaseURL() ?? AppConfig.baseURL, server: nil, accessToken: nil)
     }
@@ -1208,6 +1219,7 @@ final class ServiceContainer: @unchecked Sendable {
             authority = FarmSnapshotAuthority(durableAuthorityRecord: record)
         }
         self.farmSnapshotAuthority = authority
+        self.startupPrefetchStore = StartupPrefetchStore(authority: authority)
         self.farmSnapshotDurableRecord = durableRecord
         let demoOwnerStore = farmSnapshotOwnerStore ?? FarmSnapshotOwnerStore()
         self.farmSnapshotOwnerStore = demoOwnerStore

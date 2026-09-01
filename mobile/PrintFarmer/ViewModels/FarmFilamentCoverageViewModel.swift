@@ -218,6 +218,33 @@ final class FarmFilamentCoverageViewModel {
         await load(underCoverageEpoch: coverageAuthorityEpoch)
     }
 
+    /// Consume the readiness gate's canonical fleet once, or preserve the
+    /// existing hydrate-then-load behavior when no current-authority value exists.
+    func bootstrap(startupPrefetchStore: StartupPrefetchStore?) async {
+        if let startupPrefetchStore {
+            var prefetched: StartupPrefetchValue<FleetFilamentCoverage>?
+            startupPrefetchStore.consumeFilamentCoverage { entry in
+                requestGeneration &+= 1
+                commitSuccess(fleet: entry.value, generation: requestGeneration)
+                isShowingStaleCache = false
+                cacheLastUpdatedAtMillis = entry.lastUpdatedAtMillis
+                prefetched = entry
+            }
+            if let prefetched {
+                if let cache = coverageCache {
+                    _ = await cache.recordFleet(
+                        prefetched.value,
+                        lastUpdatedAtMillis: prefetched.lastUpdatedAtMillis,
+                        capturedSession: prefetched.session
+                    )
+                }
+                return
+            }
+        }
+        await hydrateFromCache()
+        await load()
+    }
+
     // MARK: - Test seams (DEBUG-only, deterministic — no polling)
 
     #if DEBUG

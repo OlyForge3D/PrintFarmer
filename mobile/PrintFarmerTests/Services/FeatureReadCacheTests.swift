@@ -16,6 +16,7 @@ import XCTest
 ///                                                       `testCommitWithStaleCapturedSessionIsRejected`,
 ///                                                       `testHydrateDuringSwitchYieldsInactive`
 ///  6 monotonic — older cannot overwrite newer          → `testOlderSuccessCannotOverwriteNewer`,
+///                                                       `testExplicitFetchTimestampCannotOverwriteNewerSnapshot`,
 ///                                                       `testErrorAfterSuccessNeverWrites`
 ///  7 disabled tombstone beats older, not empty success → `testDisabledTombstoneBeatsOlderSnapshot`,
 ///                                                       `testReverseOrderNewerDisabledWins`,
@@ -306,10 +307,45 @@ final class FeatureReadCacheTests: XCTestCase {
         let newer = await adapter.recordRefresh(items: [item("failure:new")], nextCursor: nil,
                                                 healthyPrinterCount: 3, capturedSession: session)
         XCTAssertEqual(newer, .committed)
-        // An older-completing response (lower instant) must be refused.
+        // An older clock-driven response must be refused.
         clock.set(4_000)
         let older = await adapter.recordRefresh(items: [item("failure:old")], nextCursor: nil,
                                                 healthyPrinterCount: 99, capturedSession: session)
+        XCTAssertEqual(older, .notNewer)
+
+        let hydration = await adapter.loadCached()
+        guard case let .snapshot(payload, millis) = hydration else {
+            return XCTFail("expected snapshot")
+        }
+        XCTAssertEqual(payload.items.map(\.id), ["failure:new"])
+        XCTAssertEqual(payload.healthyPrinterCount, 3)
+        XCTAssertEqual(millis, 5_000)
+    }
+
+    func testExplicitFetchTimestampCannotOverwriteNewerSnapshot() async throws {
+        let root = newRoot()
+        let (store, authority) = makeStore(root: root)
+        let ns = FarmSnapshotFixtures.namespace()
+        let session = try mint(authority, ns)
+        let clock = MutableClock(5_000)
+        let adapter = AttentionReadCacheAdapter(store: store, now: clock.sendableNow)
+
+        let newer = await adapter.recordRefresh(
+            items: [item("failure:new")],
+            nextCursor: nil,
+            healthyPrinterCount: 3,
+            capturedSession: session
+        )
+        XCTAssertEqual(newer, .committed)
+
+        clock.set(6_000)
+        let older = await adapter.recordRefresh(
+            items: [item("failure:old")],
+            nextCursor: nil,
+            healthyPrinterCount: 99,
+            lastUpdatedAtMillis: 4_000,
+            capturedSession: session
+        )
         XCTAssertEqual(older, .notNewer)
 
         let hydration = await adapter.loadCached()

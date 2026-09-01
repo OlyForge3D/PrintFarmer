@@ -368,6 +368,227 @@ struct BackendReadinessResult: Equatable, Sendable {
     static let cancelled = BackendReadinessResult(failures: [], wasCancelled: true)
 }
 
+struct StartupPrefetchValue<Value: Sendable>: Sendable {
+    let value: Value
+    let session: FarmSnapshotSession
+    let lastUpdatedAtMillis: Int64
+}
+
+fileprivate struct StartupPrefetchPayload: Sendable {
+    let session: FarmSnapshotSession
+    var attention: StartupPrefetchValue<AttentionFeed>?
+    var filamentCoverage: StartupPrefetchValue<FleetFilamentCoverage>?
+    var printers: StartupPrefetchValue<[Printer]>?
+}
+
+/// One-launch, one-consumer handoff from the readiness gate to the first tab
+/// activation. The existing farm-snapshot authority is the sole identity fence:
+/// publication and consumption both occur inside `withPromotion`, so server/user
+/// switches, relogins, tombstones, and generation advances invalidate old values.
+final class StartupPrefetchStore: @unchecked Sendable {
+    /// Bounds launch-to-first-navigation reuse. Beyond 30 seconds, a tab must
+    /// perform its normal hydrate-then-load path rather than claim old data is live.
+    static let freshnessWindowMillis: Int64 = 30_000
+
+    private let authority: FarmSnapshotAuthority
+    private let now: @Sendable () -> Date
+    private let lock = NSLock()
+    private var payload: StartupPrefetchPayload?
+
+    init(
+        authority: FarmSnapshotAuthority,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        self.authority = authority
+        self.now = now
+    }
+
+    func makeAttempt(
+        session: FarmSnapshotSession?,
+        generation: Int
+    ) -> StartupPrefetchAttempt? {
+        removeAll()
+        guard let session,
+              session.generation == generation,
+              authority.isCurrent(session) else {
+            return nil
+        }
+        return StartupPrefetchAttempt(store: self, session: session)
+    }
+
+    func removeAll() {
+        lock.lock()
+        payload = nil
+        lock.unlock()
+    }
+
+    @MainActor
+    @discardableResult
+    func consumeAttention(
+        _ body: (StartupPrefetchValue<AttentionFeed>) -> Void
+    ) -> Bool {
+        consume(\.attention, body)
+    }
+
+    @MainActor
+    @discardableResult
+    func consumeFilamentCoverage(
+        _ body: (StartupPrefetchValue<FleetFilamentCoverage>) -> Void
+    ) -> Bool {
+        consume(\.filamentCoverage, body)
+    }
+
+    @MainActor
+    @discardableResult
+    func consumePrinters(
+        _ body: (StartupPrefetchValue<[Printer]>) -> Void
+    ) -> Bool {
+        consume(\.printers, body)
+    }
+
+    fileprivate func publish(_ candidate: StartupPrefetchPayload) {
+        _ = authority.withPromotion(candidate.session, cancelled: { false }) {
+            lock.lock()
+            payload = candidate
+            lock.unlock()
+        }
+    }
+
+    @MainActor
+    private func consume<Value: Sendable>(
+        _ keyPath: WritableKeyPath<StartupPrefetchPayload, StartupPrefetchValue<Value>?>,
+        _ body: (StartupPrefetchValue<Value>) -> Void
+    ) -> Bool {
+        lock.lock()
+        let candidateSession = payload?.session
+        lock.unlock()
+        guard let candidateSession else { return false }
+
+        var consumedValue: StartupPrefetchValue<Value>?
+        let currentMillis = nowMillis()
+        let validated = authority.withPromotion(candidateSession, cancelled: { false }) {
+            lock.lock()
+            guard var current = payload,
+                  current.session == candidateSession,
+                  let value = current[keyPath: keyPath] else {
+                lock.unlock()
+                return
+            }
+            if Self.isExpired(value, at: currentMillis) {
+                payload = nil
+                lock.unlock()
+                return
+            }
+            current[keyPath: keyPath] = nil
+            payload = current
+            lock.unlock()
+            consumedValue = value
+        }
+        if validated == nil {
+            lock.lock()
+            if payload?.session == candidateSession {
+                payload = nil
+            }
+            lock.unlock()
+            return false
+        }
+        guard let consumedValue else { return false }
+        body(consumedValue)
+        return true
+    }
+
+    fileprivate func nowMillis() -> Int64 {
+        Int64((now().timeIntervalSince1970 * 1000).rounded())
+    }
+
+    private static func isExpired<Value: Sendable>(
+        _ value: StartupPrefetchValue<Value>,
+        at currentMillis: Int64
+    ) -> Bool {
+        // A backwards wall-clock correction is deliberately treated as fresh:
+        // authority fencing still proves identity, and expiring on an NTP jump
+        // would reintroduce a stale banner for data fetched moments earlier.
+        guard currentMillis > value.lastUpdatedAtMillis else { return false }
+        let age = currentMillis.subtractingReportingOverflow(value.lastUpdatedAtMillis)
+        return age.overflow || age.partialValue > freshnessWindowMillis
+    }
+}
+
+/// Mutable staging area for one readiness attempt. A failed, cancelled, timed
+/// out, superseded, or Continue Offline attempt is sealed and discarded; late
+/// probe completions cannot publish after that point.
+final class StartupPrefetchAttempt: @unchecked Sendable {
+    private let store: StartupPrefetchStore
+    private let session: FarmSnapshotSession
+    private let lock = NSLock()
+    private var isOpen = true
+    private var attention: StartupPrefetchValue<AttentionFeed>?
+    private var filamentCoverage: StartupPrefetchValue<FleetFilamentCoverage>?
+    private var printers: StartupPrefetchValue<[Printer]>?
+
+    fileprivate init(store: StartupPrefetchStore, session: FarmSnapshotSession) {
+        self.store = store
+        self.session = session
+    }
+
+    func captureAttention(_ value: AttentionFeed) {
+        capture(value) { attention = $0 }
+    }
+
+    func captureFilamentCoverage(_ value: FleetFilamentCoverage) {
+        capture(value) { filamentCoverage = $0 }
+    }
+
+    func capturePrinters(_ value: [Printer]) {
+        capture(value) { printers = $0 }
+    }
+
+    func publish() {
+        lock.lock()
+        guard isOpen else {
+            lock.unlock()
+            return
+        }
+        isOpen = false
+        let candidate = StartupPrefetchPayload(
+            session: session,
+            attention: attention,
+            filamentCoverage: filamentCoverage,
+            printers: printers
+        )
+        attention = nil
+        filamentCoverage = nil
+        printers = nil
+        lock.unlock()
+        store.publish(candidate)
+    }
+
+    func discard() {
+        lock.lock()
+        isOpen = false
+        attention = nil
+        filamentCoverage = nil
+        printers = nil
+        lock.unlock()
+    }
+
+    private func capture<Value: Sendable>(
+        _ value: Value,
+        assign: (StartupPrefetchValue<Value>) -> Void
+    ) {
+        let entry = StartupPrefetchValue(
+            value: value,
+            session: session,
+            lastUpdatedAtMillis: store.nowMillis()
+        )
+        lock.lock()
+        if isOpen {
+            assign(entry)
+        }
+        lock.unlock()
+    }
+}
+
 struct BackendReadinessProbe: Sendable {
     let endpoint: BackendServiceEndpoint
     let isEnabled: @Sendable (ResolvedSystemCapabilities) -> Bool
@@ -387,16 +608,69 @@ struct BackendReadinessProbe: Sendable {
     }
 }
 
+extension BackendReadinessProbe {
+    /// Caps optional warming to at most one second of added splash latency while
+    /// the original one-item request retains the full outer readiness budget.
+    static let attentionPrefetchTimeout: Duration = .seconds(1)
+
+    static func attention(
+        service: any AttentionServiceProtocol,
+        startupPrefetchAttempt: StartupPrefetchAttempt?,
+        prefetchTimeoutSleep: @escaping @Sendable (Duration) async throws -> Void = {
+            try await Task.sleep(for: $0)
+        }
+    ) -> BackendReadinessProbe {
+        BackendReadinessProbe(
+            endpoint: .attention,
+            isEnabled: { $0.attentionEnabled },
+            treatsUnsupportedAsAvailable: true
+        ) {
+            try Task.checkCancellation()
+            async let gatingRequest = service.getFeed(cursor: nil, limit: 1)
+            async let prefetchRequest: BackendTimedResult<AttentionFeed?> =
+                runBackendReadinessWithTimeout(
+                    timeout: BackendReadinessProbe.attentionPrefetchTimeout,
+                    timeoutSleep: prefetchTimeoutSleep
+                ) {
+                    try? await service.getFeed(cursor: nil, limit: nil)
+                }
+
+            do {
+                _ = try await gatingRequest
+            } catch {
+                _ = await prefetchRequest
+                throw error
+            }
+            let prefetchResult = await prefetchRequest
+
+            try Task.checkCancellation()
+            switch prefetchResult {
+            case .completed(.some(let feed)):
+                startupPrefetchAttempt?.captureAttention(feed)
+            case .completed(.none), .timedOut:
+                return
+            case .cancelled:
+                // Defensive only: monotonic parent-to-child cancellation means
+                // the check above always throws before this branch is observed.
+                throw CancellationError()
+            }
+        }
+    }
+}
+
 struct BackendReadinessPlan: Sendable {
     let capabilitiesService: any SystemCapabilitiesServiceProtocol
     let probes: [BackendReadinessProbe]
+    let startupPrefetchAttempt: StartupPrefetchAttempt?
 
     init(
         capabilitiesService: any SystemCapabilitiesServiceProtocol,
-        probes: [BackendReadinessProbe]
+        probes: [BackendReadinessProbe],
+        startupPrefetchAttempt: StartupPrefetchAttempt? = nil
     ) {
         self.capabilitiesService = capabilitiesService
         self.probes = probes
+        self.startupPrefetchAttempt = startupPrefetchAttempt
     }
 
     @MainActor
@@ -419,8 +693,16 @@ struct BackendReadinessPlan: Sendable {
         let predictiveService = services.predictiveService
         let dispatchService = services.dispatchService
         let failureDetectionService = services.failureDetectionService
+        // This side-effecting call clears the preceding launch handoff. Keep this
+        // initializer gate-bound: construct it only immediately before `check`,
+        // never for diagnostics or speculative preflight inspection.
+        let startupPrefetchAttempt = services.startupPrefetchStore.makeAttempt(
+            session: services.farmSnapshotAuthority.currentSession(),
+            generation: services.activeServerGeneration
+        )
 
         self.capabilitiesService = services.capabilitiesService
+        self.startupPrefetchAttempt = startupPrefetchAttempt
         self.probes = [
             BackendReadinessProbe(endpoint: .api) {
                 guard let apiClient else {
@@ -432,7 +714,8 @@ struct BackendReadinessPlan: Sendable {
                 try await signalRService.connectForReadiness()
             },
             BackendReadinessProbe(endpoint: .printers) {
-                _ = try await printerService.list(includeDisabled: false)
+                let printers = try await printerService.list(includeDisabled: false)
+                startupPrefetchAttempt?.capturePrinters(printers)
             },
             BackendReadinessProbe(endpoint: .jobs) {
                 _ = try await jobService.list()
@@ -452,19 +735,17 @@ struct BackendReadinessPlan: Sendable {
             BackendReadinessProbe(endpoint: .maintenance) {
                 _ = try await maintenanceService.getAlerts()
             },
-            BackendReadinessProbe(
-                endpoint: .attention,
-                isEnabled: { $0.attentionEnabled },
-                treatsUnsupportedAsAvailable: true
-            ) {
-                _ = try await attentionService.getFeed(cursor: nil, limit: 1)
-            },
+            BackendReadinessProbe.attention(
+                service: attentionService,
+                startupPrefetchAttempt: startupPrefetchAttempt
+            ),
             BackendReadinessProbe(
                 endpoint: .filamentCoverage,
                 isEnabled: { $0.filamentCoverageEnabled },
                 treatsUnsupportedAsAvailable: true
             ) {
-                _ = try await filamentCoverageService.getForFleet()
+                let coverage = try await filamentCoverageService.getForFleet()
+                startupPrefetchAttempt?.captureFilamentCoverage(coverage)
             },
             BackendReadinessProbe(
                 endpoint: .shiftTasks,
@@ -570,6 +851,37 @@ private final class BackendReadinessRace<Value: Sendable>: @unchecked Sendable {
     }
 }
 
+private func runBackendReadinessWithTimeout<Value: Sendable>(
+    timeout: Duration,
+    timeoutSleep: @escaping @Sendable (Duration) async throws -> Void = {
+        try await Task.sleep(for: $0)
+    },
+    operation: @escaping @Sendable () async -> Value
+) async -> BackendTimedResult<Value> {
+    let race = BackendReadinessRace<BackendTimedResult<Value>>()
+    let operationTask = Task {
+        race.resolve(.completed(await operation()))
+    }
+    let timeoutTask = Task {
+        do {
+            try await timeoutSleep(timeout)
+            race.resolve(.timedOut)
+        } catch {
+            // The operation completed or the caller cancelled the race.
+        }
+    }
+
+    let result = await withTaskCancellationHandler {
+        await race.value()
+    } onCancel: {
+        race.resolve(.cancelled)
+    }
+
+    timeoutTask.cancel()
+    operationTask.cancel()
+    return result
+}
+
 struct BackendReadinessChecker: Sendable {
     let timeout: Duration
     let capabilitiesTimeout: Duration
@@ -663,7 +975,7 @@ struct BackendReadinessChecker: Sendable {
     ) async -> BackendProbeRunResult {
         let clock = ContinuousClock()
         let startedAt = clock.now
-        let result = await runWithTimeout(timeout: capabilitiesTimeout) {
+        let result = await runBackendReadinessWithTimeout(timeout: capabilitiesTimeout) {
             await service.refresh()
         }
         let elapsed = startedAt.duration(to: clock.now)
@@ -721,25 +1033,26 @@ struct BackendReadinessChecker: Sendable {
     ) async -> BackendProbeRunResult {
         let clock = ContinuousClock()
         let startedAt = clock.now
-        let result: BackendTimedResult<BackendProbeExecutionResult> = await runWithTimeout(
-            timeout: timeout,
-            timeoutSleep: probeTimeoutSleep
-        ) {
-            do {
-                try Task.checkCancellation()
-                try await probe.operation()
-                try Task.checkCancellation()
-                return .succeeded
-            } catch is CancellationError {
-                return .cancelled
-            } catch {
-                if probe.treatsUnsupportedAsAvailable,
-                   Self.isUnsupported(error) {
-                    return .unsupported
+        let result: BackendTimedResult<BackendProbeExecutionResult> =
+            await runBackendReadinessWithTimeout(
+                timeout: timeout,
+                timeoutSleep: probeTimeoutSleep
+            ) {
+                do {
+                    try Task.checkCancellation()
+                    try await probe.operation()
+                    try Task.checkCancellation()
+                    return .succeeded
+                } catch is CancellationError {
+                    return .cancelled
+                } catch {
+                    if probe.treatsUnsupportedAsAvailable,
+                       Self.isUnsupported(error) {
+                        return .unsupported
+                    }
+                    return .failed(BackendReadinessDiagnostics.classify(error))
                 }
-                return .failed(BackendReadinessDiagnostics.classify(error))
             }
-        }
         let elapsed = startedAt.duration(to: clock.now)
 
         switch result {
@@ -771,37 +1084,6 @@ struct BackendReadinessChecker: Sendable {
             recordDiagnostic(endpoint: probe.endpoint, elapsed: elapsed, outcome: .cancelled)
             return .cancelled
         }
-    }
-
-    private func runWithTimeout<Value: Sendable>(
-        timeout: Duration,
-        timeoutSleep: @escaping @Sendable (Duration) async throws -> Void = {
-            try await Task.sleep(for: $0)
-        },
-        operation: @escaping @Sendable () async -> Value
-    ) async -> BackendTimedResult<Value> {
-        let race = BackendReadinessRace<BackendTimedResult<Value>>()
-        let operationTask = Task {
-            race.resolve(.completed(await operation()))
-        }
-        let timeoutTask = Task {
-            do {
-                try await timeoutSleep(timeout)
-                race.resolve(.timedOut)
-            } catch {
-                // The operation completed or the caller cancelled the race.
-            }
-        }
-
-        let result = await withTaskCancellationHandler {
-            await race.value()
-        } onCancel: {
-            race.resolve(.cancelled)
-        }
-
-        timeoutTask.cancel()
-        operationTask.cancel()
-        return result
     }
 
     private func recordFailure(_ failure: BackendServiceFailure) {
@@ -916,18 +1198,22 @@ final class BackendConnectionGate {
         let result = await checker.check(plan: plan)
         guard attemptID == attempt,
               activeGeneration == generation else {
+            plan.startupPrefetchAttempt?.discard()
             return
         }
         guard !result.wasCancelled,
               !Task.isCancelled,
               isCurrent() else {
+            plan.startupPrefetchAttempt?.discard()
             state = .idle
             return
         }
 
         if result.failures.isEmpty {
+            plan.startupPrefetchAttempt?.publish()
             state = .ready
         } else {
+            plan.startupPrefetchAttempt?.discard()
             state = .failed(result.failures)
         }
     }

@@ -35,6 +35,79 @@ final class PrinterListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedStatus, .all)
     }
 
+    func testBootstrapConsumesPrefetchedPrintersWithoutBlockingLaterRefresh() async throws {
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("printer-prefetch"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 6
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let attempt = try XCTUnwrap(store.makeAttempt(session: session, generation: 6))
+        let prefetched = try TestData.decodePrinter()
+        attempt.capturePrinters([prefetched])
+        attempt.publish()
+        mockService.printersToReturn = [
+            try TestData.decodePrinter(from: TestJSON.printerMinimal),
+        ]
+
+        await viewModel.bootstrap(startupPrefetchStore: store)
+
+        XCTAssertEqual(viewModel.printers.map(\.id), [prefetched.id])
+        XCTAssertEqual(mockService.listPrintersCallCount, 0)
+        XCTAssertTrue(mockAutoDispatchService.getAllStatusCalled)
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertFalse(store.consumePrinters { _ in XCTFail("prefetch reused") })
+
+        await viewModel.loadPrinters()
+
+        XCTAssertEqual(mockService.listPrintersCallCount, 1)
+        XCTAssertEqual(viewModel.printers.first?.name, "Ender 3")
+    }
+
+    func testBootstrapDuringCanonicalPassDropsPrefetchAndCanonicalLoadWins() async throws {
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("printer-prefetch-inflight"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let attempt = try XCTUnwrap(store.makeAttempt(session: session, generation: 1))
+        attempt.capturePrinters([try TestData.decodePrinter()])
+        attempt.publish()
+
+        let firstGate = ShiftTaskResultGate<[Printer]>()
+        let current = [try TestData.decodePrinter(from: TestJSON.printerMinimal)]
+        let script = ScriptedCanonicalResult<[Printer]>([
+            .gated(firstGate),
+            .value(current),
+        ])
+        mockService.listHandler = { _ in try await script.next() }
+
+        let inFlight = Task { await viewModel.loadPrinters() }
+        await script.waitForCallCount(1)
+        let bootstrap = Task {
+            await viewModel.bootstrap(startupPrefetchStore: store)
+        }
+        await viewModel.waitForCanonicalWaiterCount(2)
+        await firstGate.succeed([try TestData.decodePrinter()])
+        await script.waitForCallCount(2)
+        await bootstrap.value
+        await inFlight.value
+
+        let callCount = await script.callCount
+        XCTAssertEqual(callCount, 2)
+        XCTAssertEqual(viewModel.printers.map(\.id), current.map(\.id))
+        XCTAssertEqual(viewModel.printers.first?.name, "Ender 3")
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertFalse(store.consumePrinters { _ in XCTFail("conflicting prefetch must be dropped") })
+    }
+
     func testReconnectRecoveryRefreshesCanonicalListOnceAndFencesStaleService() async throws {
         let callbackQueue = ShiftTaskCallbackQueue()
         let oldPrinterService = MockPrinterService()

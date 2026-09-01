@@ -1,6 +1,30 @@
 import Foundation
 @testable import PrintFarmer
 
+final class StartupPrefetchTestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var millis: Int64
+
+    init(millis: Int64) {
+        self.millis = millis
+    }
+
+    func set(millis: Int64) {
+        lock.lock()
+        self.millis = millis
+        lock.unlock()
+    }
+
+    var now: @Sendable () -> Date {
+        { [self] in
+            lock.lock()
+            let captured = millis
+            lock.unlock()
+            return Date(timeIntervalSince1970: Double(captured) / 1000.0)
+        }
+    }
+}
+
 enum ShiftTaskProofError: LocalizedError, Sendable {
     case forced(String)
 

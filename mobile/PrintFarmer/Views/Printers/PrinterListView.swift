@@ -81,7 +81,7 @@ struct PrinterListView: View {
                 autoPrintService: services.autoPrintService,
                 signalRService: services.signalRService
             )
-            await viewModel.loadPrinters()
+            await viewModel.bootstrap(startupPrefetchStore: services.startupPrefetchStore)
         }
         .task(id: filamentCoverageEnabled) {
             guard filamentCoverageEnabled else {
@@ -90,11 +90,10 @@ struct PrinterListView: View {
             }
             coverageViewModel.configure(coverageService: services.filamentCoverageService)
             coverageViewModel.configureSignalR(services.signalRService)
-            // #789: wire + hydrate the fleet read-cache BEFORE the canonical load
-            // so an offline launch shows honestly-stale coverage immediately.
+            // #789: wire the read-cache before readiness-prefetch consumption or
+            // the hydrate-then-load fallback.
             coverageViewModel.configureCache(services.filamentCoverageReadCache)
-            await coverageViewModel.hydrateFromCache()
-            await coverageViewModel.load()
+            await coverageViewModel.bootstrap(startupPrefetchStore: services.startupPrefetchStore)
         }
         .onDisappear {
             PrinterListViewLifecycle.onDisappear(

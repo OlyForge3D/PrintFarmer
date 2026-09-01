@@ -6,8 +6,37 @@ import Foundation
 /// issue #1321). `AttentionProofSupport`'s `ScriptedAttentionService` covers
 /// the richer feed-scripting scenarios; this mock stays intentionally small.
 final class MockAttentionService: AttentionServiceProtocol, @unchecked Sendable {
+    private let feedCallLock = NSLock()
+    private var recordedFeedCalls: [(cursor: String?, limit: Int?)] = []
+    private var recordedFeedHandler:
+        (@Sendable (String?, Int?) async throws -> AttentionFeed)?
+
     var feedToReturn = AttentionFeed(items: [], nextCursor: nil, healthyPrinterCount: 0)
     var errorToThrow: Error?
+    var getFeedHandler: (@Sendable (String?, Int?) async throws -> AttentionFeed)? {
+        get {
+            feedCallLock.lock()
+            defer { feedCallLock.unlock() }
+            return recordedFeedHandler
+        }
+        set {
+            feedCallLock.lock()
+            recordedFeedHandler = newValue
+            feedCallLock.unlock()
+        }
+    }
+
+    var getFeedCalls: [(cursor: String?, limit: Int?)] {
+        feedCallLock.lock()
+        defer { feedCallLock.unlock() }
+        return recordedFeedCalls
+    }
+
+    var getFeedCallCount: Int {
+        feedCallLock.lock()
+        defer { feedCallLock.unlock() }
+        return recordedFeedCalls.count
+    }
 
     var snoozeCalledWith: (itemId: String, snoozedUntilUtc: Date)?
     var snoozeResponseToReturn: SnoozeAttentionResponse?
@@ -16,6 +45,12 @@ final class MockAttentionService: AttentionServiceProtocol, @unchecked Sendable 
     var executeActionResultToReturn: AttentionActionResult?
 
     func getFeed(cursor: String?, limit: Int?) async throws -> AttentionFeed {
+        feedCallLock.lock()
+        recordedFeedCalls.append((cursor, limit))
+        feedCallLock.unlock()
+        if let getFeedHandler {
+            return try await getFeedHandler(cursor, limit)
+        }
         if let error = errorToThrow { throw error }
         return feedToReturn
     }
