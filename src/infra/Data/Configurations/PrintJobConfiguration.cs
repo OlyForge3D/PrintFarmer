@@ -28,6 +28,15 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
         builder.Property(pj => pj.EstimatedPrintTime).HasConversion<long>();
         builder.Property(pj => pj.ActualPrintTime).HasConversion<long>();
 
+        // Persisted shadow column mirroring ActualPrintTime's raw ticks, with no value
+        // converter. EF Core cannot translate a grouped SUM over ActualPrintTime.Ticks because
+        // of its TimeSpan value converter (issue #2346 / spike #2333); this plain long? column
+        // lets aggregate queries (e.g. StatisticsService.GetPrinterUtilizationAsync) push the
+        // duration sum to SQL instead of materializing every row. Populated in SaveChanges
+        // overrides (see AppDbContext.PopulateActualPrintTimeTicksShadowColumn), mirroring the
+        // NameLowered shadow-column pattern used by Manufacturer/PrinterModel.
+        builder.Property<long?>("ActualPrintTimeTicks");
+
         // JSON array properties
         PropertyBuilder<string[]?> requiredCapabilities = builder
             .Property(pj => pj.RequiredCapabilities)

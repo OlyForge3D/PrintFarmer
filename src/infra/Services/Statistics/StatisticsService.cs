@@ -233,27 +233,22 @@ public class StatisticsService(AppDbContext db, IPrintFarmerTelemetryService? te
             query = query.Where(j => j.QueuedAt <= effectiveEnd.Value);
         }
 
-        var rawJobs = await query
-            .Select(j => new
-            {
-                PrinterId = j.AssignedPrinterId!.Value,
-                j.Status,
-                PrintTimeTicks = j.ActualPrintTime.HasValue ? j.ActualPrintTime.Value.Ticks : (long?)null,
-            })
-            .ToListAsync(ct);
-
-        var rows = rawJobs
-            .GroupBy(j => j.PrinterId)
+        // Aggregated server-side in a single GROUP BY, so the result set is O(printers) rather
+        // than O(jobs) -- previously every matching row was materialized client-side because EF
+        // Core cannot translate a grouped SUM over ActualPrintTime.Ticks (its TimeSpan value
+        // converter blocks translation). The "ActualPrintTimeTicks" shadow column carries no
+        // converter, so the duration SUM can be pushed to SQL too (issue #2346 / spike #2333).
+        var rows = await query
+            .GroupBy(j => j.AssignedPrinterId!.Value)
             .Select(g => new
             {
                 PrinterId = g.Key,
                 TotalJobs = g.Count(),
                 Completed = g.Count(j => j.Status == PrintJobStatus.Completed),
                 Failed = g.Count(j => j.Status == PrintJobStatus.Failed),
-                TotalHours = g.Where(j => j.PrintTimeTicks.HasValue)
-                    .Sum(j => TimeSpan.FromTicks(j.PrintTimeTicks!.Value).TotalHours),
+                TotalTicks = g.Sum(j => EF.Property<long?>(j, "ActualPrintTimeTicks")) ?? 0L,
             })
-            .ToList();
+            .ToListAsync(ct);
 
         var printerIds = rows.Select(r => r.PrinterId).ToList();
         var printerNames = await _db.Printers
@@ -268,7 +263,7 @@ public class StatisticsService(AppDbContext db, IPrintFarmerTelemetryService? te
             TotalJobs = r.TotalJobs,
             CompletedJobs = r.Completed,
             FailedJobs = r.Failed,
-            TotalPrintHours = Math.Round(r.TotalHours, 1),
+            TotalPrintHours = Math.Round(TimeSpan.FromTicks(r.TotalTicks).TotalHours, 1),
             SuccessRate = r.Completed + r.Failed > 0
                 ? Math.Round((double)r.Completed / (r.Completed + r.Failed) * 100, 1)
                 : 0,

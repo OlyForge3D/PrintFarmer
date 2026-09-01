@@ -5078,6 +5078,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<long?>("ActualPrintTime")
                         .HasColumnType("bigint");
 
+                    b.Property<long?>("ActualPrintTimeTicks")
+                        .HasColumnType("bigint");
+
                     b.Property<DateTime?>("ActualStartTime")
                         .HasColumnType("datetime2");
 

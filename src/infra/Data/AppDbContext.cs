@@ -715,6 +715,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
         NormalizeActiveExternalPrintKeys();
+        PopulateActualPrintTimeTicksShadowColumn();
         RevisionConcurrency.Advance(ChangeTracker);
         PopulateQueueRevisionSnapshots();
         return base.SaveChanges(acceptAllChangesOnSuccess);
@@ -730,6 +731,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
         NormalizeActiveExternalPrintKeys();
+        PopulateActualPrintTimeTicksShadowColumn();
         RevisionConcurrency.Advance(ChangeTracker);
         PopulateQueueRevisionSnapshots();
         return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
@@ -1096,6 +1098,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entry.Entity.ActiveExternalPrinterId = activeExternal
                 ? entry.Entity.AssignedPrinterId
                 : null;
+        }
+    }
+
+    /// <summary>
+    /// Keeps the "ActualPrintTimeTicks" shadow column in sync with <see cref="PrintJob.ActualPrintTime"/>.
+    /// This plain <c>long?</c> column carries no value converter, so aggregate queries (e.g.
+    /// <c>StatisticsService.GetPrinterUtilizationAsync</c>) can push a grouped SUM over it to SQL
+    /// instead of materializing every row client-side -- EF Core cannot translate a SUM over
+    /// <see cref="PrintJob.ActualPrintTime"/> itself because of its <c>TimeSpan</c> value converter
+    /// (issue #2346 / spike #2333).
+    /// </summary>
+    private void PopulateActualPrintTimeTicksShadowColumn()
+    {
+        foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>()
+                     .Where(candidate => candidate.State is EntityState.Added or EntityState.Modified))
+        {
+            entry.Property("ActualPrintTimeTicks").CurrentValue = entry.Entity.ActualPrintTime?.Ticks;
         }
     }
 

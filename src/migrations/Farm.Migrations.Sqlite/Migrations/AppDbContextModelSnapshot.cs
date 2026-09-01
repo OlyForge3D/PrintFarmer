@@ -5043,6 +5043,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<long?>("ActualPrintTime")
                         .HasColumnType("INTEGER");
 
+                    b.Property<long?>("ActualPrintTimeTicks")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime?>("ActualStartTime")
                         .HasColumnType("TEXT");
 

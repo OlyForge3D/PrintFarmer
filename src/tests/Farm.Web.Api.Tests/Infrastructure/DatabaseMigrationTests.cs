@@ -63,7 +63,8 @@ public sealed class DatabaseMigrationTests
             "20260827161050_AddPrinterRotationCursors",
             "20260828155919_AddPrinterCorneringFields",
             "20260829174516_AddCalibrationMethodProgressAndDraftProfile",
-            "20260829182206_AddCalibrationDraftProfilePromotionClaim");
+            "20260829182206_AddCalibrationDraftProfilePromotionClaim",
+            "20260901184722_AddActualPrintTimeTicksShadowColumn");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -114,6 +115,62 @@ public sealed class DatabaseMigrationTests
         (await reader.ReadAsync()).Should().BeTrue();
         reader.GetString(0).Should().Be("PRUSA CORE ONE");
         reader.GetString(1).Should().Be("ORCASLICER");
+    }
+
+    [Fact]
+    public async Task CoreMigration_BackfillsActualPrintTimeTicksShadowColumn()
+    {
+        // #2346 / spike #2333: EF Core cannot translate a grouped SUM over ActualPrintTime's
+        // Ticks because of its TimeSpan value converter, so a plain long? shadow column is
+        // synced alongside it. Existing rows created before this migration must be backfilled
+        // from the pre-existing ActualPrintTime column (already stored as raw ticks).
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.Database.GetService<IMigrator>();
+        await migrator.MigrateAsync("20260829182206_AddCalibrationDraftProfilePromotionClaim");
+
+        Guid jobWithDurationId = Guid.NewGuid();
+        Guid jobWithoutDurationId = Guid.NewGuid();
+        DateTime now = DateTime.UtcNow;
+        long ticks = TimeSpan.FromHours(3.5).Ticks;
+        _ = await context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+             INSERT INTO "PrintJobs"
+                 ("Id", "Name", "Status", "QueuePosition", "IsExternalPrint", "ActualPrintTime", "CreatedAt", "QueuedAt", "UpdatedAt")
+             VALUES
+                 ({jobWithDurationId}, {"Backfill target"}, {0}, {0}, {false}, {ticks}, {now}, {now}, {now});
+             """);
+        _ = await context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+             INSERT INTO "PrintJobs"
+                 ("Id", "Name", "Status", "QueuePosition", "IsExternalPrint", "ActualPrintTime", "CreatedAt", "QueuedAt", "UpdatedAt")
+             VALUES
+                 ({jobWithoutDurationId}, {"Backfill target without duration"}, {0}, {0}, {false}, {null}, {now}, {now}, {now});
+             """);
+
+        await migrator.MigrateAsync();
+
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            """
+            SELECT "Id", "ActualPrintTimeTicks"
+            FROM "PrintJobs"
+            WHERE "Id" IN ($withDuration, $withoutDuration);
+            """;
+        _ = command.Parameters.AddWithValue("$withDuration", jobWithDurationId);
+        _ = command.Parameters.AddWithValue("$withoutDuration", jobWithoutDurationId);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        var backfilled = new Dictionary<Guid, long?>();
+        while (await reader.ReadAsync())
+        {
+            Guid id = reader.GetGuid(0);
+            long? backfilledTicks = reader.IsDBNull(1) ? null : reader.GetInt64(1);
+            backfilled[id] = backfilledTicks;
+        }
+
+        backfilled.Should().HaveCount(2);
+        backfilled[jobWithDurationId].Should().Be(ticks);
+        backfilled[jobWithoutDurationId].Should().BeNull();
     }
 
     [Fact]
@@ -332,27 +389,26 @@ public sealed class DatabaseMigrationTests
         IMigrator migrator = context.Database.GetService<IMigrator>();
         await migrator.MigrateAsync("20260730231403_InitialV2");
 
+        // Raw SQL insert (rather than context.PrintJobs.Add) because the current PrintJob model
+        // includes columns added by later migrations (e.g. ActualPrintTimeTicks, #2346), which do
+        // not exist yet in the InitialV2 schema this test intentionally seeds against.
         DateTime now = new(2026, 8, 6, 23, 30, 0, DateTimeKind.Utc);
-        context.PrintJobs.AddRange(
-            new PrintJob
-            {
-                Id = Guid.NewGuid(),
-                Name = "Legacy negative priority",
-                Status = PrintJobStatus.Queued,
-                Priority = -1,
-                CreatedAt = now,
-                UpdatedAt = now,
-            },
-            new PrintJob
-            {
-                Id = Guid.NewGuid(),
-                Name = "Legacy oversized priority",
-                Status = PrintJobStatus.Queued,
-                Priority = 100,
-                CreatedAt = now,
-                UpdatedAt = now,
-            });
-        await context.SaveChangesAsync();
+        Guid negativePriorityId = Guid.NewGuid();
+        Guid oversizedPriorityId = Guid.NewGuid();
+        _ = await context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+             INSERT INTO "PrintJobs"
+                 ("Id", "Revision", "Name", "Status", "Priority", "QueuePosition", "IsExternalPrint", "CreatedAt", "UpdatedAt", "QueuedAt")
+             VALUES
+                 ({negativePriorityId}, {1L}, {"Legacy negative priority"}, {(int)PrintJobStatus.Queued}, {-1}, {0}, {false}, {now}, {now}, {now});
+             """);
+        _ = await context.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+             INSERT INTO "PrintJobs"
+                 ("Id", "Revision", "Name", "Status", "Priority", "QueuePosition", "IsExternalPrint", "CreatedAt", "UpdatedAt", "QueuedAt")
+             VALUES
+                 ({oversizedPriorityId}, {1L}, {"Legacy oversized priority"}, {(int)PrintJobStatus.Queued}, {100}, {0}, {false}, {now}, {now}, {now});
+             """);
         context.ChangeTracker.Clear();
 
         _ = await ProviderAwareMigrationRunner.MigrateAsync(
@@ -600,7 +656,8 @@ public sealed class DatabaseMigrationTests
             "20260827161050_AddPrinterRotationCursors",
             "20260828155919_AddPrinterCorneringFields",
             "20260829174516_AddCalibrationMethodProgressAndDraftProfile",
-            "20260829182206_AddCalibrationDraftProfilePromotionClaim");
+            "20260829182206_AddCalibrationDraftProfilePromotionClaim",
+            "20260901184722_AddActualPrintTimeTicksShadowColumn");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1141,6 +1198,7 @@ public sealed class DatabaseMigrationTests
                 "20260828155834_AddPrinterCorneringFields",
                 "20260829174442_AddCalibrationMethodProgressAndDraftProfile",
                 "20260829182140_AddCalibrationDraftProfilePromotionClaim",
+                "20260901184652_AddActualPrintTimeTicksShadowColumn",
             ]
             :
             [
@@ -1169,6 +1227,7 @@ public sealed class DatabaseMigrationTests
                 "20260828155858_AddPrinterCorneringFields",
                 "20260829174453_AddCalibrationMethodProgressAndDraftProfile",
                 "20260829182150_AddCalibrationDraftProfilePromotionClaim",
+                "20260901184704_AddActualPrintTimeTicksShadowColumn",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");
