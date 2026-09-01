@@ -656,4 +656,38 @@ describe('QueueRealtimeBridge', () => {
       vi.useRealTimers();
     }
   });
+
+  it('#2341: logs a superseded-request cancellation at warn (not error) severity, unlike a genuine refresh failure', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Never resolves on its own -- the in-flight `fetchQuery(queryKeys.printers)`
+    // reconcileSubscriptions issues on mount is cancelled out from under it
+    // below, the same way a superseding printers refetch (e.g. after a
+    // successful discovery/add-printer flow) cancels it in production.
+    mocks.getPrinters.mockReturnValueOnce(new Promise<never>(() => {}));
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <QueueRealtimeBridge />
+      </QueryClientProvider>
+    );
+
+    await waitFor(() => expect(mocks.getPrinters).toHaveBeenCalledTimes(1));
+    await queryClient.cancelQueries({ queryKey: queryKeys.printers });
+
+    await waitFor(() =>
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[QueueRealtimeBridge] authoritative refresh cancelled by a superseding request',
+        expect.anything()
+      )
+    );
+    expect(errorSpy).not.toHaveBeenCalled();
+
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
 });

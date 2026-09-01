@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { isCancelledError, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { printerSignalRService } from '@/services/printer-signalr';
@@ -89,10 +89,28 @@ function createCoalescedRefresher(run: () => Promise<void>, isDisposed: () => bo
             refreshed = true;
             break;
           } catch (error) {
-            console.error(
-              '[QueueRealtimeBridge] authoritative refresh failed',
-              error
-            );
+            // #2341: a query cancelled by a superseding request (e.g. React
+            // Query's own refetch-race cancellation, or an in-flight
+            // fetchQuery superseded by a fresher one after a successful
+            // discovery/add-printer refresh) is expected, not a genuine
+            // refresh failure -- logging it at error severity is noise that
+            // masks real failures. Only a non-cancellation error is a real
+            // problem worth surfacing at error severity.
+            if (isCancelledError(error)) {
+              // console.warn (not .debug/.log/.info) so this stays exempt from the
+              // `pf-no-unguarded-console` lint rule, which only guards against
+              // unguarded debug-level UI noise -- this is a below-error-severity
+              // diagnostic for an expected condition, not a debug trace.
+              console.warn(
+                '[QueueRealtimeBridge] authoritative refresh cancelled by a superseding request',
+                error
+              );
+            } else {
+              console.error(
+                '[QueueRealtimeBridge] authoritative refresh failed',
+                error
+              );
+            }
             if (isDisposed() || attempt === resourceRefreshRetryDelaysMs.length) {
               break;
             }
