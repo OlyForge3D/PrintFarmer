@@ -71,6 +71,14 @@ public interface IProfilesService
     /// <param name="ct">Cancellation token.</param>
     Task<AllProfilesResponseDto?> GetCatalogFilteredWorkerHierarchyAsync(HttpClient httpClient, CancellationToken ct);
 
+    /// <summary>
+    /// Fetches worker profiles and attributes machine models to catalog manufacturers.
+    /// </summary>
+    Task<AllProfilesResponseDto?> GetCatalogAttributedWorkerHierarchyAsync(
+        HttpClient httpClient,
+        string scope,
+        CancellationToken ct);
+
     /// <summary>Fetches machine profiles for a specific manufacturer and model from the worker.</summary>
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="manufacturer">Manufacturer name.</param>

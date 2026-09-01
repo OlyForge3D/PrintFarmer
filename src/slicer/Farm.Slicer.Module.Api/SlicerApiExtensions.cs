@@ -69,6 +69,7 @@ public static class SlicerApiExtensions
         _ = services.AddScoped<IProfilesService, ProfilesService>();
         _ = services.AddScoped<IProfileFamilyRenderer, ProfileFamilyRenderer>();
         _ = services.AddScoped<IProfileFamilyService, ProfileFamilyService>();
+        _ = services.AddScoped<ProfileManufacturerMaintenanceService>();
         _ = services.AddHttpClient<IProfileFamilyWorkerClient, ProfileFamilyWorkerClient>(client =>
         {
             client.Timeout = TimeSpan.FromMinutes(2);
