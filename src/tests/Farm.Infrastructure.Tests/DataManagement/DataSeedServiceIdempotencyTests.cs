@@ -280,4 +280,54 @@ public sealed class DataSeedServiceIdempotencyTests : IAsyncLifetime, IDisposabl
         PrinterModel copperheadModel = models.Single(m => m.Manufacturer!.Name == "Copperhead");
         copperheadModel.Aliases.Should().ContainSingle(a => a.SlicerModelName == "Copperhead Rattler X1", "the two manufacturers' identically-named models must remain independent across re-seeds");
     }
+
+    [Fact]
+    public async Task SeedMaintenanceTasksAsync_TolerantOfPreExistingDuplicateNamedRows()
+    {
+        // MaintenanceTask.TaskName has no unique DB constraint -- tasks are user-writable with
+        // no uniqueness check, so two rows sharing a name are legitimate, pre-existing data.
+        // BuildFirstWinsDictionary must tolerate this exactly as the original per-row
+        // FirstOrDefaultAsync silently did; a naive ToDictionaryAsync throws ArgumentException
+        // on the first duplicate key instead, which would crash seeding on boot.
+        _context.MaintenanceTasks.Add(new MaintenanceTask { Id = Guid.NewGuid(), TaskName = "Lubricate Rails", Category = "Mechanical" });
+        _context.MaintenanceTasks.Add(new MaintenanceTask { Id = Guid.NewGuid(), TaskName = "Lubricate Rails", Category = "Mechanical" });
+        await _context.SaveChangesAsync();
+
+        Func<Task> act = async () => await _service.SeedMaintenanceTasksAsync();
+
+        await act.Should().NotThrowAsync("duplicate-named maintenance tasks are legitimate pre-existing data and must not crash seeding");
+        (await _context.MaintenanceTasks.CountAsync()).Should().Be(2, "seeding must resolve the YAML row against one of the existing duplicates rather than adding a third row");
+    }
+
+    [Fact]
+    public async Task SeedComponentModelsAsync_TolerantOfPreExistingDuplicateNamedHotendsWithinAManufacturer()
+    {
+        // HotendModelDefinition has no unique DB constraint on (ManufacturerId, Name) -- same
+        // rationale as above, but for a manufacturer-scoped component definition rather than a
+        // globally-keyed maintenance catalog row.
+        Manufacturer manufacturer = new() { Id = Guid.NewGuid(), Name = "Diamondback" };
+        _context.Manufacturers.Add(manufacturer);
+        _context.HotendModelDefinitions.Add(new HotendModelDefinition { Id = Guid.NewGuid(), Name = "V6", ManufacturerId = manufacturer.Id, MaxTemp = 260 });
+        _context.HotendModelDefinitions.Add(new HotendModelDefinition { Id = Guid.NewGuid(), Name = "V6", ManufacturerId = manufacturer.Id, MaxTemp = 260 });
+        await _context.SaveChangesAsync();
+
+        // SeedComponentModelsAsync also seeds nozzles, which resolve a NozzleMaterial FK;
+        // built-in materials must exist first (SeedAllAsync always runs this before component
+        // models, so this mirrors production ordering rather than being test-only setup).
+        await _service.SeedNozzleMaterialsAsync();
+
+        // ResolveToolheadDefaultComponentsFromYamlAsync (run as part of SeedComponentModelsAsync)
+        // has its own pre-existing, unrelated composite-key ToDictionaryAsync over hotend name +
+        // manufacturer name that is untouched by this PR (confirmed via `git diff` against the
+        // pre-batching baseline) and is out of scope here (same class of issue flagged
+        // non-blocking during review for FilamentType). Suppress toolheads for this test so it
+        // isolates SeedHotendsAsync's own duplicate-tolerance rather than tripping that
+        // unrelated, already-existing bug.
+        _ = _reader.Setup(r => r.ReadToolheadsAsync()).ReturnsAsync([]);
+
+        Func<Task> act = async () => await _service.SeedComponentModelsAsync();
+
+        await act.Should().NotThrowAsync("duplicate-named hotend definitions within a manufacturer are legitimate pre-existing data and must not crash seeding");
+        (await _context.HotendModelDefinitions.CountAsync(h => h.ManufacturerId == manufacturer.Id && h.Name == "V6")).Should().Be(2, "seeding must resolve the YAML row against one of the existing duplicates rather than adding a third row");
+    }
 }

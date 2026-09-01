@@ -227,10 +227,14 @@ public class DataSeedService : IDataSeedService
 
             _logger.LogInformation("[SeedData] Seeding {Count} default bed types", defaultBedTypes.Length);
 
-            // Preload existing names once instead of one existence query per row.
+            // Preload existing names once instead of one existence query per row. Matched
+            // case-insensitively: the original per-row query used `==` translated to SQL, which
+            // is collation-dependent (SQL Server's default collation is case-insensitive), so an
+            // ordinal client-side comparison here would regress case-tolerant matching on that
+            // provider. See ManufacturerScopedNameComparer for the same rationale.
             HashSet<string> existingNames = new(
                 await _context.BedTypes.Select(b => b.Name).ToListAsync(),
-                StringComparer.Ordinal);
+                StringComparer.OrdinalIgnoreCase);
 
             foreach ((string name, string description, string color) in defaultBedTypes)
             {
@@ -286,10 +290,11 @@ public class DataSeedService : IDataSeedService
 
             _logger.LogInformation("[SeedData] Seeding {Count} built-in nozzle materials", builtInMaterials.Length);
 
-            // Preload existing names once instead of one existence query per row.
+            // Preload existing names once instead of one existence query per row. Matched
+            // case-insensitively for the same collation-parity reason as SeedBedTypesAsync.
             HashSet<string> existingNames = new(
                 await _context.NozzleMaterials.Select(m => m.Name).ToListAsync(),
-                StringComparer.Ordinal);
+                StringComparer.OrdinalIgnoreCase);
 
             foreach ((Guid id, string name, bool isHardened, int defaultMaxTemp, string description) in builtInMaterials)
             {
