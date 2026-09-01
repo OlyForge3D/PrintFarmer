@@ -54,6 +54,17 @@ public class TelemetryMiddleware(RequestDelegate next, IPrintFarmerTelemetryServ
 
             _telemetryService.RecordApiCall(endpoint, method, statusCode, stopwatch.Elapsed);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // The client disconnected/cancelled the request (issue #2348). Don't record
+            // this as a 500 in the API-call metric/SLO - it's not a server-side error.
+            stopwatch.Stop();
+            _ = activity?.SetTag("http.status_code", 499);
+            _ = activity?.SetTag("client_aborted", true);
+
+            _telemetryService.RecordApiCall(endpoint, method, 499, stopwatch.Elapsed);
+            throw;
+        }
         catch (Exception ex)
         {
             stopwatch.Stop();

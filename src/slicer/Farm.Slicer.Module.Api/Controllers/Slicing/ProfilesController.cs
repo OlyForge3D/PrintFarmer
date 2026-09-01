@@ -767,6 +767,14 @@ public class ProfilesController(
             _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The client disconnected/cancelled the request. This is not a server
+            // fault, so let it propagate: ASP.NET Core's hosting layer recognizes an
+            // OperationCanceledException tied to the aborted request token and treats
+            // it as a client disconnect rather than an unhandled 500 (issue #2348).
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError("Error fetching profiles hierarchy from OrcaSlicer worker: {Message}", LogSanitizer.Sanitize(ex.Message));
@@ -804,6 +812,14 @@ public class ProfilesController(
         {
             _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The client disconnected/cancelled the request. This is not a server
+            // fault, so let it propagate: ASP.NET Core's hosting layer recognizes an
+            // OperationCanceledException tied to the aborted request token and treats
+            // it as a client disconnect rather than an unhandled 500 (issue #2348).
+            throw;
         }
         catch (Exception ex)
         {

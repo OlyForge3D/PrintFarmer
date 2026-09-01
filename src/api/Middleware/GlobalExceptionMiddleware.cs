@@ -30,6 +30,26 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
         {
             await _next(context);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // The client disconnected/cancelled the request (issue #2348). This is not
+            // a server fault: don't log it at Error severity and don't attempt to write
+            // a response body, since the connection is already gone. A lower-severity
+            // debug log is kept for local diagnostics only.
+            string correlationId = context.Items["CorrelationId"] as string ?? context.TraceIdentifier;
+            logger.LogDebug(
+                "Request aborted by client for {Method} {Path}. CorrelationId: {CorrelationId}",
+                LogSanitizer.Sanitize(context.Request.Method),
+                LogSanitizer.Sanitize(context.Request.Path),
+                LogSanitizer.Sanitize(correlationId));
+
+            // Align the hosting access log with the telemetry metric (499) rather than
+            // leaving the default 200. Guarded by HasStarted since no body was written.
+            if (!context.Response.HasStarted)
+            {
+                context.Response.StatusCode = 499;
+            }
+        }
 
         // CA1031: Intentionally catching all exceptions to prevent unhandled exceptions from crashing the application
         // This is the global exception handler that provides consistent error responses
