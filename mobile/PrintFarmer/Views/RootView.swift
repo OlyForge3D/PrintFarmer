@@ -189,7 +189,7 @@ struct RootView: View {
             isChecking: connectionGate.isChecking,
             statusText: connectionGate.failures == nil
                 ? "Connecting to services..."
-                : "Some services are unavailable"
+                : connectionGate.failureTitle
         )
             .task(id: "\(services.activeServerGeneration):\(connectionGate.retryRevision)") {
                 let generation = services.activeServerGeneration
@@ -205,7 +205,7 @@ struct RootView: View {
                 }
             }
             .alert(
-                "Some services are unavailable",
+                connectionGate.failureTitle,
                 isPresented: Binding(
                     get: { connectionGate.failures != nil },
                     set: { isPresented in

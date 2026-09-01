@@ -250,7 +250,11 @@ final class SystemCapabilitiesTests: XCTestCase {
         let service = SystemCapabilitiesService(apiClient: apiClient)
         let outcome = await service.refresh()
 
-        XCTAssertEqual(outcome, .failed)
+        guard case .failedWithDiagnostics(let classification) = outcome else {
+            return XCTFail("Expected a classified capabilities refresh failure")
+        }
+        XCTAssertEqual(classification.kind, .transport)
+        XCTAssertEqual(classification.diagnosticDetail, "no internet connection")
         XCTAssertEqual(service.resolved, ResolvedSystemCapabilities.defaults)
     }
 
