@@ -11,6 +11,7 @@ const {
   mockGetSetupStatus,
   mockLogin,
   mockNetworkScanState,
+  mockSaveSpoolmanConfig,
   mockScanNetwork,
   mockTestSpoolmanConnection,
 } = vi.hoisted(() => ({
@@ -21,6 +22,7 @@ const {
   mockGetSetupStatus: vi.fn(),
   mockLogin: vi.fn(),
   mockNetworkScanState: { availableInstances: [] as Array<{ url: string; version?: string }> },
+  mockSaveSpoolmanConfig: vi.fn(),
   mockScanNetwork: vi.fn(),
   mockTestSpoolmanConnection: vi.fn(),
 }));
@@ -29,7 +31,7 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({ isAuthenticated: mockAuthState.isAuthenticated, login: mockLogin }),
 }));
 
-vi.mock('@/common/hooks/useApi', () => ({
+vi.mock('@/common/hooks/useHealthStatus', () => ({
   useHealthStatus: () => ({
     data: { kind: 'basic', status: 'Healthy' },
     isLoading: false,
@@ -57,14 +59,17 @@ vi.mock('@/common/hooks/useSpoolmanNetworkScan', () => ({
   }),
 }));
 
-vi.mock('@/services/api', () => ({
-  apiClient: {
-    createInitialAdmin: (...args: unknown[]) => mockCreateInitialAdmin(...args),
-    getSettings: (...args: unknown[]) => mockGetSettings(...args),
-    getSetupBootstrap: (...args: unknown[]) => mockGetSetupBootstrap(...args),
-    getSetupStatus: (...args: unknown[]) => mockGetSetupStatus(...args),
-    testSpoolmanConnection: (...args: unknown[]) => mockTestSpoolmanConnection(...args),
-  },
+vi.mock('@/services/api/setupApi', () => ({
+  createInitialAdmin: (...args: unknown[]) => mockCreateInitialAdmin(...args),
+  getSetupBootstrap: (...args: unknown[]) => mockGetSetupBootstrap(...args),
+  getSetupStatus: (...args: unknown[]) => mockGetSetupStatus(...args),
+  saveSpoolmanConfig: (...args: unknown[]) => mockSaveSpoolmanConfig(...args),
+  testSpoolmanConnection: (...args: unknown[]) => mockTestSpoolmanConnection(...args),
+}));
+
+vi.mock('@/services/settingsApi', () => ({
+  fetchSettingsValues: (...args: unknown[]) => mockGetSettings(...args),
+  saveSettingsValues: vi.fn(),
 }));
 
 async function advanceToSpoolmanStep() {
@@ -105,6 +110,7 @@ describe('SetupWizard first-run Spoolman bootstrap', () => {
     });
     mockScanNetwork.mockResolvedValue(undefined);
     mockTestSpoolmanConnection.mockResolvedValue({ success: true, version: '0.22.1' });
+    mockSaveSpoolmanConfig.mockResolvedValue({});
   });
 
   it('pre-populates the deployment URL without reading protected settings', async () => {

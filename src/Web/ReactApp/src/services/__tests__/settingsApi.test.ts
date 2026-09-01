@@ -6,15 +6,12 @@ import {
   fetchSettingsValues,
   saveSettingsValues,
 } from '../settingsApi';
-import { apiClient } from '../api';
+import { client } from '../api/httpClient';
 
-vi.mock('../api', () => ({
-  apiClient: {
-    getSettingsMetadata: vi.fn(),
-    getSettingsGroups: vi.fn(),
-    getAllSettings: vi.fn(),
-    getSettings: vi.fn(),
-    saveSettings: vi.fn(),
+vi.mock('../api/httpClient', () => ({
+  client: {
+    get: vi.fn(),
+    post: vi.fn(),
   },
 }));
 
@@ -34,11 +31,11 @@ describe('settingsApi', () => {
         },
       ];
 
-      vi.mocked(apiClient.getSettingsMetadata).mockResolvedValue(mockMetadata);
+      vi.mocked(client.get).mockResolvedValue({ data: mockMetadata });
 
       const result = await fetchSettingsMetadata();
 
-      expect(apiClient.getSettingsMetadata).toHaveBeenCalled();
+      expect(client.get).toHaveBeenCalledWith('/settings/metadata');
       expect(result).toEqual(mockMetadata);
     });
   });
@@ -61,11 +58,11 @@ describe('settingsApi', () => {
         },
       ];
 
-      vi.mocked(apiClient.getSettingsGroups).mockResolvedValue(mockGroups);
+      vi.mocked(client.get).mockResolvedValue({ data: mockGroups });
 
       const result = await fetchSettingsGroups();
 
-      expect(apiClient.getSettingsGroups).toHaveBeenCalled();
+      expect(client.get).toHaveBeenCalledWith('/settings/groups');
       expect(result).toEqual(mockGroups);
       expect(result).toHaveLength(2);
     });
@@ -80,11 +77,11 @@ describe('settingsApi', () => {
         refreshInterval: 5000,
       };
 
-      vi.mocked(apiClient.getAllSettings).mockResolvedValue(mockSettings);
+      vi.mocked(client.get).mockResolvedValue({ data: mockSettings });
 
       const result = await fetchSettingsUnified();
 
-      expect(apiClient.getAllSettings).toHaveBeenCalled();
+      expect(client.get).toHaveBeenCalledWith('/settings');
       expect(result).toEqual(mockSettings);
     });
   });
@@ -97,11 +94,11 @@ describe('settingsApi', () => {
         language: 'en',
       };
 
-      vi.mocked(apiClient.getSettings).mockResolvedValue(mockValues);
+      vi.mocked(client.get).mockResolvedValue({ data: mockValues });
 
       const result = await fetchSettingsValues(keyName);
 
-      expect(apiClient.getSettings).toHaveBeenCalledWith(keyName);
+      expect(client.get).toHaveBeenCalledWith(`/settings/${keyName}`);
       expect(result).toEqual(mockValues);
     });
   });
@@ -114,11 +111,11 @@ describe('settingsApi', () => {
         autoSave: true,
       };
 
-      vi.mocked(apiClient.saveSettings).mockResolvedValue(undefined);
+      vi.mocked(client.post).mockResolvedValue({ data: undefined });
 
       await saveSettingsValues(keyName, values);
 
-      expect(apiClient.saveSettings).toHaveBeenCalledWith(keyName, values);
+      expect(client.post).toHaveBeenCalledWith(`/settings/${keyName}`, values);
     });
   });
 });

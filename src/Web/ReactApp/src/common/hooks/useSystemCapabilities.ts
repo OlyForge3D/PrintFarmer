@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { apiClient } from '@/services/api';
+import { client } from '@/services/api/httpClient';
 import type { SystemCapabilities } from '@/types/api';
 
 const SYSTEM_CAPABILITIES_KEY = ['system-capabilities'];
@@ -11,7 +11,10 @@ const SYSTEM_CAPABILITIES_KEY = ['system-capabilities'];
 export function useSystemCapabilities() {
   return useQuery<SystemCapabilities>({
     queryKey: SYSTEM_CAPABILITIES_KEY,
-    queryFn: () => apiClient.getSystemCapabilities(),
+    queryFn: async () => {
+      const response = await client.get<SystemCapabilities>('/system/capabilities');
+      return response.data;
+    },
     staleTime: Infinity,
     gcTime: Infinity,
     retry: 2,

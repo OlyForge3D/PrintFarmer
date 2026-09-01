@@ -1,5 +1,4 @@
 import { apiClient } from '@/services/api';
-import type { BasicHealthStatus, DetailedHealthStatus, HealthStatus } from '@/types/api';
 import {
   ApiError,
   BedType,
@@ -70,7 +69,6 @@ import {
   UpdateNfcDeviceDto,
   NfcScanHistoryDto,
   PagedResponse,
-  NotificationDto,
   ObicoServer,
   CreateObicoServerRequest,
   JobStateHistoryDto,
@@ -85,79 +83,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { toast } from 'sonner';
 import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
+import { queryKeys } from './queryKeys';
 
 // Type alias for query options that omit queryKey and queryFn (already provided by hooks)
 type QueryOptions<TData, TError = ApiError> = Omit<UseQueryOptions<TData, TError>, 'queryKey' | 'queryFn'>;
 
 // ============ Query Keys ============
-export const queryKeys = {
-  printers: ['printers'] as const,
-  printer: (id: string) => ['printers', id] as const,
-  printerDetails: (id: string) => ['printers', id, 'details'] as const,
-  printerHistory: (id: string, options?: { limit?: number; start?: number; since?: Date; before?: Date; order?: string }) => 
-    ['printers', id, 'history', options] as const,
-  printerHistoryJob: (printerId: string, jobId: string) => ['printers', printerId, 'history', jobId] as const,
-  printerHistoryTotals: (printerId: string) => ['printers', printerId, 'history', 'totals'] as const,
-  printJobObjects: (printerId: string) => ['printers', printerId, 'printjob', 'objects'] as const,
-  manufacturers: ['manufacturers'] as const,
-  models: (manufacturerId?: string) => ['models', manufacturerId] as const,
-  hotendModels: ['hotend-models'] as const,
-  extruderModels: ['extruder-models'] as const,
-  toolheadModels: ['toolhead-models'] as const,
-  nozzleModels: ['nozzle-models'] as const,
-  nozzleMaterials: ['nozzle-materials'] as const,
-  filamentTypes: ['filament-types'] as const,
-  filamentTypesPaged: (page?: number, pageSize?: number, search?: string) => ['filament-types', page, pageSize, search] as const,
-  filamentPresets: ['presets', 'filament'] as const,
-  spoolmanDbFilaments: ['spoolmandb', 'filaments'] as const,
-  spoolmanDbMaterials: ['spoolmandb', 'materials'] as const,
-  ofdBrands: ['ofd', 'brands'] as const,
-  ofdBrandMaterials: (slug: string) => ['ofd', 'brands', slug, 'materials'] as const,
-  ofdFilaments: (brandSlug: string, materialSlug: string) => ['ofd', 'filaments', brandSlug, materialSlug] as const,
-  spoolmanVendors: ['spoolman', 'vendors'] as const,
-  spoolmanMaterials: ['spoolman', 'materials'] as const,
-  gcodeFiles: (page?: number, pageSize?: number) => ['gcode-files', page, pageSize] as const,
-  gcodeFile: (id: string) => ['gcode-files', id] as const,
-  harvestOperations: (printerId?: string) => ['harvest-operations', printerId] as const,
-  harvestOperation: (id: string) => ['harvest-operations', id] as const,
-  jobQueue: (printerId?: string) => ['job-queue', printerId] as const,
-  health: ['health'] as const,
-  fileConsistency: {
-    health: ['file-consistency', 'health'] as const,
-    auditHistory: (pageSize?: number) => ['file-consistency', 'audits', pageSize] as const,
-    filesWithIssues: ['file-consistency', 'issues'] as const,
-    model3DHealth: (id: string) => ['file-consistency', 'model3d', id] as const,
-    gcodeFileHealth: (id: string) => ['file-consistency', 'gcode', id] as const,
-  },
-  nfcDevices: ['nfc-devices'] as const,
-  nfcDevice: (id: string) => ['nfc-devices', id] as const,
-  nfcDeviceHistory: (id: string) => ['nfc-devices', id, 'history'] as const,
-  nfcBindings: ['nfc-bindings'] as const,
-  notifications: ['notifications'] as const,
-  unreadCount: ['notifications', 'unread-count'] as const,
-  notificationPreferences: ['notifications', 'preferences'] as const,
-  costSummary: (days?: number, startDate?: string, endDate?: string) => ['costs', 'summary', days, startDate, endDate] as const,
-  costs: ['costs'] as const,
-  costsByPrinter: (days?: number, startDate?: string, endDate?: string) => ['costs', 'by-printer', days, startDate, endDate] as const,
-  costsByMaterial: (days?: number, startDate?: string, endDate?: string) => ['costs', 'by-material', days, startDate, endDate] as const,
-  costsByJob: (days?: number, startDate?: string, endDate?: string) => ['costs', 'by-job', days, startDate, endDate] as const,
-  costOverTime: ['costs', 'over-time'] as const,
-  scheduledJobs: ['scheduled-jobs'] as const,
-  scheduledJob: (jobId: string) => ['scheduled-jobs', jobId] as const,
-  jobExecutions: (jobId: string) => ['scheduled-jobs', jobId, 'executions'] as const,
-  timezones: ['timezones'] as const,
-  obicoServers: ['obico-servers'] as const,
-  obicoServer: (id: string) => ['obico-servers', id] as const,
-  failureDetectionHistory: (printerId?: string, take?: number) => (
-    ['failure-detection', 'history', printerId ?? null, take ?? null] as const
-  ),
-  printSessionTimeline: (jobId?: string) => (
-    ['job-queue-analytics', 'jobs', jobId ?? null, 'state-history'] as const
-  ),
-  bedTypes: ['bed-types'] as const,
-  customFieldDefinitions: (entityType: string) => ['custom-field-definitions', entityType] as const,
-  customFieldValues: (entityType: string, entityId: string) => ['custom-field-values', entityType, entityId] as const,
-} as const;
+export { queryKeys } from './queryKeys';
 
 // ============ Printer Hooks ============
 
@@ -1551,57 +1483,11 @@ export function useStartPrintFromFile() {
 }
 
 // ============ Health Check Hooks ============
-
-export function useHealthStatus(options?: QueryOptions<HealthStatus>) {
-  return useQuery({
-    queryKey: queryKeys.health,
-    queryFn: async () => {
-      const raw = (await apiClient.getHealthStatus()) as unknown; // backend detailed or basic
-      if (typeof raw === 'object' && raw !== null) {
-        const r = raw as Record<string, unknown>;
-        if (typeof r.results === 'object' && r.results !== null) {
-          const startup = r.startup && typeof r.startup === 'object' ? r.startup as Record<string, unknown> : undefined;
-          return {
-            kind: 'detailed',
-            status: String(r.status ?? 'unknown'),
-            totalChecksDuration: String(r.totalChecksDuration ?? ''),
-            startup: startup ? {
-              phase: String(startup.phase ?? 'Unknown'),
-              ready: Boolean(startup.ready),
-              failed: Boolean(startup.failed),
-              failureMessage: startup.failureMessage ? String(startup.failureMessage) : undefined,
-              failureStackTrace: startup.failureStackTrace ? String(startup.failureStackTrace) : undefined,
-              initStartedUtc: startup.initStartedUtc ? String(startup.initStartedUtc) : undefined,
-              initCompletedUtc: startup.initCompletedUtc ? String(startup.initCompletedUtc) : undefined,
-              initDurationMs: typeof startup.initDurationMs === 'number' ? startup.initDurationMs : undefined,
-            } : undefined,
-            results: r.results as DetailedHealthStatus['results']
-          } satisfies DetailedHealthStatus;
-        }
-        return { kind: 'basic', status: String(r.status ?? 'unknown') } satisfies BasicHealthStatus;
-      }
-      return { kind: 'basic', status: 'unknown' } satisfies BasicHealthStatus;
-    },
-    staleTime: 30000,
-    ...options,
-  });
-}
-
-export function useBasicHealth(options?: QueryOptions<BasicHealthStatus>) {
-  return useQuery({
-    queryKey: ['health', 'basic'],
-    queryFn: async () => {
-      const raw = (await apiClient.getBasicHealth()) as unknown;
-      if (typeof raw === 'object' && raw !== null) {
-        const r = raw as Record<string, unknown>;
-        return { kind: 'basic', status: String(r.status ?? 'unknown') } satisfies BasicHealthStatus;
-      }
-      return { kind: 'basic', status: 'unknown' } satisfies BasicHealthStatus;
-    },
-    staleTime: 10000,
-    ...options,
-  });
-}
+// Moved to `common/hooks/useHealthStatus.ts` (decoupled from the `apiClient`
+// monolith so the setup wizard's static import chain doesn't drag it in — see
+// issue #2343). Re-exported here so existing `@/common/hooks/useApi` imports
+// keep working unchanged for lazy (non-eager) consumers.
+export { useHealthStatus, useBasicHealth } from './useHealthStatus';
 
 // ============ Printer History Hooks ============
 
@@ -1811,62 +1697,12 @@ export function useDeleteNfcBinding() {
 
 // ============ Notification Hooks ============
 
-export function useNotifications(options?: QueryOptions<NotificationDto[]> & { limit?: number }) {
-  const limit = options?.limit;
-  return useQuery({
-    queryKey: [...queryKeys.notifications, limit],
-    queryFn: () => apiClient.getNotifications(limit),
-    staleTime: 30_000, // 30s
-    ...options,
-  });
-}
+// useNotifications, useUnreadCount, useMarkNotificationAsRead,
+// useMarkAllNotificationsAsRead, and useDeleteNotification moved to
+// `@/common/hooks/useNotificationsList` and `@/common/hooks/useUnreadCount`
+// (issue #2343) so the eagerly-mounted NotificationDrawer doesn't statically
+// import this whole file.
 
-export function useUnreadCount(options?: QueryOptions<number>) {
-  return useQuery({
-    queryKey: queryKeys.unreadCount,
-    queryFn: () => apiClient.getUnreadCount(),
-    staleTime: 10_000, // 10s
-    ...options,
-  });
-}
-
-export function useMarkNotificationAsRead() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (notificationId: string) => apiClient.markNotificationAsRead(notificationId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.notifications });
-      queryClient.invalidateQueries({ queryKey: queryKeys.unreadCount });
-    },
-    onError: (err: ApiError) => toast.error(`Failed to mark as read: ${err.message}`),
-  });
-}
-
-export function useMarkAllNotificationsAsRead() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (notificationIds: string[]) => apiClient.markMultipleNotificationsAsRead(notificationIds),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.notifications });
-      queryClient.invalidateQueries({ queryKey: queryKeys.unreadCount });
-      toast.success('All notifications marked as read');
-    },
-    onError: (err: ApiError) => toast.error(`Failed to mark as read: ${err.message}`),
-  });
-}
-
-export function useDeleteNotification() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (notificationId: string) => apiClient.deleteNotification(notificationId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.notifications });
-      queryClient.invalidateQueries({ queryKey: queryKeys.unreadCount });
-      toast.success('Notification deleted');
-    },
-    onError: (err: ApiError) => toast.error(`Failed to delete: ${err.message}`),
-  });
-}
 
 // ============ Cost Tracking Hooks ============
 

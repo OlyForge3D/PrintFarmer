@@ -1,4 +1,11 @@
-import { apiClient } from '@/services/api';
+import { client } from '@/services/api/httpClient';
+
+/**
+ * Slicer/worker registry — calls the shared axios client directly rather
+ * than delegating to the `ApiClient` monolith, because this module is
+ * reachable from the eager import graph via `SlicerContext.tsx` (statically
+ * imported by `App.tsx`). See issue #2343.
+ */
 
 export interface SlicerDto {
   id: string;
@@ -41,12 +48,12 @@ function mapWorkerToSlicer(worker: WorkerDto): SlicerDto {
 class SlicerRegistryClient {
   async getSlicers(): Promise<SlicerDto[]> {
     // Canonical source for UI worker discovery in both monolith and microservices.
-    const workers = await apiClient.request<WorkerDto[]>({ method: 'get', url: '/workers/' });
-    return workers.map(mapWorkerToSlicer);
+    const response = await client.get<WorkerDto[]>('/workers/');
+    return response.data.map(mapWorkerToSlicer);
   }
 
   async deregisterSlicer(id: string): Promise<void> {
-    await apiClient.request<void>({ method: 'delete', url: `/workers/${id}` });
+    await client.delete(`/workers/${id}`);
   }
 }
 

@@ -20,7 +20,7 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
-import { TasksWidget } from '@/features/tasks';
+import { TasksWidget } from '@/features/tasks/components/TasksWidget';
 import { ActiveJobsWidget } from './ActiveJobsWidget';
 import { RecentPrintsWidget } from './RecentPrintsWidget';
 import { CriticalAlertsBanner } from './CriticalAlertsBanner';

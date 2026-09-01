@@ -10,11 +10,11 @@ import {
   normalizeSourceKind,
   isKnownTaskType,
 } from '../tasksApi';
-import { apiClient } from '../api';
+import { client } from '../api/httpClient';
 import { loadWireContractFixture } from '@/test/wireContracts';
 
-vi.mock('../api', () => ({
-  apiClient: {
+vi.mock('../api/httpClient', () => ({
+  client: {
     get: vi.fn(),
     post: vi.fn(),
   },
@@ -54,11 +54,11 @@ describe('tasksApi', () => {
         },
       ];
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockTasks });
+      vi.mocked(client.get).mockResolvedValue({ data: mockTasks });
 
       const result = await tasksApi.getPendingTasks();
 
-      expect(apiClient.get).toHaveBeenCalledWith('/tasks');
+      expect(client.get).toHaveBeenCalledWith('/tasks');
       expect(result).toEqual(
         mockTasks.map((t) => ({
           ...t,
@@ -70,7 +70,7 @@ describe('tasksApi', () => {
     });
 
     it('should return empty array when no tasks exist', async () => {
-      vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
+      vi.mocked(client.get).mockResolvedValue({ data: [] });
 
       const result = await tasksApi.getPendingTasks();
 
@@ -94,11 +94,11 @@ describe('tasksApi', () => {
         metadataJson: '{"version":"1.2.3"}',
       };
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockTask });
+      vi.mocked(client.get).mockResolvedValue({ data: mockTask });
 
       const result = await tasksApi.getTask('task-123');
 
-      expect(apiClient.get).toHaveBeenCalledWith('/tasks/task-123');
+      expect(client.get).toHaveBeenCalledWith('/tasks/task-123');
       expect(result).toEqual({
         ...mockTask,
         anchorKind: 'unspecified',
@@ -111,18 +111,18 @@ describe('tasksApi', () => {
     it('should get pending task count', async () => {
       const mockResponse = { count: 5 };
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockResponse });
+      vi.mocked(client.get).mockResolvedValue({ data: mockResponse });
 
       const result = await tasksApi.getPendingCount();
 
-      expect(apiClient.get).toHaveBeenCalledWith('/tasks/count');
+      expect(client.get).toHaveBeenCalledWith('/tasks/count');
       expect(result).toBe(5);
     });
 
     it('should return zero when no pending tasks', async () => {
       const mockResponse = { count: 0 };
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockResponse });
+      vi.mocked(client.get).mockResolvedValue({ data: mockResponse });
 
       const result = await tasksApi.getPendingCount();
 
@@ -132,31 +132,31 @@ describe('tasksApi', () => {
 
   describe('completeTask', () => {
     it('should complete a task', async () => {
-      vi.mocked(apiClient.post).mockResolvedValue({});
+      vi.mocked(client.post).mockResolvedValue({});
 
       await tasksApi.completeTask('task-complete');
 
-      expect(apiClient.post).toHaveBeenCalledWith('/tasks/task-complete/complete');
+      expect(client.post).toHaveBeenCalledWith('/tasks/task-complete/complete');
     });
   });
 
   describe('dismissTask', () => {
     it('should dismiss a task', async () => {
-      vi.mocked(apiClient.post).mockResolvedValue({});
+      vi.mocked(client.post).mockResolvedValue({});
 
       await tasksApi.dismissTask('task-dismiss');
 
-      expect(apiClient.post).toHaveBeenCalledWith('/tasks/task-dismiss/dismiss');
+      expect(client.post).toHaveBeenCalledWith('/tasks/task-dismiss/dismiss');
     });
   });
 
   describe('skipTask', () => {
     it('should skip a task', async () => {
-      vi.mocked(apiClient.post).mockResolvedValue({});
+      vi.mocked(client.post).mockResolvedValue({});
 
       await tasksApi.skipTask('task-skip');
 
-      expect(apiClient.post).toHaveBeenCalledWith('/tasks/task-skip/skip');
+      expect(client.post).toHaveBeenCalledWith('/tasks/task-skip/skip');
     });
   });
 
@@ -291,11 +291,11 @@ describe('tasksApi', () => {
         ],
       };
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: raw });
+      vi.mocked(client.get).mockResolvedValue({ data: raw });
 
       const result = await tasksApi.getShiftPlan();
 
-      expect(apiClient.get).toHaveBeenCalledWith('/tasks?view=shift');
+      expect(client.get).toHaveBeenCalledWith('/tasks?view=shift');
       expect(result.mode).toBe('shift');
       if (result.mode !== 'shift') return;
       expect(result.plan.groups).toHaveLength(2);
@@ -306,7 +306,7 @@ describe('tasksApi', () => {
     });
 
     it('tolerates unknown anchor/source kinds by collapsing to Unspecified', async () => {
-      vi.mocked(apiClient.get).mockResolvedValue({
+      vi.mocked(client.get).mockResolvedValue({
         data: {
           generatedAt: '2026-07-13T12:00:00Z',
           groups: [
@@ -359,7 +359,7 @@ describe('tasksApi', () => {
           relatedEntityCount: 1,
         },
       ];
-      vi.mocked(apiClient.get)
+      vi.mocked(client.get)
         .mockRejectedValueOnce({ statusCode: 404, message: 'not found', details: undefined })
         .mockResolvedValueOnce({ data: flat });
 
@@ -369,14 +369,14 @@ describe('tasksApi', () => {
       if (result.mode !== 'flat') return;
       expect(result.tasks).toHaveLength(1);
       expect(result.tasks[0].taskType).toBe(TaskType.ProfileImport);
-      expect(vi.mocked(apiClient.get).mock.calls.map((c) => c[0])).toEqual([
+      expect(vi.mocked(client.get).mock.calls.map((c) => c[0])).toEqual([
         '/tasks?view=shift',
         '/tasks',
       ]);
     });
 
     it('propagates non-404 errors instead of masking them', async () => {
-      vi.mocked(apiClient.get).mockRejectedValue({ statusCode: 500, message: 'boom' });
+      vi.mocked(client.get).mockRejectedValue({ statusCode: 500, message: 'boom' });
       await expect(tasksApi.getShiftPlan()).rejects.toMatchObject({ statusCode: 500 });
     });
   });
@@ -391,11 +391,11 @@ describe('tasksApi', () => {
   describe('tasksApi — canonical wire-contract corpus (#2240)', () => {
     it('getPendingTasks() returns the corpus empty-collection fixture unchanged (GET /api/tasks)', async () => {
       const fixture = loadWireContractFixture<unknown[]>('api/tasks/tasks.empty-collection.json');
-      vi.mocked(apiClient.get).mockResolvedValue({ data: fixture });
+      vi.mocked(client.get).mockResolvedValue({ data: fixture });
 
       const result = await tasksApi.getPendingTasks();
 
-      expect(apiClient.get).toHaveBeenCalledWith('/tasks');
+      expect(client.get).toHaveBeenCalledWith('/tasks');
       expect(result).toEqual([]);
     });
 
@@ -409,11 +409,11 @@ describe('tasksApi', () => {
       // refresh that regresses the casing fails this test immediately.
       expect(fixture.anchorKind).toBe('unspecified');
       expect(fixture.sourceKind).toBe('unspecified');
-      vi.mocked(apiClient.post).mockResolvedValue({ data: fixture });
+      vi.mocked(client.post).mockResolvedValue({ data: fixture });
 
       const result = await tasksApi.createTask({ title: fixture.title as string });
 
-      expect(apiClient.post).toHaveBeenCalledWith('/tasks', { title: fixture.title });
+      expect(client.post).toHaveBeenCalledWith('/tasks', { title: fixture.title });
       expect(result.id).toBe(fixture.id);
       expect(result.title).toBe(fixture.title);
       expect(result.status).toBe(fixture.status);
@@ -426,7 +426,7 @@ describe('tasksApi', () => {
       const fixture = loadWireContractFixture<Record<string, unknown>>(
         'api/tasks/tasks.unknown-additive-request-field.json'
       );
-      vi.mocked(apiClient.post).mockResolvedValue({ data: fixture });
+      vi.mocked(client.post).mockResolvedValue({ data: fixture });
 
       const result = await tasksApi.createTask({ title: fixture.title as string });
 

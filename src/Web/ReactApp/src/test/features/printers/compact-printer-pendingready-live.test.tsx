@@ -43,15 +43,21 @@ vi.mock('@/services/printer-signalr', () => ({
 vi.mock('@/services/api', () => ({
   apiClient: {
     get: vi.fn(),
-    getAutoDispatchStatus: vi.fn().mockResolvedValue({ printers: [] }),
     getObjectTags: vi.fn().mockResolvedValue([]),
     getObjectsTags: vi.fn().mockResolvedValue([]),
-    getPrinterQueueSummaries: vi.fn().mockResolvedValue([]),
-    setAutoDispatchEnabled: vi.fn().mockResolvedValue(undefined),
     post: vi.fn().mockResolvedValue({ data: {} }),
-    skipAutoDispatchJob: vi.fn().mockResolvedValue(undefined),
-    cancelAutoDispatch: vi.fn().mockResolvedValue(undefined),
   },
+}));
+
+vi.mock('@/services/api/queueSummariesApi', () => ({
+  getPrinterQueueSummaries: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock('@/services/api/autoDispatchApi', () => ({
+  getAutoDispatchStatus: vi.fn().mockResolvedValue({ printers: [] }),
+  setAutoDispatchEnabled: vi.fn().mockResolvedValue(undefined),
+  skipAutoDispatchJob: vi.fn().mockResolvedValue(undefined),
+  cancelAutoDispatch: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/features/printers/hooks/useFailureDetectionAlert', () => ({
@@ -103,7 +109,7 @@ vi.mock('sonner', () => ({
   },
 }));
 
-import { apiClient } from '@/services/api';
+import { getAutoDispatchStatus } from '@/services/api/autoDispatchApi';
 import { CompactPrinterCard } from '@/features/printers/components/CompactPrinterCard';
 
 function createWrapper() {
@@ -153,7 +159,7 @@ describe('CompactPrinterCard PendingReady live updates', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     autoDispatchStateListeners.splice(0, autoDispatchStateListeners.length);
-    vi.mocked(apiClient.getAutoDispatchStatus).mockResolvedValue({ printers: [] });
+    vi.mocked(getAutoDispatchStatus).mockResolvedValue({ printers: [] });
   });
 
   it('uses the auto-dispatch hook path to fetch bulk status and subscribe to live updates', async () => {
@@ -170,7 +176,7 @@ describe('CompactPrinterCard PendingReady live updates', () => {
     expect(await screen.findByText('Idle')).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(apiClient.getAutoDispatchStatus).toHaveBeenCalledTimes(1);
+      expect(getAutoDispatchStatus).toHaveBeenCalledTimes(1);
       expect(connectSignalR).toHaveBeenCalled();
       expect(subscribeToAutoDispatchStateChanged).toHaveBeenCalledTimes(1);
     });
@@ -178,7 +184,7 @@ describe('CompactPrinterCard PendingReady live updates', () => {
 
   it('shows Pending Ready status and bed-clear banner from the initial bulk status snapshot when the bed-clear gate is red', async () => {
     const printer = makePrinter();
-    vi.mocked(apiClient.getAutoDispatchStatus).mockResolvedValueOnce({
+    vi.mocked(getAutoDispatchStatus).mockResolvedValueOnce({
       printers: [
         {
           printerId: printer.id,
@@ -219,7 +225,7 @@ describe('CompactPrinterCard PendingReady live updates', () => {
     'shows live %s without a bed-clear banner when auto-dispatch is stale PendingReady',
     async (state) => {
       const printer = makePrinter({ state });
-      vi.mocked(apiClient.getAutoDispatchStatus).mockResolvedValueOnce({
+      vi.mocked(getAutoDispatchStatus).mockResolvedValueOnce({
         printers: [
           {
             printerId: printer.id,
@@ -298,7 +304,7 @@ describe('CompactPrinterCard PendingReady live updates', () => {
 
   it('keeps the Pending Ready banner when a partial live update omits ready-gate details', async () => {
     const printer = makePrinter();
-    vi.mocked(apiClient.getAutoDispatchStatus).mockResolvedValueOnce({
+    vi.mocked(getAutoDispatchStatus).mockResolvedValueOnce({
       printers: [
         {
           printerId: printer.id,

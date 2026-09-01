@@ -2,7 +2,7 @@ import { useState } from 'react';
 import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
 import { BellIcon } from '@/common/components/icons/MdiIcons';
-import { useUnreadCount } from '@/common/hooks/useApi';
+import { useUnreadCount } from '@/common/hooks/useUnreadCount';
 import { NotificationDrawer } from './NotificationDrawer';
 
 interface NotificationBellProps {

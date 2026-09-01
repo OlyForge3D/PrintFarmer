@@ -23,7 +23,7 @@ import { QueueRealtimeBridge } from '@/common/components/QueueRealtimeBridge';
 // Services
 import { assetService } from '@/services/assetService';
 import { printerSignalRService } from '@/services/printer-signalr';
-import { apiClient } from '@/services/api';
+import { getSetupStatus } from '@/services/api/setupApi';
 
 // Feature Pages
 import { LoginPage } from '@/features/auth/pages/LoginPage';
@@ -352,7 +352,7 @@ function App() {
     const checkSetupStatus = async () => {
       logger.info('Checking setup status');
       try {
-        const data = await apiClient.getSetupStatus();
+        const data = await getSetupStatus();
         setSetupComplete(!data.needsSetup);
         logger.info('Setup status retrieved', {
           needsSetup: data.needsSetup,

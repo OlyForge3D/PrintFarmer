@@ -1,7 +1,16 @@
 import { useEffect, useState } from 'react';
 import { QueryClient, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { apiClient } from '@/services/api';
+import {
+  getAutoDispatchStatus,
+  setAutoDispatchEnabled,
+  setAutoDispatchGlobalEnabled,
+  confirmAutoDispatchReady,
+  acknowledgeBedClearAndStart,
+  skipAutoDispatchJob,
+  cancelAutoDispatch,
+  preClearAutoDispatchBed,
+} from '@/services/api/autoDispatchApi';
 import { printerSignalRService } from '@/services/printer-signalr';
 import {
   mutationErrorMessage,
@@ -53,7 +62,7 @@ let inflightGlobalStatusRequest: Promise<AutoDispatchGlobalStatus> | null = null
 
 function fetchAutoDispatchGlobalStatus(): Promise<AutoDispatchGlobalStatus> {
   if (!inflightGlobalStatusRequest) {
-    const request: Promise<AutoDispatchGlobalStatus> = apiClient.getAutoDispatchStatus().finally(() => {
+    const request: Promise<AutoDispatchGlobalStatus> = getAutoDispatchStatus().finally(() => {
       // Only clear the guard if it still points at *this* request. A forced
       // refresh (see resetAutoDispatchGlobalStatusInFlight below) may have
       // already replaced it with a newer in-flight request by the time this
@@ -301,7 +310,7 @@ export function useSetAutoDispatchEnabled() {
       dispatchStateETag: string;
       printerETag: string;
     }) => {
-      await apiClient.setAutoDispatchEnabled(
+      await setAutoDispatchEnabled(
         printerId,
         enabled,
         dispatchStateETag,
@@ -360,7 +369,7 @@ export function useSetAllAutoDispatchEnabled() {
       enabled: boolean;
       statuses: AutoDispatchStatus[];
     }) => {
-      await apiClient.setAutoDispatchGlobalEnabled(enabled, statuses);
+      await setAutoDispatchGlobalEnabled(enabled, statuses);
     },
     onSuccess: () => {
       resetAutoDispatchGlobalStatusInFlight();
@@ -386,14 +395,14 @@ export function useConfirmBedClear() {
         return {
           kind: 'standard',
           result: confirmFilamentOverride
-            ? await apiClient.confirmAutoDispatchReady(
+            ? await confirmAutoDispatchReady(
                 status.printerId,
                 dispatchStateETag,
                 true,
                 variables.overrideJobETag,
                 variables.filamentCheckETag
               )
-            : await apiClient.confirmAutoDispatchReady(
+            : await confirmAutoDispatchReady(
                 status.printerId,
                 dispatchStateETag
               ),
@@ -403,7 +412,7 @@ export function useConfirmBedClear() {
       const jobETag = requireStatusEtag(status.nextJobETag, 'Job ETag');
       if (!jobId) throw new Error('The exact calibration job is unavailable.');
       const result =
-        await apiClient.acknowledgeBedClearAndStart({
+        await acknowledgeBedClearAndStart({
           jobId,
           printerId: status.printerId,
           jobETag,
@@ -558,7 +567,7 @@ export function useSkipNextJob() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (status: AutoDispatchStatus) => {
-      await apiClient.skipAutoDispatchJob(
+      await skipAutoDispatchJob(
         status.printerId,
         requireStatusEtag(status.dispatchStateETag, 'Dispatch-state ETag'),
         requireStatusEtag(status.nextJobETag, 'Job ETag')
@@ -578,7 +587,7 @@ export function useCancelAutoDispatch() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (status: AutoDispatchStatus) => {
-      await apiClient.cancelAutoDispatch(
+      await cancelAutoDispatch(
         status.printerId,
         requireStatusEtag(status.dispatchStateETag, 'Dispatch-state ETag')
       );
@@ -597,7 +606,7 @@ export function usePreClearBed() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (status: AutoDispatchStatus) =>
-      apiClient.preClearAutoDispatchBed(
+      preClearAutoDispatchBed(
         status.printerId,
         requireStatusEtag(status.dispatchStateETag, 'Dispatch-state ETag')
       ),

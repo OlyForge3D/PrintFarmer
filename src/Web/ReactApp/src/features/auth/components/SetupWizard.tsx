@@ -4,11 +4,12 @@ import { AccountIcon, EmailIcon, LockIcon, EyeIcon, EyeOffIcon, CheckCircleIcon,
 import { useSpoolman as useSpoolmanContext } from '@/contexts/SpoolmanHooks';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { Button } from '@/common/components/ui';
-import { useHealthStatus } from '@/common/hooks/useApi';
+import { useHealthStatus } from '@/common/hooks/useHealthStatus';
 import { useSpoolmanNetworkScan } from '@/common/hooks/useSpoolmanNetworkScan';
 import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/common/utils/validation';
 import { isApiError } from '@/common/utils/apiErrors';
-import { apiClient } from '@/services/api';
+import { getSetupBootstrap, getSetupStatus, createInitialAdmin, testSpoolmanConnection, saveSpoolmanConfig } from '@/services/api/setupApi';
+import { fetchSettingsValues, saveSettingsValues } from '@/services/settingsApi';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 
 // Move password policy outside component to prevent unnecessary re-renders
@@ -107,7 +108,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   useEffect(() => {
     // The unified settings API expects the AppSetting "key" (AppSettingAttribute.Key),
     // which for NetworkDiscovery is "NetworkDiscovery" (not the class name).
-    apiClient.getSettings<import("@/types/NetworkDiscoverySettings").NetworkDiscoverySettings>('NetworkDiscovery')
+    fetchSettingsValues<import("@/types/NetworkDiscoverySettings").NetworkDiscoverySettings>('NetworkDiscovery')
       .then(settings => setNetworkDiscoverySettings(settings))
       .catch(() => {
         // fallback to server canonical defaults if fetch fails
@@ -149,7 +150,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     const controller = new AbortController();
     let active = true;
 
-    apiClient.getSetupBootstrap(controller.signal)
+    getSetupBootstrap(controller.signal)
       .then(bootstrap => {
         if (active && bootstrap.baseUrl && !spoolmanUrlChangedRef.current) {
           setSpoolmanUrl(bootstrap.baseUrl);
@@ -244,7 +245,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
   const checkSetupStatus = async () => {
     try {
-      const data = await apiClient.getSetupStatus() as { needsSetup: boolean };
+      const data = await getSetupStatus() as { needsSetup: boolean };
       setNeedsSetup(data.needsSetup);
     } catch (err) {
       setGlobalError('Error checking setup status');
@@ -268,7 +269,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     if (isAuthenticated) return;
 
     if (!adminCreated) {
-      const result = await apiClient.createInitialAdmin({
+      const result = await createInitialAdmin({
         username: formData.username,
         email: formData.email,
         password: formData.password,
@@ -343,7 +344,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         setSpoolmanTestResult('URL must start with http:// or https://');
         return;
       }
-      const data = (await apiClient.testSpoolmanConnection(normalized)) as unknown as { success?: boolean; version?: string; endpointTried?: string; errorCategory?: string; message?: string };
+      const data = (await testSpoolmanConnection(normalized)) as unknown as { success?: boolean; version?: string; endpointTried?: string; errorCategory?: string; message?: string };
       if (data.success) {
         setSpoolmanTestOk(true);
         const parts: string[] = ['Reachable'];
@@ -419,7 +420,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         ...networkDiscoverySettings,
         discoverySubnets: networkDiscoverySettings.discoverySubnets.filter((r: string) => r.trim()).map((r: string) => r.trim()),
       };
-  await apiClient.saveSettings('NetworkDiscovery', netPayload);
+  await saveSettingsValues('NetworkDiscovery', netPayload);
 
       // 3. Spoolman config (optional)
         if (spoolmanEnabled && spoolmanUrl) {
@@ -429,7 +430,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           if (win.PrintFarmerDebug?.setupWizard) {
             console.log('[SetupWizard] JWT token before Spoolman config request:', token);
           }
-        await apiClient.saveSpoolmanConfig({ baseUrl: normalized });
+        await saveSpoolmanConfig({ baseUrl: normalized });
         // Keep localStorage synchronized so Settings page reflects wizard-entered value immediately
         localStorage.setItem('spoolman-base-url', normalized);
       }

@@ -7,10 +7,8 @@ vi.mock('@/common/hooks/useUnifiedLogging', () => ({
   useUnifiedLogging: () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }),
 }));
 
-vi.mock('@/services/api', () => ({
-  apiClient: {
-    getSetupStatus: vi.fn().mockResolvedValue({ needsSetup: false }),
-  },
+vi.mock('@/services/api/setupApi', () => ({
+  getSetupStatus: vi.fn().mockResolvedValue({ needsSetup: false }),
 }));
 
 vi.mock('@/services/assetService', () => ({

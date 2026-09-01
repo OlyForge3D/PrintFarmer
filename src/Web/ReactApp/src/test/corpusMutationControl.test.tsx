@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { loadWireContractFixture } from '@/test/wireContracts';
 import { tasksApi, isKnownTaskType, type UserTask } from '@/services/tasksApi';
-import { apiClient } from '@/services/api';
+import { client } from '@/services/api/httpClient';
 import { useAdminOverview } from '@/features/admin/hooks/useAdminOverview';
 import type { AdminOverviewDto, SubsystemHealthDto } from '@/types/adminOverview';
 
@@ -38,11 +38,11 @@ import type { AdminOverviewDto, SubsystemHealthDto } from '@/types/adminOverview
 // consumes.
 // -----------------------------------------------------------------------------
 
-vi.mock('@/services/api', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/services/api')>();
+vi.mock('@/services/api/httpClient', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/api/httpClient')>();
   return {
     ...actual,
-    apiClient: {
+    client: {
       get: vi.fn(),
       post: vi.fn(),
     },
@@ -79,7 +79,7 @@ describe('Mutation-control (#2240): corpus-driven tests must fail on wire-contra
     const { title, ...rest } = fixture;
     const mutated = { ...rest, taskTitle: title } as unknown as UserTask;
 
-    vi.mocked(apiClient.get).mockResolvedValue({ data: [mutated] });
+    vi.mocked(client.get).mockResolvedValue({ data: [mutated] });
 
     const [result] = await tasksApi.getPendingTasks();
 
@@ -121,7 +121,7 @@ describe('Mutation-control (#2240): corpus-driven tests must fail on wire-contra
       ...fixture,
       subsystems: null as unknown as SubsystemHealthDto[],
     };
-    vi.mocked(apiClient.get).mockResolvedValue({ data: mutated });
+    vi.mocked(client.get).mockResolvedValue({ data: mutated });
 
     const { result } = renderHook(() => useAdminOverview(), {
       wrapper: makeWrapper(makeClient()),

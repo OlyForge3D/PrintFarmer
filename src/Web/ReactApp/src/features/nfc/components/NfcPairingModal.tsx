@@ -6,7 +6,7 @@ import { Button } from '@/common/components/ui/Button';
 import { Input } from '@/common/components/ui/Input';
 import { Spinner } from '@/common/components/ui/Spinner';
 import { Badge } from '@/common/components/ui/Badge';
-import { apiClient } from '@/services/api';
+import { linkNfcTag, getSpools } from '@/services/api/nfcApi';
 import type { SpoolmanSpool } from '@/types/api';
 import type {
   NfcTagUnknownEvent,
@@ -20,10 +20,6 @@ interface NfcPairingModalProps {
   session: NfcPairingSession;
 }
 
-async function linkNfcTag(request: NfcLinkRequest): Promise<NfcLinkResponse> {
-  const response = await apiClient.client.post('/nfc/link', request);
-  return response.data as NfcLinkResponse;
-}
 
 export function NfcPairingModal({ session }: NfcPairingModalProps) {
   const { isOpen, tagEvent: event, isUnavailable, close: onClose } = session;
@@ -77,7 +73,7 @@ export function NfcPairingModal({ session }: NfcPairingModalProps) {
 
   const { data: spoolsData, isLoading: spoolsLoading } = useQuery({
     queryKey: ['spoolman-spools-nfc-search', searchQuery],
-    queryFn: () => apiClient.getSpools({ search: searchQuery || undefined, limit: 50 }),
+    queryFn: () => getSpools({ search: searchQuery || undefined, limit: 50 }),
     enabled: isOpen && step === 'search',
   });
 

@@ -5,7 +5,7 @@ import {
   LogLevel
 } from '@microsoft/signalr';
 import { HarvestUpdateDto, JobQueueUpdateDto, PrinterStatusUpdate } from '@/types/api';
-import { apiClient } from '@/services/api';
+import { fetchSettingsValues } from '@/services/settingsApi';
 import {
   getHubUrl,
   getSignalRAccessToken,
@@ -194,7 +194,7 @@ export class SignalRService {
     const generation = ++this.settingsLoadGeneration;
     let nextSettings: { logLevel: string; consoleLoggingEnabled: boolean };
     try {
-      nextSettings = await apiClient.getSettings<{ logLevel: string; consoleLoggingEnabled: boolean }>('SignalR');
+      nextSettings = await fetchSettingsValues<{ logLevel: string; consoleLoggingEnabled: boolean }>('SignalR');
     } catch (error) {
       if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
         console.warn('Failed to load SignalR settings, using defaults:', error);

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { apiClient } from '@/services/api';
+import { scanNetworkForSpoolman } from '@/services/api/setupApi';
 import type { SpoolmanDiscoveryResult } from '@/types/api';
 
 export function useSpoolmanNetworkScan() {
@@ -17,7 +17,7 @@ export function useSpoolmanNetworkScan() {
 
     try {
       if (window.PrintFarmerDebug?.spoolman) { console.debug('[useSpoolmanNetworkScan] starting scanNetwork'); }
-      const discoveredInstances = await apiClient.scanNetworkForSpoolman();
+      const discoveredInstances = await scanNetworkForSpoolman();
       if (window.PrintFarmerDebug?.spoolman) { console.debug('[useSpoolmanNetworkScan] scanNetwork result:', discoveredInstances); }
       setResults(discoveredInstances);
       if (!discoveredInstances || discoveredInstances.length === 0) {

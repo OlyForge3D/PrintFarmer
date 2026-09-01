@@ -11,10 +11,8 @@ const apiTestState = vi.hoisted(() => ({
   getSlicers: vi.fn(),
 }));
 
-vi.mock('@/services/api', () => ({
-  apiClient: {
-    getSettings: apiTestState.getSettings,
-  },
+vi.mock('@/services/settingsApi', () => ({
+  fetchSettingsValues: apiTestState.getSettings,
 }));
 
 vi.mock('@/services/slicerRegistry', () => ({

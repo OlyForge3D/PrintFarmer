@@ -15,8 +15,8 @@ import type { AdminOverviewDto } from '@/types/adminOverview';
  * success the heading must always be present.
  */
 
-vi.mock('@/services/api', () => ({
-  apiClient: { get: vi.fn() },
+vi.mock('@/services/api/httpClient', () => ({
+  client: { get: vi.fn() },
 }));
 
 vi.mock('@/features/auth/hooks/useAuth', () => ({
@@ -44,10 +44,10 @@ vi.mock('@/common/components/PageTemplate', () => ({
   ),
 }));
 
-import { apiClient } from '@/services/api';
+import { client } from '@/services/api/httpClient';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 
-const mockedApiGet = vi.mocked(apiClient.get);
+const mockedApiGet = vi.mocked(client.get);
 const mockedUseAuth = vi.mocked(useAuth);
 
 function makeOverview(overrides: Partial<AdminOverviewDto> = {}): AdminOverviewDto {

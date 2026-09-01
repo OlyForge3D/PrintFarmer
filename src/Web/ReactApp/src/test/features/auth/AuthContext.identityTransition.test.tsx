@@ -44,12 +44,15 @@ vi.mock('@/services/passkeyService', () => ({
   loginWithPasskey: passkeyTestState.login,
 }));
 
+vi.mock('@/services/api/authApi', () => ({
+  getCurrentUser: vi.fn().mockRejectedValue(new Error('no session')),
+  login: vi.fn(),
+  logout: vi.fn().mockResolvedValue(undefined),
+  register: vi.fn(),
+}));
+
 vi.mock('@/services/api', () => ({
   apiClient: {
-    getCurrentUser: vi.fn().mockRejectedValue(new Error('no session')),
-    login: vi.fn(),
-    logout: vi.fn().mockResolvedValue(undefined),
-    register: vi.fn(),
     getNotificationPreferences: vi.fn(),
     updateNotificationPreferences: vi.fn(),
     get: vi.fn(),
@@ -58,6 +61,7 @@ vi.mock('@/services/api', () => ({
 }));
 
 import { apiClient } from '@/services/api';
+import { getCurrentUser, login, logout, register } from '@/services/api/authApi';
 
 const USER_A: UserDto = {
   id: 'user-a',
@@ -168,9 +172,9 @@ describe('Identity transition cache isolation (#762)', () => {
     localStorage.clear();
     queryClient.clear();
     signalRSessionTestState.reset.mockResolvedValue(undefined);
-    vi.mocked(apiClient.getCurrentUser).mockRejectedValue(new Error('no session'));
-    vi.mocked(apiClient.logout).mockResolvedValue(undefined);
-    vi.mocked(apiClient.register).mockResolvedValue({
+    vi.mocked(getCurrentUser).mockRejectedValue(new Error('no session'));
+    vi.mocked(logout).mockResolvedValue(undefined);
+    vi.mocked(register).mockResolvedValue({
       success: true,
       token: 'token-a',
       user: USER_A,
@@ -180,7 +184,7 @@ describe('Identity transition cache isolation (#762)', () => {
       token: 'token-a',
       user: USER_A,
     });
-    vi.mocked(apiClient.login).mockImplementation(async (credentials): Promise<AuthenticationResult> => {
+    vi.mocked(login).mockImplementation(async (credentials): Promise<AuthenticationResult> => {
       if (credentials.username === 'alice') {
         return { success: true, token: 'token-a', user: USER_A };
       }
@@ -204,7 +208,7 @@ describe('Identity transition cache isolation (#762)', () => {
     validationError,
   ) => {
     localStorage.setItem('auth-token', 'token-a');
-    vi.mocked(apiClient.getCurrentUser).mockRejectedValueOnce(validationError);
+    vi.mocked(getCurrentUser).mockRejectedValueOnce(validationError);
 
     renderHarness();
 
@@ -304,9 +308,9 @@ describe('Identity transition cache isolation (#762)', () => {
     await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-a'));
 
     signalRSessionTestState.reset.mockClear();
-    vi.mocked(apiClient.getCurrentUser).mockClear();
+    vi.mocked(getCurrentUser).mockClear();
     let resolveUserB: (user: UserDto) => void = () => {};
-    vi.mocked(apiClient.getCurrentUser).mockImplementation(
+    vi.mocked(getCurrentUser).mockImplementation(
       () => new Promise(resolve => { resolveUserB = resolve; }),
     );
     queryClient.setQueryData(['notifications', 'preferences'], prefsFor('user-a'));
@@ -329,7 +333,7 @@ describe('Identity transition cache isolation (#762)', () => {
     });
     await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-b'));
     expect(signalRSessionTestState.reset.mock.invocationCallOrder[0])
-      .toBeLessThan(vi.mocked(apiClient.getCurrentUser).mock.invocationCallOrder[0]);
+      .toBeLessThan(vi.mocked(getCurrentUser).mock.invocationCallOrder[0]);
 
     await act(async () => {
       localStorage.removeItem('auth-token');
@@ -349,7 +353,7 @@ describe('Identity transition cache isolation (#762)', () => {
     renderHarness();
     await waitFor(() => expect(screen.queryByTestId('auth-loading')).toBeNull());
 
-    vi.mocked(apiClient.getCurrentUser).mockResolvedValueOnce(USER_B);
+    vi.mocked(getCurrentUser).mockResolvedValueOnce(USER_B);
     const sessionEstablished = vi.fn();
     window.addEventListener(AUTH_SESSION_ESTABLISHED_EVENT, sessionEstablished);
 
@@ -369,12 +373,12 @@ describe('Identity transition cache isolation (#762)', () => {
 
   it('does not let initial token validation overwrite a newer cross-tab identity', async () => {
     let resolveInitialUser: (user: UserDto) => void = () => {};
-    vi.mocked(apiClient.getCurrentUser)
+    vi.mocked(getCurrentUser)
       .mockImplementationOnce(() => new Promise(resolve => { resolveInitialUser = resolve; }))
       .mockResolvedValueOnce(USER_B);
     localStorage.setItem('auth-token', 'token-a');
     renderHarness();
-    await waitFor(() => expect(apiClient.getCurrentUser).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getCurrentUser).toHaveBeenCalledTimes(1));
 
     await act(async () => {
       localStorage.setItem('auth-token', 'token-b');
@@ -397,10 +401,10 @@ describe('Identity transition cache isolation (#762)', () => {
   it('does not let a delayed explicit login overwrite or finish a newer cross-tab transition', async () => {
     let resolveLoginA: (result: AuthenticationResult) => void = () => {};
     let resolveUserB: (user: UserDto) => void = () => {};
-    vi.mocked(apiClient.login).mockImplementationOnce(
+    vi.mocked(login).mockImplementationOnce(
       () => new Promise(resolve => { resolveLoginA = resolve; }),
     );
-    vi.mocked(apiClient.getCurrentUser).mockImplementationOnce(
+    vi.mocked(getCurrentUser).mockImplementationOnce(
       () => new Promise(resolve => { resolveUserB = resolve; }),
     );
     renderHarness();
@@ -418,7 +422,7 @@ describe('Identity transition cache isolation (#762)', () => {
         newValue: 'token-b',
       }));
     });
-    await waitFor(() => expect(apiClient.getCurrentUser).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(getCurrentUser).toHaveBeenCalledTimes(1));
 
     await act(async () => {
       resolveLoginA({ success: true, token: 'token-a', user: USER_A });
@@ -439,13 +443,13 @@ describe('Identity transition cache isolation (#762)', () => {
     let resolveLogin: (result: AuthenticationResult) => void = () => {};
     let resolvePasskey: (result: AuthenticationResult) => void = () => {};
     let resolveRegistration: (result: AuthenticationResult) => void = () => {};
-    vi.mocked(apiClient.login).mockImplementationOnce(
+    vi.mocked(login).mockImplementationOnce(
       () => new Promise(resolve => { resolveLogin = resolve; }),
     );
     passkeyTestState.login.mockImplementationOnce(
       () => new Promise(resolve => { resolvePasskey = resolve; }),
     );
-    vi.mocked(apiClient.register).mockImplementationOnce(
+    vi.mocked(register).mockImplementationOnce(
       () => new Promise(resolve => { resolveRegistration = resolve; }),
     );
     renderHarness();
@@ -478,7 +482,7 @@ describe('Identity transition cache isolation (#762)', () => {
 
   it('does not let a delayed logout remove a newer explicit login', async () => {
     let resolveLogout: () => void = () => {};
-    vi.mocked(apiClient.logout).mockImplementationOnce(
+    vi.mocked(logout).mockImplementationOnce(
       () => new Promise<void>(resolve => { resolveLogout = resolve; }),
     );
     renderHarness();
@@ -491,7 +495,7 @@ describe('Identity transition cache isolation (#762)', () => {
     await act(async () => {
       screen.getByRole('button', { name: 'logout' }).click();
     });
-    await waitFor(() => expect(apiClient.logout).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
     await act(async () => {
       screen.getByRole('button', { name: 'login-b' }).click();
     });
@@ -521,7 +525,7 @@ describe('Identity transition cache isolation (#762)', () => {
     });
     await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-a'));
 
-    vi.mocked(apiClient.getCurrentUser).mockRejectedValueOnce(validationError);
+    vi.mocked(getCurrentUser).mockRejectedValueOnce(validationError);
     await act(async () => {
       localStorage.setItem('auth-token', 'token-b');
       window.dispatchEvent(new StorageEvent('storage', {
@@ -545,7 +549,7 @@ describe('Identity transition cache isolation (#762)', () => {
     });
     await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-a'));
 
-    vi.mocked(apiClient.getCurrentUser).mockImplementationOnce(async () => {
+    vi.mocked(getCurrentUser).mockImplementationOnce(async () => {
       if (localStorage.getItem('auth-token') === 'token-b') {
         localStorage.removeItem('auth-token');
         notifyAuthenticationExpired();

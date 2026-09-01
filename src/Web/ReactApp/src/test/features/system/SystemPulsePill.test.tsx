@@ -13,10 +13,8 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: vi.fn(),
 }));
 
-vi.mock('@/services/api', () => ({
-  apiClient: {
-    getSystemInfo: vi.fn(),
-  },
+vi.mock('@/services/api/systemApi', () => ({
+  getSystemInfo: vi.fn(),
 }));
 
 const useQueryMock = vi.mocked(useQuery);

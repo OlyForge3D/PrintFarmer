@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import { EmailIcon, ArrowLeftIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogo } from '@/common/components/PrintFarmerLogo';
 import { Button, Input, FormField  } from '@/common/components/ui';
-import { apiClient } from '@/services/api';
+import { forgotPassword } from '@/services/api/authApi';
 
 export function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -20,7 +20,7 @@ export function ForgotPasswordPage() {
     setIsLoading(true);
 
     try {
-      const response = await apiClient.forgotPassword(email);
+      const response = await forgotPassword(email);
       
       if (response.success) {
         setSuccess(true);

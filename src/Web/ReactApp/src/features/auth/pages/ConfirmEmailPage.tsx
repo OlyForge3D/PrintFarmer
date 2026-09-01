@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { Button } from '@/common/components/ui';
-import { apiClient } from '@/services/api';
+import { confirmEmail } from '@/services/api/authApi';
 
 export function ConfirmEmailPage() {
   const [searchParams] = useSearchParams();
@@ -10,7 +10,7 @@ export function ConfirmEmailPage() {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    const confirmEmail = async () => {
+    const runConfirmation = async () => {
       const token = searchParams.get('token');
       
       if (!token) {
@@ -20,7 +20,7 @@ export function ConfirmEmailPage() {
       }
 
       try {
-        const result = await apiClient.confirmEmail(token);
+        const result = await confirmEmail(token);
         
         if (result.success) {
           setStatus('success');
@@ -38,7 +38,7 @@ export function ConfirmEmailPage() {
       }
     };
 
-    confirmEmail();
+    runConfirmation();
   }, [searchParams]);
 
   return (

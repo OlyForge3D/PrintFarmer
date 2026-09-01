@@ -14,7 +14,7 @@
  */
 import { useCallback } from 'react';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import { apiClient } from '@/services/api';
+import { getPrinterQueueSummaries } from '@/services/api/queueSummariesApi';
 import type { PrinterQueueSummaryDto } from '@/types/api';
 
 /** Matches the previous per-card job-queue polling cadence (30s refetch). */
@@ -24,7 +24,7 @@ const QUEUE_SUMMARIES_REFETCH_MS = 30_000;
 export const queueSummariesFleetQueryKey = ['queue-summaries', 'fleet'] as const;
 
 async function fetchFleetQueueSummaries(signal?: AbortSignal): Promise<PrinterQueueSummaryDto[]> {
-  return apiClient.getPrinterQueueSummaries(signal);
+  return getPrinterQueueSummaries(signal);
 }
 
 /**

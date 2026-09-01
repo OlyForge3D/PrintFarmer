@@ -10,6 +10,7 @@ import { AxiosError } from 'axios';
 import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import { ApiClient } from '@/services/api';
 import type { PfRequestConfig } from '@/services/api';
+import { login } from '@/services/api/authApi';
 
 const signalRSessionTestState = vi.hoisted(() => ({
   reset: vi.fn().mockResolvedValue(undefined),
@@ -95,7 +96,7 @@ describe('ApiClient — 401 response interceptor', () => {
     localStorage.setItem('auth-token', 'current-identity-token');
     const removeItemSpy = vi.spyOn(localStorage, 'removeItem');
 
-    await expect(client.login({
+    await expect(login({
       username: 'different-user',
       password: 'invalid-password',
     })).rejects.toMatchObject({ statusCode: 401 });
