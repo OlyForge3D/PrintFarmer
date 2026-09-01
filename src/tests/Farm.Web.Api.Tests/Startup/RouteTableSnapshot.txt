@@ -408,6 +408,7 @@ GET /api/slicer/profiles/families/{familyId:guid} -> Farm.Slicer.Module.Api::Far
 GET /api/slicer/profiles/filament/templates -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.GetFilamentTemplatesAsync
 GET /api/slicer/profiles/hierarchy -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.ListHierarchyAsync
 GET /api/slicer/profiles/imported-names/{modelId:guid} -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.GetImportedProfileNamesAsync
+GET /api/slicer/profiles/library-hierarchy -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.GetLibraryProfilesHierarchyAsync
 GET /api/slicer/profiles/machine/for-model/{modelId:guid} -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.GetMachineProfilesForModelIdAsync
 GET /api/slicer/profiles/machine/{manufacturer}/{model} -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.GetMachineProfilesForModelAsync
 GET /api/slicer/profiles/schema/filament -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.GetFilamentSchema
@@ -755,6 +756,7 @@ POST /api/slicer/profiles/import -> Farm.Slicer.Module.Api::Farm.Slicer.Module.A
 POST /api/slicer/profiles/import-selected-for-model/{modelId:guid} -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.ImportSelectedProfilesForModelAsync
 POST /api/slicer/profiles/import/orca -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.ImportOrcaBundleAsync
 POST /api/slicer/profiles/import/orca/preview -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.PreviewOrcaBundle
+POST /api/slicer/profiles/maintenance/backfill-manufacturer -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.BackfillManufacturerAsync
 POST /api/slicer/profiles/process/for-machines -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.GetProcessProfilesForMachinesAsync
 POST /api/slicer/profiles/promote-from-calibration -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.PromoteCalibrationDraftProfileAsync
 POST /api/slicer/profiles/resolve-for-model/{modelId:guid} -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Slicing.ProfilesController.ResolveProfileForModelAsync

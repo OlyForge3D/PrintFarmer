@@ -26,7 +26,14 @@ import { ProfileEditorModal, type ProfileType } from '@/features/slicer/componen
 import { ProcessProfileEditorModal } from '@/features/slicer/components/ProcessProfileEditorModal';
 import { MachineProfileSelectorModal, type MachineProfileChoice } from '@/features/slicer/components/job/MachineProfileSelectorModal';
 import { CreateProfileFamilyModal } from '@/features/slicer/components/profile-family/CreateProfileFamilyModal';
-import { buildMachineProfileLabels, isProcessProfileCoreOneVariantCompatible, resolveHighFlow } from '@/features/slicer/utils/machineProfileLabels';
+import { buildMachineProfileLabels, resolveHighFlow } from '@/features/slicer/utils/machineProfileLabels';
+import {
+  filterCustomMachineProfiles,
+  filterCustomProcessProfiles,
+  isProcessProfileCompatibleWithMachine,
+  mergeCustomProfilesIntoVisibleList,
+  useMachineCompatibleProfiles,
+} from '@/features/slicer/hooks/useMachineCompatibleProfiles';
 import { buildSlicerProfileJson } from '@/features/slicer/utils/slicerProfilePayload';
 import {
   SlicerSettingsPanel,
@@ -39,11 +46,6 @@ import { orcaToSimpleSettings, simpleToOrcaSettings } from './simpleSlicerMappin
 import { FilamentProfileDropdown, FILTER_STORAGE_KEY, type FilamentFilterConfig } from '../components/CascadingMenuDropdown';
 import { getPrimaryNozzleDiameter } from '../utils/profileMatcher';
 import { isMultiToolhead, getPhysicalToolheads } from '../utils/profileMatcher';
-import {
-  classifyCustomProfileScope,
-  legacyMachineProfileMatchesPrinter,
-  legacyProcessProfileMatchesMachine,
-} from '../utils/customProfileScoping';
 import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
 import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
@@ -1043,20 +1045,18 @@ export const NewSliceJobPage: React.FC = () => {
     return [selectedMachineProfile.name];
   }, [selectedMachineProfile]);
 
-  // Fetch filament profiles compatible with selected machine
-  const { data: filamentProfilesData = [], isLoading: isFilamentProfilesLoading } = useQuery<OrcaFilamentProfile[]>({
-    queryKey: ['filamentProfilesForMachines', selectedMachineNames, selectedEngineVersion ?? latestAvailableForEngine ?? null],
-    queryFn: () => slicerProfilesService.getFilamentProfilesForMachines(selectedMachineNames, selectedEngineVersion ?? latestAvailableForEngine),
+  const {
+    filamentProfilesQuery: {
+      data: filamentProfilesData = [],
+      isLoading: isFilamentProfilesLoading,
+    },
+    processProfilesQuery: {
+      data: processProfilesData = [],
+      isLoading: isProcessProfilesLoading,
+    },
+  } = useMachineCompatibleProfiles(selectedMachineNames, {
     enabled: selectedMachineNames.length > 0,
-    staleTime: 30_000
-  });
-
-  // Fetch process profiles compatible with selected machine
-  const { data: processProfilesData = [], isLoading: isProcessProfilesLoading } = useQuery<OrcaProcessProfile[]>({
-    queryKey: ['processProfilesForMachines', selectedMachineNames, selectedEngineVersion ?? latestAvailableForEngine ?? null],
-    queryFn: () => slicerProfilesService.getProcessProfilesForMachines(selectedMachineNames, selectedEngineVersion ?? latestAvailableForEngine),
-    enabled: selectedMachineNames.length > 0,
-    staleTime: 30_000
+    engineVersion: selectedEngineVersion ?? latestAvailableForEngine,
   });
 
   // Filter custom profiles by type for each selector.
@@ -1065,18 +1065,12 @@ export const NewSliceJobPage: React.FC = () => {
   // back to fuzzy manufacturer/model matching so they remain usable.
   const customMachineProfiles = useMemo(() => {
     const allCustomMachine = customProfilesData?.profiles?.filter(p => p.profileType === 'machine') ?? [];
-    if (allCustomMachine.length === 0) return allCustomMachine;
-    return allCustomMachine.filter(p => {
-      const scope = classifyCustomProfileScope(p, selectedPrinterModelId);
-      if (scope === 'match') return true;
-      if (scope === 'mismatch') return false;
-      // Unscoped legacy profile — fall back to fuzzy printer matching.
-      return legacyMachineProfileMatchesPrinter(
-        p,
-        selectedPrinterForSlicing?.manufacturerName,
-        selectedPrinterForSlicing?.modelName,
-      );
-    });
+    return filterCustomMachineProfiles(
+      allCustomMachine,
+      selectedPrinterModelId,
+      selectedPrinterForSlicing?.manufacturerName,
+      selectedPrinterForSlicing?.modelName,
+    );
   }, [customProfilesData, selectedPrinterForSlicing, selectedPrinterModelId]);
 
   // Filament profiles filtered by selected machine profile compatibility
@@ -1102,14 +1096,11 @@ export const NewSliceJobPage: React.FC = () => {
   // back to compatible_printers matching against the selected machine profile.
   const customProcessProfiles = useMemo(() => {
     const allCustomProcess = customProfilesData?.profiles?.filter(p => p.profileType === 'process') ?? [];
-    if (allCustomProcess.length === 0) return allCustomProcess;
-    return allCustomProcess.filter(p => {
-      const scope = classifyCustomProfileScope(p, selectedPrinterModelId);
-      if (scope === 'match') return true;
-      if (scope === 'mismatch') return false;
-      // Unscoped legacy profile — fall back to compatible_printers matching.
-      return legacyProcessProfileMatchesMachine(p, selectedMachineProfileId);
-    });
+    return filterCustomProcessProfiles(
+      allCustomProcess,
+      selectedPrinterModelId,
+      selectedMachineProfileId,
+    );
   }, [customProfilesData, selectedPrinterModelId, selectedMachineProfileId]);
 
 
@@ -1239,38 +1230,8 @@ export const NewSliceJobPage: React.FC = () => {
   // Apply machine compatibility guards and sort each group by layer height (smallest -> largest).
   const processProfilesBySource = useMemo(() => {
     const profiles = processProfilesData ?? [];
-    const selectedMachineName = selectedMachineProfile?.name ?? '';
-    const selectedMachineLower = selectedMachineName.toLowerCase();
-    const selectedIsHighFlow = resolveHighFlow(selectedMachineProfile?.isHighFlowNozzle, selectedMachineName);
-
-    const filtered = profiles.filter((profile) => {
-      const compatiblePrinters = Array.isArray(profile.compatible_printers)
-        ? profile.compatible_printers
-        : [];
-
-      // Guard 1: Compatible printer names must include the selected machine when provided.
-      if (selectedMachineName && compatiblePrinters.length > 0) {
-        const compatible = compatiblePrinters.some((printerName) => printerName === selectedMachineName);
-        if (!compatible) {
-          return false;
-        }
-      }
-
-      // Guard 2: Avoid mixing HF and non-HF variants for the same machine family.
-      // Apply this guard only when this is the same machine family (CORE One) and
-      // the machine selection explicitly indicates HF/non-HF variant intent.
-      // A profile whose `compatible_printers` explicitly lists BOTH variants is
-      // dual-compatible and must pass regardless of selection — see
-      // isProcessProfileCoreOneVariantCompatible for why this can't be decided
-      // by joining the whole compatible_printers list into one string.
-      if (selectedMachineLower.includes('core one')) {
-        if (!isProcessProfileCoreOneVariantCompatible(profile.name, compatiblePrinters, selectedIsHighFlow)) {
-          return false;
-        }
-      }
-
-      return true;
-    });
+    const filtered = profiles.filter((profile) =>
+      isProcessProfileCompatibleWithMachine(profile, selectedMachineProfile));
 
     const user: typeof profiles = [];
     const system: typeof profiles = [];
@@ -1311,6 +1272,14 @@ export const NewSliceJobPage: React.FC = () => {
 
     return '';
   }, [customProcessProfiles, processProfilesBySource]);
+
+  const visibleProcessProfiles = useMemo(
+    () => mergeCustomProfilesIntoVisibleList(
+      [...processProfilesBySource.user, ...processProfilesBySource.system],
+      customProcessProfiles,
+    ),
+    [customProcessProfiles, processProfilesBySource],
+  );
 
   useEffect(() => {
     const optionValues = nozzleOptions.map((option) => option.value);
@@ -3018,7 +2987,7 @@ export const NewSliceJobPage: React.FC = () => {
             />
 
             {/* Select + Reset + Save row */}
-            {(processProfilesBySource.user.length > 0 || processProfilesBySource.system.length > 0 || customProcessProfiles.length > 0) ? (
+            {visibleProcessProfiles.length > 0 ? (
               <>
                 <div className="flex gap-1">
                   <Select

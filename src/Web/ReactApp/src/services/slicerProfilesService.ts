@@ -504,8 +504,15 @@ export const slicerProfilesService = {
    * @param engineVersion - Optional OrcaSlicer engine version to route to.
    * @returns Filament profiles compatible with the specified machines
    */
-  async getFilamentProfilesForMachines(machineNames: string[], engineVersion?: string): Promise<OrcaFilamentProfile[]> {
-    const qs = engineVersion ? `?slicerEngineVersion=${encodeURIComponent(engineVersion)}` : '';
+  async getFilamentProfilesForMachines(
+    machineNames: string[],
+    engineVersion?: string,
+    view?: 'summary',
+  ): Promise<OrcaFilamentProfile[]> {
+    const params = new URLSearchParams();
+    if (engineVersion) params.set('slicerEngineVersion', engineVersion);
+    if (view) params.set('view', view);
+    const qs = params.size > 0 ? `?${params.toString()}` : '';
     const res = await apiClient.post<OrcaFilamentProfile[]>(
       `/slicer/profiles/filament/for-machines${qs}`,
       { machineNames } as ForMachinesRequest
@@ -520,8 +527,15 @@ export const slicerProfilesService = {
    * @param engineVersion - Optional OrcaSlicer engine version to route to.
    * @returns Process profiles compatible with the specified machines
    */
-  async getProcessProfilesForMachines(machineNames: string[], engineVersion?: string): Promise<OrcaProcessProfile[]> {
-    const qs = engineVersion ? `?slicerEngineVersion=${encodeURIComponent(engineVersion)}` : '';
+  async getProcessProfilesForMachines(
+    machineNames: string[],
+    engineVersion?: string,
+    view?: 'summary',
+  ): Promise<OrcaProcessProfile[]> {
+    const params = new URLSearchParams();
+    if (engineVersion) params.set('slicerEngineVersion', engineVersion);
+    if (view) params.set('view', view);
+    const qs = params.size > 0 ? `?${params.toString()}` : '';
     const res = await apiClient.post<OrcaProcessProfile[]>(
       `/slicer/profiles/process/for-machines${qs}`,
       { machineNames } as ForMachinesRequest
@@ -607,6 +621,13 @@ export const slicerProfilesService = {
    */
   async getWorkerHierarchy(): Promise<WorkerHierarchyResponse> {
     const res = await apiClient.get<WorkerHierarchyResponse>('/slicer/profiles/worker-hierarchy');
+    return res.data;
+  },
+
+  async getLibraryHierarchy(scope: 'all' | 'catalog'): Promise<WorkerHierarchyResponse> {
+    const res = await apiClient.get<WorkerHierarchyResponse>(
+      `/slicer/profiles/library-hierarchy?scope=${scope}`,
+    );
     return res.data;
   },
 

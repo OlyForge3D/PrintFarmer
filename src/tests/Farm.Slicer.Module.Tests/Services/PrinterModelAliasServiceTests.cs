@@ -116,14 +116,34 @@ public sealed class PrinterModelAliasServiceTests
             SlicerType = "OrcaSlicer",
             CreatedAt = DateTime.UtcNow
         });
+        dbContext.PrinterModelAliases.Add(new PrinterModelAlias
+        {
+            PrinterModelId = modelId,
+            SlicerModelName = "Generic Micron",
+            SlicerType = null,
+            CreatedAt = DateTime.UtcNow
+        });
+        dbContext.PrinterModelAliases.Add(new PrinterModelAlias
+        {
+            PrinterModelId = modelId,
+            SlicerModelName = "Prusa Only",
+            SlicerType = "PrusaSlicer",
+            CreatedAt = DateTime.UtcNow
+        });
         _ = await dbContext.SaveChangesAsync();
 
         var service = new PrinterModelAliasService(dbContext);
 
         Guid? resolved = await service.ResolveModelAliasAsync("micron 180", "orcaslicer");
         await service.EnsureModelAliasAsync(modelId, "MICRON 180", "ORCASLICER");
+        IReadOnlyList<SlicerModelAliasEntry> aliases =
+            await service.ListAliasesAsync("OrcaSlicer");
 
         resolved.Should().Be(modelId);
-        (await dbContext.PrinterModelAliases.CountAsync()).Should().Be(1);
+        (await dbContext.PrinterModelAliases.CountAsync()).Should().Be(3);
+        aliases.Select(alias => alias.SlicerModelName)
+            .Should().Equal("Generic Micron", "Micron 180");
+        (await service.ListAliasesAsync("MissingSlicer"))
+            .Should().ContainSingle(alias => alias.SlicerModelName == "Generic Micron");
     }
 }

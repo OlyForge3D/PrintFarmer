@@ -3,6 +3,7 @@ using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Security;
 using Farm.Slicer.Module.Api.Filters;
+using Farm.Slicer.Module.Api.Services;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
@@ -771,6 +772,63 @@ public class ProfilesController(
             _logger.LogError("Error fetching profiles hierarchy from OrcaSlicer worker: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, "Error fetching profiles from worker");
         }
+    }
+
+    /// <summary>
+    /// Gets the worker profile hierarchy with machine manufacturers attributed from the printer catalog.
+    /// </summary>
+    /// <param name="httpClient">HTTP client for worker communication.</param>
+    /// <param name="scope">Either <c>catalog</c> to keep catalog manufacturers or <c>all</c>.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpGet("library-hierarchy")]
+    [ProducesResponseType(typeof(AllProfilesResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> GetLibraryProfilesHierarchyAsync(
+        [FromServices] HttpClient httpClient,
+        [FromQuery] string scope = "catalog",
+        CancellationToken ct = default)
+    {
+        if (scope is not ("all" or "catalog"))
+        {
+            return BadRequest("scope must be 'all' or 'catalog'");
+        }
+
+        try
+        {
+            AllProfilesResponseDto? profiles =
+                await _profilesService.GetCatalogAttributedWorkerHierarchyAsync(httpClient, scope, ct);
+            return Ok(profiles ?? new AllProfilesResponseDto());
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", LogSanitizer.Sanitize(ex.Message));
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                "Error fetching catalog-attributed profiles from OrcaSlicer worker: {Message}",
+                LogSanitizer.Sanitize(ex.Message));
+            return StatusCode(500, "Error fetching profiles from worker");
+        }
+    }
+
+    /// <summary>
+    /// Repairs legacy custom profile-family manufacturer values from the printer catalog.
+    /// </summary>
+    /// <param name="maintenanceService">Manufacturer maintenance service.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("maintenance/backfill-manufacturer")]
+    [RequirePermission("slicer_engines:admin")]
+    [ProducesResponseType(typeof(ProfileManufacturerBackfillResultDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ProfileManufacturerBackfillResultDto>> BackfillManufacturerAsync(
+        [FromServices] ProfileManufacturerMaintenanceService maintenanceService,
+        CancellationToken ct)
+    {
+        ProfileManufacturerBackfillResultDto result =
+            await maintenanceService.BackfillAsync(ct);
+        return Ok(result);
     }
 
     /// <summary>

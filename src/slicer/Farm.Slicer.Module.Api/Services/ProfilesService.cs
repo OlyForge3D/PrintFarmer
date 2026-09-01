@@ -765,9 +765,7 @@ public class ProfilesService(
                 .Where(p =>
                 {
                     ProcessProfile? ent = processProfiles.FirstOrDefault(x => x.Id == p.Id);
-#pragma warning disable S2589 // Unnecessary check is valid here for logical OR conditions
-                    return ent?.PrinterModelId == null || ent?.PrinterModelId == modelId;
-#pragma warning restore S2589
+                    return ent?.PrinterModelId == modelId;
                 })
                 .ToList();
 
@@ -2386,7 +2384,7 @@ public class ProfilesService(
     /// <returns>AllProfilesResponseDto with profiles organized by manufacturer hierarchy, or null if worker unavailable</returns>
     public async Task<AllProfilesResponseDto?> GetWorkerProfilesHierarchyAsync(HttpClient httpClient, CancellationToken ct)
     {
-        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync(cancellationToken: ct);
         if (string.IsNullOrEmpty(workerUrl))
         {
             throw new HttpRequestException("OrcaSlicer worker not found in registry");
@@ -2468,6 +2466,218 @@ public class ProfilesService(
         }
 
         return filtered;
+    }
+
+    /// <inheritdoc />
+    public async Task<AllProfilesResponseDto?> GetCatalogAttributedWorkerHierarchyAsync(
+        HttpClient httpClient,
+        string scope,
+        CancellationToken ct)
+    {
+        AllProfilesResponseDto? workerHierarchy =
+            await GetWorkerProfilesHierarchyAsync(httpClient, ct);
+        if (workerHierarchy is null)
+        {
+            return null;
+        }
+
+        IReadOnlyList<SlicerModelAliasEntry> aliases =
+            await _aliasService.ListAliasesAsync("OrcaSlicer", ct);
+        (IReadOnlyList<PrinterModelDto> models, _) =
+            await _catalogService.GetModelsAsync(null, ct);
+        (IReadOnlyList<ManufacturerDto> manufacturers, _) =
+            await _catalogService.GetManufacturersAsync(ct);
+
+        Dictionary<Guid, Guid> manufacturerIdByModelId =
+            models.ToDictionary(model => model.Id, model => model.ManufacturerId);
+        Dictionary<Guid, string> manufacturerNameById =
+            manufacturers.ToDictionary(manufacturer => manufacturer.Id, manufacturer => manufacturer.Name);
+        Dictionary<string, string> manufacturerByAlias =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (SlicerModelAliasEntry alias in aliases)
+        {
+            if (manufacturerIdByModelId.TryGetValue(alias.PrinterModelId, out Guid manufacturerId)
+                && manufacturerNameById.TryGetValue(manufacturerId, out string? manufacturerName))
+            {
+                manufacturerByAlias[alias.SlicerModelName] = manufacturerName;
+            }
+        }
+
+        HashSet<string> catalogManufacturerNames =
+            manufacturers.Select(manufacturer => manufacturer.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        AllProfilesResponseDto attributed = new()
+        {
+            ByHierarchy = new Dictionary<string, ManufacturerProfilesDto>(
+                StringComparer.OrdinalIgnoreCase),
+            MachineModelProfiles = new Dictionary<string, IList<MachineModelProfileDto>>(
+                StringComparer.OrdinalIgnoreCase),
+            MachineProfiles = new Dictionary<string, IList<MachineProfileDto>>(
+                StringComparer.OrdinalIgnoreCase),
+            FilamentProfiles = new Dictionary<string, IList<FilamentProfileDto>>(
+                StringComparer.OrdinalIgnoreCase),
+            ProcessProfiles = new Dictionary<string, IList<ProcessProfileDto>>(
+                StringComparer.OrdinalIgnoreCase)
+        };
+        Dictionary<string, HashSet<string>> resolvedByWorkerManufacturer =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        foreach ((string workerManufacturer, ManufacturerProfilesDto workerProfiles)
+                 in workerHierarchy.ByHierarchy)
+        {
+            foreach ((string modelKey, PrinterModelProfilesDto modelProfiles)
+                     in workerProfiles.Models)
+            {
+                string alias = string.IsNullOrWhiteSpace(modelProfiles.ModelId)
+                    ? modelKey
+                    : modelProfiles.ModelId;
+                string resolvedManufacturer = manufacturerByAlias.GetValueOrDefault(
+                    alias,
+                    workerManufacturer);
+
+                if (!resolvedByWorkerManufacturer.TryGetValue(
+                        workerManufacturer,
+                        out HashSet<string>? resolvedManufacturers))
+                {
+                    resolvedManufacturers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    resolvedByWorkerManufacturer[workerManufacturer] = resolvedManufacturers;
+                }
+
+                _ = resolvedManufacturers.Add(resolvedManufacturer);
+                if (resolvedManufacturer == workerManufacturer
+                    && workerManufacturer.StartsWith("PrintFarmer-", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning(
+                        "Worker profile model alias {Alias} could not be attributed; keeping manufacturer {Manufacturer}",
+                        LogSanitizer.Sanitize(alias),
+                        LogSanitizer.Sanitize(workerManufacturer));
+                }
+
+                foreach (MachineProfileDto machineProfile in modelProfiles.MachineProfiles)
+                {
+                    machineProfile.Manufacturer = resolvedManufacturer;
+                }
+
+                if (scope == "catalog"
+                    && !catalogManufacturerNames.Contains(resolvedManufacturer))
+                {
+                    continue;
+                }
+
+                if (!attributed.ByHierarchy.TryGetValue(
+                        resolvedManufacturer,
+                        out ManufacturerProfilesDto? targetManufacturer))
+                {
+                    targetManufacturer = new ManufacturerProfilesDto
+                    {
+                        Name = resolvedManufacturer,
+                        Models = new Dictionary<string, PrinterModelProfilesDto>(
+                            StringComparer.OrdinalIgnoreCase)
+                    };
+                    attributed.ByHierarchy[resolvedManufacturer] = targetManufacturer;
+                }
+
+                if (targetManufacturer.Models.ContainsKey(modelKey))
+                {
+                    _logger.LogWarning(
+                        "Catalog-attributed worker hierarchy model {Model} collides under manufacturer {Manufacturer}; using the last worker entry",
+                        LogSanitizer.Sanitize(modelKey),
+                        LogSanitizer.Sanitize(resolvedManufacturer));
+                }
+
+                targetManufacturer.Models[modelKey] = modelProfiles;
+            }
+        }
+
+        foreach ((string workerManufacturer, IList<MachineProfileDto> profiles)
+                 in workerHierarchy.MachineProfiles)
+        {
+            foreach (MachineProfileDto profile in profiles)
+            {
+                string resolvedManufacturer = profile.PrinterModel is not null
+                    && manufacturerByAlias.TryGetValue(profile.PrinterModel, out string? profileManufacturer)
+                        ? profileManufacturer
+                        : ResolveFlatManufacturer(workerManufacturer, resolvedByWorkerManufacturer);
+                profile.Manufacturer = resolvedManufacturer;
+                AddFlat(attributed.MachineProfiles, resolvedManufacturer, profile, scope, catalogManufacturerNames);
+            }
+        }
+
+        foreach ((string workerManufacturer, IList<MachineModelProfileDto> profiles)
+                 in workerHierarchy.MachineModelProfiles)
+        {
+            foreach (MachineModelProfileDto profile in profiles)
+            {
+                string resolvedManufacturer = manufacturerByAlias.GetValueOrDefault(
+                    profile.Name,
+                    ResolveFlatManufacturer(workerManufacturer, resolvedByWorkerManufacturer));
+                profile.Manufacturer = resolvedManufacturer;
+                AddFlat(attributed.MachineModelProfiles, resolvedManufacturer, profile, scope, catalogManufacturerNames);
+            }
+        }
+
+        RekeyFlat(
+            workerHierarchy.FilamentProfiles,
+            attributed.FilamentProfiles,
+            resolvedByWorkerManufacturer,
+            scope,
+            catalogManufacturerNames);
+        RekeyFlat(
+            workerHierarchy.ProcessProfiles,
+            attributed.ProcessProfiles,
+            resolvedByWorkerManufacturer,
+            scope,
+            catalogManufacturerNames);
+
+        return attributed;
+    }
+
+    private static string ResolveFlatManufacturer(
+        string workerManufacturer,
+        IReadOnlyDictionary<string, HashSet<string>> resolvedByWorkerManufacturer) =>
+        resolvedByWorkerManufacturer.TryGetValue(workerManufacturer, out HashSet<string>? resolved)
+        && resolved.Count == 1
+            ? resolved.Single()
+            : workerManufacturer;
+
+    private static void RekeyFlat<T>(
+        IReadOnlyDictionary<string, IList<T>> source,
+        IDictionary<string, IList<T>> destination,
+        IReadOnlyDictionary<string, HashSet<string>> resolvedByWorkerManufacturer,
+        string scope,
+        IReadOnlySet<string> catalogManufacturerNames)
+    {
+        foreach ((string workerManufacturer, IList<T> profiles) in source)
+        {
+            string resolvedManufacturer =
+                ResolveFlatManufacturer(workerManufacturer, resolvedByWorkerManufacturer);
+            foreach (T profile in profiles)
+            {
+                AddFlat(destination, resolvedManufacturer, profile, scope, catalogManufacturerNames);
+            }
+        }
+    }
+
+    private static void AddFlat<T>(
+        IDictionary<string, IList<T>> destination,
+        string manufacturer,
+        T profile,
+        string scope,
+        IReadOnlySet<string> catalogManufacturerNames)
+    {
+        if (scope == "catalog" && !catalogManufacturerNames.Contains(manufacturer))
+        {
+            return;
+        }
+
+        if (!destination.TryGetValue(manufacturer, out IList<T>? profiles))
+        {
+            profiles = new List<T>();
+            destination[manufacturer] = profiles;
+        }
+
+        profiles.Add(profile);
     }
 
     /// <summary>
@@ -3433,12 +3643,16 @@ public class ProfilesService(
     /// caller does not care which version answers the query and any Online
     /// OrcaSlicer worker is acceptable.
     /// </param>
-    private async Task<string?> GetOrcaSlicerWorkerUrlAsync(string? engineVersion = null)
+    /// <param name="cancellationToken">Cancellation token for the registry lookup.</param>
+    private async Task<string?> GetOrcaSlicerWorkerUrlAsync(
+        string? engineVersion = null,
+        CancellationToken cancellationToken = default)
     {
         try
         {
             // Query SlicerService entities via ISlicersService (not the old Worker table)
-            IReadOnlyList<SlicerService> allSlicers = await _slicersService.ListAsync(CancellationToken.None);
+            IReadOnlyList<SlicerService> allSlicers =
+                await _slicersService.ListAsync(cancellationToken);
 
             // SlicerType 1 = OrcaSlicer (per SlicerType enum). Materialize once
             // to avoid multi-enumeration warnings when we probe four times.
@@ -3515,6 +3729,10 @@ public class ProfilesService(
 
             _logger.LogWarning("No OrcaSlicer worker found in slicer registry");
             return null;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
