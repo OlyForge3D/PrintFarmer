@@ -190,6 +190,73 @@ public sealed class PrintStatsSyncModelBatchAggregateTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task GetAggregateByPrinterModelAsync_MixedDurations_MatchesOldPerRowSummationWithinFloatingPointEpsilon()
+    {
+        // The two facts above use a single, uniform duration-per-job value for every seeded row,
+        // so a summation-order difference between the new grouped SQL SUM and the old in-memory
+        // OrderByDescending(CompletedAtUtc).Sum(...) could never actually surface numerically.
+        // This test seeds adversarial, non-uniform millisecond durations specifically to make any
+        // such divergence visible, then proves it is negligible (well under any threshold that
+        // could matter for maintenance wear tracking) rather than merely assuming it away.
+        Guid modelId = Guid.NewGuid();
+        long[] durationsMs =
+        [
+            12_345L, 987_654L, 3_333_333L, 7L, 999_999_999L,
+            42L, 6_000_001L, 1L, 55_555L, 123_456_789L,
+        ];
+
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(_connection)
+            .AddInterceptors(_interceptor)
+            .Options;
+
+        await using (AppDbContext seed = new(options))
+        {
+            await seed.Database.EnsureCreatedAsync();
+            DateTime baseTimeUtc = DateTime.UtcNow;
+            for (int i = 0; i < durationsMs.Length; i++)
+            {
+                seed.PrintJobStatistics.Add(new PrintJobStatistics
+                {
+                    Id = Guid.NewGuid(),
+                    PrintJobId = Guid.NewGuid(),
+                    PrinterModelId = modelId,
+                    IsSuccess = true,
+                    ActualDurationMs = durationsMs[i],
+                    CompletedAtUtc = baseTimeUtc.AddSeconds(-i),
+                });
+            }
+
+            await seed.SaveChangesAsync();
+        }
+
+        await using AppDbContext query = new(options);
+        EfPrintJobStatisticsRepository repository = new(query);
+
+        // Oracle: replicate the EXACT removed in-memory computation. GetByPrinterModelAsync still
+        // orders by CompletedAtUtc descending - the same order the removed hosted-service code
+        // consumed - and this sums per-row-divided hours in that list order, exactly as
+        // `printerJobs.Sum(j => j.ActualDurationMs!.Value / 1000.0 / 3600.0)` did before the fix.
+        List<PrintJobStatistics> rows = await repository.GetByPrinterModelAsync(modelId, successfulOnly: true);
+        long oracleTotalMs = rows.Sum(j => j.ActualDurationMs!.Value);
+        double oracleHours = rows.Sum(j => j.ActualDurationMs!.Value / 1000.0 / 3600.0);
+
+        PrintJobStatisticsAggregate result = await repository.GetAggregateByPrinterModelAsync(modelId, successfulOnly: true);
+
+        Assert.Equal(durationsMs.Length, result.JobCount);
+        Assert.Equal(oracleTotalMs, result.TotalDurationMs);
+
+        // SQLite's internal row-iteration order for a SUM aggregate is engine-defined and not
+        // provably identical to the old list's CompletedAtUtc-descending order, so bit-for-bit
+        // identity is not guaranteed by any grouped-SQL rewrite. What this asserts instead is the
+        // defined, tested tolerance for issue #2329's "identical aggregate values" criterion: a
+        // relative divergence far too small to affect maintenance wear tracking. 1e-9 hours is
+        // ~3.6 microseconds - many orders of magnitude below any print-duration measurement this
+        // system records - even for this adversarially non-uniform dataset.
+        result.TotalDurationHours.Should().BeApproximately(oracleHours, 1e-9);
+    }
+
     private static Printer NewPrusaLinkPrinter(Guid modelId)
     {
         Guid id = Guid.NewGuid();
