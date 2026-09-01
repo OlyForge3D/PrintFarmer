@@ -5,18 +5,14 @@ import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { createSlicerRegistryConnection } from '@/services/slicerRegistryHubConnection';
 import {
   slicerProfilesService,
-  SlicerProfileListItem,
-  HierarchicalProfilesResponse,
-  PrinterModelProfilesDto,
-  ProcessProfileListItem,
-  FilamentProfileListItem,
-  MachineProfileListItem,
+  type OrcaProcessProfile,
+  type OrcaFilamentProfile,
+  type OrcaMachineProfile,
+  type WorkerPrinterModelProfilesDto,
+  type WorkerHierarchyResponse,
   ImportSlicerProfileRequest,
   SlicerProfileExtended,
-  SlicerProfileExportDto,
   BulkDeleteResultDto,
-  CloneSingleProfileRequest,
-  CloneSingleProfileResponse,
   UploadProfileRequest,
   CustomProfile,
   CustomProfilesListResponse,
@@ -25,7 +21,7 @@ import {
 import { orcaProfilesService } from '@/features/slicer/orca';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { catalogService } from '@/services/catalogService';
-import { FilterIcon, GearIcon, UploadIcon, SearchIcon, CheckCircleIcon, AlertCircleIcon, TimerSandIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
+import { FilterIcon, GearIcon, UploadIcon, SearchIcon, CheckCircleIcon, AlertCircleIcon, TimerSandIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { Button } from '@/common/components/ui/Button';
@@ -37,6 +33,14 @@ import { Select } from '@/common/components/ui/Select';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Textarea } from '@/common/components/ui/Textarea';
 import { Modal } from '@/common/components/modals/Modal';
+import { useMachineCompatibleProfiles } from '@/features/slicer/hooks/useMachineCompatibleProfiles';
+
+type LibraryProfile =
+  | (OrcaMachineProfile & { profileType: 'machine' })
+  | (OrcaFilamentProfile & { profileType: 'filament' })
+  | (OrcaProcessProfile & { profileType: 'process' });
+
+const rowKey = (profile: LibraryProfile) => `${profile.profileType}:${profile.name}`;
 
 export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = false }) => {
   const qc = useQueryClient();
@@ -84,9 +88,8 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
   // Filtering and search state
   const [searchQuery, setSearchQuery] = useState('');
   const [filterManufacturer, setFilterManufacturer] = useState<string>('all');
+  const [selectedMachineModelId, setSelectedMachineModelId] = useState<string>('');
   const [selectedMachineProfileId, setSelectedMachineProfileId] = useState<string>('');
-  const [selectedFilamentProfileId, setSelectedFilamentProfileId] = useState<string>('');
-  const [selectedProcessProfileId, setSelectedProcessProfileId] = useState<string>('');
   const [filterEngine, setFilterEngine] = useState<string>('all');
   const [filterSource, setFilterSource] = useState<string>('all');
   const [showFilters, setShowFilters] = useState(false);
@@ -97,7 +100,6 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
 
   // UI state
   const [importError, setImportError] = useState<string | null>(null);
-  const [exportingId, setExportingId] = useState<string | null>(null);
   const [exportingBundle, setExportingBundle] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [reseedModalOpen, setReseedModalOpen] = useState(false);
@@ -144,19 +146,14 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     }
   }, [slicerNames, slicerType]);
 
-  // Main hierarchy query - loads all profiles for browsing
-  const { data: profilesData, isLoading, error } = useQuery<HierarchicalProfilesResponse, Error>({
-    queryKey: ['slicerProfilesHierarchy'],
-    queryFn: async () => slicerProfilesService.listHierarchical(),
-    staleTime: 10_000
-  });
-
-  // Filtered query - loads profiles filtered by selected machine (for CompatiblePrinters filtering)
-  const { data: filteredProfilesData } = useQuery<HierarchicalProfilesResponse, Error>({
-    queryKey: ['slicerProfilesHierarchyFiltered', selectedMachineProfileId],
-    queryFn: async () => slicerProfilesService.listHierarchical(selectedMachineProfileId),
-    enabled: !!selectedMachineProfileId,
-    staleTime: 10_000
+  const {
+    data: profilesData,
+    isLoading,
+    error: libraryHierarchyError,
+  } = useQuery<WorkerHierarchyResponse, Error>({
+    queryKey: ['slicerProfilesLibraryHierarchy', 'all'],
+    queryFn: () => slicerProfilesService.getLibraryHierarchy('all'),
+    staleTime: 30_000,
   });
 
   // Custom profiles query - loads user-owned custom profiles
@@ -166,87 +163,23 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     staleTime: 10_000
   });
 
-  const allMachineProfiles = useMemo<MachineProfileListItem[]>(() => {
-    // Try hierarchical data first, fallback to flat machineProfiles
-    if (profilesData?.byHierarchy && Object.keys(profilesData.byHierarchy).length > 0) {
-      const out: MachineProfileListItem[] = [];
-      for (const mfgData of Object.values(profilesData.byHierarchy)) {
-        for (const modelData of Object.values(mfgData.models)) {
-          out.push(...(modelData.machineProfiles ?? []));
-        }
-      }
-      return out;
-    }
-    // Fallback: use flat machineProfiles grouped by manufacturer
-    if (profilesData?.machineProfiles) {
-      const out: MachineProfileListItem[] = [];
-      for (const profiles of Object.values(profilesData.machineProfiles)) {
-        out.push(...profiles);
-      }
-      return out;
-    }
-    return [];
-  }, [profilesData]);
-
-  const allFilamentProfiles = useMemo<FilamentProfileListItem[]>(() => {
-    // Try hierarchical data first, fallback to flat filamentProfiles
-    if (profilesData?.byHierarchy && Object.keys(profilesData.byHierarchy).length > 0) {
-      const out: FilamentProfileListItem[] = [];
-      for (const mfgData of Object.values(profilesData.byHierarchy)) {
-        for (const modelData of Object.values(mfgData.models)) {
-          out.push(...(modelData.filamentProfiles ?? []));
-        }
-      }
-      return out;
-    }
-    // Fallback: use flat filamentProfiles grouped by key
-    if (profilesData?.filamentProfiles) {
-      const out: FilamentProfileListItem[] = [];
-      for (const profiles of Object.values(profilesData.filamentProfiles)) {
-        out.push(...profiles);
-      }
-      return out;
-    }
-    return [];
-  }, [profilesData]);
-
-  const allProcessProfiles = useMemo<ProcessProfileListItem[]>(() => {
-    // Try hierarchical data first, fallback to flat processProfiles
-    if (profilesData?.byHierarchy && Object.keys(profilesData.byHierarchy).length > 0) {
-      const out: ProcessProfileListItem[] = [];
-      for (const mfgData of Object.values(profilesData.byHierarchy)) {
-        for (const modelData of Object.values(mfgData.models)) {
-          out.push(...(modelData.processProfiles ?? []));
-        }
-      }
-      return out;
-    }
-    // Fallback: use flat processProfiles grouped by key
-    if (profilesData?.processProfiles) {
-      const out: ProcessProfileListItem[] = [];
-      for (const profiles of Object.values(profilesData.processProfiles)) {
-        out.push(...profiles);
-      }
-      return out;
-    }
-    return [];
-  }, [profilesData]);
-
   type MachineProfileContext = {
     manufacturer: string;
+    modelId: string;
     modelName: string;
-    modelData: PrinterModelProfilesDto;
+    modelData: WorkerPrinterModelProfilesDto;
   };
 
-  const machineContextById = useMemo<Map<string, MachineProfileContext>>(() => {
+  const machineContextByName = useMemo<Map<string, MachineProfileContext>>(() => {
     const map = new Map<string, MachineProfileContext>();
     if (!profilesData?.byHierarchy) return map;
 
     for (const [manufacturer, mfgData] of Object.entries(profilesData.byHierarchy)) {
-      for (const modelData of Object.values(mfgData.models)) {
+      for (const [modelId, modelData] of Object.entries(mfgData.models)) {
         for (const machine of modelData.machineProfiles ?? []) {
-          map.set(machine.id, {
+          map.set(machine.name, {
             manufacturer,
+            modelId,
             modelName: modelData.name,
             modelData,
           });
@@ -256,10 +189,31 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     return map;
   }, [profilesData]);
 
-  const selectedMachineContext = useMemo<MachineProfileContext | undefined>(() => {
-    if (!selectedMachineProfileId) return undefined;
-    return machineContextById.get(selectedMachineProfileId);
-  }, [machineContextById, selectedMachineProfileId]);
+  const selectedModelContext = useMemo<MachineProfileContext | undefined>(() => {
+    if (!selectedMachineModelId || filterManufacturer === 'all') return undefined;
+    const modelData = profilesData?.byHierarchy[filterManufacturer]?.models[selectedMachineModelId];
+    if (!modelData) return undefined;
+    return {
+      manufacturer: filterManufacturer,
+      modelId: selectedMachineModelId,
+      modelName: modelData.name,
+      modelData,
+    };
+  }, [filterManufacturer, profilesData, selectedMachineModelId]);
+
+  const selectedMachineNames = useMemo(() => {
+    if (!selectedModelContext) return [];
+    if (selectedMachineProfileId) return [selectedMachineProfileId];
+    return (selectedModelContext.modelData.machineProfiles ?? []).map((profile) => profile.name);
+  }, [selectedMachineProfileId, selectedModelContext]);
+
+  const {
+    filamentProfilesQuery,
+    processProfilesQuery,
+  } = useMachineCompatibleProfiles(selectedMachineNames, {
+    enabled: selectedMachineNames.length > 0,
+    summary: true,
+  });
 
   const importMutation = useMutation<SlicerProfileExtended, Error, ImportSlicerProfileRequest>({
     mutationFn: async (payload) => {
@@ -273,8 +227,9 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
       setDescription('');
       setAllowSystemOverride(false);
       setSetDefault(false);
-      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
-      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesLibraryHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['filamentProfilesForMachines'] });
+      qc.invalidateQueries({ queryKey: ['processProfilesForMachines'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
     },
     onError: (err) => {
@@ -282,41 +237,18 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     }
   });
 
-  const setDefaultMutation = useMutation<void, Error, string>({
-    mutationFn: async (id) => slicerProfilesService.setDefault(id),
-    onSuccess: () => {
-      setMessage('Default profile updated.');
-      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
-      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
-      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
-    },
-    onError: (err) => setMessage(`Failed to set default: ${err.message}`)
-  });
-
   const bulkDeleteMutation = useMutation<BulkDeleteResultDto, Error, string[]>({
     mutationFn: async (ids) => slicerProfilesService.bulkDelete(ids),
     onSuccess: (result) => {
       setMessage(`Deleted ${result.totalDeleted} profiles (${result.machineProfilesDeleted} machine, ${result.processProfilesDeleted} process, ${result.filamentProfilesDeleted} filament)${result.notFound > 0 ? ` - ${result.notFound} not found` : ''}`);
       setSelectedProfileIds(new Set());
-      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
-      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesLibraryHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['filamentProfilesForMachines'] });
+      qc.invalidateQueries({ queryKey: ['processProfilesForMachines'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
     onError: (err) => setMessage(`Failed to delete profiles: ${err.message}`)
-  });
-
-  // Clone profile mutation - creates a custom copy of a system profile
-  const cloneProfileMutation = useMutation<CloneSingleProfileResponse, Error, CloneSingleProfileRequest>({
-    mutationFn: async (request) => slicerProfilesService.cloneProfile(request),
-    onSuccess: (result) => {
-      setMessage(`Created custom profile: ${result.name}`);
-      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
-      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
-      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
-      qc.invalidateQueries({ queryKey: ['customProfiles'] });
-    },
-    onError: (err) => setMessage(`Failed to clone profile: ${err.message}`)
   });
 
   // Upload custom profile mutation - creates a new custom profile from raw JSON
@@ -330,8 +262,9 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
       setUploadCompatiblePrinters([]);
       setUploadError(null);
       setIsUploadModalOpen(false);
-      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
-      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesLibraryHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['filamentProfilesForMachines'] });
+      qc.invalidateQueries({ queryKey: ['processProfilesForMachines'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
@@ -346,8 +279,9 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
       setIsEditModalOpen(false);
       setEditingProfile(null);
       setEditError(null);
-      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
-      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesLibraryHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['filamentProfilesForMachines'] });
+      qc.invalidateQueries({ queryKey: ['processProfilesForMachines'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
@@ -359,8 +293,9 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     mutationFn: async (id) => slicerProfilesService.deleteCustomProfile(id),
     onSuccess: () => {
       setMessage('Profile deleted');
-      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
-      qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesLibraryHierarchy'] });
+      qc.invalidateQueries({ queryKey: ['filamentProfilesForMachines'] });
+      qc.invalidateQueries({ queryKey: ['processProfilesForMachines'] });
       qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
       qc.invalidateQueries({ queryKey: ['customProfiles'] });
     },
@@ -461,25 +396,6 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     });
   };
 
-  const exportProfile = async (id: string) => {
-    setExportingId(id);
-    try {
-      const data: SlicerProfileExportDto = await slicerProfilesService.exportProfile(id);
-      const blob = new Blob([data.rawJson], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${data.name.replace(/\s+/g, '_')}_${data.hash.substring(0, 8)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setMessage('Profile exported.');
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : 'Export failed');
-    } finally {
-      setExportingId(null);
-    }
-  };
-
   const exportOrcaBundle = async () => {
     setExportingBundle(true);
     try {
@@ -504,10 +420,19 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     }
   };
 
-  // Apply filters to machine profiles
+  const allMachineProfiles = useMemo(
+    () => Array.from(machineContextByName.entries())
+      .map(([name, context]) => {
+        const profile = context.modelData.machineProfiles?.find((item) => item.name === name);
+        return profile ? { ...profile, profileType: 'machine' as const } : null;
+      })
+      .filter((profile): profile is OrcaMachineProfile & { profileType: 'machine' } => profile !== null),
+    [machineContextByName],
+  );
+
   const filteredMachineProfiles = useMemo(() => {
     return allMachineProfiles.filter((p) => {
-      const ctx = machineContextById.get(p.id);
+      const ctx = machineContextByName.get(p.name);
       if (!ctx) return false;
 
       // Manufacturer filter
@@ -521,15 +446,10 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
         }
       }
 
-      // Engine filter
-      if (filterEngine !== 'all' && p.slicerType !== filterEngine) return false;
+      if (filterEngine !== 'all' && filterEngine !== 'OrcaSlicer') return false;
 
-      // Source filter
       if (filterSource !== 'all' && filterSource !== '') {
-        if (filterSource === 'default' && !p.isDefault) return false;
-        if (filterSource === 'system' && !p.isSystem) return false;
-        if (filterSource === 'public' && !p.isPublic) return false;
-        if (filterSource === 'imported' && p.isSystem) return false;
+        if (filterSource !== 'system') return false;
       }
 
       return true;
@@ -539,28 +459,12 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     filterEngine,
     filterManufacturer,
     filterSource,
-    machineContextById,
+    machineContextByName,
     searchQuery,
   ]);
 
-  // Filament/process profiles are shown only after selecting a machine profile
-  // Use filteredProfilesData when available (contains CompatiblePrinters-filtered results)
   const filteredFilamentProfiles = useMemo(() => {
-    if (!selectedMachineContext) return [];
-    
-    // Use filtered data from API when available (CompatiblePrinters filtering)
-    let sourceProfiles = selectedMachineContext.modelData.filamentProfiles ?? [];
-    if (filteredProfilesData?.filamentProfiles) {
-      // Flatten filtered profiles from all manufacturers
-      const filtered: FilamentProfileListItem[] = [];
-      for (const profiles of Object.values(filteredProfilesData.filamentProfiles)) {
-        filtered.push(...profiles);
-      }
-      if (filtered.length > 0) {
-        sourceProfiles = filtered;
-      }
-    }
-    
+    const sourceProfiles = filamentProfilesQuery.data ?? [];
     return sourceProfiles.filter((p) => {
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
@@ -568,36 +472,17 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
           return false;
         }
       }
-      if (filterEngine !== 'all' && p.slicerType !== filterEngine) return false;
-
-      if (selectedFilamentProfileId && p.id !== selectedFilamentProfileId) return false;
+      if (filterEngine !== 'all' && filterEngine !== 'OrcaSlicer') return false;
 
       if (filterSource !== 'all' && filterSource !== '') {
-        if (filterSource === 'default' && !p.isDefault) return false;
-        if (filterSource === 'system' && !p.isSystem) return false;
-        if (filterSource === 'public' && !p.isPublic) return false;
-        if (filterSource === 'imported' && p.isSystem) return false;
+        if (filterSource !== 'system') return false;
       }
       return true;
     });
-  }, [filterEngine, filterSource, filteredProfilesData, searchQuery, selectedFilamentProfileId, selectedMachineContext]);
+  }, [filamentProfilesQuery.data, filterEngine, filterSource, searchQuery]);
 
   const filteredProcessProfiles = useMemo(() => {
-    if (!selectedMachineContext) return [];
-    
-    // Use filtered data from API when available (CompatiblePrinters filtering)
-    let sourceProfiles = selectedMachineContext.modelData.processProfiles ?? [];
-    if (filteredProfilesData?.processProfiles) {
-      // Flatten filtered profiles from all manufacturers
-      const filtered: ProcessProfileListItem[] = [];
-      for (const profiles of Object.values(filteredProfilesData.processProfiles)) {
-        filtered.push(...profiles);
-      }
-      if (filtered.length > 0) {
-        sourceProfiles = filtered;
-      }
-    }
-    
+    const sourceProfiles = processProfilesQuery.data ?? [];
     return sourceProfiles.filter((p) => {
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
@@ -605,19 +490,14 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
           return false;
         }
       }
-      if (filterEngine !== 'all' && p.slicerType !== filterEngine) return false;
-
-      if (selectedProcessProfileId && p.id !== selectedProcessProfileId) return false;
+      if (filterEngine !== 'all' && filterEngine !== 'OrcaSlicer') return false;
 
       if (filterSource !== 'all' && filterSource !== '') {
-        if (filterSource === 'default' && !p.isDefault) return false;
-        if (filterSource === 'system' && !p.isSystem) return false;
-        if (filterSource === 'public' && !p.isPublic) return false;
-        if (filterSource === 'imported' && p.isSystem) return false;
+        if (filterSource !== 'system') return false;
       }
       return true;
     });
-  }, [filterEngine, filterSource, filteredProfilesData, searchQuery, selectedMachineContext, selectedProcessProfileId]);
+  }, [filterEngine, filterSource, processProfilesQuery.data, searchQuery]);
 
   // Filtered custom profiles for "My Profiles" tab
   const filteredCustomProfiles = useMemo<CustomProfile[]>(() => {
@@ -651,58 +531,18 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     });
   };
 
-  const renderProfileRow = (p: SlicerProfileListItem) => (
-    <SelectableRow key={p.id} className="border-t border-pf-border" isSelected={selectedProfileIds.has(p.id)}>
-      <td className="p-2">
-        <Checkbox
-          checked={selectedProfileIds.has(p.id)}
-          onChange={() => handleToggleSelection(p.id)}
-          label=""
-          aria-label={`Select ${p.name}`}
-        />
-      </td>
+  const renderProfileRow = (p: LibraryProfile) => (
+    <tr key={rowKey(p)} className="border-t border-pf-border">
       <td className="p-2 font-medium">{p.name}</td>
-      <td className="p-2">{p.slicerType}</td>
-      <td className="p-2">{p.profileType === 'filament' ? (p as FilamentProfileListItem).material : p.profileType === 'machine' ? (p as MachineProfileListItem).manufacturer : '-'}</td>
-      <td className="p-2">{p.profileType === 'process' ? (p as ProcessProfileListItem).quality : '-'}</td>
-      <td className="p-2">{p.profileType === 'process' ? (p as ProcessProfileListItem).layerHeight.toFixed(2) + 'mm' : (p.profileType === 'machine' && (p as MachineProfileListItem).nozzleDiameter) ? (p as MachineProfileListItem).nozzleDiameter + 'mm' : '-'}</td>
-      <td className="p-2">{p.profileType === 'process' ? (p as ProcessProfileListItem).infillPercentage + '%' : '-'}</td>
+      <td className="p-2">OrcaSlicer</td>
+      <td className="p-2">{p.profileType === 'filament' ? p.material : p.profileType === 'machine' ? p.manufacturer : '-'}</td>
+      <td className="p-2">{p.profileType === 'process' ? p.quality : '-'}</td>
+      <td className="p-2">{p.profileType === 'process' ? `${p.layerHeight.toFixed(2)}mm` : p.profileType === 'machine' && p.nozzleDiameter ? `${p.nozzleDiameter}mm` : '-'}</td>
+      <td className="p-2">{p.profileType === 'process' ? `${p.infillPercentage}%` : '-'}</td>
       <td className="p-2">
-        <div className="flex flex-col text-xs gap-1">
-          {p.isDefault && <span className="px-2 py-0.5 bg-pf-accent-bg text-pf-text-primary rounded-sm">Default</span>}
-          {p.isSystem && <span className="px-2 py-0.5 bg-pf-bg-2 text-pf-text-primary rounded-sm">System</span>}
-          {p.isPublic && <span className="px-2 py-0.5 bg-pf-success-bg text-pf-text-primary rounded-sm">Public</span>}
-        </div>
+        <span className="px-2 py-0.5 bg-pf-bg-2 text-pf-text-primary rounded-sm text-xs">System</span>
       </td>
-      <td className="p-2">
-        <div className="flex gap-2">
-          <Button
-            onClick={() => setDefaultMutation.mutate(p.id)}
-            loading={setDefaultMutation.isPending}
-            size="sm"
-            variant="primary"
-          >Set Default</Button>
-          <Button
-            onClick={() => exportProfile(p.id)}
-            loading={exportingId === p.id}
-            size="sm"
-            variant="secondary"
-          >{exportingId === p.id ? 'Exporting...' : 'Export'}</Button>
-          <Button
-            onClick={() => cloneProfileMutation.mutate({
-              sourceProfileId: p.id,
-              profileType: p.profileType
-            })}
-            loading={cloneProfileMutation.isPending}
-            size="sm"
-            variant="secondary"
-            title="Clone to My Profiles"
-          >
-            <CopyIcon className="w-4 h-4" />
-          </Button>
-        </div>
-      </td>
-    </SelectableRow>
+    </tr>
   );
 
   // Render a custom profile row for the "My Profiles" tab
@@ -746,10 +586,6 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
       </td>
     </SelectableRow>
   );
-  const getTotalCount = () => {
-    return allMachineProfiles.length + allFilamentProfiles.length + allProcessProfiles.length + (customProfilesData?.profiles?.length ?? 0);
-  };
-
   const getFilteredCount = () => {
     if (activeTab === 'machines') return filteredMachineProfiles.length;
     if (activeTab === 'filaments') return filteredFilamentProfiles.length;
@@ -764,56 +600,22 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
 
   const machineModelOptions = useMemo(() => {
     if (!filterManufacturer || filterManufacturer === 'all') return [];
-    return filteredMachineProfiles
-      .map(m => m)
+    const models = profilesData?.byHierarchy[filterManufacturer]?.models ?? {};
+    return Object.entries(models)
+      .map(([id, model]) => ({ id, name: model.name }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [filterManufacturer, filteredMachineProfiles]);
+  }, [filterManufacturer, profilesData]);
 
-  // Dropdown options use CompatiblePrinters-filtered data when available
-  const filamentOptions = useMemo(() => {
-    if (!selectedMachineContext) return [];
-    
-    // Use filtered data from API when available (CompatiblePrinters filtering)
-    let sourceProfiles = selectedMachineContext.modelData.filamentProfiles ?? [];
-    if (filteredProfilesData?.filamentProfiles) {
-      const filtered: FilamentProfileListItem[] = [];
-      for (const profiles of Object.values(filteredProfilesData.filamentProfiles)) {
-        filtered.push(...profiles);
-      }
-      if (filtered.length > 0) {
-        sourceProfiles = filtered;
-      }
-    }
-    
-    return sourceProfiles
-      .slice()
-      .sort((a, b) => (a.material + a.name).localeCompare(b.material + b.name));
-  }, [filteredProfilesData, selectedMachineContext]);
+  const machineProfileOptions = useMemo(
+    () => [...(selectedModelContext?.modelData.machineProfiles ?? [])]
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [selectedModelContext],
+  );
 
-  const processOptions = useMemo(() => {
-    if (!selectedMachineContext) return [];
-    
-    // Use filtered data from API when available (CompatiblePrinters filtering)
-    let sourceProfiles = selectedMachineContext.modelData.processProfiles ?? [];
-    if (filteredProfilesData?.processProfiles) {
-      const filtered: ProcessProfileListItem[] = [];
-      for (const profiles of Object.values(filteredProfilesData.processProfiles)) {
-        filtered.push(...profiles);
-      }
-      if (filtered.length > 0) {
-        sourceProfiles = filtered;
-      }
-    }
-    
-    return sourceProfiles
-      .slice()
-      .sort((a, b) => (a.quality + a.name).localeCompare(b.quality + b.name));
-  }, [filteredProfilesData, selectedMachineContext]);
-
-  const visibleProfiles = useMemo<SlicerProfileListItem[]>(() => {
+  const visibleProfiles = useMemo<LibraryProfile[]>(() => {
     if (activeTab === 'machines') return filteredMachineProfiles;
-    if (activeTab === 'filaments') return filteredFilamentProfiles;
-    if (activeTab === 'processes') return filteredProcessProfiles;
+    if (activeTab === 'filaments') return filteredFilamentProfiles.map((profile) => ({ ...profile, profileType: 'filament' }));
+    if (activeTab === 'processes') return filteredProcessProfiles.map((profile) => ({ ...profile, profileType: 'process' }));
     // 'custom' tab handles its own rendering
     return [];
   }, [activeTab, filteredFilamentProfiles, filteredMachineProfiles, filteredProcessProfiles]);
@@ -829,17 +631,6 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     return visibleProfiles.slice(start, start + pageSize);
   }, [pageSize, safePageNumber, visibleProfiles]);
 
-  // Bulk selection handlers (must be after pagedProfiles is defined)
-  const handleSelectAll = () => {
-    if (selectedProfileIds.size === pagedProfiles.length && pagedProfiles.every(p => selectedProfileIds.has(p.id))) {
-      // Deselect all on current page
-      setSelectedProfileIds(new Set());
-    } else {
-      // Select all on current page
-      setSelectedProfileIds(new Set(pagedProfiles.map(p => p.id)));
-    }
-  };
-
   const handleDeleteSelected = () => {
     if (selectedProfileIds.size === 0) return;
     if (!window.confirm(`Are you sure you want to delete ${selectedProfileIds.size} profile(s)?`)) return;
@@ -853,28 +644,18 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
 
   React.useEffect(() => {
     setPageNumber(1);
-  }, [activeTab, filterEngine, filterManufacturer, filterSource, pageSize, searchQuery, selectedMachineProfileId, selectedFilamentProfileId, selectedProcessProfileId]);
+  }, [activeTab, filterEngine, filterManufacturer, filterSource, pageSize, searchQuery, selectedMachineModelId, selectedMachineProfileId]);
 
   React.useEffect(() => {
     // When manufacturer changes, clear dependent selections
+    setSelectedMachineModelId('');
     setSelectedMachineProfileId('');
-    setSelectedFilamentProfileId('');
-    setSelectedProcessProfileId('');
   }, [filterManufacturer]);
 
   React.useEffect(() => {
     // When machine model changes, clear dependent selections
-    setSelectedFilamentProfileId('');
-    setSelectedProcessProfileId('');
-  }, [selectedMachineProfileId]);
-
-  React.useEffect(() => {
-    if (!selectedMachineProfileId) return;
-    const stillVisible = filteredMachineProfiles.some(m => m.id === selectedMachineProfileId);
-    if (!stillVisible) {
-      setSelectedMachineProfileId('');
-    }
-  }, [filteredMachineProfiles, selectedMachineProfileId]);
+    setSelectedMachineProfileId('');
+  }, [selectedMachineModelId]);
 
   // SignalR event listener for profile import progress
   useEffect(() => {
@@ -901,8 +682,9 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
           setReseedStatus('success');
           setReseedMessage(`✅ ${data.imported} profiles imported, ${data.skipped} skipped, ${data.deleted} deleted`);
           // Refresh the profiles list
-          qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
-          qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
+          qc.invalidateQueries({ queryKey: ['slicerProfilesLibraryHierarchy'] });
+          qc.invalidateQueries({ queryKey: ['filamentProfilesForMachines'] });
+          qc.invalidateQueries({ queryKey: ['processProfilesForMachines'] });
           qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
         }
       });
@@ -927,6 +709,12 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
       return;
     }
   }, [reseedModalOpen, qc]);
+
+  const libraryUnavailable = Boolean(
+    libraryHierarchyError
+    || processProfilesQuery.error
+    || filamentProfilesQuery.error,
+  );
 
   return (
     <PageTemplate
@@ -980,7 +768,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
             <div className="flex items-center gap-4 mb-4">
               <div className="flex-1 relative">
                 <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pf-text-muted" />
-                <input
+                <Input
                   type="text"
                   placeholder="Search profiles by name, material, or manufacturer..."
                   value={searchQuery}
@@ -1000,10 +788,11 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
             </div>
 
             {/* Primary selection flow (always visible): Manufacturer -> Machine Model -> Process/Filament */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 p-3 bg-pf-bg-0 rounded-lg">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3 bg-pf-bg-0 rounded-lg">
               <div>
-                <label className="block text-sm font-medium mb-1">Manufacturer</label>
+                <label htmlFor="profile-manufacturer" className="block text-sm font-medium mb-1">Manufacturer</label>
                 <Select
+                  id="profile-manufacturer"
                   value={filterManufacturer}
                   onChange={(e) => setFilterManufacturer(e.target.value)}
                   aria-label="Select manufacturer"
@@ -1015,44 +804,32 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                 </Select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Machine Model</label>
+                <label htmlFor="profile-machine-model" className="block text-sm font-medium mb-1">Machine Model</label>
                 <Select
-                  value={selectedMachineProfileId}
-                  onChange={(e) => setSelectedMachineProfileId(e.target.value)}
+                  id="profile-machine-model"
+                  value={selectedMachineModelId}
+                  onChange={(e) => setSelectedMachineModelId(e.target.value)}
                   aria-label="Select machine model"
                   disabled={filterManufacturer === 'all'}
                 >
                   <option value="">Select a machine model</option>
                   {machineModelOptions.map(m => (
-                    <option key={m.id} value={m.id}>{m.name}{m.nozzleDiameter ? ` (${m.nozzleDiameter}mm nozzle)` : ''}</option>
+                    <option key={m.id} value={m.id}>{m.name}</option>
                   ))}
                 </Select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">Process</label>
+                <label htmlFor="profile-machine-variant" className="block text-sm font-medium mb-1">Machine</label>
                 <Select
-                  value={selectedProcessProfileId}
-                  onChange={(e) => setSelectedProcessProfileId(e.target.value)}
-                  aria-label="Select process profile"
-                  disabled={!selectedMachineProfileId}
+                  id="profile-machine-variant"
+                  value={selectedMachineProfileId}
+                  onChange={(e) => setSelectedMachineProfileId(e.target.value)}
+                  aria-label="Select machine"
+                  disabled={!selectedMachineModelId}
                 >
-                  <option value="">Select a process profile</option>
-                  {processOptions.map(p => (
-                    <option key={p.id} value={p.id}>{p.quality}  {p.name}</option>
-                  ))}
-                </Select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Filament</label>
-                <Select
-                  value={selectedFilamentProfileId}
-                  onChange={(e) => setSelectedFilamentProfileId(e.target.value)}
-                  aria-label="Select filament profile"
-                  disabled={!selectedMachineProfileId}
-                >
-                  <option value="">Select a filament profile</option>
-                  {filamentOptions.map(f => (
-                    <option key={f.id} value={f.id}>{f.material}  {f.name}</option>
+                  <option value="">All machines for this model</option>
+                  {machineProfileOptions.map(machine => (
+                    <option key={machine.name} value={machine.name}>{machine.name}</option>
                   ))}
                 </Select>
               </div>
@@ -1112,12 +889,13 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                   variant="secondary"
                   size="sm"
                   onClick={() => {
-                    qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchy'] });
-                    qc.invalidateQueries({ queryKey: ['slicerProfilesHierarchyFiltered'] });
+                    qc.invalidateQueries({ queryKey: ['slicerProfilesLibraryHierarchy'] });
+                    qc.invalidateQueries({ queryKey: ['filamentProfilesForMachines'] });
+                    qc.invalidateQueries({ queryKey: ['processProfilesForMachines'] });
                   }}
                 >Refresh</Button>
               </div>
-              {(searchQuery || filterManufacturer !== 'all' || filterEngine !== 'all' || filterSource !== 'all' || selectedMachineProfileId || selectedFilamentProfileId || selectedProcessProfileId) && (
+              {(searchQuery || filterManufacturer !== 'all' || filterEngine !== 'all' || filterSource !== 'all' || selectedMachineModelId || selectedMachineProfileId) && (
                 <Button
                   type="button"
                   onClick={() => {
@@ -1125,9 +903,8 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                     setFilterManufacturer('all');
                     setFilterEngine('all');
                     setFilterSource('all');
+                    setSelectedMachineModelId('');
                     setSelectedMachineProfileId('');
-                    setSelectedFilamentProfileId('');
-                    setSelectedProcessProfileId('');
                   }}
                   variant="subtle"
                   size="sm"
@@ -1144,10 +921,10 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                   Machines ({filteredMachineProfiles.length})
                 </Tabs.Tab>
                 <Tabs.Tab id="processes">
-                  Processes ({selectedMachineProfileId ? filteredProcessProfiles.length : 0})
+                  Processes ({selectedMachineModelId ? filteredProcessProfiles.length : 0})
                 </Tabs.Tab>
                 <Tabs.Tab id="filaments">
-                  Filaments ({selectedMachineProfileId ? filteredFilamentProfiles.length : 0})
+                  Filaments ({selectedMachineModelId ? filteredFilamentProfiles.length : 0})
                 </Tabs.Tab>
                 <Tabs.Tab id="custom">
                   My Profiles ({filteredCustomProfiles.length})
@@ -1158,14 +935,35 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
 
           {/* Profiles Table */}
           <div className="p-4">
-            {error && <Alert type="error">{error.message}</Alert>}
-            {isLoading && <div>Loading profiles...</div>}
-            {!isLoading && getTotalCount() === 0 && <div className="text-pf-text-muted text-sm">No profiles imported yet.</div>}
-            {!isLoading && getTotalCount() > 0 && getFilteredCount() === 0 && (
+            {libraryUnavailable && (
+              <Alert type="warning" title="Profile library unavailable" className="mb-4">
+                OrcaSlicer worker unavailable; the profile library cannot be listed. My Profiles is still available.
+              </Alert>
+            )}
+            {isLoading && activeTab !== 'custom' && <div>Loading profiles...</div>}
+            {!isLoading && !libraryUnavailable && getFilteredCount() === 0 && activeTab === 'machines' && (
               <div className="text-pf-text-muted text-sm">No profiles match your filters.</div>
             )}
-            {!isLoading && (activeTab === 'filaments' || activeTab === 'processes') && !selectedMachineProfileId && (
-              <div className="text-pf-text-muted text-sm">Select a machine model to view filament and process profiles.</div>
+            {!isLoading && activeTab === 'processes' && !selectedMachineModelId && (
+              <div className="text-pf-text-muted text-sm">Select a printer model to see compatible processes.</div>
+            )}
+            {!isLoading && activeTab === 'filaments' && !selectedMachineModelId && (
+              <div className="text-pf-text-muted text-sm">Select a printer model to see compatible filaments.</div>
+            )}
+            {activeTab === 'processes' && selectedMachineModelId && processProfilesQuery.isLoading && (
+              <div className="text-pf-text-muted text-sm">Loading compatible processes...</div>
+            )}
+            {activeTab === 'filaments' && selectedMachineModelId && filamentProfilesQuery.isLoading && (
+              <div className="text-pf-text-muted text-sm">Loading compatible filaments...</div>
+            )}
+            {activeTab === 'processes' && selectedMachineModelId && !processProfilesQuery.isLoading && !libraryUnavailable && filteredProcessProfiles.length === 0 && (
+              <div className="text-pf-text-muted text-sm">No compatible process profiles found for the selected machines.</div>
+            )}
+            {activeTab === 'filaments' && selectedMachineModelId && !filamentProfilesQuery.isLoading && !libraryUnavailable && filteredFilamentProfiles.length === 0 && (
+              <div className="text-pf-text-muted text-sm">No compatible filament profiles found for the selected machines.</div>
+            )}
+            {activeTab === 'filaments' && selectedMachineModelId && !libraryUnavailable && (
+              <p className="text-pf-text-muted text-sm mb-3">Includes universal library filaments.</p>
             )}
             
             {/* Custom Profiles Tab Content */}
@@ -1188,7 +986,28 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                   </div>
                 )}
                 {!customProfilesLoading && filteredCustomProfiles.length > 0 && (
-                  <div className="overflow-x-auto">
+                  <>
+                    {selectedProfileIds.size > 0 && (
+                      <div className="flex items-center gap-4 mb-4 p-2 bg-pf-bg-2 rounded-sm">
+                        <span className="text-sm text-pf-text-secondary">{selectedProfileIds.size} profile(s) selected</span>
+                        <Button
+                          onClick={handleDeleteSelected}
+                          loading={bulkDeleteMutation.isPending}
+                          size="sm"
+                          variant="danger"
+                        >
+                          Delete Selected
+                        </Button>
+                        <Button
+                          onClick={() => setSelectedProfileIds(new Set())}
+                          size="sm"
+                          variant="subtle"
+                        >
+                          Clear Selection
+                        </Button>
+                      </div>
+                    )}
+                    <div className="overflow-x-auto">
                     <table className="min-w-full text-sm">
                       <thead>
                         <tr className="bg-pf-bg-1 text-left">
@@ -1218,7 +1037,8 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                         {filteredCustomProfiles.map(p => renderCustomProfileRow(p))}
                       </tbody>
                     </table>
-                  </div>
+                    </div>
+                  </>
                 )}
               </>
             )}
@@ -1226,40 +1046,11 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
             {/* Regular Profiles Tabs Content (Machines, Filaments, Processes) */}
             {activeTab !== 'custom' && (
               <>
-            {/* Bulk actions bar */}
-            {selectedProfileIds.size > 0 && (
-              <div className="flex items-center gap-4 mb-4 p-2 bg-pf-bg-2 rounded-sm">
-                <span className="text-sm text-pf-text-secondary">{selectedProfileIds.size} profile(s) selected</span>
-                <Button
-                  onClick={handleDeleteSelected}
-                  loading={bulkDeleteMutation.isPending}
-                  size="sm"
-                  variant="danger"
-                >
-                  Delete Selected
-                </Button>
-                <Button
-                  onClick={() => setSelectedProfileIds(new Set())}
-                  size="sm"
-                  variant="subtle"
-                >
-                  Clear Selection
-                </Button>
-              </div>
-            )}
             {!isLoading && getFilteredCount() > 0 && (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="bg-pf-bg-1 text-left">
-                      <th className="p-2 w-10">
-                        <Checkbox
-                          checked={pagedProfiles.length > 0 && pagedProfiles.every(p => selectedProfileIds.has(p.id))}
-                          onChange={handleSelectAll}
-                          label=""
-                          aria-label="Select all profiles on this page"
-                        />
-                      </th>
                       <th className="p-2">Name</th>
                       <th className="p-2">Engine</th>
                       <th className="p-2">Material/Manufacturer</th>
@@ -1267,7 +1058,6 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                       <th className="p-2">Layer/Nozzle</th>
                       <th className="p-2">Infill</th>
                       <th className="p-2">Flags</th>
-                      <th className="p-2">Actions</th>
                     </tr>
                   </thead>
                   <tbody>

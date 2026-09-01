@@ -1,28 +1,35 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-// The mocks below are hoisted by Vitest before the SUT imports the services.
 vi.mock('@/services/slicerProfilesService', () => ({
   slicerProfilesService: {
-    listHierarchical: vi.fn(),
+    getLibraryHierarchy: vi.fn(),
+    getProcessProfilesForMachines: vi.fn(() => Promise.resolve([])),
+    getFilamentProfilesForMachines: vi.fn(() => Promise.resolve([])),
     listCustomProfiles: vi.fn(() => Promise.resolve({ profiles: [], totalCount: 0 })),
-    setDefault: vi.fn(() => Promise.resolve()),
     importProfile: vi.fn(),
-    bulkDelete: vi.fn(),
-    cloneProfile: vi.fn(),
+    bulkDelete: vi.fn(() => Promise.resolve({
+      machineProfilesDeleted: 0,
+      processProfilesDeleted: 0,
+      filamentProfilesDeleted: 0,
+      totalDeleted: 1,
+      notFound: 0,
+    })),
     uploadProfile: vi.fn(),
     updateCustomProfile: vi.fn(),
-    deleteCustomProfile: vi.fn(),
+    deleteCustomProfile: vi.fn(() => Promise.resolve()),
   },
 }));
 
 vi.mock('@/services/slicerRegistry', () => ({
   slicerRegistry: {
-    getSlicers: vi.fn(() => Promise.resolve([{ id: '1', name: 'orca-1', slicerType: 'OrcaSlicer', version: '2.3.1' }])),
+    getSlicers: vi.fn(() => Promise.resolve([
+      { id: '1', name: 'orca-1', slicerType: 'OrcaSlicer', version: '2.3.1' },
+    ])),
   },
 }));
 
@@ -38,9 +45,6 @@ vi.mock('@/features/slicer/orca', () => ({
   },
 }));
 
-// The SignalR hub connection is a side-effect-only useEffect on the profiles
-// page. A no-op stub keeps the test off the network and off the real transport
-// registration path while preserving the render.
 vi.mock('@/services/slicerRegistryHubConnection', () => ({
   createSlicerRegistryConnection: vi.fn(() => ({
     connection: {
@@ -52,35 +56,41 @@ vi.mock('@/services/slicerRegistryHubConnection', () => ({
   })),
 }));
 
-import { SlicerProfilesPage } from '../SlicerProfilesPage';
+import { SlicerProfilesPage } from '@/features/slicer/pages/SlicerProfilesPage';
 import { slicerProfilesService } from '@/services/slicerProfilesService';
 
-// Minimal hierarchical fixture containing one machine profile row. The row is
-// what renders the "Set Default" button that fires setDefaultMutation.
-const machineProfileFixture = {
-  id: 'machine-1',
-  name: 'Prusa MK4 0.4 nozzle',
-  slicerType: 'OrcaSlicer',
-  isDefault: false,
-  isSystem: true,
-  isPublic: true,
-  hash: 'hash-1',
-  profileType: 'machine' as const,
-  manufacturer: 'Prusa',
-  nozzleDiameter: 0.4,
-};
+const machineNames = [
+  'PrintersForAnts Micron 180 0.4 nozzle',
+  'PrintersForAnts Micron 180 0.6 nozzle',
+];
 
 const hierarchyFixture = {
   byHierarchy: {
-    Prusa: {
-      name: 'Prusa',
+    PrintersForAnts: {
+      name: 'PrintersForAnts',
       models: {
-        MK4: {
-          name: 'MK4',
-          modelId: 'model-1',
-          machineProfiles: [machineProfileFixture],
-          filamentProfiles: [],
-          processProfiles: [],
+        'Micron 180': {
+          name: 'Micron 180',
+          machineProfiles: machineNames.map((name, index) => ({
+            name,
+            manufacturer: 'PrintersForAnts',
+            nozzleDiameter: index === 0 ? 0.4 : 0.6,
+          })),
+          filamentProfiles: [{
+            name: 'Unrelated PLA @MK4S',
+            material: 'PLA',
+            nozzleTemperature: 210,
+            bedTemperature: 60,
+            printSpeed: 60,
+          }],
+          processProfiles: [{
+            name: '0.20mm Standard @MK4S',
+            quality: 'Standard',
+            layerHeight: 0.2,
+            infillPercentage: 15,
+            printSpeed: 60,
+            supports: false,
+          }],
         },
       },
     },
@@ -90,99 +100,179 @@ const hierarchyFixture = {
   processProfiles: {},
 };
 
-function renderPage(queryClient: QueryClient) {
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <SlicerProfilesPage />
-      </MemoryRouter>
-    </QueryClientProvider>
-  );
+const customProfile = {
+  id: 'custom-1',
+  name: 'My Micron process',
+  profileType: 'process' as const,
+  description: 'User owned',
+  createdAt: '2026-08-01T00:00:00Z',
+  updatedAt: '2026-08-02T00:00:00Z',
+};
+
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0, staleTime: 0 },
+      mutations: { retry: false },
+    },
+  });
 }
 
-describe('SlicerProfilesPage — filtered cache invalidation (issue #2067)', () => {
+function renderPage(queryClient = createQueryClient()) {
+  return {
+    queryClient,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <SlicerProfilesPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    ),
+  };
+}
+
+async function selectMicronModel(user = userEvent.setup()) {
+  renderPage();
+  await screen.findByRole('option', { name: 'PrintersForAnts' });
+  await user.selectOptions(screen.getByLabelText('Select manufacturer'), 'PrintersForAnts');
+  await screen.findByRole('option', { name: 'Micron 180' });
+  await user.selectOptions(screen.getByLabelText('Select machine model'), 'Micron 180');
+  return user;
+}
+
+describe('SlicerProfilesPage worker-backed library', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // listHierarchical is called both unfiltered (main hierarchy query) and
-    // filtered (['slicerProfilesHierarchyFiltered', selectedMachineProfileId]);
-    // both call sites go through the same service method, distinguished by the
-    // first argument. Return the same fixture for both — the assertion below
-    // pins the *filtered* call by argument identity, so the mount contract is
-    // verified without ambiguity.
-    vi.mocked(slicerProfilesService.listHierarchical).mockResolvedValue(hierarchyFixture);
+    vi.mocked(slicerProfilesService.getLibraryHierarchy).mockResolvedValue(hierarchyFixture);
+    vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue([]);
+    vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValue([]);
+    vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({ profiles: [], totalCount: 0 });
   });
 
-  // Regression guard for issue #2067: when a machine-profile filter is
-  // active, every mutation on this page must invalidate the
-  // `slicerProfilesHierarchyFiltered` prefix key so the filtered hierarchy
-  // view refetches immediately — not on the next `staleTime` expiry.
-  //
-  // The bug scenario the test drives end-to-end:
-  //  1. User picks Manufacturer=Prusa → Machine Model=machine-1, which
-  //     mounts the filtered query (`listHierarchical('machine-1')` is called).
-  //  2. User clicks "Set Default" on that same machine profile.
-  //  3. The mutation's `onSuccess` must fire prefix invalidation, or the
-  //     filtered view stays stale until `staleTime` elapses.
-  //
-  // `setDefaultMutation` is one representative of the seven mutation
-  // onSuccess handlers listed in the issue; the fix applies the same prefix
-  // invalidation across all nine sites (seven mutations + one SignalR
-  // handler + the manual Refresh button). The assertion uses an
-  // `objectContaining` prefix match (no `selectedMachineProfileId` element),
-  // which is exactly what mismatches a regression that reverts to a
-  // specific-key or filter-guarded invalidation.
-  it('invalidates the slicerProfilesHierarchyFiltered prefix key after setDefault when a machine filter is active', async () => {
-    const queryClient = new QueryClient({
-      defaultOptions: {
-        queries: { retry: false, gcTime: 0, staleTime: 0 },
-        mutations: { retry: false },
-      },
+  it('requests the all-scope attributed hierarchy and renders its manufacturer', async () => {
+    renderPage();
+
+    expect(await screen.findByText(machineNames[0])).toBeInTheDocument();
+    expect(slicerProfilesService.getLibraryHierarchy).toHaveBeenCalledWith('all');
+
+    const manufacturer = screen.getByLabelText<HTMLSelectElement>('Select manufacturer');
+    expect(within(manufacturer).getByRole('option', { name: 'PrintersForAnts' })).toBeInTheDocument();
+    expect(within(manufacturer).queryByRole('option', { name: 'Custom' })).not.toBeInTheDocument();
+    expect(within(manufacturer).queryByRole('option', { name: /PrintFarmer-/ })).not.toBeInTheDocument();
+  });
+
+  it('does not request compatible profiles until a model is selected', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('tab', { name: /Processes/ }));
+
+    expect(screen.getByText('Select a printer model to see compatible processes.')).toBeInTheDocument();
+    expect(slicerProfilesService.getProcessProfilesForMachines).not.toHaveBeenCalled();
+    expect(slicerProfilesService.getFilamentProfilesForMachines).not.toHaveBeenCalled();
+  });
+
+  it('queries all model machines, then narrows to a selected variant', async () => {
+    const user = await selectMicronModel();
+
+    await waitFor(() => {
+      expect(slicerProfilesService.getProcessProfilesForMachines)
+        .toHaveBeenCalledWith(machineNames, undefined, 'summary');
+      expect(slicerProfilesService.getFilamentProfilesForMachines)
+        .toHaveBeenCalledWith(machineNames, undefined, 'summary');
     });
+
+    await user.selectOptions(screen.getByLabelText('Select machine'), machineNames[0]);
+
+    await waitFor(() => {
+      expect(slicerProfilesService.getProcessProfilesForMachines)
+        .toHaveBeenLastCalledWith([machineNames[0]], undefined, 'summary');
+      expect(slicerProfilesService.getFilamentProfilesForMachines)
+        .toHaveBeenLastCalledWith([machineNames[0]], undefined, 'summary');
+    });
+  });
+
+  it('renders generated Micron processes returned by for-machines', async () => {
+    vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue([{
+      name: '0.20mm Standard @Micron 180 0.4 nozzle',
+      quality: 'Standard',
+      layerHeight: 0.2,
+      infillPercentage: 15,
+      printSpeed: 60,
+      supports: false,
+      compatible_printers: [machineNames[0]],
+    }]);
+    const user = await selectMicronModel();
+
+    await user.click(screen.getByRole('tab', { name: /Processes/ }));
+
+    expect(await screen.findByText('0.20mm Standard @Micron 180 0.4 nozzle')).toBeInTheDocument();
+  });
+
+  it('does not fall back to unrelated hierarchy process or filament buckets', async () => {
+    const user = await selectMicronModel();
+
+    await user.click(screen.getByRole('tab', { name: /Processes/ }));
+    expect(screen.queryByText('0.20mm Standard @MK4S')).not.toBeInTheDocument();
+    expect(screen.getByText('No compatible process profiles found for the selected machines.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: /Filaments/ }));
+    expect(screen.queryByText('Unrelated PLA @MK4S')).not.toBeInTheDocument();
+    expect(screen.getByText('No compatible filament profiles found for the selected machines.')).toBeInTheDocument();
+    expect(screen.getByText('Includes universal library filaments.')).toBeInTheDocument();
+  });
+
+  it('hides ID-based actions and bulk selection on worker tabs', async () => {
+    renderPage();
+
+    expect(await screen.findByText(machineNames[0])).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Set Default/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Export$/i })).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Clone to My Profiles')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Select all profiles/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps My Profiles actions and bulk deletion functional', async () => {
+    vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+      profiles: [customProfile],
+      totalCount: 1,
+    });
+    const user = userEvent.setup();
+    const { queryClient } = renderPage();
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
-    renderPage(queryClient);
-
-    // Wait for the initial (unfiltered) hierarchy to resolve so the filter
-    // dropdowns populate.
-    await waitFor(() => {
-      expect(slicerProfilesService.listHierarchical).toHaveBeenCalledWith();
-    });
-
-    // Drive the manufacturer -> machine model selection that mounts the
-    // filtered query.
-    const manufacturerSelect = await screen.findByLabelText<HTMLSelectElement>('Select manufacturer');
-    await userEvent.selectOptions(manufacturerSelect, 'Prusa');
-
-    const machineModelSelect = await screen.findByLabelText<HTMLSelectElement>('Select machine model');
-    await waitFor(() => {
-      expect(machineModelSelect).not.toBeDisabled();
-    });
-    await userEvent.selectOptions(machineModelSelect, 'machine-1');
-
-    // Prove the filtered query is actually mounted before we trigger the
-    // mutation. Without this, a "invalidateQueries called with the prefix
-    // key" assertion could pass on code that never wires the filtered query
-    // to real user flow.
-    await waitFor(() => {
-      expect(slicerProfilesService.listHierarchical).toHaveBeenCalledWith('machine-1');
-    });
-
-    // The setDefault button lives on the machine profile row that is still
-    // visible in the machines table.
-    const setDefaultButton = await screen.findByRole('button', { name: /set default/i });
-    await userEvent.click(setDefaultButton);
+    await user.click(await screen.findByRole('tab', { name: /My Profiles/ }));
+    expect(await screen.findByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    await user.click(screen.getByLabelText(`Select ${customProfile.name}`));
+    expect(screen.getByRole('button', { name: 'Delete Selected' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
 
     await waitFor(() => {
-      expect(slicerProfilesService.setDefault).toHaveBeenCalledWith('machine-1');
+      expect(slicerProfilesService.deleteCustomProfile).toHaveBeenCalledWith(customProfile.id);
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['slicerProfilesLibraryHierarchy'] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['processProfilesForMachines'] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['filamentProfilesForMachines'] });
     });
+  });
 
-    // Assert prefix invalidation — no `selectedMachineProfileId` element, so
-    // every cached filter variant refetches on next mount and the currently
-    // selected filter refetches immediately.
-    await waitFor(() => {
-      expect(invalidateSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ queryKey: ['slicerProfilesHierarchyFiltered'] })
-      );
+  it('shows a degraded banner while My Profiles remains usable', async () => {
+    vi.mocked(slicerProfilesService.getLibraryHierarchy).mockRejectedValue(
+      new Error('Request failed with status code 503'),
+    );
+    vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+      profiles: [customProfile],
+      totalCount: 1,
     });
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText(
+      'OrcaSlicer worker unavailable; the profile library cannot be listed. My Profiles is still available.',
+    )).toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: /My Profiles/ }));
+    expect(await screen.findByText(customProfile.name)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
   });
 });
