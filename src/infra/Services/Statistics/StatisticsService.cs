@@ -233,27 +233,12 @@ public class StatisticsService(AppDbContext db, IPrintFarmerTelemetryService? te
             query = query.Where(j => j.QueuedAt <= effectiveEnd.Value);
         }
 
-        var rawJobs = await query
-            .Select(j => new
-            {
-                PrinterId = j.AssignedPrinterId!.Value,
-                j.Status,
-                PrintTimeTicks = j.ActualPrintTime.HasValue ? j.ActualPrintTime.Value.Ticks : (long?)null,
-            })
-            .ToListAsync(ct);
-
-        var rows = rawJobs
-            .GroupBy(j => j.PrinterId)
-            .Select(g => new
-            {
-                PrinterId = g.Key,
-                TotalJobs = g.Count(),
-                Completed = g.Count(j => j.Status == PrintJobStatus.Completed),
-                Failed = g.Count(j => j.Status == PrintJobStatus.Failed),
-                TotalHours = g.Where(j => j.PrintTimeTicks.HasValue)
-                    .Sum(j => TimeSpan.FromTicks(j.PrintTimeTicks!.Value).TotalHours),
-            })
-            .ToList();
+        // Aggregated server-side in a single GROUP BY, so the result set is O(printers) rather
+        // than O(jobs) -- previously every matching row was materialized client-side because EF
+        // Core cannot translate a grouped SUM over ActualPrintTime.Ticks (its TimeSpan value
+        // converter blocks translation). The "ActualPrintTimeTicks" shadow column carries no
+        // converter, so the duration SUM can be pushed to SQL too (issue #2346 / spike #2333).
+        var rows = await BuildPrinterUtilizationAggregateQuery(query).ToListAsync(ct);
 
         var printerIds = rows.Select(r => r.PrinterId).ToList();
         var printerNames = await _db.Printers
@@ -268,7 +253,7 @@ public class StatisticsService(AppDbContext db, IPrintFarmerTelemetryService? te
             TotalJobs = r.TotalJobs,
             CompletedJobs = r.Completed,
             FailedJobs = r.Failed,
-            TotalPrintHours = Math.Round(r.TotalHours, 1),
+            TotalPrintHours = Math.Round(TimeSpan.FromTicks(r.TotalTicks).TotalHours, 1),
             SuccessRate = r.Completed + r.Failed > 0
                 ? Math.Round((double)r.Completed / (r.Completed + r.Failed) * 100, 1)
                 : 0,
@@ -277,6 +262,24 @@ public class StatisticsService(AppDbContext db, IPrintFarmerTelemetryService? te
         .ToList();
 
         return result;
+    }
+
+    /// <summary>
+    /// Builds the grouped per-printer aggregate query used by <see cref="GetPrinterUtilizationAsync"/>.
+    /// Extracted as a static builder (mirrors <see cref="BuildSummaryAggregateQuery"/>) so tests can
+    /// assert the query actually translates to a single server-side GROUP BY across providers,
+    /// rather than only observing round-trip counts (issue #2346 / spike #2333).
+    /// </summary>
+    internal static IQueryable<PrinterUtilizationAggregate> BuildPrinterUtilizationAggregateQuery(IQueryable<PrintJob> query)
+    {
+        return query
+            .GroupBy(j => j.AssignedPrinterId!.Value)
+            .Select(g => new PrinterUtilizationAggregate(
+                g.Key,
+                g.Count(),
+                g.Count(j => j.Status == PrintJobStatus.Completed),
+                g.Count(j => j.Status == PrintJobStatus.Failed),
+                g.Sum(j => EF.Property<long?>(j, "ActualPrintTimeTicks")) ?? 0L));
     }
 
     /// <inheritdoc />
@@ -607,4 +610,11 @@ public class StatisticsService(AppDbContext db, IPrintFarmerTelemetryService? te
         decimal MachineCost,
         decimal LaborCost,
         int JobCount);
+
+    internal sealed record PrinterUtilizationAggregate(
+        Guid PrinterId,
+        int TotalJobs,
+        int Completed,
+        int Failed,
+        long TotalTicks);
 }
