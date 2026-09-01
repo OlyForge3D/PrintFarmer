@@ -36,6 +36,28 @@ COPY LICENSE /LICENSE
 COPY THIRD-PARTY-NOTICES.md /THIRD-PARTY-NOTICES.md
 
 ############################################################
+# Restore-Manifest Stage - project/solution files only
+# Copies the full src/ tree and then prunes everything except
+# *.csproj/*.sln/Directory.Build.props(.targets)/Directory.Packages.props,
+# preserving directory structure. This lets the shared-build stage's
+# `dotnet restore` layer depend only on manifest content, so a source-only
+# edit no longer busts the restore cache (issue #2330). Pruning by filename
+# (rather than hand-listing every project) also covers every transitively
+# referenced project automatically, so nothing can be missed from the
+# restore list below.
+############################################################
+FROM --platform=${BUILDPLATFORM:-linux/amd64} mcr.microsoft.com/dotnet/sdk:${SDK_TAG} AS restore-manifest
+WORKDIR /manifest
+COPY src/ ./src/
+RUN find ./src -type f \
+      ! -name '*.csproj' \
+      ! -name '*.sln' \
+      ! -name 'Directory.Build.props' \
+      ! -name 'Directory.Build.targets' \
+      ! -name 'Directory.Packages.props' \
+      -delete
+
+############################################################
 # Shared Build Stage - Build all .NET projects once
 # Uses BUILDPLATFORM to compile on the build host's native arch (faster, no QEMU)
 # .NET publishes framework-dependent IL output that runs on any target architecture
@@ -47,18 +69,22 @@ WORKDIR /
 # Passed to `dotnet publish` as GitCommitSha so InformationalVersion carries the commit.
 ARG GIT_SHA=unknown
 
-# Copy root-level files and the entire src directory
+# Copy root-level files and the pruned (manifest-only) src directory.
 # The context root is the repository root (/home/pi/pfarm)
 COPY Directory.Build.props ./
 COPY global.json ./
 COPY VERSION ./
 COPY proto ./proto
-COPY src/ ./src/
+COPY --from=restore-manifest /manifest/src/ ./src/
 
 # Set working directory for builds
 WORKDIR /src
 
-# Restore all dependencies in one go
+# Restore all dependencies in one go. This list is the UNION of every project
+# graph entry point built below (api, workers, backend plugins, and both
+# OrcaSlicer plugin versions) so every subsequent `--no-restore` build/publish
+# step has already been restored here - see issue #2330 for why this list
+# must never diverge from what is built with --no-restore further down.
 RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
     dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
@@ -73,21 +99,18 @@ RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.TestEmulator/Farm.Backend.Plugin.TestEmulator.csproj
 
-# Build and publish all services: sequential restore, then sequential publish
-# Using BUILD_VERBOSITY argument: quiet, minimal, normal, or detailed
-# NOTE: NuGet cache mount removed to prevent corruption during .NET version migrations
-RUN dotnet restore ./api/Farm.Web.Api.csproj && \
-    dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
-    dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
-    dotnet restore ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj && \
-    dotnet restore ./moonraker-emulator/Farm.Moonraker.Emulator/Farm.Moonraker.Emulator.csproj && \
-    dotnet restore ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj && \
-    dotnet restore ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj && \
-    dotnet restore ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj && \
-    dotnet restore ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj && \
-    dotnet restore ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj && \
-    dotnet restore ./backends/Farm.Backend.Plugin.TestEmulator/Farm.Backend.Plugin.TestEmulator.csproj && \
-    echo "Publishing API..." && \
+# Now bring in the full source tree from the real build context. This layer's
+# cache is invalidated on every source edit, but it comes *after* restore, so
+# the (cacheable) restore layer above is unaffected by source-only changes.
+# NOTE: destination must be absolute (/src) -- WORKDIR is /src at this point,
+# so a relative "./src/" destination would land at /src/src/ instead of
+# overwriting the pruned manifest tree at /src (caught in review, issue #2330).
+COPY src/ /src/
+
+# Build and publish all services (restore already completed above -- no
+# duplicate restore; NOTE: NuGet cache mount removed to prevent corruption
+# during .NET version migrations)
+RUN echo "Publishing API..." && \
     dotnet publish ./api/Farm.Web.Api.csproj -c Release -o /app/publish/api --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing OrcaSlicer Worker..." && \
     dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish/orcaslicer-worker --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
