@@ -78,6 +78,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="activityAccumulator">Optional per-tool active-time accumulator (issue #711, round-14) consulted when wiring the per-tool attribution capability flag and reset on printer removal</param>
 /// <param name="configuration">Optional configuration accessor</param>
 /// <param name="membershipNotifier">Optional notifier for queue subscription membership changes (issue #1731); null in contexts that don't need it</param>
+/// <param name="spoolmanStatusCache">Optional shared status-path spool cache (issue #2338) used by <see cref="GetAllCompleteDtosAsync"/>'s DB fallback to coalesce repeated spool lookups and bound their concurrency/timeout; null falls back to direct (uncached) <see cref="Farm.Infrastructure.Services.Interfaces.ISpoolmanService"/> reads</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
@@ -100,7 +101,8 @@ public class PrintersService(
     Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null,
     Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? activityAccumulator = null,
     IConfiguration? configuration = null,
-    Farm.Infrastructure.Services.Queue.IQueueSubscriptionMembershipNotifier? membershipNotifier = null) : IPrintersService
+    Farm.Infrastructure.Services.Queue.IQueueSubscriptionMembershipNotifier? membershipNotifier = null,
+    Farm.Infrastructure.Services.Spoolman.ISpoolmanStatusCache? spoolmanStatusCache = null) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -133,6 +135,31 @@ public class PrintersService(
     // deletes a printer (changes queue-reader subscription eligibility). Nullable so unit
     // tests that build PrintersService directly need not supply it.
     private readonly Farm.Infrastructure.Services.Queue.IQueueSubscriptionMembershipNotifier? _membershipNotifier = membershipNotifier;
+
+    // Optional (issue #2338): shared status-path spool cache used by GetAllCompleteDtosAsync's
+    // DB fallback so repeated spool lookups (across printers and across requests within the
+    // cache TTL) are coalesced instead of hitting Spoolman uncached and sequentially. Nullable
+    // so unit tests that build PrintersService directly need not supply it -- the fallback then
+    // degrades to a direct (uncached) ISpoolmanService read, still bounded by
+    // FallbackSpoolLookupTimeout.
+    private readonly Farm.Infrastructure.Services.Spoolman.ISpoolmanStatusCache? _spoolmanStatusCache = spoolmanStatusCache;
+
+    /// <summary>
+    /// Maximum number of concurrent Spoolman spool lookups performed by
+    /// <see cref="PrefetchFallbackSpoolsAsync"/> for a single <see cref="GetAllCompleteDtosAsync"/>
+    /// call (issue #2338). Bounds fan-out so a large fleet with many distinct spool IDs doesn't
+    /// open unbounded concurrent HTTP requests to Spoolman.
+    /// </summary>
+    private const int MaxConcurrentSpoolLookups = 8;
+
+    /// <summary>
+    /// Per-lookup timeout for the <see cref="GetAllCompleteDtosAsync"/> spool fallback path
+    /// (issue #2338), deliberately shorter than the 30s <c>HttpClient.Timeout</c> configured for
+    /// the <see cref="Farm.Infrastructure.Services.Interfaces.ISpoolmanService"/> typed client
+    /// (<c>ServiceCollectionExtensions.cs</c>). An unreachable Spoolman then degrades a single
+    /// lookup instead of multiplying N x 30s across every printer needing the fallback.
+    /// </summary>
+    private static readonly TimeSpan FallbackSpoolLookupTimeout = TimeSpan.FromSeconds(4);
 
     /// <summary>
     /// Re-probe cadence (hours) for <see cref="RefreshDetectedFirmwareIdentityAsync"/>, configurable via
@@ -1982,6 +2009,12 @@ public class PrintersService(
         List<CompletePrinterDto> dtos = [];
         IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses = _statusCache.GetAllStatuses();
 
+        // #2338: resolve every distinct spool ID this call's DB fallback will need up front,
+        // with bounded concurrency through the shared status cache, instead of letting each
+        // printer in the loop below make its own uncached, sequential Spoolman call.
+        IReadOnlyDictionary<int, SpoolmanSpoolDto?> prefetchedSpools =
+            await PrefetchFallbackSpoolsAsync(items, cachedStatuses, ct).ConfigureAwait(false);
+
         foreach (Printer p in items)
         {
             cameraUrls.TryGetValue(p.Id, out (string? StreamUrl, string? SnapshotUrl) cam);
@@ -2045,7 +2078,7 @@ public class PrintersService(
                     HotendTarget: status.HotendTarget,
                     BedTarget: status.BedTarget,
                     HomedAxes: null, // Will be filled by PrinterStatusUpdate via SignalR
-                    SpoolInfo: status.SpoolInfo ?? await BuildDbSpoolInfoAsync(p, ct),
+                    SpoolInfo: status.SpoolInfo ?? await BuildSpoolInfoFromCacheAsync(p, prefetchedSpools, ct).ConfigureAwait(false),
                     BackendUrl: p.BackendUrl,
                     FrontendUrl: PrinterClientUrl.Create(p.FrontendUrl),
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
@@ -2097,7 +2130,7 @@ public class PrintersService(
                     HotendTarget: null,
                     BedTarget: null,
                     HomedAxes: null,
-                    SpoolInfo: await BuildDbSpoolInfoAsync(p, ct),
+                    SpoolInfo: await BuildSpoolInfoFromCacheAsync(p, prefetchedSpools, ct).ConfigureAwait(false),
                     BackendUrl: p.BackendUrl,
                     FrontendUrl: PrinterClientUrl.Create(p.FrontendUrl),
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
@@ -2558,7 +2591,10 @@ public class PrintersService(
     /// <summary>
     /// Builds a PrinterSpoolInfoDto from the DB's CurrentSpoolId by fetching spool details from Spoolman.
     /// Returns null if no spool is assigned or the fetch fails.
-    /// Used by GetAllCompleteDtosAsync which reads from the status cache and needs DB-based spool fallback.
+    /// Always reads directly through <see cref="Farm.Infrastructure.Services.Interfaces.ISpoolmanService"/>
+    /// (no caching) — used by mutation paths such as <see cref="SetActiveSpoolAsync"/> that need a
+    /// fresh read after just changing the assignment. <see cref="GetAllCompleteDtosAsync"/>'s list-view
+    /// fallback uses <see cref="BuildSpoolInfoFromCacheAsync"/> instead (issue #2338).
     /// </summary>
     private async Task<PrinterSpoolInfoDto?> BuildDbSpoolInfoAsync(Printer printer, CancellationToken ct)
     {
@@ -2570,6 +2606,127 @@ public class PrintersService(
         try
         {
             SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+            if (spool is null)
+            {
+                return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: spoolId);
+            }
+
+            return new PrinterSpoolInfoDto(
+                HasActiveSpool: true,
+                ActiveSpoolId: spoolId,
+                SpoolName: spool.FilamentName,
+                Material: spool.Material,
+                ColorHex: spool.ColorHex != null ? (spool.ColorHex.StartsWith('#') ? spool.ColorHex : $"#{spool.ColorHex}") : null,
+                FilamentName: spool.FilamentName,
+                Vendor: spool.Vendor,
+                RemainingWeightG: spool.RemainingWeightG);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to build spool info for printer {PId}, spool {SpoolId}", printer.Id, spoolId);
+            return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: spoolId);
+        }
+    }
+
+    /// <summary>
+    /// Resolves the distinct spool IDs that <see cref="GetAllCompleteDtosAsync"/>'s DB fallback will
+    /// need for this call -- printers whose cached status has no <c>SpoolInfo</c> yet -- with bounded
+    /// concurrency through <see cref="ISpoolmanStatusCache"/>. This fixes issue #2338: previously each
+    /// such printer triggered its own uncached, sequential Spoolman HTTP call, so an offline printer
+    /// fleet with distinct spool IDs (cache reuse alone doesn't help there) could block
+    /// <c>GET /api/printers</c> for N x 30s when Spoolman was unreachable.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<int, SpoolmanSpoolDto?>> PrefetchFallbackSpoolsAsync(
+        IEnumerable<Printer> printers,
+        IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses,
+        CancellationToken ct)
+    {
+        int[] spoolIds = printers
+            .Where(p => p.CurrentSpoolId.HasValue
+                && (!cachedStatuses.TryGetValue(p.Id, out PrinterStatusDto? status) || status.SpoolInfo is null))
+            .Select(p => p.CurrentSpoolId!.Value)
+            .Distinct()
+            .ToArray();
+
+        if (spoolIds.Length == 0)
+        {
+            return new Dictionary<int, SpoolmanSpoolDto?>();
+        }
+
+        var results = new ConcurrentDictionary<int, SpoolmanSpoolDto?>();
+        using var throttle = new SemaphoreSlim(MaxConcurrentSpoolLookups);
+        IEnumerable<Task> lookups = spoolIds.Select(async spoolId =>
+        {
+            await throttle.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                results[spoolId] = await GetSpoolWithBoundedTimeoutAsync(spoolId, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _ = throttle.Release();
+            }
+        });
+
+        await Task.WhenAll(lookups).ConfigureAwait(false);
+        return results;
+    }
+
+    /// <summary>
+    /// Looks up a single spool with a timeout bounded by <see cref="FallbackSpoolLookupTimeout"/>,
+    /// shorter than the 30s <c>HttpClient.Timeout</c> the underlying typed client uses (issue #2338).
+    /// Prefers the shared <see cref="ISpoolmanStatusCache"/> (coalesces concurrent/duplicate lookups
+    /// across printers and requests); falls back to a direct, uncached
+    /// <see cref="Farm.Infrastructure.Services.Interfaces.ISpoolmanService"/> read when no cache was
+    /// supplied (e.g. unit tests constructing <see cref="PrintersService"/> directly). The timeout only
+    /// abandons *this* caller's wait -- the underlying cache fetch (if any) is not cancelled by it, so
+    /// other/future callers still benefit once it completes.
+    /// </summary>
+    private async Task<SpoolmanSpoolDto?> GetSpoolWithBoundedTimeoutAsync(int spoolId, CancellationToken ct)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(FallbackSpoolLookupTimeout);
+        try
+        {
+            return _spoolmanStatusCache is not null
+                ? await _spoolmanStatusCache.GetSpoolAsync(spoolId, timeoutCts.Token).ConfigureAwait(false)
+                : await _spoolmanService.GetSpoolByIdAsync(spoolId, timeoutCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogDebug(
+                "Spool {SpoolId} lookup timed out after {Timeout}",
+                spoolId,
+                FallbackSpoolLookupTimeout);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Builds a PrinterSpoolInfoDto for <see cref="GetAllCompleteDtosAsync"/>'s DB fallback path,
+    /// preferring spools already resolved by <see cref="PrefetchFallbackSpoolsAsync"/> and falling
+    /// back to a single bounded-timeout lookup for any printer that wasn't pre-resolved (e.g. the
+    /// exception-fallback branch, which unconditionally needs spool info regardless of what the
+    /// prefetch predicted). Returns null if no spool is assigned; returns a degraded
+    /// (name/material-less) DTO if the lookup fails or times out, mirroring
+    /// <see cref="BuildDbSpoolInfoAsync"/>'s failure behavior (issue #2338).
+    /// </summary>
+    private async Task<PrinterSpoolInfoDto?> BuildSpoolInfoFromCacheAsync(
+        Printer printer,
+        IReadOnlyDictionary<int, SpoolmanSpoolDto?> prefetchedSpools,
+        CancellationToken ct)
+    {
+        if (printer.CurrentSpoolId is not { } spoolId)
+        {
+            return null;
+        }
+
+        try
+        {
+            SpoolmanSpoolDto? spool = prefetchedSpools.TryGetValue(spoolId, out SpoolmanSpoolDto? cached)
+                ? cached
+                : await GetSpoolWithBoundedTimeoutAsync(spoolId, ct).ConfigureAwait(false);
+
             if (spool is null)
             {
                 return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: spoolId);
