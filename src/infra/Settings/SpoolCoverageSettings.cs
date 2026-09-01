@@ -144,7 +144,7 @@ public class SpoolCoverageSettings : IAppSetting, IValidatableSetting
 
         if (FleetResolveTimeoutMs < SpoolSourceTimeoutMs)
         {
-            throw new ValidationException("Fleet spool resolve timeout must be greater than or equal to the spool source timeout, or every source silently degrades before it ever gets a chance to answer.");
+            throw new ValidationException($"Fleet spool resolve timeout ({FleetResolveTimeoutMs} ms) must be greater than or equal to spool source timeout ({SpoolSourceTimeoutMs} ms), or the fleet deadline can expire before a slow-but-healthy source ever gets a chance to respond.");
         }
     }
 }
