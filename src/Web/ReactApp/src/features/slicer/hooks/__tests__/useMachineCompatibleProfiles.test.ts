@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import type { OrcaMachineProfile, OrcaProcessProfile } from '@/services/slicerProfilesService';
-import { isProcessProfileCompatibleWithMachine } from '@/features/slicer/hooks/useMachineCompatibleProfiles';
+import type {
+  CustomProfile,
+  OrcaMachineProfile,
+  OrcaProcessProfile,
+} from '@/services/slicerProfilesService';
+import {
+  filterCustomMachineProfiles,
+  filterCustomProcessProfiles,
+  isProcessProfileCompatibleWithMachine,
+  mergeCustomProfilesIntoVisibleList,
+} from '@/features/slicer/hooks/useMachineCompatibleProfiles';
 
 const processProfile = (
   name: string,
@@ -19,6 +28,19 @@ const machineProfile = (name: string, isHighFlowNozzle?: boolean): OrcaMachinePr
   name,
   manufacturer: 'Prusa',
   isHighFlowNozzle,
+});
+
+const customProfile = (
+  id: string,
+  profileType: CustomProfile['profileType'],
+  printerModelId?: string | null,
+): CustomProfile => ({
+  id,
+  name: id,
+  profileType,
+  printerModelId,
+  isSystem: false,
+  createdAt: '2026-09-01T00:00:00Z',
 });
 
 describe('isProcessProfileCompatibleWithMachine', () => {
@@ -63,5 +85,32 @@ describe('isProcessProfileCompatibleWithMachine', () => {
       processProfile('0.20mm Standard @CORE One HF', ['Prusa CORE One HF 0.4 nozzle']),
       machineProfile('Prusa CORE One 0.4 nozzle', false),
     )).toBe(false);
+  });
+});
+
+describe('custom-profile list helpers', () => {
+  it('keeps only custom machine profiles scoped to the selected catalog model', () => {
+    const profiles = [
+      customProfile('selected', 'machine', 'model-1'),
+      customProfile('other', 'machine', 'model-2'),
+    ];
+
+    expect(filterCustomMachineProfiles(profiles, 'model-1', 'Prusa', 'CORE One'))
+      .toEqual([profiles[0]]);
+  });
+
+  it('keeps only custom process profiles scoped to the selected catalog model', () => {
+    const profiles = [
+      customProfile('selected', 'process', 'model-1'),
+      customProfile('other', 'process', 'model-2'),
+    ];
+
+    expect(filterCustomProcessProfiles(profiles, 'model-1', 'Prusa CORE One 0.4 nozzle'))
+      .toEqual([profiles[0]]);
+  });
+
+  it('places custom profiles before system profiles in the visible list', () => {
+    expect(mergeCustomProfilesIntoVisibleList(['system'], ['custom']))
+      .toEqual(['custom', 'system']);
   });
 });

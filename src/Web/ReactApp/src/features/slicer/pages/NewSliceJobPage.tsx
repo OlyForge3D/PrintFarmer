@@ -28,10 +28,10 @@ import { MachineProfileSelectorModal, type MachineProfileChoice } from '@/featur
 import { CreateProfileFamilyModal } from '@/features/slicer/components/profile-family/CreateProfileFamilyModal';
 import { buildMachineProfileLabels, resolveHighFlow } from '@/features/slicer/utils/machineProfileLabels';
 import {
-  classifyCustomProfileScope,
+  filterCustomMachineProfiles,
+  filterCustomProcessProfiles,
   isProcessProfileCompatibleWithMachine,
-  legacyMachineProfileMatchesPrinter,
-  legacyProcessProfileMatchesMachine,
+  mergeCustomProfilesIntoVisibleList,
   useMachineCompatibleProfiles,
 } from '@/features/slicer/hooks/useMachineCompatibleProfiles';
 import { buildSlicerProfileJson } from '@/features/slicer/utils/slicerProfilePayload';
@@ -1065,18 +1065,12 @@ export const NewSliceJobPage: React.FC = () => {
   // back to fuzzy manufacturer/model matching so they remain usable.
   const customMachineProfiles = useMemo(() => {
     const allCustomMachine = customProfilesData?.profiles?.filter(p => p.profileType === 'machine') ?? [];
-    if (allCustomMachine.length === 0) return allCustomMachine;
-    return allCustomMachine.filter(p => {
-      const scope = classifyCustomProfileScope(p, selectedPrinterModelId);
-      if (scope === 'match') return true;
-      if (scope === 'mismatch') return false;
-      // Unscoped legacy profile — fall back to fuzzy printer matching.
-      return legacyMachineProfileMatchesPrinter(
-        p,
-        selectedPrinterForSlicing?.manufacturerName,
-        selectedPrinterForSlicing?.modelName,
-      );
-    });
+    return filterCustomMachineProfiles(
+      allCustomMachine,
+      selectedPrinterModelId,
+      selectedPrinterForSlicing?.manufacturerName,
+      selectedPrinterForSlicing?.modelName,
+    );
   }, [customProfilesData, selectedPrinterForSlicing, selectedPrinterModelId]);
 
   // Filament profiles filtered by selected machine profile compatibility
@@ -1102,14 +1096,11 @@ export const NewSliceJobPage: React.FC = () => {
   // back to compatible_printers matching against the selected machine profile.
   const customProcessProfiles = useMemo(() => {
     const allCustomProcess = customProfilesData?.profiles?.filter(p => p.profileType === 'process') ?? [];
-    if (allCustomProcess.length === 0) return allCustomProcess;
-    return allCustomProcess.filter(p => {
-      const scope = classifyCustomProfileScope(p, selectedPrinterModelId);
-      if (scope === 'match') return true;
-      if (scope === 'mismatch') return false;
-      // Unscoped legacy profile — fall back to compatible_printers matching.
-      return legacyProcessProfileMatchesMachine(p, selectedMachineProfileId);
-    });
+    return filterCustomProcessProfiles(
+      allCustomProcess,
+      selectedPrinterModelId,
+      selectedMachineProfileId,
+    );
   }, [customProfilesData, selectedPrinterModelId, selectedMachineProfileId]);
 
 
@@ -1281,6 +1272,14 @@ export const NewSliceJobPage: React.FC = () => {
 
     return '';
   }, [customProcessProfiles, processProfilesBySource]);
+
+  const visibleProcessProfiles = useMemo(
+    () => mergeCustomProfilesIntoVisibleList(
+      [...processProfilesBySource.user, ...processProfilesBySource.system],
+      customProcessProfiles,
+    ),
+    [customProcessProfiles, processProfilesBySource],
+  );
 
   useEffect(() => {
     const optionValues = nozzleOptions.map((option) => option.value);
@@ -2944,7 +2943,7 @@ export const NewSliceJobPage: React.FC = () => {
             />
 
             {/* Select + Reset + Save row */}
-            {(processProfilesBySource.user.length > 0 || processProfilesBySource.system.length > 0 || customProcessProfiles.length > 0) ? (
+            {visibleProcessProfiles.length > 0 ? (
               <>
                 <div className="flex gap-1">
                   <Select
