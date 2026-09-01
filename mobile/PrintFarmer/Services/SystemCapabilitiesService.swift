@@ -35,6 +35,7 @@ enum SystemCapabilitiesRefreshOutcome: Equatable, Sendable {
     case loaded
     case legacyDefaults
     case failed
+    case failedWithDiagnostics(BackendReadinessFailureClassification)
 }
 
 /// Live implementation backed by the shared `APIClient`.
@@ -76,9 +77,16 @@ final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unche
             resolved = .defaults
             return .legacyDefaults
         } catch {
-            Self.logger.warning("Failed to fetch capabilities: \(error.localizedDescription, privacy: .public)")
+            let classification = BackendReadinessDiagnostics.classify(error)
+            Self.logger.warning(
+                """
+                Failed to fetch capabilities \
+                kind=\(classification.kind.rawValue, privacy: .public) \
+                detail=\(classification.diagnosticDetail, privacy: .public)
+                """
+            )
             // Fail open — do not disable features because of a transient error.
-            return .failed
+            return .failedWithDiagnostics(classification)
         }
     }
 }

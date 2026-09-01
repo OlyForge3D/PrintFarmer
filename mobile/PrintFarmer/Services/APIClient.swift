@@ -978,7 +978,19 @@ actor APIClient {
     /// `true` when the server answers with an HTTP status below 500 (server is up),
     /// `false` on transport failure or a 5xx response. Never throws.
     func isReachable(path: String = "/healthz", timeout: TimeInterval = 6) async -> Bool {
-        guard let url = URL(string: path, relativeTo: baseURL) else { return false }
+        do {
+            try await checkReachability(path: path, timeout: timeout)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Throwing reachability variant used when callers need failure diagnostics.
+    func checkReachability(path: String = "/healthz", timeout: TimeInterval = 6) async throws {
+        guard let url = URL(string: path, relativeTo: baseURL) else {
+            throw NetworkError.invalidURL(path)
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = timeout
@@ -986,10 +998,22 @@ actor APIClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         do {
             let (_, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return false }
-            return http.statusCode < 500
-        } catch {
-            return false
+            guard let http = response as? HTTPURLResponse else {
+                throw NetworkError.invalidResponse
+            }
+            guard http.statusCode < 500 else {
+                throw NetworkError.serverError(http.statusCode)
+            }
+        } catch let networkError as NetworkError {
+            throw networkError
+        } catch let urlError as URLError {
+            if urlError.code == .cancelled, Task.isCancelled {
+                throw CancellationError()
+            }
+            if urlError.code == .timedOut {
+                throw NetworkError.timeout
+            }
+            throw NetworkError.transportError(urlError)
         }
     }
 

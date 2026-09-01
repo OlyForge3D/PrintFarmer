@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import PrintFarmer
 
@@ -457,6 +458,7 @@ final class ConnectionMonitorTests: XCTestCase {
 
     func testReadinessSucceedsWhenEveryEnabledProbeSucceeds() async {
         let recorder = BackendProbeRecorder()
+        let diagnostics = BackendReadinessDiagnosticRecorder()
         let capabilities = TestCapabilitiesService()
         let plan = BackendReadinessPlan(
             capabilitiesService: capabilities,
@@ -470,12 +472,20 @@ final class ConnectionMonitorTests: XCTestCase {
             ]
         )
 
-        let result = await BackendReadinessChecker().check(plan: plan)
+        let result = await BackendReadinessChecker(
+            diagnosticRecorder: diagnostics.record
+        ).check(plan: plan)
 
         XCTAssertFalse(result.wasCancelled)
         XCTAssertTrue(result.failures.isEmpty)
         let recorded = await recorder.snapshot()
         XCTAssertEqual(Set(recorded), Set([.api, .attention]))
+        let diagnosticSnapshot = diagnostics.snapshot()
+        XCTAssertEqual(
+            Set(diagnosticSnapshot.map(\.endpoint)),
+            Set([.api, .systemCapabilities, .attention])
+        )
+        XCTAssertTrue(diagnosticSnapshot.allSatisfy { $0.outcome == .succeeded })
     }
 
     func testReadinessSkipsCapabilityDisabledProbes() async {
@@ -626,6 +636,7 @@ final class ConnectionMonitorTests: XCTestCase {
         let result = await BackendReadinessChecker().check(plan: plan)
 
         XCTAssertEqual(result.failures.map(\.endpoint), [.systemCapabilities])
+        XCTAssertEqual(result.failures.first?.kind, .transport)
         let recorded = await recorder.snapshot()
         XCTAssertEqual(recorded, [.printers])
     }
@@ -645,6 +656,7 @@ final class ConnectionMonitorTests: XCTestCase {
     func testReadinessTimesOutAnUnresponsiveProbe() async {
         let operationStarted = AsyncBarrier()
         let timeoutGate = AsyncBarrier()
+        let diagnostics = BackendReadinessDiagnosticRecorder()
         defer {
             operationStarted.close()
             timeoutGate.close()
@@ -663,7 +675,8 @@ final class ConnectionMonitorTests: XCTestCase {
             timeout: .seconds(30),
             probeTimeoutSleep: { _ in
                 await timeoutGate.arriveAndWait()
-            }
+            },
+            diagnosticRecorder: diagnostics.record
         )
         let checkTask = Task {
             await checker.check(plan: plan)
@@ -674,6 +687,11 @@ final class ConnectionMonitorTests: XCTestCase {
         let result = await checkTask.value
 
         XCTAssertEqual(result.failures.map(\.endpoint), [.signalR])
+        XCTAssertEqual(result.failures.first?.kind, .timeout)
+        let diagnostic = diagnostics.snapshot().first { $0.endpoint == .signalR }
+        XCTAssertEqual(diagnostic?.outcome, .failed)
+        XCTAssertEqual(diagnostic?.failureKind, .timeout)
+        XCTAssertEqual(diagnostic?.detail, "readiness timeout budget 30.0 seconds")
     }
 
     func testReadinessTimeoutReturnsWhenProbeIgnoresCancellation() async {
@@ -819,6 +837,8 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertEqual(gate.failures?.map(\.endpoint), [.attention])
         XCTAssertFalse(gate.allowsMainContent)
         XCTAssertTrue(gate.failureMessage?.contains("Attention") == true)
+        XCTAssertTrue(gate.failureMessage?.contains("Check the network and server") == true)
+        XCTAssertEqual(gate.failureTitle, "Some services are unavailable")
 
         gate.continueOffline()
         gate.continueOffline()
@@ -837,6 +857,31 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertEqual(gate.state, .idle)
         XCTAssertEqual(gate.retryRevision, initialRevision + 1)
         XCTAssertTrue(gate.isChecking)
+    }
+
+    func testConnectionGateCallsTimeoutsRespondingSlowly() async {
+        let operationStarted = AsyncBarrier()
+        let timeoutGate = AsyncBarrier()
+        defer {
+            operationStarted.close()
+            timeoutGate.close()
+        }
+        let plan = BackendReadinessPlan(
+            capabilitiesService: TestCapabilitiesService(),
+            probes: [
+                BackendReadinessProbe(endpoint: .attention) {
+                    operationStarted.signal()
+                    try await Task.sleep(for: .seconds(30))
+                },
+            ]
+        )
+        let gate = BackendConnectionGate(timeout: .milliseconds(1))
+
+        await gate.check(plan: plan, generation: 3) { true }
+
+        XCTAssertEqual(gate.failures?.first?.kind, .timeout)
+        XCTAssertEqual(gate.failureTitle, "Some services are responding slowly")
+        XCTAssertTrue(gate.failureMessage?.contains("Responding slowly") == true)
     }
 }
 
@@ -907,6 +952,21 @@ private actor BackendProbeRecorder {
 
     func snapshot() -> [BackendServiceEndpoint] {
         endpoints
+    }
+}
+
+private final class BackendReadinessDiagnosticRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var diagnostics: [BackendReadinessProbeDiagnostic] = []
+
+    func record(_ diagnostic: BackendReadinessProbeDiagnostic) {
+        lock.withLock {
+            diagnostics.append(diagnostic)
+        }
+    }
+
+    func snapshot() -> [BackendReadinessProbeDiagnostic] {
+        lock.withLock { diagnostics }
     }
 }
 

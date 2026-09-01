@@ -259,6 +259,8 @@
 		CF11AA0000000000000D0001 /* NetworkPathObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000D0002 /* NetworkPathObserver.swift */; };
 		CF11AA0000000000000C0003 /* ConnectionStatusBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0004 /* ConnectionStatusBar.swift */; };
 		CF11AA0000000000000C0005 /* ConnectionMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */; };
+		D23130000000000000000001 /* BackendReadinessDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D23130000000000000000002 /* BackendReadinessDiagnostics.swift */; };
+		D23130000000000000000003 /* BackendReadinessDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D23130000000000000000004 /* BackendReadinessDiagnosticsTests.swift */; };
 		CF49398DE8F99324505C3137 /* APIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */; };
 		D03264A0F5F62252FDBA4E5B /* BinPartLoggingViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BB420C7D1448757457238B5 /* BinPartLoggingViewModelTests.swift */; };
 		D08B97AB1E4FC1A905AA95DB /* MaintenanceAlertRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF9ACFBFE1D96FCCB90261DF /* MaintenanceAlertRow.swift */; };
@@ -779,6 +781,8 @@
 		CF11AA0000000000000D0002 /* NetworkPathObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPathObserver.swift; sourceTree = "<group>"; };
 		CF11AA0000000000000C0004 /* ConnectionStatusBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStatusBar.swift; sourceTree = "<group>"; };
 		CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMonitorTests.swift; sourceTree = "<group>"; };
+		D23130000000000000000002 /* BackendReadinessDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendReadinessDiagnostics.swift; sourceTree = "<group>"; };
+		D23130000000000000000004 /* BackendReadinessDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendReadinessDiagnosticsTests.swift; sourceTree = "<group>"; };
 		CF16548F3F1D5C3EAB3E4E14 /* LocationServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationServiceProtocol.swift; sourceTree = "<group>"; };
 		CF44DAD87236ACF5D2387EF0 /* DemoLocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoLocationService.swift; sourceTree = "<group>"; };
 		D1A6C200000000000000F003 /* PrinterControlsSectionSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterControlsSectionSnapshotTests.swift; sourceTree = "<group>"; };
@@ -1040,6 +1044,7 @@
 				CA110D6A7E1234567890AB04 /* SignalRSubscription.swift */,
 				CA110D6A7E1234567890AD04 /* CompletionRegistry.swift */,
 				CA110D6A7E1234567890B004 /* SignalRLifecycleInvariants.swift */,
+				D23130000000000000000002 /* BackendReadinessDiagnostics.swift */,
 				CF11AA0000000000000C0002 /* ConnectionMonitor.swift */,
 				CF11AA0000000000000D0002 /* NetworkPathObserver.swift */,
 				BF23D467957EDEE89DB0A90A /* SpoolService.swift */,
@@ -1470,6 +1475,7 @@
 				CA110D6A7E1234567890AB06 /* SignalRSubscriptionLifecycleTests.swift */,
 				CA110D6A7E1234567890AF04 /* SignalRCrossHubFIFOTests.swift */,
 				CA110D6A7E1234567890AE02 /* CompletionRegistryTests.swift */,
+				D23130000000000000000004 /* BackendReadinessDiagnosticsTests.swift */,
 				CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */,
 				F7060001000000000000B011 /* SystemCapabilitiesTests.swift */,
 				F711A0005000000000000001 /* PrinterServiceFallbackTests.swift */,
@@ -1822,6 +1828,7 @@
 				F900A0030000000000000003 /* JobServiceTests.swift in Sources */,
 				F1F1F1F100000000000000B1 /* SignalRServiceTests.swift in Sources */,
 				B58C5ED9DA35CFF23A191D1D /* AuthServiceTests.swift in Sources */,
+				D23130000000000000000003 /* BackendReadinessDiagnosticsTests.swift in Sources */,
 				CF11AA0000000000000C0005 /* ConnectionMonitorTests.swift in Sources */,
 				A5B292852C205CF923659C29 /* PrinterServiceTests.swift in Sources */,
 				DFD4294EC690BF7D5A4E695F /* DashboardViewModelTests.swift in Sources */,
@@ -1902,6 +1909,7 @@
 				BC1000000000000000000006 /* BarcodeIntakeViewModel.swift in Sources */,
 				BC1000000000000000000007 /* BarcodeIntakeView.swift in Sources */,
 				82D78FD0563C041F9256AEF2 /* DemoModeBanner.swift in Sources */,
+				D23130000000000000000001 /* BackendReadinessDiagnostics.swift in Sources */,
 				CF11AA0000000000000C0001 /* ConnectionMonitor.swift in Sources */,
 				CF11AA0000000000000D0001 /* NetworkPathObserver.swift in Sources */,
 				CF11AA0000000000000C0003 /* ConnectionStatusBar.swift in Sources */,
