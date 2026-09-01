@@ -141,5 +141,10 @@ public class SpoolCoverageSettings : IAppSetting, IValidatableSetting
         {
             throw new ValidationException("Fleet spool resolve timeout must be between 1000 and 60000 ms.");
         }
+
+        if (FleetResolveTimeoutMs < SpoolSourceTimeoutMs)
+        {
+            throw new ValidationException("Fleet spool resolve timeout must be greater than or equal to the spool source timeout, or every source silently degrades before it ever gets a chance to answer.");
+        }
     }
 }

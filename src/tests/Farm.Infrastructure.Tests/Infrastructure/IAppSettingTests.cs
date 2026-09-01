@@ -132,7 +132,9 @@ public class IAppSettingTests
 
         foreach (int value in new[] { 250, 30000 })
         {
-            var settings = new SpoolCoverageSettings { SpoolSourceTimeoutMs = value };
+            // FleetResolveTimeoutMs must stay >= SpoolSourceTimeoutMs (cross-field
+            // invariant), so pin it to the max range value for both boundaries.
+            var settings = new SpoolCoverageSettings { SpoolSourceTimeoutMs = value, FleetResolveTimeoutMs = 60000 };
             settings.Validate();
             string json = JsonSerializer.Serialize(settings);
             SpoolCoverageSettings? roundTrip = JsonSerializer.Deserialize<SpoolCoverageSettings>(json);
@@ -166,7 +168,9 @@ public class IAppSettingTests
 
         foreach (int value in new[] { 1000, 60000 })
         {
-            var settings = new SpoolCoverageSettings { FleetResolveTimeoutMs = value };
+            // SpoolSourceTimeoutMs must stay <= FleetResolveTimeoutMs (cross-field
+            // invariant), so pin it to the min range value for both boundaries.
+            var settings = new SpoolCoverageSettings { FleetResolveTimeoutMs = value, SpoolSourceTimeoutMs = 250 };
             settings.Validate();
             string json = JsonSerializer.Serialize(settings);
             SpoolCoverageSettings? roundTrip = JsonSerializer.Deserialize<SpoolCoverageSettings>(json);
@@ -181,6 +185,28 @@ public class IAppSettingTests
     public void SpoolCoverageSettings_FleetResolveTimeoutMs_OutOfRangeThrows(int value)
     {
         var settings = new SpoolCoverageSettings { FleetResolveTimeoutMs = value };
+
+        _ = Assert.Throws<ValidationException>(settings.Validate);
+    }
+
+    [Fact]
+    public void SpoolCoverageSettings_FleetTimeoutEqualToSourceTimeout_Passes()
+    {
+        // Boundary case for the cross-field invariant (issue #2317): equal values must
+        // be accepted, not just strictly-greater ones.
+        var settings = new SpoolCoverageSettings { SpoolSourceTimeoutMs = 5000, FleetResolveTimeoutMs = 5000 };
+
+        settings.Validate();
+    }
+
+    [Fact]
+    public void SpoolCoverageSettings_FleetTimeoutLessThanSourceTimeout_Throws()
+    {
+        // Rejecting case for the cross-field invariant (issue #2317): a fleet deadline
+        // shorter than a single source's own timeout guarantees every source silently
+        // degrades to "unavailable" before it can ever answer, suppressing runout
+        // warnings.
+        var settings = new SpoolCoverageSettings { SpoolSourceTimeoutMs = 5000, FleetResolveTimeoutMs = 4999 };
 
         _ = Assert.Throws<ValidationException>(settings.Validate);
     }
