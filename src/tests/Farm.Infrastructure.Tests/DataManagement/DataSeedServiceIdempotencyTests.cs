@@ -1,9 +1,11 @@
 ﻿using System.Linq;
+using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Services.DataManagement;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -15,33 +17,47 @@ namespace Farm.Infrastructure.Tests.DataManagement;
 /// Covers issue #2328: <c>SeedAllAsync</c> and its downstream <c>DataSeedService</c> methods
 /// used to issue one existence-check query per catalog row (~413 sequential queries measured
 /// at boot, ~38% of warm time-to-ready). Each loop now preloads its existing rows once via a
-/// single <c>ToDictionaryAsync</c>/<c>ToListAsync</c> call and does in-memory lookups instead.
+/// single query and does in-memory lookups instead.
 /// <para>
-/// These tests exercise the full <c>SeedAllAsync</c> pipeline — manufacturers, filament types,
+/// These tests run against a real SQLite relational provider (not <c>UseInMemoryDatabase</c>) so
+/// the unique indexes on <see cref="Manufacturer"/>, <see cref="FilamentType"/>, and
+/// <see cref="PrinterModel"/> are actually enforced — the in-memory provider silently ignores
+/// them, which would hide a regression in the batched preload/lookup rewrite. The catalog
+/// includes two manufacturers that each define a printer model with the identical name, to pin
+/// the fix for a real pre-existing bug the rewrite uncovered: printer-model (and related
+/// component) uniqueness is scoped to <c>(ManufacturerId, Name)</c>, not <c>Name</c> alone.
+/// </para>
+/// <para>
+/// The tests exercise the full <c>SeedAllAsync</c> pipeline — manufacturers, filament types,
 /// component models (hotends/extruders/toolheads/nozzles), printer models (with aliases,
 /// filament-type associations, and toolhead assignments), and maintenance tasks/components/plans
-/// — twice in a row against the same in-memory database, to pin two properties of the batched
-/// rewrite: (1) it still seeds every catalog row from YAML, and (2) it remains idempotent on a
-/// second boot — no duplicate rows and no lost associations.
+/// — twice in a row against the same database, to pin two properties of the batched rewrite:
+/// (1) it still seeds every catalog row from YAML, and (2) it remains idempotent on a second
+/// boot — no duplicate rows and no lost associations.
 /// </para>
 /// </summary>
-public sealed class DataSeedServiceIdempotencyTests : IDisposable
+public sealed class DataSeedServiceIdempotencyTests : IAsyncLifetime, IDisposable
 {
-    private readonly AppDbContext _context;
+    private SqliteConnection _connection = null!;
+    private AppDbContext _context = null!;
     private readonly Mock<IYamlSeedDataReader> _reader = new();
     private readonly Mock<ILogger<DataSeedService>> _logger = new();
-    private readonly DataSeedService _service;
+    private DataSeedService _service = null!;
 
-    public DataSeedServiceIdempotencyTests()
+    public async Task InitializeAsync()
     {
-        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(databaseName: $"SeedIdempotencyTestDb_{Guid.NewGuid()}")
-            .Options;
+        _connection = new SqliteConnection($"Data Source=file:seed-idempotency-{Guid.NewGuid()}?mode=memory&cache=shared");
+        await _connection.OpenAsync();
+        await EnableSqliteForeignKeysAsync(_connection);
+
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options;
         _context = new AppDbContext(options);
+        _ = await _context.Database.EnsureCreatedAsync();
 
         _ = _reader.Setup(r => r.ReadManufacturersAsync()).ReturnsAsync(
         [
             new ManufacturerSeedDto { Name = "Diamondback" },
+            new ManufacturerSeedDto { Name = "Copperhead" },
         ]);
 
         _ = _reader.Setup(r => r.ReadFilamentTypesAsync()).ReturnsAsync(
@@ -52,11 +68,13 @@ public sealed class DataSeedServiceIdempotencyTests : IDisposable
         _ = _reader.Setup(r => r.ReadHotendsAsync()).ReturnsAsync(
         [
             new HotendModelSeedDto { Name = "V6", Manufacturer = "Diamondback", MaxTemp = 260 },
+            new HotendModelSeedDto { Name = "V6", Manufacturer = "Copperhead", MaxTemp = 280 },
         ]);
 
         _ = _reader.Setup(r => r.ReadExtrudersAsync()).ReturnsAsync(
         [
             new ExtruderModelSeedDto { Name = "Titan", Manufacturer = "Diamondback" },
+            new ExtruderModelSeedDto { Name = "Titan", Manufacturer = "Copperhead" },
         ]);
 
         _ = _reader.Setup(r => r.ReadToolheadsAsync()).ReturnsAsync(
@@ -69,13 +87,25 @@ public sealed class DataSeedServiceIdempotencyTests : IDisposable
                 DefaultExtruder = "Titan",
                 DefaultNozzle = "Volcano Nozzle",
             },
+            new ToolheadModelSeedDto
+            {
+                Name = "Primary Toolhead",
+                Manufacturer = "Copperhead",
+                DefaultHotend = "V6",
+                DefaultExtruder = "Titan",
+                DefaultNozzle = "Volcano Nozzle",
+            },
         ]);
 
         _ = _reader.Setup(r => r.ReadNozzlesAsync()).ReturnsAsync(
         [
             new NozzleModelSeedDto { Name = "Volcano Nozzle", Manufacturer = "Diamondback", NozzleType = "Brass" },
+            new NozzleModelSeedDto { Name = "Volcano Nozzle", Manufacturer = "Copperhead", NozzleType = "Brass" },
         ]);
 
+        // Two manufacturers deliberately share the printer-model name "Rattler X1" — printer
+        // model uniqueness is scoped to (ManufacturerId, Name), not Name alone, and a preload
+        // dictionary keyed only on Name would silently merge these two distinct models.
         _ = _reader.Setup(r => r.ReadPrinterModelsAsync()).ReturnsAsync(
         [
             new PrinterModelSeedDto
@@ -85,6 +115,18 @@ public sealed class DataSeedServiceIdempotencyTests : IDisposable
                 BuildVolume = new BuildVolumeDto { X = 250, Y = 250, Z = 250 },
                 SupportedMaterials = ["PLA"],
                 Aliases = [new SlicerAliasDto { SlicerType = "OrcaSlicer", SlicerModelName = "Diamondback Rattler X1" }],
+                Toolheads =
+                [
+                    new ToolheadAssignmentDto { Name = "Primary", Toolhead = "Primary Toolhead" },
+                ],
+            },
+            new PrinterModelSeedDto
+            {
+                Name = "Rattler X1",
+                Manufacturer = "Copperhead",
+                BuildVolume = new BuildVolumeDto { X = 300, Y = 300, Z = 300 },
+                SupportedMaterials = ["PLA"],
+                Aliases = [new SlicerAliasDto { SlicerType = "OrcaSlicer", SlicerModelName = "Copperhead Rattler X1" }],
                 Toolheads =
                 [
                     new ToolheadAssignmentDto { Name = "Primary", Toolhead = "Primary Toolhead" },
@@ -110,36 +152,68 @@ public sealed class DataSeedServiceIdempotencyTests : IDisposable
         _service = new DataSeedService(_context, _reader.Object, _logger.Object);
     }
 
-    public void Dispose() => _context.Dispose();
+    public async Task DisposeAsync()
+    {
+        await _context.DisposeAsync();
+        await _connection.DisposeAsync();
+    }
+
+    public void Dispose()
+    {
+        _context?.Dispose();
+        _connection?.Dispose();
+    }
+
+    private static async Task EnableSqliteForeignKeysAsync(System.Data.Common.DbConnection connection)
+    {
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync();
+        }
+
+        using System.Data.Common.DbCommand cmd = connection.CreateCommand();
+        cmd.CommandText = "PRAGMA foreign_keys = ON;";
+        _ = await cmd.ExecuteNonQueryAsync();
+    }
 
     [Fact]
     public async Task SeedAllAsync_PopulatesEveryCatalogRowFromYaml()
     {
         await _service.SeedAllAsync();
 
-        (await _context.Manufacturers.CountAsync()).Should().Be(1);
+        (await _context.Manufacturers.CountAsync()).Should().Be(2);
         (await _context.FilamentTypes.CountAsync()).Should().Be(1);
-        (await _context.HotendModelDefinitions.CountAsync()).Should().Be(1);
-        (await _context.ExtruderModelDefinitions.CountAsync()).Should().Be(1);
-        (await _context.ToolheadModelDefinitions.CountAsync()).Should().Be(1);
-        (await _context.NozzleModelDefinitions.CountAsync()).Should().Be(1);
-        (await _context.PrinterModels.CountAsync()).Should().Be(1);
-        (await _context.PrinterModelAliases.CountAsync()).Should().Be(1);
-        (await _context.PrinterModelToolheads.CountAsync()).Should().Be(1);
+        (await _context.HotendModelDefinitions.CountAsync()).Should().Be(2, "each manufacturer's identically-named hotend is a distinct row");
+        (await _context.ExtruderModelDefinitions.CountAsync()).Should().Be(2, "each manufacturer's identically-named extruder is a distinct row");
+        (await _context.ToolheadModelDefinitions.CountAsync()).Should().Be(2, "each manufacturer's identically-named toolhead is a distinct row");
+        (await _context.NozzleModelDefinitions.CountAsync()).Should().Be(2, "each manufacturer's identically-named nozzle is a distinct row");
+        (await _context.PrinterModels.CountAsync()).Should().Be(2, "each manufacturer's identically-named printer model is a distinct row");
+        (await _context.PrinterModelAliases.CountAsync()).Should().Be(2);
+        (await _context.PrinterModelToolheads.CountAsync()).Should().Be(2);
+        (await _context.BedTypes.CountAsync()).Should().BeGreaterThan(0, "the fixed bed type catalog must be seeded");
+        (await _context.NozzleMaterials.CountAsync()).Should().BeGreaterThan(0, "the built-in nozzle material catalog must be seeded");
         (await _context.MaintenanceTasks.CountAsync()).Should().Be(1);
         (await _context.MaintenanceComponents.CountAsync()).Should().Be(1);
         (await _context.MaintenancePlans.CountAsync()).Should().Be(1);
 
-        PrinterModel model = await _context.PrinterModels
+        List<PrinterModel> models = await _context.PrinterModels
+            .Include(pm => pm.Manufacturer)
             .Include(pm => pm.SupportedFilamentTypes)
             .Include(pm => pm.Toolheads)
             .Include(pm => pm.Aliases)
-            .SingleAsync();
-        model.SupportedFilamentTypes.Should().ContainSingle(ft => ft.Name == "PLA");
-        model.Toolheads.Should().ContainSingle();
-        model.Aliases.Should().ContainSingle(a => a.SlicerModelName == "Diamondback Rattler X1");
+            .ToListAsync();
 
-        PrinterModelToolhead toolhead = model.Toolheads.Single();
+        PrinterModel diamondbackModel = models.Single(m => m.Manufacturer!.Name == "Diamondback");
+        diamondbackModel.SupportedFilamentTypes.Should().ContainSingle(ft => ft.Name == "PLA");
+        diamondbackModel.Toolheads.Should().ContainSingle();
+        diamondbackModel.Aliases.Should().ContainSingle(a => a.SlicerModelName == "Diamondback Rattler X1");
+
+        PrinterModel copperheadModel = models.Single(m => m.Manufacturer!.Name == "Copperhead");
+        copperheadModel.SupportedFilamentTypes.Should().ContainSingle(ft => ft.Name == "PLA");
+        copperheadModel.Toolheads.Should().ContainSingle();
+        copperheadModel.Aliases.Should().ContainSingle(a => a.SlicerModelName == "Copperhead Rattler X1");
+
+        PrinterModelToolhead toolhead = diamondbackModel.Toolheads.Single();
         toolhead.HotendModelId.Should().NotBeNull("the toolhead assignment should resolve the named hotend");
         toolhead.ExtruderModelId.Should().NotBeNull("the toolhead assignment should resolve the named extruder");
 
@@ -170,7 +244,10 @@ public sealed class DataSeedServiceIdempotencyTests : IDisposable
         int planTaskCount = await _context.MaintenancePlans.Include(p => p.PlanTasks).SelectMany(p => p.PlanTasks).CountAsync();
 
         // Simulate a second boot against the same database (the scenario this fix targets:
-        // seeding must be safe to run on every application start).
+        // seeding must be safe to run on every application start). On a real relational
+        // provider, any regression that mis-scopes a preload dictionary key (e.g. keying
+        // printer models by Name alone instead of (ManufacturerId, Name)) would either throw
+        // on the unique index or silently update the wrong row — both are caught below.
         await _service.SeedAllAsync();
 
         (await _context.Manufacturers.CountAsync()).Should().Be(manufacturerCount, "re-seeding must not duplicate manufacturers");
@@ -190,11 +267,17 @@ public sealed class DataSeedServiceIdempotencyTests : IDisposable
         (await _context.MaintenancePlans.Include(p => p.PlanTasks).SelectMany(p => p.PlanTasks).CountAsync())
             .Should().Be(planTaskCount, "re-seeding must not duplicate plan-task associations");
 
-        PrinterModel model = await _context.PrinterModels
+        List<PrinterModel> models = await _context.PrinterModels
+            .Include(pm => pm.Manufacturer)
             .Include(pm => pm.SupportedFilamentTypes)
             .Include(pm => pm.Aliases)
-            .SingleAsync();
-        model.SupportedFilamentTypes.Should().ContainSingle("the filament-type association must survive a second seed pass without duplication");
-        model.Aliases.Should().ContainSingle("the alias must survive a second seed pass without duplication");
+            .ToListAsync();
+
+        PrinterModel diamondbackModel = models.Single(m => m.Manufacturer!.Name == "Diamondback");
+        diamondbackModel.SupportedFilamentTypes.Should().ContainSingle("the filament-type association must survive a second seed pass without duplication");
+        diamondbackModel.Aliases.Should().ContainSingle("the alias must survive a second seed pass without duplication");
+
+        PrinterModel copperheadModel = models.Single(m => m.Manufacturer!.Name == "Copperhead");
+        copperheadModel.Aliases.Should().ContainSingle(a => a.SlicerModelName == "Copperhead Rattler X1", "the two manufacturers' identically-named models must remain independent across re-seeds");
     }
 }
