@@ -161,7 +161,7 @@ enum BackendReadinessDiagnostics {
              .methodNotAllowed, .conflict, .partsInventoryConflict,
              .preconditionFailed, .preconditionRequired, .clientError,
              .serverError, .unexpectedStatus:
-            preconditionFailure("HTTP readiness failures must have a status code")
+            return transportClassification(detail: "unclassified HTTP failure")
         }
     }
 
@@ -185,7 +185,10 @@ enum BackendReadinessDiagnostics {
              .serverError(let statusCode),
              .unexpectedStatus(let statusCode):
             statusCode
-        default:
+        case .invalidURL, .invalidResponse, .noConnection, .timeout,
+             .serverUnreachable, .decodingFailed, .transportError,
+             .staleServerResponse, .insecureTransportBlocked,
+             .certificateChanged, .certificateNotTrusted:
             nil
         }
     }
