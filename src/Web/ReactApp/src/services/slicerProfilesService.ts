@@ -625,10 +625,9 @@ export const slicerProfilesService = {
   },
 
   async getLibraryHierarchy(scope: 'all' | 'catalog'): Promise<WorkerHierarchyResponse> {
-    const endpoint = scope === 'catalog'
-      ? '/slicer/profiles/catalog-hierarchy'
-      : '/slicer/profiles/worker-hierarchy';
-    const res = await apiClient.get<WorkerHierarchyResponse>(endpoint);
+    const res = await apiClient.get<WorkerHierarchyResponse>(
+      `/slicer/profiles/library-hierarchy?scope=${scope}`,
+    );
     return res.data;
   },
 

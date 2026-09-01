@@ -149,7 +149,7 @@ describe('SlicerProfilesPage worker-backed library', () => {
     vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({ profiles: [], totalCount: 0 });
   });
 
-  it('requests the all-scope attributed hierarchy and renders its manufacturer', async () => {
+  it('pins the admin library request to all scope and renders its attributed manufacturer', async () => {
     renderPage();
 
     expect(await screen.findByText(machineNames[0])).toBeInTheDocument();
@@ -258,7 +258,7 @@ describe('SlicerProfilesPage worker-backed library', () => {
 
   it('shows a degraded banner while My Profiles remains usable', async () => {
     vi.mocked(slicerProfilesService.getLibraryHierarchy).mockRejectedValue(
-      new Error('Request failed with status code 503'),
+      Object.assign(new Error('Service unavailable'), { statusCode: 503 }),
     );
     vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
       profiles: [customProfile],
@@ -274,5 +274,17 @@ describe('SlicerProfilesPage worker-backed library', () => {
     await user.click(screen.getByRole('tab', { name: /My Profiles/ }));
     expect(await screen.findByText(customProfile.name)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+  });
+
+  it('renders non-503 failures as request errors rather than worker degradation', async () => {
+    vi.mocked(slicerProfilesService.getLibraryHierarchy).mockRejectedValue(
+      Object.assign(new Error('Invalid library scope'), { statusCode: 400 }),
+    );
+    renderPage();
+
+    expect(await screen.findByText('Invalid library scope')).toBeInTheDocument();
+    expect(screen.getByText('Unable to load profile library')).toBeInTheDocument();
+    expect(screen.queryByText(/OrcaSlicer worker unavailable/)).not.toBeInTheDocument();
+    expect(screen.queryByText('No profiles match your filters.')).not.toBeInTheDocument();
   });
 });

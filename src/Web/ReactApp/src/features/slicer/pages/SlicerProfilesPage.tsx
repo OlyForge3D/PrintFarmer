@@ -34,6 +34,7 @@ import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Textarea } from '@/common/components/ui/Textarea';
 import { Modal } from '@/common/components/modals/Modal';
 import { useMachineCompatibleProfiles } from '@/features/slicer/hooks/useMachineCompatibleProfiles';
+import { isApiError } from '@/common/utils/apiErrors';
 
 type LibraryProfile =
   | (OrcaMachineProfile & { profileType: 'machine' })
@@ -710,11 +711,19 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
     }
   }, [reseedModalOpen, qc]);
 
-  const libraryUnavailable = Boolean(
-    libraryHierarchyError
-    || processProfilesQuery.error
-    || filamentProfilesQuery.error,
+  const libraryErrors = [
+    libraryHierarchyError,
+    processProfilesQuery.error,
+    filamentProfilesQuery.error,
+  ].filter(Boolean);
+  const libraryUnavailable = libraryErrors.some(
+    error => isApiError(error) && error.statusCode === 503,
   );
+  const libraryRequestFailed = libraryErrors.length > 0 && !libraryUnavailable;
+  const libraryRequestError = libraryErrors[0];
+  const libraryErrorMessage = libraryRequestFailed
+    ? libraryRequestError?.message || 'The profile library request failed.'
+    : null;
 
   return (
     <PageTemplate
@@ -940,8 +949,13 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                 OrcaSlicer worker unavailable; the profile library cannot be listed. My Profiles is still available.
               </Alert>
             )}
+            {libraryRequestFailed && (
+              <Alert type="error" title="Unable to load profile library" className="mb-4">
+                {libraryErrorMessage}
+              </Alert>
+            )}
             {isLoading && activeTab !== 'custom' && <div>Loading profiles...</div>}
-            {!isLoading && !libraryUnavailable && getFilteredCount() === 0 && activeTab === 'machines' && (
+            {!isLoading && !libraryUnavailable && !libraryRequestFailed && getFilteredCount() === 0 && activeTab === 'machines' && (
               <div className="text-pf-text-muted text-sm">No profiles match your filters.</div>
             )}
             {!isLoading && activeTab === 'processes' && !selectedMachineModelId && (
@@ -956,13 +970,13 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
             {activeTab === 'filaments' && selectedMachineModelId && filamentProfilesQuery.isLoading && (
               <div className="text-pf-text-muted text-sm">Loading compatible filaments...</div>
             )}
-            {activeTab === 'processes' && selectedMachineModelId && !processProfilesQuery.isLoading && !libraryUnavailable && filteredProcessProfiles.length === 0 && (
+            {activeTab === 'processes' && selectedMachineModelId && !processProfilesQuery.isLoading && !libraryUnavailable && !libraryRequestFailed && filteredProcessProfiles.length === 0 && (
               <div className="text-pf-text-muted text-sm">No compatible process profiles found for the selected machines.</div>
             )}
-            {activeTab === 'filaments' && selectedMachineModelId && !filamentProfilesQuery.isLoading && !libraryUnavailable && filteredFilamentProfiles.length === 0 && (
+            {activeTab === 'filaments' && selectedMachineModelId && !filamentProfilesQuery.isLoading && !libraryUnavailable && !libraryRequestFailed && filteredFilamentProfiles.length === 0 && (
               <div className="text-pf-text-muted text-sm">No compatible filament profiles found for the selected machines.</div>
             )}
-            {activeTab === 'filaments' && selectedMachineModelId && !libraryUnavailable && (
+            {activeTab === 'filaments' && selectedMachineModelId && !libraryUnavailable && !libraryRequestFailed && (
               <p className="text-pf-text-muted text-sm mb-3">Includes universal library filaments.</p>
             )}
             
