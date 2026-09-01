@@ -356,7 +356,21 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
               </Button>
             </div>
 
-            <div className="max-h-96 overflow-y-auto space-y-2 border border-pf-border rounded-md p-2 bg-pf-bg-2">
+            {/* Regression fix for #2324: this list used to be its own
+                independently-scrolling box (`max-h-96 overflow-y-auto`)
+                nested inside the modal's own scrollable content area. That
+                created two overlapping scroll regions at mobile breakpoints
+                — scrolling the modal only revealed a still-clipped,
+                separately-scrolling results box, so the fixed footer read
+                as if it were overlapping the last candidate card. Letting
+                this list flow as part of the modal's single content scroll
+                region (Modal.tsx already wraps children in one
+                `overflow-y-auto`) gives one unobstructed scroll gesture that
+                reveals every discovered printer above the footer. */}
+            <div
+              data-testid="discovery-results-list"
+              className="space-y-2 border border-pf-border rounded-md p-2 bg-pf-bg-2"
+            >
               {foundPrinters.map((printer) => {
                 const config = printerConfigs[printer.discoveryId];
                 const hasConfig = !!(config?.manufacturerId || config?.newManufacturerName);
