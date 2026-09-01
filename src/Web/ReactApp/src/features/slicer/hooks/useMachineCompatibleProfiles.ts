@@ -34,7 +34,12 @@ export function useMachineCompatibleProfiles(
   { enabled, engineVersion, summary = false }: MachineCompatibleProfilesOptions,
 ) {
   const filamentProfilesQuery = useQuery<OrcaFilamentProfile[]>({
-    queryKey: ['filamentProfilesForMachines', machineNames, engineVersion ?? null],
+    queryKey: [
+      'filamentProfilesForMachines',
+      machineNames,
+      engineVersion ?? null,
+      summary ? 'summary' : 'full',
+    ],
     queryFn: () => summary
       ? slicerProfilesService.getFilamentProfilesForMachines(machineNames, engineVersion, 'summary')
       : slicerProfilesService.getFilamentProfilesForMachines(machineNames, engineVersion),
@@ -43,7 +48,12 @@ export function useMachineCompatibleProfiles(
   });
 
   const processProfilesQuery = useQuery<OrcaProcessProfile[]>({
-    queryKey: ['processProfilesForMachines', machineNames, engineVersion ?? null],
+    queryKey: [
+      'processProfilesForMachines',
+      machineNames,
+      engineVersion ?? null,
+      summary ? 'summary' : 'full',
+    ],
     queryFn: () => summary
       ? slicerProfilesService.getProcessProfilesForMachines(machineNames, engineVersion, 'summary')
       : slicerProfilesService.getProcessProfilesForMachines(machineNames, engineVersion),
