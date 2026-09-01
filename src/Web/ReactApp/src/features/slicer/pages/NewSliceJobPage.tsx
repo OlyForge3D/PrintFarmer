@@ -1570,13 +1570,38 @@ export const NewSliceJobPage: React.FC = () => {
   }, [STORAGE_KEYS.filamentProfileId, STORAGE_KEYS.machineProfileId, STORAGE_KEYS.printerId, STORAGE_KEYS.processProfileId]);
 
   // First use fallback: default to first available printer.
+  //
+  // Issue #2342: a printer selection restored from localStorage (or simply
+  // left over from a previous visit) can point at a printer that has since
+  // gone offline. `hasSelectedPrinter` only checked list membership, so an
+  // offline-but-still-registered printer silently stayed selected as an
+  // eligible submission target with no warning. Auto-correct that ONE time
+  // per page load — right after mount/restore — to an online printer if one
+  // exists. The ref guard is deliberate: it must not re-fire every time the
+  // printers query refetches (30s staleTime) and fight a user who explicitly
+  // re-selects an offline printer afterwards (e.g. to stage a job for later).
+  // For the remaining case — no online printer exists at all — the warning
+  // banner and the submit-time guard in `submitSliceJob` keep an offline
+  // target from being silently accepted.
+  const didAutoCorrectOfflinePrinterRef = useRef(false);
   useEffect(() => {
     if (!printers.length) return;
 
     queueMicrotask(() => {
-      const hasSelectedPrinter = !!selectedPrinterId && printers.some((p) => p.id === selectedPrinterId);
-      if (!hasSelectedPrinter) {
+      const currentPrinter = printers.find((p) => p.id === selectedPrinterId);
+      if (!currentPrinter) {
         setSelectedPrinterId(printers[0].id);
+        return;
+      }
+
+      if (!didAutoCorrectOfflinePrinterRef.current) {
+        didAutoCorrectOfflinePrinterRef.current = true;
+        if (currentPrinter.isOnline === false) {
+          const onlinePrinter = printers.find((p) => p.isOnline !== false);
+          if (onlinePrinter) {
+            setSelectedPrinterId(onlinePrinter.id);
+          }
+        }
       }
     });
   }, [printers, selectedPrinterId]);
@@ -1793,6 +1818,15 @@ export const NewSliceJobPage: React.FC = () => {
 
   const submitSliceJob = useCallback((activeModelIds?: string[]) => {
     setError(null);
+
+    // Issue #2342: never let an offline printer sit silently selected as an
+    // eligible submission target. This must be the FIRST check — before print
+    // settings/engine/model validation — so an offline selection is always
+    // caught regardless of how far along the rest of the form is.
+    if (selectedPrinterForSlicing?.isOnline === false) {
+      setError('Selected printer is offline. Choose an online printer before slicing.');
+      return;
+    }
 
     // Issue #2223: block submission on invalid print settings instead of
     // letting a negative perimeter/infill count or a zero top/bottom shell
@@ -2065,6 +2099,7 @@ export const NewSliceJobPage: React.FC = () => {
     submitMutation,
     user?.id,
     selectedModelId,
+    selectedPrinterForSlicing,
   ]);
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -2392,6 +2427,15 @@ export const NewSliceJobPage: React.FC = () => {
               }}
               className=""
             />
+            {selectedPrinter?.isOnline === false && (
+              <p
+                role="alert"
+                data-testid="offline-printer-warning"
+                className="text-xs text-pf-warning"
+              >
+                ⚠ This printer is offline. Choose an online printer before slicing.
+              </p>
+            )}
 
             <div className="border-t border-pf-border/70 pt-2 space-y-2">
               {/* The kebab (Edit / Import / Manage) lives OUTSIDE the printer
