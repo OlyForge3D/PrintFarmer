@@ -122,7 +122,7 @@ vi.mock('@/common/hooks/useViewModePreference', () => ({
 
 vi.mock('@/services/api', () => ({
   apiClient: {
-    getHarvestOperations: vi.fn().mockResolvedValue([]),
+    getAllActiveHarvests: vi.fn().mockResolvedValue([]),
     getUnifiedFiles: vi.fn().mockResolvedValue({
       items: [],
       totalItems: 0,
