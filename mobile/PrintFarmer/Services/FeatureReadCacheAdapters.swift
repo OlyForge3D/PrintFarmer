@@ -56,6 +56,7 @@ final class AttentionReadCacheAdapter: Sendable {
         items: [AttentionItem],
         nextCursor: String?,
         healthyPrinterCount: Int,
+        lastUpdatedAtMillis: Int64? = nil,
         capturedSession: FarmSnapshotSession
     ) async -> FeatureReadCacheCommitResult {
         var seen: Set<String> = []
@@ -72,7 +73,7 @@ final class AttentionReadCacheAdapter: Sendable {
         return await store.commitSnapshot(
             payload,
             recordKey: Self.recordKey,
-            lastUpdatedAtMillis: Self.millis(now()),
+            lastUpdatedAtMillis: lastUpdatedAtMillis ?? Self.millis(now()),
             capturedSession: capturedSession
         )
     }
@@ -126,12 +127,13 @@ final class FilamentCoverageReadCacheAdapter: Sendable {
     @discardableResult
     func recordFleet(
         _ fleet: FleetFilamentCoverage,
+        lastUpdatedAtMillis: Int64? = nil,
         capturedSession: FarmSnapshotSession
     ) async -> FeatureReadCacheCommitResult {
         await store.commitSnapshot(
             fleet,
             recordKey: Self.fleetRecordKey,
-            lastUpdatedAtMillis: Self.millis(now()),
+            lastUpdatedAtMillis: lastUpdatedAtMillis ?? Self.millis(now()),
             capturedSession: capturedSession
         )
     }

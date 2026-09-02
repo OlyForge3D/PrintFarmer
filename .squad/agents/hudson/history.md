@@ -123,3 +123,36 @@ When new Swift files are created but missing from `.pbxproj`, compiler errors ca
 **Orchestration Log:** .squad/orchestration-log/2026-05-31T225752-hudson.md
 
 Status: Backlog item cleared. No blockers for review.
+
+### 2026-09-01T14:14:40-07:00: Startup readiness prefetch handoff
+
+- Readiness responses can be reused safely only after the whole current gate succeeds; stage per attempt, seal on failure/cancellation/supersession, and publish immediately before `.ready`.
+- Reuse `FarmSnapshotSession` plus `FarmSnapshotAuthority.withPromotion` for ephemeral handoffs. This fences server, user, generation, relogin token, and tombstones without a parallel identity model.
+- One-shot consumption must remove the field atomically under authority, but apply view-model state only after releasing authority/store locks.
+- Persist a prefetched response with its fetch timestamp, not its later consume time, so an older prefetch can never overwrite a newer SignalR-driven cache record.
+- Attention’s usable canonical first page is `getFeed(cursor: nil, limit: nil)` (server default), not the former readiness-only `limit: 1` request.
+- On Windows, Swift 6/XCTest correctness must be reviewed statically; in particular, never put `await` inside XCTest assertion autoclosures.
+
+### 2026-09-01T14:37:34.268-07:00: Startup prefetch freshness and canonical printer fencing
+
+- Ephemeral startup handoffs still need an age bound: a lazy `TabView` may not activate a tab until long after launch. Enforce freshness in the store (30 seconds here), inject the clock, and invalidate the whole attempt payload when any entry expires.
+- A prefetched response is still a canonical response. Never assign printer state directly; mint/install `CanonicalAuthority` and reuse `completeCanonicalPass` so load tokens, pending demand, waiters, auto-status guards, and observable loading state retain one ordering model.
+- When prefetch adoption races active or queued canonical demand, canonical demand wins. Consume/drop the handoff and join the normal load instead of trying to reorder an existing pass.
+- Attention readiness now fetches the server-default first page (up to 100 items versus one), while probes still run concurrently under the existing 10-second per-probe timeout. The larger response can therefore time out on a slow backend and should receive macOS/real-server review.
+
+### 2026-09-01T14:46:16.550-07:00: Best-effort Attention warming
+
+- Never let an opportunistic canonical prefetch redefine a readiness verdict. Bound it with a shorter nested race, capture only success, and fall back to the pre-existing cheap request for the actual reachability decision.
+- Nest the prefetch budget inside the existing outer probe timeout. This prevents budgets from stacking: full-page warming and fallback together remain capped by the original outer duration.
+- Preserve one network request on the happy path. A slow or failed full page may issue the original cheap request second, but must publish no canonical handoff so the tab follows normal hydrate-then-load behavior.
+
+### 2026-09-01T15:09:56.766-07:00: Concurrent readiness and prefetch requests
+
+- A sequential best-effort prefetch still narrows the real probe's usable outer timeout. To preserve verdict semantics exactly, start the original cheap request and warming request concurrently; only the cheap request may throw into readiness.
+- Awaiting both yields `max(gating, min(warming, cap))`, not summed latency. A one-second cap adds at most one second versus the original probe and is masked when a sibling readiness probe is slower.
+- With concurrent mock calls, never script by arrival order. Record calls under a lock and branch test responses by request arguments (`limit == 1` versus `nil`).
+
+### 2026-09-01T15:33:16.232-07:00: Causal concurrency regression proof
+
+- When concurrency itself closes a user-facing timeout regression, call-count assertions are insufficient: sequential code may produce the same eventual calls. Park both operations on one `AsyncBarrier` and causally await two simultaneous release waiters.
+- An XCTest expectation timeout can bound only the regression/failure path while the passing path remains deterministic and free of sleeps, yields, polling, or wall-clock ordering.

@@ -488,6 +488,508 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertTrue(diagnosticSnapshot.allSatisfy { $0.outcome == .succeeded })
     }
 
+    func testSuccessfulReadinessPublishesAttentionCoverageAndPrinters() async throws {
+        let root = FarmSnapshotFixtures.tempRoot()
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-success"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 0
+        ))
+        let feed = makeAttentionFeed(healthyPrinterCount: 4)
+        let fleet = FleetFilamentCoverage(
+            printers: [],
+            evaluatedAtUtc: Date(timeIntervalSince1970: 1_000)
+        )
+        let printers = [try TestData.decodePrinter()]
+        let reachabilityFeed = makeAttentionFeed(healthyPrinterCount: 1)
+        let container = ServiceContainer(
+            observeRegistry: false,
+            farmSnapshotAuthority: authority,
+            farmSnapshotRootURL: root,
+            synchronizeOfflineQueueOnStartup: false
+        )
+        let attention = MockAttentionService()
+        attention.getFeedHandler = { _, limit in
+            limit == nil ? feed : reachabilityFeed
+        }
+        let printer = MockPrinterService()
+        printer.printersToReturn = printers
+        container.attentionService = attention
+        container.filamentCoverageService = StubFilamentCoverageService(fleet: fleet)
+        container.printerService = printer
+        container.capabilitiesService = TestCapabilitiesService()
+        let shippingPlan = BackendReadinessPlan(services: container)
+        let plan = BackendReadinessPlan(
+            capabilitiesService: shippingPlan.capabilitiesService,
+            probes: shippingPlan.probes.filter {
+                [.attention, .filamentCoverage, .printers].contains($0.endpoint)
+            },
+            startupPrefetchAttempt: shippingPlan.startupPrefetchAttempt
+        )
+        let gate = BackendConnectionGate()
+
+        await gate.check(plan: plan, generation: 0) { true }
+
+        XCTAssertEqual(gate.state, .ready)
+        let attentionCalls = attention.getFeedCalls
+        XCTAssertEqual(attentionCalls.count, 2)
+        XCTAssertTrue(attentionCalls.allSatisfy { $0.cursor == nil })
+        XCTAssertEqual(attentionCalls.filter { $0.limit == nil }.count, 1)
+        XCTAssertEqual(attentionCalls.filter { $0.limit == 1 }.count, 1)
+        XCTAssertEqual(printer.listIncludeDisabledArg, false)
+        var consumedFeed: AttentionFeed?
+        var consumedFleet: FleetFilamentCoverage?
+        var consumedPrinters: [Printer]?
+        XCTAssertTrue(container.startupPrefetchStore.consumeAttention { consumedFeed = $0.value })
+        XCTAssertTrue(container.startupPrefetchStore.consumeFilamentCoverage { consumedFleet = $0.value })
+        XCTAssertTrue(container.startupPrefetchStore.consumePrinters { consumedPrinters = $0.value })
+        XCTAssertEqual(consumedFeed, feed)
+        XCTAssertEqual(consumedFleet, fleet)
+        XCTAssertEqual(consumedPrinters?.map(\.id), printers.map(\.id))
+        XCTAssertFalse(container.startupPrefetchStore.consumeAttention { _ in XCTFail("attention must be one-shot") })
+        XCTAssertFalse(container.startupPrefetchStore.consumeFilamentCoverage { _ in XCTFail("coverage must be one-shot") })
+        XCTAssertFalse(container.startupPrefetchStore.consumePrinters { _ in XCTFail("printers must be one-shot") })
+        XCTAssertTrue(authority.isCurrent(session))
+    }
+
+    func testSlowAttentionPrefetchFallsBackToCheapProbeAndNormalTabLoad() async throws {
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-slow"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let attempt = try XCTUnwrap(store.makeAttempt(session: session, generation: 1))
+        let fullPageGate = AttentionResultGate<AttentionFeed>()
+        let fullPageStarted = AsyncBarrier()
+        defer { fullPageStarted.close() }
+        let tabFeed = makeAttentionFeed(
+            items: [makeAttentionItem(id: "tab-canonical")],
+            healthyPrinterCount: 3
+        )
+        let service = MockAttentionService()
+        service.getFeedHandler = { _, limit in
+            if limit == nil {
+                fullPageStarted.signal()
+                return try await fullPageGate.wait()
+            }
+            return makeAttentionFeed(healthyPrinterCount: 1)
+        }
+        let probe = BackendReadinessProbe.attention(
+            service: service,
+            startupPrefetchAttempt: attempt,
+            prefetchTimeoutSleep: { _ in
+                await fullPageStarted.waitUntilArrived()
+            }
+        )
+        let plan = BackendReadinessPlan(
+            capabilitiesService: TestCapabilitiesService(),
+            probes: [probe],
+            startupPrefetchAttempt: attempt
+        )
+        let gate = BackendConnectionGate()
+
+        await gate.check(plan: plan, generation: 1) { true }
+
+        XCTAssertEqual(gate.state, .ready)
+        let gateCalls = service.getFeedCalls
+        XCTAssertEqual(gateCalls.count, 2)
+        XCTAssertEqual(gateCalls.filter { $0.limit == nil }.count, 1)
+        XCTAssertEqual(gateCalls.filter { $0.limit == 1 }.count, 1)
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("cheap probe is not a canonical page") })
+
+        service.getFeedHandler = { _, _ in tabFeed }
+        let viewModel = AttentionFeedViewModel()
+        let bootstrapped = await viewModel.bootstrap(
+            attentionService: service,
+            signalRService: MockSignalRService(),
+            attentionEnabled: true,
+            startupPrefetchStore: store
+        )
+
+        XCTAssertTrue(bootstrapped)
+        let snapshot = try XCTUnwrap(viewModel.snapshot)
+        XCTAssertEqual(snapshot.items, tabFeed.items)
+        XCTAssertEqual(snapshot.nextCursor, tabFeed.nextCursor)
+        XCTAssertEqual(snapshot.healthyPrinterCount, tabFeed.healthyPrinterCount)
+        XCTAssertEqual(service.getFeedCallCount, 3)
+    }
+
+    func testFailedAttentionPrefetchCannotFailSuccessfulCheapProbe() async throws {
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-failed-warm"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let attempt = try XCTUnwrap(store.makeAttempt(session: session, generation: 1))
+        let service = MockAttentionService()
+        service.getFeedHandler = { _, limit in
+            guard limit == 1 else {
+                throw ShiftTaskProofError.forced("canonical page failed")
+            }
+            return makeAttentionFeed(healthyPrinterCount: 1)
+        }
+        let plan = BackendReadinessPlan(
+            capabilitiesService: TestCapabilitiesService(),
+            probes: [
+                BackendReadinessProbe.attention(
+                    service: service,
+                    startupPrefetchAttempt: attempt
+                ),
+            ],
+            startupPrefetchAttempt: attempt
+        )
+        let gate = BackendConnectionGate()
+
+        await gate.check(plan: plan, generation: 1) { true }
+
+        XCTAssertEqual(gate.state, .ready)
+        XCTAssertEqual(service.getFeedCallCount, 2)
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("failed warming published prefetch") })
+    }
+
+    func testPreCancelledAttentionProbeStartsNoRequests() async {
+        let service = MockAttentionService()
+        let probe = BackendReadinessProbe.attention(
+            service: service,
+            startupPrefetchAttempt: nil
+        )
+
+        let wasCancelled = await Task { () -> Bool in
+            withUnsafeCurrentTask { $0?.cancel() }
+            do {
+                try await probe.operation()
+                return false
+            } catch is CancellationError {
+                return true
+            } catch {
+                return false
+            }
+        }.value
+
+        XCTAssertTrue(wasCancelled)
+        XCTAssertEqual(service.getFeedCallCount, 0)
+    }
+
+    func testAttentionGatingAndPrefetchRequestsAreConcurrent() async throws {
+        let bothInFlight = AsyncBarrier()
+        let suspendedTimeout = AsyncBarrier()
+        defer {
+            bothInFlight.close()
+            suspendedTimeout.close()
+        }
+        let service = MockAttentionService()
+        service.getFeedHandler = { _, _ in
+            await bothInFlight.arriveAndWait()
+            return makeAttentionFeed()
+        }
+        let probe = BackendReadinessProbe.attention(
+            service: service,
+            startupPrefetchAttempt: nil,
+            prefetchTimeoutSleep: { _ in
+                await suspendedTimeout.arriveAndWait()
+            }
+        )
+        let probeTask = Task { try await probe.operation() }
+        let bothParked = expectation(description: "both attention requests in flight")
+        let observer = Task {
+            await bothInFlight.waitUntilReleaseWaiterCount(2)
+            bothParked.fulfill()
+        }
+
+        // Failure-path bound only: the passing path is causal and uses no
+        // sleeps, yields, polling, or wall-clock ordering.
+        await fulfillment(of: [bothParked], timeout: 5)
+        bothInFlight.close()
+        await observer.value
+        try await probeTask.value
+        XCTAssertEqual(service.getFeedCallCount, 2)
+    }
+
+    func testUnreachableAttentionStillFailsAfterBestEffortPrefetch() async throws {
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-unreachable"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let attempt = try XCTUnwrap(store.makeAttempt(session: session, generation: 1))
+        let service = MockAttentionService()
+        service.getFeedHandler = { _, _ in
+            throw ShiftTaskProofError.forced("unreachable")
+        }
+        let plan = BackendReadinessPlan(
+            capabilitiesService: TestCapabilitiesService(),
+            probes: [
+                BackendReadinessProbe.attention(
+                    service: service,
+                    startupPrefetchAttempt: attempt
+                ),
+            ],
+            startupPrefetchAttempt: attempt
+        )
+        let gate = BackendConnectionGate()
+
+        await gate.check(plan: plan, generation: 1) { true }
+
+        XCTAssertEqual(gate.failures?.map(\.endpoint), [.attention])
+        XCTAssertFalse(gate.allowsMainContent)
+        let calls = service.getFeedCalls
+        XCTAssertEqual(calls.count, 2)
+        XCTAssertEqual(calls.filter { $0.limit == nil }.count, 1)
+        XCTAssertEqual(calls.filter { $0.limit == 1 }.count, 1)
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("failed probe published prefetch") })
+    }
+
+    func testPrefetchRejectsGenerationUserAndServerAuthorityChanges() throws {
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-fences"))!
+        )
+        let store = StartupPrefetchStore(authority: authority)
+        let serverA = UUID()
+        let userA = UUID()
+        var session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: serverA, userID: userA),
+            generation: 1
+        ))
+
+        func publish(_ current: FarmSnapshotSession) throws {
+            let attempt = try XCTUnwrap(
+                store.makeAttempt(session: current, generation: current.generation)
+            )
+            attempt.captureAttention(makeAttentionFeed(healthyPrinterCount: current.generation))
+            attempt.publish()
+        }
+
+        try publish(session)
+        session = try XCTUnwrap(try authority.mint(
+            namespace: session.namespace,
+            generation: 2
+        ))
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("old generation leaked") })
+
+        try publish(session)
+        session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: serverA, userID: UUID()),
+            generation: 3
+        ))
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("old user leaked") })
+
+        try publish(session)
+        session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 4
+        ))
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("old server leaked") })
+
+        try publish(session)
+        try authority.tombstone(session.serverID)
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("tombstoned server leaked") })
+
+        let logoutAuthority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-logout"))!
+        )
+        let logoutStore = StartupPrefetchStore(authority: logoutAuthority)
+        let logoutSession = try XCTUnwrap(try logoutAuthority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let logoutAttempt = try XCTUnwrap(
+            logoutStore.makeAttempt(session: logoutSession, generation: 1)
+        )
+        logoutAttempt.captureAttention(makeAttentionFeed(healthyPrinterCount: 1))
+        logoutAttempt.publish()
+        logoutAuthority.revoke()
+        XCTAssertFalse(logoutStore.consumeAttention { _ in XCTFail("logout leaked") })
+    }
+
+    func testFailedReadinessAndContinueOfflineDiscardPrefetch() async throws {
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-failed"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let attempt = try XCTUnwrap(store.makeAttempt(session: session, generation: 1))
+        let plan = BackendReadinessPlan(
+            capabilitiesService: TestCapabilitiesService(),
+            probes: [
+                BackendReadinessProbe(endpoint: .attention) {
+                    attempt.captureAttention(makeAttentionFeed(healthyPrinterCount: 9))
+                },
+                BackendReadinessProbe(endpoint: .jobs) {
+                    throw ReadinessTestError.failed
+                },
+            ],
+            startupPrefetchAttempt: attempt
+        )
+        let gate = BackendConnectionGate()
+
+        await gate.check(plan: plan, generation: 1) { true }
+        XCTAssertEqual(gate.failures?.map(\.endpoint), [.jobs])
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("failed gate published") })
+
+        gate.continueOffline()
+        XCTAssertEqual(gate.state, .proceedingOffline)
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("offline continuation published") })
+    }
+
+    func testCancelledReadinessDiscardsPrefetchAndLateCapture() async throws {
+        let started = AsyncBarrier()
+        let release = AsyncBarrier()
+        defer {
+            started.close()
+            release.close()
+        }
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-cancel"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let attempt = try XCTUnwrap(store.makeAttempt(session: session, generation: 1))
+        let plan = BackendReadinessPlan(
+            capabilitiesService: TestCapabilitiesService(),
+            probes: [
+                BackendReadinessProbe(endpoint: .attention) {
+                    started.signal()
+                    await release.arriveAndWait()
+                    attempt.captureAttention(makeAttentionFeed(healthyPrinterCount: 8))
+                },
+            ],
+            startupPrefetchAttempt: attempt
+        )
+        let gate = BackendConnectionGate()
+        let check = Task {
+            await gate.check(plan: plan, generation: 1) { true }
+        }
+
+        await started.waitUntilArrived()
+        check.cancel()
+        release.release()
+        await check.value
+        attempt.captureAttention(makeAttentionFeed(healthyPrinterCount: 10))
+        attempt.publish()
+
+        XCTAssertEqual(gate.state, .idle)
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("cancelled gate published") })
+    }
+
+    /// Covers guard 1 of `BackendConnectionGate.check` — the attempt/generation
+    /// fence. `testConnectionGateResetInvalidatesInFlightAttempt` already asserts
+    /// the state transition, but it builds a plan with no attempt attached, so
+    /// `plan.startupPrefetchAttempt?.discard()` is a no-op there and that test
+    /// would still pass if the superseded branch published instead of discarding.
+    /// Staging a real attempt is what makes the disposal observable.
+    func testSupersededGateDiscardsStagedPrefetch() async throws {
+        let started = AsyncBarrier()
+        let release = AsyncBarrier()
+        defer {
+            started.close()
+            release.close()
+        }
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-superseded"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let attempt = try XCTUnwrap(store.makeAttempt(session: session, generation: 1))
+        let plan = BackendReadinessPlan(
+            capabilitiesService: TestCapabilitiesService(),
+            probes: [
+                BackendReadinessProbe(endpoint: .attention) {
+                    attempt.captureAttention(makeAttentionFeed(healthyPrinterCount: 7))
+                    started.signal()
+                    await release.arriveAndWait()
+                },
+            ],
+            startupPrefetchAttempt: attempt
+        )
+        let gate = BackendConnectionGate()
+        let check = Task {
+            await gate.check(plan: plan, generation: 1) { true }
+        }
+
+        await started.waitUntilArrived()
+        gate.reset()
+        release.release()
+        await check.value
+
+        XCTAssertEqual(gate.state, .idle)
+        XCTAssertFalse(gate.allowsMainContent)
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("superseded gate published") })
+
+        // The attempt must also be sealed, so a probe that completes after
+        // supersession cannot publish the data it staged too late.
+        attempt.captureAttention(makeAttentionFeed(healthyPrinterCount: 11))
+        attempt.publish()
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("sealed attempt published after supersession") })
+    }
+
+    /// Covers guard 2 of `BackendConnectionGate.check` — the `isCurrent` fence.
+    /// `testConnectionGateDiscardsSupersededGenerationResult` asserts the state
+    /// transition for this branch but likewise attaches no attempt, leaving the
+    /// prefetch disposal itself unobserved.
+    func testNonCurrentGateDiscardsStagedPrefetch() async throws {
+        let started = AsyncBarrier()
+        let release = AsyncBarrier()
+        defer {
+            started.close()
+            release.close()
+        }
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-not-current"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let attempt = try XCTUnwrap(store.makeAttempt(session: session, generation: 1))
+        let plan = BackendReadinessPlan(
+            capabilitiesService: TestCapabilitiesService(),
+            probes: [
+                BackendReadinessProbe(endpoint: .attention) {
+                    attempt.captureAttention(makeAttentionFeed(healthyPrinterCount: 6))
+                    started.signal()
+                    await release.arriveAndWait()
+                },
+            ],
+            startupPrefetchAttempt: attempt
+        )
+        let gate = BackendConnectionGate()
+        var isCurrent = true
+        let check = Task {
+            await gate.check(plan: plan, generation: 1) { isCurrent }
+        }
+
+        await started.waitUntilArrived()
+        isCurrent = false
+        release.release()
+        await check.value
+
+        XCTAssertEqual(gate.state, .idle)
+        XCTAssertFalse(gate.allowsMainContent)
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("non-current gate published") })
+    }
+
     func testReadinessSkipsCapabilityDisabledProbes() async {
         var resolved = ResolvedSystemCapabilities.defaults
         resolved.attentionEnabled = false

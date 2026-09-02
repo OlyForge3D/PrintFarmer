@@ -161,6 +161,24 @@ final class PrinterListViewModel {
         await waiter.wait()
     }
 
+    /// Use the readiness gate's canonical printer list on first activation.
+    /// Auto-dispatch status remains independently refreshed so card behavior is
+    /// unchanged, while later manual/reconnect loads still use `loadPrinters()`.
+    func bootstrap(startupPrefetchStore: StartupPrefetchStore?) async {
+        guard canLoadPrinters else { return }
+        if let startupPrefetchStore {
+            var committed = false
+            let consumed = startupPrefetchStore.consumePrinters { entry in
+                committed = commitPrefetchedPrinters(entry.value)
+            }
+            if consumed, committed {
+                await loadAutoDispatchStatuses()
+                return
+            }
+        }
+        await loadPrinters()
+    }
+
     private func beginCanonicalLoad() -> CanonicalLoadWaiter? {
         guard canLoadPrinters else { return nil }
         let enqueue = callbackEnqueuer
@@ -186,15 +204,44 @@ final class PrinterListViewModel {
         guard canonicalLoadTask == nil else { return }
 
         let token = UUID()
-        canonicalLoadToken = token
         canonicalLoadRequested = false
         canonicalPassHasRecoveryDemand = canonicalPendingRecoveryDemand
         canonicalPendingRecoveryDemand = false
+        let authority = prepareCanonicalPassAuthority(token: token)
+        startCanonicalPass(authority: authority)
+    }
+
+    /// Install the same authority and observable loading state used by every
+    /// canonical pass. Callers must first exclude conflicting canonical work.
+    private func prepareCanonicalPassAuthority(token: UUID) -> CanonicalAuthority {
+        canonicalLoadToken = token
         autoStatusLoadToken = nil
         isLoading = true
         errorMessage = nil
-        let authority = makeCanonicalAuthority(token: token)
-        startCanonicalPass(authority: authority)
+        return makeCanonicalAuthority(token: token)
+    }
+
+    /// Apply a readiness response through the canonical completion machinery.
+    /// Any in-flight or queued canonical demand wins; in that case the consumed
+    /// prefetch is ignored and bootstrap joins the normal load path.
+    private func commitPrefetchedPrinters(_ prefetchedPrinters: [Printer]) -> Bool {
+        guard canLoadPrinters,
+              canonicalLoadTask == nil,
+              !canonicalLoadRequested,
+              !canonicalPendingRecoveryDemand else {
+            return false
+        }
+        canonicalPassHasRecoveryDemand = false
+        let token = UUID()
+        let authority = prepareCanonicalPassAuthority(token: token)
+        completeCanonicalPass(
+            .success(CanonicalSnapshot(
+                printers: prefetchedPrinters,
+                autoDispatchStatuses: autoDispatchStatuses
+            )),
+            authority: authority
+        )
+        return true
     }
 
     private func startCanonicalPass(authority: CanonicalAuthority) {

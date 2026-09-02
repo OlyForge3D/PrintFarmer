@@ -484,6 +484,159 @@ final class AttentionFeedViewModelTests: XCTestCase {
         XCTAssertEqual(vm.phase, .loaded)
     }
 
+    func testBootstrapConsumesLivePrefetchOnceWithoutStaleBannerAndLaterRefreshes() async throws {
+        let clock = StartupPrefetchTestClock(millis: 1_000)
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("attention-prefetch"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 3
+        ))
+        let store = StartupPrefetchStore(authority: authority, now: clock.now)
+        let attempt = try XCTUnwrap(store.makeAttempt(session: session, generation: 3))
+        attempt.captureAttention(makeAttentionFeed(
+            items: [makeAttentionItem(id: "prefetched")],
+            healthyPrinterCount: 2
+        ))
+        attempt.publish()
+        clock.set(millis: 1_000 + StartupPrefetchStore.freshnessWindowMillis)
+        let service = ScriptedAttentionService(steps: [
+            .value(makeAttentionFeed(
+                items: [makeAttentionItem(id: "refreshed")],
+                healthyPrinterCount: 7
+            )),
+        ])
+        let vm = AttentionFeedViewModel()
+
+        let bootstrapped = await vm.bootstrap(
+            attentionService: service,
+            signalRService: MockSignalRService(),
+            attentionEnabled: true,
+            startupPrefetchStore: store
+        )
+
+        XCTAssertTrue(bootstrapped)
+        XCTAssertEqual(vm.snapshot?.items.map(\.id), ["prefetched"])
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 2)
+        XCTAssertFalse(vm.isShowingStaleCache)
+        XCTAssertNotNil(vm.cacheLastUpdatedAtMillis)
+        let bootstrapCallCount = await service.loadCallCount
+        XCTAssertEqual(bootstrapCallCount, 0)
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("prefetch reused") })
+
+        let refreshed = await vm.refresh()
+        let refreshCallCount = await service.loadCallCount
+        XCTAssertTrue(refreshed)
+        XCTAssertEqual(refreshCallCount, 1)
+        XCTAssertEqual(vm.snapshot?.items.map(\.id), ["refreshed"])
+        XCTAssertEqual(vm.snapshot?.healthyPrinterCount, 7)
+    }
+
+    func testExpiredPrefetchDropsWholePayloadAndFallsBackToStaleHydrateThenLoad() async throws {
+        let root = FarmSnapshotFixtures.tempRoot()
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let clock = StartupPrefetchTestClock(millis: 1_000)
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("attention-prefetch-expired"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let prefetchStore = StartupPrefetchStore(authority: authority, now: clock.now)
+        let attempt = try XCTUnwrap(prefetchStore.makeAttempt(session: session, generation: 1))
+        attempt.captureAttention(makeAttentionFeed(healthyPrinterCount: 99))
+        attempt.capturePrinters([try TestData.decodePrinter()])
+        attempt.publish()
+        clock.set(millis: 1_001 + StartupPrefetchStore.freshnessWindowMillis)
+
+        let cacheStore = FeatureReadCacheStore(authority: authority, rootURL: root)
+        let cache = AttentionReadCacheAdapter(store: cacheStore)
+        let staleItem = makeAttentionItem(id: "honestly-stale")
+        let committed = await cache.recordRefresh(
+            items: [staleItem],
+            nextCursor: nil,
+            healthyPrinterCount: 1,
+            capturedSession: session
+        )
+        XCTAssertEqual(committed, .committed)
+        let service = ScriptedAttentionService(steps: [
+            .failure(.forced("offline")),
+        ])
+        let vm = AttentionFeedViewModel()
+        vm.configureCache(cache)
+
+        let bootstrapped = await vm.bootstrap(
+            attentionService: service,
+            signalRService: MockSignalRService(),
+            attentionEnabled: true,
+            startupPrefetchStore: prefetchStore
+        )
+
+        XCTAssertFalse(bootstrapped)
+        let loadCallCount = await service.loadCallCount
+        XCTAssertEqual(loadCallCount, 1)
+        XCTAssertEqual(vm.snapshot?.items.map(\.id), ["honestly-stale"])
+        XCTAssertTrue(vm.isShowingStaleCache, "expired data must not suppress the honest stale banner")
+        clock.set(millis: 1_001)
+        XCTAssertFalse(
+            prefetchStore.consumePrinters { _ in XCTFail("expiry must drop the whole payload") }
+        )
+    }
+
+    func testRejectedPrefetchFallsBackToStaleHydrateThenCanonicalLoad() async throws {
+        let root = FarmSnapshotFixtures.tempRoot()
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("attention-prefetch-reject"))!
+        )
+        let cacheStore = FeatureReadCacheStore(authority: authority, rootURL: root)
+        let cache = AttentionReadCacheAdapter(store: cacheStore)
+        let sessionA = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let prefetchStore = StartupPrefetchStore(authority: authority)
+        let attempt = try XCTUnwrap(prefetchStore.makeAttempt(session: sessionA, generation: 1))
+        attempt.captureAttention(makeAttentionFeed(healthyPrinterCount: 99))
+        attempt.publish()
+
+        let sessionB = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 2
+        ))
+        let staleItem = makeAttentionItem(id: "honestly-stale")
+        let committed = await cache.recordRefresh(
+            items: [staleItem],
+            nextCursor: nil,
+            healthyPrinterCount: 1,
+            capturedSession: sessionB
+        )
+        XCTAssertEqual(
+            committed,
+            .committed
+        )
+        let service = ScriptedAttentionService(steps: [
+            .failure(.forced("offline")),
+        ])
+        let vm = AttentionFeedViewModel()
+        vm.configureCache(cache)
+
+        let bootstrapped = await vm.bootstrap(
+            attentionService: service,
+            signalRService: MockSignalRService(),
+            attentionEnabled: true,
+            startupPrefetchStore: prefetchStore
+        )
+
+        XCTAssertFalse(bootstrapped)
+        let loadCallCount = await service.loadCallCount
+        XCTAssertEqual(loadCallCount, 1)
+        XCTAssertEqual(vm.snapshot?.items.map(\.id), ["honestly-stale"])
+        XCTAssertTrue(vm.isShowingStaleCache, "genuinely stale fallback must keep the offline banner")
+    }
+
     func testBootstrapCoalescesQueuedDrainIntoASingleFetch() async {
         let service = ScriptedAttentionService(steps: [
             .value(makeAttentionFeed(healthyPrinterCount: 1)),

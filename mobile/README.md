@@ -68,7 +68,13 @@ feature before opening the main interface. If one or more services are
 unavailable, the app names them in an alert and lets you continue with cached
 data and any services that remain available. Features disabled by the server's
 `operatorFeatures` capability flags are omitted from navigation and views rather
-than shown as unavailable placeholders.
+than shown as unavailable placeholders. For up to 30 seconds, promptly completed
+canonical checks hand their confirmed-live Attention feed, fleet filament
+coverage, and printer list to the first tab activation, avoiding a duplicate
+startup fetch and stale-cache banner. Attention's original lightweight readiness
+request runs concurrently and solely determines availability; canonical warming
+is best-effort and capped at one second. Tabs without a handoff perform their
+normal fresh load.
 
 ### HTTPS Certificate Trust
 

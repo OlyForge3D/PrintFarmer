@@ -65,6 +65,56 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertTrue(vm.isFeatureDisabled)
     }
 
+    #if DEBUG
+    func testBootstrapConsumesLivePrefetchAndSignalRStillRefreshes() async throws {
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("coverage-prefetch"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 5
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let attempt = try XCTUnwrap(store.makeAttempt(session: session, generation: 5))
+        let prefetched = Self.fleet(
+            evaluatedAt: Date(timeIntervalSince1970: 5_000),
+            printerName: "Prefetched"
+        )
+        attempt.captureFilamentCoverage(prefetched)
+        attempt.publish()
+        let service = ControlledFilamentCoverageService()
+        let signalR = MockSignalRService()
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configure(coverageService: service)
+        vm.configureSignalR(signalR)
+
+        await vm.bootstrap(startupPrefetchStore: store)
+
+        XCTAssertEqual(vm.coverageByPrinter.values.first?.printerName, "Prefetched")
+        XCTAssertFalse(vm.isShowingStaleCache)
+        XCTAssertNotNil(vm.cacheLastUpdatedAtMillis)
+        XCTAssertEqual(vm.dispatchedRequestCount, 1)
+        let pendingCount = await service.pendingCount
+        XCTAssertEqual(pendingCount, 0)
+        XCTAssertFalse(store.consumeFilamentCoverage { _ in XCTFail("prefetch reused") })
+
+        signalR.simulateFilamentCoverageChanged(FilamentCoverageChangedEvent(
+            printerId: nil,
+            reason: "post-prefetch",
+            occurredAt: Date()
+        ))
+        await service.awaitPending(count: 1)
+        await service.completeSuccess(
+            index: 0,
+            fleet: Self.fleet(evaluatedAt: Date(), printerName: "SignalR fresh")
+        )
+        await vm.waitForCallbackTick(atLeast: 1)
+
+        XCTAssertEqual(vm.dispatchedRequestCount, 2)
+        XCTAssertEqual(vm.coverageByPrinter.values.first?.printerName, "SignalR fresh")
+    }
+    #endif
+
     // MARK: - Idempotent SignalR configuration + subscription count
 
     func testConfigureSignalRIsIdempotent() {

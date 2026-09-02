@@ -940,15 +940,17 @@ final class AttentionFeedViewModel {
     /// * Bootstrap consumes any queued drain flag before configuring
     ///   so `configure`'s re-entry path does not enqueue a duplicate
     ///   fetch through the callback path.
-    /// * Bootstrap then awaits a single `refresh()` — that is the one
-    ///   canonical GET per bootstrap invocation.
+    /// * A current-authority readiness prefetch is applied through the same
+    ///   canonical snapshot path without another GET. Otherwise bootstrap
+    ///   awaits the existing single `refresh()`.
     @discardableResult
     func bootstrap(
         attentionService: any AttentionServiceProtocol,
         signalRService: any SignalRServiceProtocol,
         attentionEnabled: Bool,
         lifecycleToken: AttentionLifecycleToken? = nil,
-        printerService: (any PrinterServiceProtocol)? = nil
+        printerService: (any PrinterServiceProtocol)? = nil,
+        startupPrefetchStore: StartupPrefetchStore? = nil
     ) async -> Bool {
         // #779 blocker 1: refuse to run when the lifecycle has been
         // superseded by a `deactivate`. Any state mutation here would
@@ -978,6 +980,36 @@ final class AttentionFeedViewModel {
         )
         if let printerService {
             configureSnapshotService(printerService)
+        }
+        if attentionEnabled, let startupPrefetchStore {
+            var prefetched: StartupPrefetchValue<AttentionFeed>?
+            startupPrefetchStore.consumeAttention { entry in
+                refreshRequestOrdinal &+= 1
+                _ = advanceLoadStamp()
+                applySnapshot(
+                    entry.value,
+                    mode: .refresh,
+                    refreshOrdinal: refreshRequestOrdinal,
+                    // `ContentView` is keyed by active server generation, so this
+                    // first activation always owns a fresh view model/cover epoch.
+                    coverSequence: 0
+                )
+                isShowingStaleCache = false
+                cacheLastUpdatedAtMillis = entry.lastUpdatedAtMillis
+                prefetched = entry
+            }
+            if let prefetched {
+                if let cache = attentionCache, let applied = snapshot {
+                    _ = await cache.recordRefresh(
+                        items: applied.items,
+                        nextCursor: applied.nextCursor,
+                        healthyPrinterCount: applied.healthyPrinterCount,
+                        lastUpdatedAtMillis: prefetched.lastUpdatedAtMillis,
+                        capturedSession: prefetched.session
+                    )
+                }
+                return true
+            }
         }
         // #789: hydrate honestly-stale cached Attention (if any) AFTER activation
         // but BEFORE the canonical refresh, so a cold/offline launch shows the
