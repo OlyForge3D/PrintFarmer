@@ -11,6 +11,7 @@ import { ColorSwatch } from '@/features/filamentManagement/components/ColorSwatc
 import { projectService } from '@/services/projectService';
 import { templateService } from '@/services/templateService';
 import { apiClient } from '@/services/api';
+import { getErrorMessage } from '@/common/utils/apiErrors';
 import { PrintProjectStatus } from '@/types/api';
 import type { 
   CreatePrintProjectRequest, 
@@ -30,6 +31,14 @@ interface CreateProjectModalProps {
   /** When provided, the modal operates in edit mode for this project */
   editProject?: PrintProjectDetailDto;
 }
+
+/**
+ * Maximum project name length accepted by the backend (`PrintProject.NameMaxLength`,
+ * see the EF Core column config and `PrintProjectsController`). Enforced client-side via
+ * the `maxLength` attribute so a long Unicode name is rejected before submission rather
+ * than round-tripping to the API for a 400 (issue #2368).
+ */
+const PROJECT_NAME_MAX_LENGTH = 255;
 
 export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   isOpen,
@@ -372,8 +381,14 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g., Voron 2.4 Build Kit"
             className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-lg text-pf-text-primary placeholder:text-pf-text-tertiary focus:outline-none focus:ring-2 focus:ring-pf-accent"
+            maxLength={PROJECT_NAME_MAX_LENGTH}
             required
           />
+          {name.length > PROJECT_NAME_MAX_LENGTH * 0.9 && (
+            <p className="mt-1 text-xs text-pf-text-tertiary">
+              {name.length} / {PROJECT_NAME_MAX_LENGTH} characters
+            </p>
+          )}
         </div>
 
         {/* Description */}
@@ -626,7 +641,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
 
         {activeMutation.isError && (
           <p className="text-sm text-pf-error">
-            Failed to {isEditMode ? 'update' : 'create'} project: {String(activeMutation.error)}
+            Failed to {isEditMode ? 'update' : 'create'} project: {getErrorMessage(activeMutation.error, 'An unexpected error occurred')}
           </p>
         )}
       </form>

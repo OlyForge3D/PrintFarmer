@@ -15,7 +15,7 @@ public class PrintProjectConfiguration : IEntityTypeConfiguration<PrintProject>
 
         // Concurrency token for optimistic locking
         // Basic properties
-        builder.Property(p => p.Name).IsRequired().HasMaxLength(255);
+        builder.Property(p => p.Name).IsRequired().HasMaxLength(PrintProject.NameMaxLength);
         builder.Property(p => p.Description).HasMaxLength(2000);
         builder.Property(p => p.Notes).HasMaxLength(2000);
         builder.Property(p => p.Status).HasConversion<int>().HasDefaultValue(PrintProjectStatus.Open);
