@@ -219,7 +219,34 @@ describe('usePrinterFileThumbnails (#1650)', () => {
     // resolving. The per-url controller + ownership-check design must instead let the replay's
     // second setup naturally reissue a fresh fetch, while the original (now-superseded) fetch's
     // eventual rejection is discarded rather than committed.
-    hoisted.getPrinterFileThumbnail.mockResolvedValue(new Blob(['fake-png-bytes']));
+    //
+    // The mock below is deliberately abort-aware (round-4 review finding: a plain
+    // `mockResolvedValue` ignores the AbortSignal entirely and resolves the very first,
+    // pre-replay call regardless of whether it was later aborted - which makes the test pass
+    // even against the broken round-2/round-3 implementation, since an abort-blind mock never
+    // lets a "permanently aborted, never retried" fetch actually fail). The first call's
+    // promise only ever settles via its `AbortSignal` - proving it must actually be superseded
+    // and abandoned, not merely resolved anyway - while every subsequent call resolves
+    // normally, standing in for the replay's fresh, non-aborted fetch.
+    let callCount = 0;
+    hoisted.getPrinterFileThumbnail.mockImplementation(
+      (_url: string, signal?: AbortSignal) =>
+        new Promise<Blob>((resolve, reject) => {
+          const isFirstCall = callCount === 0;
+          callCount += 1;
+          if (isFirstCall) {
+            if (signal?.aborted) {
+              reject(new DOMException('Aborted', 'AbortError'));
+              return;
+            }
+            signal?.addEventListener('abort', () =>
+              reject(new DOMException('Aborted', 'AbortError'))
+            );
+            return;
+          }
+          resolve(new Blob(['fake-png-bytes']));
+        })
+    );
     const url = '/api/printers/00000000-0000-0000-0000-000000000001/files/thumbnail?filename=thumbs%2Fstrict.png';
     const files = [makeFile({ thumbnailUrl: url })];
 
@@ -231,5 +258,11 @@ describe('usePrinterFileThumbnails (#1650)', () => {
       expect(result.current.objectUrls[url]).toBe('blob:mock-object-url');
     });
     expect(result.current.failed[url]).toBeUndefined();
+
+    // Pin the mechanism, not just the outcome: the pre-replay fetch really was aborted and
+    // superseded by a genuinely fresh, second request - not silently resolved anyway.
+    expect(hoisted.getPrinterFileThumbnail).toHaveBeenCalledTimes(2);
+    const firstCallSignal = hoisted.getPrinterFileThumbnail.mock.calls[0][1] as AbortSignal;
+    expect(firstCallSignal.aborted).toBe(true);
   });
 });
