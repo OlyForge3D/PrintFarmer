@@ -64,21 +64,24 @@ describe('CreateProjectModal - name length validation and error rendering (#2368
     const nameInput = screen.getByPlaceholderText('e.g., Voron 2.4 Build Kit') as HTMLInputElement;
     expect(nameInput).toHaveAttribute('maxlength', '255');
 
-    // The exact repro from #2368: 295 UTF-16 code units of "測試🚀" repeated.
-    const longName = '測試🚀'.repeat(74).slice(0, 295);
+    // The exact repro from #2368: 295 UTF-16 code units built from "測試🚀"
+    // repeated. Composed as 73 full repetitions (292 code units) plus "測試"
+    // then "測" (3 more BMP code units) rather than slicing the repeated
+    // string, so no surrogate pair is split in half.
+    const longName = '測試🚀'.repeat(73) + '測試' + '測';
     expect(longName.length).toBe(295);
 
-    // Simulate the browser enforcing the maxLength attribute on a native
-    // "input" event (jsdom, like real browsers, truncates the value the
-    // element reports even if the event is dispatched with a longer string).
-    nameInput.value = longName;
-    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    // Drive real keystrokes through userEvent, which (unlike a raw jsdom
+    // "input" event dispatch) respects the native maxLength constraint the
+    // same way a real browser does, refusing to insert characters beyond it.
+    const user = userEvent.setup();
+    await user.click(nameInput);
+    await user.paste(longName);
 
     await waitFor(() => {
-      expect(
-        (screen.getByPlaceholderText('e.g., Voron 2.4 Build Kit') as HTMLInputElement).value.length
-      ).toBeLessThanOrEqual(255);
+      expect(nameInput.value.length).toBe(255);
     });
+    expect(nameInput.value).toBe(longName.slice(0, 255));
   });
 
   it('renders the backend validation message instead of "[object Object]" when the API rejects an over-length name', async () => {

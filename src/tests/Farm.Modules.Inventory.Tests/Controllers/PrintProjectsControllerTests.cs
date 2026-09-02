@@ -196,8 +196,11 @@ public class PrintProjectsControllerTests
     {
         // Arrange: 295-character Unicode name (repeated 測試🚀), reproducing issue #2368.
         // 🚀 is a surrogate pair, so this exercises string.Length counting UTF-16 code units
-        // the same way the EF Core column's HasMaxLength(255) constraint does.
-        var longName = string.Concat(Enumerable.Repeat("測試🚀", 74))[..295];
+        // the same way the EF Core column's HasMaxLength(255) constraint does. Built as
+        // 73 full repetitions (292 code units) plus "測試" then "測" (3 more BMP code units)
+        // rather than slicing the repeated string, so no surrogate pair is split in half.
+        var longName = string.Concat(Enumerable.Repeat("測試🚀", 73)) + "測試" + "測";
+        Assert.Equal(295, longName.Length);
         var request = new CreatePrintProjectRequest(longName);
 
         // Act
@@ -205,7 +208,9 @@ public class PrintProjectsControllerTests
 
         // Assert
         BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
-        Assert.Contains("255", badRequest.Value?.ToString());
+        Assert.Equal(
+            "Project name must be 255 characters or fewer (received 295).",
+            badRequest.Value?.ToString());
         _projectServiceMock.Verify(
             s => s.CreateProjectAsync(It.IsAny<CreatePrintProjectRequest>(), It.IsAny<CancellationToken>()),
             Times.Never);
@@ -278,7 +283,8 @@ public class PrintProjectsControllerTests
     {
         // Arrange: 295-character Unicode name (repeated 測試🚀), reproducing issue #2368.
         var projectId = Guid.NewGuid();
-        var longName = string.Concat(Enumerable.Repeat("測試🚀", 74))[..295];
+        var longName = string.Concat(Enumerable.Repeat("測試🚀", 73)) + "測試" + "測";
+        Assert.Equal(295, longName.Length);
         var request = new UpdatePrintProjectRequest(longName, null, null, null, null, null);
 
         // Act
@@ -286,7 +292,9 @@ public class PrintProjectsControllerTests
 
         // Assert
         BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
-        Assert.Contains("255", badRequest.Value?.ToString());
+        Assert.Equal(
+            "Project name must be 255 characters or fewer (received 295).",
+            badRequest.Value?.ToString());
         _projectServiceMock.Verify(
             s => s.UpdateProjectAsync(It.IsAny<Guid>(), It.IsAny<UpdatePrintProjectRequest>(), It.IsAny<CancellationToken>()),
             Times.Never);
