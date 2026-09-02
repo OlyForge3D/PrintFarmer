@@ -64,6 +64,63 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertTrue(vm.isFeatureDisabled)
     }
 
+    func testDetailViewManualAndForegroundRefreshFallbacksLoadCoverage() async {
+        let service = ControlledFilamentCoverageService()
+        let coverageViewModel = PrinterFilamentCoverageViewModel(printerId: printerA)
+        coverageViewModel.configure(coverageService: service)
+        let detailViewModel = PrinterDetailViewModel(printerId: printerA)
+        detailViewModel.isViewActive = true
+
+        let manualRefresh = Task {
+            await PrinterDetailViewLifecycle.refresh(
+                viewModel: detailViewModel,
+                coverageViewModel: coverageViewModel,
+                refreshCoverage: true,
+                snapshotPollingAllowed: false
+            )
+        }
+        await service.awaitPending(count: 1)
+        await service.completeSuccess(
+            index: 0,
+            printer: Self.coverage(for: printerA, status: .covers)
+        )
+        await manualRefresh.value
+
+        let foregroundRefresh = Task {
+            await PrinterDetailViewLifecycle.willEnterForeground(
+                viewModel: detailViewModel,
+                coverageViewModel: coverageViewModel,
+                refreshCoverage: true
+            )
+        }
+        await service.awaitPending(count: 1)
+        await service.completeSuccess(
+            index: 0,
+            printer: Self.coverage(for: printerA, status: .covers)
+        )
+        await foregroundRefresh.value
+
+        XCTAssertEqual(coverageViewModel.dispatchedRequestCount, 2)
+
+        await PrinterDetailViewLifecycle.refresh(
+            viewModel: detailViewModel,
+            coverageViewModel: coverageViewModel,
+            refreshCoverage: false,
+            snapshotPollingAllowed: false
+        )
+        await PrinterDetailViewLifecycle.willEnterForeground(
+            viewModel: detailViewModel,
+            coverageViewModel: coverageViewModel,
+            refreshCoverage: false
+        )
+
+        XCTAssertEqual(coverageViewModel.dispatchedRequestCount, 2)
+        let pendingCountAfterDisabledRefreshes = await service.pendingCount
+        XCTAssertEqual(pendingCountAfterDisabledRefreshes, 0)
+        detailViewModel.isViewActive = false
+        detailViewModel.stopSnapshotPolling()
+    }
+
     // MARK: - Invalidation filtering
 
     /// A scoped invalidation for a DIFFERENT printer must not cause a

@@ -66,8 +66,12 @@ struct PrinterDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .refreshable {
-            await viewModel.loadPrinter()
-            viewModel.setSnapshotPollingAllowed(scenePhase == .active)
+            await PrinterDetailViewLifecycle.refresh(
+                viewModel: viewModel,
+                coverageViewModel: coverageViewModel,
+                refreshCoverage: filamentCoverageEnabled,
+                snapshotPollingAllowed: scenePhase == .active
+            )
         }
         .alert(
             viewModel.pendingAction?.title ?? "Confirm",
@@ -147,7 +151,14 @@ struct PrinterDetailView: View {
             switch newPhase {
             case .active:
                 if viewModel.isViewActive {
-                    viewModel.setSnapshotPollingAllowed(true)
+                    let task = Task {
+                        await PrinterDetailViewLifecycle.willEnterForeground(
+                            viewModel: viewModel,
+                            coverageViewModel: coverageViewModel,
+                            refreshCoverage: filamentCoverageEnabled
+                        )
+                    }
+                    activeTasks.append(task)
                 }
             case .inactive, .background:
                 viewModel.setSnapshotPollingAllowed(false)
@@ -1659,6 +1670,34 @@ struct PrinterDetailView: View {
                 .fullWidthActionButton()
         }
         .buttonStyle(.bordered)
+    }
+}
+
+@MainActor
+enum PrinterDetailViewLifecycle {
+    static func refresh(
+        viewModel: PrinterDetailViewModel,
+        coverageViewModel: PrinterFilamentCoverageViewModel,
+        refreshCoverage: Bool,
+        snapshotPollingAllowed: Bool
+    ) async {
+        await viewModel.loadPrinter()
+        if refreshCoverage {
+            await coverageViewModel.load()
+        }
+        viewModel.setSnapshotPollingAllowed(snapshotPollingAllowed)
+    }
+
+    static func willEnterForeground(
+        viewModel: PrinterDetailViewModel,
+        coverageViewModel: PrinterFilamentCoverageViewModel,
+        refreshCoverage: Bool
+    ) async {
+        guard viewModel.isViewActive else { return }
+        viewModel.setSnapshotPollingAllowed(true)
+        if refreshCoverage {
+            await coverageViewModel.load()
+        }
     }
 }
 

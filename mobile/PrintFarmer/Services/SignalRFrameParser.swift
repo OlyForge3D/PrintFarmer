@@ -96,6 +96,7 @@ struct SignalRFrameParser {
 
 enum SignalRProtocolMessage: Equatable, Sendable {
     case invocation(target: String, firstArgument: Data?)
+    case completion(invocationId: String, result: Data?, error: String?)
     case ping
     case close(error: String?)
     case unsupported(type: Int)
@@ -126,6 +127,27 @@ enum SignalRProtocolMessage: Equatable, Sendable {
                 argumentData = nil
             }
             return .invocation(target: target, firstArgument: argumentData)
+        case 3:
+            guard let invocationId = json["invocationId"] as? String else {
+                return .malformed
+            }
+            let resultData: Data?
+            if let result = json["result"] {
+                guard let data = try? JSONSerialization.data(
+                    withJSONObject: result,
+                    options: .fragmentsAllowed
+                ) else {
+                    return .malformed
+                }
+                resultData = data
+            } else {
+                resultData = nil
+            }
+            return .completion(
+                invocationId: invocationId,
+                result: resultData,
+                error: json["error"] as? String
+            )
         case 6:
             return .ping
         case 7:

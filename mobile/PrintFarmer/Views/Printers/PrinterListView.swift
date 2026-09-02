@@ -57,7 +57,11 @@ struct PrinterListView: View {
             .navigationTitle("Farm")
             .searchable(text: $viewModel.searchText, prompt: "Search printers")
             .refreshable {
-                await viewModel.loadPrinters()
+                await PrinterListViewLifecycle.refresh(
+                    viewModel: viewModel,
+                    coverageViewModel: coverageViewModel,
+                    refreshCoverage: filamentCoverageEnabled
+                )
             }
             .toolbar {
                 if sizeClass == .compact {
@@ -105,7 +109,9 @@ struct PrinterListView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
             Task {
                 await PrinterListViewLifecycle.willEnterForeground(
-                    viewModel: viewModel
+                    viewModel: viewModel,
+                    coverageViewModel: coverageViewModel,
+                    refreshCoverage: filamentCoverageEnabled
                 )
             }
         }
@@ -246,9 +252,25 @@ enum PrinterListViewLifecycle {
     }
 
     static func willEnterForeground(
-        viewModel: PrinterListViewModel
+        viewModel: PrinterListViewModel,
+        coverageViewModel: FarmFilamentCoverageViewModel? = nil,
+        refreshCoverage: Bool = false
     ) async {
         await viewModel.loadAutoDispatchStatuses()
+        if refreshCoverage {
+            await coverageViewModel?.load()
+        }
+    }
+
+    static func refresh(
+        viewModel: PrinterListViewModel,
+        coverageViewModel: FarmFilamentCoverageViewModel,
+        refreshCoverage: Bool
+    ) async {
+        await viewModel.loadPrinters()
+        if refreshCoverage {
+            await coverageViewModel.load()
+        }
     }
 }
 
