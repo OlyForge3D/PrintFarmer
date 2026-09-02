@@ -636,7 +636,9 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
     {
         ArgumentNullException.ThrowIfNull(tagIds);
 
-        Dictionary<Guid, int> counts = tagIds.ToDictionary(id => id, _ => 0);
+        // Distinct() guards against a caller passing a tagIds collection with duplicates -
+        // ToDictionary would otherwise throw ArgumentException on a duplicate key.
+        Dictionary<Guid, int> counts = tagIds.Distinct().ToDictionary(id => id, _ => 0);
         if (tagIds.Count == 0)
         {
             return counts;

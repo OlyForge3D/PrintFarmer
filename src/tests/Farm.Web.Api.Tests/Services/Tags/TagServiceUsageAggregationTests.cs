@@ -270,6 +270,50 @@ public class TagServiceUsageAggregationTests
     }
 
     /// <summary>
+    /// A tagIds collection containing a duplicate id must not throw (the batch method's
+    /// internal `ToDictionary` seeding previously assumed unique keys) and must not
+    /// double-count usage for the duplicated id.
+    /// </summary>
+    [Fact]
+    public async Task GetTagUsageCountsAsync_DuplicateTagIdsInInput_DoesNotThrowOrDoubleCount()
+    {
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
+
+        DateTime now = DateTime.UtcNow;
+        Tag tag = new() { Id = Guid.NewGuid(), Name = "Duplicated", CreatedAt = now, UpdatedAt = now };
+        db.Set<Tag>().Add(tag);
+
+        FolderNode folder = new() { Id = Guid.NewGuid(), Path = "/", FolderType = "gcode" };
+        db.Set<FolderNode>().Add(folder);
+        await db.SaveChangesAsync();
+
+        GcodeFile gcodeFile = new() { Id = Guid.NewGuid(), FileName = "benchy.gcode", FolderId = folder.Id, UpdatedAt = now };
+        gcodeFile.Tags.Add(tag);
+        db.GcodeFiles.Add(gcodeFile);
+        await db.SaveChangesAsync();
+
+        EfTagRepository repo = new(db, null);
+
+        IReadOnlyDictionary<Guid, int> counts = await repo.GetTagUsageCountsAsync([tag.Id, tag.Id], CancellationToken.None);
+
+        Assert.Equal(1, counts[tag.Id]);
+    }
+
+    /// <summary>
+    /// An empty tagIds collection must short-circuit to an empty result without querying.
+    /// </summary>
+    [Fact]
+    public async Task GetTagUsageCountsAsync_EmptyTagIds_ReturnsEmptyDictionary()
+    {
+        using AppDbContext db = AppDbTestHelpers.CreateSqliteInMemoryDb();
+        EfTagRepository repo = new(db, null);
+
+        IReadOnlyDictionary<Guid, int> counts = await repo.GetTagUsageCountsAsync([], CancellationToken.None);
+
+        Assert.Empty(counts);
+    }
+
+    /// <summary>
     /// Mirrors <see cref="GetTagUsageCountsAsync_CoversZeroUsageSingleSourceAndAllSources_WithoutDroppingOrDoubleCounting"/>
     /// for <see cref="ITagRepository.GetTagLastUsedAtBatchAsync"/>: a tag used in both
     /// GcodeFile and Model3D sources must report the MAX of the two timestamps, and an unused
