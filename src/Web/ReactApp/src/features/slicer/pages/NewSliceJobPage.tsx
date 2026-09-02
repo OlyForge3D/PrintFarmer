@@ -786,6 +786,22 @@ export const NewSliceJobPage: React.FC = () => {
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
   const jobProgress = useSliceJobProgress(submittedJobId);
 
+  // Issue #2374: Retry on a failed/cancelled slice must resubmit the SAME
+  // plate models that were originally sliced, not whatever `bedModels`
+  // happens to hold at retry time. `submitSliceJob` is plate-aware — its
+  // `activeModelIds` argument comes from the workspace's Slice button click
+  // and is never itself persisted — so it's captured here on every submit
+  // and replayed by the Retry action below.
+  const lastSubmittedModelIdsRef = useRef<string[] | undefined>(undefined);
+
+  // Synchronous re-entrancy guard for Retry (issue #2374 review): two fast
+  // clicks on the Retry button can both fire before React re-renders with
+  // `submitMutation.isPending === true` — that flag only updates on the next
+  // render, so relying on it alone still lets a same-tick double-click slip
+  // a second `POST /api/slice/` through. This ref is set the instant Retry is
+  // invoked (no render needed) and cleared once the mutation settles.
+  const retryInFlightRef = useRef(false);
+
   // Snapshot of cost/routing values captured at slice-submit time.
   // Keeps cost display and queue routing stable while sidebar stays editable.
   const [sliceSnapshot, setSliceSnapshot] = useState<{
@@ -1781,20 +1797,55 @@ export const NewSliceJobPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['slice-jobs'] });
     },
     onError: (err: unknown) => {
-      setError(getErrorMessage(err, 'Failed to submit job'));
-    }
+      // Hicks review (issue #2374, round 2): a mutation-level failure (the
+      // request actually reached the API and the backend/network rejected
+      // it — distinct from the client-side guards in `submitSliceJob`, which
+      // already toast) previously only set the page-level `error` state.
+      // On Retry, the overlay stays anchored to the ORIGINAL failed job and
+      // keeps showing that job's stale `progress.error`, so a retry that
+      // fails again at this layer looked identical to one that never
+      // resubmitted at all — the same silent-no-op class of bug as #2374
+      // itself. Toast so this is visible regardless of sidebar/overlay state.
+      const msg = getErrorMessage(err, 'Failed to submit job');
+      setError(msg);
+      toast.error(msg);
+    },
+    onSettled: () => {
+      retryInFlightRef.current = false;
+    },
   });
 
-  const submitSliceJob = useCallback((activeModelIds?: string[]) => {
+  // Returns whether a request was actually dispatched (`submitMutation.mutate`
+  // called) — `false` when an early validation guard blocked submission. The
+  // Retry re-entrancy guard below (issue #2374 review) uses this to release
+  // `retryInFlightRef` immediately when Retry's replay hits a guard instead of
+  // a real in-flight request, so a stale-but-now-invalid selection doesn't
+  // leave the Retry button permanently disabled.
+  const submitSliceJob = useCallback((activeModelIds?: string[]): boolean => {
     setError(null);
+
+    // Remember which plate models this submission targeted so a later Retry
+    // (see the Failed/Cancelled handlers below) can replay the exact same
+    // set instead of re-deriving it from whatever `bedModels` holds by then.
+    lastSubmittedModelIdsRef.current = activeModelIds;
+
+    // Issue #2374 (Bishop review): every guard below now pairs `setError` with
+    // `toast.error` so a validation failure is never a silent no-op. This
+    // matters specifically for Retry: the left-column error Alert sits inside
+    // the settings sidebar, which is `hidden` when `sidebarOpen` is false, and
+    // `SliceProgressOverlay` — the surface Retry is most often pressed from —
+    // never rendered the page-level `error` state at all, only `progress.error`.
+    // A toast is visible regardless of sidebar/overlay state.
 
     // Issue #2342: never let an offline printer sit silently selected as an
     // eligible submission target. This must be the FIRST check — before print
     // settings/engine/model validation — so an offline selection is always
     // caught regardless of how far along the rest of the form is.
     if (selectedPrinterForSlicing?.isOnline === false) {
-      setError('Selected printer is offline. Choose an online printer before slicing.');
-      return;
+      const msg = 'Selected printer is offline. Choose an online printer before slicing.';
+      setError(msg);
+      toast.error(msg);
+      return false;
     }
 
     // Issue #2223: block submission on invalid print settings instead of
@@ -1805,13 +1856,16 @@ export const NewSliceJobPage: React.FC = () => {
     // is a defense-in-depth check against the committed `slicerSettings` that
     // also covers Advanced mode and profile-import paths.
     if (slicerMode !== 'Advanced' && !isSimpleSlicerSettingsValid) {
-      setError('Fix the highlighted print setting before slicing.');
-      return;
+      const msg = 'Fix the highlighted print setting before slicing.';
+      setError(msg);
+      toast.error(msg);
+      return false;
     }
     const settingsErrors = validateOrcaPrintSettings(slicerSettings);
     if (settingsErrors.length > 0) {
       setError(settingsErrors[0].message);
-      return;
+      toast.error(settingsErrors[0].message);
+      return false;
     }
 
     // Issue #578 dual-engine (Hicks R3, refined R4): reject submission until
@@ -1820,8 +1874,10 @@ export const NewSliceJobPage: React.FC = () => {
     // dispatch an unpinned Orca job that any installed version could claim —
     // re-opening the profile/worker version mismatch H#3/H#R4 flagged.
     if (registeredEngines === undefined) {
-      setError('Slicer registry not yet loaded. Please retry in a moment.');
-      return;
+      const msg = 'Slicer registry not yet loaded. Please retry in a moment.';
+      setError(msg);
+      toast.error(msg);
+      return false;
     }
 
     // Backend returns latest=null in TWO shapes (Hicks R4 #3, Vasquez R4):
@@ -1845,7 +1901,8 @@ export const NewSliceJobPage: React.FC = () => {
       && !engineHasAnyAvailable
     ) {
       setError(`No online ${engineName} worker is available to accept this job.`);
-      return;
+      toast.error(`No online ${engineName} worker is available to accept this job.`);
+      return false;
     }
 
     // Pinned-mode guard (Vasquez): the check above is gated on the pin being
@@ -1888,7 +1945,8 @@ export const NewSliceJobPage: React.FC = () => {
       && !versionEntriesForEngine.some(v => v.version === selectedEngineVersion && v.available)
     ) {
       setError(`${engineName} ${selectedEngineVersion} has no online worker to accept this job. Switch to Latest or start that worker.`);
-      return;
+      toast.error(`${engineName} ${selectedEngineVersion} has no online worker to accept this job. Switch to Latest or start that worker.`);
+      return false;
     }
 
     // Legacy / fresh-install path is served naturally: `latestAvailableForEngine`
@@ -1918,7 +1976,7 @@ export const NewSliceJobPage: React.FC = () => {
         : 'Select a model or enter a URL';
       setError(msg);
       if (activeModelIds) toast.error(msg);
-      return;
+      return false;
     }
 
     // Effective single-model source: prefer the active plate's first sliceable
@@ -1927,17 +1985,44 @@ export const NewSliceJobPage: React.FC = () => {
     const effectiveModelFileName = primaryModel ? primaryModel.fileName : modelFileName;
 
     if (!selectedModelId && !effectiveModelFileUrl.trim()) {
-      setError('Select a model or enter a URL');
-      return;
+      const msg = 'Select a model or enter a URL';
+      setError(msg);
+      toast.error(msg);
+      return false;
     }
     if (!primaryModel && !selectedModelId && modelFileUrl.trim() && !modelFileName.trim()) {
-      setError('Model file name is required when using a URL');
-      return;
+      const msg = 'Model file name is required when using a URL';
+      setError(msg);
+      toast.error(msg);
+      return false;
     }
 
     if (!selectedProcessPresetId) {
-      setError('Select a process profile');
-      return;
+      const msg = 'Select a process profile';
+      setError(msg);
+      toast.error(msg);
+      return false;
+    }
+
+    // Issue #2374 (Bishop review): `submitSliceJob` previously validated less
+    // than the Slice button's own `canSlice` gate, which also requires a
+    // machine profile (and, for single-extruder printers, a filament profile)
+    // to be selected before the button is even clickable. Retry bypasses
+    // `canSlice` entirely — it calls this function directly — so without these
+    // checks here a user who switches to a printer whose profiles haven't
+    // finished loading yet, then presses Retry, could dispatch a request with
+    // an empty `machineProfileName`/`filamentProfileName`.
+    if (!selectedMachineProfileId) {
+      const msg = 'Select a machine profile';
+      setError(msg);
+      toast.error(msg);
+      return false;
+    }
+    if (!printerIsMultiToolhead && !selectedFilamentProfileId) {
+      const msg = 'Select a filament profile';
+      setError(msg);
+      toast.error(msg);
+      return false;
     }
 
     // Multi-toolhead validation: ensure all extruders have filament assigned
@@ -1947,7 +2032,8 @@ export const NewSliceJobPage: React.FC = () => {
       );
       if (missingExtruders.length > 0) {
         setError(`Assign a filament profile to all ${physicalToolheads.length} extruders`);
-        return;
+        toast.error(`Assign a filament profile to all ${physicalToolheads.length} extruders`);
+        return false;
       }
     }
 
@@ -2037,6 +2123,7 @@ export const NewSliceJobPage: React.FC = () => {
     });
 
     submitMutation.mutate(request);
+    return true;
   }, [
     advancedProcessSettings,
     allFilamentProfiles,
@@ -2070,6 +2157,39 @@ export const NewSliceJobPage: React.FC = () => {
     selectedModelId,
     selectedPrinterForSlicing,
   ]);
+
+  // Issue #2374: Retry on a Failed/Cancelled slice previously only cleared
+  // the submitted-job state and fell back to the plain editor view, without
+  // ever issuing a new `POST /api/slice/` request — the user had to notice
+  // this and manually press Slice again. Retry must resubmit the same plate
+  // models that failed, using `submitSliceJob`'s own validation/guard rails,
+  // so a stale/now-invalid selection still surfaces a clear error instead of
+  // silently resubmitting garbage.
+  //
+  // Re-entrancy guard (review finding, issue #2374): unlike the main Slice
+  // button — which is disabled via `canSlice` while `submitMutation.isPending`
+  // — the Retry buttons have no built-in re-entrancy protection from the
+  // browser, so a fast double-click could otherwise fire two overlapping
+  // `POST /api/slice/` requests for the same failed job. `retryInFlightRef` is
+  // checked (and set) synchronously so a second click landing before the next
+  // render still sees it, unlike `submitMutation.isPending`, which does not
+  // reflect the first click's `mutate()` call until React re-renders. The
+  // callers also disable/show a loading state on the Retry buttons themselves
+  // while pending, as a visible (not just functional) safeguard.
+  const handleRetryFailedSlice = useCallback(() => {
+    if (retryInFlightRef.current || submitMutation.isPending) {
+      return;
+    }
+    retryInFlightRef.current = true;
+    const dispatched = submitSliceJob(lastSubmittedModelIdsRef.current);
+    // An early validation guard blocked this attempt (e.g. the selection
+    // went stale between the failed job and Retry) — no mutation was started,
+    // so `onSettled` will never fire to release the guard. Release it here
+    // instead of leaving Retry permanently disabled.
+    if (!dispatched) {
+      retryInFlightRef.current = false;
+    }
+  }, [submitMutation.isPending, submitSliceJob]);
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -3208,12 +3328,8 @@ export const NewSliceJobPage: React.FC = () => {
                 setModelFileName('');
                 setBedModels([]);
               }}
-              onRetry={() => {
-                setSubmittedJobId(null);
-                setSliceSnapshot(null);
-                setError(null);
-                setMessage(null);
-              }}
+              onRetry={handleRetryFailedSlice}
+              retryDisabled={submitMutation.isPending}
             />
           )}
 
@@ -3273,12 +3389,8 @@ export const NewSliceJobPage: React.FC = () => {
                   setModelFileName('');
                   setBedModels([]);
                 }}
-                onRetry={() => {
-                  setSubmittedJobId(null);
-                  setSliceSnapshot(null);
-                  setError(null);
-                  setMessage(null);
-                }}
+                onRetry={handleRetryFailedSlice}
+                retryDisabled={submitMutation.isPending}
               />
             )}
           </div>
@@ -3349,11 +3461,14 @@ function SliceJobProgressPanel({
   progress,
   onNewJob,
   onRetry,
+  retryDisabled,
 }: {
   jobId: string;
   progress: ReturnType<typeof useSliceJobProgress>;
   onNewJob: () => void;
   onRetry: () => void;
+  /** True while a Retry-triggered resubmission is in flight (issue #2374). */
+  retryDisabled?: boolean;
 }) {
   const isCompleted = progress.status === 'Completed';
   const isFailed = progress.status === 'Failed';
@@ -3437,7 +3552,7 @@ function SliceJobProgressPanel({
             </p>
           )}
           <div className="flex items-center gap-2">
-            <Button variant="primary" size="sm" onClick={onRetry}>
+            <Button variant="primary" size="sm" onClick={onRetry} disabled={retryDisabled} loading={retryDisabled}>
               Retry
             </Button>
             <Button variant="secondary" size="sm" onClick={onNewJob}>
@@ -3450,7 +3565,7 @@ function SliceJobProgressPanel({
       {/* Cancelled */}
       {isCancelled && (
         <div className="flex items-center gap-2 pt-1">
-          <Button variant="primary" size="sm" onClick={onRetry}>
+          <Button variant="primary" size="sm" onClick={onRetry} disabled={retryDisabled} loading={retryDisabled}>
             Retry
           </Button>
           <Button variant="secondary" size="sm" onClick={onNewJob}>

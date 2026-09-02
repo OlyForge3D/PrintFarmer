@@ -30,6 +30,12 @@ interface SliceProgressOverlayProps {
   requiredMaterialType?: string;
   /** Required nozzle diameter derived from slice selections — forwarded to the queue form. */
   requiredNozzleDiameter?: number;
+  /**
+   * True while a Retry-triggered resubmission is in flight. Disables the
+   * Retry button so a double-click can't fire a second overlapping
+   * `POST /api/slice/` for the same failed job (issue #2374).
+   */
+  retryDisabled?: boolean;
 }
 
 /**
@@ -37,7 +43,7 @@ interface SliceProgressOverlayProps {
  * Inspired by OrcaSlicer's progress dialog — prominent, centered, 
  * with real-time progress ring and status details.
  */
-export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filamentCostPerKg, resolvedCostPerGram, costSource, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: SliceProgressOverlayProps) {
+export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filamentCostPerKg, resolvedCostPerGram, costSource, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter, retryDisabled }: SliceProgressOverlayProps) {
   const isCompleted = progress.status === 'Completed';
   const isFailed = progress.status === 'Failed';
   const isCancelled = progress.status === 'Cancelled';
@@ -191,7 +197,7 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
 
         {(isFailed || isCancelled) && (
           <div className="flex items-center gap-3 mt-2">
-            <Button variant="primary" size="sm" onClick={onRetry}>
+            <Button variant="primary" size="sm" onClick={onRetry} disabled={retryDisabled} loading={retryDisabled}>
               Retry
             </Button>
             <Button variant="secondary" size="sm" onClick={onNewJob}>
