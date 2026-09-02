@@ -44,10 +44,20 @@ final class MockAttentionService: AttentionServiceProtocol, @unchecked Sendable 
     var executeActionCalledWith: (itemId: String, actionKind: AttentionActionKind)?
     var executeActionResultToReturn: AttentionActionResult?
 
-    func getFeed(cursor: String?, limit: Int?) async throws -> AttentionFeed {
+    /// Records the call synchronously. `NSLock.lock()`/`unlock()` are `noasync`,
+    /// so the critical section must live in a sync helper rather than inline in
+    /// `getFeed`. Keeping it separate also preserves the load-bearing property
+    /// that the lock is released *before* awaiting the handler, which is what
+    /// lets concurrent callers accumulate on a barrier in
+    /// `testAttentionGatingAndPrefetchRequestsAreConcurrent`.
+    private func recordFeedCall(cursor: String?, limit: Int?) {
         feedCallLock.lock()
+        defer { feedCallLock.unlock() }
         recordedFeedCalls.append((cursor, limit))
-        feedCallLock.unlock()
+    }
+
+    func getFeed(cursor: String?, limit: Int?) async throws -> AttentionFeed {
+        recordFeedCall(cursor: cursor, limit: limit)
         if let getFeedHandler {
             return try await getFeedHandler(cursor, limit)
         }
