@@ -47,6 +47,17 @@ public class MoonrakerClient(
     ISupportsPerExtruderFilamentUsage
 {
     private const int MaxExcludeObjectNameLength = 256;
+
+    /// <summary>
+    /// Maximum number of concurrent per-file thumbnail-path lookups issued while building the
+    /// file list. Each lookup is its own round trip to the printer's Moonraker instance, so
+    /// resolving them one at a time made <see cref="GetFileListWithMetadataAsync"/> scale
+    /// linearly with the number of files - large libraries (200+ files) could exceed
+    /// <see cref="BackendTimeoutSettings.CommandTimeout"/> and silently degrade to an empty
+    /// list. Bounding (rather than fully unbounding) concurrency keeps the printer from being
+    /// hit with hundreds of simultaneous requests. See issue #2393.
+    /// </summary>
+    private const int ThumbnailLookupConcurrency = 8;
     private static readonly JsonSerializerOptions WebJsonOptions =
         new(JsonSerializerDefaults.Web);
 
@@ -1454,7 +1465,11 @@ public class MoonrakerClient(
                 return [];
             }
 
-            List<PrinterFileInfo> files = new();
+            // First pass: parse the gcode file candidates synchronously (cheap, no I/O). The
+            // per-file thumbnail-path lookup is deliberately deferred to a second, bounded-
+            // concurrency pass below rather than awaited inline here - see
+            // ThumbnailLookupConcurrency remarks.
+            List<(string FileName, long? Size, long? Modified)> candidates = new();
             foreach (JsonElement file in result.EnumerateArray())
             {
                 if (file.TryGetProperty("path", out JsonElement path) &&
@@ -1480,20 +1495,36 @@ public class MoonrakerClient(
                             modified = (long)timestamp;
                         }
 
-                        // Get the backend-relative thumbnail path for this file (never an absolute
-                        // internal URL - see GetThumbnailPathAsync remarks).
-                        string? thumbnailPath = await GetThumbnailPathAsync(baseUrl, fileName, cts.Token);
-
-                        files.Add(new PrinterFileInfo
-                        {
-                            Name = fileName,
-                            Path = fileName,
-                            Size = size,
-                            Modified = modified,
-                            ThumbnailPath = thumbnailPath
-                        });
+                        candidates.Add((fileName, size, modified));
                     }
                 }
+            }
+
+            // Second pass: resolve each candidate's backend-relative thumbnail path (never an
+            // absolute internal URL - see GetThumbnailPathAsync remarks) with bounded
+            // concurrency so N files issue at most ThumbnailLookupConcurrency simultaneous
+            // requests instead of N sequential round trips. Results are written into an
+            // index-aligned array so file order is preserved regardless of completion order.
+            string?[] thumbnailPaths = new string?[candidates.Count];
+            await Parallel.ForEachAsync(
+                Enumerable.Range(0, candidates.Count),
+                new ParallelOptions { MaxDegreeOfParallelism = ThumbnailLookupConcurrency, CancellationToken = cts.Token },
+                async (index, token) =>
+                {
+                    thumbnailPaths[index] = await GetThumbnailPathAsync(baseUrl, candidates[index].FileName, token);
+                });
+
+            List<PrinterFileInfo> files = new(candidates.Count);
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                files.Add(new PrinterFileInfo
+                {
+                    Name = candidates[i].FileName,
+                    Path = candidates[i].FileName,
+                    Size = candidates[i].Size,
+                    Modified = candidates[i].Modified,
+                    ThumbnailPath = thumbnailPaths[i]
+                });
             }
 
             return files;

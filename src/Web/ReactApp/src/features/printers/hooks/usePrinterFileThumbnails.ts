@@ -10,6 +10,50 @@ interface PrinterFileThumbnailsState {
 }
 
 /**
+ * Maximum number of thumbnail fetches allowed in flight at once. An unbounded
+ * `Promise.all` over every file in the list would fire one request per unique
+ * thumbnail immediately - fine for a handful of files, but it saturates the
+ * connection pool and floods the printer/API proxy for large libraries. A small
+ * worker pool caps concurrency while still fetching everything passed in. See
+ * issue #2393.
+ */
+const THUMBNAIL_FETCH_CONCURRENCY = 5;
+
+interface ThumbnailFetchResult {
+  thumbnailUrl: string;
+  objectUrl: string | null;
+  failed: boolean;
+}
+
+/**
+ * Runs `fetchOne` over `items` with at most `concurrency` calls in flight at a time,
+ * returning results in the same order as `items` (not completion order).
+ */
+async function runWithBoundedConcurrency<TItem, TResult>(
+  items: TItem[],
+  concurrency: number,
+  fetchOne: (item: TItem) => Promise<TResult>
+): Promise<TResult[]> {
+  const results: TResult[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= items.length) {
+        return;
+      }
+      results[index] = await fetchOne(items[index]);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  return results;
+}
+
+/**
  * Fetches authenticated thumbnail blobs for a printer's file list and exposes them as
  * object URLs, keyed by each file's `thumbnailUrl` proxy path.
  *
@@ -61,8 +105,10 @@ export function usePrinterFileThumbnails(files: PrinterFileDto[]) {
         return;
       }
 
-      const results = await Promise.all(
-        uniqueUrls.map(async (thumbnailUrl) => {
+      const results = await runWithBoundedConcurrency(
+        uniqueUrls,
+        THUMBNAIL_FETCH_CONCURRENCY,
+        async (thumbnailUrl): Promise<ThumbnailFetchResult> => {
           try {
             const blob = await apiClient.getPrinterFileThumbnail(
               thumbnailUrl,
@@ -70,9 +116,9 @@ export function usePrinterFileThumbnails(files: PrinterFileDto[]) {
             );
             return { thumbnailUrl, objectUrl: URL.createObjectURL(blob), failed: false };
           } catch {
-            return { thumbnailUrl, objectUrl: null as string | null, failed: true };
+            return { thumbnailUrl, objectUrl: null, failed: true };
           }
-        })
+        }
       );
 
       if (cancelled) {
