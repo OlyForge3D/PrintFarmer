@@ -1506,13 +1506,31 @@ public class MoonrakerClient(
             // requests instead of N sequential round trips. Results are written into an
             // index-aligned array so file order is preserved regardless of completion order.
             string?[] thumbnailPaths = new string?[candidates.Count];
-            await Parallel.ForEachAsync(
-                Enumerable.Range(0, candidates.Count),
-                new ParallelOptions { MaxDegreeOfParallelism = ThumbnailLookupConcurrency, CancellationToken = cts.Token },
-                async (index, token) =>
-                {
-                    thumbnailPaths[index] = await GetThumbnailPathAsync(baseUrl, candidates[index].FileName, token);
-                });
+            try
+            {
+                await Parallel.ForEachAsync(
+                    Enumerable.Range(0, candidates.Count),
+                    new ParallelOptions { MaxDegreeOfParallelism = ThumbnailLookupConcurrency, CancellationToken = cts.Token },
+                    async (index, token) =>
+                    {
+                        thumbnailPaths[index] = await GetThumbnailPathAsync(baseUrl, candidates[index].FileName, token);
+                    });
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // The internal CommandTimeout (cts.CancelAfter) fired partway through resolving
+                // thumbnails, not caller cancellation. Return the file list anyway with whatever
+                // thumbnails resolved before the deadline (unresolved entries stay null, same as
+                // GetThumbnailPathAsync's own per-file failure fallback) instead of degrading to
+                // an empty list - that empty-list fallback is exactly the silent-timeout symptom
+                // #2393 exists to remove, and letting a slow thumbnail lookup blank out an
+                // otherwise-successful file list would reintroduce it.
+                _logger.LogDebug(
+                    "Timed out resolving thumbnail paths for {Count} candidate file(s) from {BaseUrl}; " +
+                    "returning file list with partial thumbnails",
+                    candidates.Count,
+                    baseUrl);
+            }
 
             List<PrinterFileInfo> files = new(candidates.Count);
             for (int i = 0; i < candidates.Count; i++)
@@ -1536,8 +1554,9 @@ public class MoonrakerClient(
         }
         catch (OperationCanceledException ex)
         {
-            // Internal command timeout (cts.CancelAfter) fired, not caller cancellation -
-            // degrade to an empty list, matching the prior bare-catch fallback behavior.
+            // Internal command timeout (cts.CancelAfter) fired before the file list itself
+            // could be retrieved/parsed - degrade to an empty list, matching the prior
+            // bare-catch fallback behavior for that failure mode.
             _logger.LogDebug(ex, "Timed out getting file list from {BaseUrl}", baseUrl);
             return [];
         }

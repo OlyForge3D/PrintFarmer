@@ -70,7 +70,13 @@ export function usePrinterFileThumbnails(files: PrinterFileDto[]) {
     objectUrls: {},
     failed: {},
   });
+
+  // Persisted across effect re-runs (not reset every time `files` changes) so an incrementally
+  // growing file list - e.g. PrinterFilesModal only passing in visible/near-visible rows as the
+  // user scrolls, see #2393 - only fetches thumbnails that haven't been resolved yet instead of
+  // re-fetching and re-revoking everything already loaded on every visibility change.
   const objectUrlsRef = useRef<Record<string, string>>({});
+  const failedRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
     const uniqueUrls = Array.from(
@@ -80,33 +86,52 @@ export function usePrinterFileThumbnails(files: PrinterFileDto[]) {
           .filter((url): url is string => !!url)
       )
     );
+    const uniqueUrlSet = new Set(uniqueUrls);
 
-    const revokeTrackedObjectUrls = () => {
-      for (const url of Object.values(objectUrlsRef.current)) {
-        URL.revokeObjectURL(url);
+    // Drop tracked thumbnails for urls no longer present in the current list (e.g. the file
+    // list was replaced/refreshed for a different printer), revoking their object URLs -
+    // matches the previous full-replace behavior for that case.
+    let removedAny = false;
+    for (const url of Object.keys(objectUrlsRef.current)) {
+      if (!uniqueUrlSet.has(url)) {
+        URL.revokeObjectURL(objectUrlsRef.current[url]);
+        delete objectUrlsRef.current[url];
+        removedAny = true;
       }
-      objectUrlsRef.current = {};
-    };
+    }
+    for (const url of Object.keys(failedRef.current)) {
+      if (!uniqueUrlSet.has(url)) {
+        delete failedRef.current[url];
+        removedAny = true;
+      }
+    }
+
+    // Only fetch urls that aren't already resolved or marked failed from a previous run.
+    const urlsToFetch = uniqueUrls.filter(
+      (url) => !(url in objectUrlsRef.current) && !(url in failedRef.current)
+    );
 
     const abortController = new AbortController();
     let cancelled = false;
 
     async function loadThumbnails() {
-      if (uniqueUrls.length === 0) {
-        // Still await a microtask so the state reset below isn't a synchronous
-        // setState call from the effect body, matching react-hooks/set-state-in-effect.
+      if (removedAny) {
+        // Still await a microtask so this setState isn't a synchronous call from the effect
+        // body, matching react-hooks/set-state-in-effect.
         await Promise.resolve();
         if (cancelled) {
           return;
         }
 
-        revokeTrackedObjectUrls();
-        setState({ objectUrls: {}, failed: {} });
+        setState({ objectUrls: { ...objectUrlsRef.current }, failed: { ...failedRef.current } });
+      }
+
+      if (urlsToFetch.length === 0) {
         return;
       }
 
       const results = await runWithBoundedConcurrency(
-        uniqueUrls,
+        urlsToFetch,
         THUMBNAIL_FETCH_CONCURRENCY,
         async (thumbnailUrl): Promise<ThumbnailFetchResult> => {
           try {
@@ -122,6 +147,9 @@ export function usePrinterFileThumbnails(files: PrinterFileDto[]) {
       );
 
       if (cancelled) {
+        // Aborted by an overlapping effect run (e.g. more rows became visible before this
+        // batch finished) - revoke anything it created and let the next run retry these urls,
+        // since they were never recorded as resolved or failed.
         for (const result of results) {
           if (result.objectUrl) {
             URL.revokeObjectURL(result.objectUrl);
@@ -130,20 +158,15 @@ export function usePrinterFileThumbnails(files: PrinterFileDto[]) {
         return;
       }
 
-      revokeTrackedObjectUrls();
-
-      const nextObjectUrls: Record<string, string> = {};
-      const nextFailed: Record<string, boolean> = {};
       for (const result of results) {
         if (result.objectUrl) {
-          nextObjectUrls[result.thumbnailUrl] = result.objectUrl;
+          objectUrlsRef.current[result.thumbnailUrl] = result.objectUrl;
         } else {
-          nextFailed[result.thumbnailUrl] = true;
+          failedRef.current[result.thumbnailUrl] = true;
         }
       }
 
-      objectUrlsRef.current = nextObjectUrls;
-      setState({ objectUrls: nextObjectUrls, failed: nextFailed });
+      setState({ objectUrls: { ...objectUrlsRef.current }, failed: { ...failedRef.current } });
     }
 
     void loadThumbnails();
@@ -156,6 +179,11 @@ export function usePrinterFileThumbnails(files: PrinterFileDto[]) {
 
   useEffect(() => {
     return () => {
+      // Intentionally read `.current` at unmount time rather than copying it to a local
+      // variable at effect-setup time: objectUrlsRef accumulates entries across every re-run of
+      // the effect above, so a snapshot taken here at mount would only ever see the initial
+      // (empty) value and leak every object URL created afterwards.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       for (const url of Object.values(objectUrlsRef.current)) {
         URL.revokeObjectURL(url);
       }

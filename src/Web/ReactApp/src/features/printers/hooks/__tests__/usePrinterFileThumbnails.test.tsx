@@ -115,4 +115,42 @@ describe('usePrinterFileThumbnails (#1650)', () => {
     expect(result.current.objectUrls[firstUrl]).toBeUndefined();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-object-url');
   });
+
+  it('#2393: does not re-fetch or revoke already-resolved thumbnails when the file list grows (visible-row subset expanding)', async () => {
+    // Regression coverage for PrinterFilesModal passing an incrementally growing
+    // visible-file subset (via IntersectionObserver) instead of a stable full list: adding
+    // a file to the end of the list must not re-fetch or revoke thumbnails already resolved
+    // for files still present in the new list.
+    hoisted.getPrinterFileThumbnail.mockResolvedValue(new Blob(['fake-png-bytes']));
+    const firstUrl = '/api/printers/00000000-0000-0000-0000-000000000001/files/thumbnail?filename=thumbs%2Ffirst.png';
+    const secondUrl = '/api/printers/00000000-0000-0000-0000-000000000001/files/thumbnail?filename=thumbs%2Fsecond.png';
+
+    const { result, rerender } = renderHook(
+      ({ files }: { files: PrinterFileDto[] }) => usePrinterFileThumbnails(files),
+      { initialProps: { files: [makeFile({ fileName: 'a.gcode', thumbnailUrl: firstUrl })] } }
+    );
+
+    await waitFor(() => {
+      expect(result.current.objectUrls[firstUrl]).toBe('blob:mock-object-url');
+    });
+    expect(hoisted.getPrinterFileThumbnail).toHaveBeenCalledTimes(1);
+
+    rerender({
+      files: [
+        makeFile({ fileName: 'a.gcode', thumbnailUrl: firstUrl }),
+        makeFile({ fileName: 'b.gcode', thumbnailUrl: secondUrl }),
+      ],
+    });
+
+    await waitFor(() => {
+      expect(result.current.objectUrls[secondUrl]).toBe('blob:mock-object-url');
+    });
+
+    // Only the newly-added url should have triggered a fetch; the already-resolved
+    // firstUrl must neither be re-fetched nor revoked.
+    expect(hoisted.getPrinterFileThumbnail).toHaveBeenCalledTimes(2);
+    expect(hoisted.getPrinterFileThumbnail).toHaveBeenCalledWith(secondUrl, expect.any(AbortSignal));
+    expect(result.current.objectUrls[firstUrl]).toBe('blob:mock-object-url');
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+  });
 });
