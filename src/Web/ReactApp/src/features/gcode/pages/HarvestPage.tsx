@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useEffectEvent } from 'react';
+import React, { useState, useEffect, useEffectEvent, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -58,42 +58,75 @@ export const HarvestPage: React.FC = () => {
   // Set up real-time updates for harvest progress and per-file progress
   const joinedOpsRef = React.useRef<Set<string>>(new Set());
 
+  // Stable primitive derived from the running-operation IDs. Unlike `harvestOperations`
+  // (a new array reference on every poll, even when only progress fields changed), this
+  // string only changes when the *set* of running operation IDs changes, so it's safe to
+  // use as an effect dependency without churning on every 2s poll.
+  const runningOpIdsKey = useMemo(() => {
+    if (!harvestOperations) {
+      return '';
+    }
+    return harvestOperations
+      .filter(op => op.status === GcodeHarvestStatus.Running && op.id)
+      .map(op => op.id)
+      .sort()
+      .join(',');
+  }, [harvestOperations]);
+
+  // Mount-once effect: connect, register event subscriptions, and leave any remaining
+  // joined groups on unmount. The handlers are `useEffectEvent`, so they always read fresh
+  // state without needing to be dependencies here. This never re-runs, so it can never
+  // double-subscribe, and its cleanup runs exactly once at unmount - reading
+  // `joinedOpsRef.current` at that time (refs mutate in place, so this always reflects the
+  // latest set maintained by the delta-reconciliation effect below).
   useEffect(() => {
-    // Async setup function
-    const setupSignalR = async () => {
-      await signalRService.connect();
+    signalRService.connect();
 
-      // Join SignalR group for each running operation
-      if (harvestOperations) {
-        joinedOpsRef.current.clear();
-        for (const op of harvestOperations) {
-          if (op.status === GcodeHarvestStatus.Running && op.id) {
-            await signalRService.joinHarvestGroup(op.id);
-            joinedOpsRef.current.add(op.id);
-          }
-        }
-      }
-    };
-
-    setupSignalR();
-
-    // Subscribe to events using extracted handlers (no dependency on callbacks)
     const unsubscribeFileProgress = signalRService.onHarvestFileProgress(handleHarvestFileProgress);
     const unsubscribeOperationProgress = signalRService.onHarvestOperationProgress(handleHarvestOperationProgress);
     const unsubscribe = signalRService.onHarvestUpdate(handleHarvestUpdate);
-
-    // Copy ref to local variable to avoid ref warning in cleanup
-    const opsToClean = new Set(joinedOpsRef.current);
 
     return () => {
       unsubscribe();
       unsubscribeFileProgress();
       unsubscribeOperationProgress();
-      // Clean up joined ops using local copy
-      opsToClean.forEach(opId => signalRService.leaveHarvestGroup(opId));
+      // Intentionally read `joinedOpsRef.current` here rather than a value captured at
+      // effect-setup time: this cleanup only ever runs once, at unmount (deps are `[]`),
+      // and must leave whatever operations are joined *at that moment* - which the
+      // delta-reconciliation effect below keeps up to date via ref mutation over the
+      // component's lifetime, not just what was joined when this effect first ran.
+      /* eslint-disable react-hooks/exhaustive-deps */
+      const opsToClean = new Set(joinedOpsRef.current);
+      joinedOpsRef.current.clear();
+      /* eslint-enable react-hooks/exhaustive-deps */
+      opsToClean.forEach(id => signalRService.leaveHarvestGroup(id));
     };
-   
-  }, [harvestOperations]);
+  }, []);
+
+  // Delta-reconciliation effect: keyed on the stable running-op-id primitive, so it only
+  // re-runs when the set of running operations actually changes (not on every poll).
+  // Joins only newly-running ops and leaves only ops that stopped running - never a
+  // clear-and-rejoin of everything - so an operation that stays running across a poll never
+  // has a leave/rejoin pair fired for it, eliminating the drop window. Deliberately has no
+  // cleanup function: an unmount-time leave-all is handled once by the mount-once effect
+  // above, not here, so this effect re-running on every set change never re-leaves
+  // operations that are still running.
+  useEffect(() => {
+    const runningOpIds = runningOpIdsKey ? runningOpIdsKey.split(',') : [];
+    const runningOpIdSet = new Set(runningOpIds);
+
+    const newlyRunning = runningOpIds.filter(id => !joinedOpsRef.current.has(id));
+    const noLongerRunning = Array.from(joinedOpsRef.current).filter(id => !runningOpIdSet.has(id));
+
+    newlyRunning.forEach(id => {
+      joinedOpsRef.current.add(id);
+      signalRService.joinHarvestGroup(id);
+    });
+    noLongerRunning.forEach(id => {
+      joinedOpsRef.current.delete(id);
+      signalRService.leaveHarvestGroup(id);
+    });
+  }, [runningOpIdsKey]);
 
   // Update selectedOperation when harvestOperations changes
   useEffect(() => {
