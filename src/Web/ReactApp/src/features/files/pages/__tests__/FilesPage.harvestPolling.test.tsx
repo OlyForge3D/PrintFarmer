@@ -87,7 +87,14 @@ import { FilesPage } from '../FilesPage';
 
 function renderFilesPage() {
   const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
+    // Mirror src/services/queryClient.ts's production defaults (30s
+    // staleTime) rather than react-query's own default of 0. Several of the
+    // tests below specifically exist to prove the epoch-keyed query still
+    // refetches and re-arms the loading gate on reopen *despite* this
+    // staleTime - if the test client didn't share it, those tests would
+    // pass even against a broken implementation that only worked by luck of
+    // an unrealistic staleTime: 0.
+    defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
   });
 
   return render(
@@ -164,7 +171,7 @@ describe('FilesPage harvest operations polling', () => {
       expect(apiMocks.getAllActiveHarvests).toHaveBeenCalledTimes(callsWhileOpen);
     });
 
-    it('refetches fresh active harvests every time the modal is reopened, even within the global staleTime window', async () => {
+    it('re-arms the loading gate and fetches fresh active harvests every time the modal is reopened, even within the global staleTime window', async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       const user = userEvent.setup();
       renderFilesPage();
@@ -178,17 +185,37 @@ describe('FilesPage harvest operations polling', () => {
         expect(screen.queryByRole('dialog', { name: 'Harvest wizard mock' })).not.toBeInTheDocument(),
       );
 
-      // Reopen well within react-query's default 30s staleTime window. The
-      // page must still request fresh data rather than reusing the cached
-      // response from the previous open, and must show the loading gate
-      // until that fresh fetch resolves - otherwise a user could act on
-      // conflict data that is arbitrarily out of date.
+      // Reopen well within the test client's 30s staleTime (mirroring
+      // production). A query keyed on the *same* cache entry as the first
+      // open would neither refetch nor show loading here - proving only the
+      // call count increased is not enough, since a stale refetch that
+      // resolves instantly can bump the count while `isLoading` never
+      // re-arms (exactly the round-1 bug). Defer the second response so we
+      // can observe the loading gate re-engage before it resolves.
+      let resolveSecondFetch: (value: unknown[]) => void = () => {};
+      apiMocks.getAllActiveHarvests.mockImplementationOnce(
+        () => new Promise((resolve) => {
+          resolveSecondFetch = resolve;
+        }),
+      );
+
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2_000);
       });
 
       await user.click(screen.getByRole('button', { name: 'Start Harvest' }));
+
       await waitFor(() => expect(apiMocks.getAllActiveHarvests).toHaveBeenCalledTimes(2));
+      // The gate must be re-armed immediately on reopen, before the fresh
+      // fetch resolves - this is what the epoch-keyed query cache entry
+      // (rather than reusing the previous open's cached "success" state)
+      // exists to guarantee.
+      expect(await screen.findByTestId('is-loading')).toHaveTextContent('true');
+
+      await act(async () => {
+        resolveSecondFetch([]);
+      });
+      await waitFor(() => expect(screen.getByTestId('is-loading')).toHaveTextContent('false'));
     });
   });
 });
