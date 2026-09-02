@@ -728,10 +728,10 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
             List<Guid> distinctModelIds = model3dMappings.Select(m => m.Model3DId).Distinct().ToList();
             IReadOnlyDictionary<Guid, DateTime> modelUpdatedAt = await _model3DQuery.GetUpdatedAtByIdsAsync(distinctModelIds, ct);
 
-            foreach (var mapping in model3dMappings)
+            foreach (var mapping in model3dMappings.Where(m => modelUpdatedAt.ContainsKey(m.Model3DId)))
             {
-                if (modelUpdatedAt.TryGetValue(mapping.Model3DId, out DateTime updatedAt)
-                    && (!lastUsed.TryGetValue(mapping.TagsId, out DateTime existing) || updatedAt > existing))
+                DateTime updatedAt = modelUpdatedAt[mapping.Model3DId];
+                if (!lastUsed.TryGetValue(mapping.TagsId, out DateTime existing) || updatedAt > existing)
                 {
                     lastUsed[mapping.TagsId] = updatedAt;
                 }
