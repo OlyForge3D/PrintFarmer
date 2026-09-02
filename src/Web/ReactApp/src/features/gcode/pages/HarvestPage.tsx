@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useEffectEvent } from 'react';
+import React, { useState, useEffect, useEffectEvent, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -58,42 +58,127 @@ export const HarvestPage: React.FC = () => {
   // Set up real-time updates for harvest progress and per-file progress
   const joinedOpsRef = React.useRef<Set<string>>(new Set());
 
+  // Bumped every time the underlying SignalR connection transitions to `Connected`
+  // (initial connect AND every reconnect - see the `onConnectionStateChange` subscription
+  // below). Reconnects imply the *server* has forgotten all group membership for the new
+  // connection, so the delta-reconciliation effect uses a change here to force a full
+  // rejoin of every currently-running operation, rather than trusting `joinedOpsRef` (which
+  // still lists ops joined on the now-defunct prior connection).
+  const [connectedEpoch, setConnectedEpoch] = useState(0);
+  const reconciledEpochRef = React.useRef(0);
+
+  // Stable primitive derived from the running-operation IDs. Unlike `harvestOperations`
+  // (a new array reference on every poll, even when only progress fields changed), this
+  // string only changes when the *set* of running operation IDs changes, so it's safe to
+  // use as an effect dependency without churning on every 2s poll.
+  const runningOpIdsKey = useMemo(() => {
+    if (!harvestOperations) {
+      return '';
+    }
+    return harvestOperations
+      .filter(op => op.status === GcodeHarvestStatus.Running && op.id)
+      .map(op => op.id)
+      .sort()
+      .join(',');
+  }, [harvestOperations]);
+
+  // Mount-once effect: connect, register event subscriptions, and leave any remaining
+  // joined groups on unmount. The handlers are `useEffectEvent`, so they always read fresh
+  // state without needing to be dependencies here. This never re-runs, so it can never
+  // double-subscribe, and its cleanup runs exactly once at unmount - reading
+  // `joinedOpsRef.current` at that time (refs mutate in place, so this always reflects the
+  // latest set maintained by the delta-reconciliation effect below).
   useEffect(() => {
-    // Async setup function
-    const setupSignalR = async () => {
-      await signalRService.connect();
+    signalRService.connect();
 
-      // Join SignalR group for each running operation
-      if (harvestOperations) {
-        joinedOpsRef.current.clear();
-        for (const op of harvestOperations) {
-          if (op.status === GcodeHarvestStatus.Running && op.id) {
-            await signalRService.joinHarvestGroup(op.id);
-            joinedOpsRef.current.add(op.id);
-          }
-        }
-      }
-    };
-
-    setupSignalR();
-
-    // Subscribe to events using extracted handlers (no dependency on callbacks)
     const unsubscribeFileProgress = signalRService.onHarvestFileProgress(handleHarvestFileProgress);
     const unsubscribeOperationProgress = signalRService.onHarvestOperationProgress(handleHarvestOperationProgress);
     const unsubscribe = signalRService.onHarvestUpdate(handleHarvestUpdate);
-
-    // Copy ref to local variable to avoid ref warning in cleanup
-    const opsToClean = new Set(joinedOpsRef.current);
+    // Bump `connectedEpoch` on every transition to connected (initial connect and every
+    // reconnect). The delta-reconciliation effect below is keyed on this so it never
+    // attempts to join a group before the connection is actually established (`connect()`
+    // above is fire-and-forget, and the underlying service silently no-ops a join attempted
+    // before the connection reaches `Connected`), and so it re-joins everything after a
+    // reconnect instead of trusting stale `joinedOpsRef` state from the dropped connection.
+    const unsubscribeConnectionState = signalRService.onConnectionStateChange((connected) => {
+      if (connected) {
+        setConnectedEpoch(epoch => epoch + 1);
+      }
+    });
+    // `onConnectionStateChange` only fires on future *transitions* - it does not replay
+    // current state to a new subscriber, and `connect()` above only notifies when it starts
+    // a connection from `Disconnected` (a no-op "already connected" branch fires no
+    // notification at all). `signalRService` is a module-level singleton shared with other
+    // components (e.g. the harvest wizard, file browser), so it is routinely already
+    // `Connected` by the time this effect runs - without this check, `connectedEpoch` would
+    // stay `0` forever and no group would ever be joined for the lifetime of this mount.
+    // Subscribing before checking (not after) means a transition that lands in between is
+    // still captured by the listener above; a resulting double-bump only causes one harmless,
+    // idempotent extra rejoin.
+    if (signalRService.isConnected) {
+      setConnectedEpoch(epoch => epoch + 1);
+    }
 
     return () => {
       unsubscribe();
       unsubscribeFileProgress();
       unsubscribeOperationProgress();
-      // Clean up joined ops using local copy
-      opsToClean.forEach(opId => signalRService.leaveHarvestGroup(opId));
+      unsubscribeConnectionState();
+      // Intentionally read `joinedOpsRef.current` here rather than a value captured at
+      // effect-setup time: this cleanup only ever runs once, at unmount (deps are `[]`),
+      // and must leave whatever operations are joined *at that moment* - which the
+      // delta-reconciliation effect below keeps up to date via ref mutation over the
+      // component's lifetime, not just what was joined when this effect first ran.
+      /* eslint-disable react-hooks/exhaustive-deps */
+      const opsToClean = new Set(joinedOpsRef.current);
+      joinedOpsRef.current.clear();
+      /* eslint-enable react-hooks/exhaustive-deps */
+      opsToClean.forEach(id => signalRService.leaveHarvestGroup(id));
     };
-   
-  }, [harvestOperations]);
+  }, []);
+
+  // Delta-reconciliation effect: keyed on the stable running-op-id primitive and the
+  // connection epoch, so it only re-runs when the set of running operations actually
+  // changes, or the connection (re)connects - not on every poll. While not yet connected
+  // (`connectedEpoch === 0`), it does nothing: attempting a join before the connection is
+  // ready would silently no-op server-side while still marking the op as joined locally,
+  // permanently losing that operation's progress events for the rest of the session (see
+  // #2395 review). Once connected, an epoch change (new or reconnected connection) forces a
+  // full rejoin of every currently-running operation, since the server has no memory of
+  // group membership from a prior connection; otherwise it joins only newly-running ops and
+  // leaves only ops that stopped running - never a clear-and-rejoin of everything - so an
+  // operation that stays running across a poll never has a leave/rejoin pair fired for it,
+  // eliminating the drop window. Deliberately has no cleanup function: an unmount-time
+  // leave-all is handled once by the mount-once effect above, not here, so this effect
+  // re-running on every set change never re-leaves operations that are still running.
+  useEffect(() => {
+    if (connectedEpoch === 0) {
+      return;
+    }
+
+    const runningOpIds = runningOpIdsKey ? runningOpIdsKey.split(',') : [];
+    const runningOpIdSet = new Set(runningOpIds);
+
+    if (reconciledEpochRef.current !== connectedEpoch) {
+      // Fresh connection (initial connect or reconnect): server-side group membership for
+      // this connection is empty regardless of what `joinedOpsRef` says, so reset local
+      // bookkeeping and treat every currently-running op as newly-running.
+      joinedOpsRef.current.clear();
+      reconciledEpochRef.current = connectedEpoch;
+    }
+
+    const newlyRunning = runningOpIds.filter(id => !joinedOpsRef.current.has(id));
+    const noLongerRunning = Array.from(joinedOpsRef.current).filter(id => !runningOpIdSet.has(id));
+
+    newlyRunning.forEach(id => {
+      joinedOpsRef.current.add(id);
+      signalRService.joinHarvestGroup(id);
+    });
+    noLongerRunning.forEach(id => {
+      joinedOpsRef.current.delete(id);
+      signalRService.leaveHarvestGroup(id);
+    });
+  }, [runningOpIdsKey, connectedEpoch]);
 
   // Update selectedOperation when harvestOperations changes
   useEffect(() => {
