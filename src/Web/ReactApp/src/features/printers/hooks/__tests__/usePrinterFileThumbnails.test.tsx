@@ -153,4 +153,58 @@ describe('usePrinterFileThumbnails (#1650)', () => {
     expect(result.current.objectUrls[firstUrl]).toBe('blob:mock-object-url');
     expect(URL.revokeObjectURL).not.toHaveBeenCalled();
   });
+
+  it('#2393: does not abort or restart an in-flight thumbnail fetch when the file list grows before it resolves', async () => {
+    // Regression coverage for the overlapping-effect-run race: if a still-in-flight fetch
+    // from a prior render were aborted whenever the effect re-ran (e.g. continuous scroll
+    // adding a new visible row before the previous batch finished), that thumbnail could be
+    // repeatedly restarted and never resolve.
+    const firstUrl = '/api/printers/00000000-0000-0000-0000-000000000001/files/thumbnail?filename=thumbs%2Ffirst.png';
+    const secondUrl = '/api/printers/00000000-0000-0000-0000-000000000001/files/thumbnail?filename=thumbs%2Fsecond.png';
+
+    let resolveFirst!: (blob: Blob) => void;
+    const firstFetchPromise = new Promise<Blob>((resolve) => {
+      resolveFirst = resolve;
+    });
+    hoisted.getPrinterFileThumbnail.mockImplementation((url: string) =>
+      url === firstUrl ? firstFetchPromise : Promise.resolve(new Blob(['fake-png-bytes']))
+    );
+
+    const { result, rerender } = renderHook(
+      ({ files }: { files: PrinterFileDto[] }) => usePrinterFileThumbnails(files),
+      { initialProps: { files: [makeFile({ fileName: 'a.gcode', thumbnailUrl: firstUrl })] } }
+    );
+
+    await waitFor(() => {
+      expect(hoisted.getPrinterFileThumbnail).toHaveBeenCalledWith(firstUrl, expect.any(AbortSignal));
+    });
+    expect(hoisted.getPrinterFileThumbnail).toHaveBeenCalledTimes(1);
+    const firstCallSignal = hoisted.getPrinterFileThumbnail.mock.calls[0][1] as AbortSignal;
+
+    // Grow the list before firstUrl resolves.
+    rerender({
+      files: [
+        makeFile({ fileName: 'a.gcode', thumbnailUrl: firstUrl }),
+        makeFile({ fileName: 'b.gcode', thumbnailUrl: secondUrl }),
+      ],
+    });
+
+    await waitFor(() => {
+      expect(result.current.objectUrls[secondUrl]).toBe('blob:mock-object-url');
+    });
+
+    // Only one fetch per url so far - firstUrl's original in-flight call must not have been
+    // aborted and re-issued by the overlapping run that added secondUrl.
+    expect(hoisted.getPrinterFileThumbnail).toHaveBeenCalledTimes(2);
+    expect(firstCallSignal.aborted).toBe(false);
+
+    resolveFirst(new Blob(['fake-png-bytes']));
+
+    await waitFor(() => {
+      expect(result.current.objectUrls[firstUrl]).toBe('blob:mock-object-url');
+    });
+
+    // Still exactly one call for firstUrl - it was never restarted.
+    expect(hoisted.getPrinterFileThumbnail).toHaveBeenCalledTimes(2);
+  });
 });
