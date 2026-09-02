@@ -2576,7 +2576,20 @@ describe('NewSliceJobPage', () => {
       await waitFor(() => {
         expect(latestOnSlice()).toBeTypeOf('function');
       });
-      await act(async () => { latestOnSlice()!(); });
+
+      // Pass an explicit active-plate model ID (rather than calling `onSlice()`
+      // with no arguments) so this test actually exercises the ref-replay
+      // mechanism the fix relies on: `lastSubmittedModelIdsRef` must capture
+      // THIS specific ID and Retry must later resubmit that same ID rather
+      // than `undefined`/whatever `bedModels` happens to hold by then.
+      const lastWorkspaceProps = slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as {
+        models?: Array<{ id: string; libraryModelId?: string }>;
+      } | undefined;
+      const activeModel = lastWorkspaceProps?.models?.find((model) => model.libraryModelId === 'model-3d-1');
+      expect(activeModel?.id).toBeTruthy();
+      const activeModelId = activeModel!.id;
+
+      await act(async () => { latestOnSlice()!([activeModelId]); });
 
       await waitFor(() => {
         expect(sliceJobService.submitJob).toHaveBeenCalled();
@@ -2593,10 +2606,12 @@ describe('NewSliceJobPage', () => {
       await waitFor(() => {
         expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
       });
+
+      return { activeModelId };
     }
 
     it('issues a new POST /api/slice/ request when Retry is pressed after a Failed result', async () => {
-      await submitAndFail();
+      const { activeModelId } = await submitAndFail();
 
       expect(sliceJobService.submitJob).toHaveBeenCalledTimes(1);
       const firstRequest = vi.mocked(sliceJobService.submitJob).mock.calls[0][0];
@@ -2617,6 +2632,78 @@ describe('NewSliceJobPage', () => {
       // whatever the (unchanged) form state would derive independently.
       const secondRequest = vi.mocked(sliceJobService.submitJob).mock.calls[1][0];
       expect(secondRequest).toEqual(firstRequest);
+
+      // Bishop review (issue #2374): the assertion above alone doesn't prove
+      // the replay used the specific plate ID captured on first submit — an
+      // implementation that dropped `activeModelIds` entirely and always
+      // resolved the same single-model bed would pass it too. Anchor on the
+      // model file URL derived from the explicit active-plate ID (a
+      // single-sliceable-model plate resolves to the singular `modelFileUrl`
+      // field, not `modelFileUrls` — see `buildSlicePayloadModels`) to make
+      // sure `lastSubmittedModelIdsRef` genuinely carried that ID into retry.
+      expect(activeModelId).toBeTruthy();
+      expect(firstRequest.modelFileUrl).toMatch(/\/3d-models\/file\/model-3d-1$/);
+      expect(secondRequest.modelFileUrl).toEqual(firstRequest.modelFileUrl);
+    });
+
+    it('does not issue a second request when Retry is double-clicked before the resubmission settles', async () => {
+      await submitAndFail();
+
+      expect(sliceJobService.submitJob).toHaveBeenCalledTimes(1);
+
+      // Make the retried submission hang so both clicks land while it is
+      // still pending — proving the re-entrancy guard (not just timing luck)
+      // is what prevents the duplicate POST.
+      let resolveRetry!: (value: Awaited<ReturnType<typeof sliceJobService.submitJob>>) => void;
+      vi.mocked(sliceJobService.submitJob).mockImplementationOnce(
+        () => new Promise((resolve) => { resolveRetry = resolve; })
+      );
+
+      const retryButtons = screen.getAllByRole('button', { name: 'Retry' });
+      await act(async () => {
+        fireEvent.click(retryButtons[0]);
+        fireEvent.click(retryButtons[0]);
+      });
+
+      expect(sliceJobService.submitJob).toHaveBeenCalledTimes(2);
+
+      await act(async () => { resolveRetry({ jobId: 'job-2', queuePosition: null }); });
+    });
+
+    it('re-enables Retry after a guard blocks a replay attempt, instead of bricking it forever', async () => {
+      await submitAndFail();
+
+      expect(sliceJobService.submitJob).toHaveBeenCalledTimes(1);
+
+      // Invalidate the process profile selection between the failed submit
+      // and Retry (e.g. the profile list refreshed out from under the user)
+      // so `submitSliceJob`'s own validation guard fires and returns `false`
+      // instead of ever calling `submitMutation.mutate()`.
+      const processSelect = Array.from(document.querySelectorAll('select'))
+        .find((s) => s.value.startsWith('system:'));
+      expect(processSelect).toBeDefined();
+      fireEvent.change(processSelect!, { target: { value: '' } });
+
+      const retryButtons = screen.getAllByRole('button', { name: 'Retry' });
+      await act(async () => { fireEvent.click(retryButtons[0]); });
+
+      // The guard blocked the replay — no new POST /api/slice/ was issued,
+      // and the failure was surfaced via toast (not a silent no-op).
+      expect(sliceJobService.submitJob).toHaveBeenCalledTimes(1);
+      expect(toast.error).toHaveBeenCalledWith('Select a process profile');
+
+      // Because `submitSliceJob` returned `false`, `onSettled` never fires
+      // (no mutation was ever started) — `handleRetryFailedSlice` must have
+      // released `retryInFlightRef` itself using that return value, or Retry
+      // would be permanently disabled for the rest of the session. Restore a
+      // valid selection and confirm Retry still works.
+      fireEvent.change(processSelect!, { target: { value: 'system:0.20mm Standard @MK4S' } });
+      const retryButtonsAgain = screen.getAllByRole('button', { name: 'Retry' });
+      await act(async () => { fireEvent.click(retryButtonsAgain[0]); });
+
+      await waitFor(() => {
+        expect(sliceJobService.submitJob).toHaveBeenCalledTimes(2);
+      });
     });
   });
 
