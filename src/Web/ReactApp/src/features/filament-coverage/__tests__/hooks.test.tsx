@@ -34,6 +34,7 @@ vi.mock("@/services/printer-signalr", () => {
 import {
   __resetFilamentCoverageSubscriptionForTests,
   filamentCoverageQueryKeys,
+  FLEET_INVALIDATE_THROTTLE_MS,
   usePrinterFilamentCoverage,
   usePrinterCoverageFromFleet,
   useFleetFilamentCoverage,
@@ -259,6 +260,103 @@ describe("filament coverage hooks", () => {
       const keys = invalidateSpy.mock.calls.map((c) => JSON.stringify(c[0]?.queryKey));
       expect(keys).toContain(JSON.stringify(["filament-coverage", "printer"]));
     });
+  });
+
+  it("throttles fleet invalidation across a burst of per-printer ticks: one leading call, then exactly one trailing call after the window", async () => {
+    mockGet.mockResolvedValue({
+      data: { printers: [], evaluatedAtUtc: "2025-01-01T00:00:00Z" },
+    });
+    const qc = makeClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const fleetKey = JSON.stringify(filamentCoverageQueryKeys.fleet());
+    const fleetCallCount = () =>
+      invalidateSpy.mock.calls.filter(
+        (c) => JSON.stringify(c[0]?.queryKey) === fleetKey,
+      ).length;
+
+    renderHook(() => useFleetFilamentCoverage(), { wrapper: wrapper(qc) });
+    await waitFor(() =>
+      expect(hoisted.signalRMock.onFilamentCoverageChanged).toHaveBeenCalled(),
+    );
+
+    const emit = (printerId: string) => {
+      act(() => {
+        hoisted.onFilamentCoverageChangedCb.current?.({
+          printerId,
+          reason: "jobProgress",
+          occurredAt: "2025-01-01T00:00:00Z",
+        });
+      });
+    };
+
+    // Leading edge: the first tick in the burst invalidates the fleet cache
+    // immediately, so a lone event is never delayed.
+    emit("p-1");
+    await waitFor(() => expect(fleetCallCount()).toBe(1));
+
+    // Further ticks arriving within the throttle window are coalesced —
+    // no extra fleet invalidation fires yet, even though each printer's own
+    // slice is still invalidated immediately.
+    emit("p-2");
+    emit("p-3");
+    expect(fleetCallCount()).toBe(1);
+    expect(invalidateSpy.mock.calls.some(
+      (c) => JSON.stringify(c[0]?.queryKey) === JSON.stringify(filamentCoverageQueryKeys.printer("p-2")),
+    )).toBe(true);
+    expect(invalidateSpy.mock.calls.some(
+      (c) => JSON.stringify(c[0]?.queryKey) === JSON.stringify(filamentCoverageQueryKeys.printer("p-3")),
+    )).toBe(true);
+
+    // Once the throttle window elapses, exactly one trailing invalidation
+    // fires — fleet coverage catches up shortly after the burst settles
+    // instead of staying stale indefinitely.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, FLEET_INVALIDATE_THROTTLE_MS + 50));
+    });
+    await waitFor(() => expect(fleetCallCount()).toBe(2));
+  });
+
+  it("never delays a genuine fleet-wide event behind the per-printer throttle window", async () => {
+    mockGet.mockResolvedValue({
+      data: { printers: [], evaluatedAtUtc: "2025-01-01T00:00:00Z" },
+    });
+    const qc = makeClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const fleetKey = JSON.stringify(filamentCoverageQueryKeys.fleet());
+    const fleetCallCount = () =>
+      invalidateSpy.mock.calls.filter(
+        (c) => JSON.stringify(c[0]?.queryKey) === fleetKey,
+      ).length;
+
+    renderHook(() => useFleetFilamentCoverage(), { wrapper: wrapper(qc) });
+    await waitFor(() =>
+      expect(hoisted.signalRMock.onFilamentCoverageChanged).toHaveBeenCalled(),
+    );
+
+    // A per-printer tick opens the throttle window (leading edge fires,
+    // then subsequent per-printer ticks would normally be coalesced).
+    act(() => {
+      hoisted.onFilamentCoverageChangedCb.current?.({
+        printerId: "p-1",
+        reason: "jobProgress",
+        occurredAt: "2025-01-01T00:00:00Z",
+      });
+    });
+    await waitFor(() => expect(fleetCallCount()).toBe(1));
+
+    // A genuine fleet-scope event (spool swap, printer added/removed)
+    // arrives immediately after, still well inside the throttle window.
+    // It must invalidate the fleet cache right away — no regression in
+    // fleet-scope delivery is an explicit acceptance criterion for #2375 —
+    // rather than being coalesced into the per-printer throttle.
+    act(() => {
+      hoisted.onFilamentCoverageChangedCb.current?.({
+        printerId: null,
+        reason: "printerAdded",
+        occurredAt: "2025-01-01T00:00:00Z",
+      });
+    });
+    expect(fleetCallCount()).toBe(2);
   });
 
   it("does NOT unsubscribe SignalR when only one of two hooks sharing the same QueryClient unmounts", async () => {
