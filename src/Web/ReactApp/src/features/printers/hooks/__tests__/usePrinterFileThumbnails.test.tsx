@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { renderHook, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { PrinterFileDto } from '@/types/api';
@@ -206,5 +207,29 @@ describe('usePrinterFileThumbnails (#1650)', () => {
 
     // Still exactly one call for firstUrl - it was never restarted.
     expect(hoisted.getPrinterFileThumbnail).toHaveBeenCalledTimes(2);
+  });
+
+  it('#2393: resolves the thumbnail correctly under React StrictMode mount replay instead of permanently failing it', async () => {
+    // Regression coverage for the round-3 finding: StrictMode (development) synchronously
+    // replays every effect on initial mount as setup -> cleanup -> setup, specifically to
+    // prove setup can undo whatever cleanup did. A hook-lifetime-shared AbortController that
+    // is aborted in the mount-tracking effect's cleanup but never recreated in its setup would
+    // leave the very first thumbnail fetch (started during the first setup pass, before the
+    // replay) permanently using an aborted signal - marking it failed forever instead of
+    // resolving. The per-url controller + ownership-check design must instead let the replay's
+    // second setup naturally reissue a fresh fetch, while the original (now-superseded) fetch's
+    // eventual rejection is discarded rather than committed.
+    hoisted.getPrinterFileThumbnail.mockResolvedValue(new Blob(['fake-png-bytes']));
+    const url = '/api/printers/00000000-0000-0000-0000-000000000001/files/thumbnail?filename=thumbs%2Fstrict.png';
+    const files = [makeFile({ thumbnailUrl: url })];
+
+    const { result } = renderHook(() => usePrinterFileThumbnails(files), {
+      wrapper: StrictMode,
+    });
+
+    await waitFor(() => {
+      expect(result.current.objectUrls[url]).toBe('blob:mock-object-url');
+    });
+    expect(result.current.failed[url]).toBeUndefined();
   });
 });
