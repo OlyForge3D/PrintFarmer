@@ -208,4 +208,25 @@ public interface ITagRepository
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The last usage timestamp, or null if never used.</returns>
     Task<DateTime?> GetTagLastUsedAtAsync(Guid tagId, CancellationToken ct);
+
+    /// <summary>
+    /// Gets usage counts for a set of tags in a small, fixed number of GROUP BY queries
+    /// (issue #2362) instead of one query per tag. Tags with zero usage across GcodeFiles,
+    /// Printers, and Model3D are included in the result with a count of 0 — the underlying
+    /// implementation must not use an INNER JOIN-only approach that would silently drop them.
+    /// </summary>
+    /// <param name="tagIds">The tag ids to compute usage counts for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A dictionary keyed by tag id with an entry for every id in <paramref name="tagIds"/>.</returns>
+    Task<IReadOnlyDictionary<Guid, int>> GetTagUsageCountsAsync(IReadOnlyCollection<Guid> tagIds, CancellationToken ct);
+
+    /// <summary>
+    /// Gets the last-used timestamp for a set of tags in a small, fixed number of queries
+    /// (issue #2362) instead of one query per tag. Mirrors <see cref="GetTagLastUsedAtAsync"/>
+    /// semantics: only GcodeFile and Model3D usage contribute (Printer carries no UpdatedAt).
+    /// </summary>
+    /// <param name="tagIds">The tag ids to compute last-used timestamps for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A dictionary keyed by tag id. Tags with no recorded usage are omitted.</returns>
+    Task<IReadOnlyDictionary<Guid, DateTime>> GetTagLastUsedAtBatchAsync(IReadOnlyCollection<Guid> tagIds, CancellationToken ct);
 }

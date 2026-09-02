@@ -31,4 +31,17 @@ public class SlicerModel3DQueryProvider(SlicerDbContext db) : IModel3DQueryProvi
             .Where(m => idList.Contains(m.Id))
             .MaxAsync(m => (DateTime?)m.UpdatedAt, ct);
     }
+
+    public async Task<IReadOnlyDictionary<Guid, DateTime>> GetUpdatedAtByIdsAsync(IReadOnlyCollection<Guid> ids, CancellationToken ct)
+    {
+        if (ids.Count == 0)
+        {
+            return new Dictionary<Guid, DateTime>();
+        }
+
+        return await _db.Set<Model3D>()
+            .Where(m => ids.Contains(m.Id))
+            .Select(m => new { m.Id, m.UpdatedAt })
+            .ToDictionaryAsync(x => x.Id, x => x.UpdatedAt, ct);
+    }
 }

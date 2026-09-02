@@ -600,53 +600,145 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
 
     /// <summary>
     /// Get the total count of objects using a specific tag (across both GcodeFile and Model3D).
+    /// Implemented on top of <see cref="GetTagUsageCountsAsync"/> so single-tag and batch
+    /// callers share one set-based query path (issue #2362).
     /// </summary>
     /// <param name="tagId">The unique identifier of the tag to count usage for.</param>
     /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task<int> GetTagUsageCountAsync(Guid tagId, CancellationToken ct)
     {
-        int gcodeCount = await _dbContext.GcodeFiles
-            .Where(g => g.Tags.Any(t => t.Id == tagId))
-            .CountAsync(ct);
-
-        int printerCount = await _dbContext.Printers
-            .Where(p => p.Tags.Any(t => t.Id == tagId))
-            .CountAsync(ct);
-
-        int model3dCount = await Model3DTags
-            .Where(x => x.TagsId == tagId)
-            .Select(x => x.Model3DId)
-            .Distinct()
-            .CountAsync(ct);
-
-        return gcodeCount + printerCount + model3dCount;
+        IReadOnlyDictionary<Guid, int> counts = await GetTagUsageCountsAsync([tagId], ct);
+        return counts.TryGetValue(tagId, out int count) ? count : 0;
     }
 
     /// <summary>
-    /// Get the last time a tag was used (last tagged object's UpdatedAt).
+    /// Get the last time a tag was used (last tagged object's UpdatedAt). Implemented on top of
+    /// <see cref="GetTagLastUsedAtBatchAsync"/> so single-tag and batch callers share one
+    /// set-based query path (issue #2362).
     /// </summary>
     /// <param name="tagId">The unique identifier of the tag to check.</param>
     /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
     public async Task<DateTime?> GetTagLastUsedAtAsync(Guid tagId, CancellationToken ct)
     {
-        DateTime? gcodeLastUsed = await _dbContext.GcodeFiles
-            .Where(g => g.Tags.Any(t => t.Id == tagId))
-            .MaxAsync(g => (DateTime?)g.UpdatedAt, ct);
+        IReadOnlyDictionary<Guid, DateTime> lastUsed = await GetTagLastUsedAtBatchAsync([tagId], ct);
+        return lastUsed.TryGetValue(tagId, out DateTime value) ? value : null;
+    }
 
-        // Get Model3D IDs with this tag, then query SlicerDbContext for UpdatedAt
-        var model3dIdsWithTag = await Model3DTags
-            .Where(x => x.TagsId == tagId)
-            .Select(x => x.Model3DId)
+    /// <summary>
+    /// Get usage counts for a set of tags across GcodeFiles, Printers, and Model3D in three
+    /// fixed GROUP BY queries, instead of one query per tag (issue #2362). Tags with zero
+    /// usage are still present in the result with count 0 — counts are seeded up front and
+    /// only incremented by matching GROUP BY rows, so no INNER JOIN can silently drop them.
+    /// </summary>
+    /// <param name="tagIds">The tag ids to compute usage counts for.</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
+    public async Task<IReadOnlyDictionary<Guid, int>> GetTagUsageCountsAsync(IReadOnlyCollection<Guid> tagIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tagIds);
+
+        // Distinct() guards against a caller passing a tagIds collection with duplicates -
+        // ToDictionary would otherwise throw ArgumentException on a duplicate key.
+        Dictionary<Guid, int> counts = tagIds.Distinct().ToDictionary(id => id, _ => 0);
+        if (tagIds.Count == 0)
+        {
+            return counts;
+        }
+
+        // Query 1: GcodeFile usage, grouped by tag id.
+        var gcodeCounts = await _dbContext.GcodeFiles
+            .SelectMany(g => g.Tags, (g, t) => t.Id)
+            .Where(tagId => tagIds.Contains(tagId))
+            .GroupBy(tagId => tagId)
+            .Select(g => new { TagId = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        foreach (var row in gcodeCounts)
+        {
+            counts[row.TagId] += row.Count;
+        }
+
+        // Query 2: Printer usage, grouped by tag id.
+        var printerCounts = await _dbContext.Printers
+            .SelectMany(p => p.Tags, (p, t) => t.Id)
+            .Where(tagId => tagIds.Contains(tagId))
+            .GroupBy(tagId => tagId)
+            .Select(g => new { TagId = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        foreach (var row in printerCounts)
+        {
+            counts[row.TagId] += row.Count;
+        }
+
+        // Query 3: Model3D usage via the join table, grouped by tag id. Distinct(Model3DId)
+        // per group preserves GetTagUsageCountAsync's prior per-tag semantics.
+        var model3dCounts = await Model3DTags
+            .Where(x => tagIds.Contains(x.TagsId))
+            .GroupBy(x => x.TagsId)
+            .Select(g => new { TagId = g.Key, Count = g.Select(x => x.Model3DId).Distinct().Count() })
+            .ToListAsync(ct);
+        foreach (var row in model3dCounts)
+        {
+            counts[row.TagId] += row.Count;
+        }
+
+        return counts;
+    }
+
+    /// <summary>
+    /// Get the last-used timestamp for a set of tags across GcodeFile and Model3D usage, in a
+    /// small fixed number of queries instead of one round trip per tag (issue #2362). Printers
+    /// are excluded because <see cref="Farm.Infrastructure.Domain.Printer"/> carries no
+    /// UpdatedAt timestamp, matching the prior single-tag semantics.
+    /// </summary>
+    /// <param name="tagIds">The tag ids to compute last-used timestamps for.</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
+    public async Task<IReadOnlyDictionary<Guid, DateTime>> GetTagLastUsedAtBatchAsync(IReadOnlyCollection<Guid> tagIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tagIds);
+
+        Dictionary<Guid, DateTime> lastUsed = new();
+        if (tagIds.Count == 0)
+        {
+            return lastUsed;
+        }
+
+        // Query 1: GcodeFile side, grouped by tag id.
+        var gcodeLastUsed = await _dbContext.GcodeFiles
+            .SelectMany(g => g.Tags, (g, t) => new { TagId = t.Id, g.UpdatedAt })
+            .Where(x => tagIds.Contains(x.TagId))
+            .GroupBy(x => x.TagId)
+            .Select(g => new { TagId = g.Key, LastUsedAt = g.Max(x => x.UpdatedAt) })
+            .ToListAsync(ct);
+        foreach (var row in gcodeLastUsed)
+        {
+            lastUsed[row.TagId] = row.LastUsedAt;
+        }
+
+        // Query 2: Model3D mapping rows (tag id + model id pairs) for the requested tags.
+        var model3dMappings = await Model3DTags
+            .Where(x => tagIds.Contains(x.TagsId))
+            .Select(x => new { x.TagsId, x.Model3DId })
             .ToListAsync(ct);
 
-        DateTime? model3dLastUsed = model3dIdsWithTag.Count > 0 && _model3DQuery is not null
-            ? await _model3DQuery.GetLatestUpdatedAtAsync(model3dIdsWithTag, ct)
-            : null;
+        if (model3dMappings.Count > 0 && _model3DQuery is not null)
+        {
+            // Query 3 (cross-module): per-model UpdatedAt for the distinct Model3D ids
+            // referenced above, via IModel3DQueryProvider — EfTagRepository must not reach
+            // into SlicerDbContext directly (module boundary). The per-tag grouping is then
+            // done in memory by joining the mapping rows fetched above against this dictionary.
+            List<Guid> distinctModelIds = model3dMappings.Select(m => m.Model3DId).Distinct().ToList();
+            IReadOnlyDictionary<Guid, DateTime> modelUpdatedAt = await _model3DQuery.GetUpdatedAtByIdsAsync(distinctModelIds, ct);
 
-        // Return the most recent
-        return gcodeLastUsed.HasValue && model3dLastUsed.HasValue
-            ? gcodeLastUsed > model3dLastUsed ? gcodeLastUsed : model3dLastUsed
-            : gcodeLastUsed ?? model3dLastUsed;
+            foreach (var mapping in model3dMappings)
+            {
+                if (modelUpdatedAt.TryGetValue(mapping.Model3DId, out DateTime updatedAt)
+                    && (!lastUsed.TryGetValue(mapping.TagsId, out DateTime existing) || updatedAt > existing))
+                {
+                    lastUsed[mapping.TagsId] = updatedAt;
+                }
+            }
+        }
+
+        return lastUsed;
     }
 
     /// <summary>
