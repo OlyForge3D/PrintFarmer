@@ -1,9 +1,9 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 // Regression coverage for issue #2377: FilesPage must not poll harvest
 // operations while the harvest wizard modal — the sole consumer of that
@@ -85,6 +85,20 @@ vi.mock('@/services/api', () => ({
 
 import { FilesPage } from '../FilesPage';
 
+function renderFilesPage() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/files']}>
+        <FilesPage />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
 describe('FilesPage harvest operations polling', () => {
   beforeEach(() => {
     apiMocks.getAllActiveHarvests.mockReset();
@@ -93,17 +107,7 @@ describe('FilesPage harvest operations polling', () => {
 
   it('does not fetch harvest operations while the harvest wizard modal is closed', async () => {
     const user = userEvent.setup();
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/files']}>
-          <FilesPage />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    renderFilesPage();
 
     // Give any stray effects a chance to run, then confirm no request fired.
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -117,17 +121,7 @@ describe('FilesPage harvest operations polling', () => {
 
   it('fetches only active operations via the dedicated endpoint when the modal opens', async () => {
     const user = userEvent.setup();
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/files']}>
-          <FilesPage />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    renderFilesPage();
 
     await user.click(screen.getByRole('button', { name: 'Start Harvest' }));
 
@@ -137,30 +131,64 @@ describe('FilesPage harvest operations polling', () => {
     expect(apiMocks.getAllActiveHarvests).toHaveBeenCalledWith();
   });
 
-  it('stops polling once the harvest wizard modal is closed again', async () => {
-    const user = userEvent.setup();
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
+  describe('with fake timers', () => {
+    afterEach(() => {
+      vi.useRealTimers();
     });
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/files']}>
-          <FilesPage />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    it('polls every 5s while open and stops immediately once the modal is closed', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const user = userEvent.setup();
+      renderFilesPage();
 
-    await user.click(screen.getByRole('button', { name: 'Start Harvest' }));
-    await waitFor(() => expect(apiMocks.getAllActiveHarvests).toHaveBeenCalledTimes(1));
+      await user.click(screen.getByRole('button', { name: 'Start Harvest' }));
+      await waitFor(() => expect(apiMocks.getAllActiveHarvests).toHaveBeenCalledTimes(1));
 
-    await user.click(screen.getByRole('button', { name: 'Close harvest wizard' }));
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: 'Harvest wizard mock' })).not.toBeInTheDocument(),
-    );
+      // Advance past two 5s poll ticks while the modal stays open.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(11_000);
+      });
+      const callsWhileOpen = apiMocks.getAllActiveHarvests.mock.calls.length;
+      expect(callsWhileOpen).toBeGreaterThanOrEqual(3);
 
-    const callsAtClose = apiMocks.getAllActiveHarvests.mock.calls.length;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(apiMocks.getAllActiveHarvests).toHaveBeenCalledTimes(callsAtClose);
+      await user.click(screen.getByRole('button', { name: 'Close harvest wizard' }));
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog', { name: 'Harvest wizard mock' })).not.toBeInTheDocument(),
+      );
+
+      // Advance well past two more poll intervals - no further requests should
+      // fire now that the modal (the query's sole consumer) is closed.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+      expect(apiMocks.getAllActiveHarvests).toHaveBeenCalledTimes(callsWhileOpen);
+    });
+
+    it('refetches fresh active harvests every time the modal is reopened, even within the global staleTime window', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const user = userEvent.setup();
+      renderFilesPage();
+
+      await user.click(screen.getByRole('button', { name: 'Start Harvest' }));
+      await waitFor(() => expect(apiMocks.getAllActiveHarvests).toHaveBeenCalledTimes(1));
+      expect(await screen.findByTestId('is-loading')).toHaveTextContent('false');
+
+      await user.click(screen.getByRole('button', { name: 'Close harvest wizard' }));
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog', { name: 'Harvest wizard mock' })).not.toBeInTheDocument(),
+      );
+
+      // Reopen well within react-query's default 30s staleTime window. The
+      // page must still request fresh data rather than reusing the cached
+      // response from the previous open, and must show the loading gate
+      // until that fresh fetch resolves - otherwise a user could act on
+      // conflict data that is arbitrarily out of date.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+
+      await user.click(screen.getByRole('button', { name: 'Start Harvest' }));
+      await waitFor(() => expect(apiMocks.getAllActiveHarvests).toHaveBeenCalledTimes(2));
+    });
   });
 });

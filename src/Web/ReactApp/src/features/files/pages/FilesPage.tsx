@@ -468,15 +468,38 @@ export function FilesPage() {
   // dedicated active-operations endpoint so completed history is never fetched.
   const canExecuteHarvest = hasPermission('gcode_harvest', 'execute');
   const shouldFetchHarvestOperations = showHarvestModal && canExecuteHarvest;
+
+  // Give every modal open its own query-cache entry (an incrementing epoch in
+  // the query key) so react-query never reuses a response from a previous
+  // open. Without this, the global 30s staleTime means reopening the modal
+  // within that window would reuse the previous open's cached response
+  // without refetching, and `isLoading` (isPending && isFetching) never
+  // re-arms once a query key has resolved once — so the loading gate below
+  // would silently pass through stale conflict data instead of protecting
+  // against it. A fresh key starts with no cached data, so `isLoading` is
+  // correctly true again on every open until that open's fetch resolves.
+  // Derived during render (React's "adjusting state when a prop changes"
+  // pattern) rather than in an effect, so there is no extra render/flash
+  // before the value is available.
+  const [harvestQueryEpoch, setHarvestQueryEpoch] = useState(0);
+  const [prevShowHarvestModal, setPrevShowHarvestModal] = useState(showHarvestModal);
+  if (showHarvestModal !== prevShowHarvestModal) {
+    setPrevShowHarvestModal(showHarvestModal);
+    if (showHarvestModal) {
+      setHarvestQueryEpoch((epoch) => epoch + 1);
+    }
+  }
+
   const {
     data: harvestOperations = [],
     isLoading: isLoadingHarvestOperations,
   } = useQuery({
-    queryKey: ['files-harvest-operations'],
+    queryKey: ['files-harvest-operations', harvestQueryEpoch],
     queryFn: () => apiClient.getAllActiveHarvests(),
     refetchInterval: shouldFetchHarvestOperations ? 5_000 : false,
     enabled: shouldFetchHarvestOperations,
   });
+
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [showAddToProjectModal, setShowAddToProjectModal] = useState(false);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
