@@ -23,26 +23,39 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, ILogger<Aut
     private readonly RequestDelegate _next = next;
     private readonly ILogger<AuthenticationRateLimitMiddleware> _logger = logger;
 
+    // Resolved once per middleware instance (not a static readonly field) so that
+    // tests which mutate TEST_DISABLE_RATE_LIMITER and construct a fresh middleware
+    // instance per test still observe the current env var value, while production
+    // (where the middleware is instantiated once at app startup) pays the
+    // environment-variable lookup cost only once instead of on every request.
+    private readonly bool _rateLimiterDisabledForTests = IsRateLimiterDisabledForTests();
+
+    private static bool IsRateLimiterDisabledForTests()
+    {
+        try
+        {
+            string? disabled = Environment.GetEnvironmentVariable("TEST_DISABLE_RATE_LIMITER");
+            return !string.IsNullOrEmpty(disabled) && (string.Equals(disabled, "true", StringComparison.OrdinalIgnoreCase) || disabled == "1");
+        }
+        catch
+        {
+            // If anything goes wrong while checking env, fall back to normal behaviour
+            return false;
+        }
+    }
+
     public async Task InvokeAsync(HttpContext context, IRateLimitService rateLimitService)
     {
         // Allow tests to opt-out of the authentication rate limiter by setting
         // the TEST_DISABLE_RATE_LIMITER environment variable. This keeps
         // integration tests stable in minimal test hosts.
-        try
+        if (_rateLimiterDisabledForTests)
         {
-            string? disabled = Environment.GetEnvironmentVariable("TEST_DISABLE_RATE_LIMITER");
-            if (!string.IsNullOrEmpty(disabled) && (string.Equals(disabled, "true", StringComparison.OrdinalIgnoreCase) || disabled == "1"))
-            {
-                await _next(context);
-                return;
-            }
-        }
-        catch
-        {
-            // If anything goes wrong while checking env, fall back to normal behaviour
+            await _next(context);
+            return;
         }
 
-        string path = context.Request.Path.Value?.ToLowerInvariant() ?? string.Empty;
+        string path = context.Request.Path.Value ?? string.Empty;
 
         // Path (not HTTP method) decides whether this request is subject to the
         // limiter. The underlying [HttpPost] actions only ever execute for POST
@@ -50,9 +63,15 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, ILogger<Aut
         // different verb: the caller fully controls Request.Method, so gating the
         // sensitive rate-limit check on it would let an attacker bypass the limit
         // simply by varying the verb on each attempt.
-        bool isLogin = path.EndsWith("/api/auth/login");
-        bool isRegister = path.EndsWith("/api/auth/register");
-        bool isApiKeyExchange = path.EndsWith("/api/auth/api-key/exchange");
+        //
+        // Note: this middleware matches by path *suffix*, not prefix, so
+        // PathString.StartsWithSegments (used in TelemetryMiddleware) is not
+        // equivalent here and must not be substituted. EndsWith with
+        // StringComparison.OrdinalIgnoreCase avoids the ToLowerInvariant()
+        // allocation while preserving case-insensitive matching.
+        bool isLogin = path.EndsWith("/api/auth/login", StringComparison.OrdinalIgnoreCase);
+        bool isRegister = path.EndsWith("/api/auth/register", StringComparison.OrdinalIgnoreCase);
+        bool isApiKeyExchange = path.EndsWith("/api/auth/api-key/exchange", StringComparison.OrdinalIgnoreCase);
 
         if (!isLogin && !isRegister && !isApiKeyExchange)
         {

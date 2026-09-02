@@ -295,6 +295,22 @@ public class AuthenticationRateLimitMiddlewareTests
     }
 
     [Fact]
+    public async Task MixedCasePath_IsStillRateLimited()
+    {
+        // Regression test: the path match uses EndsWith(..., StringComparison.OrdinalIgnoreCase)
+        // rather than lower-casing the path first. A mixed-case request path must still be
+        // recognized as the login endpoint and subjected to the rate limiter.
+        DefaultHttpContext ctx = CreatePostRequest("/API/Auth/Login", IPAddress.Parse("203.0.113.50"));
+        Mock<IRateLimitService> service = CreateAllowingService();
+        AuthenticationRateLimitMiddleware middleware = CreateMiddleware(_ => Task.CompletedTask);
+
+        await middleware.InvokeAsync(ctx, service.Object);
+
+        service.Verify(s => s.CheckLoginLimitAsync("203.0.113.50", It.IsAny<CancellationToken>()), Times.Once);
+        service.Verify(s => s.RecordLoginAttemptAsync("203.0.113.50", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task TestDisableRateLimiterEnv_BypassesEverything()
     {
         const string envVar = "TEST_DISABLE_RATE_LIMITER";
