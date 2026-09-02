@@ -65,6 +65,37 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertTrue(vm.isFeatureDisabled)
     }
 
+    func testFarmViewManualAndForegroundRefreshFallbacksLoadCoverage() async {
+        let service = ControlledFilamentCoverageService()
+        let coverageViewModel = FarmFilamentCoverageViewModel()
+        coverageViewModel.configure(coverageService: service)
+        let printerListViewModel = PrinterListViewModel()
+
+        let manualRefresh = Task {
+            await PrinterListViewLifecycle.refresh(
+                viewModel: printerListViewModel,
+                coverageViewModel: coverageViewModel,
+                refreshCoverage: true
+            )
+        }
+        await service.awaitPending(count: 1)
+        await service.completeSuccess(index: 0, fleet: Self.oneCoverPrinterFleet())
+        await manualRefresh.value
+
+        let foregroundRefresh = Task {
+            await PrinterListViewLifecycle.willEnterForeground(
+                viewModel: printerListViewModel,
+                coverageViewModel: coverageViewModel,
+                refreshCoverage: true
+            )
+        }
+        await service.awaitPending(count: 1)
+        await service.completeSuccess(index: 0, fleet: Self.oneCoverPrinterFleet())
+        await foregroundRefresh.value
+
+        XCTAssertEqual(coverageViewModel.dispatchedRequestCount, 2)
+    }
+
     #if DEBUG
     func testBootstrapConsumesLivePrefetchAndSignalRStillRefreshes() async throws {
         let authority = FarmSnapshotFixtures.makeAuthority(

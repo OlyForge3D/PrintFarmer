@@ -32,6 +32,7 @@ final class PrinterListViewModel {
     @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
     @ObservationIgnored private var signalRAuthorityEpoch: UInt64 = 0
     @ObservationIgnored private var lastObservedConnectionState: SignalRConnectionState?
+    @ObservationIgnored private var printerSubscriptionSyncGeneration: UInt64 = 0
     @ObservationIgnored private let callbackEnqueuer: CallbackEnqueuer
     @ObservationIgnored private var isActive = true
     @ObservationIgnored private var canonicalLifecycleEpoch: UInt64 = 0
@@ -131,6 +132,7 @@ final class PrinterListViewModel {
         signalRService = nil
         signalRServiceIdentity = nil
         lastObservedConnectionState = nil
+        printerSubscriptionSyncGeneration &+= 1
     }
 
     private func hasSignalRAuthority(
@@ -280,6 +282,7 @@ final class PrinterListViewModel {
         switch result {
         case .success(let snapshot):
             printers = snapshot.printers
+            synchronizePrinterSubscriptions(for: snapshot.printers)
             if autoStatusLoadToken == nil {
                 autoDispatchStatuses = snapshot.autoDispatchStatuses
             }
@@ -290,6 +293,21 @@ final class PrinterListViewModel {
             break
         }
         finishCanonicalLoad(authority: authority)
+    }
+
+    private func synchronizePrinterSubscriptions(for printers: [Printer]) {
+        guard let signalRService, let signalRServiceIdentity else { return }
+        printerSubscriptionSyncGeneration &+= 1
+        let syncGeneration = printerSubscriptionSyncGeneration
+        let printerIds = printers.map(\.id)
+        Task { @MainActor [weak self] in
+            guard let self,
+                  self.printerSubscriptionSyncGeneration == syncGeneration,
+                  self.signalRServiceIdentity == signalRServiceIdentity else {
+                return
+            }
+            await signalRService.replacePrinterSubscriptions(printerIds)
+        }
     }
 
     nonisolated private static func loadCanonicalPrinters(

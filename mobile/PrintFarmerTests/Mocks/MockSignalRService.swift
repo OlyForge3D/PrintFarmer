@@ -23,6 +23,10 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     private let capturedConnectionStateLock = NSLock()
     private var capturedConnectionStateHandlers:
         [@Sendable (SignalRConnectionState) -> Void] = []
+    private let printerSubscriptionLock = NSLock()
+    private var recordedPrinterSubscriptionCalls: [[UUID]] = []
+    private var printerSubscriptionWaiters:
+        [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
 
     init() {
         self.connectionStateHub = SignalRConnectionStateHub(coordinator: coordinator)
@@ -79,6 +83,20 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
         let state = connectionState
         guard state != .connected, state != .connecting else { return }
         try? await connect()
+    }
+
+    func replacePrinterSubscriptions(_ printerIds: [UUID]) async {
+        recordPrinterSubscriptionCall(printerIds)
+    }
+
+    private func recordPrinterSubscriptionCall(_ printerIds: [UUID]) {
+        printerSubscriptionLock.lock()
+        recordedPrinterSubscriptionCalls.append(printerIds)
+        let callCount = recordedPrinterSubscriptionCalls.count
+        let ready = printerSubscriptionWaiters.filter { callCount >= $0.target }
+        printerSubscriptionWaiters.removeAll { callCount >= $0.target }
+        printerSubscriptionLock.unlock()
+        ready.forEach { $0.continuation.resume() }
     }
 
     @discardableResult
@@ -206,4 +224,40 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     var taskInvalidationSubscriberCount: Int { taskInvalidationHub.handlerCountForTesting }
     var printerUpdateSubscriberCount: Int { printerUpdateHub.handlerCountForTesting }
     var jobQueueSubscriberCount: Int { jobQueueUpdateHub.handlerCountForTesting }
+    var printerSubscriptionCalls: [[UUID]] {
+        printerSubscriptionLock.lock()
+        defer { printerSubscriptionLock.unlock() }
+        return recordedPrinterSubscriptionCalls
+    }
+
+    func waitForPrinterSubscriptionCallCount(_ target: Int) async {
+        if hasPrinterSubscriptionCallCount(target) { return }
+
+        await withCheckedContinuation { continuation in
+            registerPrinterSubscriptionWaiter(
+                target: target,
+                continuation: continuation
+            )
+        }
+    }
+
+    private func hasPrinterSubscriptionCallCount(_ target: Int) -> Bool {
+        printerSubscriptionLock.lock()
+        defer { printerSubscriptionLock.unlock() }
+        return recordedPrinterSubscriptionCalls.count >= target
+    }
+
+    private func registerPrinterSubscriptionWaiter(
+        target: Int,
+        continuation: CheckedContinuation<Void, Never>
+    ) {
+        printerSubscriptionLock.lock()
+        if recordedPrinterSubscriptionCalls.count >= target {
+            printerSubscriptionLock.unlock()
+            continuation.resume()
+        } else {
+            printerSubscriptionWaiters.append((target, continuation))
+            printerSubscriptionLock.unlock()
+        }
+    }
 }

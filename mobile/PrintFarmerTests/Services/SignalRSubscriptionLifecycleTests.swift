@@ -890,6 +890,8 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
     private var pendingReceives: [PendingReceive] = []
     private var pendingSends: [CheckedContinuation<Void, Error>] = []
     private var sentMessages: [URLSessionWebSocketTask.Message] = []
+    private var sendWaiters:
+        [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
     private var resumeCount = 0
     private var cancelCount = 0
     private var nextAnonymousCaller = 0
@@ -1059,8 +1061,13 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
     }
 
     private func _recordSent(_ message: URLSessionWebSocketTask.Message) {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         sentMessages.append(message)
+        let sendCount = sentMessages.count
+        let ready = sendWaiters.filter { sendCount >= $0.target }
+        sendWaiters.removeAll { sendCount >= $0.target }
+        lock.unlock()
+        ready.forEach { $0.continuation.resume() }
     }
 
     private func _enqueueSend(cont: CheckedContinuation<Void, Error>) {
@@ -1237,6 +1244,34 @@ final class MockSignalRWebSocket: NSObject, SignalRWebSocket, @unchecked Sendabl
     func snapshotSent() -> [URLSessionWebSocketTask.Message] {
         lock.lock(); defer { lock.unlock() }
         return sentMessages
+    }
+
+    func waitForSendCount(_ target: Int) async {
+        if _sendCountReached(target) { return }
+
+        await withCheckedContinuation { continuation in
+            _registerSendWaiter(target: target, continuation: continuation)
+        }
+    }
+
+    private func _sendCountReached(_ target: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return sentMessages.count >= target
+    }
+
+    private func _registerSendWaiter(
+        target: Int,
+        continuation: CheckedContinuation<Void, Never>
+    ) {
+        lock.lock()
+        if sentMessages.count >= target {
+            lock.unlock()
+            continuation.resume()
+        } else {
+            sendWaiters.append((target, continuation))
+            lock.unlock()
+        }
     }
 
     func isCancelled() -> Bool { lock.lock(); defer { lock.unlock() }; return cancelCount > 0 }
@@ -4754,6 +4789,100 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         await service.disconnect()
     }
 
+    func testPrinterSubscriptionsBatchReplaceAndReplayAfterReconnect() async throws {
+        let printerA = UUID(uuidString: "AAAAAAAA-1111-1111-1111-111111111111")!
+        let printerB = UUID(uuidString: "BBBBBBBB-2222-2222-2222-222222222222")!
+        let printerC = UUID(uuidString: "CCCCCCCC-3333-3333-3333-333333333333")!
+        let socketA = MockSignalRWebSocket()
+        let socketB = MockSignalRWebSocket()
+        let sleeper = LifecycleControlledSleeper()
+        let service = makeService(
+            sockets: MockWebSocketSwitcher([socketA, socketB]),
+            sleeper: sleeper
+        )
+
+        await service.replacePrinterSubscriptions([printerB, printerA, printerA])
+        let initialConnect = Task { try await service.connect() }
+        await socketA.waitForReceiveCall()
+        socketA.completeReceive(with: .data(makeSignalRHandshakeData()))
+        await socketA.waitForSendCount(2)
+
+        let initialSubscribe = try XCTUnwrap(
+            try decodeSignalRClientInvocation(socketA.snapshotSent()[1])
+        )
+        XCTAssertEqual(initialSubscribe.target, "SubscribeToPrintersAsync")
+        XCTAssertEqual(
+            initialSubscribe.stringArrayArgument,
+            [printerA.uuidString, printerB.uuidString]
+        )
+        let initialInvocationId = try XCTUnwrap(initialSubscribe.invocationId)
+        await socketA.waitForReceiveEnrollments(count: 2)
+        socketA.completeReceive(
+            with: try makeSignalRCompletion(
+                invocationId: initialInvocationId,
+                result: [printerA.uuidString, printerB.uuidString]
+            )
+        )
+        try await initialConnect.value
+
+        let replacement = Task {
+            await service.replacePrinterSubscriptions([printerC, printerB])
+        }
+        await socketA.waitForSendCount(3)
+        let unsubscribe = try XCTUnwrap(
+            try decodeSignalRClientInvocation(socketA.snapshotSent()[2])
+        )
+        XCTAssertEqual(unsubscribe.target, "UnsubscribeFromPrinterAsync")
+        XCTAssertEqual(unsubscribe.stringArgument, printerA.uuidString)
+        await socketA.waitForReceiveEnrollments(count: 3)
+        socketA.completeReceive(
+            with: try makeSignalRCompletion(
+                invocationId: try XCTUnwrap(unsubscribe.invocationId)
+            )
+        )
+
+        await socketA.waitForSendCount(4)
+        let incrementalSubscribe = try XCTUnwrap(
+            try decodeSignalRClientInvocation(socketA.snapshotSent()[3])
+        )
+        XCTAssertEqual(incrementalSubscribe.target, "SubscribeToPrintersAsync")
+        XCTAssertEqual(incrementalSubscribe.stringArrayArgument, [printerC.uuidString])
+        await socketA.waitForReceiveEnrollments(count: 4)
+        socketA.completeReceive(
+            with: try makeSignalRCompletion(
+                invocationId: try XCTUnwrap(incrementalSubscribe.invocationId),
+                result: [printerC.uuidString]
+            )
+        )
+        await replacement.value
+
+        await socketA.waitForReceiveEnrollments(count: 5)
+        socketA.failReceive(with: URLError(.networkConnectionLost))
+        await sleeper.waitForNextSleep()
+        await sleeper.release()
+        await socketB.waitForReceiveCall()
+        socketB.completeReceive(with: .data(makeSignalRHandshakeData()))
+        await socketB.waitForSendCount(2)
+
+        let replaySubscribe = try XCTUnwrap(
+            try decodeSignalRClientInvocation(socketB.snapshotSent()[1])
+        )
+        XCTAssertEqual(replaySubscribe.target, "SubscribeToPrintersAsync")
+        XCTAssertEqual(
+            replaySubscribe.stringArrayArgument,
+            [printerB.uuidString, printerC.uuidString]
+        )
+        await socketB.waitForReceiveEnrollments(count: 2)
+        socketB.completeReceive(
+            with: try makeSignalRCompletion(
+                invocationId: try XCTUnwrap(replaySubscribe.invocationId),
+                result: [printerB.uuidString, printerC.uuidString]
+            )
+        )
+
+        await service.disconnect()
+    }
+
     private func makeService(
         sockets: MockWebSocketSwitcher,
         sleeper: LifecycleControlledSleeper = LifecycleControlledSleeper(),
@@ -4784,6 +4913,59 @@ private func makeSignalRHandshakeData(
     }
     data.append(trailingPartial)
     return data
+}
+
+private struct DecodedSignalRClientInvocation {
+    let invocationId: String?
+    let target: String
+    let stringArgument: String?
+    let stringArrayArgument: [String]?
+}
+
+private func decodeSignalRClientInvocation(
+    _ message: URLSessionWebSocketTask.Message
+) throws -> DecodedSignalRClientInvocation? {
+    var data: Data
+    switch message {
+    case .data(let value):
+        data = value
+    case .string(let value):
+        data = Data(value.utf8)
+    @unknown default:
+        return nil
+    }
+    if data.last == SignalRFrameParser.recordSeparator {
+        data.removeLast()
+    }
+    guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+          json["type"] as? Int == 1,
+          let target = json["target"] as? String,
+          let arguments = json["arguments"] as? [Any],
+          let firstArgument = arguments.first else {
+        return nil
+    }
+    return DecodedSignalRClientInvocation(
+        invocationId: json["invocationId"] as? String,
+        target: target,
+        stringArgument: firstArgument as? String,
+        stringArrayArgument: firstArgument as? [String]
+    )
+}
+
+private func makeSignalRCompletion(
+    invocationId: String,
+    result: [String]? = nil
+) throws -> URLSessionWebSocketTask.Message {
+    var json: [String: Any] = [
+        "type": 3,
+        "invocationId": invocationId,
+    ]
+    if let result {
+        json["result"] = result
+    }
+    var data = try JSONSerialization.data(withJSONObject: json)
+    data.append(SignalRFrameParser.recordSeparator)
+    return .data(data)
 }
 
 private func makeSignalRPrinterInvocation(id: UUID) -> Data {
