@@ -82,6 +82,11 @@ public class PrintProjectsController(IPrintProjectService projectService, ILogge
                 return BadRequest("Project name is required");
             }
 
+            if (request.Name.Length > PrintProject.NameMaxLength)
+            {
+                return BadRequest($"Project name must be {PrintProject.NameMaxLength} characters or fewer (received {request.Name.Length}).");
+            }
+
             var project = await projectService.CreateProjectAsync(request);
             return Created($"/api/projects/{project.Id}", project);
         }
@@ -99,12 +104,18 @@ public class PrintProjectsController(IPrintProjectService projectService, ILogge
     /// <param name="request">The update request.</param>
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(PrintProjectDetailDto), 200)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrintProjectDetailDto>> UpdateProjectAsync(Guid id, [FromBody] UpdatePrintProjectRequest request)
     {
         try
         {
+            if (request.Name is { Length: > PrintProject.NameMaxLength })
+            {
+                return BadRequest($"Project name must be {PrintProject.NameMaxLength} characters or fewer (received {request.Name.Length}).");
+            }
+
             var project = await projectService.UpdateProjectAsync(id, request);
             return project is null ? NotFound($"Project {id} not found") : Ok(project);
         }

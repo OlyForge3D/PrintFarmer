@@ -8,13 +8,21 @@ namespace Farm.Infrastructure.Domain;
 /// </summary>
 public class PrintProject : IRevisionedEntity
 {
+    /// <summary>
+    /// Maximum length (in UTF-16 code units) allowed for <see cref="Name"/>. Shared by the
+    /// EF Core column configuration and the request DTO validation in
+    /// <c>PrintProjectsController</c> so long names are rejected with a 400 before ever
+    /// reaching the database (see issue #2368).
+    /// </summary>
+    public const int NameMaxLength = 255;
+
     public Guid Id { get; set; }
 
     /// <inheritdoc/>
     public long Revision { get; set; } = 1;
 
     [Required]
-    [MaxLength(255)]
+    [MaxLength(NameMaxLength)]
     public string Name { get; set; } = string.Empty;
 
     [MaxLength(2000)]

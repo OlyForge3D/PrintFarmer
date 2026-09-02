@@ -816,6 +816,7 @@ struct BackendReadinessPlan: Sendable {
             BackendReadinessProbe(endpoint: .printers) {
                 let printers = try await printerService.list(includeDisabled: false)
                 startupPrefetchAttempt?.capturePrinters(printers)
+                await signalRService.replacePrinterSubscriptions(printers.map(\.id))
             },
             BackendReadinessProbe(endpoint: .jobs) {
                 _ = try await jobService.list()

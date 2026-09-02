@@ -339,6 +339,15 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// incomplete record before a replacement transport starts.
     private var frameParser = SignalRFrameParser()
 
+    /// Desired printer groups survive automatic reconnects. Applied groups are
+    /// transport-scoped and are cleared whenever the socket is replaced.
+    private var desiredPrinterSubscriptionIds: Set<String> = []
+    private var appliedPrinterSubscriptionIds: Set<String> = []
+    private var printerSubscriptionGeneration: UInt64 = 0
+    private var printerSubscriptionTail: Task<Void, Never>?
+    private var nextHubInvocationId: UInt64 = 0
+    private var pendingHubInvocations: [String: HubInvocationWaiter] = [:]
+
     // Handler storage for #711 F6 `fallbackGroupsUpdated` follows the
     // simple handler-array pattern rather than a SignalREventHub because
     // fallback-group updates are refetch hints with no in-flight lifecycle
@@ -649,6 +658,9 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         let reconnect: Task<Void, Never>? = lifecycleSync {
             self.intentionalDisconnect = true
             self.generation &+= 1
+            self.printerSubscriptionGeneration &+= 1
+            self.desiredPrinterSubscriptionIds.removeAll(keepingCapacity: true)
+            self.appliedPrinterSubscriptionIds.removeAll(keepingCapacity: true)
             self.tearDownLocked()
             let r = self.reconnectTask
             self.reconnectTask = nil
@@ -708,6 +720,14 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             // The reconnect ladder owns recovery from here.
             logger.info("ensureConnected: connect attempt failed, reconnect ladder continues")
         }
+    }
+
+    func replacePrinterSubscriptions(_ printerIds: [UUID]) async {
+        let desiredIds = Set(printerIds.map(\.uuidString))
+        let task = enqueuePrinterSubscriptionReconciliation(
+            replacingDesiredIds: desiredIds
+        )
+        await task.value
     }
 
     /// Whether the installed socket has gone silent long enough to be
@@ -880,7 +900,252 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         if !started {
             throw NetworkError.invalidResponse
         }
+        _ = enqueuePrinterSubscriptionReconciliation()
         logger.info("Connected to SignalR hub at \(self.serverURL.absoluteString)")
+    }
+
+    private struct ClientInvocation<Argument: Encodable & Sendable>: Encodable, Sendable {
+        let type = 1
+        let invocationId: String
+        let target: String
+        let arguments: [Argument]
+    }
+
+    private enum HubInvocationError: LocalizedError, Sendable {
+        case server(String)
+        case missingResult(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .server(let message):
+                return message
+            case .missingResult(let target):
+                return "\(target) completed without the expected result"
+            }
+        }
+    }
+
+    private final class HubInvocationWaiter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var result: Result<Data?, Error>?
+        private var continuation: CheckedContinuation<Data?, Error>?
+
+        func value() async throws -> Data? {
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    lock.lock()
+                    if let result {
+                        lock.unlock()
+                        continuation.resume(with: result)
+                    } else {
+                        self.continuation = continuation
+                        lock.unlock()
+                    }
+                }
+            } onCancel: {
+                self.resolve(.failure(CancellationError()))
+            }
+        }
+
+        func resolve(_ result: Result<Data?, Error>) {
+            lock.lock()
+            guard self.result == nil else {
+                lock.unlock()
+                return
+            }
+            self.result = result
+            let continuation = self.continuation
+            self.continuation = nil
+            lock.unlock()
+            continuation?.resume(with: result)
+        }
+    }
+
+    private func enqueuePrinterSubscriptionReconciliation(
+        replacingDesiredIds: Set<String>? = nil
+    ) -> Task<Void, Never> {
+        lifecycleSync {
+            if let replacingDesiredIds {
+                self.desiredPrinterSubscriptionIds = replacingDesiredIds
+                self.printerSubscriptionGeneration &+= 1
+            }
+            let subscriptionGeneration = self.printerSubscriptionGeneration
+            let predecessor = self.printerSubscriptionTail
+            let task = Task { [weak self] in
+                await predecessor?.value
+                guard let self else { return }
+                await self.reconcilePrinterSubscriptions(
+                    subscriptionGeneration: subscriptionGeneration
+                )
+            }
+            self.printerSubscriptionTail = task
+            return task
+        }
+    }
+
+    private func reconcilePrinterSubscriptions(
+        subscriptionGeneration: UInt64
+    ) async {
+        let snapshot: (
+            connectionGeneration: UInt64,
+            desiredIds: Set<String>,
+            appliedIds: Set<String>
+        )? = lifecycleSync {
+            guard self.printerSubscriptionGeneration == subscriptionGeneration,
+                  self.connectionStateHub.snapshot() == .connected,
+                  self.webSocketTask != nil else {
+                return nil
+            }
+            return (
+                self.generation,
+                self.desiredPrinterSubscriptionIds,
+                self.appliedPrinterSubscriptionIds
+            )
+        }
+        guard let snapshot else { return }
+
+        for printerId in snapshot.appliedIds.subtracting(snapshot.desiredIds).sorted() {
+            do {
+                _ = try await sendHubInvocation(
+                    target: "UnsubscribeFromPrinterAsync",
+                    argument: printerId,
+                    connectionGeneration: snapshot.connectionGeneration
+                )
+            } catch {
+                logger.warning(
+                    "Failed to unsubscribe from printer SignalR group \(printerId): \(error.localizedDescription)"
+                )
+                continue
+            }
+
+            let shouldContinue = lifecycleSync {
+                guard self.generation == snapshot.connectionGeneration else {
+                    return false
+                }
+                self.appliedPrinterSubscriptionIds.remove(printerId)
+                return self.printerSubscriptionGeneration == subscriptionGeneration
+            }
+            guard shouldContinue else { return }
+        }
+
+        let idsToSubscribe: [String]? = lifecycleSync {
+            guard self.generation == snapshot.connectionGeneration else {
+                return nil
+            }
+            return Array(
+                snapshot.desiredIds.subtracting(self.appliedPrinterSubscriptionIds)
+            ).sorted()
+        }
+        guard let idsToSubscribe, !idsToSubscribe.isEmpty else { return }
+
+        do {
+            let result = try await sendHubInvocation(
+                target: "SubscribeToPrintersAsync",
+                argument: idsToSubscribe,
+                connectionGeneration: snapshot.connectionGeneration
+            )
+            guard let result else {
+                throw HubInvocationError.missingResult("SubscribeToPrintersAsync")
+            }
+            let authorizedIds = try JSONDecoder().decode([String].self, from: result)
+            let authorizedSet = Set(authorizedIds)
+            let rejectedIds = Set(idsToSubscribe).subtracting(authorizedSet)
+
+            lifecycleSync {
+                guard self.generation == snapshot.connectionGeneration else { return }
+                self.appliedPrinterSubscriptionIds.formUnion(authorizedSet)
+                if self.printerSubscriptionGeneration == subscriptionGeneration {
+                    self.desiredPrinterSubscriptionIds.subtract(rejectedIds)
+                }
+            }
+            if !rejectedIds.isEmpty {
+                logger.warning(
+                    "SignalR printer subscription excluded \(rejectedIds.count) unauthorized printer(s)"
+                )
+            }
+        } catch {
+            logger.warning(
+                "Failed to subscribe to printer SignalR groups: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    private func sendHubInvocation<Argument: Encodable & Sendable>(
+        target: String,
+        argument: Argument,
+        connectionGeneration: UInt64
+    ) async throws -> Data? {
+        let prepared: (
+            invocationId: String,
+            socket: SignalRWebSocket,
+            waiter: HubInvocationWaiter
+        )? = lifecycleSync {
+            guard self.generation == connectionGeneration,
+                  self.connectionStateHub.snapshot() == .connected,
+                  let socket = self.webSocketTask else {
+                return nil
+            }
+            self.nextHubInvocationId &+= 1
+            let invocationId = String(self.nextHubInvocationId)
+            let waiter = HubInvocationWaiter()
+            self.pendingHubInvocations[invocationId] = waiter
+            return (invocationId, socket, waiter)
+        }
+        guard let prepared else {
+            throw NetworkError.invalidResponse
+        }
+
+        let invocation = ClientInvocation(
+            invocationId: prepared.invocationId,
+            target: target,
+            arguments: [argument]
+        )
+        var data = try JSONEncoder().encode(invocation)
+        data.append(Self.recordSeparator)
+
+        do {
+            try await prepared.socket.send(.data(data))
+            try Task.checkCancellation()
+
+            let stillCurrent = lifecycleSync {
+                self.generation == connectionGeneration
+                    && self.connectionStateHub.snapshot() == .connected
+                    && self.webSocketTask === prepared.socket
+            }
+            guard stillCurrent else {
+                throw NetworkError.invalidResponse
+            }
+            return try await prepared.waiter.value()
+        } catch {
+            failHubInvocation(
+                invocationId: prepared.invocationId,
+                error: error
+            )
+            throw error
+        }
+    }
+
+    private func completeHubInvocation(
+        invocationId: String,
+        result: Data?,
+        error: String?
+    ) {
+        let waiter = lifecycleSync {
+            self.pendingHubInvocations.removeValue(forKey: invocationId)
+        }
+        guard let waiter else { return }
+        if let error {
+            waiter.resolve(.failure(HubInvocationError.server(error)))
+        } else {
+            waiter.resolve(.success(result))
+        }
+    }
+
+    private func failHubInvocation(invocationId: String, error: Error) {
+        let waiter = lifecycleSync {
+            self.pendingHubInvocations.removeValue(forKey: invocationId)
+        }
+        waiter?.resolve(.failure(error))
     }
 
     private func checkGenerationStillCurrent(_ myGen: UInt64) throws {
@@ -1213,6 +1478,12 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         switch SignalRProtocolMessage.decode(data) {
         case .invocation(let target, let firstArgument):
             handleInvocation(target: target, firstArgument: firstArgument)
+        case .completion(let invocationId, let result, let error):
+            completeHubInvocation(
+                invocationId: invocationId,
+                result: result,
+                error: error
+            )
         case .ping:
             break
         case .close(let error):
@@ -1281,6 +1552,16 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 printerUpdateHub.deliver(update)
             } catch {
                 logger.warning("Failed to decode printerupdated: \(error.localizedDescription)")
+            }
+
+        case "printerstatusesreplayed":
+            do {
+                let updates = try decoder.decode([PrinterStatusUpdate].self, from: argData)
+                for update in updates {
+                    printerUpdateHub.deliver(update)
+                }
+            } catch {
+                logger.warning("Failed to decode printerstatusesreplayed: \(error.localizedDescription)")
             }
 
         case "jobqueueupdate":
@@ -2137,6 +2418,12 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         pingTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         setWebSocketTaskLocked(nil)
+        appliedPrinterSubscriptionIds.removeAll(keepingCapacity: true)
+        let pendingWaiters = Array(pendingHubInvocations.values)
+        pendingHubInvocations.removeAll(keepingCapacity: true)
+        for waiter in pendingWaiters {
+            waiter.resolve(.failure(NetworkError.invalidResponse))
+        }
     }
 }
 

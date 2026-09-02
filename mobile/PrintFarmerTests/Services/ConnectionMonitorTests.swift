@@ -625,9 +625,11 @@ final class ConnectionMonitorTests: XCTestCase {
         }
         let printer = MockPrinterService()
         printer.printersToReturn = printers
+        let signalR = MockSignalRService()
         container.attentionService = attention
         container.filamentCoverageService = StubFilamentCoverageService(fleet: fleet)
         container.printerService = printer
+        container.signalRService = signalR
         container.capabilitiesService = TestCapabilitiesService()
         let shippingPlan = BackendReadinessPlan(services: container)
         let plan = BackendReadinessPlan(
@@ -648,6 +650,7 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertEqual(attentionCalls.filter { $0.limit == nil }.count, 1)
         XCTAssertEqual(attentionCalls.filter { $0.limit == 1 }.count, 1)
         XCTAssertEqual(printer.listIncludeDisabledArg, false)
+        XCTAssertEqual(signalR.printerSubscriptionCalls, [printers.map(\.id)])
         var consumedFeed: AttentionFeed?
         var consumedFleet: FleetFilamentCoverage?
         var consumedPrinters: [Printer]?

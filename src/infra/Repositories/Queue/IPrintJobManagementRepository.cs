@@ -238,9 +238,33 @@ public interface IPrintJobManagementRepository
     Task<HashSet<string>> GetExternalJobIdsForPrinterAsync(Guid printerId, CancellationToken ct = default);
 
     /// <summary>
+    /// Get external job IDs for a specific printer, scoped to only the candidate IDs supplied.
+    /// Use for high-frequency, small-batch callers (e.g. active-job sync) that only ever need to
+    /// know whether specific IDs already exist, rather than materializing the printer's entire
+    /// history into memory.
+    /// </summary>
+    /// <param name="printerId">The printer to check.</param>
+    /// <param name="candidateExternalJobIds">External job IDs actually present in the caller's fetched batch.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<HashSet<string>> GetExternalJobIdsForPrinterAsync(
+        Guid printerId, IReadOnlyCollection<string> candidateExternalJobIds, CancellationToken ct = default);
+
+    /// <summary>
     /// Get known actual start times for a specific printer (for duplicate detection during history seeding).
     /// </summary>
     Task<HashSet<DateTime>> GetActualStartTimesForPrinterAsync(Guid printerId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get known actual start times for a specific printer, scoped to only the candidate whole-second
+    /// UTC start times supplied. Use for high-frequency, small-batch callers (e.g. active-job sync)
+    /// that only ever need to know whether specific start times already exist, rather than
+    /// materializing the printer's entire history into memory.
+    /// </summary>
+    /// <param name="printerId">The printer to check.</param>
+    /// <param name="candidateStartTimesUtc">Whole-second UTC start times actually present in the caller's fetched batch.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<HashSet<DateTime>> GetActualStartTimesForPrinterAsync(
+        Guid printerId, IReadOnlyCollection<DateTime> candidateStartTimesUtc, CancellationToken ct = default);
 
     /// <summary>
     /// Get lightweight candidate rows for detecting existing duplicate history jobs.

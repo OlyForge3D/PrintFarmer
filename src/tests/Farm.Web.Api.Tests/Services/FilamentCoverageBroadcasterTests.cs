@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Spoolman;
@@ -42,8 +43,8 @@ public class FilamentCoverageBroadcasterTests
             .Returns(Task.CompletedTask)
             .Verifiable();
 
-        Mock<IHubClients> clients = new();
-        clients.Setup(c => c.All).Returns(clientProxy.Object);
+        Mock<IHubClients> clients = new(MockBehavior.Strict);
+        clients.Setup(c => c.Group(AuthorizedHubGroups.Printer(printerId))).Returns(clientProxy.Object);
 
         Mock<IHubContext<PrinterHub>> hub = new();
         hub.Setup(h => h.Clients).Returns(clients.Object);
@@ -74,7 +75,7 @@ public class FilamentCoverageBroadcasterTests
             .Returns(Task.CompletedTask)
             .Verifiable();
 
-        Mock<IHubClients> clients = new();
+        Mock<IHubClients> clients = new(MockBehavior.Strict);
         clients.Setup(c => c.All).Returns(clientProxy.Object);
 
         Mock<IHubContext<PrinterHub>> hub = new();
@@ -96,6 +97,7 @@ public class FilamentCoverageBroadcasterTests
         // Defensive: callers should never send an empty reason, but if they
         // do we must still emit a valid string on the wire so clients can
         // parse it. "queueChanged" is the most conservative refetch trigger.
+        Guid printerId = Guid.NewGuid();
         Mock<IClientProxy> clientProxy = new(MockBehavior.Strict);
         clientProxy
             .Setup(c => c.SendCoreAsync(
@@ -108,8 +110,8 @@ public class FilamentCoverageBroadcasterTests
             .Returns(Task.CompletedTask)
             .Verifiable();
 
-        Mock<IHubClients> clients = new();
-        clients.Setup(c => c.All).Returns(clientProxy.Object);
+        Mock<IHubClients> clients = new(MockBehavior.Strict);
+        clients.Setup(c => c.Group(AuthorizedHubGroups.Printer(printerId))).Returns(clientProxy.Object);
         Mock<IHubContext<PrinterHub>> hub = new();
         hub.Setup(h => h.Clients).Returns(clients.Object);
 
@@ -118,7 +120,7 @@ public class FilamentCoverageBroadcasterTests
             ScopeFactory(enabled: true),
             NullLogger<FilamentCoverageBroadcaster>.Instance);
 
-        await broadcaster.BroadcastPrinterChangedAsync(Guid.NewGuid(), string.Empty, CancellationToken.None);
+        await broadcaster.BroadcastPrinterChangedAsync(printerId, string.Empty, CancellationToken.None);
 
         clientProxy.Verify();
     }
@@ -219,6 +221,7 @@ public class FilamentCoverageBroadcasterTests
     {
         ControlledDelay delay = new();
         int sendCount = 0;
+        Guid printerId = Guid.NewGuid();
         Mock<IClientProxy> clientProxy = new(MockBehavior.Strict);
         clientProxy
             .Setup(c => c.SendCoreAsync(
@@ -229,7 +232,7 @@ public class FilamentCoverageBroadcasterTests
                 ? Task.CompletedTask
                 : Task.FromException(new InvalidOperationException("send failed")));
         Mock<IHubClients> clients = new();
-        clients.Setup(c => c.All).Returns(clientProxy.Object);
+        clients.Setup(c => c.Group(AuthorizedHubGroups.Printer(printerId))).Returns(clientProxy.Object);
         Mock<IHubContext<PrinterHub>> hub = new();
         hub.Setup(h => h.Clients).Returns(clients.Object);
         Mock<ILogger<FilamentCoverageBroadcaster>> logger = new();
@@ -238,7 +241,6 @@ public class FilamentCoverageBroadcasterTests
             ScopeFactory(() => true),
             logger.Object,
             delay.DelayAsync);
-        Guid printerId = Guid.NewGuid();
 
         await broadcaster.BroadcastPrinterChangedAsync(printerId, FilamentCoverageChangeReasons.SpoolWeight, CancellationToken.None);
         await broadcaster.BroadcastPrinterChangedAsync(printerId, FilamentCoverageChangeReasons.SpoolWeight, CancellationToken.None);
@@ -331,6 +333,7 @@ public class FilamentCoverageBroadcasterTests
             .Returns(Task.CompletedTask);
         Mock<IHubClients> clients = new();
         clients.Setup(c => c.All).Returns(clientProxy.Object);
+        clients.Setup(c => c.Group(It.IsAny<string>())).Returns(clientProxy.Object);
         Mock<IHubContext<PrinterHub>> hub = new();
         hub.Setup(h => h.Clients).Returns(clients.Object);
         return new FilamentCoverageBroadcaster(
