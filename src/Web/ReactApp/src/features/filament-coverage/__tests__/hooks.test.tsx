@@ -316,6 +316,49 @@ describe("filament coverage hooks", () => {
     await waitFor(() => expect(fleetCallCount()).toBe(2));
   });
 
+  it("never delays a genuine fleet-wide event behind the per-printer throttle window", async () => {
+    mockGet.mockResolvedValue({
+      data: { printers: [], evaluatedAtUtc: "2025-01-01T00:00:00Z" },
+    });
+    const qc = makeClient();
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    const fleetKey = JSON.stringify(filamentCoverageQueryKeys.fleet());
+    const fleetCallCount = () =>
+      invalidateSpy.mock.calls.filter(
+        (c) => JSON.stringify(c[0]?.queryKey) === fleetKey,
+      ).length;
+
+    renderHook(() => useFleetFilamentCoverage(), { wrapper: wrapper(qc) });
+    await waitFor(() =>
+      expect(hoisted.signalRMock.onFilamentCoverageChanged).toHaveBeenCalled(),
+    );
+
+    // A per-printer tick opens the throttle window (leading edge fires,
+    // then subsequent per-printer ticks would normally be coalesced).
+    act(() => {
+      hoisted.onFilamentCoverageChangedCb.current?.({
+        printerId: "p-1",
+        reason: "jobProgress",
+        occurredAt: "2025-01-01T00:00:00Z",
+      });
+    });
+    await waitFor(() => expect(fleetCallCount()).toBe(1));
+
+    // A genuine fleet-scope event (spool swap, printer added/removed)
+    // arrives immediately after, still well inside the throttle window.
+    // It must invalidate the fleet cache right away — no regression in
+    // fleet-scope delivery is an explicit acceptance criterion for #2375 —
+    // rather than being coalesced into the per-printer throttle.
+    act(() => {
+      hoisted.onFilamentCoverageChangedCb.current?.({
+        printerId: null,
+        reason: "printerAdded",
+        occurredAt: "2025-01-01T00:00:00Z",
+      });
+    });
+    expect(fleetCallCount()).toBe(2);
+  });
+
   it("does NOT unsubscribe SignalR when only one of two hooks sharing the same QueryClient unmounts", async () => {
     mockGet.mockResolvedValue({
       data: { printers: [], evaluatedAtUtc: "2025-01-01T00:00:00Z" },

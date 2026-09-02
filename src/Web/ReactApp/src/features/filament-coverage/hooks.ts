@@ -110,18 +110,31 @@ function invalidateFleetThrottled(qc: QueryClient): void {
 
 function invalidateCoverageCaches(event: FilamentCoverageChangedEvent) {
   coverageQueryClients.forEach((_count, qc) => {
-    // Fleet cache is always affected — either a single printer changed
-    // (its slot in the batch response) or the whole fleet did — but a
-    // per-tick refetch of the whole fleet is throttled/coalesced rather
-    // than forced on every event (issue #2375).
-    invalidateFleetThrottled(qc);
     if (event.printerId) {
-      // Per-printer invalidation stays immediate: it is cheap (a single
-      // printer's slice) and drives the detail view's own live update.
+      // Per-printer tick: only that printer's slice of the fleet snapshot
+      // changed, so the fleet refetch is throttled/coalesced rather than
+      // forced on every event (issue #2375). Per-printer invalidation stays
+      // immediate: it is cheap (a single printer's slice) and drives the
+      // detail view's own live update.
+      invalidateFleetThrottled(qc);
       void qc.invalidateQueries({
         queryKey: filamentCoverageQueryKeys.printer(event.printerId),
       });
     } else {
+      // Genuine fleet-scope event (spool swap, printer added/removed): the
+      // whole fleet snapshot is authoritative and must never be delayed by
+      // the per-printer throttle, or fleet-scope delivery would regress
+      // (issue #2375 acceptance criteria). Invalidate immediately and reset
+      // the throttle window so it doesn't suppress the *next* per-printer
+      // tick's leading edge.
+      const state = getFleetInvalidationState(qc);
+      if (state.trailingTimer !== undefined) {
+        clearTimeout(state.trailingTimer);
+        state.trailingTimer = undefined;
+      }
+      state.hasPendingTrailing = false;
+      state.lastInvalidatedAt = Date.now();
+      void qc.invalidateQueries({ queryKey: filamentCoverageQueryKeys.fleet() });
       // Fleet-wide invalidation: refetch every per-printer subscription too.
       void qc.invalidateQueries({
         queryKey: [...filamentCoverageQueryKeys.all, "printer"],
