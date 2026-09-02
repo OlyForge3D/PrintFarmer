@@ -555,6 +555,150 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertTrue(authority.isCurrent(session))
     }
 
+    func testConstructingReadinessPlanPreservesPrefetchUntilGateStarts() async throws {
+        let root = FarmSnapshotFixtures.tempRoot()
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-plan-lifecycle"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 0
+        ))
+        let container = ServiceContainer(
+            observeRegistry: false,
+            farmSnapshotAuthority: authority,
+            farmSnapshotRootURL: root,
+            synchronizeOfflineQueueOnStartup: false
+        )
+        let initialFeed = makeAttentionFeed(healthyPrinterCount: 4)
+        let initialAttempt = try XCTUnwrap(
+            container.startupPrefetchStore.makeAttempt(session: session, generation: 0)
+        )
+        initialAttempt.captureAttention(initialFeed)
+        initialAttempt.publish()
+
+        let shippingPlan = BackendReadinessPlan(services: container)
+
+        var consumedFeed: AttentionFeed?
+        XCTAssertTrue(
+            container.startupPrefetchStore.consumeAttention {
+                consumedFeed = $0.value
+            }
+        )
+        XCTAssertEqual(consumedFeed, initialFeed)
+
+        let supersededFeed = makeAttentionFeed(healthyPrinterCount: 8)
+        let supersededAttempt = try XCTUnwrap(
+            container.startupPrefetchStore.makeAttempt(session: session, generation: 0)
+        )
+        supersededAttempt.captureAttention(supersededFeed)
+        supersededAttempt.publish()
+
+        let started = AsyncBarrier()
+        let release = AsyncBarrier()
+        defer {
+            started.close()
+            release.close()
+        }
+        let gatePlan = BackendReadinessPlan(
+            capabilitiesService: TestCapabilitiesService(),
+            probes: [
+                BackendReadinessProbe(endpoint: .api) {
+                    started.signal()
+                    await release.arriveAndWait()
+                },
+            ],
+            startupPrefetchAttempt: shippingPlan.startupPrefetchAttempt
+        )
+        let gate = BackendConnectionGate()
+        let check = Task {
+            await gate.check(plan: gatePlan, generation: 0) { true }
+        }
+
+        await started.waitUntilArrived()
+        XCTAssertFalse(
+            container.startupPrefetchStore.consumeAttention { _ in
+                XCTFail("a real gate attempt must supersede the preceding handoff")
+            }
+        )
+        release.release()
+        await check.value
+        XCTAssertEqual(gate.state, .ready)
+    }
+
+    func testStaleGateStartDoesNotClearCurrentSessionPrefetch() async throws {
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-stale-plan"))!
+        )
+        let staleSession = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let staleAttempt = try XCTUnwrap(
+            store.makeAttempt(session: staleSession, generation: 1)
+        )
+        let stalePlan = BackendReadinessPlan(
+            capabilitiesService: TestCapabilitiesService(),
+            probes: [],
+            startupPrefetchAttempt: staleAttempt
+        )
+
+        let currentSession = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 2
+        ))
+        let currentFeed = makeAttentionFeed(healthyPrinterCount: 6)
+        let currentAttempt = try XCTUnwrap(
+            store.makeAttempt(session: currentSession, generation: 2)
+        )
+        currentAttempt.captureAttention(currentFeed)
+        currentAttempt.publish()
+
+        let gate = BackendConnectionGate()
+        await gate.check(plan: stalePlan, generation: 1) { false }
+
+        var consumedFeed: AttentionFeed?
+        XCTAssertTrue(store.consumeAttention { consumedFeed = $0.value })
+        XCTAssertEqual(consumedFeed, currentFeed)
+        XCTAssertEqual(gate.state, .idle)
+    }
+
+    func testReusingCompletedPlanDoesNotClearNewPrefetch() async throws {
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-plan-reuse"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let completedAttempt = try XCTUnwrap(
+            store.makeAttempt(session: session, generation: 1)
+        )
+        let completedPlan = BackendReadinessPlan(
+            capabilitiesService: TestCapabilitiesService(),
+            probes: [],
+            startupPrefetchAttempt: completedAttempt
+        )
+        let gate = BackendConnectionGate()
+        await gate.check(plan: completedPlan, generation: 1) { true }
+
+        let currentFeed = makeAttentionFeed(healthyPrinterCount: 5)
+        let currentAttempt = try XCTUnwrap(
+            store.makeAttempt(session: session, generation: 1)
+        )
+        currentAttempt.captureAttention(currentFeed)
+        currentAttempt.publish()
+
+        await gate.check(plan: completedPlan, generation: 1) { true }
+
+        var consumedFeed: AttentionFeed?
+        XCTAssertTrue(store.consumeAttention { consumedFeed = $0.value })
+        XCTAssertEqual(consumedFeed, currentFeed)
+    }
+
     func testSlowAttentionPrefetchFallsBackToCheapProbeAndNormalTabLoad() async throws {
         let authority = FarmSnapshotFixtures.makeAuthority(
             tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-slow"))!
