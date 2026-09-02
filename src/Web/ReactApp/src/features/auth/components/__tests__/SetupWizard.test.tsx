@@ -283,6 +283,72 @@ describe('SetupWizard first-run Spoolman bootstrap', () => {
 });
 
 /**
+ * #2365 — submitting the initial admin setup form with empty required fields
+ * silently did nothing: no field errors were shown, focus never moved, and
+ * no request was sent. The account step's validation errors were computed
+ * but rendered from a disconnected `useActionState` action that was never
+ * dispatched, so the UI always displayed an empty error set.
+ */
+describe('SetupWizard account step validation (#2365)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuthState.isAuthenticated = false;
+    mockNetworkScanState.availableInstances = [];
+    mockGetSetupStatus.mockResolvedValue({ needsSetup: true });
+    mockGetSetupBootstrap.mockResolvedValue({ baseUrl: '' });
+    mockGetSettings.mockResolvedValue({
+      enableDiscovery: true,
+      discoverySubnets: [],
+      clientTimeoutMs: 200,
+      requestDelayMs: 100,
+      maxConcurrentRequests: 20,
+      maxRetries: 2,
+      ports: [80],
+    });
+  });
+
+  it('shows field-level errors and focuses the first invalid field when all required fields are empty', async () => {
+    render(<SetupWizard onComplete={vi.fn()} />);
+    await screen.findByText('Initial configuration wizard');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Admin & Continue' }));
+
+    const firstNameInput = screen.getByLabelText(/First Name/, { selector: 'input' });
+    await waitFor(() => expect(firstNameInput).toHaveFocus());
+
+    expect(screen.getByLabelText(/First Name/, { selector: 'input' })).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getAllByRole('alert').length).toBeGreaterThan(0);
+    expect(mockCreateInitialAdmin).not.toHaveBeenCalled();
+  });
+
+  it('moves focus to the first field still invalid when only some fields are filled in', async () => {
+    render(<SetupWizard onComplete={vi.fn()} />);
+    await screen.findByText('Initial configuration wizard');
+
+    fireEvent.change(screen.getByLabelText(/First Name/, { selector: 'input' }), { target: { value: 'Ada' } });
+    fireEvent.change(screen.getByLabelText(/Last Name/, { selector: 'input' }), { target: { value: 'Lovelace' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Admin & Continue' }));
+
+    const usernameInput = screen.getByLabelText(/Username/, { selector: 'input' });
+    await waitFor(() => expect(usernameInput).toHaveFocus());
+    expect(mockCreateInitialAdmin).not.toHaveBeenCalled();
+  });
+
+  it('clears a field error as soon as the user corrects that field', async () => {
+    render(<SetupWizard onComplete={vi.fn()} />);
+    await screen.findByText('Initial configuration wizard');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Admin & Continue' }));
+    const firstNameInput = screen.getByLabelText(/First Name/, { selector: 'input' });
+    await waitFor(() => expect(firstNameInput).toHaveFocus());
+    expect(firstNameInput).toHaveAttribute('aria-invalid', 'true');
+
+    fireEvent.change(firstNameInput, { target: { value: 'Ada' } });
+    expect(firstNameInput).toHaveAttribute('aria-invalid', 'false');
+  });
+});
+
+/**
  * #1753 — at a 320x568 viewport, the wizard was centered with
  * `min-h-screen flex items-center justify-center` and no scroll container.
  * Its header began off-screen (y=-138) and the page could not scroll to
