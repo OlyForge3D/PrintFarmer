@@ -609,6 +609,32 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         return externalIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
+    public async Task<HashSet<string>> GetExternalJobIdsForPrinterAsync(
+        Guid printerId, IReadOnlyCollection<string> candidateExternalJobIds, CancellationToken ct = default)
+    {
+        if (candidateExternalJobIds.Count == 0)
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        // Normalize to upper-invariant so the SQL-translated comparison matches the caller's
+        // case-insensitive semantics regardless of provider collation (SQLite/Postgres are
+        // case-sensitive by default; SQL Server typically is not).
+        HashSet<string> candidatesUpper = candidateExternalJobIds
+            .Select(id => id.ToUpperInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+
+        List<string> externalIds = await _context.PrintJobs
+            .AsNoTracking()
+            .Where(pj => pj.SourcePrinterId == printerId
+                && pj.ExternalJobId != null
+                && candidatesUpper.Contains(pj.ExternalJobId!.ToUpper()))
+            .Select(pj => pj.ExternalJobId!)
+            .ToListAsync(ct);
+
+        return externalIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
     public async Task<HashSet<DateTime>> GetActualStartTimesForPrinterAsync(Guid printerId, CancellationToken ct = default)
     {
         List<DateTime> rawStartTimes = await _context.PrintJobs
@@ -619,6 +645,37 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
 
         return rawStartTimes
             .Select(startTime => startTime.AddTicks(-(startTime.Ticks % TimeSpan.TicksPerSecond)))
+            .ToHashSet();
+    }
+
+    public async Task<HashSet<DateTime>> GetActualStartTimesForPrinterAsync(
+        Guid printerId, IReadOnlyCollection<DateTime> candidateStartTimesUtc, CancellationToken ct = default)
+    {
+        if (candidateStartTimesUtc.Count == 0)
+        {
+            return new HashSet<DateTime>();
+        }
+
+        // Scope the query to the [min, max+1s) range covering every candidate whole-second time,
+        // rather than loading the printer's entire start-time history. The exact truncate-then-match
+        // semantics below are preserved so this is behaviorally identical to the unbounded load for
+        // any row within range, just cheaper to fetch.
+        DateTime rangeStartUtc = candidateStartTimesUtc.Min();
+        DateTime rangeEndUtc = candidateStartTimesUtc.Max().AddSeconds(1);
+
+        List<DateTime> rawStartTimes = await _context.PrintJobs
+            .AsNoTracking()
+            .Where(pj => (pj.SourcePrinterId == printerId || pj.AssignedPrinterId == printerId)
+                && pj.ActualStartTime.HasValue
+                && pj.ActualStartTime.Value >= rangeStartUtc
+                && pj.ActualStartTime.Value < rangeEndUtc)
+            .Select(pj => pj.ActualStartTime!.Value)
+            .ToListAsync(ct);
+
+        HashSet<DateTime> candidateSeconds = candidateStartTimesUtc.ToHashSet();
+        return rawStartTimes
+            .Select(startTime => startTime.AddTicks(-(startTime.Ticks % TimeSpan.TicksPerSecond)))
+            .Where(candidateSeconds.Contains)
             .ToHashSet();
     }
 
