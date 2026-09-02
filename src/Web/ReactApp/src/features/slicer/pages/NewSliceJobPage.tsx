@@ -1797,7 +1797,18 @@ export const NewSliceJobPage: React.FC = () => {
       qc.invalidateQueries({ queryKey: ['slice-jobs'] });
     },
     onError: (err: unknown) => {
-      setError(getErrorMessage(err, 'Failed to submit job'));
+      // Hicks review (issue #2374, round 2): a mutation-level failure (the
+      // request actually reached the API and the backend/network rejected
+      // it — distinct from the client-side guards in `submitSliceJob`, which
+      // already toast) previously only set the page-level `error` state.
+      // On Retry, the overlay stays anchored to the ORIGINAL failed job and
+      // keeps showing that job's stale `progress.error`, so a retry that
+      // fails again at this layer looked identical to one that never
+      // resubmitted at all — the same silent-no-op class of bug as #2374
+      // itself. Toast so this is visible regardless of sidebar/overlay state.
+      const msg = getErrorMessage(err, 'Failed to submit job');
+      setError(msg);
+      toast.error(msg);
     },
     onSettled: () => {
       retryInFlightRef.current = false;

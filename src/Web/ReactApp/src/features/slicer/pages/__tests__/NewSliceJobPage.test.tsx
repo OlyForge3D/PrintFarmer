@@ -2670,6 +2670,93 @@ describe('NewSliceJobPage', () => {
       await act(async () => { resolveRetry({ jobId: 'job-2', queuePosition: null }); });
     });
 
+    it('replays only the originally-active plate subset on Retry, not every model since added to the bed (Hicks review)', async () => {
+      const wrappedPage = buildWrappedPage('/slicer?modelId=model-3d-1');
+      render(wrappedPage);
+
+      await waitFor(() => {
+        expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      await waitFor(() => {
+        const processSelect = Array.from(document.querySelectorAll('select'))
+          .find((s) => s.value.startsWith('system:'));
+        expect(processSelect?.value).toBe('system:0.20mm Standard @MK4S');
+      });
+
+      const latestOnSlice = () =>
+        (slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as { onSlice?: (ids?: string[]) => void } | undefined)?.onSlice;
+      await waitFor(() => {
+        expect(latestOnSlice()).toBeTypeOf('function');
+      });
+
+      const modelsAtCall = () =>
+        (slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as {
+          models?: Array<{ id: string; libraryModelId?: string }>;
+        } | undefined)?.models ?? [];
+      const activeModel = modelsAtCall().find((model) => model.libraryModelId === 'model-3d-1');
+      expect(activeModel?.id).toBeTruthy();
+      const activeModelId = activeModel!.id;
+
+      // Add a SECOND bed model that is never part of `activeModelIds` on
+      // either the initial submit or the retry. With one bed model, dropping
+      // `activeModelIds` and falling back to "all of `bedModels`" is
+      // indistinguishable from correctly replaying the captured subset — the
+      // request payload comes out identical either way. A second model makes
+      // the two cases produce different payloads (2 sliceable models vs. 1),
+      // so this test actually proves `lastSubmittedModelIdsRef`/Retry only
+      // ever resubmit the originally-active subset, not "whatever `bedModels`
+      // holds by now".
+      act(() => {
+        fireEvent.click(screen.getByRole('button', { name: /add model/i }));
+      });
+      const option = await screen.findByRole('option', { name: /test-model\.stl/i });
+      act(() => {
+        fireEvent.doubleClick(option);
+      });
+      await waitFor(() => {
+        expect(modelsAtCall().length).toBe(2);
+      });
+
+      await act(async () => { latestOnSlice()!([activeModelId]); });
+
+      await waitFor(() => {
+        expect(sliceJobService.submitJob).toHaveBeenCalledTimes(1);
+      }, { timeout: 3000 });
+      const firstRequest = vi.mocked(sliceJobService.submitJob).mock.calls[0][0];
+      // Explicit single-model subset: singular field only, no plural array.
+      expect(firstRequest.modelFileUrl).toMatch(/\/3d-models\/file\/model-3d-1$/);
+      expect(firstRequest.modelFileUrls ?? []).toHaveLength(0);
+
+      act(() => {
+        jobProgressRef.set({
+          ...jobProgressRef.value,
+          status: 'Failed',
+          error: 'Slicer worker crashed while processing the plate.',
+        });
+      });
+      await waitFor(() => {
+        expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
+      });
+
+      const retryButtons = screen.getAllByRole('button', { name: 'Retry' });
+      await act(async () => { fireEvent.click(retryButtons[0]); });
+
+      await waitFor(() => {
+        expect(sliceJobService.submitJob).toHaveBeenCalledTimes(2);
+      });
+      const secondRequest = vi.mocked(sliceJobService.submitJob).mock.calls[1][0];
+
+      // If Retry had dropped `activeModelIds` (e.g. called `submitSliceJob()`
+      // with no arguments, or re-derived from `bedModels` fresh), the second
+      // model added above would now be on the "active plate" too, and this
+      // request would carry a 2-entry `modelFileUrls` instead of matching the
+      // single-model `firstRequest`.
+      expect(secondRequest).toEqual(firstRequest);
+      expect(secondRequest.modelFileUrls ?? []).toHaveLength(0);
+    });
+
     it('re-enables Retry after a guard blocks a replay attempt, instead of bricking it forever', async () => {
       await submitAndFail();
 
