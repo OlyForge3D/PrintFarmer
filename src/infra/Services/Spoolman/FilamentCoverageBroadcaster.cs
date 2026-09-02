@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
@@ -201,7 +202,15 @@ public class FilamentCoverageBroadcaster(
     {
         try
         {
-            await _hub.Clients.All.SendAsync(EventName, payload, ct).ConfigureAwait(false);
+            // Per-printer events (non-null PrinterId) only affect that printer's slice of the
+            // fleet snapshot, so scope delivery to clients that joined its group — mirroring the
+            // "printerupdated" pattern used at every polling call site above this one. Genuine
+            // fleet-scope events (null PrinterId, e.g. spool swap, printer added/removed) still
+            // fan out to every client since there is no single group that captures "everyone".
+            IClientProxy target = payload.PrinterId is { } printerId
+                ? _hub.Clients.Group(AuthorizedHubGroups.Printer(printerId))
+                : _hub.Clients.All;
+            await target.SendAsync(EventName, payload, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

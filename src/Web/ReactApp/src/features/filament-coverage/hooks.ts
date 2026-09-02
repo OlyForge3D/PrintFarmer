@@ -31,6 +31,18 @@ import type {
 const FLEET_STALE_MS = 15_000;
 const FLEET_REFETCH_MS = 30_000;
 
+/**
+ * Fleet-cache invalidation is throttled to at most once per this window
+ * (leading + trailing edge), instead of forcing a synchronous refetch on
+ * every per-printer tick (issue #2375). Backend polling cadence is ~5s per
+ * printer, so a 2s window still coalesces same-printer bursts and staggered
+ * multi-printer ticks into far fewer fleet recomputes, while staying well
+ * under the 15s fleet staleness budget so coverage never reads stale for
+ * longer than operators would tolerate. Exported so tests can assert against
+ * the real window instead of a hardcoded duplicate.
+ */
+export const FLEET_INVALIDATE_THROTTLE_MS = 2_000;
+
 export const filamentCoverageQueryKeys = {
   all: ["filament-coverage"] as const,
   fleet: () => [...filamentCoverageQueryKeys.all, "fleet"] as const,
@@ -47,12 +59,65 @@ export const filamentCoverageQueryKeys = {
 const coverageQueryClients = new Map<QueryClient, number>();
 let coverageSignalRUnsubscribe: (() => void) | undefined;
 
+interface FleetInvalidationState {
+  lastInvalidatedAt: number;
+  trailingTimer: ReturnType<typeof setTimeout> | undefined;
+  hasPendingTrailing: boolean;
+}
+
+/** Per-QueryClient throttle bookkeeping. A plain Map (not WeakMap) so tests can clear it. */
+const fleetInvalidationState = new Map<QueryClient, FleetInvalidationState>();
+
+function getFleetInvalidationState(qc: QueryClient): FleetInvalidationState {
+  let state = fleetInvalidationState.get(qc);
+  if (!state) {
+    state = { lastInvalidatedAt: 0, trailingTimer: undefined, hasPendingTrailing: false };
+    fleetInvalidationState.set(qc, state);
+  }
+  return state;
+}
+
+/**
+ * Invalidates the fleet coverage cache at most once per
+ * `FLEET_INVALIDATE_THROTTLE_MS`. The first invalidation in a burst fires
+ * immediately (leading edge) so a lone event is never delayed; subsequent
+ * events within the window are coalesced into exactly one trailing
+ * invalidation once the window closes, so fleet coverage still reflects the
+ * latest change shortly after a burst settles instead of going stale
+ * indefinitely.
+ */
+function invalidateFleetThrottled(qc: QueryClient): void {
+  const state = getFleetInvalidationState(qc);
+  const now = Date.now();
+  const elapsed = now - state.lastInvalidatedAt;
+  if (elapsed >= FLEET_INVALIDATE_THROTTLE_MS) {
+    state.lastInvalidatedAt = now;
+    void qc.invalidateQueries({ queryKey: filamentCoverageQueryKeys.fleet() });
+    return;
+  }
+
+  state.hasPendingTrailing = true;
+  if (state.trailingTimer !== undefined) return;
+  const remaining = FLEET_INVALIDATE_THROTTLE_MS - elapsed;
+  state.trailingTimer = setTimeout(() => {
+    state.trailingTimer = undefined;
+    if (!state.hasPendingTrailing) return;
+    state.hasPendingTrailing = false;
+    state.lastInvalidatedAt = Date.now();
+    void qc.invalidateQueries({ queryKey: filamentCoverageQueryKeys.fleet() });
+  }, remaining);
+}
+
 function invalidateCoverageCaches(event: FilamentCoverageChangedEvent) {
   coverageQueryClients.forEach((_count, qc) => {
     // Fleet cache is always affected — either a single printer changed
-    // (its slot in the batch response) or the whole fleet did.
-    void qc.invalidateQueries({ queryKey: filamentCoverageQueryKeys.fleet() });
+    // (its slot in the batch response) or the whole fleet did — but a
+    // per-tick refetch of the whole fleet is throttled/coalesced rather
+    // than forced on every event (issue #2375).
+    invalidateFleetThrottled(qc);
     if (event.printerId) {
+      // Per-printer invalidation stays immediate: it is cheap (a single
+      // printer's slice) and drives the detail view's own live update.
       void qc.invalidateQueries({
         queryKey: filamentCoverageQueryKeys.printer(event.printerId),
       });
@@ -103,6 +168,12 @@ export function __resetFilamentCoverageSubscriptionForTests(): void {
     coverageSignalRUnsubscribe = undefined;
   }
   coverageQueryClients.clear();
+  for (const state of fleetInvalidationState.values()) {
+    if (state.trailingTimer !== undefined) {
+      clearTimeout(state.trailingTimer);
+    }
+  }
+  fleetInvalidationState.clear();
 }
 
 export interface UseFleetFilamentCoverageOptions<
