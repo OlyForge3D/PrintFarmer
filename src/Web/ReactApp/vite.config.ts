@@ -53,13 +53,45 @@ function emitVersionJson() {
 //   4. NEVER raise `chunkSizeWarningLimit`. If a new heavy library
 //      is added, add it here (or lazy-load its consumers) instead
 //      of silencing the warning.
-// Evaluated in order; the first matching group wins.
+//
+// NOTE: this is expressed via `output.codeSplitting.groups` (rolldown's
+// modern replacement for the deprecated `manualChunks` function form), not
+// `manualChunks` itself. `manualChunks(id)` returning a single, ad-hoc
+// chunk name per id is NOT equivalent here: rolldown treats every distinct
+// name returned from one `manualChunks` function as sub-groups of ONE
+// overarching group, and small/heavily-shared modules (e.g. `clsx`, the
+// bare `react-dom` package) were empirically observed to get silently
+// re-merged back into whichever other manual chunk already pulled them in
+// (`vendor-charts`) instead of materializing their own chunk — reproducing
+// #2390 even with a dedicated entry. Declaring each package family as its
+// own independent `{ name, test, priority }` group below (the officially
+// documented multi-group pattern) does not have that failure mode: each
+// group is matched purely by `test`, with no cross-group fallback merging.
+// Priority mirrors this array's order (first = highest) even though the
+// `test` patterns below don't currently overlap, to keep the "first match
+// wins" intent explicit and safe against future additions.
 const MANUAL_CHUNK_GROUPS: Array<[string, string[]]> = [
   ['routing', ['react-router']],
   // Keep only framework-agnostic Three modules here. Fiber and Drei
   // follow the lazy 3D consumers so their React dependencies cannot
   // turn this shared core into an eager app-shell chunk.
   ['three', ['three', 'three-stdlib']],
+  // `clsx` and the bare `react-dom` package are used directly by the
+  // eager main entry (e.g. `clsx` for class-name composition across the
+  // app shell, `createPortal` from `react-dom` for Modal-style portals)
+  // AND internally by `recharts` (its Legend/Tooltip/portal layers do
+  // `import { createPortal } from 'react-dom'`, and it uses `clsx`
+  // throughout). Neither module had a manual-chunk entry of its own, so
+  // rolldown-vite's default algorithm physically homed both inside the
+  // `vendor-charts` chunk below, then had to add a genuine static
+  // `import` edge from the main entry back into that ~400 kB chunk just
+  // to reach these two small, otherwise-unrelated bindings — forcing
+  // every route to fetch/parse all of `vendor-charts` (#2390). Same
+  // technique as `vendor-otel-api` above: give the shared piece its own
+  // stable micro-chunk so the heavy chunk below no longer needs to be
+  // referenced from the entry at all.
+  ['vendor-clsx', ['clsx']],
+  ['vendor-react-dom', ['react-dom']],
   // Charting library — used across analytics/statistics/maintenance
   // dashboards; ~400 kB minified. Splitting keeps it out of the
   // main entry chunk (loaded only when a chart-using route mounts).
@@ -195,16 +227,18 @@ export default defineConfig({
       // External modules expect to be provided by the runtime environment
       // In a browser SPA, we need all dependencies bundled
       output: {
-        // See the MANUAL_CHUNK_GROUPS chunk-splitting policy above.
-        // NOTE: rolldown-vite requires `manualChunks` as a function rather than
-        // the plain object map Rollup accepted; MANUAL_CHUNK_GROUPS above is
-        // the same grouping data, just consumed via id-matching instead.
-        manualChunks(id) {
-          for (const [chunkName, packages] of MANUAL_CHUNK_GROUPS) {
-            if (packages.some((pkg) => id.includes(`/node_modules/${pkg}/`))) {
-              return chunkName;
-            }
-          }
+        // See the MANUAL_CHUNK_GROUPS chunk-splitting policy above. Each
+        // group is independent (matched only by its own `test`), so a
+        // module shared by two groups' consumers (e.g. `clsx`/`react-dom`
+        // needed by both the entry and `vendor-charts`) reliably gets its
+        // own dedicated chunk instead of being folded into whichever
+        // group's modules happen to import it first (#2390).
+        codeSplitting: {
+          groups: MANUAL_CHUNK_GROUPS.map(([name, packages], index) => ({
+            name,
+            test: (id: string) => packages.some((pkg) => id.includes(`/node_modules/${pkg}/`)),
+            priority: MANUAL_CHUNK_GROUPS.length - index,
+          })),
         },
       }
     }
