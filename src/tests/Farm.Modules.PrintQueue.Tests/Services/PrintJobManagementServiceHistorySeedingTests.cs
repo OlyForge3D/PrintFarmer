@@ -78,9 +78,11 @@ public class PrintJobManagementServiceHistorySeedingTests
         Mock<IPrintJobManagementRepository> repository = new();
         repository.Setup(r => r.GetEnabledPrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync([printer]);
-        repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+        repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(
+                printerId, It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
-        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(
+                printerId, It.IsAny<IReadOnlyCollection<DateTime>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => []);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
                 printerId,
@@ -172,9 +174,11 @@ public class PrintJobManagementServiceHistorySeedingTests
         Mock<IPrintJobManagementRepository> repository = new();
         repository.Setup(r => r.GetEnabledPrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync([printer]);
-        repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+        repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(
+                printerId, It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(["ext-active-2"]);
-        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(
+                printerId, It.IsAny<IReadOnlyCollection<DateTime>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => []);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
                 printerId,
@@ -249,9 +253,11 @@ public class PrintJobManagementServiceHistorySeedingTests
         Mock<IPrintJobManagementRepository> repository = new();
         repository.Setup(r => r.GetEnabledPrintersAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync([printer]);
-        repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+        repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(
+                printerId, It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync([]);
-        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(
+                printerId, It.IsAny<IReadOnlyCollection<DateTime>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => []);
         repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
                 printerId,
@@ -291,6 +297,203 @@ public class PrintJobManagementServiceHistorySeedingTests
             null,
             It.IsAny<CancellationToken>()), Times.Once);
         repository.Verify(r => r.UpdatePrinterLastHistorySeedAsync(It.IsAny<Guid>(), It.IsAny<DateTime>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SyncActiveExternalJobsFromPrintersAsync_ForMoonraker_RequestsReducedLimitWithDescendingOrder()
+    {
+        // Moonraker's history API is verified newest-first, so active sync should request a small
+        // descending-order page instead of the full 1000-record fetch used for other providers.
+        Guid printerId = Guid.NewGuid();
+        DateTime startUtc = DateTime.UtcNow.AddMinutes(-3);
+        long startUnix = new DateTimeOffset(startUtc).ToUnixTimeSeconds();
+
+        Printer printer = new()
+        {
+            Id = printerId,
+            Name = "Moonraker Active External",
+            Backend = (int)PrinterBackend.Moonraker,
+            IsEnabled = true,
+            ServiceState = new PrinterServiceState { PrinterId = printerId, LastHistorySeedUtc = DateTime.UtcNow.AddMinutes(-30) }
+        };
+
+        HistoryListResponse historyResponse = new()
+        {
+            Count = 1,
+            Jobs =
+            [
+                new HistoryJob
+                {
+                    JobId = "moonraker-active-1",
+                    Filename = "moonraker-active.gcode",
+                    Status = "printing",
+                    StartTime = startUnix,
+                    EndTime = null,
+                    FilamentUsed = 100,
+                    Metadata = []
+                }
+            ]
+        };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetEnabledPrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([printer]);
+        repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(
+                printerId, It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(
+                printerId, It.IsAny<IReadOnlyCollection<DateTime>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
+        repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
+                printerId,
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJob?)null);
+        repository.Setup(r => r.FindGcodeFileByFilenameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((GcodeFile?)null);
+        repository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        repository.Setup(r => r.UpdatePrinterLastHistorySeedAsync(printerId, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        Mock<IPrintersService> printersService = new();
+        printersService.Setup(p => p.GetHistoryListAsync(
+                printerId,
+                50,
+                0,
+                It.IsAny<DateTime?>(),
+                null,
+                "desc",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(historyResponse);
+
+        PrintJobManagementService service = CreateService(repository, printersService);
+
+        await service.SyncActiveExternalJobsFromPrintersAsync();
+
+        printersService.Verify(p => p.GetHistoryListAsync(
+            printerId,
+            50,
+            0,
+            It.IsAny<DateTime?>(),
+            null,
+            "desc",
+            It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(r => r.Add(It.IsAny<PrintJob>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SyncActiveExternalJobsFromPrintersAsync_ForUnverifiedOrderingProvider_StillDiscoversActiveJobNotAmongMostRecentRecords()
+    {
+        // Regression test required by issue #2376: for a provider whose history ordering cannot be
+        // established (PrusaLink here; also applies to OctoPrint and SDCP), the fetch limit must NOT
+        // be reduced. This test proves an active job placed at the END of a large returned page (i.e.
+        // not among what a naive "most recent N" assumption would consider recent) is still discovered,
+        // specifically because the full fallback limit is requested rather than a small page.
+        Guid printerId = Guid.NewGuid();
+        DateTime startUtc = DateTime.UtcNow.AddMinutes(-1);
+        long startUnix = new DateTimeOffset(startUtc).ToUnixTimeSeconds();
+
+        Printer printer = new()
+        {
+            Id = printerId,
+            Name = "Prusa Active Buried Job",
+            Backend = (int)PrinterBackend.PrusaLink,
+            IsEnabled = true,
+            ServiceState = new PrinterServiceState { PrinterId = printerId, LastHistorySeedUtc = DateTime.UtcNow.AddMinutes(-30) }
+        };
+
+        // Simulate a page far larger than any small "reduced" limit (e.g. 50) would allow, with the
+        // active (non-terminal) job positioned last - i.e. NOT among the first N entries.
+        List<HistoryJob> jobs = [];
+        for (int i = 0; i < 60; i++)
+        {
+            jobs.Add(new HistoryJob
+            {
+                JobId = $"prusa-completed-{i}",
+                Filename = $"completed-{i}.gcode",
+                Status = "completed",
+                StartTime = startUnix - (60 - i),
+                EndTime = startUnix - (60 - i) + 30,
+                FilamentUsed = 50,
+                Metadata = []
+            });
+        }
+
+        jobs.Add(new HistoryJob
+        {
+            JobId = "prusa-active-buried",
+            Filename = "active-buried.gcode",
+            Status = "printing",
+            StartTime = startUnix,
+            EndTime = null,
+            FilamentUsed = 150,
+            Metadata = []
+        });
+
+        HistoryListResponse historyResponse = new() { Count = jobs.Count, Jobs = [.. jobs] };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetEnabledPrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([printer]);
+        repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(
+                printerId, It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(
+                printerId, It.IsAny<IReadOnlyCollection<DateTime>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => []);
+        repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
+                printerId,
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJob?)null);
+        repository.Setup(r => r.FindGcodeFileByFilenameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((GcodeFile?)null);
+        repository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        repository.Setup(r => r.UpdatePrinterLastHistorySeedAsync(printerId, It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        PrintJob? addedJob = null;
+        repository.Setup(r => r.Add(It.IsAny<PrintJob>()))
+            .Callback<PrintJob>(job => addedJob = job);
+
+        Mock<IPrintersService> printersService = new();
+
+        // Only the unchanged (fallback) limit/order combination returns the full page. If the
+        // implementation regressed to reduce PrusaLink's limit or request an explicit order, this
+        // mock would not match and GetHistoryListAsync would return a default/empty response,
+        // causing the active job to go undiscovered and the assertions below to fail.
+        printersService.Setup(p => p.GetHistoryListAsync(
+                printerId,
+                1000,
+                0,
+                It.IsAny<DateTime?>(),
+                null,
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(historyResponse);
+
+        PrintJobManagementService service = CreateService(repository, printersService);
+
+        await service.SyncActiveExternalJobsFromPrintersAsync();
+
+        printersService.Verify(p => p.GetHistoryListAsync(
+            printerId,
+            1000,
+            0,
+            It.IsAny<DateTime?>(),
+            null,
+            null,
+            It.IsAny<CancellationToken>()), Times.Once);
+        repository.Verify(r => r.Add(It.IsAny<PrintJob>()), Times.Once);
+        Assert.NotNull(addedJob);
+        Assert.Equal("prusa-active-buried", addedJob!.ExternalJobId);
+        Assert.Equal(PrintJobStatus.Printing, addedJob.Status);
     }
 
     [Fact]

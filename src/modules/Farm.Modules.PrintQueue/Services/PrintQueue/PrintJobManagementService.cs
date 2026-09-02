@@ -121,6 +121,42 @@ public class PrintJobManagementService(
         InitialFetchLimit: 1000,
         IncrementalFetchLimit: 1000);
 
+    // Active-job sync only cares about the handful of currently non-terminal jobs, which are
+    // always the most recently started jobs a printer has recorded (a printer cannot start a new
+    // job while a prior one is still non-terminal). Requesting a small newest-first page instead
+    // of the full 1000-record fetch is only safe for backends whose history API is *verified* to
+    // return newest-first ordering; see GetActiveSyncFetchParameters for the per-backend evidence.
+    private const int ActiveSyncSmallFetchLimit = 50;
+
+    /// <summary>
+    /// Resolves the fetch limit and requested order to use for the active-job sync path
+    /// (<see cref="ActiveExternalSyncOptions"/>), based on verified per-backend history ordering.
+    /// Only shrink the fetch limit for a backend whose history API is documented/verified to return
+    /// newest-first ordering; otherwise keep the full fallback limit so an active job that doesn't
+    /// sort into a small page is never missed.
+    /// </summary>
+    private static (int Limit, string? Order) GetActiveSyncFetchParameters(PrinterBackend backend, int fallbackLimit)
+    {
+        return backend switch
+        {
+            // Moonraker's `server/history/list` API defaults to newest-first (desc) and honors an
+            // explicit `order=desc` request (confirmed against Moonraker's public API docs and
+            // mirrored by our own Moonraker emulator). Safe to request only a small page.
+            PrinterBackend.Moonraker => (ActiveSyncSmallFetchLimit, "desc"),
+
+            // OctoPrint, PrusaLink, and SDCP clients only apply an explicit sort when `order` is
+            // requested, and requesting an explicit order forces those clients into a full
+            // historical scan anyway (see each client's `requiresFullScan` gate) - so requesting a
+            // small page plus an explicit order does not avoid the full fetch there. Their *native*
+            // (order-omitted) page ordering is not documented or verified in this codebase, so a
+            // small page could silently miss an active job that doesn't sort into the first page.
+            // Keep the full fetch limit for these until per-backend ordering is verified against
+            // the live API. FlashForge does not implement ISupportsHistory at all and never reaches
+            // this path.
+            _ => (fallbackLimit, null),
+        };
+    }
+
     private static readonly ConcurrentDictionary<Guid, PrinterSyncLockState> PrinterHistorySyncLocks = new();
     private static readonly TimeSpan PrinterHistorySyncLockIdleTtl = TimeSpan.FromMinutes(15);
     private static int _historySyncReleaseCounter;
@@ -2748,15 +2784,20 @@ public class PrintJobManagementService(
                 ? printer.ServiceState?.LastHistorySeedUtc ?? DateTime.MinValue
                 : DateTime.MinValue;
 
+            int fallbackFetchLimit = isInitialSeed ? options.InitialFetchLimit : options.IncrementalFetchLimit;
+            (int fetchLimit, string? fetchOrder) = options.ActiveOnly
+                ? GetActiveSyncFetchParameters((PrinterBackend)printer.Backend, fallbackFetchLimit)
+                : (fallbackFetchLimit, null);
+
             // Get history from printer via PrintersService.
             // Active sync intentionally does not participate in shared history watermark reads/writes.
             HistoryListResponse history = await _printersService.GetHistoryListAsync(
                 printer.Id,
-                limit: isInitialSeed ? options.InitialFetchLimit : options.IncrementalFetchLimit,
+                limit: fetchLimit,
                 start: 0,
                 since: seedSinceUtc,
                 before: null,
-                order: null,
+                order: fetchOrder,
                 cancellationToken);
 
             if (history.Jobs.Length == 0)
@@ -2769,12 +2810,39 @@ public class PrintJobManagementService(
                 "[{LogPrefix}] Retrieved {JobCount} history jobs from printer {PrinterName} (initial={IsInitial}, usesWatermark={UsesWatermark})",
                 options.LogPrefix, history.Jobs.Length, printer.Name, isInitialSeed, hasWatermark);
 
-            // Get all existing seeded jobs and actual start times for this printer to check for duplicates.
+            // Get existing seeded jobs and actual start times for this printer to check for duplicates.
             // History providers report start times as Unix seconds, so exact UTC-second matching is stable here.
-            HashSet<string> existingExternalJobIds = await _repository.GetExternalJobIdsForPrinterAsync(
-                printer.Id, cancellationToken);
-            HashSet<DateTime> existingActualStartTimes = await _repository.GetActualStartTimesForPrinterAsync(
-                printer.Id, cancellationToken);
+            // Active sync only ever looks up IDs/times belonging to jobs in the fetched page (see the loop
+            // below), so it queries the database scoped to just those candidates instead of materializing
+            // the printer's entire history. Full-history seeding still needs the broad load because it can
+            // legitimately span many more distinct printer runs per cycle.
+            HashSet<string> existingExternalJobIds;
+            HashSet<DateTime> existingActualStartTimes;
+            if (options.ActiveOnly)
+            {
+                List<string> candidateExternalJobIds = history.Jobs
+                    .Select(j => j.JobId)
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                List<DateTime> candidateStartTimesUtc = history.Jobs
+                    .Select(j => DateTimeOffset.FromUnixTimeSeconds((long)j.StartTime).UtcDateTime)
+                    .Where(startTime => startTime > DateTime.UnixEpoch)
+                    .Distinct()
+                    .ToList();
+
+                existingExternalJobIds = await _repository.GetExternalJobIdsForPrinterAsync(
+                    printer.Id, candidateExternalJobIds, cancellationToken);
+                existingActualStartTimes = await _repository.GetActualStartTimesForPrinterAsync(
+                    printer.Id, candidateStartTimesUtc, cancellationToken);
+            }
+            else
+            {
+                existingExternalJobIds = await _repository.GetExternalJobIdsForPrinterAsync(
+                    printer.Id, cancellationToken);
+                existingActualStartTimes = await _repository.GetActualStartTimesForPrinterAsync(
+                    printer.Id, cancellationToken);
+            }
 
             foreach (HistoryJob historyJob in history.Jobs)
             {

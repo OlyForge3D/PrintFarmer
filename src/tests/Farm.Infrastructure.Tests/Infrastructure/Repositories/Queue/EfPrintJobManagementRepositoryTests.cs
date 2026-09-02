@@ -120,6 +120,120 @@ public class EfPrintJobManagementRepositoryTests
             .UseInMemoryDatabase($"{testName}_{Guid.NewGuid():N}")
             .Options;
 
+    [Fact]
+    public async Task GetExternalJobIdsForPrinterAsync_Scoped_ReturnsOnlyCandidatesPresentCaseInsensitively()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        Guid printerId = Guid.NewGuid();
+        Guid otherPrinterId = Guid.NewGuid();
+
+        await using (AppDbContext seedContext = new(options))
+        {
+            await seedContext.Database.EnsureCreatedAsync();
+
+            PrintJob matchingDifferentCase = new PrintJobBuilder().WithAssignedPrinterId(null).Build();
+            matchingDifferentCase.GcodeFileId = null;
+            matchingDifferentCase.GcodeFile = null;
+            matchingDifferentCase.SourcePrinterId = printerId;
+            matchingDifferentCase.ExternalJobId = "Ext-Job-ABC";
+
+            PrintJob notInCandidateList = new PrintJobBuilder().WithAssignedPrinterId(null).Build();
+            notInCandidateList.GcodeFileId = null;
+            notInCandidateList.GcodeFile = null;
+            notInCandidateList.SourcePrinterId = printerId;
+            notInCandidateList.ExternalJobId = "ext-job-xyz";
+
+            PrintJob differentPrinter = new PrintJobBuilder().WithAssignedPrinterId(null).Build();
+            differentPrinter.GcodeFileId = null;
+            differentPrinter.GcodeFile = null;
+            differentPrinter.SourcePrinterId = otherPrinterId;
+            differentPrinter.ExternalJobId = "ext-job-abc";
+
+            seedContext.PrintJobs.AddRange(matchingDifferentCase, notInCandidateList, differentPrinter);
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using AppDbContext queryContext = new(options);
+        EfPrintJobManagementRepository repository = new(queryContext);
+
+        // Candidate uses lowercase; the seeded matching row uses mixed case - the scoped query must
+        // still find it via case-insensitive comparison, matching the original StringComparer.OrdinalIgnoreCase
+        // in-memory HashSet semantics.
+        HashSet<string> result = await repository.GetExternalJobIdsForPrinterAsync(
+            printerId, ["ext-job-abc"]);
+
+        string found = Assert.Single(result);
+        Assert.Equal("Ext-Job-ABC", found);
+    }
+
+    [Fact]
+    public async Task GetExternalJobIdsForPrinterAsync_Scoped_WithNoCandidates_ReturnsEmptyWithoutQuerying()
+    {
+        DbContextOptions<AppDbContext> options =
+            CreateInMemoryOptions(nameof(GetExternalJobIdsForPrinterAsync_Scoped_WithNoCandidates_ReturnsEmptyWithoutQuerying));
+        Guid printerId = Guid.NewGuid();
+
+        await using AppDbContext queryContext = new(options);
+        EfPrintJobManagementRepository repository = new(queryContext);
+
+        HashSet<string> result = await repository.GetExternalJobIdsForPrinterAsync(printerId, []);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task GetActualStartTimesForPrinterAsync_Scoped_MatchesTruncatedCandidateAndExcludesOutOfRange()
+    {
+        DbContextOptions<AppDbContext> options =
+            CreateInMemoryOptions(nameof(GetActualStartTimesForPrinterAsync_Scoped_MatchesTruncatedCandidateAndExcludesOutOfRange));
+        Guid printerId = Guid.NewGuid();
+
+        DateTime candidateWholeSecond = new DateTime(2024, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        DateTime subSecondMatchingRow = candidateWholeSecond.AddMilliseconds(250);
+        DateTime outOfRangeRow = candidateWholeSecond.AddHours(2);
+
+        await using (AppDbContext seedContext = new(options))
+        {
+            PrintJob withinCandidateRange = new PrintJobBuilder().WithActualStartTime(subSecondMatchingRow).Build();
+            withinCandidateRange.SourcePrinterId = printerId;
+
+            PrintJob outsideCandidateRange = new PrintJobBuilder().WithActualStartTime(outOfRangeRow).Build();
+            outsideCandidateRange.SourcePrinterId = printerId;
+
+            seedContext.PrintJobs.AddRange(withinCandidateRange, outsideCandidateRange);
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using AppDbContext queryContext = new(options);
+        EfPrintJobManagementRepository repository = new(queryContext);
+
+        HashSet<DateTime> result = await repository.GetActualStartTimesForPrinterAsync(
+            printerId, [candidateWholeSecond]);
+
+        DateTime matched = Assert.Single(result);
+        Assert.Equal(candidateWholeSecond, matched);
+    }
+
+    [Fact]
+    public async Task GetActualStartTimesForPrinterAsync_Scoped_WithNoCandidates_ReturnsEmptyWithoutQuerying()
+    {
+        DbContextOptions<AppDbContext> options =
+            CreateInMemoryOptions(nameof(GetActualStartTimesForPrinterAsync_Scoped_WithNoCandidates_ReturnsEmptyWithoutQuerying));
+        Guid printerId = Guid.NewGuid();
+
+        await using AppDbContext queryContext = new(options);
+        EfPrintJobManagementRepository repository = new(queryContext);
+
+        HashSet<DateTime> result = await repository.GetActualStartTimesForPrinterAsync(printerId, []);
+
+        Assert.Empty(result);
+    }
+
     [Theory]
     [InlineData(ReadOnlyPrintJobQuery.JobDetails)]
     [InlineData(ReadOnlyPrintJobQuery.FilteredQueue)]
