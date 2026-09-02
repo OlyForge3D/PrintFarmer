@@ -316,8 +316,15 @@ describe('SetupWizard account step validation (#2365)', () => {
     const firstNameInput = screen.getByLabelText(/First Name/, { selector: 'input' });
     await waitFor(() => expect(firstNameInput).toHaveFocus());
 
-    expect(screen.getByLabelText(/First Name/, { selector: 'input' })).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getAllByRole('alert').length).toBeGreaterThan(0);
+    expect(firstNameInput).toHaveAttribute('aria-invalid', 'true');
+    expect(firstNameInput).toHaveAttribute('aria-describedby', 'firstName-error');
+    expect(screen.getByText('First name is required')).toHaveAttribute('id', 'firstName-error');
+    expect(screen.getByText('Last name is required')).toBeInTheDocument();
+    expect(screen.getByText('Username is required')).toBeInTheDocument();
+    expect(screen.getByText('Email is required')).toBeInTheDocument();
+    expect(screen.getByText('Password is required')).toBeInTheDocument();
+    expect(screen.getByText('Please confirm your password')).toBeInTheDocument();
+    expect(screen.getAllByRole('alert').length).toBe(6);
     expect(mockCreateInitialAdmin).not.toHaveBeenCalled();
   });
 
@@ -331,6 +338,8 @@ describe('SetupWizard account step validation (#2365)', () => {
 
     const usernameInput = screen.getByLabelText(/Username/, { selector: 'input' });
     await waitFor(() => expect(usernameInput).toHaveFocus());
+    expect(screen.queryByText('First name is required')).not.toBeInTheDocument();
+    expect(screen.queryByText('Last name is required')).not.toBeInTheDocument();
     expect(mockCreateInitialAdmin).not.toHaveBeenCalled();
   });
 
@@ -344,7 +353,9 @@ describe('SetupWizard account step validation (#2365)', () => {
     expect(firstNameInput).toHaveAttribute('aria-invalid', 'true');
 
     fireEvent.change(firstNameInput, { target: { value: 'Ada' } });
-    expect(firstNameInput).toHaveAttribute('aria-invalid', 'false');
+    expect(firstNameInput).not.toHaveAttribute('aria-invalid');
+    expect(firstNameInput).not.toHaveAttribute('aria-describedby');
+    expect(screen.queryByText('First name is required')).not.toBeInTheDocument();
   });
 });
 

@@ -71,7 +71,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const passwordInputRef = useRef<HTMLInputElement>(null);
   const confirmPasswordInputRef = useRef<HTMLInputElement>(null);
   const accountFieldOrder: (keyof SetupFormData)[] = ['firstName', 'lastName', 'username', 'email', 'password', 'confirmPassword'];
-  const accountFieldRefs: Record<keyof SetupFormData, React.RefObject<HTMLInputElement>> = {
+  const accountFieldRefs: Record<keyof SetupFormData, React.RefObject<HTMLInputElement | null>> = {
     firstName: firstNameInputRef,
     lastName: lastNameInputRef,
     username: usernameInputRef,
@@ -244,8 +244,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     else if (formData.password.length < passwordPolicy.minLength) errs.password = `Min ${passwordPolicy.minLength} characters`;
     if (!formData.confirmPassword) errs.confirmPassword = 'Please confirm your password';
     else if (formData.password !== formData.confirmPassword) errs.confirmPassword = 'Passwords do not match';
-    if (!formData.firstName.trim()) errs.firstName = 'Required';
-    if (!formData.lastName.trim()) errs.lastName = 'Required';
+    if (!formData.firstName.trim()) errs.firstName = 'First name is required';
+    if (!formData.lastName.trim()) errs.lastName = 'Last name is required';
     return errs;
   };
   const ensureAdminAuthenticated = async () => {
@@ -463,29 +463,29 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label htmlFor="firstName" className="block text-sm font-medium text-pf-text-primary mb-2"><AccountIcon className="inline h-4 w-4 mr-1"/>First Name *</label>
-          <input id="firstName" ref={firstNameInputRef} type="text" value={formData.firstName} onChange={e => handleInputChange('firstName', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="given-name" disabled={submitting} aria-invalid={!!accountErrors.firstName} aria-describedby={accountErrors.firstName ? 'firstName-error' : undefined} />
+          <input id="firstName" ref={firstNameInputRef} type="text" value={formData.firstName} onChange={e => handleInputChange('firstName', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="given-name" disabled={submitting} aria-required="true" aria-invalid={accountErrors.firstName ? true : undefined} aria-describedby={accountErrors.firstName ? 'firstName-error' : undefined} />
           {accountErrors.firstName && <p id="firstName-error" className="text-xs text-pf-error" role="alert">{accountErrors.firstName}</p>}
         </div>
         <div>
           <label htmlFor="lastName" className="block text-sm font-medium text-pf-text-primary mb-2">Last Name *</label>
-          <input id="lastName" ref={lastNameInputRef} type="text" value={formData.lastName} onChange={e => handleInputChange('lastName', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="family-name" disabled={submitting} aria-invalid={!!accountErrors.lastName} aria-describedby={accountErrors.lastName ? 'lastName-error' : undefined} />
+          <input id="lastName" ref={lastNameInputRef} type="text" value={formData.lastName} onChange={e => handleInputChange('lastName', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="family-name" disabled={submitting} aria-required="true" aria-invalid={accountErrors.lastName ? true : undefined} aria-describedby={accountErrors.lastName ? 'lastName-error' : undefined} />
           {accountErrors.lastName && <p id="lastName-error" className="text-xs text-pf-error" role="alert">{accountErrors.lastName}</p>}
         </div>
       </div>
       <div>
         <label htmlFor="username" className="block text-sm font-medium text-pf-text-primary mb-2"><AccountIcon className="inline h-4 w-4 mr-1"/>Username *</label>
-        <input id="username" ref={usernameInputRef} type="text" name="username" value={formData.username} onChange={e => handleInputChange('username', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="username" disabled={submitting} aria-invalid={!!accountErrors.username} aria-describedby={accountErrors.username ? 'username-error' : undefined} />
+        <input id="username" ref={usernameInputRef} type="text" name="username" value={formData.username} onChange={e => handleInputChange('username', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="username" disabled={submitting} aria-required="true" aria-invalid={accountErrors.username ? true : undefined} aria-describedby={accountErrors.username ? 'username-error' : undefined} />
         {accountErrors.username && <p id="username-error" className="text-xs text-pf-error" role="alert">{accountErrors.username}</p>}
       </div>
       <div>
         <label htmlFor="email" className="block text-sm font-medium text-pf-text-primary mb-2"><EmailIcon className="inline h-4 w-4 mr-1"/>Email *</label>
-        <input id="email" ref={emailInputRef} type="email" name="email" value={formData.email} onChange={e => handleInputChange('email', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="email" disabled={submitting} aria-invalid={!!accountErrors.email} aria-describedby={accountErrors.email ? 'email-error' : undefined} />
+        <input id="email" ref={emailInputRef} type="email" name="email" value={formData.email} onChange={e => handleInputChange('email', e.target.value)} className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" autoComplete="email" disabled={submitting} aria-required="true" aria-invalid={accountErrors.email ? true : undefined} aria-describedby={accountErrors.email ? 'email-error' : undefined} />
         {accountErrors.email && <p id="email-error" className="text-xs text-pf-error" role="alert">{accountErrors.email}</p>}
       </div>
       <div>
         <label htmlFor="password" className="block text-sm font-medium text-pf-text-primary mb-2"><LockIcon className="inline h-4 w-4 mr-1"/>Password *</label>
         <div className="relative">
-          <input id="password" ref={passwordInputRef} type={showPassword ? 'text':'password'} name="password" value={formData.password} onChange={e => handleInputChange('password', e.target.value)} autoComplete="new-password" className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10" disabled={submitting} aria-invalid={!!accountErrors.password} aria-describedby={accountErrors.password ? 'password-error' : undefined} />
+          <input id="password" ref={passwordInputRef} type={showPassword ? 'text':'password'} name="password" value={formData.password} onChange={e => handleInputChange('password', e.target.value)} autoComplete="new-password" className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary pr-10" disabled={submitting} aria-required="true" aria-invalid={accountErrors.password ? true : undefined} aria-describedby={accountErrors.password ? 'password-error' : undefined} />
           <Button
             type="button"
             onClick={() => setShowPassword(p => !p)}
@@ -509,7 +509,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       </div>
       <div>
         <label htmlFor="confirmPassword" className="block text-sm font-medium text-pf-text-primary mb-2"><LockIcon className="inline h-4 w-4 mr-1"/>Confirm Password *</label>
-        <input id="confirmPassword" ref={confirmPasswordInputRef} type="password" name="confirmPassword" value={formData.confirmPassword} onChange={e => handleInputChange('confirmPassword', e.target.value)} autoComplete="new-password" className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" disabled={submitting} aria-invalid={!!accountErrors.confirmPassword} aria-describedby={accountErrors.confirmPassword ? 'confirmPassword-error' : undefined} />
+        <input id="confirmPassword" ref={confirmPasswordInputRef} type="password" name="confirmPassword" value={formData.confirmPassword} onChange={e => handleInputChange('confirmPassword', e.target.value)} autoComplete="new-password" className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary" disabled={submitting} aria-required="true" aria-invalid={accountErrors.confirmPassword ? true : undefined} aria-describedby={accountErrors.confirmPassword ? 'confirmPassword-error' : undefined} />
         {accountErrors.confirmPassword && <p id="confirmPassword-error" className="text-xs text-pf-error" role="alert">{accountErrors.confirmPassword}</p>}
       </div>
       <div className="flex justify-end">
