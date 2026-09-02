@@ -450,27 +450,30 @@ public class TagService(
 
             string lowerQuery = query.ToLowerInvariant().Trim();
 
-            // Get all tags and their usage counts
+            // Get all tags, then filter by name BEFORE computing any usage counts.
             IReadOnlyList<Tag> allTags = await _tagRepository.ListAllAsync(ct);
+            List<Tag> matchingTags = allTags
+                .Where(tag => tag.Name.Contains(lowerQuery, StringComparison.OrdinalIgnoreCase))
+                .ToList();
 
-            // Filter and enrich with usage counts
-            List<TagSuggestionDto> suggestions = new();
-            foreach (Tag tag in allTags.Where(tag => tag.Name.Contains(lowerQuery, StringComparison.OrdinalIgnoreCase)))
-            {
-                // Count how many objects use this tag (across all types)
-                int usageCount = await _tagRepository.GetTagUsageCountAsync(tag.Id, ct);
+            // Batched: a small fixed number of GROUP BY queries for the matched tags' usage
+            // counts, instead of one round trip per tag (issue #2362).
+            IReadOnlyDictionary<Guid, int> usageCounts = await _tagRepository.GetTagUsageCountsAsync(
+                matchingTags.Select(t => t.Id).ToList(), ct);
 
-                suggestions.Add(new TagSuggestionDto
+            List<TagSuggestionDto> suggestions = matchingTags
+                .Select(tag => new TagSuggestionDto
                 {
                     Id = tag.Id,
                     Name = tag.Name,
                     Color = tag.Color,
-                    UsageCount = usageCount,
+                    UsageCount = usageCounts.TryGetValue(tag.Id, out int count) ? count : 0,
                     IsPopular = false
-                });
-            }
+                })
+                .OrderBy(s => s.Name)
+                .ToList();
 
-            return suggestions.OrderBy(s => s.Name).ToList();
+            return suggestions;
         }
         catch (Exception ex)
         {
@@ -496,19 +499,15 @@ public class TagService(
 
             IReadOnlyList<Tag> allTags = await _tagRepository.ListAllAsync(ct);
 
-            // Get usage counts for all tags
-            List<(Tag Tag, int Count)> tagsWithCounts = new();
-            foreach (Tag tag in allTags)
-            {
-                int usageCount = await _tagRepository.GetTagUsageCountAsync(tag.Id, ct);
-                if (usageCount > 0)
-                {
-                    tagsWithCounts.Add((tag, usageCount));
-                }
-            }
+            // Batched: a small fixed number of GROUP BY queries for ALL tags' usage counts,
+            // instead of one round trip per tag (issue #2362). Ordering by count and Take(count)
+            // happens after this single batched fetch, not per-tag.
+            IReadOnlyDictionary<Guid, int> usageCounts = await _tagRepository.GetTagUsageCountsAsync(
+                allTags.Select(t => t.Id).ToList(), ct);
 
-            // Sort by usage descending and take top N
-            var popularTags = tagsWithCounts
+            var popularTags = allTags
+                .Select(tag => (Tag: tag, Count: usageCounts.TryGetValue(tag.Id, out int c) ? c : 0))
+                .Where(t => t.Count > 0)
                 .OrderByDescending(t => t.Count)
                 .Take(count)
                 .Select(t => new TagSuggestionDto
@@ -542,6 +541,12 @@ public class TagService(
             IReadOnlyList<Tag> allTags = await _tagRepository.ListAllAsync(ct);
             int totalTags = allTags.Count;
 
+            // Batched: a small fixed number of queries for ALL tags' usage counts and
+            // last-used timestamps, instead of two round trips per tag (issue #2362).
+            List<Guid> tagIds = allTags.Select(t => t.Id).ToList();
+            IReadOnlyDictionary<Guid, int> usageCounts = await _tagRepository.GetTagUsageCountsAsync(tagIds, ct);
+            IReadOnlyDictionary<Guid, DateTime> lastUsedAtByTag = await _tagRepository.GetTagLastUsedAtBatchAsync(tagIds, ct);
+
             // Calculate statistics
             List<TagStatDto> tagStats = new();
             int totalAssociations = 0;
@@ -549,7 +554,7 @@ public class TagService(
 
             foreach (Tag tag in allTags)
             {
-                int objectCount = await _tagRepository.GetTagUsageCountAsync(tag.Id, ct);
+                int objectCount = usageCounts.TryGetValue(tag.Id, out int count) ? count : 0;
 
                 if (objectCount > 0)
                 {
@@ -558,11 +563,9 @@ public class TagService(
 
                 totalAssociations += objectCount;
 
-                DateTime? lastUsedAt = null;
-                if (objectCount > 0)
-                {
-                    lastUsedAt = await _tagRepository.GetTagLastUsedAtAsync(tag.Id, ct);
-                }
+                DateTime? lastUsedAt = objectCount > 0 && lastUsedAtByTag.TryGetValue(tag.Id, out DateTime lastUsed)
+                    ? lastUsed
+                    : null;
 
                 tagStats.Add(new TagStatDto
                 {
