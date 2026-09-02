@@ -2515,4 +2515,109 @@ describe('NewSliceJobPage', () => {
     });
   });
 
+  describe('Retry on a failed slice resubmits (issue #2374)', () => {
+    beforeEach(() => {
+      jobProgressRef.reset();
+      vi.mocked(slicerService.listEngines).mockResolvedValue([
+        { engine: 'OrcaSlicer', versions: ['2.4.2'], versionEntries: [{ version: '2.4.2', available: true }], latest: '2.4.2' },
+      ]);
+      vi.mocked(slicerProfilesService.getMachineProfilesForModel).mockResolvedValue([
+        { name: 'Prusa MK4S 0.4 nozzle', manufacturer: 'Prusa', nozzleDiameter: 0.4, printerModel: 'MK4S' },
+      ] as OrcaMachineProfile[]);
+      vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue([
+        {
+          name: '0.20mm Standard @MK4S',
+          quality: 'Standard',
+          layerHeight: 0.2,
+          infillPercentage: 15,
+          printSpeed: 60,
+          supports: false,
+          compatible_printers: ['Prusa MK4S 0.4 nozzle'],
+        },
+      ] as OrcaProcessProfile[]);
+      vi.mocked(sliceJobService.submitJob).mockResolvedValue({
+        jobId: 'job-1',
+        queuePosition: null,
+      } as Awaited<ReturnType<typeof sliceJobService.submitJob>>);
+    });
+
+    function buildWrappedPage(route: string) {
+      const queryClient = createTestQueryClient();
+      return (
+        <MemoryRouter initialEntries={[route]}>
+          <QueryClientProvider client={queryClient}>
+            <AuthProvider>
+              <Routes>
+                <Route path="/slicer" element={<NewSliceJobPage />} />
+              </Routes>
+            </AuthProvider>
+          </QueryClientProvider>
+        </MemoryRouter>
+      );
+    }
+
+    async function submitAndFail() {
+      const wrappedPage = buildWrappedPage('/slicer?modelId=model-3d-1');
+      render(wrappedPage);
+
+      await waitFor(() => {
+        expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      await waitFor(() => {
+        const processSelect = Array.from(document.querySelectorAll('select'))
+          .find((s) => s.value.startsWith('system:'));
+        expect(processSelect?.value).toBe('system:0.20mm Standard @MK4S');
+      });
+
+      const latestOnSlice = () =>
+        (slicerWorkspaceSpy.mock.calls.at(-1)?.[0] as { onSlice?: (ids?: string[]) => void } | undefined)?.onSlice;
+      await waitFor(() => {
+        expect(latestOnSlice()).toBeTypeOf('function');
+      });
+      await act(async () => { latestOnSlice()!(); });
+
+      await waitFor(() => {
+        expect(sliceJobService.submitJob).toHaveBeenCalled();
+      }, { timeout: 3000 });
+
+      act(() => {
+        jobProgressRef.set({
+          ...jobProgressRef.value,
+          status: 'Failed',
+          error: 'Slicer worker crashed while processing the plate.',
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
+      });
+    }
+
+    it('issues a new POST /api/slice/ request when Retry is pressed after a Failed result', async () => {
+      await submitAndFail();
+
+      expect(sliceJobService.submitJob).toHaveBeenCalledTimes(1);
+      const firstRequest = vi.mocked(sliceJobService.submitJob).mock.calls[0][0];
+
+      const retryButtons = screen.getAllByRole('button', { name: 'Retry' });
+      expect(retryButtons.length).toBeGreaterThan(0);
+
+      await act(async () => { fireEvent.click(retryButtons[0]); });
+
+      // The bug (#2374): Retry previously only cleared local UI state and
+      // fell back to the editor view without ever calling submitJob again.
+      // The fix resubmits, so a second POST /api/slice/ must be observed.
+      await waitFor(() => {
+        expect(sliceJobService.submitJob).toHaveBeenCalledTimes(2);
+      });
+
+      // Retry must replay the same plate/model selection that failed, not
+      // whatever the (unchanged) form state would derive independently.
+      const secondRequest = vi.mocked(sliceJobService.submitJob).mock.calls[1][0];
+      expect(secondRequest).toEqual(firstRequest);
+    });
+  });
+
 });

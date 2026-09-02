@@ -786,6 +786,14 @@ export const NewSliceJobPage: React.FC = () => {
   const [submittedJobId, setSubmittedJobId] = useState<string | null>(null);
   const jobProgress = useSliceJobProgress(submittedJobId);
 
+  // Issue #2374: Retry on a failed/cancelled slice must resubmit the SAME
+  // plate models that were originally sliced, not whatever `bedModels`
+  // happens to hold at retry time. `submitSliceJob` is plate-aware — its
+  // `activeModelIds` argument comes from the workspace's Slice button click
+  // and is never itself persisted — so it's captured here on every submit
+  // and replayed by the Retry action below.
+  const lastSubmittedModelIdsRef = useRef<string[] | undefined>(undefined);
+
   // Snapshot of cost/routing values captured at slice-submit time.
   // Keeps cost display and queue routing stable while sidebar stays editable.
   const [sliceSnapshot, setSliceSnapshot] = useState<{
@@ -1788,6 +1796,11 @@ export const NewSliceJobPage: React.FC = () => {
   const submitSliceJob = useCallback((activeModelIds?: string[]) => {
     setError(null);
 
+    // Remember which plate models this submission targeted so a later Retry
+    // (see the Failed/Cancelled handlers below) can replay the exact same
+    // set instead of re-deriving it from whatever `bedModels` holds by then.
+    lastSubmittedModelIdsRef.current = activeModelIds;
+
     // Issue #2342: never let an offline printer sit silently selected as an
     // eligible submission target. This must be the FIRST check — before print
     // settings/engine/model validation — so an offline selection is always
@@ -2070,6 +2083,18 @@ export const NewSliceJobPage: React.FC = () => {
     selectedModelId,
     selectedPrinterForSlicing,
   ]);
+
+  // Issue #2374: Retry on a Failed/Cancelled slice previously only cleared
+  // the submitted-job state and fell back to the plain editor view, without
+  // ever issuing a new `POST /api/slice/` request — the user had to notice
+  // this and manually press Slice again. Retry must resubmit the same plate
+  // models that failed, using `submitSliceJob`'s own validation/guard rails,
+  // so a stale/now-invalid selection still surfaces a clear error instead of
+  // silently resubmitting garbage.
+  const handleRetryFailedSlice = useCallback(() => {
+    submitSliceJob(lastSubmittedModelIdsRef.current);
+  }, [submitSliceJob]);
+
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -3208,12 +3233,7 @@ export const NewSliceJobPage: React.FC = () => {
                 setModelFileName('');
                 setBedModels([]);
               }}
-              onRetry={() => {
-                setSubmittedJobId(null);
-                setSliceSnapshot(null);
-                setError(null);
-                setMessage(null);
-              }}
+              onRetry={handleRetryFailedSlice}
             />
           )}
 
@@ -3273,12 +3293,7 @@ export const NewSliceJobPage: React.FC = () => {
                   setModelFileName('');
                   setBedModels([]);
                 }}
-                onRetry={() => {
-                  setSubmittedJobId(null);
-                  setSliceSnapshot(null);
-                  setError(null);
-                  setMessage(null);
-                }}
+                onRetry={handleRetryFailedSlice}
               />
             )}
           </div>
