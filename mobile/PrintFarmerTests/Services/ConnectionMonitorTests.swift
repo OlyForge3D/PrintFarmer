@@ -889,6 +889,107 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertFalse(store.consumeAttention { _ in XCTFail("cancelled gate published") })
     }
 
+    /// Covers guard 1 of `BackendConnectionGate.check` — the attempt/generation
+    /// fence. `testConnectionGateResetInvalidatesInFlightAttempt` already asserts
+    /// the state transition, but it builds a plan with no attempt attached, so
+    /// `plan.startupPrefetchAttempt?.discard()` is a no-op there and that test
+    /// would still pass if the superseded branch published instead of discarding.
+    /// Staging a real attempt is what makes the disposal observable.
+    func testSupersededGateDiscardsStagedPrefetch() async throws {
+        let started = AsyncBarrier()
+        let release = AsyncBarrier()
+        defer {
+            started.close()
+            release.close()
+        }
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-superseded"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let attempt = try XCTUnwrap(store.makeAttempt(session: session, generation: 1))
+        let plan = BackendReadinessPlan(
+            capabilitiesService: TestCapabilitiesService(),
+            probes: [
+                BackendReadinessProbe(endpoint: .attention) {
+                    attempt.captureAttention(makeAttentionFeed(healthyPrinterCount: 7))
+                    started.signal()
+                    await release.arriveAndWait()
+                },
+            ],
+            startupPrefetchAttempt: attempt
+        )
+        let gate = BackendConnectionGate()
+        let check = Task {
+            await gate.check(plan: plan, generation: 1) { true }
+        }
+
+        await started.waitUntilArrived()
+        gate.reset()
+        release.release()
+        await check.value
+
+        XCTAssertEqual(gate.state, .idle)
+        XCTAssertFalse(gate.allowsMainContent)
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("superseded gate published") })
+
+        // The attempt must also be sealed, so a probe that completes after
+        // supersession cannot publish the data it staged too late.
+        attempt.captureAttention(makeAttentionFeed(healthyPrinterCount: 11))
+        attempt.publish()
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("sealed attempt published after supersession") })
+    }
+
+    /// Covers guard 2 of `BackendConnectionGate.check` — the `isCurrent` fence.
+    /// `testConnectionGateDiscardsSupersededGenerationResult` asserts the state
+    /// transition for this branch but likewise attaches no attempt, leaving the
+    /// prefetch disposal itself unobserved.
+    func testNonCurrentGateDiscardsStagedPrefetch() async throws {
+        let started = AsyncBarrier()
+        let release = AsyncBarrier()
+        defer {
+            started.close()
+            release.close()
+        }
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-not-current"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let attempt = try XCTUnwrap(store.makeAttempt(session: session, generation: 1))
+        let plan = BackendReadinessPlan(
+            capabilitiesService: TestCapabilitiesService(),
+            probes: [
+                BackendReadinessProbe(endpoint: .attention) {
+                    attempt.captureAttention(makeAttentionFeed(healthyPrinterCount: 6))
+                    started.signal()
+                    await release.arriveAndWait()
+                },
+            ],
+            startupPrefetchAttempt: attempt
+        )
+        let gate = BackendConnectionGate()
+        var isCurrent = true
+        let check = Task {
+            await gate.check(plan: plan, generation: 1) { isCurrent }
+        }
+
+        await started.waitUntilArrived()
+        isCurrent = false
+        release.release()
+        await check.value
+
+        XCTAssertEqual(gate.state, .idle)
+        XCTAssertFalse(gate.allowsMainContent)
+        XCTAssertFalse(store.consumeAttention { _ in XCTFail("non-current gate published") })
+    }
+
     func testReadinessSkipsCapabilityDisabledProbes() async {
         var resolved = ResolvedSystemCapabilities.defaults
         resolved.attentionEnabled = false
