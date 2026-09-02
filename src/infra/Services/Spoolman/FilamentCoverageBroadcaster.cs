@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
@@ -201,7 +202,27 @@ public class FilamentCoverageBroadcaster(
     {
         try
         {
-            await _hub.Clients.All.SendAsync(EventName, payload, ct).ConfigureAwait(false);
+            // Per-printer events (non-null PrinterId) only affect that printer's slice of the
+            // fleet snapshot, so scope delivery to clients that joined its group — mirroring the
+            // "printerupdated" pattern used at every polling call site above this one. Genuine
+            // fleet-scope events (null PrinterId, e.g. spool swap, printer added/removed) still
+            // fan out to every client since there is no single group that captures "everyone".
+            //
+            // Known consumer gap (issue #2375 risk section, tracked separately): the iOS mobile
+            // app never invokes SubscribeToPrinterAsync/SubscribeToPrintersAsync — it is a
+            // receive-only SignalR client — so it never joins any Printer-{id} group. Every other
+            // "printerupdated" sender in this codebase (Moonraker/SDCP/PrusaLink/FlashForge/
+            // OctoPrint/TestEmulator) has *always* scoped to Clients.Group(...) the same way this
+            // does, so mobile already receives zero live "printerupdated" pushes today; this is a
+            // pre-existing architectural gap this change does not introduce. What this change does
+            // newly expose is that mobile's filament-coverage view models (unlike its printer-list/
+            // dashboard view models) have no pull-to-refresh or app-foreground refresh fallback, so
+            // their coverage badges will stop updating live instead of degrading to eventual
+            // consistency. Tracked as a mobile-side follow-up rather than fixed here.
+            IClientProxy target = payload.PrinterId is { } printerId
+                ? _hub.Clients.Group(AuthorizedHubGroups.Printer(printerId))
+                : _hub.Clients.All;
+            await target.SendAsync(EventName, payload, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
