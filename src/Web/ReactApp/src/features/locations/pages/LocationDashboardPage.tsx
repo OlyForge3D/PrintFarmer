@@ -190,6 +190,8 @@ export const LocationDashboardPage: React.FC = () => {
           tree={tree}
           selectedId={selectedLocationId}
           onSelect={setSelectedLocationId}
+          canCreateLocation={isFarmAdmin}
+          onCreateLocation={handleAddLocation}
         />
 
         <div className="min-w-0 flex-1 space-y-6">
