@@ -532,6 +532,7 @@ final class StartupPrefetchAttempt: @unchecked Sendable {
     private let session: FarmSnapshotSession
     private let lock = NSLock()
     private var isOpen = true
+    private var hasBegun = false
     private var attention: StartupPrefetchValue<AttentionFeed>?
     private var filamentCoverage: StartupPrefetchValue<FleetFilamentCoverage>?
     private var printers: StartupPrefetchValue<[Printer]>?
@@ -554,6 +555,14 @@ final class StartupPrefetchAttempt: @unchecked Sendable {
     }
 
     fileprivate func begin(generation: Int) {
+        lock.lock()
+        guard isOpen, !hasBegun else {
+            lock.unlock()
+            return
+        }
+        hasBegun = true
+        lock.unlock()
+
         guard store.beginAttempt(session: session, generation: generation) else {
             discard()
             return

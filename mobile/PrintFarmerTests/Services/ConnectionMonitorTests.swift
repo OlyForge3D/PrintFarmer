@@ -618,7 +618,7 @@ final class ConnectionMonitorTests: XCTestCase {
 
         await started.waitUntilArrived()
         XCTAssertFalse(
-            container.startupPrefetchStore.consumeAttention {
+            container.startupPrefetchStore.consumeAttention { _ in
                 XCTFail("a real gate attempt must supersede the preceding handoff")
             }
         )
@@ -663,6 +663,40 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertTrue(store.consumeAttention { consumedFeed = $0.value })
         XCTAssertEqual(consumedFeed, currentFeed)
         XCTAssertEqual(gate.state, .idle)
+    }
+
+    func testReusingCompletedPlanDoesNotClearNewPrefetch() async throws {
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("startup-prefetch-plan-reuse"))!
+        )
+        let session = try XCTUnwrap(try authority.mint(
+            namespace: FarmSnapshotNamespace(serverID: UUID(), userID: UUID()),
+            generation: 1
+        ))
+        let store = StartupPrefetchStore(authority: authority)
+        let completedAttempt = try XCTUnwrap(
+            store.makeAttempt(session: session, generation: 1)
+        )
+        let completedPlan = BackendReadinessPlan(
+            capabilitiesService: TestCapabilitiesService(),
+            probes: [],
+            startupPrefetchAttempt: completedAttempt
+        )
+        let gate = BackendConnectionGate()
+        await gate.check(plan: completedPlan, generation: 1) { true }
+
+        let currentFeed = makeAttentionFeed(healthyPrinterCount: 5)
+        let currentAttempt = try XCTUnwrap(
+            store.makeAttempt(session: session, generation: 1)
+        )
+        currentAttempt.captureAttention(currentFeed)
+        currentAttempt.publish()
+
+        await gate.check(plan: completedPlan, generation: 1) { true }
+
+        var consumedFeed: AttentionFeed?
+        XCTAssertTrue(store.consumeAttention { consumedFeed = $0.value })
+        XCTAssertEqual(consumedFeed, currentFeed)
     }
 
     func testSlowAttentionPrefetchFallsBackToCheapProbeAndNormalTabLoad() async throws {
