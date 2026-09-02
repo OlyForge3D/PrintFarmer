@@ -13,14 +13,41 @@ import { GcodeHarvestStatus, type GcodeHarvestOperation } from '@/types/api';
 // must never re-fire a join/leave pair for an operation that stays
 // running across a poll.
 
-const signalRMocks = vi.hoisted(() => ({
-  connect: vi.fn().mockResolvedValue(undefined),
-  joinHarvestGroup: vi.fn().mockResolvedValue(undefined),
-  leaveHarvestGroup: vi.fn().mockResolvedValue(undefined),
-  onHarvestFileProgress: vi.fn(),
-  onHarvestOperationProgress: vi.fn(),
-  onHarvestUpdate: vi.fn(),
-}));
+const signalRMocks = vi.hoisted(() => {
+  // By default, `onConnectionStateChange` synchronously reports `connected: true` the
+  // moment it's subscribed, simulating an already-established connection so existing
+  // lifecycle assertions don't need extra plumbing. Tests exercising the connect-race or
+  // reconnect scenarios flip `autoConnect` off and drive `emitConnectionState` manually.
+  let autoConnect = true;
+  const connectionStateCallbacks: Array<(connected: boolean) => void> = [];
+
+  return {
+    connect: vi.fn().mockResolvedValue(undefined),
+    joinHarvestGroup: vi.fn().mockResolvedValue(undefined),
+    leaveHarvestGroup: vi.fn().mockResolvedValue(undefined),
+    onHarvestFileProgress: vi.fn(),
+    onHarvestOperationProgress: vi.fn(),
+    onHarvestUpdate: vi.fn(),
+    onConnectionStateChange: vi.fn((callback: (connected: boolean) => void) => {
+      connectionStateCallbacks.push(callback);
+      if (autoConnect) {
+        callback(true);
+      }
+      return () => {
+        const index = connectionStateCallbacks.indexOf(callback);
+        if (index > -1) {
+          connectionStateCallbacks.splice(index, 1);
+        }
+      };
+    }),
+    setAutoConnect: (value: boolean) => {
+      autoConnect = value;
+    },
+    emitConnectionState: (connected: boolean) => {
+      connectionStateCallbacks.slice().forEach(callback => callback(connected));
+    },
+  };
+});
 
 const apiMocks = vi.hoisted(() => ({
   getHarvestOperations: vi.fn(),
@@ -95,6 +122,8 @@ describe('HarvestPage SignalR group membership lifecycle', () => {
     signalRMocks.onHarvestFileProgress.mockReset().mockReturnValue(vi.fn());
     signalRMocks.onHarvestOperationProgress.mockReset().mockReturnValue(vi.fn());
     signalRMocks.onHarvestUpdate.mockReset().mockReturnValue(vi.fn());
+    signalRMocks.onConnectionStateChange.mockClear();
+    signalRMocks.setAutoConnect(true);
     apiMocks.getHarvestOperations.mockReset();
   });
 
@@ -241,5 +270,58 @@ describe('HarvestPage SignalR group membership lifecycle', () => {
     expect(signalRMocks.onHarvestOperationProgress).toHaveBeenCalledTimes(1);
     expect(signalRMocks.onHarvestUpdate).toHaveBeenCalledTimes(1);
     expect(signalRMocks.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not attempt (and later does not drop) a join before the connection is established', async () => {
+    signalRMocks.setAutoConnect(false);
+    apiMocks.getHarvestOperations.mockResolvedValue([makeOp({ id: 'op-1' })]);
+
+    renderHarvestPage();
+
+    // The running-op set resolves before the connection does. `connect()` is
+    // fire-and-forget, and the underlying service silently no-ops a join attempted before
+    // the connection reaches `Connected` - so the delta-reconciliation effect must not call
+    // `joinHarvestGroup` yet, or that op would be marked "joined" locally while never
+    // actually joining server-side, permanently losing its progress events.
+    await waitFor(() => expect(apiMocks.getHarvestOperations).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(signalRMocks.joinHarvestGroup).not.toHaveBeenCalled();
+
+    // Connection finally establishes - the deferred join must now fire, not be lost.
+    await act(async () => {
+      signalRMocks.emitConnectionState(true);
+    });
+
+    await waitFor(() => expect(signalRMocks.joinHarvestGroup).toHaveBeenCalledTimes(1));
+    expect(signalRMocks.joinHarvestGroup).toHaveBeenCalledWith('op-1');
+  });
+
+  it('rejoins every currently-running operation after a reconnect, without trusting stale local state', async () => {
+    apiMocks.getHarvestOperations.mockResolvedValue([
+      makeOp({ id: 'op-1' }),
+      makeOp({ id: 'op-2' }),
+    ]);
+
+    renderHarvestPage();
+
+    await waitFor(() => expect(signalRMocks.joinHarvestGroup).toHaveBeenCalledTimes(2));
+    signalRMocks.joinHarvestGroup.mockClear();
+    signalRMocks.leaveHarvestGroup.mockClear();
+
+    // Connection drops, then reconnects. Server-side group membership from the old
+    // connection is gone, so both still-running operations must be rejoined - `joinedOpsRef`
+    // cannot be trusted to reflect real server state across a reconnect.
+    await act(async () => {
+      signalRMocks.emitConnectionState(false);
+    });
+    await act(async () => {
+      signalRMocks.emitConnectionState(true);
+    });
+
+    await waitFor(() => expect(signalRMocks.joinHarvestGroup).toHaveBeenCalledTimes(2));
+    expect(signalRMocks.joinHarvestGroup).toHaveBeenCalledWith('op-1');
+    expect(signalRMocks.joinHarvestGroup).toHaveBeenCalledWith('op-2');
   });
 });
