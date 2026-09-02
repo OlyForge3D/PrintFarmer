@@ -14,11 +14,15 @@ import { GcodeHarvestStatus, type GcodeHarvestOperation } from '@/types/api';
 // running across a poll.
 
 const signalRMocks = vi.hoisted(() => {
-  // By default, `onConnectionStateChange` synchronously reports `connected: true` the
-  // moment it's subscribed, simulating an already-established connection so existing
-  // lifecycle assertions don't need extra plumbing. Tests exercising the connect-race or
-  // reconnect scenarios flip `autoConnect` off and drive `emitConnectionState` manually.
-  let autoConnect = true;
+  // Mirrors the real `SignalRService` contract exactly: `onConnectionStateChange` only
+  // notifies *future* transitions (it never replays current state to a new subscriber),
+  // and `isConnected` reflects live connection state at read time. `HarvestPage` reads
+  // `isConnected` synchronously right after subscribing specifically to cover the case
+  // where the (singleton, shared) service is already connected before this page mounts -
+  // defaulting `connected` to `true` here means the default lifecycle tests below exercise
+  // exactly that "already connected at mount" path, matching the real-world common case.
+  // Tests exercising the connect-race path explicitly set it to `false` first.
+  let connected = true;
   const connectionStateCallbacks: Array<(connected: boolean) => void> = [];
 
   return {
@@ -30,9 +34,6 @@ const signalRMocks = vi.hoisted(() => {
     onHarvestUpdate: vi.fn(),
     onConnectionStateChange: vi.fn((callback: (connected: boolean) => void) => {
       connectionStateCallbacks.push(callback);
-      if (autoConnect) {
-        callback(true);
-      }
       return () => {
         const index = connectionStateCallbacks.indexOf(callback);
         if (index > -1) {
@@ -40,11 +41,15 @@ const signalRMocks = vi.hoisted(() => {
         }
       };
     }),
-    setAutoConnect: (value: boolean) => {
-      autoConnect = value;
+    get isConnected() {
+      return connected;
     },
-    emitConnectionState: (connected: boolean) => {
-      connectionStateCallbacks.slice().forEach(callback => callback(connected));
+    setAutoConnect: (value: boolean) => {
+      connected = value;
+    },
+    emitConnectionState: (value: boolean) => {
+      connected = value;
+      connectionStateCallbacks.slice().forEach(callback => callback(value));
     },
   };
 });
@@ -131,7 +136,7 @@ describe('HarvestPage SignalR group membership lifecycle', () => {
     vi.useRealTimers();
   });
 
-  it('joins the group for the initial running operation exactly once on mount', async () => {
+  it('joins the group for the initial running operation exactly once on mount (connection already established, the common singleton-service case)', async () => {
     apiMocks.getHarvestOperations.mockResolvedValue([makeOp({ id: 'op-1' })]);
 
     renderHarvestPage();

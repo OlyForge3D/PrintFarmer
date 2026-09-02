@@ -105,6 +105,19 @@ export const HarvestPage: React.FC = () => {
         setConnectedEpoch(epoch => epoch + 1);
       }
     });
+    // `onConnectionStateChange` only fires on future *transitions* - it does not replay
+    // current state to a new subscriber, and `connect()` above only notifies when it starts
+    // a connection from `Disconnected` (a no-op "already connected" branch fires no
+    // notification at all). `signalRService` is a module-level singleton shared with other
+    // components (e.g. the harvest wizard, file browser), so it is routinely already
+    // `Connected` by the time this effect runs - without this check, `connectedEpoch` would
+    // stay `0` forever and no group would ever be joined for the lifetime of this mount.
+    // Subscribing before checking (not after) means a transition that lands in between is
+    // still captured by the listener above; a resulting double-bump only causes one harmless,
+    // idempotent extra rejoin.
+    if (signalRService.isConnected) {
+      setConnectedEpoch(epoch => epoch + 1);
+    }
 
     return () => {
       unsubscribe();
