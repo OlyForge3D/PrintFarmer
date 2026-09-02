@@ -900,7 +900,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         if !started {
             throw NetworkError.invalidResponse
         }
-        await enqueuePrinterSubscriptionReconciliation().value
+        _ = enqueuePrinterSubscriptionReconciliation()
         logger.info("Connected to SignalR hub at \(self.serverURL.absoluteString)")
     }
 

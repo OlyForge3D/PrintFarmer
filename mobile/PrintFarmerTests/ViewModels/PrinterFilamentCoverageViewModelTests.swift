@@ -101,6 +101,22 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         await foregroundRefresh.value
 
         XCTAssertEqual(coverageViewModel.dispatchedRequestCount, 2)
+
+        await PrinterDetailViewLifecycle.refresh(
+            viewModel: detailViewModel,
+            coverageViewModel: coverageViewModel,
+            refreshCoverage: false,
+            snapshotPollingAllowed: false
+        )
+        await PrinterDetailViewLifecycle.willEnterForeground(
+            viewModel: detailViewModel,
+            coverageViewModel: coverageViewModel,
+            refreshCoverage: false
+        )
+
+        XCTAssertEqual(coverageViewModel.dispatchedRequestCount, 2)
+        let pendingCountAfterDisabledRefreshes = await service.pendingCount
+        XCTAssertEqual(pendingCountAfterDisabledRefreshes, 0)
         detailViewModel.isViewActive = false
         detailViewModel.stopSnapshotPolling()
     }

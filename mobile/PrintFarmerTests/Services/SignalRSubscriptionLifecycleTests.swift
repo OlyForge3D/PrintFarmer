@@ -4880,6 +4880,18 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
             )
         )
 
+        await service.replacePrinterSubscriptions([printerB, printerC])
+        XCTAssertEqual(
+            socketA.snapshotSent().count,
+            4,
+            "the original transport must send only handshake, initial subscribe, unsubscribe, and incremental subscribe"
+        )
+        XCTAssertEqual(
+            socketB.snapshotSent().count,
+            2,
+            "the replacement transport must send only its handshake and the exact desired subscription replay"
+        )
+
         await service.disconnect()
     }
 

@@ -94,6 +94,21 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
         await foregroundRefresh.value
 
         XCTAssertEqual(coverageViewModel.dispatchedRequestCount, 2)
+
+        await PrinterListViewLifecycle.refresh(
+            viewModel: printerListViewModel,
+            coverageViewModel: coverageViewModel,
+            refreshCoverage: false
+        )
+        await PrinterListViewLifecycle.willEnterForeground(
+            viewModel: printerListViewModel,
+            coverageViewModel: coverageViewModel,
+            refreshCoverage: false
+        )
+
+        XCTAssertEqual(coverageViewModel.dispatchedRequestCount, 2)
+        let pendingCountAfterDisabledRefreshes = await service.pendingCount
+        XCTAssertEqual(pendingCountAfterDisabledRefreshes, 0)
     }
 
     #if DEBUG
