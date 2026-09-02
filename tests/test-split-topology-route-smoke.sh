@@ -434,6 +434,15 @@ assert_slicer_route "/api/workers" "workers (bare, no trailing slash)"
 assert_slicer_route "/api/workers/$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)" "workers"
 
 log "Asserting slicer-owned namespace: /api/slicers"
+# nginx-proxy-split.conf defines both an exact-match location for the bare
+# collection-root path (`location = /api/slicers`, no trailing slash) and a
+# trailing-slash prefix location (`location /api/slicers/`) for sub-paths -
+# issue #2367 fixed a regression where the bare path fell through to
+# nginx's own default redirect (which drops the externally mapped port,
+# e.g. localhost:18080 -> localhost) instead of reaching slicer-host.
+# Assert both the bare path (SlicersController.ListAsync) and a real
+# sub-route so a regression on either is caught.
+assert_slicer_route "/api/slicers" "slicers (bare, no trailing slash)"
 assert_slicer_route "/api/slicers/engines" "slicers"
 
 log "Asserting slicer-owned namespace: /api/slicer"
