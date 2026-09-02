@@ -35,6 +35,31 @@ final class PrinterListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedStatus, .all)
     }
 
+    func testCanonicalLoadsReplaceSignalRPrinterSubscriptionsWithCurrentSet() async throws {
+        let signalR = MockSignalRService()
+        viewModel.configureSignalR(signalR)
+        let firstSet = [
+            try TestData.decodePrinter(from: TestJSON.printer),
+            try TestData.decodePrinter(from: TestJSON.printerMinimal),
+        ]
+        mockService.printersToReturn = firstSet
+
+        await viewModel.loadPrinters()
+        await signalR.waitForPrinterSubscriptionCallCount(1)
+
+        XCTAssertEqual(
+            Set(signalR.printerSubscriptionCalls[0]),
+            Set(firstSet.map(\.id))
+        )
+
+        let secondSet = [try TestData.decodePrinter(from: TestJSON.printerMinimal)]
+        mockService.printersToReturn = secondSet
+        await viewModel.loadPrinters()
+        await signalR.waitForPrinterSubscriptionCallCount(2)
+
+        XCTAssertEqual(signalR.printerSubscriptionCalls[1], secondSet.map(\.id))
+    }
+
     func testBootstrapConsumesPrefetchedPrintersWithoutBlockingLaterRefresh() async throws {
         let authority = FarmSnapshotFixtures.makeAuthority(
             tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("printer-prefetch"))!

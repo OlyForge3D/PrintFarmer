@@ -21,6 +21,14 @@ protocol SignalRServiceProtocol: AnyObject, Sendable {
     /// out a backoff sleep.
     func ensureConnected() async
 
+    /// Replaces the authorized printer groups this client wants to receive.
+    ///
+    /// Production keeps this desired set across transport reconnects and
+    /// replays it through the batched `SubscribeToPrintersAsync` hub method.
+    /// Removed printers leave their prior group through
+    /// `UnsubscribeFromPrinterAsync`.
+    func replacePrinterSubscriptions(_ printerIds: [UUID]) async
+
     /// Register a connection-state observer.
     ///
     /// Returns a tuple containing the state snapshot captured at registration
@@ -95,4 +103,6 @@ extension SignalRServiceProtocol {
         guard state != .connected, state != .connecting else { return }
         try? await connect()
     }
+
+    func replacePrinterSubscriptions(_ printerIds: [UUID]) async {}
 }
