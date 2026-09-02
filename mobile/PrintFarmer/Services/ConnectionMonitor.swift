@@ -407,13 +407,23 @@ final class StartupPrefetchStore: @unchecked Sendable {
         session: FarmSnapshotSession?,
         generation: Int
     ) -> StartupPrefetchAttempt? {
-        removeAll()
         guard let session,
               session.generation == generation,
               authority.isCurrent(session) else {
             return nil
         }
         return StartupPrefetchAttempt(store: self, session: session)
+    }
+
+    fileprivate func beginAttempt(
+        session: FarmSnapshotSession,
+        generation: Int
+    ) -> Bool {
+        guard session.generation == generation else { return false }
+        return authority.withPromotion(session, cancelled: { false }) {
+            removeAll()
+            return true
+        } ?? false
     }
 
     func removeAll() {
@@ -541,6 +551,13 @@ final class StartupPrefetchAttempt: @unchecked Sendable {
 
     func capturePrinters(_ value: [Printer]) {
         capture(value) { printers = $0 }
+    }
+
+    fileprivate func begin(generation: Int) {
+        guard store.beginAttempt(session: session, generation: generation) else {
+            discard()
+            return
+        }
     }
 
     func publish() {
@@ -693,9 +710,6 @@ struct BackendReadinessPlan: Sendable {
         let predictiveService = services.predictiveService
         let dispatchService = services.dispatchService
         let failureDetectionService = services.failureDetectionService
-        // This side-effecting call clears the preceding launch handoff. Keep this
-        // initializer gate-bound: construct it only immediately before `check`,
-        // never for diagnostics or speculative preflight inspection.
         let startupPrefetchAttempt = services.startupPrefetchStore.makeAttempt(
             session: services.farmSnapshotAuthority.currentSession(),
             generation: services.activeServerGeneration
@@ -1195,6 +1209,7 @@ final class BackendConnectionGate {
         let attempt = attemptID
         activeGeneration = generation
         state = .checking
+        plan.startupPrefetchAttempt?.begin(generation: generation)
         let result = await checker.check(plan: plan)
         guard attemptID == attempt,
               activeGeneration == generation else {
