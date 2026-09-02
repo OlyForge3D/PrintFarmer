@@ -7,17 +7,22 @@ export interface UseKeyboardNavigationOptions {
 }
 
 // Elements that already manage their own Enter/Space/Arrow key activation
-// (links, buttons, form controls, editable regions). This hook attaches a
-// window-level listener with no container/focus scoping, so without this
-// guard it hijacks every Enter keypress on the page — including activating
-// the "Skip to main content" link, whose native anchor navigation gets
-// preventDefault()'d before it can move focus, and instead opens the first
-// job's details modal via the stale default `selectedIndex` of 0 (#2373).
+// (links, buttons, form controls, editable regions, and any explicitly
+// focusable custom widget). This hook attaches a window-level listener with
+// no container/focus scoping, so without this guard it hijacks every Enter
+// keypress on the page — including activating the "Skip to main content"
+// link, whose native anchor navigation gets preventDefault()'d before it can
+// move focus, and instead opens the first job's details modal via the stale
+// default `selectedIndex` of 0 (#2373). `[tabindex]:not([tabindex="-1"])`
+// also covers custom focusable widgets that manage their own Enter handling
+// (e.g. queue job rows/cards, the timeline's keyboard surface), which would
+// otherwise be double-handled by this listener after their own handler runs.
 const INTERACTIVE_SELECTOR =
-  'a[href], button, input, textarea, select, [contenteditable="true"], [role="button"]';
+  'a[href], button, input, textarea, select, summary, [contenteditable="true"], ' +
+  '[role="button"], [role="link"], [tabindex]:not([tabindex="-1"])';
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && target.closest(INTERACTIVE_SELECTOR) !== null;
+  return target instanceof Element && target.closest(INTERACTIVE_SELECTOR) !== null;
 }
 
 /**
