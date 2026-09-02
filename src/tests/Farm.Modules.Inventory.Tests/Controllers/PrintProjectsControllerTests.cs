@@ -191,6 +191,51 @@ public class PrintProjectsControllerTests
         Assert.IsType<BadRequestObjectResult>(result.Result);
     }
 
+    [Fact]
+    public async Task CreateProjectAsync_WithNameExceedingMaxLength_ReturnsBadRequestWithoutHittingService()
+    {
+        // Arrange: 295-character Unicode name (repeated 測試🚀), reproducing issue #2368.
+        // 🚀 is a surrogate pair, so this exercises string.Length counting UTF-16 code units
+        // the same way the EF Core column's HasMaxLength(255) constraint does. Built as
+        // 73 full repetitions (292 code units) plus "測試" then "測" (3 more BMP code units)
+        // rather than slicing the repeated string, so no surrogate pair is split in half.
+        var longName = string.Concat(Enumerable.Repeat("測試🚀", 73)) + "測試" + "測";
+        Assert.Equal(295, longName.Length);
+        var request = new CreatePrintProjectRequest(longName);
+
+        // Act
+        ActionResult<PrintProjectDetailDto> result = await _controller.CreateProjectAsync(request);
+
+        // Assert
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Equal(
+            "Project name must be 255 characters or fewer (received 295).",
+            badRequest.Value?.ToString());
+        _projectServiceMock.Verify(
+            s => s.CreateProjectAsync(It.IsAny<CreatePrintProjectRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateProjectAsync_WithNameAtMaxLength_ReturnsCreatedAtAction()
+    {
+        // Arrange: exactly 255 characters should still be accepted.
+        var maxLengthName = new string('a', 255);
+        var request = new CreatePrintProjectRequest(maxLengthName);
+        var project = CreateProjectDetailDto(Guid.NewGuid(), maxLengthName);
+
+        _projectServiceMock
+            .Setup(s => s.CreateProjectAsync(request, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(project);
+
+        // Act
+        ActionResult<PrintProjectDetailDto> result = await _controller.CreateProjectAsync(request);
+
+        // Assert
+        CreatedResult createdResult = Assert.IsType<CreatedResult>(result.Result);
+        Assert.Equal(project, createdResult.Value);
+    }
+
     #endregion
 
     #region UpdateProjectAsync Tests
@@ -231,6 +276,28 @@ public class PrintProjectsControllerTests
 
         // Assert
         Assert.IsType<NotFoundObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UpdateProjectAsync_WithNameExceedingMaxLength_ReturnsBadRequestWithoutHittingService()
+    {
+        // Arrange: 295-character Unicode name (repeated 測試🚀), reproducing issue #2368.
+        var projectId = Guid.NewGuid();
+        var longName = string.Concat(Enumerable.Repeat("測試🚀", 73)) + "測試" + "測";
+        Assert.Equal(295, longName.Length);
+        var request = new UpdatePrintProjectRequest(longName, null, null, null, null, null);
+
+        // Act
+        ActionResult<PrintProjectDetailDto> result = await _controller.UpdateProjectAsync(projectId, request);
+
+        // Assert
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Equal(
+            "Project name must be 255 characters or fewer (received 295).",
+            badRequest.Value?.ToString());
+        _projectServiceMock.Verify(
+            s => s.UpdateProjectAsync(It.IsAny<Guid>(), It.IsAny<UpdatePrintProjectRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     #endregion
