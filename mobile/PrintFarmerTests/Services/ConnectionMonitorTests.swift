@@ -118,6 +118,114 @@ final class ConnectionMonitorTests: XCTestCase {
         )
     }
 
+    // MARK: - startup grace (no alarming banner during launch)
+
+    func testStartupGraceFoldsNotYetEstablishedStatesIntoConnecting() {
+        // The cold-launch race: REST is fine but the hub has not handshaked yet.
+        // Reporting `.degraded` here is what flashed the banner on every launch.
+        XCTAssertEqual(
+            ConnectionMonitor.resolve(
+                isServerReachable: true,
+                signalR: .disconnected,
+                consecutiveFailures: 0,
+                threshold: 2,
+                isWithinStartupGrace: true
+            ),
+            .connecting
+        )
+        XCTAssertEqual(
+            ConnectionMonitor.resolve(
+                isServerReachable: false,
+                signalR: .disconnected,
+                consecutiveFailures: 1,
+                threshold: 2,
+                isWithinStartupGrace: true
+            ),
+            .connecting
+        )
+    }
+
+    func testStartupGraceStillReportsAConfirmedOutage() {
+        // The grace softens "not finished starting", never a confirmed outage.
+        XCTAssertEqual(
+            ConnectionMonitor.resolve(
+                isServerReachable: false,
+                signalR: .disconnected,
+                consecutiveFailures: 2,
+                threshold: 2,
+                isWithinStartupGrace: true
+            ),
+            .offline
+        )
+    }
+
+    func testStartupGraceDoesNotMaskAHealthyConnection() {
+        XCTAssertEqual(
+            ConnectionMonitor.resolve(
+                isServerReachable: true,
+                signalR: .connected,
+                consecutiveFailures: 0,
+                threshold: 2,
+                isWithinStartupGrace: true
+            ),
+            .connected
+        )
+    }
+
+    func testOutsideStartupGraceBehaviourIsUnchanged() {
+        XCTAssertEqual(
+            ConnectionMonitor.resolve(
+                isServerReachable: true,
+                signalR: .disconnected,
+                consecutiveFailures: 0,
+                threshold: 2,
+                isWithinStartupGrace: false
+            ),
+            .degraded
+        )
+    }
+
+    func testColdLaunchWithHubStillHandshakingDoesNotSurfaceABanner() async {
+        // End-to-end reproduction of the reported bug: server reachable, hub not
+        // yet connected, immediately after start(). Previously `.degraded`.
+        mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        let signalR = MockSignalRService()
+        signalR.connectionState = .disconnected
+
+        let monitor = ConnectionMonitor()
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
+        monitor.start()
+        await monitor.refresh()
+
+        XCTAssertEqual(monitor.status, .connecting)
+        XCTAssertFalse(
+            monitor.isReportable,
+            "The global bar must stay hidden while the hub is still handshaking"
+        )
+        monitor.stop()
+    }
+
+    func testHubDropAfterSettlingStillReportsDegraded() async {
+        // Once the session has settled, the grace must no longer apply.
+        mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        let signalR = MockSignalRService()
+        signalR.connectionState = .connected
+
+        let monitor = ConnectionMonitor()
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
+        monitor.start()
+        await monitor.refresh()
+        XCTAssertEqual(monitor.status, .connected)
+
+        mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        signalR.connectionState = .disconnected
+        await monitor.refresh()
+
+        XCTAssertEqual(monitor.status, .degraded)
+        XCTAssertTrue(monitor.isReportable)
+        monitor.stop()
+    }
+
     // MARK: - refresh() integration
 
     func testRefreshReportsConnectedWhenHealthyAndHubConnected() async {
