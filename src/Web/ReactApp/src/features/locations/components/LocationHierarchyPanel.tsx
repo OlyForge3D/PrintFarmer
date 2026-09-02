@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { Button, Card, Input, Badge } from '@/common/components/ui';
-import { SearchIcon } from '@/common/components/icons/MdiIcons';
+import { PlusIcon, SearchIcon } from '@/common/components/icons/MdiIcons';
 import type { LocationTreeNode } from '@/types/api';
 
 interface LocationHierarchyPanelProps {
@@ -9,6 +9,10 @@ interface LocationHierarchyPanelProps {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   className?: string;
+  /** Whether the current user may create a location (shows the empty-state create action). */
+  canCreateLocation?: boolean;
+  /** Invoked when the empty-state "Add location" action is clicked. */
+  onCreateLocation?: () => void;
 }
 
 interface TreeRowProps {
@@ -132,6 +136,8 @@ export function LocationHierarchyPanel({
   selectedId,
   onSelect,
   className,
+  canCreateLocation = false,
+  onCreateLocation,
 }: LocationHierarchyPanelProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => collectDefaultExpandedIds(tree));
@@ -141,9 +147,12 @@ export function LocationHierarchyPanel({
     [tree],
   );
 
+  const trimmedSearchTerm = searchTerm.trim();
+  const hasAnyLocations = tree.length > 0;
+
   const visibleTree = useMemo(
-    () => tree.filter((node) => matchesSearch(node, searchTerm.trim())),
-    [searchTerm, tree],
+    () => tree.filter((node) => matchesSearch(node, trimmedSearchTerm)),
+    [trimmedSearchTerm, tree],
   );
 
   const toggleNode = (id: string) => {
@@ -199,7 +208,18 @@ export function LocationHierarchyPanel({
           )}
         </Button>
         {visibleTree.length === 0 ? (
-          <p className="px-3 py-6 text-center text-sm text-pf-text-secondary">No locations match that search.</p>
+          !hasAnyLocations ? (
+            <div className="flex flex-col items-center gap-3 px-3 py-6 text-center text-sm text-pf-text-secondary">
+              <p>No locations configured yet.</p>
+              {canCreateLocation && onCreateLocation && (
+                <Button type="button" variant="secondary" size="sm" onClick={onCreateLocation} iconLeft={<PlusIcon />}>
+                  Add location
+                </Button>
+              )}
+            </div>
+          ) : (
+            <p className="px-3 py-6 text-center text-sm text-pf-text-secondary">No locations match that search.</p>
+          )
         ) : (
           <ul className="space-y-1" aria-label="Location hierarchy">
             {visibleTree.map((node) => (
@@ -209,7 +229,7 @@ export function LocationHierarchyPanel({
                 depth={0}
                 selectedId={selectedId}
                 expandedIds={expandedIds}
-                searchTerm={searchTerm.trim()}
+                searchTerm={trimmedSearchTerm}
                 onSelect={onSelect}
                 onToggle={toggleNode}
               />
