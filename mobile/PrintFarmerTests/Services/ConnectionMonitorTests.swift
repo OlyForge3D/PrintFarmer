@@ -602,7 +602,7 @@ final class ConnectionMonitorTests: XCTestCase {
             release.close()
         }
         let gatePlan = BackendReadinessPlan(
-            capabilitiesService: shippingPlan.capabilitiesService,
+            capabilitiesService: TestCapabilitiesService(),
             probes: [
                 BackendReadinessProbe(endpoint: .api) {
                     started.signal()
