@@ -15,7 +15,7 @@ let forwardedSignal: AbortSignal | undefined;
 vi.mock('@/services/api', () => ({
   apiClient: {
     downloadModel3dFile: apiMocks.downloadModel3dFile,
-    getHarvestOperations: vi.fn().mockResolvedValue([]),
+    getAllActiveHarvests: vi.fn().mockResolvedValue([]),
     getUnifiedFiles: apiMocks.getUnifiedFiles,
   },
 }));

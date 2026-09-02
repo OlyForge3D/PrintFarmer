@@ -453,12 +453,6 @@ export function FilesPage() {
   const { viewMode, setViewMode } = useViewModePreference('printfarmer-files-viewmode');
   const { hasPermission } = useAuth();
   const { data: printers = [] } = usePrinters({ staleTime: 30_000 });
-  const { data: harvestOperations = [] } = useQuery({
-    queryKey: ['files-harvest-operations'],
-    queryFn: () => apiClient.getHarvestOperations(),
-    refetchInterval: hasPermission('gcode_harvest', 'execute') ? 5_000 : false,
-    enabled: hasPermission('gcode_harvest', 'execute'),
-  });
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showModelUploadModal, setShowModelUploadModal] = useState(false);
@@ -468,6 +462,21 @@ export function FilesPage() {
   const [showPrintablesImportModal, setShowPrintablesImportModal] = useState(false);
   const [selectedPrintablesUrl, setSelectedPrintablesUrl] = useState<string | null>(null);
   const [showHarvestModal, setShowHarvestModal] = useState(false);
+
+  // Only poll active harvest operations while the harvest wizard modal is open —
+  // it is the sole consumer of this data and defaults to closed. Use the
+  // dedicated active-operations endpoint so completed history is never fetched.
+  const canExecuteHarvest = hasPermission('gcode_harvest', 'execute');
+  const shouldFetchHarvestOperations = showHarvestModal && canExecuteHarvest;
+  const {
+    data: harvestOperations = [],
+    isLoading: isLoadingHarvestOperations,
+  } = useQuery({
+    queryKey: ['files-harvest-operations'],
+    queryFn: () => apiClient.getAllActiveHarvests(),
+    refetchInterval: shouldFetchHarvestOperations ? 5_000 : false,
+    enabled: shouldFetchHarvestOperations,
+  });
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [showAddToProjectModal, setShowAddToProjectModal] = useState(false);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
@@ -1127,6 +1136,7 @@ export function FilesPage() {
             onClose={() => setShowHarvestModal(false)}
             printers={printers}
             activeHarvests={harvestOperations}
+            isLoadingActiveHarvests={isLoadingHarvestOperations}
             onComplete={() => {
               toast.success('Harvest completed');
               handleRefresh();

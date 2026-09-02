@@ -14,6 +14,10 @@ interface HarvestWizardStep1SelectionProps {
   selectedPrinterId: string | null;
   onSelect: (printerId: string) => void;
   activeHarvests?: GcodeHarvestOperation[];
+  /** True while activeHarvests is still loading — printer selection is
+   *  disabled until it resolves so a user cannot start a harvest that
+   *  conflicts with one already running. */
+  isLoadingActiveHarvests?: boolean;
 }
 
 // Helper to convert PrinterBackend enum (number or string) to display string
@@ -44,6 +48,7 @@ export function HarvestWizardStep1Selection({
   selectedPrinterId,
   onSelect,
   activeHarvests = [],
+  isLoadingActiveHarvests = false,
 }: HarvestWizardStep1SelectionProps) {
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -222,6 +227,30 @@ export function HarvestWizardStep1Selection({
 
   return (
     <div className="space-y-4">
+      {/* Loading banner - active harvests are still being fetched, so printer
+          selection is disabled to avoid starting a conflicting harvest */}
+      {isLoadingActiveHarvests && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-2 rounded-lg border border-pf-border bg-pf-bg-1 px-4 py-2 text-sm text-pf-text-secondary"
+        >
+          <svg
+            className="w-4 h-4 animate-spin text-pf-accent"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path
+              className="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+            />
+          </svg>
+          Checking for active harvests…
+        </div>
+      )}
+
       {/* Filter Summary */}
       <div className="text-sm text-pf-text-secondary">
         Showing <span className="font-semibold text-pf-text-primary">{filteredPrinters.length}</span> of{' '}
@@ -308,20 +337,29 @@ export function HarvestWizardStep1Selection({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {filteredPrinters.map(printer => {
           const hasActiveHarvest = printersWithActiveHarvests.has(printer.id);
+          const isDisabled = hasActiveHarvest || isLoadingActiveHarvests;
           
           return (
           <button
             key={printer.id}
-            onClick={() => !hasActiveHarvest && onSelect(printer.id)}
-            disabled={hasActiveHarvest}
+            onClick={() => !isDisabled && onSelect(printer.id)}
+            disabled={isDisabled}
             className={`p-4 rounded-lg border-2 text-left transition-all ${
               hasActiveHarvest
                 ? 'border-pf-warning bg-pf-warning-bg cursor-not-allowed opacity-60'
+                : isLoadingActiveHarvests
+                ? 'border-pf-border bg-pf-bg-1 cursor-not-allowed opacity-60'
                 : selectedPrinterId === printer.id
                 ? 'border-pf-accent bg-pf-accent-bg'
                 : 'border-pf-border hover:border-pf-accent hover:bg-pf-bg-2'
             }`}
-            title={hasActiveHarvest ? 'This printer has an active harvest in progress' : undefined}
+            title={
+              hasActiveHarvest
+                ? 'This printer has an active harvest in progress'
+                : isLoadingActiveHarvests
+                ? 'Checking for active harvests…'
+                : undefined
+            }
           >
             <div className="flex items-start justify-between">
               <div className="flex-1">

@@ -36,6 +36,10 @@ interface HarvestWizardModalProps {
   printers: Printer[];
   onComplete?: () => void;
   activeHarvests?: GcodeHarvestOperation[];
+  /** True while activeHarvests is still loading — used to prevent starting a
+   *  harvest that would conflict with one already running before the data
+   *  arrives. */
+  isLoadingActiveHarvests?: boolean;
 }
 
 type WizardStep = 'select-printer' | 'configure-options' | 'discovery-import';
@@ -46,6 +50,7 @@ export function HarvestWizardModal({
   printers,
   onComplete,
   activeHarvests = [],
+  isLoadingActiveHarvests = false,
 }: HarvestWizardModalProps) {
   // Wizard state
   const [step, setStep] = useState<WizardStep>('select-printer');
@@ -406,6 +411,7 @@ export function HarvestWizardModal({
             selectedPrinterId={selectedPrinterId}
             onSelect={handlePrinterSelect}
             activeHarvests={activeHarvests}
+            isLoadingActiveHarvests={isLoadingActiveHarvests}
           />
         );
         
