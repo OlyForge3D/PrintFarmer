@@ -116,8 +116,16 @@ public sealed class SliceArtifactLibraryService(
         {
             IReadOnlyList<Artifact> artifacts =
                 await _artifactsRepository.GetByJobIdAsync(sliceJobId, cancellationToken);
-            artifact = artifacts.FirstOrDefault(candidate =>
-                string.Equals(candidate.Kind, SlicerArtifactKinds.Gcode, StringComparison.OrdinalIgnoreCase));
+            List<Artifact> gcodeArtifacts = artifacts
+                .Where(IsGcodeArtifact)
+                .Take(2)
+                .ToList();
+            if (gcodeArtifacts.Count > 1)
+            {
+                return Failure(StatusCodes.Status409Conflict, "source_artifact_required");
+            }
+
+            artifact = gcodeArtifacts.SingleOrDefault();
         }
 
         if (artifact is null)
@@ -248,6 +256,18 @@ public sealed class SliceArtifactLibraryService(
             return Failure(StatusCodes.Status409Conflict, "source_artifact_required");
         }
 
+        if (!artifactId.HasValue && _artifactsRepository is not null)
+        {
+            IReadOnlyList<Artifact> artifacts =
+                await _artifactsRepository.GetByJobIdAsync(sliceJobId, cancellationToken);
+            if (artifacts.Any(candidate =>
+                    IsGcodeArtifact(candidate) &&
+                    candidate.Id != checkpoint.SourceArtifactId))
+            {
+                return Failure(StatusCodes.Status409Conflict, "source_artifact_required");
+            }
+        }
+
         GcodeFile? file = await _dbContext.GcodeFiles
             .AsNoTracking()
             .FirstOrDefaultAsync(candidate => candidate.Id == checkpoint.GcodeFileId, cancellationToken);
@@ -270,4 +290,7 @@ public sealed class SliceArtifactLibraryService(
             StatusCodes.Status200OK,
             replayed: true);
     }
+
+    private static bool IsGcodeArtifact(Artifact artifact) =>
+        string.Equals(artifact.Kind, SlicerArtifactKinds.Gcode, StringComparison.OrdinalIgnoreCase);
 }

@@ -79,6 +79,62 @@ public sealed class SlicePrintBridgeAddToQueueTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task AddToQueueAsync_WithArtifactId_QueuesExactlyTheSelectedDurableFile()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid artifactId = Guid.NewGuid();
+        Guid gcodeFileId = Guid.NewGuid();
+        SetupCompletedJob(jobId);
+        SetupPromotion(jobId, gcodeFileId, createdNew: true, artifactId: artifactId);
+        _queue
+            .Setup(service => service.AddJobToQueueAsync(
+                It.Is<QueuePrintJobDto>(request => request.GcodeFileId == gcodeFileId),
+                TestUserId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new JobQueuePrintJobDto { Id = Guid.NewGuid(), QueuePosition = 1 });
+
+        IActionResult result = await BuildController().AddToQueueAsync(
+            jobId,
+            new AddSliceToQueueRequest { ArtifactId = artifactId },
+            CancellationToken.None);
+
+        result.Should().BeOfType<OkObjectResult>();
+        _library.Verify(service => service.PromoteAsync(
+            jobId,
+            artifactId,
+            It.IsAny<CalibrationActor>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AddToQueueAsync_MultipleOutputsWithoutArtifactId_ReturnsSelectionRequired()
+    {
+        Guid jobId = Guid.NewGuid();
+        SetupCompletedJob(jobId);
+        _library
+            .Setup(service => service.PromoteAsync(
+                jobId,
+                null,
+                It.IsAny<CalibrationActor>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CalibrationApiResult<SliceArtifactLibraryResult>.Failure(
+                StatusCodes.Status409Conflict,
+                "source_artifact_required"));
+
+        IActionResult result = await BuildController().AddToQueueAsync(
+            jobId,
+            new AddSliceToQueueRequest(),
+            CancellationToken.None);
+
+        result.Should().BeOfType<ObjectResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _queue.Verify(service => service.AddJobToQueueAsync(
+            It.IsAny<QueuePrintJobDto>(),
+            It.IsAny<Guid?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -171,12 +227,16 @@ public sealed class SlicePrintBridgeAddToQueueTests
             });
     }
 
-    private void SetupPromotion(Guid jobId, Guid gcodeFileId, bool createdNew)
+    private void SetupPromotion(
+        Guid jobId,
+        Guid gcodeFileId,
+        bool createdNew,
+        Guid? artifactId = null)
     {
         _library
             .Setup(service => service.PromoteAsync(
                 jobId,
-                null,
+                artifactId,
                 It.IsAny<CalibrationActor>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(CalibrationApiResult<SliceArtifactLibraryResult>.Success(
@@ -188,7 +248,7 @@ public sealed class SlicePrintBridgeAddToQueueTests
                     CreatedNew = createdNew,
                     Printable = true,
                     SliceJobId = jobId,
-                    SourceArtifactId = Guid.NewGuid(),
+                    SourceArtifactId = artifactId ?? Guid.NewGuid(),
                 },
                 createdNew ? StatusCodes.Status201Created : StatusCodes.Status200OK,
                 replayed: !createdNew));

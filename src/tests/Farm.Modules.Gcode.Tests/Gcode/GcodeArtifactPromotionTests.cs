@@ -356,6 +356,15 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
     {
         PromotionFixture first = await _harness.SeedCompletedGcodeArtifactAsync();
         PromotionFixture second = await _harness.SeedAdditionalGcodeArtifactAsync(first, "; second\nG28\n");
+        CalibrationApiResult<SliceArtifactLibraryResult> stagedAmbiguity =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                first.JobId,
+                artifactId: null,
+                first.Owner,
+                CancellationToken.None);
+        _ = stagedAmbiguity.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = stagedAmbiguity.Code.Should().Be("source_artifact_required");
+
         _ = await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
             first.JobId,
             first.ArtifactId,
@@ -378,6 +387,27 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
 
         _ = result.StatusCode.Should().Be(StatusCodes.Status409Conflict);
         _ = result.Code.Should().Be("source_artifact_required");
+    }
+
+    [Fact(DisplayName = "Explicit selection promotes exactly the requested artifact from a multi-output job")]
+    public async Task SliceArtifactLibraryService_MultipleOutputs_WithArtifactId_PromotesSelectedArtifact()
+    {
+        PromotionFixture first = await _harness.SeedCompletedGcodeArtifactAsync();
+        PromotionFixture selected = await _harness.SeedAdditionalGcodeArtifactAsync(first, "; selected\nG28\n");
+
+        CalibrationApiResult<SliceArtifactLibraryResult> result =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                selected.JobId,
+                selected.ArtifactId,
+                selected.Owner,
+                CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status201Created, result.Code);
+        _ = result.Value!.SourceArtifactId.Should().Be(selected.ArtifactId);
+        _ = (await _harness.GetCheckpointByOperationAsync(
+                SliceArtifactLibraryService.BuildOperationId(selected.JobId, selected.ArtifactId)))
+            .SourceArtifactId.Should().Be(selected.ArtifactId);
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
     }
 
     [Fact(DisplayName = "A new farm-wide file notifies every authenticated user without metadata")]
@@ -1307,6 +1337,34 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = cleanupSafe.Should().BeTrue();
     }
 
+    [Theory(DisplayName = "A local staged-file length mismatch fails terminally and releases its pin")]
+    [InlineData(-1)]
+    [InlineData(1)]
+    public async Task PromoteAsync_WhenLocalContentLengthMismatches_FailsAndReleasesPin(
+        long declaredSizeDelta)
+    {
+        PromotionFixture original = await _harness.SeedCompletedGcodeArtifactAsync();
+        PromotionFixture fixture = await _harness.SetArtifactDeclaredSizeAsync(
+            original,
+            original.SizeBytes + declaredSizeDelta);
+        GcodeArtifactPromotionRequest request = fixture.Request(
+            $"promotion-local-size-{declaredSizeDelta}");
+
+        CalibrationApiResult<GcodePromotionDto> result = await _harness.CreatePromoter()
+            .PromoteAsync(request, fixture.Owner, CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = result.Code.Should().Be(GcodeStreamIngestException.SizeMismatch);
+        GcodePromotionCheckpoint checkpoint =
+            await _harness.GetCheckpointByOperationAsync(request.OperationId);
+        _ = checkpoint.State.Should().Be(GcodePromotionState.Failed);
+        _ = checkpoint.FailureCode.Should().Be(GcodeStreamIngestException.SizeMismatch);
+        Artifact released = await _harness.GetArtifactAsync(fixture.ArtifactId);
+        _ = released.PromotionCheckpointId.Should().BeNull();
+        _ = released.PromotionStartedAtUtc.Should().BeNull();
+        _ = (await _harness.IsArtifactCleanupEligibleAsync(fixture.ArtifactId)).Should().BeTrue();
+    }
+
     [Fact(DisplayName = "A truncated transport remains pending and succeeds on retry")]
     public async Task PromoteAsync_WhenTransportIsTruncated_RetryKeepsCheckpointAndPinRecoverable()
     {
@@ -1791,6 +1849,18 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 Sha256 = sha256,
                 SizeBytes = bytes.LongLength,
             };
+        }
+
+        public async Task<PromotionFixture> SetArtifactDeclaredSizeAsync(
+            PromotionFixture fixture,
+            long declaredSizeBytes)
+        {
+            await using SlicerDbContext slicer = CreateSlicerContext();
+            Artifact artifact = await slicer.Artifacts
+                .SingleAsync(candidate => candidate.Id == fixture.ArtifactId);
+            artifact.SizeBytes = declaredSizeBytes;
+            _ = await slicer.SaveChangesAsync();
+            return fixture with { SizeBytes = declaredSizeBytes };
         }
 
         public async Task<Guid> SeedInterruptedPromotionAsync(PromotionFixture fixture, string operationId)

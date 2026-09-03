@@ -128,7 +128,7 @@ public class SlicePrintBridgeController(
             QueueActorIdentity.Resolve(User),
             PrintFarmerPermissions.IsFarmAdmin(User));
         CalibrationApiResult<SliceArtifactLibraryResult> promotion =
-            await sliceArtifactLibraryService.PromoteAsync(id, artifactId: null, actor, ct);
+            await sliceArtifactLibraryService.PromoteAsync(id, request.ArtifactId, actor, ct);
         if (!promotion.IsSuccess || promotion.Value is null)
         {
             return PromotionFailure(promotion, id);
@@ -539,7 +539,7 @@ public class SlicePrintBridgeController(
             QueueActorIdentity.Resolve(User),
             PrintFarmerPermissions.IsFarmAdmin(User));
         CalibrationApiResult<SliceArtifactLibraryResult> promotion =
-            await sliceArtifactLibraryService.PromoteAsync(id, artifactId: null, actor, ct);
+            await sliceArtifactLibraryService.PromoteAsync(id, request.ArtifactId, actor, ct);
         if (!promotion.IsSuccess || promotion.Value is null)
         {
             return PromotionFailure(promotion, id);

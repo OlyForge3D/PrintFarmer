@@ -8,6 +8,12 @@ namespace Farm.Modules.PrintQueue.Controllers.Requests;
 public sealed record AddSliceToQueueRequest
 {
     /// <summary>
+    /// Optional staged G-code artifact to queue. Required when the slice job has multiple G-code
+    /// outputs.
+    /// </summary>
+    public Guid? ArtifactId { get; init; }
+
+    /// <summary>
     /// Optional job priority. Defaults to <see cref="PrintJobPriority.Normal"/> when null.
     /// </summary>
     public PrintJobPriority? Priority { get; init; }

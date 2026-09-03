@@ -23,7 +23,10 @@ public sealed class LocalPromotionArtifactContentSource(IArtifactsService artifa
                 await _artifacts.OpenReadStreamAsync(artifactId, cancellationToken);
             return content is null
                 ? null
-                : PromotionArtifactContent.Create(content.Content, expectedSizeBytes, content.DisposeAsync);
+                : PromotionArtifactContent.CreateLocal(
+                    content.Content,
+                    expectedSizeBytes,
+                    content.DisposeAsync);
         }
         catch (IOException exception)
         {
