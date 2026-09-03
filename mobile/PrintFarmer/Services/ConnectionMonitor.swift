@@ -267,6 +267,14 @@ final class ConnectionMonitor {
         // Clear the displayed state immediately so a stopped monitor (e.g. during
         // a server switch) never keeps showing the previous server's status while
         // the next connect attempt is still in flight.
+        //
+        // Note this leaves `status == .connecting` with the grace disarmed, so
+        // ``isReportable`` reads `true` for a stopped monitor. That is safe only
+        // because every caller of `stop()` (logout, server-generation change) also
+        // leaves `RootView` outside `isShowingMainContent`, which gates the bar
+        // independently. Preserve that pairing: a refactor that shows main content
+        // over a stopped monitor would surface a grey "Connecting…" bar for a
+        // session that has already been torn down.
         resetState()
     }
 
