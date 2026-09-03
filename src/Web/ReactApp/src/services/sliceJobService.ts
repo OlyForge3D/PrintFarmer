@@ -251,6 +251,21 @@ export interface AddSliceToQueueResponse {
   message: string;
 }
 
+export interface PromoteSliceArtifactResponse {
+  gcodeFileId: string;
+  name: string;
+  sizeBytes: number;
+  createdNew: boolean;
+  printable: boolean;
+  sliceJobId: string;
+  sourceArtifactId: string;
+}
+
+export interface PromoteSliceArtifactRequest {
+  sliceJobId: string;
+  artifactId: string;
+}
+
 export class SliceJobService {
   /**
    * Submit a new slicing job
@@ -299,6 +314,20 @@ export class SliceJobService {
       data: payload,
     });
     return response;
+  }
+
+  /**
+   * Explicitly promote a staged slice artifact into the farm-wide G-code library.
+   */
+  async promoteSliceArtifact(
+    sliceJobId: string,
+    artifactId: string,
+  ): Promise<PromoteSliceArtifactResponse> {
+    return apiClient.request<PromoteSliceArtifactResponse>({
+      url: '/gcode-promotions/slice-artifact',
+      method: 'POST',
+      data: { sliceJobId, artifactId } satisfies PromoteSliceArtifactRequest,
+    });
   }
 
   /**

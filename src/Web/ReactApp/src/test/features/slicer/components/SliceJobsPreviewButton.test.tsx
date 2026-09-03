@@ -10,6 +10,7 @@ vi.mock('sonner', () => ({
 }));
 
 const mockGetMyJobs = vi.fn();
+const viewModeState = vi.hoisted(() => ({ value: 'grid' as 'grid' | 'explorer' }));
 
 vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
@@ -49,7 +50,7 @@ vi.mock('@/features/slicer/components/GcodePreviewModal', () => ({
 }));
 
 vi.mock('@/common/hooks/useViewModePreference', () => ({
-  useViewModePreference: () => ({ viewMode: 'grid', setViewMode: vi.fn() }),
+  useViewModePreference: () => ({ viewMode: viewModeState.value, setViewMode: vi.fn() }),
 }));
 
 function renderPanel() {
@@ -68,7 +69,32 @@ function renderPanel() {
 describe('SliceJobsPanel Preview button', () => {
   beforeEach(() => {
     mockGetMyJobs.mockReset();
+    viewModeState.value = 'grid';
   });
+
+  it.each(['grid', 'explorer'] as const)(
+    'shows all staged-artifact actions for completed jobs in %s view',
+    async (viewMode) => {
+      viewModeState.value = viewMode;
+      mockGetMyJobs.mockResolvedValue([
+        {
+          id: 'job-completed-actions',
+          status: 'Completed',
+          progressPercent: 100,
+          queuedAt: '2026-05-31T09:00:00Z',
+          completedAt: '2026-05-31T09:05:00Z',
+          artifactsRoute: '/api/artifacts/job/job-completed-actions',
+        },
+      ]);
+
+      renderPanel();
+
+      expect(await screen.findByRole('button', { name: /preview/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /download/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /save to library/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /print/i })).toBeInTheDocument();
+    },
+  );
 
   it('shows Preview button for completed jobs', async () => {
     mockGetMyJobs.mockResolvedValue([

@@ -1,4 +1,8 @@
-import { sliceJobService, type ArtifactListItemResponse } from '@/services/sliceJobService';
+import {
+  sliceJobService,
+  type ArtifactListItemResponse,
+  type PromoteSliceArtifactResponse,
+} from '@/services/sliceJobService';
 import {
   isGcodeFileName,
   isTextGcodeFileName,
@@ -36,4 +40,16 @@ export async function downloadGcodeArtifact(artifactsRoute: string): Promise<voi
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
+}
+
+export async function saveGcodeArtifactToLibrary(
+  artifactsRoute: string,
+  sliceJobId: string,
+): Promise<PromoteSliceArtifactResponse> {
+  const artifact = await findGcodeArtifact(artifactsRoute, isGcodeFileName);
+  if (!artifact) {
+    throw new Error('No G-code artifact is available for this job.');
+  }
+
+  return sliceJobService.promoteSliceArtifact(sliceJobId, artifact.id);
 }

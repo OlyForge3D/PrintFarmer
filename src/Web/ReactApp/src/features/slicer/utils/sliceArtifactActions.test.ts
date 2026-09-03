@@ -1,13 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { downloadGcodeArtifact, resolveGcodeArtifact } from './sliceArtifactActions';
+import {
+  downloadGcodeArtifact,
+  resolveGcodeArtifact,
+  saveGcodeArtifactToLibrary,
+} from './sliceArtifactActions';
 
 const getArtifactsByRoute = vi.fn();
 const downloadArtifact = vi.fn();
+const promoteSliceArtifact = vi.fn();
 
 vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
     getArtifactsByRoute: (...args: unknown[]) => getArtifactsByRoute(...args),
     downloadArtifact: (...args: unknown[]) => downloadArtifact(...args),
+    promoteSliceArtifact: (...args: unknown[]) => promoteSliceArtifact(...args),
   },
 }));
 
@@ -102,5 +108,30 @@ describe('sliceArtifactActions', () => {
     );
 
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:gcode');
+  });
+
+  it('promotes the resolved staged artifact and converges on the durable result when repeated', async () => {
+    getArtifactsByRoute.mockResolvedValue([
+      { id: 'artifact-1', fileName: 'output.bgcode' },
+    ]);
+    const durable = {
+      gcodeFileId: 'file-1',
+      name: 'output.bgcode',
+      sizeBytes: 100,
+      printable: true,
+      sliceJobId: 'job-1',
+      sourceArtifactId: 'artifact-1',
+    };
+    promoteSliceArtifact
+      .mockResolvedValueOnce({ ...durable, createdNew: true })
+      .mockResolvedValueOnce({ ...durable, createdNew: false });
+
+    const first = await saveGcodeArtifactToLibrary('/api/artifacts/job/job-1', 'job-1');
+    const replay = await saveGcodeArtifactToLibrary('/api/artifacts/job/job-1', 'job-1');
+
+    expect(first.gcodeFileId).toBe('file-1');
+    expect(replay.gcodeFileId).toBe('file-1');
+    expect(promoteSliceArtifact).toHaveBeenNthCalledWith(1, 'job-1', 'artifact-1');
+    expect(promoteSliceArtifact).toHaveBeenNthCalledWith(2, 'job-1', 'artifact-1');
   });
 });

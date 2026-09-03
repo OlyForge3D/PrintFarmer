@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Button } from '@/common/components/ui';
-import { DownloadIcon } from '@/common/components/icons/MdiIcons';
+import { DownloadIcon, SaveIcon } from '@/common/components/icons/MdiIcons';
 import { sliceJobService } from '@/services/sliceJobService';
 import { GcodePreviewModal } from '@/features/slicer/components/GcodePreviewModal';
 import { SendToPrinterModal } from '@/features/slicer/components/SendToPrinterModal';
 import type { SliceJobProgressState } from '@/features/slicer/hooks/useSliceJobProgress';
-import { downloadGcodeArtifact } from '@/features/slicer/utils/sliceArtifactActions';
+import {
+  downloadGcodeArtifact,
+  saveGcodeArtifactToLibrary,
+} from '@/features/slicer/utils/sliceArtifactActions';
 
 interface SliceProgressOverlayProps {
   jobId: string;
@@ -45,6 +49,7 @@ interface SliceProgressOverlayProps {
  * with real-time progress ring and status details.
  */
 export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filamentCostPerKg, resolvedCostPerGram, costSource, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter, retryDisabled }: SliceProgressOverlayProps) {
+  const queryClient = useQueryClient();
   const isCompleted = progress.status === 'Completed';
   const isFailed = progress.status === 'Failed';
   const isCancelled = progress.status === 'Cancelled';
@@ -54,6 +59,12 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
   const [previewOpen, setPreviewOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveFeedback, setSaveFeedback] = useState<{
+    kind: 'success' | 'error';
+    message: string;
+  } | null>(null);
+  const saveInFlightRef = useRef(false);
   const autoOpenedJobRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -74,6 +85,31 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
       setIsDownloading(false);
     }
   }, [progress.artifactsRoute]);
+
+  const handleSave = useCallback(async () => {
+    if (!progress.artifactsRoute || saveInFlightRef.current) return;
+    saveInFlightRef.current = true;
+    setIsSaving(true);
+    setSaveFeedback(null);
+    try {
+      const result = await saveGcodeArtifactToLibrary(progress.artifactsRoute, jobId);
+      if (result.createdNew) {
+        await queryClient.invalidateQueries({ queryKey: ['file-browser'] });
+      }
+      const message = result.createdNew
+        ? 'Saved to Library'
+        : 'Already in File Library';
+      setSaveFeedback({ kind: 'success', message });
+      toast.success(message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save G-code.';
+      setSaveFeedback({ kind: 'error', message });
+      toast.error(message);
+    } finally {
+      saveInFlightRef.current = false;
+      setIsSaving(false);
+    }
+  }, [jobId, progress.artifactsRoute, queryClient]);
 
   const materialCost = resolvedCostPerGram != null
     ? sliceJobService.computeMaterialCostPerGram(progress.filamentUsedGrams, resolvedCostPerGram)
@@ -190,30 +226,51 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
 
         {/* Terminal actions */}
         {isCompleted && (
-          <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
-            {progress.artifactsRoute && (
-              <Button variant="primary" size="sm" onClick={() => setPreviewOpen(true)}>
-                Preview
-              </Button>
-            )}
-            <Button variant="success" size="sm" onClick={() => setSendOpen(true)}>
-              Send to Printer
-            </Button>
-            {progress.artifactsRoute && (
+          <div className="flex flex-col items-center gap-2 mt-2">
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {progress.artifactsRoute && (
+                <Button variant="primary" size="sm" onClick={() => setPreviewOpen(true)}>
+                  Preview
+                </Button>
+              )}
+              {progress.artifactsRoute && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  iconLeft={<DownloadIcon className="w-4 h-4" />}
+                  onClick={handleDownload}
+                  loading={isDownloading}
+                  disabled={isDownloading}
+                >
+                  Download G-code
+                </Button>
+              )}
               <Button
                 variant="secondary"
                 size="sm"
-                iconLeft={<DownloadIcon className="w-4 h-4" />}
-                onClick={handleDownload}
-                loading={isDownloading}
-                disabled={isDownloading}
+                iconLeft={<SaveIcon className="w-4 h-4" />}
+                onClick={handleSave}
+                loading={isSaving}
+                disabled={!progress.artifactsRoute || isSaving}
+                title={progress.artifactsRoute ? undefined : 'No staged G-code artifact is available.'}
               >
-                Download G-code
+                Save to Library
               </Button>
+              <Button variant="success" size="sm" onClick={() => setSendOpen(true)}>
+                Print
+              </Button>
+              <Button variant="secondary" size="sm" onClick={onNewJob}>
+                New Job
+              </Button>
+            </div>
+            {saveFeedback && (
+              <p
+                role={saveFeedback.kind === 'error' ? 'alert' : 'status'}
+                className={saveFeedback.kind === 'error' ? 'text-xs text-pf-error' : 'text-xs text-pf-success'}
+              >
+                {saveFeedback.message}
+              </p>
             )}
-            <Button variant="secondary" size="sm" onClick={onNewJob}>
-              New Job
-            </Button>
           </div>
         )}
 

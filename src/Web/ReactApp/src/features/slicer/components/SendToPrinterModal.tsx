@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button, Select, FormField, Checkbox, NumberStepper } from '@/common/components/ui';
@@ -8,6 +8,7 @@ import { usePrintersFast } from '@/common/hooks/useApi';
 import { sortPrintersByAvailability } from '@/utils/printerSort';
 import { sliceJobService } from '@/services/sliceJobService';
 import type { SendToPrinterResponse, AddSliceToQueueResponse } from '@/services/sliceJobService';
+import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
 
 type SendMode = 'queue' | 'direct';
 
@@ -32,7 +33,7 @@ export function SendToPrinterModal({ isOpen, onClose, jobId, selectedSpoolId, re
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Send to Printer"
+      title="Print"
       titleIcon={<PrinterIcon className="w-5 h-5" />}
       size="sm"
     >
@@ -182,6 +183,7 @@ interface QueueFormProps {
 }
 
 function QueueForm({ jobId, onClose, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: QueueFormProps) {
+  const queryClient = useQueryClient();
   const [priority, setPriority] = useState('Normal');
   const [copies, setCopies] = useState(1);
 
@@ -196,6 +198,12 @@ function QueueForm({ jobId, onClose, selectedSpoolId, requiredPrinterModel, requ
         requiredNozzleDiameter: requiredNozzleDiameter,
       }),
     onSuccess: (data: AddSliceToQueueResponse) => {
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['job-queue'] }),
+        queryClient.invalidateQueries({ queryKey: ['queue-jobs'] }),
+        queryClient.invalidateQueries({ queryKey: ['queue-stats'] }),
+        queryClient.invalidateQueries({ queryKey: queueSummariesFleetQueryKey }),
+      ]);
       const positionText = data.queuePosition != null ? ` — position ${data.queuePosition}` : '';
       toast.success(`Queued${positionText}`);
       onClose();
