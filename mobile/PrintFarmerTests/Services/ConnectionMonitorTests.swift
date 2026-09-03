@@ -192,7 +192,8 @@ final class ConnectionMonitorTests: XCTestCase {
         let signalR = MockSignalRService()
         signalR.connectionState = .disconnected
 
-        let monitor = ConnectionMonitor()
+        let monitor = ConnectionMonitor(pathObserver: FakeNetworkPathObserver())
+        monitor.pollInterval = .seconds(3600)
         monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
         monitor.start()
         await monitor.refresh()
@@ -211,7 +212,8 @@ final class ConnectionMonitorTests: XCTestCase {
         let signalR = MockSignalRService()
         signalR.connectionState = .connected
 
-        let monitor = ConnectionMonitor()
+        let monitor = ConnectionMonitor(pathObserver: FakeNetworkPathObserver())
+        monitor.pollInterval = .seconds(3600)
         monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
         monitor.start()
         await monitor.refresh()
@@ -223,6 +225,104 @@ final class ConnectionMonitorTests: XCTestCase {
 
         XCTAssertEqual(monitor.status, .degraded)
         XCTAssertTrue(monitor.isReportable)
+        monitor.stop()
+    }
+
+    func testStartupGraceExpiryRestoresDegradedAndReporting() async {
+        // Drives the real elapsed-time branch of `isWithinStartupGrace` by
+        // making the window zero-length, so the grace is already over on the
+        // very first sample. Without this the time-based branch is never run.
+        mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        let signalR = MockSignalRService()
+        signalR.connectionState = .disconnected
+
+        let monitor = ConnectionMonitor(pathObserver: FakeNetworkPathObserver())
+        monitor.pollInterval = .seconds(3600)
+        monitor.startupGrace = .zero
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
+        monitor.start()
+        await monitor.refresh()
+
+        XCTAssertEqual(
+            monitor.status,
+            .degraded,
+            "Once the grace has elapsed a handshaking hub is reported normally"
+        )
+        XCTAssertTrue(
+            monitor.isReportable,
+            "A `.connecting` that outlives the grace must still surface the bar"
+        )
+        monitor.stop()
+    }
+
+    func testConfirmedOutageDuringStartupGraceIsReportedNotMasked() async {
+        // The grace softens "not finished starting", never a real outage. A
+        // masked outage would leave the operator with no indicator at all while
+        // the farm is unreachable — strictly worse than the banner being fixed.
+        mockAPIClient.stubError(.cannotConnectToHost)
+        let signalR = MockSignalRService()
+        signalR.connectionState = .disconnected
+
+        let monitor = ConnectionMonitor(pathObserver: FakeNetworkPathObserver())
+        monitor.pollInterval = .seconds(3600)
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
+        monitor.start()
+
+        // First failure is below the hysteresis threshold: softened to
+        // `.connecting` by the grace, so still no banner.
+        await monitor.refresh()
+        XCTAssertEqual(monitor.status, .connecting)
+        XCTAssertFalse(monitor.isReportable)
+
+        // Second consecutive failure confirms the outage. Even though we are
+        // still inside the grace window, this must escalate and be reported.
+        mockAPIClient.stubError(.cannotConnectToHost)
+        await monitor.refresh()
+
+        XCTAssertEqual(
+            monitor.status,
+            .offline,
+            "A confirmed outage must escalate even inside the startup grace"
+        )
+        XCTAssertTrue(
+            monitor.isReportable,
+            "A confirmed outage must always be visible to the operator"
+        )
+        monitor.stop()
+    }
+
+    func testRestartRearmsStartupGraceForTheNewSession() async {
+        // A server switch re-runs start(); the new session gets a fresh grace
+        // rather than inheriting the previous session's settled state.
+        mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        let signalR = MockSignalRService()
+        signalR.connectionState = .connected
+
+        let monitor = ConnectionMonitor(pathObserver: FakeNetworkPathObserver())
+        monitor.pollInterval = .seconds(3600)
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
+        monitor.start()
+        await monitor.refresh()
+        XCTAssertTrue(monitor.hasSettledSinceStart)
+
+        monitor.stop()
+        XCTAssertFalse(
+            monitor.hasSettledSinceStart,
+            "stop() must clear session-scoped startup state"
+        )
+
+        // New session against a hub that has not handshaked yet.
+        mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        signalR.connectionState = .disconnected
+        monitor.start()
+        await monitor.refresh()
+
+        XCTAssertEqual(
+            monitor.status,
+            .connecting,
+            "The restarted session must get its own grace window"
+        )
+        XCTAssertFalse(monitor.isReportable)
         monitor.stop()
     }
 

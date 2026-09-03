@@ -39,9 +39,11 @@ final class ConnectionMonitor {
     /// `.connecting` is the "still working on it" baseline the monitor holds
     /// during startup and brief hub handshakes. Surfacing a banner for it made
     /// the global bar flash on every cold launch for a condition that resolves
-    /// itself a second later, so the bar stays hidden until the state is
-    /// something the operator can actually act on.
-    var isReportable: Bool { status != .connecting }
+    /// itself a second later, so the bar stays hidden *for the launch window
+    /// only*. A `.connecting` that outlives the grace — a hub handshake that
+    /// stalls against a black-holed port, say — is a real problem the operator
+    /// needs to see, so it reports normally (as the neutral grey bar).
+    var isReportable: Bool { status != .connecting || !isWithinStartupGrace }
 
     @ObservationIgnored private var apiClient: APIClient?
     @ObservationIgnored private var signalRService: (any SignalRServiceProtocol)?
@@ -178,7 +180,11 @@ final class ConnectionMonitor {
             return isWithinStartupGrace ? .connecting : .degraded
         }
         let resolved = resolve(isServerReachable: isServerReachable, signalR: signalR)
-        if isWithinStartupGrace && resolved != .connected {
+        // Only `.degraded` represents "has not finished starting". A confirmed
+        // `.offline` (failures at/past threshold) is a real outage and must
+        // escalate even during the grace window — masking it would leave the
+        // operator with no indicator at all while the farm is unreachable.
+        if isWithinStartupGrace && resolved == .degraded {
             return .connecting
         }
         return resolved
