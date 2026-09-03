@@ -1,11 +1,30 @@
 import Foundation
 
-/// Operator feature gate flags exposed by `GET /api/system/capabilities`.
+/// Observed farm counts returned by `GET /api/system/capabilities`.
+///
+/// Each count is optional so older servers and degraded or partially populated
+/// responses remain decodable. ``unknown`` represents a response that supplied
+/// no usable farm-shape counts.
+struct FarmShape: Codable, Sendable, Equatable {
+    var accountCount: Int?
+    var locationCount: Int?
+    var printerCount: Int?
+
+    static let unknown = FarmShape(
+        accountCount: nil,
+        locationCount: nil,
+        printerCount: nil
+    )
+}
+
+/// System capability data exposed by `GET /api/system/capabilities`.
 ///
 /// Canonical servers return these flags under `operatorFeatures`. Legacy
 /// servers exposed the same fields at the response root. Every flag remains
 /// optional so either payload shape decodes successfully; missing values fall
-/// back to the documented defaults via ``resolved``.
+/// back to the documented defaults via ``resolved``. `farmShape` is also
+/// optional because older servers, anonymous requests, and degraded count
+/// queries omit it.
 ///
 /// The response payload uses camelCase, matching the rest of the
 /// PrintFarmer API and the React client. iOS must not introduce a
@@ -21,9 +40,12 @@ struct SystemCapabilities: Codable, Sendable, Equatable {
     var shiftPlanEnabled: Bool?
     var printedPartsInventoryEnabled: Bool?
     var offlineWriteReplayEnabled: Bool?
+    /// Server-observed farm counts, or `nil` when the shape is unavailable.
+    var farmShape: FarmShape?
 
     private enum CodingKeys: String, CodingKey {
         case operatorFeatures
+        case farmShape
         case attentionEnabled
         case nativePushEnabled
         case filamentCoverageEnabled
@@ -83,6 +105,7 @@ struct SystemCapabilities: Codable, Sendable, Equatable {
             nested?.printedPartsInventoryEnabled ?? legacy.printedPartsInventoryEnabled
         offlineWriteReplayEnabled =
             nested?.offlineWriteReplayEnabled ?? legacy.offlineWriteReplayEnabled
+        farmShape = try container.decodeIfPresent(FarmShape.self, forKey: .farmShape)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -100,9 +123,11 @@ struct SystemCapabilities: Codable, Sendable, Equatable {
             ),
             forKey: .operatorFeatures
         )
+        try container.encodeIfPresent(farmShape, forKey: .farmShape)
     }
 
-    /// Resolved, non-optional snapshot with the defaults documented in #725.
+    /// Resolved, non-optional snapshot with the defaults documented in #725
+    /// and an unknown farm shape when the server did not provide counts.
     ///
     /// Defaults:
     /// * `attentionEnabled` — `true`
@@ -113,6 +138,7 @@ struct SystemCapabilities: Codable, Sendable, Equatable {
     /// * `shiftPlanEnabled` — `true`
     /// * `printedPartsInventoryEnabled` — `false` (until part SKUs/output mappings configured)
     /// * `offlineWriteReplayEnabled` — `true`
+    /// * `farmShape` — ``FarmShape/unknown``
     var resolved: ResolvedSystemCapabilities {
         ResolvedSystemCapabilities(
             attentionEnabled: attentionEnabled ?? true,
@@ -122,12 +148,13 @@ struct SystemCapabilities: Codable, Sendable, Equatable {
             multiSlotFallbackEnabled: multiSlotFallbackEnabled ?? true,
             shiftPlanEnabled: shiftPlanEnabled ?? true,
             printedPartsInventoryEnabled: printedPartsInventoryEnabled ?? false,
-            offlineWriteReplayEnabled: offlineWriteReplayEnabled ?? true
+            offlineWriteReplayEnabled: offlineWriteReplayEnabled ?? true,
+            farmShape: farmShape ?? .unknown
         )
     }
 }
 
-/// Non-optional snapshot of the resolved operator feature gates.
+/// Non-optional snapshot of the resolved system capabilities.
 struct ResolvedSystemCapabilities: Sendable, Equatable {
     var attentionEnabled: Bool
     var nativePushEnabled: Bool
@@ -137,11 +164,13 @@ struct ResolvedSystemCapabilities: Sendable, Equatable {
     var shiftPlanEnabled: Bool
     var printedPartsInventoryEnabled: Bool
     var offlineWriteReplayEnabled: Bool
+    var farmShape: FarmShape = .unknown
 
     /// The default snapshot used before `/api/system/capabilities` responds,
     /// after a 404, or when the endpoint is unreachable. Mirrors the server-side
     /// defaults so the app never advertises an action the backend will reject —
     /// notably harvest, which requires configured part SKUs and output mappings.
+    /// Farm shape remains unknown until the server provides observed counts.
     static let defaults = ResolvedSystemCapabilities(
         attentionEnabled: true,
         nativePushEnabled: false,
@@ -150,6 +179,7 @@ struct ResolvedSystemCapabilities: Sendable, Equatable {
         multiSlotFallbackEnabled: true,
         shiftPlanEnabled: true,
         printedPartsInventoryEnabled: false,
-        offlineWriteReplayEnabled: true
+        offlineWriteReplayEnabled: true,
+        farmShape: .unknown
     )
 }
