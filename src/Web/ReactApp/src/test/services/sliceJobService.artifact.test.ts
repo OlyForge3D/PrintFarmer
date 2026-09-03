@@ -96,6 +96,7 @@ describe('SliceJobService artifact URL helpers', () => {
           sizeBytes: 12345,
           downloadUrl: '/api/artifacts/art-1',
           createdAt: '2026-05-31T10:00:00Z',
+          isPrimary: true,
         },
       ];
       mockRequest.mockResolvedValue(mockList);

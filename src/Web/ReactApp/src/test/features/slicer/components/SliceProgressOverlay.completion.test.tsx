@@ -213,12 +213,10 @@ describe('SliceProgressOverlay completion actions', () => {
 
   it('opens Print with the exact selected artifact when multiple artifacts exist', async () => {
     const artifacts = [
-      { id: 'selected-artifact', fileName: 'selected.gcode' },
-      { id: 'newest-artifact', fileName: 'newest.gcode' },
+      { id: 'newest-artifact', fileName: 'newest.gcode', isPrimary: false },
+      { id: 'primary-artifact', fileName: 'primary.gcode', isPrimary: true },
     ];
-    resolveGcodeArtifactForAction.mockResolvedValue(
-      artifacts.find(artifact => artifact.fileName.endsWith('.gcode')),
-    );
+    resolveGcodeArtifactForAction.mockResolvedValue(artifacts[1]);
     const completedProgress: SliceJobProgressState = {
       ...processingProgress,
       status: 'Completed',
@@ -237,7 +235,7 @@ describe('SliceProgressOverlay completion actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Print' }));
 
     expect(await screen.findByTestId('print-modal')).toHaveTextContent(
-      'job-1:selected-artifact',
+      'job-1:primary-artifact',
     );
     expect(resolveGcodeArtifactForAction).toHaveBeenCalledWith(
       '/api/artifacts/job/job-1',

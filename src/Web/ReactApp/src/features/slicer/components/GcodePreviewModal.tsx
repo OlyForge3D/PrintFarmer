@@ -55,7 +55,7 @@ export function GcodePreviewModal({ isOpen, onClose, artifactsRoute }: GcodePrev
       )}
       {!isLoading && error && (
         <div className="flex h-[70vh] flex-col items-center justify-center gap-3 text-pf-error">
-          <p>Failed to load the G-code artifact.</p>
+          <p>{error instanceof Error ? error.message : 'Failed to load the G-code artifact.'}</p>
           <Button variant="secondary" size="sm" loading={isFetching} onClick={() => refetch()}>
             Retry
           </Button>

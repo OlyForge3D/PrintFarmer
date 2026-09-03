@@ -21,6 +21,7 @@ export interface ArtifactListItemResponse {
   sizeBytes: number;
   downloadUrl: string;
   createdAt: string;
+  isPrimary: boolean;
 }
 
 // Slice Job DTOs matching backend
