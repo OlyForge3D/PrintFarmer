@@ -593,6 +593,7 @@ POST /api/gcode-harvest/queue/{queueItemId:guid}/cancel -> Farm.Modules.Gcode::F
 POST /api/gcode-harvest/start -> Farm.Modules.Gcode::Farm.Modules.Gcode.Controllers.GcodeHarvestController.StartHarvestAsync
 POST /api/gcode-library/upload -> Farm.Modules.Gcode::Farm.Modules.Gcode.Controllers.GcodeLibraryController.UploadFileAsync
 POST /api/gcode-promotions -> Farm.Modules.Gcode::Farm.Modules.Gcode.Controllers.GcodePromotionsController.PromoteAsync
+POST /api/gcode-promotions/slice-artifact -> Farm.Modules.Gcode::Farm.Modules.Gcode.Controllers.GcodePromotionsController.PromoteSliceArtifactAsync
 POST /api/internal/discovery/events/completed -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.InternalDiscoveryEventsController.CompletedAsync
 POST /api/internal/discovery/events/printer-found -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.InternalDiscoveryEventsController.PrinterFoundAsync
 POST /api/internal/discovery/events/progress -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.InternalDiscoveryEventsController.ProgressAsync

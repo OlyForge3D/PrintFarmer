@@ -6,6 +6,7 @@ using Farm.Infrastructure.Security;
 using Farm.Modules.Calibration.Controllers;
 using Farm.Modules.Calibration.Services.Calibration;
 using Farm.Modules.Calibration.Services.Gcode;
+using Farm.Modules.Gcode.Services.Gcode;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -46,6 +47,16 @@ public sealed record GcodePromotionCreateRequest
     public string? VirtualDirectory { get; init; }
 }
 
+/// <summary>Explicit user-action request to save a staged slice artifact to the library.</summary>
+public sealed record SliceArtifactPromotionRequest
+{
+    /// <summary>Completed slice job identifier.</summary>
+    public Guid SliceJobId { get; init; }
+
+    /// <summary>G-code artifact identifier asserted by the caller.</summary>
+    public Guid ArtifactId { get; init; }
+}
+
 /// <summary>
 /// Authenticated promotion boundary for turning completed slicer artifacts into library G-code.
 /// </summary>
@@ -56,9 +67,43 @@ public sealed record GcodePromotionCreateRequest
 [ApiController]
 [Route("api/gcode-promotions")]
 [Authorize]
-public sealed class GcodePromotionsController(IGcodeArtifactPromoter promoter) : CalibrationControllerBase
+public sealed class GcodePromotionsController(
+    IGcodeArtifactPromoter promoter,
+    ISliceArtifactLibraryService sliceArtifactLibrary) : CalibrationControllerBase
 {
     private readonly IGcodeArtifactPromoter _promoter = promoter ?? throw new ArgumentNullException(nameof(promoter));
+    private readonly ISliceArtifactLibraryService _sliceArtifactLibrary =
+        sliceArtifactLibrary ?? throw new ArgumentNullException(nameof(sliceArtifactLibrary));
+
+    /// <summary>Explicitly saves one staged slice artifact to the durable farm-wide library.</summary>
+    /// <param name="request">Authoritative slice job and artifact identifiers.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The durable file identity, display name, and replay status.</returns>
+    [HttpPost("slice-artifact")]
+    [RequirePermission(PrintFarmerPermissions.Slicing.Promote)]
+    [ProducesResponseType(typeof(SliceArtifactLibraryResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(SliceArtifactLibraryResult), StatusCodes.Status201Created)]
+    public async Task<IActionResult> PromoteSliceArtifactAsync(
+        [FromBody] SliceArtifactPromotionRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        CalibrationActor? actor = GetActor();
+        if (actor is null)
+        {
+            return AuthenticationProblem();
+        }
+
+        CalibrationApiResult<SliceArtifactLibraryResult> result =
+            await _sliceArtifactLibrary.PromoteAsync(
+                request.SliceJobId,
+                request.ArtifactId,
+                actor,
+                cancellationToken);
+        return !result.IsSuccess || result.Value is null
+            ? Problem(result.StatusCode, result.Code ?? "promotion_operation_failed")
+            : StatusCode(result.StatusCode, result.Value);
+    }
 
     /// <summary>Promotes an artifact, or replays the stable result of an identical earlier request.</summary>
     /// <param name="request">The immutable promotion request.</param>

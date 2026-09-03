@@ -53,7 +53,7 @@ export interface SliceJobEvent {
   queuedAt?: string;
   startedAt?: string;
   completedAt?: string;
-  resultFileUrl?: string;
+  artifactsRoute?: string;
   estimatedPrintTimeSeconds?: number;
   filamentUsedGrams?: number;
   errorMessage?: string;

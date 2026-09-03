@@ -1,11 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { isGcodeFileName } from '@/features/slicer/utils/gcodeFileUtils';
+import {
+  isGcodeFileName,
+  isTextGcodeFileName,
+} from '@/features/slicer/utils/gcodeFileUtils';
 
 describe('isGcodeFileName', () => {
   it.each([
     ['model.gcode', true],
     ['output.GCODE', true],
     ['print.bgcode', true],
+    ['legacy.gco', true],
     ['legacy.g', true],
     ['file.G', true],
     ['thumbnail.png', false],
@@ -15,5 +19,14 @@ describe('isGcodeFileName', () => {
     ['archive.gcode.zip', false],
   ])('isGcodeFileName(%s) → %s', (fileName, expected) => {
     expect(isGcodeFileName(fileName)).toBe(expected);
+  });
+
+  it.each([
+    ['model.gcode', true],
+    ['short.g', true],
+    ['legacy.gco', true],
+    ['binary.bgcode', false],
+  ])('isTextGcodeFileName(%s) → %s', (fileName, expected) => {
+    expect(isTextGcodeFileName(fileName)).toBe(expected);
   });
 });

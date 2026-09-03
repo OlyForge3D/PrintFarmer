@@ -2686,10 +2686,14 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("VirtualDirectory")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("GcodeFileId")
-                        .IsUnique();
+                    b.HasIndex("GcodeFileId");
 
                     b.HasIndex("OperationScope", "OperationId")
                         .IsUnique();

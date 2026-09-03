@@ -28,6 +28,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\modules\Farm.Modules.Calibration\Farm.Modules.Calibration.csproj" />
+    <ProjectReference Include="..\..\modules\Farm.Modules.Gcode\Farm.Modules.Gcode.csproj" />
     <ProjectReference Include="..\..\modules\Farm.Modules.PrintQueue\Farm.Modules.PrintQueue.csproj" />
     <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.OctoPrint\Farm.Backend.Plugin.OctoPrint.csproj" />
   </ItemGroup>

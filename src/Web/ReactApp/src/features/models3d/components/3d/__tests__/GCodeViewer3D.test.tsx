@@ -139,6 +139,27 @@ describe('GCodeViewer3D', () => {
     });
   });
 
+  it('passes authorization headers to the worker-backed preview service', async () => {
+    const service = createMockService();
+    const requestHeaders = { Authorization: 'Bearer preview-token' };
+
+    render(
+      <GCodeViewer
+        gcodeUrl="/api/artifacts/artifact-1"
+        requestHeaders={requestHeaders}
+        service={service}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(service.parseGCodeDetailed).toHaveBeenCalledWith(
+        '/api/artifacts/artifact-1',
+        requestHeaders,
+        expect.any(AbortSignal),
+      );
+    });
+  });
+
   it('keeps the real settings control visible, named, and keyboard operable on hover', async () => {
     const user = userEvent.setup();
     const service = createMockService();
@@ -211,7 +232,11 @@ describe('GCodeViewer3D', () => {
     render(<GCodeViewer gcodeUrl="/test.gcode" service={service} />);
 
     await waitFor(() => {
-      expect(service.parseGCodeDetailed).toHaveBeenCalledWith('/test.gcode', expect.any(AbortSignal));
+      expect(service.parseGCodeDetailed).toHaveBeenCalledWith(
+        '/test.gcode',
+        {},
+        expect.any(AbortSignal),
+      );
     });
   });
 
@@ -225,9 +250,13 @@ describe('GCodeViewer3D', () => {
     const { rerender } = render(<GCodeViewer gcodeUrl="/stale.gcode" service={service} />);
 
     await waitFor(() => {
-      expect(service.parseGCodeDetailed).toHaveBeenCalledWith('/stale.gcode', expect.any(AbortSignal));
+      expect(service.parseGCodeDetailed).toHaveBeenCalledWith(
+        '/stale.gcode',
+        {},
+        expect.any(AbortSignal),
+      );
     });
-    const staleSignal = (service.parseGCodeDetailed as ReturnType<typeof vi.fn>).mock.calls[0][1] as AbortSignal;
+    const staleSignal = (service.parseGCodeDetailed as ReturnType<typeof vi.fn>).mock.calls[0][2] as AbortSignal;
     expect(staleSignal.aborted).toBe(false);
 
     // Switching gcodeUrl before the stale parse resolves must abort the
@@ -237,7 +266,11 @@ describe('GCodeViewer3D', () => {
 
     expect(staleSignal.aborted).toBe(true);
     await waitFor(() => {
-      expect(service.parseGCodeDetailed).toHaveBeenCalledWith('/new.gcode', expect.any(AbortSignal));
+      expect(service.parseGCodeDetailed).toHaveBeenCalledWith(
+        '/new.gcode',
+        {},
+        expect.any(AbortSignal),
+      );
     });
 
     // Resolving the superseded (now-aborted) request afterwards must not

@@ -3,6 +3,7 @@ using System.Runtime.Loader;
 using Farm.Slicer.Module.Contracts.Libraries;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Mvc.ApplicationParts;
+using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -44,6 +45,8 @@ public static class SlicerIntegrationExtensions
         {
             mvcBuilder.AddApplicationPart(assembly);
         }
+
+        mvcBuilder.PartManager.FeatureProviders.Add(new InternalSlicerControllerExclusionFeatureProvider());
 
         // For each plugin-contract type found across all loaded assemblies,
         // create a single instance (may implement multiple interfaces) and wire it up.
@@ -211,4 +214,21 @@ public static class SlicerIntegrationExtensions
     /// <summary>Returns <c>true</c> if <paramref name="assembly"/> contains at least one concrete
     /// <see cref="ISlicerModule"/> or <see cref="ISlicerHubRegistrar"/> implementation.</summary>
     private static bool HasPluginTypes(Assembly assembly) => GetPluginTypes(assembly).Any();
+
+    private sealed class InternalSlicerControllerExclusionFeatureProvider
+        : IApplicationFeatureProvider<ControllerFeature>
+    {
+        private const string InternalPromotionControllerName =
+            "Farm.Slicer.Module.Api.Controllers.InternalPromotionArtifactController";
+
+        public void PopulateFeature(IEnumerable<ApplicationPart> parts, ControllerFeature feature)
+        {
+            TypeInfo? internalController = feature.Controllers.FirstOrDefault(
+                controller => controller.FullName == InternalPromotionControllerName);
+            if (internalController is not null)
+            {
+                _ = feature.Controllers.Remove(internalController);
+            }
+        }
+    }
 }

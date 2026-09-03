@@ -66,6 +66,7 @@ public sealed class GcodeApiModule : IApiModule
         // #2038) because Calibration's slice-promotion saga is its primary consumer.
         _ = services.AddSingleton<GcodePromotionReconcilerState>();
         _ = services.AddScoped<IGcodeArtifactPromoter, GcodeArtifactPromoter>();
+        _ = services.AddScoped<ISliceArtifactLibraryService, SliceArtifactLibraryService>();
         _ = services.AddHostedService<GcodePromotionReconciliationService>();
 
         // File consistency audit: runs hourly to detect orphaned/missing/corrupted files. Uses

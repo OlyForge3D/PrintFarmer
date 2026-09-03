@@ -21,6 +21,7 @@ export interface ArtifactListItemResponse {
   sizeBytes: number;
   downloadUrl: string;
   createdAt: string;
+  isPrimary: boolean;
 }
 
 // Slice Job DTOs matching backend
@@ -92,7 +93,7 @@ export interface SliceJobStatusResponse {
   queuedAt: string;
   startedAt?: string;
   completedAt?: string;
-  resultFileUrl?: string;
+  artifactsRoute?: string;
   errorMessage?: string;
   /**
    * Real worker-side failure detail (e.g. OrcaSlicer exit code/stderr or the
@@ -218,6 +219,7 @@ export enum SlicerEngine {
 }
 
 export interface SendToPrinterRequest {
+  artifactId: string;
   printerId: string;
   startPrint: boolean;
 }
@@ -237,6 +239,7 @@ export interface SpoolCostResponse {
 }
 
 export interface AddSliceToQueueRequest {
+  artifactId: string;
   priority?: string;
   spoolId?: number;
   copies?: number;
@@ -249,6 +252,21 @@ export interface AddSliceToQueueResponse {
   printJobId: string;
   queuePosition: number | null;
   message: string;
+}
+
+export interface PromoteSliceArtifactResponse {
+  gcodeFileId: string;
+  name: string;
+  sizeBytes: number;
+  createdNew: boolean;
+  printable: boolean;
+  sliceJobId: string;
+  sourceArtifactId: string;
+}
+
+export interface PromoteSliceArtifactRequest {
+  sliceJobId: string;
+  artifactId: string;
 }
 
 export class SliceJobService {
@@ -302,13 +320,32 @@ export class SliceJobService {
   }
 
   /**
+   * Explicitly promote a staged slice artifact into the farm-wide G-code library.
+   */
+  async promoteSliceArtifact(
+    sliceJobId: string,
+    artifactId: string,
+  ): Promise<PromoteSliceArtifactResponse> {
+    return apiClient.request<PromoteSliceArtifactResponse>({
+      url: '/gcode-promotions/slice-artifact',
+      method: 'POST',
+      data: { sliceJobId, artifactId } satisfies PromoteSliceArtifactRequest,
+    });
+  }
+
+  /**
    * Send completed gcode to a printer for printing
    */
-  async sendToPrinter(jobId: string, printerId: string, startPrint: boolean): Promise<SendToPrinterResponse> {
+  async sendToPrinter(
+    jobId: string,
+    artifactId: string,
+    printerId: string,
+    startPrint: boolean,
+  ): Promise<SendToPrinterResponse> {
     const response = await apiClient.request<SendToPrinterResponse>({
       url: `/slice/${jobId}/send-to-printer`,
       method: 'POST',
-      data: { printerId, startPrint } satisfies SendToPrinterRequest
+      data: { artifactId, printerId, startPrint } satisfies SendToPrinterRequest
     });
     return response;
   }
@@ -513,6 +550,41 @@ export class SliceJobService {
       method: 'GET',
     });
     return response;
+  }
+
+  /**
+   * List artifacts from the canonical route returned by completed job contracts.
+   */
+  async getArtifactsByRoute(artifactsRoute: string): Promise<ArtifactListItemResponse[]> {
+    const apiBaseUrl = getApiBaseUrl().replace(/\/$/, '');
+    let requestUrl: string;
+    if (artifactsRoute.startsWith(`${apiBaseUrl}/`)) {
+      requestUrl = artifactsRoute.slice(apiBaseUrl.length);
+    } else if (artifactsRoute.startsWith('/api/')) {
+      requestUrl = artifactsRoute.slice('/api'.length);
+    } else {
+      throw new Error('Invalid slice artifacts route.');
+    }
+    const artifactJobRoute =
+      /^\/artifacts\/job\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!artifactJobRoute.test(requestUrl)) {
+      throw new Error('Invalid slice artifacts route.');
+    }
+    return apiClient.request<ArtifactListItemResponse[]>({
+      url: requestUrl,
+      method: 'GET',
+    });
+  }
+
+  /**
+   * Fetch an artifact through the authenticated API client.
+   */
+  async downloadArtifact(artifactId: string): Promise<Blob> {
+    return apiClient.request<Blob>({
+      url: `/artifacts/${artifactId}`,
+      method: 'GET',
+      responseType: 'blob',
+    });
   }
 
   /**

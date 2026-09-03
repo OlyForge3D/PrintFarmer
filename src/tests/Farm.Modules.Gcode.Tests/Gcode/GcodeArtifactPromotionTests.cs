@@ -5,9 +5,11 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.FolderManagement;
 using Farm.Infrastructure.Services.Gcode;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
@@ -23,6 +25,7 @@ using Farm.Slicer.Module.Services.Metrics;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -265,6 +268,366 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
     }
 
+    [Fact(DisplayName = "Explicit slice save derives one stable server-owned operation identity")]
+    public async Task SliceArtifactLibraryService_ExplicitSaveAndReplay_ReturnStableDurableIdentity()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        string expectedOperationId =
+            SliceArtifactLibraryService.BuildOperationId(fixture.JobId, fixture.ArtifactId);
+
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(0);
+        _ = (await _harness.CountCheckpointsAsync()).Should().Be(0);
+
+        CalibrationApiResult<SliceArtifactLibraryResult> first =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None);
+        CalibrationApiResult<SliceArtifactLibraryResult> replay =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None);
+
+        _ = first.StatusCode.Should().Be(StatusCodes.Status201Created, first.Code);
+        _ = first.Value!.CreatedNew.Should().BeTrue();
+        _ = replay.StatusCode.Should().Be(StatusCodes.Status200OK, replay.Code);
+        _ = replay.Value!.CreatedNew.Should().BeFalse();
+        _ = replay.Value.GcodeFileId.Should().Be(first.Value.GcodeFileId);
+        _ = (await _harness.GetCheckpointByOperationAsync(expectedOperationId))
+            .SourceArtifactId.Should().Be(fixture.ArtifactId);
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Promoted virtual-path G-code can be downloaded and read from durable storage")]
+    public async Task SliceArtifactLibraryService_PromotedFile_ReadsFromConfiguredStorageRoot()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        CalibrationApiResult<SliceArtifactLibraryResult> saved =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None);
+
+        byte[]? bytes = await _harness.ReadGcodeFileBytesAsync(saved.Value!.GcodeFileId);
+        string? downloadPath = await _harness.ResolveGcodeDownloadPathAsync(saved.Value.GcodeFileId);
+        GcodeFile stored = await _harness.GetGcodeFileAsync(saved.Value.GcodeFileId);
+
+        _ = stored.FilePath.Should().Be("/");
+        _ = bytes.Should().Equal(Encoding.UTF8.GetBytes(GcodeContent));
+        _ = downloadPath.Should().Be(Path.Join(_harness.GcodeRoot, stored.FileName));
+        _ = File.Exists(downloadPath).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "Promotion persists its virtual directory and replay cannot relocate it")]
+    public async Task PromoteAsync_NonRootVirtualDirectory_ReadsAndReplaysOriginalLocation()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        GcodeArtifactPromotionRequest request = fixture.Request("promotion-subdirectory") with
+        {
+            VirtualDirectory = "/slice-results/nested",
+        };
+
+        CalibrationApiResult<GcodePromotionDto> promoted = await _harness.CreatePromoter()
+            .PromoteAsync(request, fixture.Owner, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> replay = await _harness.CreatePromoter()
+            .PromoteAsync(request, fixture.Owner, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> relocation = await _harness.CreatePromoter()
+            .PromoteAsync(
+                request with { VirtualDirectory = "/different-directory" },
+                fixture.Owner,
+                CancellationToken.None);
+
+        GcodeFile stored = await _harness.GetGcodeFileAsync(promoted.Value!.GcodeFileId);
+        string? downloadPath = await _harness.ResolveGcodeDownloadPathAsync(stored.Id);
+        byte[]? bytes = await _harness.ReadGcodeFileBytesAsync(stored.Id);
+        _ = promoted.StatusCode.Should().Be(StatusCodes.Status201Created);
+        _ = replay.StatusCode.Should().Be(StatusCodes.Status200OK);
+        _ = replay.Value!.GcodeFileId.Should().Be(stored.Id);
+        _ = relocation.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = relocation.Code.Should().Be("idempotency_payload_mismatch");
+        _ = stored.FilePath.Should().Be("/slice-results/nested");
+        _ = downloadPath.Should().Be(
+            Path.Join(_harness.GcodeRoot, "slice-results", "nested", stored.FileName));
+        _ = bytes.Should().Equal(Encoding.UTF8.GetBytes(GcodeContent));
+    }
+
+    [Fact(DisplayName = "Promotion rejects a traversing virtual directory")]
+    public async Task PromoteAsync_TraversingVirtualDirectory_ReturnsStableFailure()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+
+        CalibrationApiResult<GcodePromotionDto> result = await _harness.CreatePromoter()
+            .PromoteAsync(
+                fixture.Request("promotion-traversal") with { VirtualDirectory = "../outside" },
+                fixture.Owner,
+                CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = result.Code.Should().Be(GcodeStreamIngestException.InvalidVirtualDirectory);
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(0);
+        _ = Directory.Exists(Path.Join(_harness.GcodeRoot, "outside")).Should().BeFalse();
+    }
+
+    [Theory(DisplayName = "Deleting a promoted file removes durable bytes from its virtual directory")]
+    [InlineData("/")]
+    [InlineData("/slice-results/delete")]
+    public async Task DeleteFileAsync_PromotedFile_RemovesRootAndSubdirectoryBytes(
+        string virtualDirectory)
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        CalibrationApiResult<GcodePromotionDto> promoted = await _harness.CreatePromoter()
+            .PromoteAsync(
+                fixture.Request($"promotion-delete-{Guid.NewGuid():N}") with
+                {
+                    VirtualDirectory = virtualDirectory,
+                },
+                fixture.Owner,
+                CancellationToken.None);
+        string? physicalPath = await _harness.ResolveGcodeDownloadPathAsync(
+            promoted.Value!.GcodeFileId);
+
+        bool deleted = await _harness.DeleteGcodeFileAsync(promoted.Value.GcodeFileId);
+
+        _ = deleted.Should().BeTrue();
+        _ = physicalPath.Should().NotBeNull();
+        _ = File.Exists(physicalPath).Should().BeFalse();
+        _ = (await _harness.GcodeFileExistsAsync(promoted.Value.GcodeFileId)).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "Explicit Save replays the durable file after staged artifact cleanup")]
+    public async Task SliceArtifactLibraryService_SaveAfterArtifactCleanup_ReplaysDurableFile()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        CalibrationApiResult<SliceArtifactLibraryResult> saved =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None);
+        await _harness.DeleteArtifactRowAsync(fixture.ArtifactId);
+
+        CalibrationApiResult<SliceArtifactLibraryResult> replay =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None);
+
+        _ = saved.IsSuccess.Should().BeTrue(saved.Code);
+        _ = replay.StatusCode.Should().Be(StatusCodes.Status200OK, replay.Code);
+        _ = replay.Replayed.Should().BeTrue();
+        _ = replay.Value!.CreatedNew.Should().BeFalse();
+        _ = replay.Value.GcodeFileId.Should().Be(saved.Value!.GcodeFileId);
+    }
+
+    [Fact(DisplayName = "Print-path promotion replays the sole durable file after staged artifact cleanup")]
+    public async Task SliceArtifactLibraryService_PrintAfterArtifactCleanup_ReplaysSoleDurableFile()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        CalibrationApiResult<SliceArtifactLibraryResult> saved =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None);
+        await _harness.DeleteArtifactRowAsync(fixture.ArtifactId);
+
+        CalibrationApiResult<SliceArtifactLibraryResult> printPromotion =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                fixture.JobId,
+                artifactId: null,
+                fixture.Owner,
+                CancellationToken.None);
+
+        _ = printPromotion.StatusCode.Should().Be(StatusCodes.Status200OK, printPromotion.Code);
+        _ = printPromotion.Value!.GcodeFileId.Should().Be(saved.Value!.GcodeFileId);
+        _ = printPromotion.Value.SourceArtifactId.Should().Be(fixture.ArtifactId);
+    }
+
+    [Fact(DisplayName = "Print-path replay requires an artifact when cleanup leaves multiple durable outputs")]
+    public async Task SliceArtifactLibraryService_PrintAfterCleanup_WithMultipleOutputs_RequiresArtifact()
+    {
+        PromotionFixture first = await _harness.SeedCompletedGcodeArtifactAsync();
+        PromotionFixture second = await _harness.SeedAdditionalGcodeArtifactAsync(first, "; second\nG28\n");
+        CalibrationApiResult<SliceArtifactLibraryResult> stagedAmbiguity =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                first.JobId,
+                artifactId: null,
+                first.Owner,
+                CancellationToken.None);
+        _ = stagedAmbiguity.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = stagedAmbiguity.Code.Should().Be("source_artifact_required");
+
+        _ = await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+            first.JobId,
+            first.ArtifactId,
+            first.Owner,
+            CancellationToken.None);
+        _ = await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+            second.JobId,
+            second.ArtifactId,
+            second.Owner,
+            CancellationToken.None);
+        await _harness.DeleteArtifactRowAsync(first.ArtifactId);
+        await _harness.DeleteArtifactRowAsync(second.ArtifactId);
+
+        CalibrationApiResult<SliceArtifactLibraryResult> result =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                first.JobId,
+                artifactId: null,
+                first.Owner,
+                CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = result.Code.Should().Be("source_artifact_required");
+    }
+
+    [Fact(DisplayName = "Explicit selection promotes exactly the requested artifact from a multi-output job")]
+    public async Task SliceArtifactLibraryService_MultipleOutputs_WithArtifactId_PromotesSelectedArtifact()
+    {
+        PromotionFixture first = await _harness.SeedCompletedGcodeArtifactAsync();
+        PromotionFixture selected = await _harness.SeedAdditionalGcodeArtifactAsync(first, "; selected\nG28\n");
+
+        CalibrationApiResult<SliceArtifactLibraryResult> result =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                selected.JobId,
+                selected.ArtifactId,
+                selected.Owner,
+                CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status201Created, result.Code);
+        _ = result.Value!.SourceArtifactId.Should().Be(selected.ArtifactId);
+        _ = (await _harness.GetCheckpointByOperationAsync(
+                SliceArtifactLibraryService.BuildOperationId(selected.JobId, selected.ArtifactId)))
+            .SourceArtifactId.Should().Be(selected.ArtifactId);
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+    }
+
+    [Fact(DisplayName = "A new farm-wide file notifies every authenticated user without metadata")]
+    public async Task SliceArtifactLibraryService_NewFile_NotifiesAuthenticatedUsersWithoutPayload()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        var proxy = new Mock<IClientProxy>();
+        var clients = new Mock<IHubClients>();
+        clients.Setup(value => value.Group(AuthorizedHubGroups.AuthenticatedUsers))
+            .Returns(proxy.Object);
+        var hub = new Mock<IHubContext<PrinterHub>>();
+        hub.SetupGet(value => value.Clients).Returns(clients.Object);
+
+        CalibrationApiResult<SliceArtifactLibraryResult> result =
+            await _harness.CreateSliceArtifactLibraryService(hub: hub.Object).PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None);
+
+        _ = result.IsSuccess.Should().BeTrue(result.Code);
+        clients.Verify(
+            value => value.Group(AuthorizedHubGroups.AuthenticatedUsers),
+            Times.Once);
+        clients.Verify(
+            value => value.Group(AuthorizedHubGroups.User(fixture.Owner.UserId)),
+            Times.Never);
+        proxy.Verify(
+            value => value.SendCoreAsync(
+                "gcodelibraryupdated",
+                It.Is<object?[]>(arguments => arguments.Length == 0),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact(DisplayName = "A completed durable replay does not emit another library notification")]
+    public async Task SliceArtifactLibraryService_CompletedReplay_DoesNotNotifyAgain()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        var proxy = new Mock<IClientProxy>();
+        var clients = new Mock<IHubClients>();
+        clients.Setup(value => value.Group(AuthorizedHubGroups.AuthenticatedUsers))
+            .Returns(proxy.Object);
+        var hub = new Mock<IHubContext<PrinterHub>>();
+        hub.SetupGet(value => value.Clients).Returns(clients.Object);
+
+        _ = await _harness.CreateSliceArtifactLibraryService(hub: hub.Object).PromoteAsync(
+            fixture.JobId,
+            fixture.ArtifactId,
+            fixture.Owner,
+            CancellationToken.None);
+        _ = await _harness.CreateSliceArtifactLibraryService(hub: hub.Object).PromoteAsync(
+            fixture.JobId,
+            fixture.ArtifactId,
+            fixture.Owner,
+            CancellationToken.None);
+
+        proxy.Verify(
+            value => value.SendCoreAsync(
+                "gcodelibraryupdated",
+                It.Is<object?[]>(arguments => arguments.Length == 0),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact(DisplayName = "Concurrent explicit saves converge on one durable identity")]
+    public async Task SliceArtifactLibraryService_ConcurrentSaves_ConvergeOnOneFile()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+
+        CalibrationApiResult<SliceArtifactLibraryResult>[] results = await Task.WhenAll(
+            Task.Run(() => _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None)),
+            Task.Run(() => _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None)));
+
+        _ = results.Should().OnlyContain(result => result.IsSuccess);
+        _ = results.Select(result => result.Value!.GcodeFileId).Distinct()
+            .Should().ContainSingle();
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+        _ = (await _harness.CountCheckpointsAsync()).Should().Be(1);
+    }
+
+    [Fact(DisplayName = "A split-host pin race resolves the sibling's completed durable file")]
+    public async Task SliceArtifactLibraryService_PinMismatchRace_ConvergesWithinRequest()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        string operationId =
+            SliceArtifactLibraryService.BuildOperationId(fixture.JobId, fixture.ArtifactId);
+        CalibrationApiResult<GcodePromotionDto>? siblingResult = null;
+        var racingSource = new SiblingCompletionContentSource(async () =>
+        {
+            siblingResult = await _harness.CreatePromoter(
+                contentSource: _harness.CreateLocalContentSource()).PromoteAsync(
+                    fixture.Request(operationId),
+                    fixture.Owner,
+                    CancellationToken.None);
+        });
+        IGcodeArtifactPromoter racingPromoter =
+            _harness.CreatePromoter(contentSource: racingSource);
+
+        CalibrationApiResult<SliceArtifactLibraryResult> result =
+            await _harness.CreateSliceArtifactLibraryService(promoter: racingPromoter).PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None);
+
+        _ = siblingResult.Should().NotBeNull();
+        _ = siblingResult!.IsSuccess.Should().BeTrue(siblingResult.Code);
+        _ = result.IsSuccess.Should().BeTrue(result.Code);
+        _ = result.Value!.GcodeFileId.Should().Be(siblingResult.Value!.GcodeFileId);
+        _ = result.Value.CreatedNew.Should().BeFalse();
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+        _ = (await _harness.CountCheckpointsAsync()).Should().Be(1);
+    }
+
     [Fact(DisplayName = "A changed payload under the same operation key conflicts")]
     public async Task PromoteAsync_WithChangedPayloadForSameOperation_ReturnsConflict()
     {
@@ -323,6 +686,46 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = second.StatusCode.Should().Be(StatusCodes.Status200OK, second.Code);
         _ = second.Value!.GcodeFileId.Should().Be(first.Value!.GcodeFileId);
         _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Distinct artifacts with identical content share one completed library file")]
+    public async Task PromoteAsync_DistinctArtifactsWithIdenticalContent_CompleteAndReplaySharedFile()
+    {
+        PromotionFixture firstFixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        PromotionFixture secondFixture = await _harness.SeedAdditionalGcodeArtifactAsync(
+            firstFixture,
+            GcodeContent);
+        GcodeArtifactPromotionRequest firstRequest = firstFixture.Request("promotion-identical-a");
+        GcodeArtifactPromotionRequest secondRequest = secondFixture.Request("promotion-identical-b");
+
+        CalibrationApiResult<GcodePromotionDto> first = await _harness.CreatePromoter()
+            .PromoteAsync(firstRequest, firstFixture.Owner, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> second = await _harness.CreatePromoter()
+            .PromoteAsync(secondRequest, secondFixture.Owner, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> firstReplay = await _harness.CreatePromoter()
+            .PromoteAsync(firstRequest, firstFixture.Owner, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> secondReplay = await _harness.CreatePromoter()
+            .PromoteAsync(secondRequest, secondFixture.Owner, CancellationToken.None);
+
+        _ = first.StatusCode.Should().Be(StatusCodes.Status201Created, first.Code);
+        _ = second.StatusCode.Should().Be(StatusCodes.Status200OK, second.Code);
+        _ = second.Code.Should().NotBe("promotion_conflict");
+        _ = second.Value!.GcodeFileId.Should().Be(first.Value!.GcodeFileId);
+        _ = firstReplay.StatusCode.Should().Be(StatusCodes.Status200OK, firstReplay.Code);
+        _ = firstReplay.Replayed.Should().BeTrue();
+        _ = firstReplay.Value!.GcodeFileId.Should().Be(first.Value.GcodeFileId);
+        _ = secondReplay.StatusCode.Should().Be(StatusCodes.Status200OK, secondReplay.Code);
+        _ = secondReplay.Replayed.Should().BeTrue();
+        _ = secondReplay.Value!.GcodeFileId.Should().Be(first.Value.GcodeFileId);
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+        _ = (await _harness.CountCheckpointsAsync()).Should().Be(2);
+        GcodePromotionCheckpoint firstCheckpoint =
+            await _harness.GetCheckpointByOperationAsync(firstRequest.OperationId);
+        GcodePromotionCheckpoint secondCheckpoint =
+            await _harness.GetCheckpointByOperationAsync(secondRequest.OperationId);
+        _ = firstCheckpoint.State.Should().Be(GcodePromotionState.Completed);
+        _ = secondCheckpoint.State.Should().Be(GcodePromotionState.Completed);
+        _ = secondCheckpoint.GcodeFileId.Should().Be(firstCheckpoint.GcodeFileId);
     }
 
     [Fact(DisplayName = "Promoted G-code survives source artifact cleanup with recoverable lineage")]
@@ -1004,6 +1407,36 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = (await _harness.IsArtifactCleanupEligibleAsync(fixture.ArtifactId)).Should().BeTrue();
     }
 
+    [Fact(DisplayName = "Crash-window reconciliation notifies when the reserved file becomes visible")]
+    public async Task ReconcileAsync_AfterBytesCommitted_NotifiesVisibilityTransitionOnlyOnce()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        Guid checkpointId = await _harness.SeedInterruptedPromotionAsync(
+            fixture,
+            SliceArtifactLibraryService.BuildOperationId(fixture.JobId, fixture.ArtifactId));
+        await _harness.SeedReservedGcodeFileAsync(checkpointId, fixture);
+        var proxy = new Mock<IClientProxy>();
+        var clients = new Mock<IHubClients>();
+        clients.Setup(value => value.Group(AuthorizedHubGroups.AuthenticatedUsers))
+            .Returns(proxy.Object);
+        var hub = new Mock<IHubContext<PrinterHub>>();
+        hub.SetupGet(value => value.Clients).Returns(clients.Object);
+
+        CalibrationApiResult<GcodePromotionDto> recovered = await _harness.CreatePromoter(hub: hub.Object)
+            .ReconcileAsync(checkpointId, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> replay = await _harness.CreatePromoter(hub: hub.Object)
+            .ReconcileAsync(checkpointId, CancellationToken.None);
+
+        _ = recovered.IsSuccess.Should().BeTrue(recovered.Code);
+        _ = replay.IsSuccess.Should().BeTrue(replay.Code);
+        proxy.Verify(
+            value => value.SendCoreAsync(
+                "gcodelibraryupdated",
+                It.Is<object?[]>(arguments => arguments.Length == 0),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     [Fact(DisplayName = "An unresolved promotion keeps its source artifact ineligible for cleanup")]
     public async Task IsSourceArtifactCleanupSafeAsync_TracksDurablePromotionState()
     {
@@ -1039,6 +1472,88 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         bool cleanupSafe = await _harness.CreatePromoter()
             .IsSourceArtifactCleanupSafeAsync(fixture.ArtifactId, CancellationToken.None);
         _ = cleanupSafe.Should().BeTrue();
+    }
+
+    [Theory(DisplayName = "A local staged-file length mismatch fails terminally and releases its pin")]
+    [InlineData(-1)]
+    [InlineData(1)]
+    public async Task PromoteAsync_WhenLocalContentLengthMismatches_FailsAndReleasesPin(
+        long declaredSizeDelta)
+    {
+        PromotionFixture original = await _harness.SeedCompletedGcodeArtifactAsync();
+        PromotionFixture fixture = await _harness.SetArtifactDeclaredSizeAsync(
+            original,
+            original.SizeBytes + declaredSizeDelta);
+        GcodeArtifactPromotionRequest request = fixture.Request(
+            $"promotion-local-size-{declaredSizeDelta}");
+
+        CalibrationApiResult<GcodePromotionDto> result = await _harness.CreatePromoter()
+            .PromoteAsync(request, fixture.Owner, CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = result.Code.Should().Be(GcodeStreamIngestException.SizeMismatch);
+        GcodePromotionCheckpoint checkpoint =
+            await _harness.GetCheckpointByOperationAsync(request.OperationId);
+        _ = checkpoint.State.Should().Be(GcodePromotionState.Failed);
+        _ = checkpoint.FailureCode.Should().Be(GcodeStreamIngestException.SizeMismatch);
+        Artifact released = await _harness.GetArtifactAsync(fixture.ArtifactId);
+        _ = released.PromotionCheckpointId.Should().BeNull();
+        _ = released.PromotionStartedAtUtc.Should().BeNull();
+        _ = (await _harness.IsArtifactCleanupEligibleAsync(fixture.ArtifactId)).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "A restart reconciles a transient failure into the original virtual directory")]
+    public async Task ReconcileAsync_AfterTransportFailure_PreservesDirectoryReplayAndImmutability()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        byte[] bytes = Encoding.UTF8.GetBytes(GcodeContent);
+        var source = new TruncatedThenCompleteContentSource(bytes);
+        GcodeArtifactPromotionRequest request = fixture.Request("promotion-transport-retry") with
+        {
+            VirtualDirectory = "  /slice-results/recovered  ",
+        };
+
+        CalibrationApiResult<GcodePromotionDto> first = await _harness
+            .CreatePromoter(contentSource: source)
+            .PromoteAsync(request, fixture.Owner, CancellationToken.None);
+        GcodePromotionCheckpoint pending =
+            await _harness.GetCheckpointByOperationAsync(request.OperationId);
+        Artifact pinned = await _harness.GetArtifactAsync(fixture.ArtifactId);
+
+        _ = first.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        _ = first.Code.Should().Be("promotion_source_transport_unavailable");
+        _ = pending.State.Should().Be(GcodePromotionState.Pending);
+        _ = pending.FailureCode.Should().BeNull();
+        _ = pending.VirtualDirectory.Should().Be("/slice-results/recovered");
+        _ = pinned.PromotionCheckpointId.Should().Be(pending.Id);
+        _ = pinned.PromotionStartedAtUtc.Should().NotBeNull();
+        _ = pinned.PromotedAtUtc.Should().BeNull();
+
+        CalibrationApiResult<GcodePromotionDto> reconciled = await _harness.CreatePromoter()
+            .ReconcileAsync(pending.Id, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> replay = await _harness.CreatePromoter()
+            .PromoteAsync(request, fixture.Owner, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> relocation = await _harness.CreatePromoter()
+            .PromoteAsync(
+                request with { VirtualDirectory = "/different-directory" },
+                fixture.Owner,
+                CancellationToken.None);
+
+        _ = reconciled.StatusCode.Should().Be(StatusCodes.Status201Created, reconciled.Code);
+        _ = replay.StatusCode.Should().Be(StatusCodes.Status200OK, replay.Code);
+        _ = replay.Replayed.Should().BeTrue();
+        _ = replay.Value!.GcodeFileId.Should().Be(reconciled.Value!.GcodeFileId);
+        _ = relocation.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = relocation.Code.Should().Be("idempotency_payload_mismatch");
+        _ = (await _harness.GetCheckpointAsync(pending.Id)).State
+            .Should().Be(GcodePromotionState.Completed);
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+        GcodeFile stored = await _harness.GetGcodeFileAsync(reconciled.Value.GcodeFileId);
+        string? downloadPath = await _harness.ResolveGcodeDownloadPathAsync(stored.Id);
+        _ = stored.FilePath.Should().Be("/slice-results/recovered");
+        _ = downloadPath.Should().Be(
+            Path.Join(_harness.GcodeRoot, "slice-results", "recovered", stored.FileName));
+        _ = File.Exists(downloadPath).Should().BeTrue();
     }
 
     [Fact(DisplayName = "The promotion status route returns the caller's own promotion only")]
@@ -1333,21 +1848,44 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         public SlicerDbContext CreateSlicerContext() =>
             new(new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(_slicerConnectionString).Options);
 
-        public GcodeArtifactPromoter CreatePromoter(bool withArtifactRouting = true)
+        public GcodeArtifactPromoter CreatePromoter(
+            bool withArtifactRouting = true,
+            IPromotionArtifactContentSource? contentSource = null,
+            IHubContext<PrinterHub>? hub = null)
         {
             AppDbContext core = CreateCoreContext();
             SlicerContextFactory slicerFactory = new(_slicerConnectionString);
             IArtifactsRepository artifactsRepository = new EfArtifactsRepository(slicerFactory);
             ISliceJobRepository sliceJobs = new EfSliceJobRepository(CreateSlicerContext());
+            IArtifactsService artifactsService = CreateArtifactsService(artifactsRepository);
             return new GcodeArtifactPromoter(
                 core,
                 CreateGcodeFilesService(core),
                 CreateStoragePaths(),
                 ReconcilerState,
                 NullLogger<GcodeArtifactPromoter>.Instance,
-                withArtifactRouting ? CreateArtifactsService(artifactsRepository) : null,
+                withArtifactRouting
+                    ? contentSource ?? new LocalPromotionArtifactContentSource(artifactsService)
+                    : null,
                 withArtifactRouting ? artifactsRepository : null,
-                withArtifactRouting ? sliceJobs : null);
+                withArtifactRouting ? sliceJobs : null,
+                hub);
+        }
+
+        public SliceArtifactLibraryService CreateSliceArtifactLibraryService(
+            IGcodeArtifactPromoter? promoter = null,
+            IHubContext<PrinterHub>? hub = null) =>
+            new(
+                CreateCoreContext(),
+                promoter ?? CreatePromoter(hub: hub),
+                CreateArtifactsRepository(),
+                new EfSliceJobRepository(CreateSlicerContext()));
+
+        public LocalPromotionArtifactContentSource CreateLocalContentSource()
+        {
+            IArtifactsRepository artifactsRepository = CreateArtifactsRepository();
+            return new LocalPromotionArtifactContentSource(
+                CreateArtifactsService(artifactsRepository));
         }
 
         public EfArtifactsRepository CreateArtifactsRepository() =>
@@ -1437,6 +1975,52 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 new CalibrationActor(owner, "owner", false));
         }
 
+        public async Task<PromotionFixture> SeedAdditionalGcodeArtifactAsync(
+            PromotionFixture source,
+            string content)
+        {
+            Guid artifactId = Guid.NewGuid();
+            byte[] bytes = Encoding.UTF8.GetBytes(content);
+            string sha256 = Convert.ToHexString(SHA256.HashData(bytes));
+            await File.WriteAllBytesAsync(Path.Join(ArtifactRoot, $"{artifactId}.gcode"), bytes);
+
+            await using SlicerDbContext slicer = CreateSlicerContext();
+            _ = slicer.Artifacts.Add(new Artifact
+            {
+                Id = artifactId,
+                JobId = source.JobId,
+                WorkerId = source.WorkerId,
+                Kind = SlicerArtifactKinds.Gcode,
+                FileName = $"{artifactId}.gcode",
+                RelativePath = $"{artifactId}.gcode",
+                ContentType = "text/x.gcode",
+                SizeBytes = bytes.LongLength,
+                Sha256 = sha256,
+                DeclaredSha256 = sha256,
+                CreatedAt = DateTime.UtcNow,
+            });
+            _ = await slicer.SaveChangesAsync();
+
+            return source with
+            {
+                ArtifactId = artifactId,
+                Sha256 = sha256,
+                SizeBytes = bytes.LongLength,
+            };
+        }
+
+        public async Task<PromotionFixture> SetArtifactDeclaredSizeAsync(
+            PromotionFixture fixture,
+            long declaredSizeBytes)
+        {
+            await using SlicerDbContext slicer = CreateSlicerContext();
+            Artifact artifact = await slicer.Artifacts
+                .SingleAsync(candidate => candidate.Id == fixture.ArtifactId);
+            artifact.SizeBytes = declaredSizeBytes;
+            _ = await slicer.SaveChangesAsync();
+            return fixture with { SizeBytes = declaredSizeBytes };
+        }
+
         public async Task<Guid> SeedInterruptedPromotionAsync(PromotionFixture fixture, string operationId)
         {
             // Reproduces a crash between accepting the promotion and copying the bytes: the checkpoint
@@ -1474,6 +2058,29 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 checkpointId,
                 fixture.Owner.UserId);
             return checkpointId;
+        }
+
+        public async Task SeedReservedGcodeFileAsync(Guid checkpointId, PromotionFixture fixture)
+        {
+            await using AppDbContext core = CreateCoreContext();
+            GcodePromotionCheckpoint checkpoint = await core.GcodePromotionCheckpoints
+                .SingleAsync(candidate => candidate.Id == checkpointId);
+            _ = core.GcodeFiles.Add(new GcodeFile
+            {
+                Id = checkpoint.GcodeFileId,
+                FileName = "recovered.gcode",
+                FileHash = fixture.Sha256,
+                ContentSha256 = fixture.Sha256,
+                FileSizeBytes = fixture.SizeBytes,
+                FilePath = Path.Join(GcodeRoot, "recovered.gcode"),
+                FolderId = _folderId,
+                UploadedAt = DateTime.UtcNow,
+                PromotionOperationId = checkpoint.OperationId,
+                PromotionOperationKey = GcodePromotionOperationKey.Compute(
+                    fixture.Owner.UserId,
+                    checkpoint.OperationId),
+            });
+            _ = await core.SaveChangesAsync();
         }
 
         public async Task PinArtifactForPromotionAsync(
@@ -1621,6 +2228,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
 
                 _deleteArtifactFile(path);
             }
+
         }
 
         public async Task<bool> ArtifactExistsAsync(Guid artifactId)
@@ -1643,6 +2251,33 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             return await core.GcodeFiles.AsNoTracking().SingleAsync(file => file.Id == fileId);
         }
 
+        public async Task<byte[]?> ReadGcodeFileBytesAsync(Guid fileId)
+        {
+            await using AppDbContext core = CreateCoreContext();
+            return await CreateGcodeFilesService(core)
+                .ReadFileBytesAsync(fileId, CancellationToken.None);
+        }
+
+        public async Task<string?> ResolveGcodeDownloadPathAsync(Guid fileId)
+        {
+            await using AppDbContext core = CreateCoreContext();
+            return await CreateGcodeFilesService(core)
+                .DownloadFileAsync(fileId, string.Empty, CancellationToken.None);
+        }
+
+        public async Task<bool> DeleteGcodeFileAsync(Guid fileId)
+        {
+            await using AppDbContext core = CreateCoreContext();
+            return await CreateGcodeFilesService(core)
+                .DeleteFileAsync(fileId, CancellationToken.None);
+        }
+
+        public async Task<bool> GcodeFileExistsAsync(Guid fileId)
+        {
+            await using AppDbContext core = CreateCoreContext();
+            return await core.GcodeFiles.AnyAsync(file => file.Id == fileId);
+        }
+
         public async Task<GcodePromotionCheckpoint> GetCheckpointAsync(Guid checkpointId)
         {
             await using AppDbContext core = CreateCoreContext();
@@ -1650,10 +2285,23 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 .SingleAsync(checkpoint => checkpoint.Id == checkpointId);
         }
 
+        public async Task<GcodePromotionCheckpoint> GetCheckpointByOperationAsync(string operationId)
+        {
+            await using AppDbContext core = CreateCoreContext();
+            return await core.GcodePromotionCheckpoints.AsNoTracking()
+                .SingleAsync(checkpoint => checkpoint.OperationId == operationId);
+        }
+
         public async Task<int> CountGcodeFilesAsync()
         {
             await using AppDbContext core = CreateCoreContext();
             return await core.GcodeFiles.CountAsync();
+        }
+
+        public async Task<int> CountCheckpointsAsync()
+        {
+            await using AppDbContext core = CreateCoreContext();
+            return await core.GcodePromotionCheckpoints.CountAsync();
         }
 
         public async Task<byte[]> ReadPromotedBytesAsync(Guid fileId)
@@ -1681,6 +2329,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             {
                 // Temporary test data is reclaimed by the operating system.
             }
+
         }
 
         private async Task SeedCalibrationContextAsync(
@@ -1806,6 +2455,50 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         {
             public SlicerDbContext CreateDbContext() =>
                 new(new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connectionString).Options);
+        }
+    }
+
+    private sealed class SiblingCompletionContentSource(Func<Task> completeSiblingAsync)
+        : IPromotionArtifactContentSource
+    {
+        public async Task<PromotionArtifactContent?> OpenReadAsync(
+            Guid artifactId,
+            string operationKey,
+            long expectedSizeBytes,
+            CancellationToken cancellationToken)
+        {
+            _ = artifactId;
+            _ = operationKey;
+            _ = expectedSizeBytes;
+            cancellationToken.ThrowIfCancellationRequested();
+            await completeSiblingAsync();
+            throw new PromotionSourcePinMismatchException();
+        }
+    }
+
+    private sealed class TruncatedThenCompleteContentSource(byte[] bytes)
+        : IPromotionArtifactContentSource
+    {
+        private int _calls;
+
+        public Task<PromotionArtifactContent?> OpenReadAsync(
+            Guid artifactId,
+            string operationKey,
+            long expectedSizeBytes,
+            CancellationToken cancellationToken)
+        {
+            _ = artifactId;
+            _ = operationKey;
+            cancellationToken.ThrowIfCancellationRequested();
+            int length = Interlocked.Increment(ref _calls) == 1
+                ? bytes.Length - 1
+                : bytes.Length;
+            Stream stream = new MemoryStream(bytes, 0, length, writable: false);
+            return Task.FromResult<PromotionArtifactContent?>(
+                PromotionArtifactContent.Create(
+                    stream,
+                    expectedSizeBytes,
+                    stream.DisposeAsync));
         }
     }
 }

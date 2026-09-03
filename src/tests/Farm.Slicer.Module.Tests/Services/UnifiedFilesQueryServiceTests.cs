@@ -296,6 +296,30 @@ public sealed class UnifiedFilesQueryServiceTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task QueryAsync_PromotedSliceGcode_ReturnsDurableGcodeLibraryRow()
+    {
+        Guid sourceJobId = Guid.NewGuid();
+        GcodeFile promoted = CreateGcode("completed-slice.gcode", 321);
+        promoted.SourceSliceJobId = sourceJobId;
+        promoted.SourceArtifactId = Guid.NewGuid();
+        promoted.IsImmutable = true;
+        _appDb.GcodeFiles.Add(promoted);
+        await SaveChangesAsync();
+
+        UnifiedFilesQueryResponse response = await _service.QueryAsync(
+            new UnifiedFilesQueryRequestDto
+            {
+                Filter = UnifiedFileTypeFilter.Gcode,
+            },
+            CancellationToken.None);
+
+        response.Items.Should().ContainSingle();
+        response.Items[0].Id.Should().Be(promoted.Id);
+        response.Items[0].Source.Should().Be(UnifiedFileSource.Gcode);
+        response.Items[0].Name.Should().Be("completed-slice.gcode");
+    }
+
+    [Fact]
     public async Task QueryAsync_CancelledRequest_StopsDatabaseWork()
     {
         _slicerDb.Models3D.Add(CreateModel("cancel.stl", 1));

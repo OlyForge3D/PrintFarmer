@@ -115,7 +115,7 @@ describe('useSliceJobProgress', () => {
         eventType: 'JobCompleted',
         status: 'Completed',
         progressPercent: 100,
-        resultFileUrl: '/artifacts/job-1/output.gcode',
+        artifactsRoute: '/api/artifacts/job/job-1',
         estimatedPrintTimeSeconds: 3600,
         filamentUsedGrams: 25.5,
       }));
@@ -123,7 +123,7 @@ describe('useSliceJobProgress', () => {
 
     expect(result.current.status).toBe('Completed');
     expect(result.current.progressPercent).toBe(100);
-    expect(result.current.resultFileUrl).toBe('/artifacts/job-1/output.gcode');
+    expect(result.current.artifactsRoute).toBe('/api/artifacts/job/job-1');
     expect(result.current.estimatedPrintTimeSeconds).toBe(3600);
     expect(result.current.filamentUsedGrams).toBe(25.5);
   });

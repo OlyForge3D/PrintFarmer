@@ -278,11 +278,18 @@ export function QueueRealtimeBridge() {
     });
     const unsubscribeConnection =
       printerSignalRService.onConnectionStateChange((connected) => {
-        if (connected) void refreshBoth();
+        if (connected) {
+          void refreshBoth();
+          void queryClient.invalidateQueries({ queryKey: ['file-browser'] });
+        }
       });
     const unsubscribeResources =
       printerSignalRService.onQueueResourcesChanged?.(() => {
         void refreshBoth();
+      }) ?? (() => {});
+    const unsubscribeGcodeLibrary =
+      printerSignalRService.onGcodeLibraryUpdated?.(() => {
+        void queryClient.invalidateQueries({ queryKey: ['file-browser'] });
       }) ?? (() => {});
 
     void refreshBoth();
@@ -300,6 +307,7 @@ export function QueueRealtimeBridge() {
       unsubscribeQueue();
       unsubscribeConnection();
       unsubscribeResources();
+      unsubscribeGcodeLibrary();
       invalidateRefresher.dispose();
       reconcileRefresher.dispose();
       const lifecycle = printerSignalRService as typeof printerSignalRService & {

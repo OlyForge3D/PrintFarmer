@@ -11,6 +11,8 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
+using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Modules.Calibration.Services.Calibration;
 using Farm.Modules.Calibration.Services.Gcode;
@@ -18,6 +20,7 @@ using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -39,9 +42,10 @@ public sealed class GcodeArtifactPromoter(
     IStoragePathService storagePaths,
     GcodePromotionReconcilerState reconcilerState,
     ILogger<GcodeArtifactPromoter> logger,
-    IArtifactsService? artifacts = null,
+    IPromotionArtifactContentSource? contentSource = null,
     IArtifactsRepository? artifactsRepository = null,
-    ISliceJobRepository? sliceJobs = null) : IGcodeArtifactPromoter
+    ISliceJobRepository? sliceJobs = null,
+    IHubContext<PrinterHub>? hub = null) : IGcodeArtifactPromoter
 {
     private const string ManifestSchemaVersion = "1.0";
     private const string GeneratorName = "printfarmer.gcode-artifact-promoter";
@@ -59,15 +63,16 @@ public sealed class GcodeArtifactPromoter(
         reconcilerState ?? throw new ArgumentNullException(nameof(reconcilerState));
 
     private readonly ILogger<GcodeArtifactPromoter> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    private readonly IArtifactsService? _artifacts = artifacts;
+    private readonly IPromotionArtifactContentSource? _contentSource = contentSource;
     private readonly IArtifactsRepository? _artifactsRepository = artifactsRepository;
     private readonly ISliceJobRepository? _sliceJobs = sliceJobs;
+    private readonly IHubContext<PrinterHub>? _hub = hub;
 
     /// <inheritdoc/>
     public async Task<GcodePromotionCapabilityDto> GetCapabilityAsync(CancellationToken cancellationToken)
     {
         bool artifactSourceAvailable =
-            _artifacts is not null && _artifactsRepository is not null && _sliceJobs is not null;
+            _contentSource is not null && _artifactsRepository is not null && _sliceJobs is not null;
         bool libraryStorageWritable = IsLibraryStorageWritable();
         bool checkpointStoreAvailable = await IsCheckpointStoreAvailableAsync(cancellationToken);
         bool reconcilerHealthy = _reconcilerState.IsHealthy;
@@ -116,7 +121,9 @@ public sealed class GcodeArtifactPromoter(
         GcodePromotionCapabilityDto capability = await GetCapabilityAsync(cancellationToken);
         if (!capability.Operational)
         {
-            return Failure(StatusCodes.Status503ServiceUnavailable, "promotion_dependency_unavailable");
+            return Failure(
+                StatusCodes.Status503ServiceUnavailable,
+                "promotion_dependency_unavailable");
         }
 
         Artifact? artifact = await _artifactsRepository!.GetByIdAsync(request.SourceArtifactId, cancellationToken);
@@ -141,7 +148,8 @@ public sealed class GcodeArtifactPromoter(
         string contentSha256 = NormalizeHex(artifact.Sha256);
         string operationScope = GetOperationScope(job.UserId);
         string operationId = request.OperationId.Trim();
-        string requestSha256 = ComputeRequestSha256(request, contentSha256);
+        string virtualDirectory = NormalizeVirtualDirectory(request.VirtualDirectory);
+        string requestSha256 = ComputeRequestSha256(request, contentSha256, virtualDirectory);
 
         GcodePromotionCheckpoint? checkpoint = await _dbContext.GcodePromotionCheckpoints
             .FirstOrDefaultAsync(
@@ -173,7 +181,15 @@ public sealed class GcodeArtifactPromoter(
                     : Failure(StatusCodes.Status409Conflict, "promotion_in_progress");
             }
 
-            checkpoint = NewCheckpoint(request, artifact, job, operationScope, operationId, requestSha256, contentSha256);
+            checkpoint = NewCheckpoint(
+                request,
+                artifact,
+                job,
+                operationScope,
+                operationId,
+                requestSha256,
+                contentSha256,
+                virtualDirectory);
             _ = _dbContext.GcodePromotionCheckpoints.Add(checkpoint);
             try
             {
@@ -217,7 +233,7 @@ public sealed class GcodeArtifactPromoter(
             return Failure(StatusCodes.Status409Conflict, checkpoint.FailureCode ?? "promotion_failed");
         }
 
-        return await ExecutePromotionAsync(checkpoint, request.VirtualDirectory, artifact, job, cancellationToken);
+        return await ExecutePromotionAsync(checkpoint, checkpoint.VirtualDirectory, artifact, job, cancellationToken);
     }
 
     /// <inheritdoc/>
@@ -392,7 +408,7 @@ public sealed class GcodeArtifactPromoter(
                 replayed: true);
         }
 
-        if (_artifacts is null || _artifactsRepository is null || _sliceJobs is null)
+        if (_contentSource is null || _artifactsRepository is null || _sliceJobs is null)
         {
             return Failure(StatusCodes.Status503ServiceUnavailable, "promotion_dependency_unavailable");
         }
@@ -408,7 +424,7 @@ public sealed class GcodeArtifactPromoter(
         }
 
         checkpoint.ReconcileAttempts++;
-        return await ExecutePromotionAsync(checkpoint, virtualDirectory: null, artifact, job, cancellationToken);
+        return await ExecutePromotionAsync(checkpoint, checkpoint.VirtualDirectory, artifact, job, cancellationToken);
     }
 
     /// <inheritdoc/>
@@ -497,6 +513,9 @@ public sealed class GcodeArtifactPromoter(
 
     private static string NormalizeHex(string? value) =>
         (value ?? string.Empty).Trim().Replace("-", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
+
+    private static string NormalizeVirtualDirectory(string? value) =>
+        value?.Trim() ?? string.Empty;
 
     private static bool IsHexDigest(string value) =>
         value.Length == 64 && value.All(Uri.IsHexDigit);
@@ -630,7 +649,8 @@ public sealed class GcodeArtifactPromoter(
         string operationScope,
         string operationId,
         string requestSha256,
-        string contentSha256)
+        string contentSha256,
+        string virtualDirectory)
     {
         DateTime nowUtc = DateTime.UtcNow;
         return new GcodePromotionCheckpoint
@@ -640,6 +660,7 @@ public sealed class GcodeArtifactPromoter(
             OperationScope = operationScope,
             OperationId = operationId,
             RequestSha256 = requestSha256,
+            VirtualDirectory = virtualDirectory,
             SourceArtifactId = artifact.Id,
             SourceSliceJobId = job.Id,
             SourceWorkerId = artifact.WorkerId,
@@ -681,17 +702,19 @@ public sealed class GcodeArtifactPromoter(
         GcodePromotionLineage lineage = await BuildLineageAsync(checkpoint, artifact, job, manifestJson, cancellationToken);
 
         GcodeStreamIngestResult ingest;
-        await using ArtifactContentStream? content = await _artifacts!.OpenReadStreamAsync(
-            checkpoint.SourceArtifactId,
-            cancellationToken);
-        if (content is null)
-        {
-            await FailCheckpointAsync(checkpoint, "source_artifact_bytes_unavailable", cancellationToken);
-            return Failure(StatusCodes.Status409Conflict, "source_artifact_bytes_unavailable");
-        }
-
         try
         {
+            await using PromotionArtifactContent? content = await _contentSource!.OpenReadAsync(
+                checkpoint.SourceArtifactId,
+                checkpoint.ScopedOperationKey(),
+                checkpoint.SourceSizeBytes,
+                cancellationToken);
+            if (content is null)
+            {
+                await FailCheckpointAsync(checkpoint, "source_artifact_bytes_unavailable", cancellationToken);
+                return Failure(StatusCodes.Status409Conflict, "source_artifact_bytes_unavailable");
+            }
+
             ingest = await _gcodeFiles.IngestStreamAsync(
                 new GcodeStreamIngestRequest
                 {
@@ -705,6 +728,45 @@ public sealed class GcodeArtifactPromoter(
                     Lineage = lineage,
                 },
                 cancellationToken);
+        }
+        catch (PromotionSourcePinMismatchException exception)
+        {
+            _logger.LogInformation(
+                exception,
+                "Promotion {OperationId} observed a completed or replaced source pin and is resolving durable state",
+                LogSanitizer.Sanitize(checkpoint.OperationId));
+            GcodePromotionCheckpoint? winner = await ReloadCheckpointAsync(checkpoint.Id, cancellationToken);
+            if (winner?.State == GcodePromotionState.Completed)
+            {
+                return CalibrationApiResult<GcodePromotionDto>.Success(
+                    await ToDtoAsync(winner, cancellationToken),
+                    StatusCodes.Status200OK,
+                    replayed: true);
+            }
+
+            return Failure(StatusCodes.Status409Conflict, "promotion_in_progress");
+        }
+        catch (PromotionSourceContentMismatchException exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Promotion {OperationId} found a permanent local source size mismatch",
+                LogSanitizer.Sanitize(checkpoint.OperationId));
+            await FailCheckpointAsync(
+                checkpoint,
+                GcodeStreamIngestException.SizeMismatch,
+                cancellationToken);
+            return Failure(StatusCodes.Status409Conflict, GcodeStreamIngestException.SizeMismatch);
+        }
+        catch (PromotionSourceTransportException exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Promotion {OperationId} could not read its source bytes and remains pending",
+                LogSanitizer.Sanitize(checkpoint.OperationId));
+            return Failure(
+                StatusCodes.Status503ServiceUnavailable,
+                "promotion_source_transport_unavailable");
         }
         catch (GcodeStreamIngestException exception)
         {
@@ -767,9 +829,11 @@ public sealed class GcodeArtifactPromoter(
         checkpoint.Revision++;
 
         GcodePromotionCheckpoint effective = checkpoint;
+        bool completedHere = false;
         try
         {
             _ = await _dbContext.SaveChangesAsync(cancellationToken);
+            completedHere = true;
         }
         catch (DbUpdateException)
         {
@@ -786,8 +850,37 @@ public sealed class GcodeArtifactPromoter(
             effective = winner;
         }
 
+        if (completedHere)
+        {
+            await NotifyLibraryUpdatedAsync(cancellationToken);
+        }
+
         await AcknowledgeSourceAsync(effective, cancellationToken);
         return effective;
+    }
+
+    private async Task NotifyLibraryUpdatedAsync(CancellationToken cancellationToken)
+    {
+        if (_hub is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _hub.Clients.Group(AuthorizedHubGroups.AuthenticatedUsers)
+                .SendAsync("gcodelibraryupdated", cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Could not notify authenticated users that the G-code library was updated.");
+        }
     }
 
     private async Task FailCheckpointAsync(
@@ -1067,7 +1160,10 @@ public sealed class GcodeArtifactPromoter(
             : CalibrationLineageContext.Empty with { SpecificationSha256 = attempt.SpecificationSha256 };
     }
 
-    private static string ComputeRequestSha256(GcodeArtifactPromotionRequest request, string contentSha256)
+    private static string ComputeRequestSha256(
+        GcodeArtifactPromotionRequest request,
+        string contentSha256,
+        string virtualDirectory)
     {
         // A canonical, ordered projection of only the immutable request fields: two calls agree exactly
         // or they are a payload mismatch.
@@ -1084,7 +1180,7 @@ public sealed class GcodeArtifactPromoter(
             $"projectId={request.CalibrationProjectId?.ToString("D", CultureInfo.InvariantCulture) ?? string.Empty}",
             $"attemptId={request.CalibrationAttemptId?.ToString("D", CultureInfo.InvariantCulture) ?? string.Empty}",
             $"orchestrationId={request.CalibrationOrchestrationId?.ToString("D", CultureInfo.InvariantCulture) ?? string.Empty}",
-            $"virtualDirectory={request.VirtualDirectory?.Trim() ?? string.Empty}");
+            $"virtualDirectory={virtualDirectory}");
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
 

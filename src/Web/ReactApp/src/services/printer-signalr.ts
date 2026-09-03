@@ -55,6 +55,7 @@ type FilamentCoverageChangedCallback = (event: FilamentCoverageChangedEvent) => 
 type FallbackGroupsUpdatedCallback = (event: FallbackGroupsUpdatedEvent) => void;
 type QueueEventCallback = (event: QueueEventEnvelope) => void;
 type QueueResourcesChangedCallback = () => void;
+type GcodeLibraryUpdatedCallback = () => void;
 
 const AUTO_DISPATCH_STATE_CHANGED_EVENT = "autodispatchstatechanged";
 
@@ -232,6 +233,15 @@ export class PrinterSignalRService {
           callback();
         } catch (error) {
           console.error("Queue resource callback error:", error);
+        }
+      });
+    });
+    connection.on("gcodelibraryupdated", () => {
+      this.gcodeLibraryUpdatedCallbacks.forEach((callback) => {
+        try {
+          callback();
+        } catch (error) {
+          console.error("G-code library callback error:", error);
         }
       });
     });
@@ -435,6 +445,7 @@ export class PrinterSignalRService {
   private fallbackGroupsUpdatedCallbacks: FallbackGroupsUpdatedCallback[] = [];
   private queueEventCallbacks: QueueEventCallback[] = [];
   private queueResourcesChangedCallbacks: QueueResourcesChangedCallback[] = [];
+  private gcodeLibraryUpdatedCallbacks: GcodeLibraryUpdatedCallback[] = [];
   private subscribedPrinters = new Set<string>();
   private subscribedQueueJobs = new Set<string>();
   private subscribedProjects = new Set<string>();
@@ -1053,6 +1064,16 @@ export class PrinterSignalRService {
     };
   }
 
+  public onGcodeLibraryUpdated(
+    callback: GcodeLibraryUpdatedCallback
+  ): () => void {
+    this.gcodeLibraryUpdatedCallbacks.push(callback);
+    return () => {
+      const index = this.gcodeLibraryUpdatedCallbacks.indexOf(callback);
+      if (index >= 0) this.gcodeLibraryUpdatedCallbacks.splice(index, 1);
+    };
+  }
+
   public getQueueSubscriptionSnapshot(): {
     printerIds: string[];
     jobIds: string[];
@@ -1529,6 +1550,7 @@ export class PrinterSignalRService {
     this.fallbackGroupsUpdatedCallbacks = [];
     this.queueEventCallbacks = [];
     this.queueResourcesChangedCallbacks = [];
+    this.gcodeLibraryUpdatedCallbacks = [];
     this.clearQueueSubscriptionState();
     for (const timer of this.offlineGraceTimers.values()) {
       clearTimeout(timer);

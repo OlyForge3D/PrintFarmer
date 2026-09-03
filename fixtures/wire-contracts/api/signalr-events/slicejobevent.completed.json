@@ -1,0 +1,17 @@
+{
+  "eventType": "JobCompleted",
+  "jobId": "8111254b-0d48-4c36-ba3c-37a8cd8cb452",
+  "userId": "de83b424-bc79-4b92-905b-55b25864cb80",
+  "status": "Completed",
+  "progressPercent": 0,
+  "queuedAt": "2026-09-03T04:23:53.2979993Z",
+  "startedAt": "2026-09-03T04:24:53.2980115Z",
+  "completedAt": "2026-09-03T04:25:53.2980248Z",
+  "artifactsRoute": "/api/artifacts/job/8111254b-0d48-4c36-ba3c-37a8cd8cb452",
+  "estimatedPrintTimeSeconds": 3600,
+  "filamentUsedGrams": 18.5,
+  "workerId": "ad3e16bb-82ed-4a1f-ab5f-58133c3e8dd7",
+  "priority": 0,
+  "timestamp": "2026-09-03T04:25:53.2992785Z",
+  "slicerEngineVersion": "2.3.1"
+}

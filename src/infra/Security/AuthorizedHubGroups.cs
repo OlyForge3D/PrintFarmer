@@ -5,6 +5,7 @@
 /// </summary>
 public static class AuthorizedHubGroups
 {
+    public const string AuthenticatedUsers = "AuthenticatedUsers";
     public const string Farm = "Farm-default";
     public const string Administrators = "FarmAdministrators";
     public const string SlicingMonitors = "SlicingMonitors";

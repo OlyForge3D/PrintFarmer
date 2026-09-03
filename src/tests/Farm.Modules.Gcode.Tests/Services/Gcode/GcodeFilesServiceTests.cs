@@ -183,6 +183,7 @@ public class GcodeFilesServiceTests
                 .ReturnsAsync(gcodeFile);
             var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
             var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+            storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
             var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
             var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
             var mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
@@ -227,6 +228,7 @@ public class GcodeFilesServiceTests
             .ReturnsAsync(gcodeFile);
         var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
         var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
         var mockFolderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
@@ -238,6 +240,157 @@ public class GcodeFilesServiceTests
         string? result = await service.DownloadFileAsync(fileId, "/app/wwwroot", CancellationToken.None);
 
         // Assert
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_ById_WithEscapingVirtualPath_ReturnsNull()
+    {
+        string parent = Path.Join(Path.GetTempPath(), "pfarm-gcode-tests", Guid.NewGuid().ToString());
+        string storageDir = Path.Join(parent, "root");
+        string outsideDir = Path.Join(parent, "outside");
+        Directory.CreateDirectory(storageDir);
+        Directory.CreateDirectory(outsideDir);
+        string fileName = "escaped.gcode";
+        await File.WriteAllTextAsync(Path.Join(outsideDir, fileName), "G28");
+
+        try
+        {
+            var fileId = Guid.NewGuid();
+            var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
+            repo.Setup(x => x.GetByIdWithIncludesAsync(fileId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new GcodeFile
+                {
+                    Id = fileId,
+                    Name = fileName,
+                    FileName = fileName,
+                    FilePath = "../outside",
+                    FileHash = "testhash",
+                    FileSizeBytes = 3,
+                    UploadedAt = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                    Source = GcodeSource.Upload,
+                });
+            var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+            storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
+            var service = new GcodeFilesService(
+                repo.Object,
+                new Mock<IUnitOfWork>(MockBehavior.Loose).Object,
+                new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose).Object,
+                storagePath.Object,
+                new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict).Object,
+                new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict).Object,
+                new Mock<IFolderManagementService>(MockBehavior.Loose).Object,
+                CreateStoredFileOperationsServiceMock().Object,
+                new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
+
+            string? result = await service.DownloadFileAsync(
+                fileId,
+                string.Empty,
+                CancellationToken.None);
+
+            result.Should().BeNull();
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("/", "")]
+    [InlineData("/nested/thumbnails", "nested/thumbnails")]
+    public async Task GetThumbnailPathAsync_WithVirtualDirectory_ResolvesContainedPhysicalPath(
+        string virtualDirectory,
+        string relativeDirectory)
+    {
+        string storageRoot = Path.Join(
+            Path.GetTempPath(),
+            "pfarm-thumbnail-service-tests",
+            Guid.NewGuid().ToString());
+        string directory = Path.Join(
+            storageRoot,
+            relativeDirectory.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(directory);
+        string thumbnailFileName = "preview.png";
+        string expectedPath = Path.Join(directory, thumbnailFileName);
+        await File.WriteAllBytesAsync(expectedPath, [1, 2, 3]);
+
+        try
+        {
+            Guid fileId = Guid.NewGuid();
+            var repository = new Mock<IGcodeRepository>(MockBehavior.Strict);
+            repository.Setup(candidate => candidate.GetByIdWithIncludesAsync(
+                    fileId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new GcodeFile
+                {
+                    Id = fileId,
+                    Name = "model.gcode",
+                    FileName = "model.gcode",
+                    FilePath = virtualDirectory,
+                    ThumbnailFileName = thumbnailFileName,
+                    FileHash = "hash",
+                    UploadedAt = DateTime.UtcNow,
+                });
+            var storagePaths = new Mock<IStoragePathService>(MockBehavior.Strict);
+            storagePaths.Setup(service => service.GetGcodeStorageDirectory()).Returns(storageRoot);
+            var service = new GcodeFilesService(
+                repository.Object,
+                new Mock<IUnitOfWork>(MockBehavior.Loose).Object,
+                new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose).Object,
+                storagePaths.Object,
+                new Mock<IGcodeMetadataExtractorService>(MockBehavior.Loose).Object,
+                new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Loose).Object,
+                new Mock<IFolderManagementService>(MockBehavior.Loose).Object,
+                CreateStoredFileOperationsServiceMock().Object,
+                new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
+
+            string? result = await service.GetThumbnailPathAsync(fileId, CancellationToken.None);
+
+            result.Should().Be(expectedPath);
+        }
+        finally
+        {
+            Directory.Delete(storageRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetThumbnailPathAsync_WithUnsafeStoredPath_ReturnsNull()
+    {
+        Guid fileId = Guid.NewGuid();
+        string storageRoot = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
+        var repository = new Mock<IGcodeRepository>(MockBehavior.Strict);
+        repository.Setup(candidate => candidate.GetByIdWithIncludesAsync(
+                fileId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new GcodeFile
+            {
+                Id = fileId,
+                Name = "model.gcode",
+                FileName = "model.gcode",
+                FilePath = "../outside",
+                ThumbnailFileName = "preview.png",
+                FileHash = "hash",
+                UploadedAt = DateTime.UtcNow,
+            });
+        var storagePaths = new Mock<IStoragePathService>(MockBehavior.Strict);
+        storagePaths.Setup(service => service.GetGcodeStorageDirectory()).Returns(storageRoot);
+        var service = new GcodeFilesService(
+            repository.Object,
+            new Mock<IUnitOfWork>(MockBehavior.Loose).Object,
+            new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose).Object,
+            storagePaths.Object,
+            new Mock<IGcodeMetadataExtractorService>(MockBehavior.Loose).Object,
+            new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Loose).Object,
+            new Mock<IFolderManagementService>(MockBehavior.Loose).Object,
+            CreateStoredFileOperationsServiceMock().Object,
+            new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
+
+        string? result = await service.GetThumbnailPathAsync(fileId, CancellationToken.None);
+
         result.Should().BeNull();
     }
 
@@ -463,6 +616,7 @@ public class GcodeFilesServiceTests
         var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
         var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
         var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
         var folderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
@@ -538,6 +692,7 @@ public class GcodeFilesServiceTests
         var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
         var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
         var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
         var folderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
@@ -627,6 +782,7 @@ public class GcodeFilesServiceTests
         var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
         var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
         var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
         var folderService = new Mock<IFolderManagementService>(MockBehavior.Loose);

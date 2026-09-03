@@ -8,11 +8,12 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Modules.Calibration.Services.Calibration;
+using Farm.Modules.Gcode.Services.Gcode;
 using Farm.Modules.PrintQueue.Controllers.Requests;
 using Farm.Modules.PrintQueue.Controllers.Responses;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
-using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Services.Gcode.Safety;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -26,11 +27,8 @@ namespace Farm.Modules.PrintQueue.Controllers;
 /// </summary>
 /// <remarks>
 /// This controller lives in Farm.Modules.PrintQueue (not the slicer module) because it needs
-/// access to both <see cref="IArtifactsService"/> from the slicer module and
-/// infrastructure services such as <see cref="IPrintersService"/> and
-/// <see cref="IJobQueueService"/>.
-/// When the slicer module is disabled (microservices deployment), the slicer services
-/// will be null and the endpoints return 503 Service Unavailable.
+/// access to both slicer job metadata and the durable G-code library, plus infrastructure
+/// services such as <see cref="IPrintersService"/> and <see cref="IJobQueueService"/>.
 /// </remarks>
 [ApiController]
 [Route("api/slice")]
@@ -40,11 +38,10 @@ public class SlicePrintBridgeController(
     ILogger<SlicePrintBridgeController> logger,
     IGcodeSafetyValidator gcodeSafetyValidator,
     ISliceJobRepository? jobRepository = null,
-    IArtifactsService? artifactsService = null,
     IJobQueueService? jobQueueService = null,
-    ISliceGcodeImportService? importService = null,
     ISpoolmanService? spoolmanService = null,
-    IGcodeFileDeleter? gcodeFilesService = null,
+    ISliceArtifactLibraryService? sliceArtifactLibraryService = null,
+    IGcodeFilesService? gcodeFilesService = null,
     IDispatchClaimService? dispatchClaimService = null,
     IQueueResourceAuthorizationService? resourceAuthorization = null) : ControllerBase
 {
@@ -73,7 +70,7 @@ public class SlicePrintBridgeController(
         [FromBody] SendToPrinterRequest request,
         CancellationToken ct)
     {
-        if (jobRepository is null || artifactsService is null)
+        if (jobRepository is null || sliceArtifactLibraryService is null || gcodeFilesService is null)
         {
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
@@ -118,34 +115,65 @@ public class SlicePrintBridgeController(
             });
         }
 
-        // 3. Find the gcode artifact
-        IReadOnlyList<Artifact> artifacts = await artifactsService.ListByJobAsync(id, ct);
-        Artifact? gcodeArtifact = artifacts.FirstOrDefault(a =>
-            string.Equals(a.Kind, "gcode", StringComparison.OrdinalIgnoreCase));
-
-        if (gcodeArtifact is null)
-        {
-            return BadRequest(new { error = "Slice job has no gcode artifact.", jobId = id });
-        }
-
-        // 4. Validate the target printer exists after the resource-scope check above.
+        // 3. Validate the target printer exists after the resource-scope check above.
         var printer = await printersService.FindByIdWithIncludesAsync(request.PrinterId, ct);
         if (printer is null)
         {
             return NotFound(new { error = "Printer not found.", printerId = request.PrinterId });
         }
 
-        // 5. Resolve the artifact file on disk
-        byte[]? gcodeBytes = await artifactsService.ReadArtifactBytesAsync(gcodeArtifact.Id, ct);
+        // 4. Commit the staged artifact to the durable library before any printer-side effect.
+        var actor = new CalibrationActor(
+            userId,
+            QueueActorIdentity.Resolve(User),
+            PrintFarmerPermissions.IsFarmAdmin(User));
+        CalibrationApiResult<SliceArtifactLibraryResult> promotion =
+            await sliceArtifactLibraryService.PromoteAsync(id, request.ArtifactId, actor, ct);
+        if (!promotion.IsSuccess || promotion.Value is null)
+        {
+            return PromotionFailure(promotion, id);
+        }
+
+        // 5. Read the exact durable bytes that will be validated and uploaded.
+        byte[]? gcodeBytes;
+        try
+        {
+            gcodeBytes = await gcodeFilesService.ReadFileBytesAsync(promotion.Value.GcodeFileId, ct);
+        }
+        catch (IOException ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Could not read durable GcodeFile {GcodeFileId} for slice job {JobId}",
+                promotion.Value.GcodeFileId,
+                id);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new
+                {
+                    error = "The durable G-code file is temporarily unavailable.",
+                    code = "PROMOTED_GCODE_UNAVAILABLE",
+                    gcodeFileId = promotion.Value.GcodeFileId,
+                });
+        }
+
         if (gcodeBytes is null)
         {
             logger.LogError(
-                "Gcode artifact file missing from disk for artifact {ArtifactId}, job {JobId}",
-                gcodeArtifact.Id, id);
-            return BadRequest(new { error = "Gcode artifact file is missing from storage.", artifactId = gcodeArtifact.Id });
+                "Promoted GcodeFile {GcodeFileId} is missing from durable storage for slice job {JobId}",
+                promotion.Value.GcodeFileId,
+                id);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new
+                {
+                    error = "The durable G-code file is unavailable.",
+                    code = "PROMOTED_GCODE_UNAVAILABLE",
+                    gcodeFileId = promotion.Value.GcodeFileId,
+                });
         }
 
-        string fileName = gcodeArtifact.FileName;
+        string fileName = promotion.Value.Name;
 
         // 6. Validate and upload from the exact byte content just read. Reading once (instead of
         // validating the file, then reopening it for upload) closes a time-of-check/time-of-use
@@ -192,7 +220,9 @@ public class SlicePrintBridgeController(
         {
             logger.LogWarning(
                 "Gcode safety validation rejected artifact {ArtifactId} for job {JobId} before send-to-printer: {Problems}",
-                gcodeArtifact.Id, id, string.Join("; ", safetyResult.Problems.Select(p => $"{p.Code}: {p.Message}")));
+                promotion.Value.SourceArtifactId,
+                id,
+                string.Join("; ", safetyResult.Problems.Select(p => $"{p.Code}: {p.Message}")));
             return BadRequest(new
             {
                 error = "Gcode failed safety validation and was not sent to the printer.",
@@ -450,16 +480,16 @@ public class SlicePrintBridgeController(
         [FromBody] AddSliceToQueueRequest request,
         CancellationToken ct)
     {
-        if (jobRepository is null || artifactsService is null)
+        if (jobRepository is null || sliceArtifactLibraryService is null)
         {
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
                 new { error = "Slicing module is not enabled.", code = "SLICER_DISABLED" });
         }
 
-        if (importService is null || jobQueueService is null)
+        if (jobQueueService is null)
         {
-            logger.LogError("Queue services (ISliceGcodeImportService / IJobQueueService) are null — check DI registration");
+            logger.LogError("Queue service IJobQueueService is null — check DI registration");
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
                 new { error = "Queue services are unavailable.", code = "QUEUE_UNAVAILABLE" });
@@ -503,43 +533,25 @@ public class SlicePrintBridgeController(
             });
         }
 
-        // 3. Find the gcode artifact
-        IReadOnlyList<Artifact> artifacts = await artifactsService.ListByJobAsync(id, ct);
-        Artifact? gcodeArtifact = artifacts.FirstOrDefault(a =>
-            string.Equals(a.Kind, "gcode", StringComparison.OrdinalIgnoreCase));
-
-        if (gcodeArtifact is null)
+        // 3. Commit the staged artifact through the same durable promotion path used by Save.
+        var actor = new CalibrationActor(
+            userId,
+            QueueActorIdentity.Resolve(User),
+            PrintFarmerPermissions.IsFarmAdmin(User));
+        CalibrationApiResult<SliceArtifactLibraryResult> promotion =
+            await sliceArtifactLibraryService.PromoteAsync(id, request.ArtifactId, actor, ct);
+        if (!promotion.IsSuccess || promotion.Value is null)
         {
-            return BadRequest(new { error = "Slice job has no gcode artifact.", jobId = id });
-        }
-
-        // 4. Open the artifact's bytes and import it in one atomic step. Using
-        // OpenReadStreamAsync (rather than resolving a path and reading it separately)
-        // closes the check-then-use gap between resolving the artifact's storage location
-        // and reading its bytes.
-        SliceGcodeImportResult importResult;
-        await using (ArtifactContentStream? artifactContent = await artifactsService.OpenReadStreamAsync(gcodeArtifact.Id, ct))
-        {
-            if (artifactContent is null)
-            {
-                logger.LogError(
-                    "Gcode artifact file missing from disk for artifact {ArtifactId}, job {JobId}",
-                    gcodeArtifact.Id, id);
-                return BadRequest(new { error = "Gcode artifact file is missing from storage.", artifactId = gcodeArtifact.Id });
-            }
-
-            // 5. Import the gcode into the GcodeFile library
-            importResult = await importService.ImportAsync(
-                artifactContent.Artifact.FileName,
-                artifactContent.Content,
-                ct);
+            return PromotionFailure(promotion, id);
         }
 
         logger.LogInformation(
-            "Imported slice gcode from job {JobId} as GcodeFile {GcodeFileId} (isNew={IsNewFile})",
-            id, importResult.FileId, importResult.IsNewFile);
+            "Resolved slice job {JobId} to durable GcodeFile {GcodeFileId} (createdNew={CreatedNew})",
+            id,
+            promotion.Value.GcodeFileId,
+            promotion.Value.CreatedNew);
 
-        // 6. Optionally resolve Spoolman spool into denormalized filament fields
+        // 4. Optionally resolve Spoolman spool into denormalized filament fields
         int? spoolmanFilamentId = null;
         string? filamentName = null;
         string? filamentVendor = null;
@@ -567,12 +579,12 @@ public class SlicePrintBridgeController(
             }
         }
 
-        // 7. Build queue request and enqueue
+        // 5. Build queue request and enqueue
         // AddJobToQueueAsync merges these request values with GcodeFile metadata as fallback,
         // so we only need to forward what the caller explicitly provided.
         var queueDto = new QueuePrintJobDto
         {
-            GcodeFileId = importResult.FileId,
+            GcodeFileId = promotion.Value.GcodeFileId,
             AssignedPrinterId = null, // auto-dispatch
             Priority = request.Priority ?? PrintJobPriority.Normal,
             Copies = request.Copies ?? 1,
@@ -588,43 +600,13 @@ public class SlicePrintBridgeController(
         JobQueuePrintJobDto? printJob = await jobQueueService.AddJobToQueueAsync(queueDto, userId, ct);
         if (printJob is null)
         {
-            // Attempt to clean up a newly-imported GcodeFile that is now orphaned.
-            // A reused file (IsNewFile=false) must not be deleted — other jobs may reference it.
-            bool cleanedUp = false;
-            if (importResult.IsNewFile && gcodeFilesService is not null)
-            {
-                try
-                {
-                    cleanedUp = await gcodeFilesService.DeleteFileAsync(importResult.FileId, ct);
-                    if (!cleanedUp)
-                    {
-                        logger.LogWarning(
-                            "Could not clean up orphaned GcodeFile {GcodeFileId} after no compatible printer found for slice job {JobId}",
-                            importResult.FileId, id);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(
-                        ex,
-                        "Failed to clean up orphaned GcodeFile {GcodeFileId} after no compatible printer found for slice job {JobId}",
-                        importResult.FileId, id);
-                }
-            }
-
             const string noCompatiblePrinterError =
                 "No compatible printer is available for this job. Adjust the compatibility requirements or add a suitable printer.";
-
-            if (cleanedUp)
-            {
-                return BadRequest(new { error = noCompatiblePrinterError, jobId = id });
-            }
-
             return BadRequest(new
             {
                 error = noCompatiblePrinterError,
                 jobId = id,
-                gcodeFileId = importResult.FileId
+                gcodeFileId = promotion.Value.GcodeFileId
             });
         }
 
@@ -639,6 +621,18 @@ public class SlicePrintBridgeController(
             Message = "Gcode added to the print queue successfully."
         });
     }
+
+    private ObjectResult PromotionFailure(
+        CalibrationApiResult<SliceArtifactLibraryResult> promotion,
+        Guid sliceJobId) =>
+        StatusCode(
+            promotion.StatusCode,
+            new
+            {
+                error = "The slice artifact could not be saved to the G-code library.",
+                code = promotion.Code ?? "promotion_operation_failed",
+                jobId = sliceJobId,
+            });
 
     private async Task<IActionResult> UploadAndStartPrintAsync(
         Guid jobId, Guid printerId, string fileName, Stream stream, CancellationToken ct)
