@@ -315,6 +315,13 @@
     "RefreshCommit": "359ae2ac1b6d664914d64b21aa4f6089fe6c2a6e"
   },
   {
+    "Path": "api/signalr-events/slicejobevent.completed.json",
+    "Endpoint": "SignalR SlicerProgressHub \u0022slicejobevent\u0022 (NotifyJobCompletedAsync)",
+    "ProducingTest": "SignalREventContractTests.NotifyJobCompleted_RealBroadcast_SendsSliceJobEventMatchingCorpus",
+    "SchemaVersion": "1.0",
+    "RefreshCommit": "99032a899c9ccd04dcc4f64cfada8033148c73d6"
+  },
+  {
     "Path": "api/signalr-events/slicejobevent.queued.json",
     "Endpoint": "SignalR SlicerProgressHub \u0022slicejobevent\u0022 (NotifyJobQueuedAsync)",
     "ProducingTest": "SignalREventContractTests.NotifyJobQueued_RealBroadcast_SendsSliceJobEventMatchingCorpus",

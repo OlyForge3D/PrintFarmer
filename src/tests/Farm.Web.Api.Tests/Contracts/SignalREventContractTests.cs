@@ -240,6 +240,76 @@ public sealed class SignalREventContractTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// <c>SlicerProgressHub</c> <c>"slicejobevent"</c> completion payload, captured from the real
+    /// <see cref="ISliceJobEventService.NotifyJobCompletedAsync"/> producer. The authenticated
+    /// artifact-list route is the public contract; the internal result-file path is never emitted.
+    /// </summary>
+    [Fact]
+    public async Task NotifyJobCompleted_RealBroadcast_SendsSliceJobEventMatchingCorpus()
+    {
+        string token = await CreateFarmAdminTokenAsync();
+        var receivedTcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using HubConnection connection = BuildHubConnection("/hubs/slicers", token);
+        _ = connection.On<JsonElement>("slicejobevent", payload => receivedTcs.TrySetResult(payload));
+        await connection.StartAsync();
+        await connection.InvokeAsync("JoinMonitoringGroupAsync");
+
+        var job = new SliceJob
+        {
+            Id = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            ModelFileUrl = "/api/3d-models/wire-contract-model.3mf",
+            ModelFileName = "wire-contract-model.3mf",
+            SlicerEngineName = "OrcaSlicer",
+            SlicerEngineVersion = "2.3.1",
+            Status = SliceJobStatus.Completed,
+            ProgressPercent = 100,
+            QueuedAt = DateTime.UtcNow.AddMinutes(-2),
+            StartedAt = DateTime.UtcNow.AddMinutes(-1),
+            CompletedAt = DateTime.UtcNow,
+            EstimatedPrintTimeSeconds = 3600,
+            FilamentUsedGrams = 18.5m,
+            WorkerId = Guid.NewGuid(),
+            ResultFileUrl = @"D:\private\artifacts\result.gcode",
+        };
+
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            ISliceJobEventService events = scope.ServiceProvider.GetRequiredService<ISliceJobEventService>();
+            await events.NotifyJobCompletedAsync(job);
+        }
+
+        JsonElement received = await WaitForEventAsync(receivedTcs);
+
+        JsonContractAssertions.AssertEnumToken(received, "status", "Completed");
+        JsonContractAssertions.AssertMissingKey(received, "resultFileUrl");
+        JsonElement artifactsRoute =
+            JsonContractAssertions.AssertProperty(received, "artifactsRoute", JsonValueKind.String);
+        artifactsRoute.GetString().Should().Be($"/api/artifacts/job/{job.Id}");
+
+        string json = received.GetRawText();
+        var volatilePaths = new HashSet<string>
+        {
+            "$.jobId",
+            "$.userId",
+            "$.queuedAt",
+            "$.startedAt",
+            "$.completedAt",
+            "$.workerId",
+            "$.timestamp",
+            "$.artifactsRoute",
+        };
+        await WireContractFixtureWriter.CaptureOrVerifyAsync(
+            WireContractCorpusPaths.ApiRoot,
+            "signalr-events/slicejobevent.completed.json",
+            endpoint: "SignalR SlicerProgressHub \"slicejobevent\" (NotifyJobCompletedAsync)",
+            producingTest: $"{nameof(SignalREventContractTests)}.{nameof(NotifyJobCompleted_RealBroadcast_SendsSliceJobEventMatchingCorpus)}",
+            schemaVersion: "1.0",
+            actualJson: json,
+            volatilePaths: volatilePaths);
+    }
+
+    /// <summary>
     /// <c>SlicerProgressHub</c> <c>"slicingprogress"</c>, real-broadcast via
     /// <see cref="ISlicerProgressNotifier.NotifyProgressAsync"/>.
     /// </summary>

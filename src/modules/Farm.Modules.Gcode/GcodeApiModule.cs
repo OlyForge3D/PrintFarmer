@@ -67,6 +67,7 @@ public sealed class GcodeApiModule : IApiModule
         _ = services.AddSingleton<GcodePromotionReconcilerState>();
         _ = services.AddScoped<IGcodeArtifactPromoter, GcodeArtifactPromoter>();
         _ = services.AddHostedService<GcodePromotionReconciliationService>();
+        _ = services.AddHostedService<SliceLibraryPromotionService>();
 
         // File consistency audit: runs hourly to detect orphaned/missing/corrupted files. Uses
         // IFileAuditRepository from Farm.Slicer.Module.Repositories (registered by AddSlicerModule
