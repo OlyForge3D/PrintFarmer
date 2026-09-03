@@ -732,6 +732,18 @@ public sealed class GcodeArtifactPromoter(
 
             return Failure(StatusCodes.Status409Conflict, "promotion_in_progress");
         }
+        catch (PromotionSourceContentMismatchException exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Promotion {OperationId} found a permanent local source size mismatch",
+                LogSanitizer.Sanitize(checkpoint.OperationId));
+            await FailCheckpointAsync(
+                checkpoint,
+                GcodeStreamIngestException.SizeMismatch,
+                cancellationToken);
+            return Failure(StatusCodes.Status409Conflict, GcodeStreamIngestException.SizeMismatch);
+        }
         catch (PromotionSourceTransportException exception)
         {
             _logger.LogWarning(

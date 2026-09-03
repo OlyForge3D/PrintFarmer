@@ -25,11 +25,13 @@ public sealed class PromotionArtifactContent : IAsyncDisposable
         Stream content,
         long expectedSizeBytes,
         Func<ValueTask> disposeAsync,
+        bool lengthMismatchIsTransport,
         CancellationToken transportCancellationToken)
     {
         Content = new ExactLengthReadStream(
             content,
             expectedSizeBytes,
+            lengthMismatchIsTransport,
             transportCancellationToken);
         _disposeAsync = disposeAsync;
     }
@@ -56,7 +58,32 @@ public sealed class PromotionArtifactContent : IAsyncDisposable
             content,
             expectedSizeBytes,
             disposeAsync,
-            transportCancellationToken);
+            lengthMismatchIsTransport: true,
+            transportCancellationToken: transportCancellationToken);
+    }
+
+    /// <summary>
+    /// Creates a local-storage lease whose declared-length violations indicate permanently invalid
+    /// artifact metadata or bytes rather than a retryable network truncation.
+    /// </summary>
+    /// <param name="content">Underlying source stream.</param>
+    /// <param name="expectedSizeBytes">Required byte count.</param>
+    /// <param name="disposeAsync">Callback that releases the underlying source lease.</param>
+    /// <returns>The owned promotion content.</returns>
+    public static PromotionArtifactContent CreateLocal(
+        Stream content,
+        long expectedSizeBytes,
+        Func<ValueTask> disposeAsync)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(disposeAsync);
+        ArgumentOutOfRangeException.ThrowIfNegative(expectedSizeBytes);
+        return new PromotionArtifactContent(
+            content,
+            expectedSizeBytes,
+            disposeAsync,
+            lengthMismatchIsTransport: false,
+            transportCancellationToken: default);
     }
 
     /// <inheritdoc />
@@ -69,6 +96,7 @@ public sealed class PromotionArtifactContent : IAsyncDisposable
     private sealed class ExactLengthReadStream(
         Stream inner,
         long expectedLength,
+        bool lengthMismatchIsTransport,
         CancellationToken transportCancellationToken) : Stream
     {
         private long _bytesRead;
@@ -93,6 +121,14 @@ public sealed class PromotionArtifactContent : IAsyncDisposable
             {
                 return RecordRead(inner.Read(buffer, offset, count));
             }
+            catch (PromotionSourceContentMismatchException)
+            {
+                throw;
+            }
+            catch (PromotionSourceTransportException)
+            {
+                throw;
+            }
             catch (IOException exception)
             {
                 throw new PromotionSourceTransportException("Promotion source stream failed.", exception);
@@ -110,6 +146,14 @@ public sealed class PromotionArtifactContent : IAsyncDisposable
                     transportCancellationToken);
                 int read = await inner.ReadAsync(buffer, linkedSource.Token).ConfigureAwait(false);
                 return RecordRead(read);
+            }
+            catch (PromotionSourceContentMismatchException)
+            {
+                throw;
+            }
+            catch (PromotionSourceTransportException)
+            {
+                throw;
             }
             catch (OperationCanceledException exception)
                 when (!cancellationToken.IsCancellationRequested &&
@@ -142,17 +186,46 @@ public sealed class PromotionArtifactContent : IAsyncDisposable
         {
             if (count == 0 && _bytesRead < expectedLength)
             {
-                throw new PromotionSourceTransportException("Promotion source stream ended before its declared length.");
+                throw LengthMismatch("Promotion source stream ended before its declared length.");
             }
 
             _bytesRead += count;
             if (_bytesRead > expectedLength)
             {
-                throw new PromotionSourceTransportException("Promotion source stream exceeded its declared length.");
+                throw LengthMismatch("Promotion source stream exceeded its declared length.");
             }
 
             return count;
         }
+
+        private IOException LengthMismatch(string message) =>
+            lengthMismatchIsTransport
+                ? new PromotionSourceTransportException(message)
+                : new PromotionSourceContentMismatchException(message);
+    }
+}
+
+/// <summary>Permanent mismatch between local artifact metadata and the staged content bytes.</summary>
+public sealed class PromotionSourceContentMismatchException : IOException
+{
+    /// <summary>Creates a permanent local content mismatch.</summary>
+    public PromotionSourceContentMismatchException()
+    {
+    }
+
+    /// <summary>Creates a permanent local content mismatch.</summary>
+    /// <param name="message">Non-sensitive failure description.</param>
+    public PromotionSourceContentMismatchException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Creates a permanent local content mismatch with its underlying cause.</summary>
+    /// <param name="message">Non-sensitive failure description.</param>
+    /// <param name="innerException">Underlying content failure.</param>
+    public PromotionSourceContentMismatchException(string message, Exception innerException)
+        : base(message, innerException)
+    {
     }
 }
 

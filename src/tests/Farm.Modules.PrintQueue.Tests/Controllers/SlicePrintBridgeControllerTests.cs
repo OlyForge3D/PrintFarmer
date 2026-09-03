@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Claims;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
@@ -118,6 +119,21 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         {
             Directory.Delete(_tempDir, recursive: true);
         }
+    }
+
+    [Fact]
+    public void PrintRequestContracts_SerializeOptionalArtifactIdInCamelCase()
+    {
+        Guid artifactId = Guid.NewGuid();
+        using JsonDocument send = JsonDocument.Parse(JsonSerializer.Serialize(
+            new SendToPrinterRequest { PrinterId = Guid.NewGuid(), ArtifactId = artifactId },
+            JsonSerializerOptions.Web));
+        using JsonDocument queue = JsonDocument.Parse(JsonSerializer.Serialize(
+            new AddSliceToQueueRequest { ArtifactId = artifactId },
+            JsonSerializerOptions.Web));
+
+        send.RootElement.GetProperty("artifactId").GetGuid().Should().Be(artifactId);
+        queue.RootElement.GetProperty("artifactId").GetGuid().Should().Be(artifactId);
     }
 
     // =========================================================================
@@ -382,7 +398,11 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         Guid jobId = Guid.NewGuid();
         Guid printerId = Guid.NewGuid();
         Artifact durableGcode = CreateArtifact(jobId, "gcode", "saved-model.gcode");
-        SetupCompletedJobWithGcode(jobId, durableGcode, createdNew: false);
+        SetupCompletedJobWithGcode(
+            jobId,
+            durableGcode,
+            createdNew: false,
+            requestedArtifactId: durableGcode.Id);
         SetupPrinterExists(printerId);
         _gcodeFilesMock
             .Setup(service => service.ReadFileBytesAsync(
@@ -399,18 +419,55 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
 
         IActionResult result = await _controller.SendToPrinterAsync(
             jobId,
-            new SendToPrinterRequest { PrinterId = printerId, StartPrint = false },
+            new SendToPrinterRequest
+            {
+                PrinterId = printerId,
+                StartPrint = false,
+                ArtifactId = durableGcode.Id,
+            },
             CancellationToken.None);
 
         result.Should().BeOfType<OkObjectResult>();
         _libraryMock.Verify(service => service.PromoteAsync(
             jobId,
-            null,
+            durableGcode.Id,
             It.IsAny<CalibrationActor>(),
             It.IsAny<CancellationToken>()), Times.Once);
         _gcodeFilesMock.Verify(service => service.ReadFileBytesAsync(
             durableGcode.Id,
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "SlicePrintBridge")]
+    public async Task SendToPrinter_MultipleOutputsWithoutArtifactId_ReturnsSelectionRequired()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        _jobRepoMock
+            .Setup(repository => repository.GetByIdAsync(jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CreateJob(jobId, SliceJobStatus.Completed));
+        SetupPrinterExists(printerId);
+        _libraryMock
+            .Setup(service => service.PromoteAsync(
+                jobId,
+                null,
+                It.IsAny<CalibrationActor>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CalibrationApiResult<SliceArtifactLibraryResult>.Failure(
+                StatusCodes.Status409Conflict,
+                "source_artifact_required"));
+
+        IActionResult result = await _controller.SendToPrinterAsync(
+            jobId,
+            new SendToPrinterRequest { PrinterId = printerId },
+            CancellationToken.None);
+
+        result.Should().BeOfType<ObjectResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _gcodeFilesMock.Verify(service => service.ReadFileBytesAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // =========================================================================
@@ -1003,7 +1060,8 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
     private void SetupCompletedJobWithGcode(
         Guid jobId,
         Artifact gcodeArtifact,
-        bool createdNew = true)
+        bool createdNew = true,
+        Guid? requestedArtifactId = null)
     {
         _jobRepoMock
             .Setup(r => r.GetByIdAsync(jobId, It.IsAny<CancellationToken>()))
@@ -1012,7 +1070,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         _libraryMock
             .Setup(service => service.PromoteAsync(
                 jobId,
-                null,
+                requestedArtifactId,
                 It.IsAny<CalibrationActor>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(CalibrationApiResult<SliceArtifactLibraryResult>.Success(
