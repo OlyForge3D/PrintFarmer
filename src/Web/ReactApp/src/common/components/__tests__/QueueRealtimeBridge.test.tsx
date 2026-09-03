@@ -133,6 +133,34 @@ describe('QueueRealtimeBridge', () => {
     expect(mocks.unsubscribeGcodeLibraryUpdated).toHaveBeenCalledOnce();
   });
 
+  it('invalidates the file browser exactly once after a successful PrinterHub recovery', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    render(
+      <QueryClientProvider client={queryClient}>
+        <QueueRealtimeBridge />
+      </QueryClientProvider>
+    );
+    await waitFor(() =>
+      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledOnce()
+    );
+    invalidate.mockClear();
+
+    mocks.emitConnection(true);
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['file-browser'] })
+    );
+    expect(
+      invalidate.mock.calls.filter(
+        ([filters]) =>
+          JSON.stringify(filters) === JSON.stringify({ queryKey: ['file-browser'] })
+      )
+    ).toHaveLength(1);
+  });
+
   it('discovers a post-connect resource from the server hint and refetches queue keys', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
