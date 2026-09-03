@@ -327,7 +327,7 @@ struct JobDetailView: View {
                             .fontWeight(.semibold)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.pfWarning)
+                    .tint(Color.pfWarningFill)
 
                     Button(role: .destructive) {
                         let task = Task { await viewModel.abortJob() }
@@ -337,7 +337,7 @@ struct JobDetailView: View {
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.pfError)
+                    .tint(Color.pfErrorFill)
                 }
             } else {
                 if viewModel.canPause {
@@ -350,7 +350,7 @@ struct JobDetailView: View {
                             .fontWeight(.semibold)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.pfWarning)
+                    .tint(Color.pfWarningFill)
                 }
             }
 
@@ -375,7 +375,7 @@ struct JobDetailView: View {
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.pfError)
+                    .tint(Color.pfErrorFill)
                 }
             } else {
                 if viewModel.canResume {
@@ -399,7 +399,7 @@ struct JobDetailView: View {
                             .fullWidthActionButton()
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.pfError)
+                    .tint(Color.pfErrorFill)
                 }
             }
 

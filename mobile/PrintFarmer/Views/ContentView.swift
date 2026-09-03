@@ -151,7 +151,7 @@ struct ContentView: View {
                         .font(.caption2.weight(.bold))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.pfWarning, in: Capsule())
+                        .background(Color.pfWarningFill, in: Capsule())
                         .foregroundStyle(.white)
                         .accessibilityHidden(true)
                 }

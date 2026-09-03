@@ -82,8 +82,8 @@ struct ConnectionStatusPresentation: Equatable {
     var barBackground: Color {
         if label.hasPrefix("Connected") { return .pfSuccess }
         if label.hasPrefix("Connecting") { return .pfTextTertiary }
-        if iconName == "wifi.slash" { return .pfError }
-        return .pfWarning
+        if iconName == "wifi.slash" { return .pfErrorFill }
+        return .pfWarningFill
     }
 
     /// Relative, human-readable rendering of the last-confirmed instant.
