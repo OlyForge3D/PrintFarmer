@@ -54,6 +54,7 @@ describe('GcodePreviewModal URL contract', () => {
         sizeBytes: 9000,
         downloadUrl: '/api/artifacts/art-abc',
         createdAt: '2026-05-31T10:00:00Z',
+        isPrimary: false,
       },
     ]);
 
@@ -83,6 +84,7 @@ describe('GcodePreviewModal URL contract', () => {
         sizeBytes: 1000,
         downloadUrl: '/api/artifacts/art-log',
         createdAt: '2026-05-31T10:00:00Z',
+        isPrimary: false,
       },
       {
         id: 'art-gcode',
@@ -92,6 +94,7 @@ describe('GcodePreviewModal URL contract', () => {
         sizeBytes: 50000,
         downloadUrl: '/api/artifacts/art-gcode',
         createdAt: '2026-05-31T10:01:00Z',
+        isPrimary: false,
       },
     ]);
 
@@ -111,6 +114,7 @@ describe('GcodePreviewModal URL contract', () => {
         sizeBytes: 20000,
         downloadUrl: '/api/artifacts/art-stl',
         createdAt: '2026-05-31T10:00:00Z',
+        isPrimary: false,
       },
       {
         id: 'art-bgcode',
@@ -120,6 +124,7 @@ describe('GcodePreviewModal URL contract', () => {
         sizeBytes: 40000,
         downloadUrl: '/api/artifacts/art-bgcode',
         createdAt: '2026-05-31T10:01:00Z',
+        isPrimary: false,
       },
     ]);
 
@@ -131,32 +136,66 @@ describe('GcodePreviewModal URL contract', () => {
     expect(screen.queryByTestId('gcode-viewer')).toBeNull();
   });
 
-  it('prefers a text G-code artifact over binary G-code', async () => {
+  it('previews the declared text primary instead of the newest non-primary output', async () => {
     mockGetArtifactsByRoute.mockResolvedValue([
       {
-        id: 'art-bgcode',
+        id: 'art-newest',
         jobId: 'job-6',
-        fileName: 'output.bgcode',
+        fileName: 'newest.gcode',
         contentType: 'application/octet-stream',
         sizeBytes: 40000,
-        downloadUrl: '/api/artifacts/art-bgcode',
-        createdAt: '2026-05-31T10:01:00Z',
+        downloadUrl: '/api/artifacts/art-newest',
+        createdAt: '2026-05-31T10:02:00Z',
+        isPrimary: false,
       },
       {
-        id: 'art-gcode',
+        id: 'art-primary',
         jobId: 'job-6',
-        fileName: 'output.gcode',
+        fileName: 'primary.gcode',
         contentType: 'text/plain',
         sizeBytes: 50000,
-        downloadUrl: '/api/artifacts/art-gcode',
-        createdAt: '2026-05-31T10:02:00Z',
+        downloadUrl: '/api/artifacts/art-primary',
+        createdAt: '2026-05-31T10:01:00Z',
+        isPrimary: true,
       },
     ]);
 
     renderModal({ isOpen: true, artifactsRoute: '/api/artifacts/job/job-6' });
 
     const viewer = await screen.findByTestId('gcode-viewer');
-    expect(viewer.getAttribute('data-url')).toBe('/api/artifacts/art-gcode');
+    expect(viewer.getAttribute('data-url')).toBe('/api/artifacts/art-primary');
+  });
+
+  it('surfaces selection-required state when multiple outputs have no primary', async () => {
+    mockGetArtifactsByRoute.mockResolvedValue([
+      {
+        id: 'art-1',
+        jobId: 'job-7',
+        fileName: 'first.gcode',
+        contentType: 'text/plain',
+        sizeBytes: 40000,
+        downloadUrl: '/api/artifacts/art-1',
+        createdAt: '2026-05-31T10:01:00Z',
+        isPrimary: false,
+      },
+      {
+        id: 'art-2',
+        jobId: 'job-7',
+        fileName: 'second.gcode',
+        contentType: 'text/plain',
+        sizeBytes: 50000,
+        downloadUrl: '/api/artifacts/art-2',
+        createdAt: '2026-05-31T10:02:00Z',
+        isPrimary: false,
+      },
+    ]);
+
+    renderModal({ isOpen: true, artifactsRoute: '/api/artifacts/job/job-7' });
+
+    expect(
+      await screen.findByText(/did not declare exactly one valid primary artifact/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('gcode-viewer')).not.toBeInTheDocument();
   });
 
   it('does not render viewer when only non-G-code artifacts exist', async () => {
@@ -169,6 +208,7 @@ describe('GcodePreviewModal URL contract', () => {
         sizeBytes: 3000,
         downloadUrl: '/api/artifacts/art-img',
         createdAt: '2026-05-31T10:00:00Z',
+        isPrimary: false,
       },
       {
         id: 'art-3mf',
@@ -178,6 +218,7 @@ describe('GcodePreviewModal URL contract', () => {
         sizeBytes: 15000,
         downloadUrl: '/api/artifacts/art-3mf',
         createdAt: '2026-05-31T10:01:00Z',
+        isPrimary: false,
       },
     ]);
 
@@ -185,7 +226,7 @@ describe('GcodePreviewModal URL contract', () => {
 
     // Wait for loading to finish and message to appear
     await waitFor(() => {
-      expect(screen.getByText(/no g-code artifact available/i)).toBeDefined();
+      expect(screen.getByText(/no g-code artifact is available/i)).toBeDefined();
     });
 
     // Viewer should NOT be rendered

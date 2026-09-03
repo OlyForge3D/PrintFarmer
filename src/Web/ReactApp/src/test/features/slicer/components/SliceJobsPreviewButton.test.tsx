@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { SliceJobsPanel } from '@/features/slicer/components/SliceJobsPanel';
+import { toast } from 'sonner';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -101,14 +102,16 @@ describe('SliceJobsPanel Preview button', () => {
       ]);
       mockGetArtifactsByRoute.mockResolvedValue([
         {
-          id: 'selected-artifact',
-          fileName: 'selected.gcode',
-          createdAt: '2026-09-03T10:00:00Z',
-        },
-        {
           id: 'newest-artifact',
           fileName: 'newest.gcode',
           createdAt: '2026-09-03T10:01:00Z',
+          isPrimary: false,
+        },
+        {
+          id: 'primary-artifact',
+          fileName: 'primary.gcode',
+          createdAt: '2026-09-03T10:00:00Z',
+          isPrimary: true,
         },
       ]);
 
@@ -120,7 +123,7 @@ describe('SliceJobsPanel Preview button', () => {
       await userEvent.click(screen.getByRole('button', { name: /print/i }));
 
       expect(await screen.findByTestId('print-modal')).toHaveTextContent(
-        'job-completed-actions:selected-artifact',
+        'job-completed-actions:primary-artifact',
       );
       expect(mockGetArtifactsByRoute).toHaveBeenCalledWith(
         '/api/artifacts/job/job-completed-actions',
@@ -148,6 +151,31 @@ describe('SliceJobsPanel Preview button', () => {
 
     const previewButton = await screen.findByRole('button', { name: /preview/i });
     expect(previewButton).toBeDefined();
+  });
+
+  it('blocks Print and surfaces selection-required state when no primary is declared', async () => {
+    mockGetMyJobs.mockResolvedValue([
+      {
+        id: 'job-ambiguous',
+        status: 'Completed',
+        progressPercent: 100,
+        queuedAt: '2026-05-31T09:00:00Z',
+        completedAt: '2026-05-31T09:05:00Z',
+        artifactsRoute: '/api/artifacts/job/job-ambiguous',
+      },
+    ]);
+    mockGetArtifactsByRoute.mockResolvedValue([
+      { id: 'artifact-1', fileName: 'first.gcode', isPrimary: false },
+      { id: 'artifact-2', fileName: 'second.gcode', isPrimary: false },
+    ]);
+
+    renderPanel();
+    await userEvent.click(await screen.findByRole('button', { name: /print/i }));
+
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringMatching(/did not declare exactly one valid primary artifact/i),
+    );
+    expect(screen.queryByTestId('print-modal')).not.toBeInTheDocument();
   });
 
   it('does not show Preview button for in-progress jobs', async () => {
