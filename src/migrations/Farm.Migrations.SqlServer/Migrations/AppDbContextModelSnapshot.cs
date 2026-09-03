@@ -2708,8 +2708,7 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("GcodeFileId")
-                        .IsUnique();
+                    b.HasIndex("GcodeFileId");
 
                     b.HasIndex("OperationScope", "OperationId")
                         .IsUnique();

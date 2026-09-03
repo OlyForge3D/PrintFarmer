@@ -2693,8 +2693,7 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("GcodeFileId")
-                        .IsUnique();
+                    b.HasIndex("GcodeFileId");
 
                     b.HasIndex("OperationScope", "OperationId")
                         .IsUnique();

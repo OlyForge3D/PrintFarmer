@@ -688,6 +688,46 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
     }
 
+    [Fact(DisplayName = "Distinct artifacts with identical content share one completed library file")]
+    public async Task PromoteAsync_DistinctArtifactsWithIdenticalContent_CompleteAndReplaySharedFile()
+    {
+        PromotionFixture firstFixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        PromotionFixture secondFixture = await _harness.SeedAdditionalGcodeArtifactAsync(
+            firstFixture,
+            GcodeContent);
+        GcodeArtifactPromotionRequest firstRequest = firstFixture.Request("promotion-identical-a");
+        GcodeArtifactPromotionRequest secondRequest = secondFixture.Request("promotion-identical-b");
+
+        CalibrationApiResult<GcodePromotionDto> first = await _harness.CreatePromoter()
+            .PromoteAsync(firstRequest, firstFixture.Owner, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> second = await _harness.CreatePromoter()
+            .PromoteAsync(secondRequest, secondFixture.Owner, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> firstReplay = await _harness.CreatePromoter()
+            .PromoteAsync(firstRequest, firstFixture.Owner, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> secondReplay = await _harness.CreatePromoter()
+            .PromoteAsync(secondRequest, secondFixture.Owner, CancellationToken.None);
+
+        _ = first.StatusCode.Should().Be(StatusCodes.Status201Created, first.Code);
+        _ = second.StatusCode.Should().Be(StatusCodes.Status200OK, second.Code);
+        _ = second.Code.Should().NotBe("promotion_conflict");
+        _ = second.Value!.GcodeFileId.Should().Be(first.Value!.GcodeFileId);
+        _ = firstReplay.StatusCode.Should().Be(StatusCodes.Status200OK, firstReplay.Code);
+        _ = firstReplay.Replayed.Should().BeTrue();
+        _ = firstReplay.Value!.GcodeFileId.Should().Be(first.Value.GcodeFileId);
+        _ = secondReplay.StatusCode.Should().Be(StatusCodes.Status200OK, secondReplay.Code);
+        _ = secondReplay.Replayed.Should().BeTrue();
+        _ = secondReplay.Value!.GcodeFileId.Should().Be(first.Value.GcodeFileId);
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+        _ = (await _harness.CountCheckpointsAsync()).Should().Be(2);
+        GcodePromotionCheckpoint firstCheckpoint =
+            await _harness.GetCheckpointByOperationAsync(firstRequest.OperationId);
+        GcodePromotionCheckpoint secondCheckpoint =
+            await _harness.GetCheckpointByOperationAsync(secondRequest.OperationId);
+        _ = firstCheckpoint.State.Should().Be(GcodePromotionState.Completed);
+        _ = secondCheckpoint.State.Should().Be(GcodePromotionState.Completed);
+        _ = secondCheckpoint.GcodeFileId.Should().Be(firstCheckpoint.GcodeFileId);
+    }
+
     [Fact(DisplayName = "Promoted G-code survives source artifact cleanup with recoverable lineage")]
     public async Task PromotedGcode_SurvivesSourceArtifactCleanup()
     {
