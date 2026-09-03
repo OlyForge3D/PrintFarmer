@@ -22,7 +22,7 @@ struct PrinterListView: View {
         NavigationStack(path: $router.printersPath) {
             VStack(spacing: 0) {
                 // #789: shared stale banner — honest, read-only cached coverage.
-                if filamentCoverageEnabled && coverageViewModel.isShowingStaleCache {
+                if filamentCoverageEnabled && coverageViewModel.isStaleCacheReportable {
                     ConnectionStatusBar(
                         status: .offline,
                         lastConfirmedAt: coverageViewModel.cacheLastUpdatedAt,

@@ -42,6 +42,24 @@ final class PrinterFilamentCoverageViewModel {
     @ObservationIgnored private var coverageCache: FilamentCoverageReadCacheAdapter?
     /// True exactly while the on-screen detail is UNCONFIRMED cached data.
     private(set) var isShowingStaleCache: Bool = false
+    /// True once a canonical load has CONCLUDED at least once under the current
+    /// coverage authority — success, `featureDisabled`, `notFound`, or error.
+    /// Starts false, so the interval between a cache hydrate and the first
+    /// canonical result is *undecided* rather than "offline".
+    ///
+    /// This must be observed (never `@ObservationIgnored`): `isStaleCacheReportable`
+    /// is read by SwiftUI, and a derived property whose only changing input is
+    /// untracked state is never re-evaluated, so the banner would never appear.
+    /// The same trap made `ConnectionMonitor.isReportable` inert (PR #2400).
+    private(set) var hasConcludedCanonicalLoad: Bool = false
+    /// Drives the shared stale banner. `isShowingStaleCache` alone is true from
+    /// the instant `hydrateFromCache()` lands, which flashes an "offline" banner
+    /// on an entirely healthy detail open — the canonical load simply had not
+    /// returned yet. `PrinterDetailView` builds a fresh view model on every
+    /// navigation, so that flash repeats on each tap of the same printer.
+    var isStaleCacheReportable: Bool {
+        isShowingStaleCache && hasConcludedCanonicalLoad
+    }
     private(set) var cacheLastUpdatedAtMillis: Int64?
     var cacheLastUpdatedAt: Date? {
         cacheLastUpdatedAtMillis.map { Date(timeIntervalSince1970: Double($0) / 1000.0) }
@@ -56,6 +74,20 @@ final class PrinterFilamentCoverageViewModel {
     func configure(coverageService: any FilamentCoverageServiceProtocol) {
         self.coverageService = coverageService
         coverageAuthorityEpoch &+= 1
+        // A new coverage authority invalidates everything the previous one said,
+        // including its read-cache provenance. Leaving these latched lets a new
+        // authority's slow first load render the PREVIOUS authority's stale
+        // banner and timestamp over a feed it never hydrated. Callers always
+        // invoke `configure` before `hydrateFromCache`, so clearing here is the
+        // correct point. (Same leak the Attention teardown fixed in #2404.)
+        resetReadCacheState()
+    }
+
+    /// Clear all read-cache provenance so it cannot outlive its authority.
+    private func resetReadCacheState() {
+        isShowingStaleCache = false
+        hasConcludedCanonicalLoad = false
+        cacheLastUpdatedAtMillis = nil
     }
 
     func disableForCapabilityGate() {
@@ -66,8 +98,7 @@ final class PrinterFilamentCoverageViewModel {
         isFeatureDisabled = true
         isPrinterNotFound = false
         lastLoadError = nil
-        isShowingStaleCache = false
-        cacheLastUpdatedAtMillis = nil
+        resetReadCacheState()
     }
 
     /// Wire the #789 per-printer read-cache. Additive; safe to call repeatedly.
@@ -215,6 +246,7 @@ final class PrinterFilamentCoverageViewModel {
             commitSuccess(snapshot: snapshot, generation: myGen)
             if lastCommittedGeneration == myGen {
                 isShowingStaleCache = false
+                hasConcludedCanonicalLoad = true
                 if let cache = coverageCache, let session = capturedCacheSession {
                     _ = await cache.recordPrinter(snapshot, capturedSession: session)
                 }
@@ -226,6 +258,7 @@ final class PrinterFilamentCoverageViewModel {
                 commitFeatureDisabled(generation: myGen)
                 if lastCommittedGeneration == myGen {
                     isShowingStaleCache = false
+                    hasConcludedCanonicalLoad = true
                     if let cache = coverageCache, let session = capturedCacheSession {
                         _ = await cache.recordPrinterDisabled(id: printerId, capturedSession: session)
                     }
@@ -234,13 +267,23 @@ final class PrinterFilamentCoverageViewModel {
                 commitNotFound(generation: myGen)
                 if lastCommittedGeneration == myGen {
                     isShowingStaleCache = false
+                    hasConcludedCanonicalLoad = true
                 }
             default:
                 commitError(error, generation: myGen)
+                // The load genuinely failed, so the on-screen cached data really
+                // is unconfirmed: this is the one path that should raise the
+                // banner. Cancellation is excluded — it answers nothing.
+                if lastCommittedGeneration == myGen, !isCancellationError(error) {
+                    hasConcludedCanonicalLoad = true
+                }
             }
         } catch {
             guard cvEpoch == coverageAuthorityEpoch else { return }
             commitError(error, generation: myGen)
+            if lastCommittedGeneration == myGen, !isCancellationError(error) {
+                hasConcludedCanonicalLoad = true
+            }
         }
     }
 

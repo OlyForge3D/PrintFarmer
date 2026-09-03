@@ -1957,17 +1957,7 @@ final class AttentionFeedViewModel {
     // MARK: - Item-scoped helpers
 
     static func isCancellation(_ error: Error) -> Bool {
-        if error is CancellationError {
-            return true
-        }
-        if let urlError = error as? URLError {
-            return urlError.code == .cancelled
-        }
-        if let networkError = error as? NetworkError,
-           case .transportError(let urlError) = networkError {
-            return urlError.code == .cancelled
-        }
-        return false
+        isCancellationError(error)
     }
 
     private func liveItem(id: String) -> AttentionItem? {

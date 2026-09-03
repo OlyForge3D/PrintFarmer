@@ -1627,6 +1627,33 @@ enum NetworkError: LocalizedError, Sendable {
     }
 }
 
+// MARK: - Cancellation classification
+
+/// Canonical test for "this request was cancelled, not refused".
+///
+/// Cancellation reaches callers in three shapes depending on where the task was
+/// torn down: a raw `CancellationError` from structured concurrency, a
+/// `URLError.cancelled` from `URLSession`, or that same `URLError` already
+/// wrapped by `NetworkError.transportError`.
+///
+/// This matters wherever a view model records that a canonical load *concluded*.
+/// A cancelled load concluded nothing — it was abandoned, typically because the
+/// user navigated away — so treating it as a real result would let a screen
+/// claim "offline" on the strength of a request that never got an answer.
+func isCancellationError(_ error: Error) -> Bool {
+    if error is CancellationError {
+        return true
+    }
+    if let urlError = error as? URLError {
+        return urlError.code == .cancelled
+    }
+    if let networkError = error as? NetworkError,
+       case .transportError(let urlError) = networkError {
+        return urlError.code == .cancelled
+    }
+    return false
+}
+
 // MARK: - Session Expired Notification
 
 extension Notification.Name {
