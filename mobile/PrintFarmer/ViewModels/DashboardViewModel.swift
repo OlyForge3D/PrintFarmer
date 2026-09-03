@@ -55,7 +55,32 @@ final class DashboardViewModel {
     var isStale: Bool { farmSource == .cached }
 
     /// The shell is read-only exactly while showing unconfirmed cached data.
+    /// Deliberately NOT gated on a concluded load: mutations must stay denied
+    /// while the data is unconfirmed, including during the undecided window.
     var isReadOnly: Bool { isStale }
+
+    /// True once a canonical pass has CONCLUDED at least once under the current
+    /// authority — published or failed. Cancellation/supersession does not count
+    /// (it maps to `.superseded`, which answers nothing). Starts false, so the
+    /// window between a cache hydrate and the first canonical result is
+    /// *undecided* rather than "offline".
+    ///
+    /// This must be observed (never `@ObservationIgnored`): the derived
+    /// properties below are read by SwiftUI, and a derived property whose only
+    /// changing input is untracked state is never re-evaluated. The same trap
+    /// made `ConnectionMonitor.isReportable` inert (PR #2400).
+    private(set) var hasConcludedCanonicalLoad: Bool = false
+
+    /// Drives the cold-offline shell's stale banner. The shell itself renders as
+    /// soon as the cache hydrates (that immediacy is the point of #817), but
+    /// claiming "offline" before any canonical attempt has concluded is a lie
+    /// that flashes on every healthy launch.
+    var isStaleBannerReportable: Bool { isStale && hasConcludedCanonicalLoad }
+
+    /// Drives the "No Cached Fleet" dead-end. Until a canonical pass concludes
+    /// we do not know the fleet is unreachable — only that nothing was cached —
+    /// so the undecided window must show loading, not a reconnect prompt.
+    var isAbsentFleetReportable: Bool { hasNoCachedData && hasConcludedCanonicalLoad }
 
     /// The immutable UTC instant of the last successful canonical response now
     /// on screen (live) or backing the cached snapshot (stale). `nil` until the
@@ -119,6 +144,8 @@ final class DashboardViewModel {
             || !Self.identical(self.jobAnalyticsService, jobAnalyticsService)
         if changed {
             invalidateCanonicalLoad()
+            // New data authority: nothing it said has been confirmed yet.
+            hasConcludedCanonicalLoad = false
         }
         self.printerService = printerService
         self.jobService = jobService
@@ -138,6 +165,8 @@ final class DashboardViewModel {
             || !Self.identical(self.autoPrintService, autoPrintService)
         if changed {
             invalidateCanonicalLoad()
+            // New snapshot authority: its cache provenance is unconfirmed.
+            hasConcludedCanonicalLoad = false
         }
         self.snapshotStore = store
         self.autoPrintService = autoPrintService
@@ -351,9 +380,13 @@ final class DashboardViewModel {
         switch result {
         case .success(let snapshot):
             publish(snapshot)
+            hasConcludedCanonicalLoad = true
         case .failure(let error):
             handleLoadFailure(error)
+            hasConcludedCanonicalLoad = true
         case .superseded:
+            // Cancelled or replaced by a newer pass: nothing was answered, so
+            // this must not license the offline banner.
             break
         }
         finishCanonicalLoad(authority: authority)
@@ -484,6 +517,13 @@ final class DashboardViewModel {
             )
         } catch {
             guard !Task.isCancelled else { return .superseded }
+            // Defend the invariant structurally rather than by timing. A
+            // cancellation answered nothing, so it must never reach `.failure`,
+            // which concludes the canonical pass. `Task.isCancelled` covers the
+            // ordinary case, but a nested sub-task cancelled without the parent
+            // would surface `URLError(.cancelled)` with the parent still live.
+            // Keeps all three read-cache view models consistent.
+            guard !isCancellationError(error) else { return .superseded }
             return .failure(error)
         }
     }

@@ -30,7 +30,10 @@ struct PrinterDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             // #789: shared stale banner — honest, read-only cached coverage.
-            if filamentCoverageEnabled && coverageViewModel.isShowingStaleCache {
+            // Gated on `isStaleCacheReportable`, not `isShowingStaleCache`: the
+            // latter is true from the instant the cache hydrates, which flashed
+            // an "offline" banner on every healthy open of this screen.
+            if filamentCoverageEnabled && coverageViewModel.isStaleCacheReportable {
                 ConnectionStatusBar(
                     status: .offline,
                     lastConfirmedAt: coverageViewModel.cacheLastUpdatedAt,
