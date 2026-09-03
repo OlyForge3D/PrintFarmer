@@ -11,6 +11,8 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
+using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Modules.Calibration.Services.Calibration;
 using Farm.Modules.Calibration.Services.Gcode;
@@ -18,6 +20,7 @@ using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -41,7 +44,8 @@ public sealed class GcodeArtifactPromoter(
     ILogger<GcodeArtifactPromoter> logger,
     IPromotionArtifactContentSource? contentSource = null,
     IArtifactsRepository? artifactsRepository = null,
-    ISliceJobRepository? sliceJobs = null) : IGcodeArtifactPromoter
+    ISliceJobRepository? sliceJobs = null,
+    IHubContext<PrinterHub>? hub = null) : IGcodeArtifactPromoter
 {
     private const string ManifestSchemaVersion = "1.0";
     private const string GeneratorName = "printfarmer.gcode-artifact-promoter";
@@ -62,6 +66,7 @@ public sealed class GcodeArtifactPromoter(
     private readonly IPromotionArtifactContentSource? _contentSource = contentSource;
     private readonly IArtifactsRepository? _artifactsRepository = artifactsRepository;
     private readonly ISliceJobRepository? _sliceJobs = sliceJobs;
+    private readonly IHubContext<PrinterHub>? _hub = hub;
 
     /// <inheritdoc/>
     public async Task<GcodePromotionCapabilityDto> GetCapabilityAsync(CancellationToken cancellationToken)
@@ -798,9 +803,11 @@ public sealed class GcodeArtifactPromoter(
         checkpoint.Revision++;
 
         GcodePromotionCheckpoint effective = checkpoint;
+        bool completedHere = false;
         try
         {
             _ = await _dbContext.SaveChangesAsync(cancellationToken);
+            completedHere = true;
         }
         catch (DbUpdateException)
         {
@@ -817,8 +824,37 @@ public sealed class GcodeArtifactPromoter(
             effective = winner;
         }
 
+        if (completedHere)
+        {
+            await NotifyLibraryUpdatedAsync(cancellationToken);
+        }
+
         await AcknowledgeSourceAsync(effective, cancellationToken);
         return effective;
+    }
+
+    private async Task NotifyLibraryUpdatedAsync(CancellationToken cancellationToken)
+    {
+        if (_hub is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _hub.Clients.Group(AuthorizedHubGroups.AuthenticatedUsers)
+                .SendAsync("gcodelibraryupdated", cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Could not notify authenticated users that the G-code library was updated.");
+        }
     }
 
     private async Task FailCheckpointAsync(

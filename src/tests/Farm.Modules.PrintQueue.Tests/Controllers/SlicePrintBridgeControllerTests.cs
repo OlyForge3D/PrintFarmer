@@ -375,6 +375,44 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         response.PrintStarted.Should().BeFalse();
     }
 
+    [Fact]
+    [Trait("Category", "SlicePrintBridge")]
+    public async Task SendToPrinter_DurableReplayAfterArtifactCleanup_UsesExistingFile()
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        Artifact durableGcode = CreateArtifact(jobId, "gcode", "saved-model.gcode");
+        SetupCompletedJobWithGcode(jobId, durableGcode, createdNew: false);
+        SetupPrinterExists(printerId);
+        _gcodeFilesMock
+            .Setup(service => service.ReadFileBytesAsync(
+                durableGcode.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(System.Text.Encoding.UTF8.GetBytes("; durable replay\nG28\n"));
+        _printersMock
+            .Setup(service => service.UploadGcodeAsync(
+                printerId,
+                durableGcode.FileName,
+                It.IsAny<Stream>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        IActionResult result = await _controller.SendToPrinterAsync(
+            jobId,
+            new SendToPrinterRequest { PrinterId = printerId, StartPrint = false },
+            CancellationToken.None);
+
+        result.Should().BeOfType<OkObjectResult>();
+        _libraryMock.Verify(service => service.PromoteAsync(
+            jobId,
+            null,
+            It.IsAny<CalibrationActor>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _gcodeFilesMock.Verify(service => service.ReadFileBytesAsync(
+            durableGcode.Id,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     // =========================================================================
     // Happy path: upload and start print (200)
     // =========================================================================
@@ -962,7 +1000,10 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         CreatedAt = DateTime.UtcNow
     };
 
-    private void SetupCompletedJobWithGcode(Guid jobId, Artifact gcodeArtifact)
+    private void SetupCompletedJobWithGcode(
+        Guid jobId,
+        Artifact gcodeArtifact,
+        bool createdNew = true)
     {
         _jobRepoMock
             .Setup(r => r.GetByIdAsync(jobId, It.IsAny<CancellationToken>()))
@@ -980,12 +1021,13 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
                     GcodeFileId = gcodeArtifact.Id,
                     Name = gcodeArtifact.FileName,
                     SizeBytes = gcodeArtifact.SizeBytes,
-                    CreatedNew = true,
+                    CreatedNew = createdNew,
                     Printable = true,
                     SliceJobId = jobId,
                     SourceArtifactId = gcodeArtifact.Id,
                 },
-                StatusCodes.Status201Created));
+                createdNew ? StatusCodes.Status201Created : StatusCodes.Status200OK,
+                replayed: !createdNew));
 
         _gcodeFilesMock
             .Setup(service => service.ReadFileBytesAsync(

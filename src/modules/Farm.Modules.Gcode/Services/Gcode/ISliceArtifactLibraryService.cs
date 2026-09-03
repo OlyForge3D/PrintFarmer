@@ -1,15 +1,11 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Security;
-using Farm.Infrastructure.Services.SignalR;
 using Farm.Modules.Calibration.Services.Calibration;
 using Farm.Modules.Calibration.Services.Gcode;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Modules.Gcode.Services.Gcode;
 
@@ -60,8 +56,6 @@ public interface ISliceArtifactLibraryService
 public sealed class SliceArtifactLibraryService(
     AppDbContext dbContext,
     IGcodeArtifactPromoter promoter,
-    IHubContext<PrinterHub> hub,
-    ILogger<SliceArtifactLibraryService> logger,
     IArtifactsRepository? artifactsRepository = null,
     ISliceJobRepository? sliceJobs = null) : ISliceArtifactLibraryService
 {
@@ -72,12 +66,6 @@ public sealed class SliceArtifactLibraryService(
 
     private readonly IGcodeArtifactPromoter _promoter =
         promoter ?? throw new ArgumentNullException(nameof(promoter));
-
-    private readonly IHubContext<PrinterHub> _hub =
-        hub ?? throw new ArgumentNullException(nameof(hub));
-
-    private readonly ILogger<SliceArtifactLibraryService> _logger =
-        logger ?? throw new ArgumentNullException(nameof(logger));
 
     private readonly IArtifactsRepository? _artifactsRepository = artifactsRepository;
 
@@ -94,6 +82,13 @@ public sealed class SliceArtifactLibraryService(
         if (sliceJobId == Guid.Empty || artifactId == Guid.Empty)
         {
             return Failure(StatusCodes.Status400BadRequest, "invalid_promotion_source");
+        }
+
+        CalibrationApiResult<SliceArtifactLibraryResult>? completed =
+            await ResolveCompletedPromotionAsync(sliceJobId, artifactId, actor, cancellationToken);
+        if (completed is not null)
+        {
+            return completed;
         }
 
         if (_artifactsRepository is null || _sliceJobs is null)
@@ -178,11 +173,6 @@ public sealed class SliceArtifactLibraryService(
             return Failure(StatusCodes.Status503ServiceUnavailable, "promoted_gcode_unavailable");
         }
 
-        if (createdNew)
-        {
-            await NotifyLibraryUpdatedAsync(cancellationToken);
-        }
-
         return CalibrationApiResult<SliceArtifactLibraryResult>.Success(
             new SliceArtifactLibraryResult
             {
@@ -213,22 +203,71 @@ public sealed class SliceArtifactLibraryService(
     private static CalibrationApiResult<SliceArtifactLibraryResult> Failure(int statusCode, string code) =>
         CalibrationApiResult<SliceArtifactLibraryResult>.Failure(statusCode, code);
 
-    private async Task NotifyLibraryUpdatedAsync(CancellationToken cancellationToken)
+    private async Task<CalibrationApiResult<SliceArtifactLibraryResult>?> ResolveCompletedPromotionAsync(
+        Guid sliceJobId,
+        Guid? artifactId,
+        CalibrationActor actor,
+        CancellationToken cancellationToken)
     {
-        try
+        IQueryable<GcodePromotionCheckpoint> query = _dbContext.GcodePromotionCheckpoints
+            .AsNoTracking()
+            .Where(checkpoint =>
+                checkpoint.State == GcodePromotionState.Completed &&
+                checkpoint.SourceSliceJobId == sliceJobId);
+
+        if (artifactId.HasValue)
         {
-            await _hub.Clients.Group(AuthorizedHubGroups.AuthenticatedUsers)
-                .SendAsync("gcodelibraryupdated", cancellationToken);
+            string operationId = BuildOperationId(sliceJobId, artifactId.Value);
+            query = query.Where(checkpoint =>
+                checkpoint.SourceArtifactId == artifactId.Value &&
+                checkpoint.OperationId == operationId);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        else
         {
-            throw;
+            string operationPrefix = $"slice-library:{sliceJobId:N}:";
+            query = query.Where(checkpoint => checkpoint.OperationId.StartsWith(operationPrefix));
         }
-        catch (Exception exception)
+
+        List<GcodePromotionCheckpoint> checkpoints = await query
+            .OrderBy(checkpoint => checkpoint.CompletedAtUtc)
+            .Take(2)
+            .ToListAsync(cancellationToken);
+        if (checkpoints.Count == 0)
         {
-            _logger.LogWarning(
-                exception,
-                "Could not notify authenticated users that the G-code library was updated.");
+            return null;
         }
+
+        GcodePromotionCheckpoint checkpoint = checkpoints[0];
+        if (!actor.IsFarmAdmin && checkpoint.OwnerUserId != actor.UserId)
+        {
+            return Failure(StatusCodes.Status403Forbidden, "resource_forbidden");
+        }
+
+        if (!artifactId.HasValue && checkpoints.Count > 1)
+        {
+            return Failure(StatusCodes.Status409Conflict, "source_artifact_required");
+        }
+
+        GcodeFile? file = await _dbContext.GcodeFiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == checkpoint.GcodeFileId, cancellationToken);
+        if (file is null)
+        {
+            return Failure(StatusCodes.Status503ServiceUnavailable, "promoted_gcode_unavailable");
+        }
+
+        return CalibrationApiResult<SliceArtifactLibraryResult>.Success(
+            new SliceArtifactLibraryResult
+            {
+                GcodeFileId = file.Id,
+                Name = file.Name,
+                SizeBytes = file.FileSizeBytes,
+                CreatedNew = false,
+                Printable = true,
+                SliceJobId = checkpoint.SourceSliceJobId,
+                SourceArtifactId = checkpoint.SourceArtifactId,
+            },
+            StatusCodes.Status200OK,
+            replayed: true);
     }
 }
