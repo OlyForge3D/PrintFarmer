@@ -766,6 +766,33 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
     /// `isStaleBannerReportable` and the banner could never appear. The failing
     /// pass leaves `isStale` untouched, so the invalidation can only have come
     /// from the conclusion flag.
+    /// Mirrors the coverage view models' wrapped-cancellation tests. Without
+    /// this, reverting the `isCancellationError` guard in
+    /// `loadCanonicalSnapshot`'s terminal catch passes CI: the existing
+    /// cancellation tests only exercise the `Task.isCancelled` branch, which
+    /// short-circuits first, so the guard behind it is never reached.
+    func testDashboardWrappedCancellationDoesNotConclude() async throws {
+        let cached = try TestData.decodePrinter()
+        store.hydration = .snapshot(cachedEnvelope(printers: [cached], millis: 1_699_000_000_000))
+        await viewModel.hydrateFromCache()
+        XCTAssertTrue(viewModel.isStale, "precondition: showing unconfirmed cached data")
+
+        mockPrinterService.listHandler = { _ in
+            throw NetworkError.transportError(URLError(.cancelled))
+        }
+        await viewModel.loadDashboard()
+
+        XCTAssertTrue(viewModel.isStale, "still unconfirmed: nothing was answered")
+        XCTAssertFalse(
+            viewModel.hasConcludedCanonicalLoad,
+            "a cancelled pass concludes nothing, however the cancellation was wrapped"
+        )
+        XCTAssertFalse(
+            viewModel.isStaleBannerReportable,
+            "a cancelled pass must not flash the offline banner"
+        )
+    }
+
     func testStaleBannerReportabilityIsObservable() async throws {
         let cached = try TestData.decodePrinter()
         store.hydration = .snapshot(cachedEnvelope(printers: [cached], millis: 1_699_000_000_000))
