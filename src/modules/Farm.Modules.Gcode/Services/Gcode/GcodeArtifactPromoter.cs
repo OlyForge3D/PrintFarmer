@@ -148,7 +148,8 @@ public sealed class GcodeArtifactPromoter(
         string contentSha256 = NormalizeHex(artifact.Sha256);
         string operationScope = GetOperationScope(job.UserId);
         string operationId = request.OperationId.Trim();
-        string requestSha256 = ComputeRequestSha256(request, contentSha256);
+        string virtualDirectory = NormalizeVirtualDirectory(request.VirtualDirectory);
+        string requestSha256 = ComputeRequestSha256(request, contentSha256, virtualDirectory);
 
         GcodePromotionCheckpoint? checkpoint = await _dbContext.GcodePromotionCheckpoints
             .FirstOrDefaultAsync(
@@ -180,7 +181,15 @@ public sealed class GcodeArtifactPromoter(
                     : Failure(StatusCodes.Status409Conflict, "promotion_in_progress");
             }
 
-            checkpoint = NewCheckpoint(request, artifact, job, operationScope, operationId, requestSha256, contentSha256);
+            checkpoint = NewCheckpoint(
+                request,
+                artifact,
+                job,
+                operationScope,
+                operationId,
+                requestSha256,
+                contentSha256,
+                virtualDirectory);
             _ = _dbContext.GcodePromotionCheckpoints.Add(checkpoint);
             try
             {
@@ -224,7 +233,7 @@ public sealed class GcodeArtifactPromoter(
             return Failure(StatusCodes.Status409Conflict, checkpoint.FailureCode ?? "promotion_failed");
         }
 
-        return await ExecutePromotionAsync(checkpoint, request.VirtualDirectory, artifact, job, cancellationToken);
+        return await ExecutePromotionAsync(checkpoint, checkpoint.VirtualDirectory, artifact, job, cancellationToken);
     }
 
     /// <inheritdoc/>
@@ -415,7 +424,7 @@ public sealed class GcodeArtifactPromoter(
         }
 
         checkpoint.ReconcileAttempts++;
-        return await ExecutePromotionAsync(checkpoint, virtualDirectory: null, artifact, job, cancellationToken);
+        return await ExecutePromotionAsync(checkpoint, checkpoint.VirtualDirectory, artifact, job, cancellationToken);
     }
 
     /// <inheritdoc/>
@@ -504,6 +513,9 @@ public sealed class GcodeArtifactPromoter(
 
     private static string NormalizeHex(string? value) =>
         (value ?? string.Empty).Trim().Replace("-", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
+
+    private static string NormalizeVirtualDirectory(string? value) =>
+        value?.Trim() ?? string.Empty;
 
     private static bool IsHexDigest(string value) =>
         value.Length == 64 && value.All(Uri.IsHexDigit);
@@ -637,7 +649,8 @@ public sealed class GcodeArtifactPromoter(
         string operationScope,
         string operationId,
         string requestSha256,
-        string contentSha256)
+        string contentSha256,
+        string virtualDirectory)
     {
         DateTime nowUtc = DateTime.UtcNow;
         return new GcodePromotionCheckpoint
@@ -647,6 +660,7 @@ public sealed class GcodeArtifactPromoter(
             OperationScope = operationScope,
             OperationId = operationId,
             RequestSha256 = requestSha256,
+            VirtualDirectory = virtualDirectory,
             SourceArtifactId = artifact.Id,
             SourceSliceJobId = job.Id,
             SourceWorkerId = artifact.WorkerId,
@@ -1146,7 +1160,10 @@ public sealed class GcodeArtifactPromoter(
             : CalibrationLineageContext.Empty with { SpecificationSha256 = attempt.SpecificationSha256 };
     }
 
-    private static string ComputeRequestSha256(GcodeArtifactPromotionRequest request, string contentSha256)
+    private static string ComputeRequestSha256(
+        GcodeArtifactPromotionRequest request,
+        string contentSha256,
+        string virtualDirectory)
     {
         // A canonical, ordered projection of only the immutable request fields: two calls agree exactly
         // or they are a payload mismatch.
@@ -1163,7 +1180,7 @@ public sealed class GcodeArtifactPromoter(
             $"projectId={request.CalibrationProjectId?.ToString("D", CultureInfo.InvariantCulture) ?? string.Empty}",
             $"attemptId={request.CalibrationAttemptId?.ToString("D", CultureInfo.InvariantCulture) ?? string.Empty}",
             $"orchestrationId={request.CalibrationOrchestrationId?.ToString("D", CultureInfo.InvariantCulture) ?? string.Empty}",
-            $"virtualDirectory={request.VirtualDirectory?.Trim() ?? string.Empty}");
+            $"virtualDirectory={virtualDirectory}");
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
 

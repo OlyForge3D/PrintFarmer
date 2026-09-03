@@ -1462,13 +1462,16 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = (await _harness.IsArtifactCleanupEligibleAsync(fixture.ArtifactId)).Should().BeTrue();
     }
 
-    [Fact(DisplayName = "A truncated transport remains pending and succeeds on retry")]
-    public async Task PromoteAsync_WhenTransportIsTruncated_RetryKeepsCheckpointAndPinRecoverable()
+    [Fact(DisplayName = "A restart reconciles a transient failure into the original virtual directory")]
+    public async Task ReconcileAsync_AfterTransportFailure_PreservesDirectoryReplayAndImmutability()
     {
         PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
         byte[] bytes = Encoding.UTF8.GetBytes(GcodeContent);
         var source = new TruncatedThenCompleteContentSource(bytes);
-        GcodeArtifactPromotionRequest request = fixture.Request("promotion-transport-retry");
+        GcodeArtifactPromotionRequest request = fixture.Request("promotion-transport-retry") with
+        {
+            VirtualDirectory = "  /slice-results/recovered  ",
+        };
 
         CalibrationApiResult<GcodePromotionDto> first = await _harness
             .CreatePromoter(contentSource: source)
@@ -1481,18 +1484,36 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = first.Code.Should().Be("promotion_source_transport_unavailable");
         _ = pending.State.Should().Be(GcodePromotionState.Pending);
         _ = pending.FailureCode.Should().BeNull();
+        _ = pending.VirtualDirectory.Should().Be("/slice-results/recovered");
         _ = pinned.PromotionCheckpointId.Should().Be(pending.Id);
         _ = pinned.PromotionStartedAtUtc.Should().NotBeNull();
         _ = pinned.PromotedAtUtc.Should().BeNull();
 
-        CalibrationApiResult<GcodePromotionDto> retry = await _harness
-            .CreatePromoter(contentSource: source)
+        CalibrationApiResult<GcodePromotionDto> reconciled = await _harness.CreatePromoter()
+            .ReconcileAsync(pending.Id, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> replay = await _harness.CreatePromoter()
             .PromoteAsync(request, fixture.Owner, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> relocation = await _harness.CreatePromoter()
+            .PromoteAsync(
+                request with { VirtualDirectory = "/different-directory" },
+                fixture.Owner,
+                CancellationToken.None);
 
-        _ = retry.StatusCode.Should().Be(StatusCodes.Status201Created, retry.Code);
+        _ = reconciled.StatusCode.Should().Be(StatusCodes.Status201Created, reconciled.Code);
+        _ = replay.StatusCode.Should().Be(StatusCodes.Status200OK, replay.Code);
+        _ = replay.Replayed.Should().BeTrue();
+        _ = replay.Value!.GcodeFileId.Should().Be(reconciled.Value!.GcodeFileId);
+        _ = relocation.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = relocation.Code.Should().Be("idempotency_payload_mismatch");
         _ = (await _harness.GetCheckpointAsync(pending.Id)).State
             .Should().Be(GcodePromotionState.Completed);
         _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+        GcodeFile stored = await _harness.GetGcodeFileAsync(reconciled.Value.GcodeFileId);
+        string? downloadPath = await _harness.ResolveGcodeDownloadPathAsync(stored.Id);
+        _ = stored.FilePath.Should().Be("/slice-results/recovered");
+        _ = downloadPath.Should().Be(
+            Path.Join(_harness.GcodeRoot, "slice-results", "recovered", stored.FileName));
+        _ = File.Exists(downloadPath).Should().BeTrue();
     }
 
     [Fact(DisplayName = "The promotion status route returns the caller's own promotion only")]

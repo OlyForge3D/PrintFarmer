@@ -2697,6 +2697,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("VirtualDirectory")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("GcodeFileId")

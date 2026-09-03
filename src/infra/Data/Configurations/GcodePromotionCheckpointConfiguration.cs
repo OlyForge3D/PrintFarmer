@@ -19,6 +19,7 @@ public sealed class GcodePromotionCheckpointConfiguration : IEntityTypeConfigura
         _ = builder.Property(checkpoint => checkpoint.OperationScope).IsRequired().HasMaxLength(128);
         _ = builder.Property(checkpoint => checkpoint.OperationId).IsRequired().HasMaxLength(128);
         _ = builder.Property(checkpoint => checkpoint.RequestSha256).IsRequired().HasMaxLength(64);
+        _ = builder.Property(checkpoint => checkpoint.VirtualDirectory).IsRequired().HasMaxLength(512);
         _ = builder.Property(checkpoint => checkpoint.SourceContentSha256).IsRequired().HasMaxLength(64);
         _ = builder.Property(checkpoint => checkpoint.FailureCode).HasMaxLength(128);
         _ = builder.Property(checkpoint => checkpoint.State).HasConversion<int>();
