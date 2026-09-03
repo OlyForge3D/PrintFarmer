@@ -62,6 +62,7 @@ services:
       # POST /api/slicer/calibration/resolved-profiles here with the end user's own bearer token,
       # and probes GET /healthz/calibration-resolver for availability. Both require the Jwt__*
       # values above to match the api service exactly, and the caller must hold calibration:read.
+      - ArtifactStorage__RootPath=/data/artifacts
       - MODEL_UPLOAD_PATH=/app/models
       - Logging__LogLevel__Default=Information
       - Logging__LogLevel__Microsoft.AspNetCore=Warning
