@@ -514,6 +514,24 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       printerSignalRService.dispose();
     });
 
+    it('delivers lowercase payload-free G-code library updates until unsubscribed', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      const callback = vi.fn();
+      const unsubscribe = printerSignalRService.onGcodeLibraryUpdated(callback);
+
+      signalRTestState.connectionHandlers.get('gcodelibraryupdated')?.();
+
+      expect(callback).toHaveBeenCalledOnce();
+      expect(signalRTestState.connectionHandlers.has('GcodeLibraryUpdated')).toBe(false);
+
+      unsubscribe();
+      signalRTestState.connectionHandlers.get('gcodelibraryupdated')?.();
+
+      expect(callback).toHaveBeenCalledOnce();
+      printerSignalRService.dispose();
+    });
+
     it('replays missed events before delivering a sequence-gap hint', async () => {
       signalRTestState.getQueueChanges.mockResolvedValueOnce({
         afterSequence: 0,

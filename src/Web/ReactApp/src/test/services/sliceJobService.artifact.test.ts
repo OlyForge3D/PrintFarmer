@@ -118,13 +118,40 @@ describe('SliceJobService artifact URL helpers', () => {
     describe('getArtifactsByRoute', () => {
       it('normalizes the canonical /api route through the authenticated API client', async () => {
         mockRequest.mockResolvedValue([]);
+        const jobId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
 
-        await service.getArtifactsByRoute('/api/artifacts/job/job-1');
+        await service.getArtifactsByRoute(`/api/artifacts/job/${jobId}`);
 
         expect(mockRequest).toHaveBeenCalledWith({
-          url: '/artifacts/job/job-1',
+          url: `/artifacts/job/${jobId}`,
           method: 'GET',
         });
+      });
+
+      it('accepts the canonical configured API base form', async () => {
+        mockRequest.mockResolvedValue([]);
+        const jobId = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
+
+        await service.getArtifactsByRoute(
+          `${getApiBaseUrl()}/artifacts/job/${jobId}`,
+        );
+
+        expect(mockRequest).toHaveBeenCalledWith({
+          url: `/artifacts/job/${jobId}`,
+          method: 'GET',
+        });
+      });
+
+      it.each([
+        'https://evil.example/api/artifacts/job/f47ac10b-58cc-4372-a567-0e02b2c3d479',
+        '//evil.example/api/artifacts/job/f47ac10b-58cc-4372-a567-0e02b2c3d479',
+        '/api/artifacts/job/f47ac10b-58cc-4372-a567-0e02b2c3d479/../../secrets',
+        '/api/artifacts/job/not-a-guid',
+      ])('rejects unsafe artifact route %s before the authenticated request', async (route) => {
+        await expect(service.getArtifactsByRoute(route)).rejects.toThrow(
+          'Invalid slice artifacts route.',
+        );
+        expect(mockRequest).not.toHaveBeenCalled();
       });
     });
 
