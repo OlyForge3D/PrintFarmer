@@ -247,6 +247,7 @@ if (slicerModuleEnabled)
 // machine/process/filament profile repositories. Split/microservices hosts skip AddSlicerModule,
 // so register just those repositories here (issue #1858).
 builder.Services.AddMoonrakerEmulatorSeederDependencies(builder.Configuration);
+builder.Services.AddSlicerPromotionDependencies(builder.Configuration);
 
 builder.Services.AddEndpointsApiExplorer();
 

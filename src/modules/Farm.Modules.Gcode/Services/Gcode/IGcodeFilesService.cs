@@ -341,5 +341,11 @@ public interface IGcodeFilesService
     /// </remarks>
     Task<string?> DownloadFileAsync(Guid id, string webRootPath, CancellationToken ct);
 
+    /// <summary>Reads durable G-code bytes without exposing the server-side storage path.</summary>
+    /// <param name="id">Unique identifier of the durable file.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The stored bytes, or <see langword="null"/> when the file is unavailable.</returns>
+    Task<byte[]?> ReadFileBytesAsync(Guid id, CancellationToken ct);
+
     #endregion
 }

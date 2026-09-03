@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Services;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -26,6 +27,8 @@ public class SliceJobCompletionIntegrationTests(CustomWebApplicationFactory fact
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         _ = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
+        IArtifactsRepository artifactsRepository =
+            scope.ServiceProvider.GetRequiredService<IArtifactsRepository>();
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
 
         // 1. Create processing job
@@ -73,6 +76,13 @@ public class SliceJobCompletionIntegrationTests(CustomWebApplicationFactory fact
         string[] ids = updated.ArtifactIdsCsv!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         _ = ids.Should().HaveCount(1);
         _ = Guid.Parse(ids[0]).Should().Be(artifact.Id);
+
+        Artifact staged = (await artifactsRepository.GetByIdAsync(artifact.Id))!;
+        _ = staged.PromotionCheckpointId.Should().BeNull();
+        _ = staged.PromotionOperationKey.Should().BeNull();
+        _ = staged.PromotionStartedAtUtc.Should().BeNull();
+        _ = staged.PromotedAtUtc.Should().BeNull(
+            "slice completion stages output and never saves it to the durable library");
     }
 
     [Fact(DisplayName = "Slice job completion persists multi-artifact summary")]

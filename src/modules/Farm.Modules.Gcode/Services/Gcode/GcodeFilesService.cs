@@ -1935,6 +1935,15 @@ public class GcodeFilesService(
         return System.IO.File.Exists(fullPath) ? fullPath : null;
     }
 
+    /// <inheritdoc />
+    public async Task<byte[]?> ReadFileBytesAsync(Guid id, CancellationToken ct)
+    {
+        string? path = await DownloadFileAsync(id, string.Empty, ct);
+        return path is null
+            ? null
+            : await System.IO.File.ReadAllBytesAsync(path, ct);
+    }
+
     /// <summary>
     /// Maps a GcodeFile domain model to a DTO with thumbnail URL construction.
     /// </summary>
