@@ -201,7 +201,10 @@ public interface IGcodeFilesService
     /// </summary>
     /// <param name="id">G-code file ID.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>Tuple of (filePath, originalFileName) if found, otherwise null.</returns>
+    /// <returns>
+    /// Tuple containing the containment-checked physical file path and original filename when found;
+    /// otherwise null. The caller must not resolve the returned path a second time.
+    /// </returns>
     Task<(string FilePath, string OriginalFileName)?> GetFilePathAndNameAsync(Guid id, CancellationToken ct);
 
     /// <summary>
