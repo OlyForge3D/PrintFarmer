@@ -21,6 +21,7 @@ services:
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
       - SLICER_PROFILES_PATH=/app/profiles
+      - ArtifactStorage__RootPath=/app/data/artifacts
     volumes:
       # Persistent SQLite database and application data
       - printfarmer-data:/app/data

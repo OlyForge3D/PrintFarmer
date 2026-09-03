@@ -1098,6 +1098,42 @@ resolve_worker_shared_api_key() {
     export WORKER_SHARED_API_KEY
 }
 
+# Resolve the private API-to-slicer-host promotion key before deployment files are rewritten.
+resolve_promotion_shared_api_key() {
+    if [ -n "${PROMOTION_SHARED_API_KEY:-}" ]; then
+        print_info "Using existing slicer promotion authentication key (preserved)"
+        export PROMOTION_SHARED_API_KEY
+        return 0
+    fi
+
+    local env_file="${ENV_FILE:-.env}"
+    if [ -f "${CONFIG_FILE:-}" ]; then
+        PROMOTION_SHARED_API_KEY=$(get_kv_from_file "$CONFIG_FILE" "PROMOTION_SHARED_API_KEY" || true)
+    fi
+    if [ -z "${PROMOTION_SHARED_API_KEY:-}" ] && [ -f "$env_file" ]; then
+        PROMOTION_SHARED_API_KEY=$(get_kv_from_file "$env_file" "PROMOTION_SHARED_API_KEY" || true)
+    fi
+    if [ -z "${PROMOTION_SHARED_API_KEY:-}" ]; then
+        PROMOTION_SHARED_API_KEY=$(generate_slicer_api_key) || return 1
+        print_info "Generated a new slicer promotion authentication key"
+    else
+        print_info "Recovered the existing slicer promotion authentication key"
+    fi
+
+    export PROMOTION_SHARED_API_KEY
+}
+
+resolve_deployment_shared_keys() {
+    resolve_worker_shared_api_key || {
+        print_error "Unable to resolve a worker bootstrap registration key"
+        return 1
+    }
+    resolve_promotion_shared_api_key || {
+        print_error "Unable to resolve a slicer promotion authentication key"
+        return 1
+    }
+}
+
 # Helper: generate a secure JWT signing key
 # Returns a Base64-encoded 256-bit (32-byte) key suitable for HMAC-SHA256
 generate_jwt_key() {
@@ -3336,6 +3372,14 @@ WORKER_SHARED_API_KEY=$WORKER_SHARED_API_KEY
 EOF
     fi
 
+    if [ -n "${PROMOTION_SHARED_API_KEY:-}" ]; then
+        cat >> "$CONFIG_FILE" << EOF
+
+# Private API-to-slicer-host artifact promotion key
+PROMOTION_SHARED_API_KEY=$PROMOTION_SHARED_API_KEY
+EOF
+    fi
+
     if [ "$ARCHITECTURE" = "microservices" ] && [ "${OVERRIDE_WORKER_ENDPOINTS:-no}" = "yes" ]; then
         cat >> "$CONFIG_FILE" << EOF
 
@@ -4730,10 +4774,7 @@ generate_env_file() {
     ENV_FILE="${ENV_FILE:-.env}"
 
     # Resolve this before reading or truncating ENV_FILE so redeploys retain the key.
-    resolve_worker_shared_api_key || {
-        print_error "Unable to resolve a worker bootstrap registration key"
-        return 1
-    }
+    resolve_deployment_shared_keys || return 1
     
     # Preserve existing secrets before overwriting .env file
     # This ensures JWT key and other secrets persist across redeploys
@@ -5108,6 +5149,9 @@ EOF
     echo "" >> "$ENV_FILE"
     echo "# Worker bootstrap registration key (registry-issued credentials protect worker-only routes)" >> "$ENV_FILE"
     echo "WORKER_SHARED_API_KEY=$WORKER_SHARED_API_KEY" >> "$ENV_FILE"
+    echo "" >> "$ENV_FILE"
+    echo "# Private API-to-slicer-host artifact promotion key" >> "$ENV_FILE"
+    echo "PROMOTION_SHARED_API_KEY=$PROMOTION_SHARED_API_KEY" >> "$ENV_FILE"
 
     export_discovery_service_key
     
@@ -7387,6 +7431,7 @@ redeploy_existing() {
     validate_configuration
     
     # Migrate saved state and generate fresh env files with the supported release.
+    resolve_deployment_shared_keys || exit 1
     save_deployment_config
     generate_env_file
     generate_react_env_production
@@ -7569,10 +7614,7 @@ main() {
         # regenerating .env (issue #1392).
         migrate_legacy_db_credentials
 
-        resolve_worker_shared_api_key || {
-            print_error "Unable to resolve a worker bootstrap registration key"
-            exit 1
-        }
+        resolve_deployment_shared_keys || exit 1
         save_deployment_config
         generate_env_file
         generate_react_env_production
@@ -7728,10 +7770,7 @@ main() {
         exit 1
     fi
 
-    resolve_worker_shared_api_key || {
-        print_error "Unable to resolve a worker bootstrap registration key"
-        exit 1
-    }
+    resolve_deployment_shared_keys || exit 1
     save_deployment_config
     generate_env_file
     generate_react_env_production

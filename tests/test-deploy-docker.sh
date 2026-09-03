@@ -1849,6 +1849,7 @@ EOF
     assert_not_contains "$env_content" "SLICER_WORKER_API_KEY" "Should not emit per-replica bootstrap keys"
     assert_not_contains "$env_content" "ORCA_WORKER_INSTANCE_ID=" "Scaled replicas must derive distinct runtime identities"
     assert_contains "$env_content" "DISCOVERY_SHARED_API_KEY=" "Should configure authenticated discovery event ingestion"
+    assert_contains "$env_content" "PROMOTION_SHARED_API_KEY=" "Should configure private artifact promotion"
 
     local shared_key_line
     shared_key_line=$(grep "^WORKER_SHARED_API_KEY=" "$env_file" | head -1)
@@ -1858,10 +1859,19 @@ EOF
     discovery_key_line=$(grep "^DISCOVERY_SHARED_API_KEY=" "$env_file" | head -1)
     local discovery_key_value
     discovery_key_value=$(echo "$discovery_key_line" | cut -d'=' -f2-)
+    local promotion_key_line
+    promotion_key_line=$(grep "^PROMOTION_SHARED_API_KEY=" "$env_file" | head -1)
+    local promotion_key_value
+    promotion_key_value=$(echo "$promotion_key_line" | cut -d'=' -f2-)
     
     assert_not_equals "$shared_key_value" "" "Bootstrap key value should not be empty"
     assert_not_contains "$output" "$shared_key_value" "Deployment output must not expose bootstrap key material"
     assert_not_equals "$discovery_key_value" "" "Discovery service key should not be empty"
+    assert_not_equals "$promotion_key_value" "" "Promotion service key should not be empty"
+    assert_not_equals "$shared_key_value" "$promotion_key_value" "Promotion key must be distinct from the worker bootstrap key"
+    assert_not_equals "$discovery_key_value" "$promotion_key_value" "Promotion key must be distinct from the discovery key"
+    assert_not_contains "$output" "$promotion_key_value" "Deployment output must not expose promotion key material"
+    assert_contains "$(cat .deploy-config)" "PROMOTION_SHARED_API_KEY=$promotion_key_value" "Deployment config should preserve the promotion key"
 
     # A second run must recover the original bootstrap key before rewriting either file.
     capture_output "$(get_deploy_script_command --dry-run --batch)"
@@ -1869,8 +1879,12 @@ EOF
     second_output=$(get_output)
     local preserved_key_value
     preserved_key_value=$(grep "^WORKER_SHARED_API_KEY=" "$env_file" | head -1 | cut -d'=' -f2-)
+    local preserved_promotion_key_value
+    preserved_promotion_key_value=$(grep "^PROMOTION_SHARED_API_KEY=" "$env_file" | head -1 | cut -d'=' -f2-)
     assert_equals "$shared_key_value" "$preserved_key_value" "Redeploy should preserve the worker bootstrap key"
+    assert_equals "$promotion_key_value" "$preserved_promotion_key_value" "Redeploy should preserve the promotion key"
     assert_not_contains "$second_output" "$preserved_key_value" "Redeploy output must not expose preserved bootstrap key material"
+    assert_not_contains "$second_output" "$preserved_promotion_key_value" "Redeploy output must not expose preserved promotion key material"
 
     # Clean up
     rm -f .deploy-config "$env_file" || true

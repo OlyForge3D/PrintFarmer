@@ -44,6 +44,7 @@ services:
       # URL of the main API for cross-domain lookups (printers, catalog models, manufacturers)
       - MainApi__BaseUrl=${MAIN_API_URL:-http://api:5245}
       - WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY:-}
+      - SlicerPromotion__SharedKey=${PROMOTION_SHARED_API_KEY:-}
       # JWT signing configuration - MUST match the main API's Jwt__Key so Desktop
       # API-key exchange tokens (see docs/SLICER_CONFIGURATION.md) issued by the
       # API are accepted here. Jwt__Key is required: Farm.Slicer.Host/Program.cs
@@ -63,6 +64,7 @@ services:
       # and probes GET /healthz/calibration-resolver for availability. Both require the Jwt__*
       # values above to match the api service exactly, and the caller must hold calibration:read.
       - MODEL_UPLOAD_PATH=/app/models
+      - ArtifactStorage__RootPath=/data/artifacts
       - Logging__LogLevel__Default=Information
       - Logging__LogLevel__Microsoft.AspNetCore=Warning
     volumes:

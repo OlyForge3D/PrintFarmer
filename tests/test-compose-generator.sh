@@ -203,6 +203,35 @@ test_discovery_shared_key_wiring() {
     pass_test
 }
 
+test_slicer_promotion_wiring() {
+    start_test "private slicer promotion configuration and storage"
+
+    local outdir="$TEST_TEMP_DIR/compose-slicer-promotion"
+    mkdir -p "$outdir"
+
+    assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker yes --output-dir $outdir"
+
+    local compose_content
+    compose_content=$(cat "$outdir/docker-compose.yml")
+    local monolith_content
+    monolith_content=$(cat "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.monolith.yml")
+    local env_template_content
+    env_template_content=$(cat "$REPO_ROOT/.env.template")
+    local split_nginx_content
+    split_nginx_content=$(cat "$REPO_ROOT/deploy/nginx/nginx-proxy-split.conf")
+
+    assert_contains "$compose_content" 'SlicerHost__BaseUrl=${SLICER_HOST_URL:-http://slicer-host:5246}' "API should use the private Docker DNS address for slicer-host"
+    assert_equals "2" "$(grep -c 'SlicerPromotion__SharedKey=${PROMOTION_SHARED_API_KEY:-}' "$outdir/docker-compose.yml")" "API and slicer-host should receive the same promotion key"
+    assert_contains "$compose_content" "ArtifactStorage__RootPath=/data/artifacts" "Slicer-host should stage artifacts under its persistent data mount"
+    assert_contains "$compose_content" '${EXTERNAL_SLICER_DATA_PATH:-.volumes/printfarmer-slicer-data}:/data' "Slicer-host data should use persistent storage"
+    assert_contains "$monolith_content" "ArtifactStorage__RootPath=/app/data/artifacts" "Monolith should stage artifacts under persistent application data"
+    assert_contains "$monolith_content" "printfarmer-data:/app/data" "Monolith application data should use a persistent volume"
+    assert_contains "$env_template_content" "PROMOTION_SHARED_API_KEY=" "Environment template should declare the promotion key"
+    assert_not_contains "$split_nginx_content" "/api/internal/slicer-promotion" "Internal promotion content must not have a public nginx route"
+
+    pass_test
+}
+
 # Test microservices architecture generation
 
 # Test OrcaSlicer worker configuration
@@ -2024,6 +2053,7 @@ run_all_tests() {
     test_microservices_generation
     test_discovery_network_consistency
     test_discovery_shared_key_wiring
+    test_slicer_promotion_wiring
     test_generated_compose_file_is_valid_yaml
     test_database_initialization_order
     test_database_volume_mount_correctness
