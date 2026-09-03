@@ -37,9 +37,10 @@ function createWrapper() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return function Wrapper({ children }: { children: React.ReactNode }) {
+  const Wrapper = function Wrapper({ children }: { children: React.ReactNode }) {
     return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
   };
+  return { Wrapper, queryClient };
 }
 
 function renderModal(props: Partial<React.ComponentProps<typeof SendToPrinterModal>> = {}) {
@@ -49,7 +50,12 @@ function renderModal(props: Partial<React.ComponentProps<typeof SendToPrinterMod
     jobId: 'job-123',
     ...props,
   };
-  return { ...render(<SendToPrinterModal {...defaultProps} />, { wrapper: createWrapper() }), props: defaultProps };
+  const { Wrapper, queryClient } = createWrapper();
+  return {
+    ...render(<SendToPrinterModal {...defaultProps} />, { wrapper: Wrapper }),
+    props: defaultProps,
+    queryClient,
+  };
 }
 
 describe('SendToPrinterModal', () => {
@@ -81,7 +87,7 @@ describe('SendToPrinterModal', () => {
     expect(sendButton).toBeEnabled();
   });
 
-  it('calls sendToPrinter with correct params on submit', async () => {
+  it('uses the canonical promote-first direct print contract', async () => {
     mockSendToPrinter.mockResolvedValue({
       jobId: 'job-123',
       printerId: 'printer-1',
@@ -157,7 +163,7 @@ describe('SendToPrinterModal', () => {
   it('does not render when isOpen is false', () => {
     renderModal({ isOpen: false });
 
-    expect(screen.queryByText('Send to Printer')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   describe('mode chooser', () => {
@@ -175,14 +181,15 @@ describe('SendToPrinterModal', () => {
   });
 
   describe('Add to Queue mode', () => {
-    it('calls addSliceToQueue with correct payload on submit', async () => {
+    it('uses the canonical promote-first queue contract and refreshes queue queries', async () => {
       mockAddSliceToQueue.mockResolvedValue({
         printJobId: 'pj-1',
         queuePosition: 3,
         message: 'Queued',
       });
 
-      renderModal({ selectedSpoolId: 42, requiredPrinterModel: 'MK4', requiredMaterialType: 'PLA', requiredNozzleDiameter: 0.4 });
+      const { queryClient } = renderModal({ selectedSpoolId: 42, requiredPrinterModel: 'MK4', requiredMaterialType: 'PLA', requiredNozzleDiameter: 0.4 });
+      const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
 
       fireEvent.click(screen.getByRole('radio', { name: /add to queue/i }));
 
@@ -198,6 +205,10 @@ describe('SendToPrinterModal', () => {
           requiredNozzleDiameter: 0.4,
         }));
       });
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['job-queue'] });
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-jobs'] });
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-stats'] });
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-summaries', 'fleet'] });
     });
 
     it('shows success toast with queue position on success', async () => {

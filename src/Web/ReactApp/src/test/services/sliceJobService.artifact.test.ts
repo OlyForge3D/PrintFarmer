@@ -168,5 +168,29 @@ describe('SliceJobService artifact URL helpers', () => {
         });
       });
     });
+
+    describe('promoteSliceArtifact', () => {
+      it('calls the explicit main-API slice-artifact promotion contract', async () => {
+        const response = {
+          gcodeFileId: 'file-1',
+          name: 'benchy.gcode',
+          sizeBytes: 123,
+          createdNew: true,
+          printable: true,
+          sliceJobId: 'job-1',
+          sourceArtifactId: 'artifact-1',
+        };
+        mockRequest.mockResolvedValue(response);
+
+        await expect(
+          service.promoteSliceArtifact('job-1', 'artifact-1'),
+        ).resolves.toEqual(response);
+        expect(mockRequest).toHaveBeenCalledWith({
+          url: '/gcode-promotions/slice-artifact',
+          method: 'POST',
+          data: { sliceJobId: 'job-1', artifactId: 'artifact-1' },
+        });
+      });
+    });
   });
 });

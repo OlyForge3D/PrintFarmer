@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
@@ -13,6 +13,7 @@ import {
   GridIcon,
   TableIcon,
   DownloadIcon,
+  SaveIcon,
   CloseIcon,
   LayersIcon,
   PrinterIcon,
@@ -31,10 +32,14 @@ import {
 import { useSliceJobsRealtime } from '@/features/slicer/hooks/useSliceJobsRealtime';
 import { SendToPrinterModal } from '@/features/slicer/components/SendToPrinterModal';
 import { GcodePreviewModal } from '@/features/slicer/components/GcodePreviewModal';
-import { downloadGcodeArtifact } from '@/features/slicer/utils/sliceArtifactActions';
+import {
+  downloadGcodeArtifact,
+  saveGcodeArtifactToLibrary,
+} from '@/features/slicer/utils/sliceArtifactActions';
 import type { BadgeVariant } from '@/common/components/ui/Badge';
 
 type StatusFilter = 'all' | SliceJobStatus;
+type SaveFeedback = { kind: 'success' | 'error'; message: string };
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'All Jobs' },
@@ -102,6 +107,9 @@ export function SliceJobsPanel() {
   const [sendToJobId, setSendToJobId] = useState<string | null>(null);
   const [previewJobId, setPreviewJobId] = useState<string | null>(null);
   const [downloadingJobId, setDownloadingJobId] = useState<string | null>(null);
+  const [savingJobIds, setSavingJobIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [saveFeedbackByJobId, setSaveFeedbackByJobId] = useState<Record<string, SaveFeedback>>({});
+  const saveInFlightRef = useRef(new Set<string>());
 
   const { isConnected: isRealtimeConnected } = useSliceJobsRealtime();
 
@@ -172,6 +180,47 @@ export function SliceJobsPanel() {
       toast.error(error instanceof Error ? error.message : 'Failed to download G-code.');
     } finally {
       setDownloadingJobId(null);
+    }
+  };
+
+  const handleSaveArtifact = async (jobId: string) => {
+    if (saveInFlightRef.current.has(jobId)) return;
+    const artifactsRoute = jobs.find(job => job.id === jobId)?.artifactsRoute;
+    if (!artifactsRoute) {
+      toast.error('No G-code artifact is available for this job.');
+      return;
+    }
+
+    saveInFlightRef.current.add(jobId);
+    setSavingJobIds(new Set(saveInFlightRef.current));
+    setSaveFeedbackByJobId(previous => {
+      const next = { ...previous };
+      delete next[jobId];
+      return next;
+    });
+    try {
+      const result = await saveGcodeArtifactToLibrary(artifactsRoute, jobId);
+      if (result.createdNew) {
+        await queryClient.invalidateQueries({ queryKey: ['file-browser'] });
+      }
+      const message = result.createdNew
+        ? 'Saved to Library'
+        : 'Already in File Library';
+      setSaveFeedbackByJobId(previous => ({
+        ...previous,
+        [jobId]: { kind: 'success', message },
+      }));
+      toast.success(message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save G-code.';
+      setSaveFeedbackByJobId(previous => ({
+        ...previous,
+        [jobId]: { kind: 'error', message },
+      }));
+      toast.error(message);
+    } finally {
+      saveInFlightRef.current.delete(jobId);
+      setSavingJobIds(new Set(saveInFlightRef.current));
     }
   };
 
@@ -249,10 +298,13 @@ export function SliceJobsPanel() {
           onCancel={(id) => cancelMutation.mutate(id)}
           onRetry={(id) => retryMutation.mutate(id)}
           onDownload={handleDownloadArtifact}
+          onSave={handleSaveArtifact}
           onSendToPrinter={(id) => setSendToJobId(id)}
           onPreview={(id) => setPreviewJobId(id)}
           cancellingId={cancelMutation.isPending ? (cancelMutation.variables ?? null) : null}
           downloadingId={downloadingJobId}
+          savingIds={savingJobIds}
+          saveFeedbackByJobId={saveFeedbackByJobId}
         />
       ) : (
         <JobCardGrid
@@ -260,10 +312,13 @@ export function SliceJobsPanel() {
           onCancel={(id) => cancelMutation.mutate(id)}
           onRetry={(id) => retryMutation.mutate(id)}
           onDownload={handleDownloadArtifact}
+          onSave={handleSaveArtifact}
           onSendToPrinter={(id) => setSendToJobId(id)}
           onPreview={(id) => setPreviewJobId(id)}
           cancellingId={cancelMutation.isPending ? (cancelMutation.variables ?? null) : null}
           downloadingId={downloadingJobId}
+          savingIds={savingJobIds}
+          saveFeedbackByJobId={saveFeedbackByJobId}
         />
       )}
 
@@ -291,10 +346,13 @@ function JobTable({
   onCancel,
   onRetry,
   onDownload,
+  onSave,
   onSendToPrinter,
   onPreview,
   cancellingId,
   downloadingId,
+  savingIds,
+  saveFeedbackByJobId,
 }: {
   jobs: SliceJobStatusResponse[];
   expandedJobId: string | null;
@@ -302,10 +360,13 @@ function JobTable({
   onCancel: (id: string) => void;
   onRetry: (id: string) => void;
   onDownload: (id: string) => void;
+  onSave: (id: string) => void;
   onSendToPrinter: (id: string) => void;
   onPreview: (id: string) => void;
   cancellingId: string | null;
   downloadingId: string | null;
+  savingIds: ReadonlySet<string>;
+  saveFeedbackByJobId: Record<string, SaveFeedback>;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-pf-border">
@@ -330,10 +391,13 @@ function JobTable({
               onCancel={() => onCancel(job.id)}
               onRetry={() => onRetry(job.id)}
               onDownload={() => onDownload(job.id)}
+              onSave={() => onSave(job.id)}
               onSendToPrinter={() => onSendToPrinter(job.id)}
               onPreview={() => onPreview(job.id)}
               isCancelling={cancellingId === job.id}
               isDownloading={downloadingId === job.id}
+              isSaving={savingIds.has(job.id)}
+              saveFeedback={saveFeedbackByJobId[job.id]}
             />
           ))}
         </tbody>
@@ -349,10 +413,13 @@ function JobTableRow({
   onCancel,
   onRetry,
   onDownload,
+  onSave,
   onSendToPrinter,
   onPreview,
   isCancelling,
   isDownloading,
+  isSaving,
+  saveFeedback,
 }: {
   job: SliceJobStatusResponse;
   isExpanded: boolean;
@@ -360,10 +427,13 @@ function JobTableRow({
   onCancel: () => void;
   onRetry: () => void;
   onDownload: () => void;
+  onSave: () => void;
   onSendToPrinter: () => void;
   onPreview: () => void;
   isCancelling: boolean;
   isDownloading: boolean;
+  isSaving: boolean;
+  saveFeedback?: SaveFeedback;
 }) {
   const canCancel = job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing;
   const canDownload = job.status === SliceJobStatus.Completed && !!job.artifactsRoute;
@@ -429,6 +499,17 @@ function JobTableRow({
             )}
             {canDownload && (
               <Button
+                variant="secondary"
+                size="sm"
+                onClick={onPreview}
+                aria-label="Preview gcode"
+                title="Preview G-code"
+              >
+                <EyeIcon className="w-3.5 h-3.5" />
+              </Button>
+            )}
+            {canDownload && (
+              <Button
                 variant="success"
                 size="sm"
                 onClick={onDownload}
@@ -443,11 +524,13 @@ function JobTableRow({
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={onPreview}
-                aria-label="Preview gcode"
-                title="Preview G-code"
+                onClick={onSave}
+                loading={isSaving}
+                disabled={isSaving}
+                aria-label="Save to Library"
+                title="Save to Library"
               >
-                <EyeIcon className="w-3.5 h-3.5" />
+                <SaveIcon className="w-3.5 h-3.5" />
               </Button>
             )}
             {canDownload && (
@@ -455,10 +538,19 @@ function JobTableRow({
                 variant="primary"
                 size="sm"
                 onClick={onSendToPrinter}
-                aria-label="Send to printer"
+                aria-label="Print"
+                title="Print"
               >
                 <PrinterIcon className="w-3.5 h-3.5" />
               </Button>
+            )}
+            {saveFeedback && (
+              <span
+                role={saveFeedback.kind === 'error' ? 'alert' : 'status'}
+                className={saveFeedback.kind === 'error' ? 'text-xs text-pf-error' : 'text-xs text-pf-success'}
+              >
+                {saveFeedback.message}
+              </span>
             )}
           </div>
         </td>
@@ -481,19 +573,25 @@ function JobCardGrid({
   onCancel,
   onRetry,
   onDownload,
+  onSave,
   onSendToPrinter,
   onPreview,
   cancellingId,
   downloadingId,
+  savingIds,
+  saveFeedbackByJobId,
 }: {
   jobs: SliceJobStatusResponse[];
   onCancel: (id: string) => void;
   onRetry: (id: string) => void;
   onDownload: (id: string) => void;
+  onSave: (id: string) => void;
   onSendToPrinter: (id: string) => void;
   onPreview: (id: string) => void;
   cancellingId: string | null;
   downloadingId: string | null;
+  savingIds: ReadonlySet<string>;
+  saveFeedbackByJobId: Record<string, SaveFeedback>;
 }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -504,10 +602,13 @@ function JobCardGrid({
           onCancel={() => onCancel(job.id)}
           onRetry={() => onRetry(job.id)}
           onDownload={() => onDownload(job.id)}
+          onSave={() => onSave(job.id)}
           onSendToPrinter={() => onSendToPrinter(job.id)}
           onPreview={() => onPreview(job.id)}
           isCancelling={cancellingId === job.id}
           isDownloading={downloadingId === job.id}
+          isSaving={savingIds.has(job.id)}
+          saveFeedback={saveFeedbackByJobId[job.id]}
         />
       ))}
     </div>
@@ -519,19 +620,25 @@ function JobCard({
   onCancel,
   onRetry,
   onDownload,
+  onSave,
   onSendToPrinter,
   onPreview,
   isCancelling,
   isDownloading,
+  isSaving,
+  saveFeedback,
 }: {
   job: SliceJobStatusResponse;
   onCancel: () => void;
   onRetry: () => void;
   onDownload: () => void;
+  onSave: () => void;
   onSendToPrinter: () => void;
   onPreview: () => void;
   isCancelling: boolean;
   isDownloading: boolean;
+  isSaving: boolean;
+  saveFeedback?: SaveFeedback;
 }) {
   const canCancel = job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing;
   const canDownload = job.status === SliceJobStatus.Completed && !!job.artifactsRoute;
@@ -626,6 +733,16 @@ function JobCard({
           )}
           {canDownload && (
             <Button
+              variant="secondary"
+              size="sm"
+              onClick={onPreview}
+              iconLeft={<EyeIcon className="w-3.5 h-3.5" />}
+            >
+              Preview
+            </Button>
+          )}
+          {canDownload && (
+            <Button
               variant="success"
               size="sm"
               onClick={onDownload}
@@ -640,10 +757,12 @@ function JobCard({
             <Button
               variant="secondary"
               size="sm"
-              onClick={onPreview}
-              iconLeft={<EyeIcon className="w-3.5 h-3.5" />}
+              onClick={onSave}
+              loading={isSaving}
+              disabled={isSaving}
+              iconLeft={<SaveIcon className="w-3.5 h-3.5" />}
             >
-              Preview
+              Save to Library
             </Button>
           )}
           {canDownload && (
@@ -653,10 +772,18 @@ function JobCard({
               onClick={onSendToPrinter}
               iconLeft={<PrinterIcon className="w-3.5 h-3.5" />}
             >
-              Send to Printer
+              Print
             </Button>
           )}
         </div>
+        {saveFeedback && (
+          <p
+            role={saveFeedback.kind === 'error' ? 'alert' : 'status'}
+            className={saveFeedback.kind === 'error' ? 'text-xs text-pf-error' : 'text-xs text-pf-success'}
+          >
+            {saveFeedback.message}
+          </p>
+        )}
       </Card.Body>
     </Card>
   );

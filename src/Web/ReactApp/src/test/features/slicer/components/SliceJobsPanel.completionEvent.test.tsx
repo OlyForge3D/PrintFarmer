@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,6 +24,14 @@ const realtime = vi.hoisted(() => {
 });
 
 const getMyJobs = vi.fn();
+const artifactActions = vi.hoisted(() => ({
+  download: vi.fn(),
+  save: vi.fn(),
+}));
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+}));
 
 vi.mock('@/services/slicerHubService', () => ({
   slicerHubService: realtime,
@@ -58,6 +67,11 @@ vi.mock('@/features/slicer/components/GcodePreviewModal', () => ({
   GcodePreviewModal: () => null,
 }));
 
+vi.mock('@/features/slicer/utils/sliceArtifactActions', () => ({
+  downloadGcodeArtifact: (...args: unknown[]) => artifactActions.download(...args),
+  saveGcodeArtifactToLibrary: (...args: unknown[]) => artifactActions.save(...args),
+}));
+
 vi.mock('@/common/hooks/useViewModePreference', () => ({
   useViewModePreference: () => ({ viewMode: 'grid', setViewMode: vi.fn() }),
 }));
@@ -66,6 +80,8 @@ describe('SliceJobsPanel live completion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     realtime.handler = null;
+    artifactActions.download.mockReset();
+    artifactActions.save.mockReset();
     getMyJobs.mockResolvedValue([{
       id: 'job-1',
       status: 'Processing',
@@ -74,7 +90,7 @@ describe('SliceJobsPanel live completion', () => {
     }]);
   });
 
-  it('shows Preview and Download from the completion event without a reload', async () => {
+  it('shows staged actions from completion and saves only after the explicit action', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -105,7 +121,27 @@ describe('SliceJobsPanel live completion', () => {
 
     expect(await screen.findByRole('button', { name: /preview/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /download/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /save to library/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /print/i })).toBeInTheDocument();
     expect(getMyJobs).toHaveBeenCalledOnce();
+    expect(artifactActions.save).not.toHaveBeenCalled();
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['file-browser'] });
+
+    artifactActions.save.mockResolvedValue({
+      createdNew: true,
+      gcodeFileId: 'file-1',
+    });
+    await userEvent.click(screen.getByRole('button', { name: /save to library/i }));
+
+    await waitFor(() => expect(artifactActions.save).toHaveBeenCalledOnce());
+    expect(artifactActions.save).toHaveBeenCalledWith(
+      '/api/artifacts/job/job-1',
+      'job-1',
+    );
+    expect(
+      invalidate.mock.calls.filter(([options]) =>
+        (options as { queryKey?: unknown[] }).queryKey?.[0] === 'file-browser',
+      ),
+    ).toHaveLength(1);
   });
 });
