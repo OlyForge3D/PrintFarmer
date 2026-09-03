@@ -21,7 +21,6 @@ import {
   ExternalLinkIcon,
   AlertCircleIcon,
 } from '@/common/components/icons/MdiIcons';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
 import {
   sliceJobService,
@@ -32,6 +31,7 @@ import {
 import { useSliceJobsRealtime } from '@/features/slicer/hooks/useSliceJobsRealtime';
 import { SendToPrinterModal } from '@/features/slicer/components/SendToPrinterModal';
 import { GcodePreviewModal } from '@/features/slicer/components/GcodePreviewModal';
+import { downloadGcodeArtifact } from '@/features/slicer/utils/sliceArtifactActions';
 import type { BadgeVariant } from '@/common/components/ui/Badge';
 
 type StatusFilter = 'all' | SliceJobStatus;
@@ -101,6 +101,7 @@ export function SliceJobsPanel() {
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [sendToJobId, setSendToJobId] = useState<string | null>(null);
   const [previewJobId, setPreviewJobId] = useState<string | null>(null);
+  const [downloadingJobId, setDownloadingJobId] = useState<string | null>(null);
 
   const { isConnected: isRealtimeConnected } = useSliceJobsRealtime();
 
@@ -157,8 +158,21 @@ export function SliceJobsPanel() {
     return counts;
   }, [jobs]);
 
-  const handleDownloadArtifact = (jobId: string) => {
-    window.open(`${getApiBaseUrl()}/artifacts/job/${jobId}`, '_blank');
+  const handleDownloadArtifact = async (jobId: string) => {
+    const artifactsRoute = jobs.find(job => job.id === jobId)?.artifactsRoute;
+    if (!artifactsRoute) {
+      toast.error('No G-code artifact is available for this job.');
+      return;
+    }
+
+    setDownloadingJobId(jobId);
+    try {
+      await downloadGcodeArtifact(artifactsRoute);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to download G-code.');
+    } finally {
+      setDownloadingJobId(null);
+    }
   };
 
   const toggleExpand = (jobId: string) => {
@@ -238,6 +252,7 @@ export function SliceJobsPanel() {
           onSendToPrinter={(id) => setSendToJobId(id)}
           onPreview={(id) => setPreviewJobId(id)}
           cancellingId={cancelMutation.isPending ? (cancelMutation.variables ?? null) : null}
+          downloadingId={downloadingJobId}
         />
       ) : (
         <JobCardGrid
@@ -248,6 +263,7 @@ export function SliceJobsPanel() {
           onSendToPrinter={(id) => setSendToJobId(id)}
           onPreview={(id) => setPreviewJobId(id)}
           cancellingId={cancelMutation.isPending ? (cancelMutation.variables ?? null) : null}
+          downloadingId={downloadingJobId}
         />
       )}
 
@@ -260,7 +276,7 @@ export function SliceJobsPanel() {
       <GcodePreviewModal
         isOpen={previewJobId !== null}
         onClose={() => setPreviewJobId(null)}
-        jobId={previewJobId ?? ''}
+        artifactsRoute={jobs.find(job => job.id === previewJobId)?.artifactsRoute ?? ''}
       />
     </div>
   );
@@ -278,6 +294,7 @@ function JobTable({
   onSendToPrinter,
   onPreview,
   cancellingId,
+  downloadingId,
 }: {
   jobs: SliceJobStatusResponse[];
   expandedJobId: string | null;
@@ -288,6 +305,7 @@ function JobTable({
   onSendToPrinter: (id: string) => void;
   onPreview: (id: string) => void;
   cancellingId: string | null;
+  downloadingId: string | null;
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-pf-border">
@@ -315,6 +333,7 @@ function JobTable({
               onSendToPrinter={() => onSendToPrinter(job.id)}
               onPreview={() => onPreview(job.id)}
               isCancelling={cancellingId === job.id}
+              isDownloading={downloadingId === job.id}
             />
           ))}
         </tbody>
@@ -333,6 +352,7 @@ function JobTableRow({
   onSendToPrinter,
   onPreview,
   isCancelling,
+  isDownloading,
 }: {
   job: SliceJobStatusResponse;
   isExpanded: boolean;
@@ -343,9 +363,10 @@ function JobTableRow({
   onSendToPrinter: () => void;
   onPreview: () => void;
   isCancelling: boolean;
+  isDownloading: boolean;
 }) {
   const canCancel = job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing;
-  const canDownload = job.status === SliceJobStatus.Completed;
+  const canDownload = job.status === SliceJobStatus.Completed && !!job.artifactsRoute;
   const canRetry = job.status === SliceJobStatus.Failed || job.status === SliceJobStatus.Cancelled;
 
   return (
@@ -411,6 +432,8 @@ function JobTableRow({
                 variant="success"
                 size="sm"
                 onClick={onDownload}
+                loading={isDownloading}
+                disabled={isDownloading}
                 aria-label="Download gcode"
               >
                 <DownloadIcon className="w-3.5 h-3.5" />
@@ -461,6 +484,7 @@ function JobCardGrid({
   onSendToPrinter,
   onPreview,
   cancellingId,
+  downloadingId,
 }: {
   jobs: SliceJobStatusResponse[];
   onCancel: (id: string) => void;
@@ -469,6 +493,7 @@ function JobCardGrid({
   onSendToPrinter: (id: string) => void;
   onPreview: (id: string) => void;
   cancellingId: string | null;
+  downloadingId: string | null;
 }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -482,6 +507,7 @@ function JobCardGrid({
           onSendToPrinter={() => onSendToPrinter(job.id)}
           onPreview={() => onPreview(job.id)}
           isCancelling={cancellingId === job.id}
+          isDownloading={downloadingId === job.id}
         />
       ))}
     </div>
@@ -496,6 +522,7 @@ function JobCard({
   onSendToPrinter,
   onPreview,
   isCancelling,
+  isDownloading,
 }: {
   job: SliceJobStatusResponse;
   onCancel: () => void;
@@ -504,9 +531,10 @@ function JobCard({
   onSendToPrinter: () => void;
   onPreview: () => void;
   isCancelling: boolean;
+  isDownloading: boolean;
 }) {
   const canCancel = job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing;
-  const canDownload = job.status === SliceJobStatus.Completed;
+  const canDownload = job.status === SliceJobStatus.Completed && !!job.artifactsRoute;
   const canRetry = job.status === SliceJobStatus.Failed || job.status === SliceJobStatus.Cancelled;
 
   return (
@@ -601,6 +629,8 @@ function JobCard({
               variant="success"
               size="sm"
               onClick={onDownload}
+              loading={isDownloading}
+              disabled={isDownloading}
               iconLeft={<DownloadIcon className="w-3.5 h-3.5" />}
             >
               Download
@@ -761,9 +791,9 @@ function JobDetailPanel({ job }: { job: SliceJobStatusResponse }) {
           </p>
         </div>
       )}
-      {job.resultFileUrl && (
+      {job.artifactsRoute && (
         <div className="col-span-full">
-          <DetailField label="Result" value={job.resultFileUrl} />
+          <DetailField label="Artifacts" value={job.artifactsRoute} />
         </div>
       )}
     </div>

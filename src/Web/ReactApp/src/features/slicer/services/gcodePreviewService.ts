@@ -110,6 +110,8 @@ export interface IGcodePreviewService {
    * Worker that fetches the file itself, so the raw text never round-trips
    * across the worker boundary as a structured-clone payload (#1788).
    *
+   * `requestHeaders` carries authorization into the same-origin worker fetch.
+   *
    * `signal` lets a caller cancel a specific in-flight request — e.g. when
    * the requested `gcodeUrl` changes before the previous parse finished.
    * Because the worker executes each parse synchronously, a superseded
@@ -117,7 +119,11 @@ export interface IGcodePreviewService {
    * and recreates the worker so the newer request isn't head-of-line
    * blocked behind a stale (possibly huge/malformed) parse.
    */
-  parseGCodeDetailed(gcodeUrl: string, signal?: AbortSignal): Promise<DetailedParsedGCode>;
+  parseGCodeDetailed(
+    gcodeUrl: string,
+    requestHeaders?: Record<string, string>,
+    signal?: AbortSignal,
+  ): Promise<DetailedParsedGCode>;
   dispose(): void;
 }
 
@@ -148,8 +154,12 @@ function buffersToDetailedParsedGCode(buffers: DetailedParseBuffers): DetailedPa
   return { layers, layerCount: buffers.layerCount, tools: Array.from(buffers.tools) };
 }
 
-async function fetchGCodeText(gcodeUrl: string, signal: AbortSignal): Promise<string> {
-  const res = await fetch(gcodeUrl, { signal });
+async function fetchGCodeText(
+  gcodeUrl: string,
+  requestHeaders: Record<string, string>,
+  signal: AbortSignal,
+): Promise<string> {
+  const res = await fetch(gcodeUrl, { headers: requestHeaders, signal });
   if (!res.ok) throw new Error(`Failed to load G-code: ${res.status}`);
   return res.text();
 }
@@ -218,7 +228,11 @@ export function createGcodePreviewService(): IGcodePreviewService {
       return { layers, layerCount: layers.length };
     },
 
-    async parseGCodeDetailed(gcodeUrl: string, signal?: AbortSignal): Promise<DetailedParsedGCode> {
+    async parseGCodeDetailed(
+      gcodeUrl: string,
+      requestHeaders: Record<string, string> = {},
+      signal?: AbortSignal,
+    ): Promise<DetailedParsedGCode> {
       if (signal?.aborted) {
         throw new DOMException('Parse aborted', 'AbortError');
       }
@@ -250,7 +264,7 @@ export function createGcodePreviewService(): IGcodePreviewService {
           });
           signal?.addEventListener('abort', onAbort, { once: true });
 
-          w.postMessage({ requestId, gcodeUrl });
+          w.postMessage({ requestId, gcodeUrl, requestHeaders });
         });
 
         return buffersToDetailedParsedGCode(buffers);
@@ -267,7 +281,7 @@ export function createGcodePreviewService(): IGcodePreviewService {
       const onAbort = () => controller.abort();
       signal?.addEventListener('abort', onAbort, { once: true });
       try {
-        const gcodeText = await fetchGCodeText(gcodeUrl, controller.signal);
+        const gcodeText = await fetchGCodeText(gcodeUrl, requestHeaders, controller.signal);
         const buffers = parseDetailedLayersCore(gcodeText);
         return buffersToDetailedParsedGCode(buffers);
       } finally {

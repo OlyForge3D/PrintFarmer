@@ -92,7 +92,7 @@ export interface SliceJobStatusResponse {
   queuedAt: string;
   startedAt?: string;
   completedAt?: string;
-  resultFileUrl?: string;
+  artifactsRoute?: string;
   errorMessage?: string;
   /**
    * Real worker-side failure detail (e.g. OrcaSlicer exit code/stderr or the
@@ -513,6 +513,33 @@ export class SliceJobService {
       method: 'GET',
     });
     return response;
+  }
+
+  /**
+   * List artifacts from the canonical route returned by completed job contracts.
+   */
+  async getArtifactsByRoute(artifactsRoute: string): Promise<ArtifactListItemResponse[]> {
+    const apiBaseUrl = getApiBaseUrl().replace(/\/$/, '');
+    const requestUrl = artifactsRoute.startsWith(`${apiBaseUrl}/`)
+      ? artifactsRoute.slice(apiBaseUrl.length)
+      : artifactsRoute.startsWith('/api/')
+        ? artifactsRoute.slice('/api'.length)
+        : artifactsRoute;
+    return apiClient.request<ArtifactListItemResponse[]>({
+      url: requestUrl,
+      method: 'GET',
+    });
+  }
+
+  /**
+   * Fetch an artifact through the authenticated API client.
+   */
+  async downloadArtifact(artifactId: string): Promise<Blob> {
+    return apiClient.request<Blob>({
+      url: `/artifacts/${artifactId}`,
+      method: 'GET',
+      responseType: 'blob',
+    });
   }
 
   /**

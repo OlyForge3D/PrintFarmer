@@ -114,5 +114,32 @@ describe('SliceJobService artifact URL helpers', () => {
       const result = await service.getArtifactsByJob('job-empty');
       expect(result).toEqual([]);
     });
+
+    describe('getArtifactsByRoute', () => {
+      it('normalizes the canonical /api route through the authenticated API client', async () => {
+        mockRequest.mockResolvedValue([]);
+
+        await service.getArtifactsByRoute('/api/artifacts/job/job-1');
+
+        expect(mockRequest).toHaveBeenCalledWith({
+          url: '/artifacts/job/job-1',
+          method: 'GET',
+        });
+      });
+    });
+
+    describe('downloadArtifact', () => {
+      it('requests the selected artifact as a blob through the authenticated API client', async () => {
+        const blob = new Blob(['G1 X0 Y0']);
+        mockRequest.mockResolvedValue(blob);
+
+        await expect(service.downloadArtifact('art-1')).resolves.toBe(blob);
+        expect(mockRequest).toHaveBeenCalledWith({
+          url: '/artifacts/art-1',
+          method: 'GET',
+          responseType: 'blob',
+        });
+      });
+    });
   });
 });

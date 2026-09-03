@@ -1,11 +1,12 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '@/common/components/ui';
 import { DownloadIcon } from '@/common/components/icons/MdiIcons';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { sliceJobService } from '@/services/sliceJobService';
 import { GcodePreviewModal } from '@/features/slicer/components/GcodePreviewModal';
 import { SendToPrinterModal } from '@/features/slicer/components/SendToPrinterModal';
 import type { SliceJobProgressState } from '@/features/slicer/hooks/useSliceJobProgress';
+import { downloadGcodeArtifact } from '@/features/slicer/utils/sliceArtifactActions';
 
 interface SliceProgressOverlayProps {
   jobId: string;
@@ -52,10 +53,27 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const autoOpenedJobRef = useRef<string | null>(null);
 
-  const handleDownload = useCallback(() => {
-    window.open(`${getApiBaseUrl()}/artifacts/job/${jobId}`, '_blank');
-  }, [jobId]);
+  useEffect(() => {
+    if (isCompleted && progress.artifactsRoute && autoOpenedJobRef.current !== jobId) {
+      autoOpenedJobRef.current = jobId;
+      setPreviewOpen(true);
+    }
+  }, [isCompleted, jobId, progress.artifactsRoute]);
+
+  const handleDownload = useCallback(async () => {
+    if (!progress.artifactsRoute) return;
+    setIsDownloading(true);
+    try {
+      await downloadGcodeArtifact(progress.artifactsRoute);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to download G-code.');
+    } finally {
+      setIsDownloading(false);
+    }
+  }, [progress.artifactsRoute]);
 
   const materialCost = resolvedCostPerGram != null
     ? sliceJobService.computeMaterialCostPerGram(progress.filamentUsedGrams, resolvedCostPerGram)
@@ -173,18 +191,22 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
         {/* Terminal actions */}
         {isCompleted && (
           <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
-            <Button variant="primary" size="sm" onClick={() => setPreviewOpen(true)}>
-              Preview
-            </Button>
+            {progress.artifactsRoute && (
+              <Button variant="primary" size="sm" onClick={() => setPreviewOpen(true)}>
+                Preview
+              </Button>
+            )}
             <Button variant="success" size="sm" onClick={() => setSendOpen(true)}>
               Send to Printer
             </Button>
-            {progress.resultFileUrl && (
+            {progress.artifactsRoute && (
               <Button
                 variant="secondary"
                 size="sm"
                 iconLeft={<DownloadIcon className="w-4 h-4" />}
                 onClick={handleDownload}
+                loading={isDownloading}
+                disabled={isDownloading}
               >
                 Download G-code
               </Button>
@@ -213,7 +235,11 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
       </div>
 
       {/* Post-slice modals */}
-      <GcodePreviewModal isOpen={previewOpen} onClose={() => setPreviewOpen(false)} jobId={jobId} />
+      <GcodePreviewModal
+        isOpen={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        artifactsRoute={progress.artifactsRoute ?? ''}
+      />
       <SendToPrinterModal
         isOpen={sendOpen}
         onClose={() => setSendOpen(false)}

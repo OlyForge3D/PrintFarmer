@@ -38,7 +38,7 @@ const jobProgressRef = vi.hoisted(() => {
     status: null as string | null,
     estimatedPrintTimeSeconds: null as number | null,
     filamentUsedGrams: null as number | null,
-    resultFileUrl: null as string | null,
+    artifactsRoute: null as string | null,
     error: null as string | null,
     isConnected: true,
   };
@@ -313,6 +313,17 @@ vi.mock('@/services/sliceJobService', async () => {
       computeMaterialCostPerGram: actual.sliceJobService.computeMaterialCostPerGram,
       formatPrintTime: actual.sliceJobService.formatPrintTime,
       formatFilamentUsed: actual.sliceJobService.formatFilamentUsed,
+      getArtifactsByRoute: vi.fn(() => Promise.resolve([{
+        id: 'artifact-1',
+        jobId: 'job-1',
+        fileName: 'output.gcode',
+        contentType: 'application/octet-stream',
+        sizeBytes: 1024,
+        downloadUrl: '/api/artifacts/artifact-1',
+        createdAt: '2026-09-02T00:00:00Z',
+      }])),
+      getArtifactDownloadUrl: vi.fn((artifactId: string) => `/api/artifacts/${artifactId}`),
+      downloadArtifact: vi.fn(() => Promise.resolve(new Blob(['G1 X0 Y0']))),
     },
     formatQueuePositionSuffix: actual.formatQueuePositionSuffix,
   };
@@ -2509,6 +2520,36 @@ describe('NewSliceJobPage', () => {
 
         expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
         expect(screen.queryByText(/Job queued/i)).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps completed Preview and Download actions visible past the former auto-clear window', async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        await submitAndFail();
+
+        act(() => {
+          jobProgressRef.set({
+            ...jobProgressRef.value,
+            status: 'Completed',
+            error: null,
+            progressPercent: 100,
+            artifactsRoute: '/api/artifacts/job/job-1',
+          });
+        });
+
+        expect(screen.getByRole('dialog', { name: 'G-code Preview' })).toBeInTheDocument();
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+
+        expect(screen.getByRole('dialog', { name: 'G-code Preview' })).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Close modal' }));
+
+        expect(screen.getAllByText('Completed').length).toBeGreaterThan(0);
+        expect(screen.getAllByRole('button', { name: 'Preview' }).length).toBeGreaterThan(0);
+        expect(screen.getAllByRole('button', { name: 'Download G-code' }).length).toBeGreaterThan(0);
       } finally {
         vi.useRealTimers();
       }

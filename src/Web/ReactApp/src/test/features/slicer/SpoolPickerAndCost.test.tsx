@@ -67,7 +67,7 @@ const completedProgress: SliceJobProgressState = {
   progressMessage: undefined,
   filamentUsedGrams: 50,
   estimatedPrintTimeSeconds: 3600,
-  resultFileUrl: 'http://localhost/gcode',
+  artifactsRoute: '/api/artifacts/job/job-1',
   error: undefined,
   isConnected: true,
 };

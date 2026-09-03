@@ -1,14 +1,17 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
 import { GCodeViewer } from '@/features/models3d/components/3d/GCodeViewer3D';
 import { Spinner } from '@/common/components/ui/Spinner';
+import { Button } from '@/common/components/ui/Button';
+import { getAuthHeaders } from '@/common/utils/apiUrlHelpers';
 import { sliceJobService } from '@/services/sliceJobService';
-import { isGcodeFileName } from '@/features/slicer/utils/gcodeFileUtils';
+import { resolveGcodeArtifact } from '@/features/slicer/utils/sliceArtifactActions';
 
 interface GcodePreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
-  jobId: string;
+  artifactsRoute: string;
 }
 
 /**
@@ -17,16 +20,25 @@ interface GcodePreviewModalProps {
  * GET /api/artifacts/{id} (the PhysicalFile endpoint) for raw G-code content.
  * Only G-code artifacts are considered; non-G-code files are never sent to the viewer.
  */
-export function GcodePreviewModal({ isOpen, onClose, jobId }: GcodePreviewModalProps) {
-  const { data: gcodeUrl, isLoading } = useQuery({
-    queryKey: ['gcode-preview-url', jobId],
+export function GcodePreviewModal({ isOpen, onClose, artifactsRoute }: GcodePreviewModalProps) {
+  const requestHeaders = useMemo(
+    () => (isOpen ? getAuthHeaders() : {}),
+    [isOpen],
+  );
+  const {
+    data: gcodeUrl,
+    isLoading,
+    isFetching,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['gcode-preview-url', artifactsRoute],
     queryFn: async () => {
-      const artifacts = await sliceJobService.getArtifactsByJob(jobId);
-      const gcode = artifacts.find(a => isGcodeFileName(a.fileName));
+      const gcode = await resolveGcodeArtifact(artifactsRoute);
       if (!gcode) return null;
       return sliceJobService.getArtifactDownloadUrl(gcode.id);
     },
-    enabled: isOpen && !!jobId,
+    enabled: isOpen && !!artifactsRoute,
   });
 
   return (
@@ -41,13 +53,25 @@ export function GcodePreviewModal({ isOpen, onClose, jobId }: GcodePreviewModalP
           <Spinner size="lg" />
         </div>
       )}
-      {!isLoading && !gcodeUrl && (
+      {!isLoading && error && (
+        <div className="flex h-[70vh] flex-col items-center justify-center gap-3 text-pf-error">
+          <p>Failed to load the G-code artifact.</p>
+          <Button variant="secondary" size="sm" loading={isFetching} onClick={() => refetch()}>
+            Retry
+          </Button>
+        </div>
+      )}
+      {!isLoading && !error && !gcodeUrl && (
         <div className="flex items-center justify-center h-[70vh] text-pf-text-secondary">
           <p>No G-code artifact available for this job.</p>
         </div>
       )}
       {gcodeUrl && (
-        <GCodeViewer gcodeUrl={gcodeUrl} className="h-[70vh] w-full" />
+        <GCodeViewer
+          gcodeUrl={gcodeUrl}
+          requestHeaders={requestHeaders}
+          className="h-[70vh] w-full"
+        />
       )}
     </Modal>
   );
