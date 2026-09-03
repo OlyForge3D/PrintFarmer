@@ -31,7 +31,7 @@ public sealed class GcodePromotionCheckpointConfiguration : IEntityTypeConfigura
             .IsUnique();
         _ = builder.HasIndex(checkpoint => new { checkpoint.SourceArtifactId, checkpoint.SourceContentSha256 })
             .IsUnique();
-        _ = builder.HasIndex(checkpoint => checkpoint.GcodeFileId).IsUnique();
+        _ = builder.HasIndex(checkpoint => checkpoint.GcodeFileId);
         _ = builder.HasIndex(checkpoint => new { checkpoint.State, checkpoint.UpdatedAtUtc });
     }
 }
