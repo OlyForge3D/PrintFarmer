@@ -889,6 +889,11 @@ actor APIClient {
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
+            #if DEBUG
+            let preview = String(data: data.prefix(2000), encoding: .utf8) ?? "<binary>"
+            print("⚠️ [APIClient] Decode failed for \(T.self) at \(request.url?.path ?? "?"): \(error)")
+            print("⚠️ [APIClient] Response body preview: \(preview)")
+            #endif
             throw NetworkError.decodingFailed(
                 ResponseDecodingFailure(error: error, targetType: T.self)
             )

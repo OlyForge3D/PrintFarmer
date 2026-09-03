@@ -961,12 +961,6 @@ final class ServiceContainer: @unchecked Sendable {
         // CAS publish: the synchronous rebuild follows the epoch check with no await
         // between them, so an older switch cannot publish stale services.
         let client = rebuildRealServices(baseURL: server.baseURL, server: server, accessToken: accessToken)
-        if accessToken != nil {
-            let shapeService = farmShapeService
-            Task {
-                await shapeService.refreshLatest(serverID: server.id)
-            }
-        }
         userDefaultsBox.userDefaults.set(server.normalizedURLString, forKey: APIClient.serverURLKey)
         // A2: rebuildRealServices already bound bearer + identity atomically at
         // construction from a synchronously captured epoch. No fire-and-forget
@@ -974,6 +968,14 @@ final class ServiceContainer: @unchecked Sendable {
         // overwrite this client's identity with a superseded token.
         await configureTokenExpiryChecker(client: client, serverID: server.id)
         guard transitionEpoch.isCurrent(epoch) else { return } // superseded during the awaits
+        if accessToken != nil {
+            let shapeService = farmShapeService
+            await shapeService.resolveForAuthenticatedSession(
+                serverID: server.id,
+                timeout: FarmShapeService.startupTimeout
+            )
+            guard transitionEpoch.isCurrent(epoch) else { return }
+        }
 
         // Bind the snapshot to the SAME captured server + generation the services
         // were rebuilt for.

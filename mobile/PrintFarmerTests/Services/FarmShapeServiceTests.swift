@@ -1,4 +1,6 @@
 import XCTest
+import KeychainSwift
+import Observation
 @testable import PrintFarmer
 
 @MainActor
@@ -103,9 +105,16 @@ final class FarmShapeServiceTests: XCTestCase {
         XCTAssertNil(service.latestShape)
         XCTAssertTrue(service.isSessionResolved)
 
+        let latestChanged = expectation(description: "late shape observed")
+        withObservationTracking {
+            _ = service.latestShape
+        } onChange: {
+            latestChanged.fulfill()
+        }
         request.release()
-        await waitUntil { service.latestShape == lateShape }
+        await fulfillment(of: [latestChanged], timeout: 2)
         XCTAssertNil(service.sessionShape)
+        XCTAssertEqual(service.latestShape, lateShape)
         XCTAssertEqual(store.shape(serverID: serverID), lateShape)
     }
 
@@ -177,6 +186,76 @@ final class FarmShapeServiceTests: XCTestCase {
         XCTAssertEqual(container.farmShapeService.sessionShape, shapeB)
     }
 
+    func testAuthenticatedServerSwitchResolvesFreshSessionShape() async throws {
+        let registry = ServerRegistry(
+            userDefaults: userDefaults,
+            migrateLegacyServerURL: false
+        )
+        let serverA = try registry.add(
+            displayName: "A",
+            baseURL: URL(string: "https://a.example.com")!
+        )
+        let serverB = try registry.add(
+            displayName: "B",
+            baseURL: URL(string: "https://b.example.com")!
+        )
+        try registry.setActive(id: serverA.id)
+        let keychain = KeychainSwift(keyPrefix: "FarmShapeServiceTests.\(UUID().uuidString).")
+        defer { keychain.clear() }
+        let credentials = ServerCredentialsStore(keychain: keychain)
+        credentials.save(
+            ServerCredentials(
+                accessToken: "token-b",
+                expiresAt: Date().addingTimeInterval(3_600)
+            ),
+            serverId: serverB.id
+        )
+        let mock = MockAPIClient()
+        mock.stubResponse(json: """
+        {
+            "accountCount": 4,
+            "locationCount": 5,
+            "printerCount": 6
+        }
+        """)
+        let container = ServiceContainer(
+            serverRegistry: registry,
+            credentialsStore: credentials,
+            userDefaultsBox: AuthServiceUserDefaultsBox(userDefaults),
+            observeRegistry: false,
+            farmShapeStore: store,
+            synchronizeOfflineQueueOnStartup: false,
+            apiClientFactory: { baseURL, generation, accessToken, authSessionToken, serverID in
+                let identity = accessToken.flatMap { token in
+                    serverID.map {
+                        AuthenticatedIdentity(
+                            accessToken: token,
+                            serverID: $0,
+                            authSessionToken: authSessionToken
+                        )
+                    }
+                }
+                return APIClient(
+                    baseURL: baseURL,
+                    session: mock.urlSession,
+                    serverGeneration: generation,
+                    authenticated: identity
+                )
+            },
+            signalRServiceFactory: { _, _ in MockSignalRService() }
+        )
+
+        await container.switchToServer(serverB)
+
+        XCTAssertEqual(
+            container.farmShapeService.sessionShape,
+            FarmShape(accountCount: 4, locationCount: 5, printerCount: 6)
+        )
+        XCTAssertTrue(
+            mock.capturedRequests.contains { $0.url?.path == "/api/system/farm-shape" }
+        )
+    }
+
     func testLateMidSessionChangeUpdatesPersistenceWithoutChangingSessionShape() async {
         let initial = FarmShape(accountCount: 1, locationCount: 1, printerCount: 5)
         let changed = FarmShape(accountCount: 2, locationCount: 2, printerCount: 9)
@@ -199,8 +278,14 @@ final class FarmShapeServiceTests: XCTestCase {
         )
         XCTAssertEqual(service.sessionShape, initial)
 
+        let latestChanged = expectation(description: "changed shape observed")
+        withObservationTracking {
+            _ = service.latestShape
+        } onChange: {
+            latestChanged.fulfill()
+        }
         request.release()
-        await waitUntil { service.latestShape == changed }
+        await fulfillment(of: [latestChanged], timeout: 2)
 
         XCTAssertEqual(service.sessionShape, initial)
         XCTAssertEqual(service.latestShape, changed)
@@ -246,7 +331,7 @@ final class FarmShapeServiceTests: XCTestCase {
 
         capabilities.gate.release()
         await preparation.value
-        await waitUntil { capabilities.completed }
+        XCTAssertTrue(capabilities.completed)
         XCTAssertEqual(shape.serverID, server.id)
     }
 
@@ -270,18 +355,6 @@ final class FarmShapeServiceTests: XCTestCase {
         XCTAssertNil(store.shape(serverID: serverID))
     }
 
-    private func waitUntil(
-        attempts: Int = 100,
-        _ predicate: @escaping @MainActor () -> Bool
-    ) async {
-        for _ in 0..<attempts {
-            if predicate() {
-                return
-            }
-            await Task.yield()
-        }
-        XCTFail("Condition did not become true")
-    }
 }
 
 @MainActor
