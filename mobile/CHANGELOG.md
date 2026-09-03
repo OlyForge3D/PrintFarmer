@@ -6,6 +6,10 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Added
 
+- **Per-server advanced-controls safety interlock** — Jog, preheat, home,
+  z-offset, and disable-motors controls are now hidden by default until enabled
+  from **Settings** → **Printer Safety** for the active server. Turning the
+  setting off revokes open access immediately.
 - **Post-login backend readiness check** — The app now checks every enabled
   mobile feature service and SignalR before showing the main interface. If part
   of the backend is unavailable, the app names the affected services and lets

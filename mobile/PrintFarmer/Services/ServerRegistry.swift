@@ -33,6 +33,7 @@ final class ServerRegistry {
     static let storageKey = "pf_server_registry"
     static let corruptBackupKey = "pf_server_registry_corrupt_backup"
     static let legacyMigrationCompletedKey = "pf_server_registry_legacy_migration_completed"
+    private static let advancedPrinterControlsPreferenceKeyPrefix = "pf_advanced_printer_controls_enabled"
 
     private struct PersistedRegistry: Codable {
         var servers: [RegisteredServer]
@@ -40,7 +41,13 @@ final class ServerRegistry {
     }
 
     var servers: [RegisteredServer]
-    var activeServerID: UUID?
+    var activeServerID: UUID? {
+        didSet {
+            guard activeServerID != oldValue else { return }
+            reloadAdvancedPrinterControlsPreference()
+        }
+    }
+    private(set) var advancedPrinterControlsEnabled = false
 
     /// Awaited snapshot purge authority, wired by `ServiceContainer`. Server
     /// removal is gated on this: a successful purge must complete before the
@@ -136,6 +143,7 @@ final class ServerRegistry {
             migrateLegacyServerIfNeeded()
         }
         sanitizeActiveSelection()
+        reloadAdvancedPrinterControlsPreference()
     }
 
     var activeServer: RegisteredServer? {
@@ -198,6 +206,7 @@ final class ServerRegistry {
         if activeServerID == id {
             activeServerID = servers.first?.id
         }
+        userDefaults.removeObject(forKey: Self.advancedPrinterControlsPreferenceKey(for: id))
         persist()
     }
 
@@ -237,6 +246,7 @@ final class ServerRegistry {
         // Consume the revision CAS FIRST (side-effect-free on failure).
         guard Self.consumeAddRevision(candidate.id, expected: expectedRevision) else { return false }
         servers.remove(at: index)
+        userDefaults.removeObject(forKey: Self.advancedPrinterControlsPreferenceKey(for: candidate.id))
         persist()
         return true
     }
@@ -280,6 +290,19 @@ final class ServerRegistry {
         }
         activeServerID = id
         persist()
+    }
+
+    func setAdvancedPrinterControlsEnabled(_ enabled: Bool) {
+        guard let activeServerID else {
+            advancedPrinterControlsEnabled = false
+            return
+        }
+
+        userDefaults.set(
+            enabled,
+            forKey: Self.advancedPrinterControlsPreferenceKey(for: activeServerID)
+        )
+        advancedPrinterControlsEnabled = enabled
     }
 
     func associateOriginServerId(_ originServerId: UUID, with serverID: UUID) throws {
@@ -395,6 +418,21 @@ final class ServerRegistry {
             self.activeServerID = servers.first?.id
             persist()
         }
+    }
+
+    private static func advancedPrinterControlsPreferenceKey(for serverID: UUID) -> String {
+        "\(advancedPrinterControlsPreferenceKeyPrefix).\(serverID.uuidString.lowercased())"
+    }
+
+    private func reloadAdvancedPrinterControlsPreference() {
+        guard let activeServerID else {
+            advancedPrinterControlsEnabled = false
+            return
+        }
+
+        advancedPrinterControlsEnabled = userDefaults.bool(
+            forKey: Self.advancedPrinterControlsPreferenceKey(for: activeServerID)
+        )
     }
 
     private func persist() {
