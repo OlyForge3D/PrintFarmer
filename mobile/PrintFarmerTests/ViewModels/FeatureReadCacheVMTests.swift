@@ -108,6 +108,168 @@ final class FeatureReadCacheVMTests: XCTestCase {
         XCTAssertEqual(payload.healthyPrinterCount, 9)
     }
 
+    // MARK: - Stale banner reportability (cold-launch flash regression)
+
+    /// Seeds a cached snapshot and returns a view model wired to `service`,
+    /// with the cache hydrated but no canonical refresh performed yet.
+    private func makeHydratedAttentionVM(
+        service: ScriptedAttentionService
+    ) async throws -> AttentionFeedViewModel {
+        let (store, _, session) = try makeStore()
+        let adapter = AttentionReadCacheAdapter(store: store)
+        let seed = await adapter.recordRefresh(
+            items: [makeAttentionItem(id: "failure:a", severity: .critical, title: "A")],
+            nextCursor: nil,
+            healthyPrinterCount: 1,
+            capturedSession: session
+        )
+        XCTAssertEqual(seed, .committed)
+
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: service,
+            signalRService: MockSignalRService(),
+            attentionEnabled: true
+        )
+        vm.configureCache(adapter)
+        await vm.hydrateFromCache()
+        return vm
+    }
+
+    /// THE REGRESSION: between a cold-launch cache hydrate and the first
+    /// canonical result, the feed is genuinely stale but we do not yet KNOW the
+    /// backend is unreachable. Reporting "offline" here flashed a red banner on
+    /// every healthy launch. The underlying `isShowingStaleCache` must keep its
+    /// value, because it still refuses offline load-more (#789 criterion 3).
+    func testStaleBannerIsNotReportableBeforeFirstCanonicalResult() async throws {
+        let vm = try await makeHydratedAttentionVM(
+            service: ScriptedAttentionService(steps: [])
+        )
+
+        XCTAssertTrue(vm.isShowingStaleCache, "hydrated cache is still unconfirmed-stale")
+        XCTAssertFalse(
+            vm.hasConcludedCanonicalRefresh,
+            "no canonical refresh has concluded yet"
+        )
+        XCTAssertFalse(
+            vm.isStaleCacheReportable,
+            "the stale banner must stay hidden while the first canonical refresh is undecided"
+        )
+    }
+
+    /// A healthy cold launch must never show the banner at all: the successful
+    /// refresh clears staleness, so there is no instant at which both inputs are
+    /// true.
+    func testStaleBannerNeverBecomesReportableOnHealthyLaunch() async throws {
+        let fresh = makeAttentionFeed(
+            items: [makeAttentionItem(id: "failure:c", title: "C")],
+            nextCursor: nil,
+            healthyPrinterCount: 3
+        )
+        let vm = try await makeHydratedAttentionVM(
+            service: ScriptedAttentionService(steps: [.value(fresh)])
+        )
+        XCTAssertFalse(vm.isStaleCacheReportable)
+
+        let ok = await vm.refresh()
+        XCTAssertTrue(ok)
+
+        XCTAssertFalse(vm.isShowingStaleCache, "a confirmed-live snapshot is not stale")
+        XCTAssertTrue(vm.hasConcludedCanonicalRefresh, "the refresh concluded")
+        XCTAssertFalse(
+            vm.isStaleCacheReportable,
+            "a healthy launch must never report the stale banner"
+        )
+    }
+
+    /// A genuinely unreachable backend must still surface the banner — the fix
+    /// suppresses the startup flash, not the honest offline signal.
+    func testStaleBannerBecomesReportableWhenFirstCanonicalRefreshFails() async throws {
+        let vm = try await makeHydratedAttentionVM(
+            service: ScriptedAttentionService(steps: [.failure(.network("offline"))])
+        )
+        XCTAssertFalse(vm.isStaleCacheReportable, "undecided before the attempt")
+
+        let ok = await vm.refresh()
+        XCTAssertFalse(ok, "the scripted failure must surface as a failed refresh")
+
+        XCTAssertTrue(vm.isShowingStaleCache, "cached data is still on screen and unconfirmed")
+        XCTAssertTrue(vm.hasConcludedCanonicalRefresh, "the attempt concluded, unsuccessfully")
+        XCTAssertTrue(
+            vm.isStaleCacheReportable,
+            "a confirmed-unreachable backend must still show the stale banner"
+        )
+    }
+
+    /// Hicks (round 1): stale-cache state is per-authority. A full teardown
+    /// discards the snapshot, so leaving `isShowingStaleCache` and the cached
+    /// timestamp latched let the NEXT authority's first failed refresh report
+    /// "offline, showing cached fleet" — carrying the PREVIOUS authority's
+    /// last-updated time — over a feed that was never hydrated from any cache.
+    func testStaleBannerDoesNotLeakAcrossAFullAuthorityTeardown() async throws {
+        // Authority A: hydrate real cached data, then fail the refresh so the
+        // banner is legitimately reportable.
+        let vmA = try await makeHydratedAttentionVM(
+            service: ScriptedAttentionService(steps: [.failure(.network("offline"))])
+        )
+        _ = await vmA.refresh()
+        XCTAssertTrue(vmA.isStaleCacheReportable, "A is genuinely offline with cache")
+        XCTAssertNotNil(vmA.cacheLastUpdatedAt)
+
+        // Switch to authority B: a different service identity forces the full
+        // teardown path (`invalidateAuthority(resetState: true)`).
+        let (storeB, _, _) = try makeStore()
+        vmA.configure(
+            attentionService: ScriptedAttentionService(steps: [.failure(.network("offline"))]),
+            signalRService: MockSignalRService(),
+            attentionEnabled: true
+        )
+        vmA.configureCache(AttentionReadCacheAdapter(store: storeB))
+
+        XCTAssertFalse(
+            vmA.isShowingStaleCache,
+            "teardown discarded the snapshot, so no cached feed is on screen"
+        )
+        XCTAssertNil(vmA.cacheLastUpdatedAt, "A's timestamp must not describe B")
+        XCTAssertFalse(vmA.isStaleCacheReportable)
+
+        // B has no cached data at all, so hydrate is a no-op.
+        await vmA.hydrateFromCache()
+        XCTAssertFalse(vmA.isShowingStaleCache, "B has nothing cached to hydrate")
+
+        // B's first canonical refresh fails. Without the reset this reported a
+        // cached-fleet banner for an authority that never had a cache.
+        _ = await vmA.refresh()
+        XCTAssertTrue(vmA.hasConcludedCanonicalRefresh, "B's attempt concluded")
+        XCTAssertFalse(
+            vmA.isStaleCacheReportable,
+            "B never hydrated a cache, so it must not claim to be showing one"
+        )
+        XCTAssertNil(vmA.cacheLastUpdatedAt)
+    }
+
+    /// Vasquez (round 1): a cancelled refresh (tab switch, view disappearing) is
+    /// not evidence the backend is unreachable. Concluding on it would flash the
+    /// very banner this change removes.
+    func testCancelledRefreshDoesNotConcludeAndDoesNotShowTheBanner() async throws {
+        let vm = try await makeHydratedAttentionVM(
+            service: ScriptedAttentionService(steps: [.cancelled])
+        )
+        XCTAssertFalse(vm.isStaleCacheReportable, "undecided before the attempt")
+
+        _ = await vm.refresh()
+
+        XCTAssertTrue(vm.isShowingStaleCache, "cached data is still on screen")
+        XCTAssertFalse(
+            vm.hasConcludedCanonicalRefresh,
+            "an abandoned refresh concluded nothing about reachability"
+        )
+        XCTAssertFalse(
+            vm.isStaleCacheReportable,
+            "a cancelled refresh must not flash the offline banner"
+        )
+    }
+
     // MARK: - Fleet coverage (criteria 4 + 8)
 
     func testFleetCoverageOfflineHydratePreservesUnknownThenReconnectReplaces() async throws {
@@ -183,5 +345,415 @@ final class FeatureReadCacheVMTests: XCTestCase {
             return XCTFail("expected fresh cached fleet after reconnect, got \(hydration)")
         }
         XCTAssertEqual(fleet.printers.map(\.printerId), [coversPrinterID])
+    }
+
+    // MARK: - Coverage stale-banner reportability (open-screen flash regression)
+
+    private func makeCoverage(
+        printerID: UUID,
+        name: String,
+        evaluatedAt: TimeInterval
+    ) -> PrinterFilamentCoverage {
+        PrinterFilamentCoverage(
+            printerId: printerID,
+            printerName: name,
+            status: .covers,
+            toolheads: [],
+            activeJobId: nil,
+            activeJobName: nil,
+            activeJobProgress: nil,
+            earliestPredictedRunoutAt: nil,
+            assignedQueuedJobCount: 0,
+            evaluatedAtUtc: Date(timeIntervalSince1970: evaluatedAt)
+        )
+    }
+
+    /// Seeds this printer's cached coverage and returns a view model with the
+    /// cache hydrated but no canonical load performed yet.
+    private func makeHydratedPrinterCoverageVM(
+        service: ControlledFilamentCoverageService,
+        printerID: UUID
+    ) async throws -> PrinterFilamentCoverageViewModel {
+        let (store, _, session) = try makeStore()
+        let adapter = FilamentCoverageReadCacheAdapter(store: store)
+        let seed = await adapter.recordPrinter(
+            makeCoverage(printerID: printerID, name: "Cached", evaluatedAt: 5_000),
+            capturedSession: session
+        )
+        XCTAssertEqual(seed, .committed)
+
+        let vm = PrinterFilamentCoverageViewModel(printerId: printerID)
+        vm.configure(coverageService: service)
+        vm.configureCache(adapter)
+        await vm.hydrateFromCache()
+        return vm
+    }
+
+    /// THE REGRESSION the user reported: opening a printer detail hydrates the
+    /// coverage cache, which set `isShowingStaleCache` before anything was known
+    /// about reachability. `PrinterDetailView` builds a fresh view model on every
+    /// navigation, so the red banner flashed on EVERY tap of the SAME printer.
+    func testPrinterCoverageStaleBannerIsNotReportableBeforeFirstCanonicalLoad() async throws {
+        let vm = try await makeHydratedPrinterCoverageVM(
+            service: ControlledFilamentCoverageService(),
+            printerID: UUID()
+        )
+
+        XCTAssertTrue(vm.isShowingStaleCache, "hydrated cache is still unconfirmed-stale")
+        XCTAssertFalse(vm.hasConcludedCanonicalLoad, "no canonical load has concluded yet")
+        XCTAssertFalse(
+            vm.isStaleCacheReportable,
+            "the stale banner must stay hidden while the first canonical load is undecided"
+        )
+    }
+
+    /// A healthy open must never show the banner at all: the successful load
+    /// clears staleness, so there is no instant at which both inputs are true.
+    func testPrinterCoverageStaleBannerNeverBecomesReportableOnHealthyOpen() async throws {
+        let printerID = UUID()
+        let service = ControlledFilamentCoverageService()
+        let vm = try await makeHydratedPrinterCoverageVM(service: service, printerID: printerID)
+        XCTAssertFalse(vm.isStaleCacheReportable)
+
+        async let load: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeSuccess(
+            index: 0,
+            printer: makeCoverage(printerID: printerID, name: "Fresh", evaluatedAt: 6_000)
+        )
+        _ = await load
+
+        XCTAssertFalse(vm.isShowingStaleCache, "a confirmed-live snapshot is not stale")
+        XCTAssertTrue(vm.hasConcludedCanonicalLoad, "the load concluded")
+        XCTAssertFalse(
+            vm.isStaleCacheReportable,
+            "a healthy open must never report the stale banner"
+        )
+    }
+
+    /// A genuinely unreachable backend must still surface the banner — the fix
+    /// suppresses the open-screen flash, not the honest offline signal.
+    func testPrinterCoverageStaleBannerBecomesReportableWhenFirstLoadFails() async throws {
+        let printerID = UUID()
+        let service = ControlledFilamentCoverageService()
+        let vm = try await makeHydratedPrinterCoverageVM(service: service, printerID: printerID)
+        XCTAssertFalse(vm.isStaleCacheReportable, "undecided before the attempt")
+
+        async let load: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeError(index: 0, error: NetworkError.transportError(URLError(.notConnectedToInternet)))
+        _ = await load
+
+        XCTAssertTrue(vm.isShowingStaleCache, "cached data is still on screen and unconfirmed")
+        XCTAssertTrue(vm.hasConcludedCanonicalLoad, "the attempt concluded, unsuccessfully")
+        XCTAssertTrue(
+            vm.isStaleCacheReportable,
+            "a confirmed-unreachable backend must still show the stale banner"
+        )
+    }
+
+    /// A CANCELLED load answers nothing, so it must not license the banner.
+    /// `PrinterDetailView.onDisappear` cancels in-flight work, and pull-to-refresh
+    /// is cancellable, so this path is reachable in normal use.
+    func testPrinterCoverageCancelledLoadDoesNotConcludeOrShowTheBanner() async throws {
+        let printerID = UUID()
+        let service = ControlledFilamentCoverageService()
+        let vm = try await makeHydratedPrinterCoverageVM(service: service, printerID: printerID)
+
+        async let load: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeError(index: 0, error: CancellationError())
+        _ = await load
+
+        XCTAssertFalse(
+            vm.hasConcludedCanonicalLoad,
+            "a cancelled load concluded nothing"
+        )
+        XCTAssertFalse(
+            vm.isStaleCacheReportable,
+            "a cancelled load must not flash the offline banner"
+        )
+    }
+
+    /// A conclusion is per-authority. Swapping the coverage service is a server
+    /// switch, so the new authority must not inherit the old one's conclusion and
+    /// flash its banner during the new undecided window.
+    ///
+    /// Equally, `configure` must NOT clear `isShowingStaleCache` or the cache
+    /// timestamp: those are provenance for `coverage`, which `configure`
+    /// deliberately retains. Clearing them would mark retained cached data as
+    /// confirmed-live, and since `hydrateFromCache` refuses to re-run once
+    /// `coverage` is non-nil, nothing would ever restore the flag -- the banner
+    /// would be suppressed permanently, even once the new authority failed.
+    func testPrinterCoverageStaleBannerIsRearmedButNotSuppressedAcrossAuthorityChange() async throws {
+        let printerID = UUID()
+        let serviceA = ControlledFilamentCoverageService()
+        let vm = try await makeHydratedPrinterCoverageVM(service: serviceA, printerID: printerID)
+        let hydratedMillis = vm.cacheLastUpdatedAtMillis
+        XCTAssertNotNil(hydratedMillis, "precondition: hydrated with a timestamp")
+
+        // Authority A concludes unsuccessfully: the banner is legitimately shown.
+        async let loadA: Void = vm.load()
+        await serviceA.awaitPending(count: 1)
+        await serviceA.completeError(index: 0, error: NetworkError.transportError(URLError(.timedOut)))
+        _ = await loadA
+        XCTAssertTrue(vm.isStaleCacheReportable, "A concluded unreachable, so the banner is honest")
+
+        // Switch to authority B.
+        let serviceB = ControlledFilamentCoverageService()
+        vm.configure(coverageService: serviceB)
+
+        XCTAssertFalse(vm.hasConcludedCanonicalLoad, "B has concluded nothing")
+        XCTAssertFalse(
+            vm.isStaleCacheReportable,
+            "B's undecided window must not inherit A's conclusion"
+        )
+        XCTAssertTrue(
+            vm.isShowingStaleCache,
+            "the retained payload is still unconfirmed; erasing its provenance "
+                + "would mark it confirmed-live and permanently suppress the banner"
+        )
+        XCTAssertEqual(
+            vm.cacheLastUpdatedAtMillis,
+            hydratedMillis,
+            "the timestamp describes the retained payload, which configure keeps"
+        )
+
+        // The banner is only deferred, never lost: B failing restores it.
+        async let loadB: Void = vm.load()
+        await serviceB.awaitPending(count: 1)
+        await serviceB.completeError(index: 0, error: NetworkError.transportError(URLError(.timedOut)))
+        _ = await loadB
+        XCTAssertTrue(
+            vm.isStaleCacheReportable,
+            "once B concludes unreachable the banner must return -- suppression "
+                + "across an authority switch must be temporary, not permanent"
+        )
+    }
+
+    // MARK: - Fleet coverage stale-banner reportability
+
+    private func makeHydratedFleetCoverageVM(
+        service: ControlledFilamentCoverageService
+    ) async throws -> FarmFilamentCoverageViewModel {
+        let (store, _, session) = try makeStore()
+        let adapter = FilamentCoverageReadCacheAdapter(store: store)
+        let cachedFleet = FleetFilamentCoverage(
+            printers: [makeCoverage(printerID: UUID(), name: "Cached", evaluatedAt: 5_000)],
+            evaluatedAtUtc: Date(timeIntervalSince1970: 5_000)
+        )
+        let seed = await adapter.recordFleet(cachedFleet, capturedSession: session)
+        XCTAssertEqual(seed, .committed)
+
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configure(coverageService: service)
+        vm.configureCache(adapter)
+        await vm.hydrateFromCache()
+        return vm
+    }
+
+    /// Same defect on the printer list. It flashed less often only because the
+    /// startup prefetch usually short-circuits hydration — not because the gate
+    /// was correct.
+    func testFleetCoverageStaleBannerIsNotReportableBeforeFirstCanonicalLoad() async throws {
+        let vm = try await makeHydratedFleetCoverageVM(service: ControlledFilamentCoverageService())
+
+        XCTAssertTrue(vm.isShowingStaleCache, "hydrated cache is still unconfirmed-stale")
+        XCTAssertFalse(vm.hasConcludedCanonicalLoad, "no canonical load has concluded yet")
+        XCTAssertFalse(
+            vm.isStaleCacheReportable,
+            "the stale banner must stay hidden while the first canonical load is undecided"
+        )
+    }
+
+    func testFleetCoverageStaleBannerBecomesReportableWhenFirstLoadFails() async throws {
+        let service = ControlledFilamentCoverageService()
+        let vm = try await makeHydratedFleetCoverageVM(service: service)
+        XCTAssertFalse(vm.isStaleCacheReportable, "undecided before the attempt")
+
+        async let load: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeError(index: 0, error: NetworkError.transportError(URLError(.notConnectedToInternet)))
+        _ = await load
+
+        XCTAssertTrue(vm.isShowingStaleCache, "cached fleet is still on screen and unconfirmed")
+        XCTAssertTrue(vm.hasConcludedCanonicalLoad, "the attempt concluded, unsuccessfully")
+        XCTAssertTrue(vm.isStaleCacheReportable, "a confirmed-unreachable backend still shows the banner")
+    }
+
+    func testFleetCoverageCancelledLoadDoesNotConcludeOrShowTheBanner() async throws {
+        let service = ControlledFilamentCoverageService()
+        let vm = try await makeHydratedFleetCoverageVM(service: service)
+
+        async let load: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeError(index: 0, error: CancellationError())
+        _ = await load
+
+        XCTAssertFalse(vm.hasConcludedCanonicalLoad, "a cancelled load concluded nothing")
+        XCTAssertFalse(vm.isStaleCacheReportable, "a cancelled load must not flash the offline banner")
+    }
+
+    /// Fleet mirror of
+    /// `testPrinterCoverageStaleBannerIsRearmedButNotSuppressedAcrossAuthorityChange`.
+    func testFleetCoverageStaleBannerIsRearmedButNotSuppressedAcrossAuthorityChange() async throws {
+        let serviceA = ControlledFilamentCoverageService()
+        let vm = try await makeHydratedFleetCoverageVM(service: serviceA)
+        let hydratedMillis = vm.cacheLastUpdatedAtMillis
+        XCTAssertNotNil(hydratedMillis, "precondition: hydrated with a timestamp")
+
+        async let loadA: Void = vm.load()
+        await serviceA.awaitPending(count: 1)
+        await serviceA.completeError(index: 0, error: NetworkError.transportError(URLError(.timedOut)))
+        _ = await loadA
+        XCTAssertTrue(vm.isStaleCacheReportable, "A concluded unreachable, so the banner is honest")
+
+        let serviceB = ControlledFilamentCoverageService()
+        vm.configure(coverageService: serviceB)
+
+        XCTAssertFalse(vm.hasConcludedCanonicalLoad, "B has concluded nothing")
+        XCTAssertFalse(vm.isStaleCacheReportable, "B's undecided window must not inherit A's conclusion")
+        XCTAssertTrue(
+            vm.isShowingStaleCache,
+            "the retained fleet payload is still unconfirmed; erasing its "
+                + "provenance would permanently suppress the banner"
+        )
+        XCTAssertEqual(vm.cacheLastUpdatedAtMillis, hydratedMillis)
+
+        async let loadB: Void = vm.load()
+        await serviceB.awaitPending(count: 1)
+        await serviceB.completeError(index: 0, error: NetworkError.transportError(URLError(.timedOut)))
+        _ = await loadB
+        XCTAssertTrue(
+            vm.isStaleCacheReportable,
+            "suppression across an authority switch must be temporary, not permanent"
+        )
+    }
+
+    // MARK: - Cancellation classification
+
+    /// The PRODUCTION cancellation shape, and the one behind the user-reported
+    /// bug. `PrinterDetailView`'s `.task(id:)` is auto-cancelled on disappear;
+    /// `URLSession` then throws `URLError(.cancelled)`, which `APIClient` wraps
+    /// as `NetworkError.transportError(URLError(.cancelled))`. That is caught by
+    /// the view model's `NetworkError` clause and lands in its `default` arm --
+    /// a DIFFERENT arm from the one a raw `CancellationError` reaches. Without
+    /// this test, reverting the guard in that arm leaves the whole suite green
+    /// while reintroducing the flash on every navigate-away.
+    func testPrinterCoverageWrappedCancellationDoesNotConclude() async throws {
+        let printerID = UUID()
+        let service = ControlledFilamentCoverageService()
+        let vm = try await makeHydratedPrinterCoverageVM(service: service, printerID: printerID)
+
+        async let load: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeError(
+            index: 0,
+            error: NetworkError.transportError(URLError(.cancelled))
+        )
+        _ = await load
+
+        XCTAssertFalse(
+            vm.hasConcludedCanonicalLoad,
+            "a cancelled request answered nothing, however it was wrapped"
+        )
+        XCTAssertFalse(vm.isStaleCacheReportable, "navigating away must not flash the banner")
+    }
+
+    func testFleetCoverageWrappedCancellationDoesNotConclude() async throws {
+        let service = ControlledFilamentCoverageService()
+        let vm = try await makeHydratedFleetCoverageVM(service: service)
+
+        async let load: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeError(
+            index: 0,
+            error: NetworkError.transportError(URLError(.cancelled))
+        )
+        _ = await load
+
+        XCTAssertFalse(
+            vm.hasConcludedCanonicalLoad,
+            "a cancelled request answered nothing, however it was wrapped"
+        )
+        XCTAssertFalse(vm.isStaleCacheReportable)
+    }
+
+    /// Direct coverage of the shared helper. The dangerous direction is a FALSE
+    /// POSITIVE: misclassifying a real failure as a cancellation would suppress
+    /// the offline banner permanently, leaving the user acting on stale data.
+    func testIsCancellationErrorClassifiesEveryShape() {
+        XCTAssertTrue(isCancellationError(CancellationError()))
+        XCTAssertTrue(isCancellationError(URLError(.cancelled)))
+        XCTAssertTrue(isCancellationError(NetworkError.transportError(URLError(.cancelled))))
+
+        // Real failures must never be mistaken for cancellation.
+        XCTAssertFalse(isCancellationError(URLError(.timedOut)))
+        XCTAssertFalse(isCancellationError(URLError(.notConnectedToInternet)))
+        XCTAssertFalse(isCancellationError(URLError(.networkConnectionLost)))
+        XCTAssertFalse(isCancellationError(NetworkError.transportError(URLError(.timedOut))))
+        XCTAssertFalse(isCancellationError(NetworkError.noConnection))
+        XCTAssertFalse(isCancellationError(NetworkError.timeout))
+        XCTAssertFalse(isCancellationError(NetworkError.serverUnreachable))
+    }
+
+    // MARK: - @Observable wiring
+
+    /// Guards the trap that made `ConnectionMonitor.isReportable` inert in #2400:
+    /// if `hasConcludedCanonicalLoad` were `@ObservationIgnored`, SwiftUI would
+    /// never re-evaluate `isStaleCacheReportable`, and the banner would never
+    /// appear even when the backend really is unreachable. The failing load
+    /// leaves `isShowingStaleCache` untouched, so an invalidation can only have
+    /// come from the conclusion flag.
+    func testPrinterCoverageReportabilityIsObservable() async throws {
+        let printerID = UUID()
+        let service = ControlledFilamentCoverageService()
+        let vm = try await makeHydratedPrinterCoverageVM(service: service, printerID: printerID)
+        XCTAssertTrue(vm.isShowingStaleCache, "precondition: stale is already true")
+
+        let invalidated = expectation(description: "observation fired")
+        withObservationTracking {
+            _ = vm.isStaleCacheReportable
+        } onChange: {
+            invalidated.fulfill()
+        }
+
+        async let load: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeError(index: 0, error: NetworkError.transportError(URLError(.timedOut)))
+        _ = await load
+
+        await fulfillment(of: [invalidated], timeout: 2)
+        XCTAssertTrue(
+            vm.isShowingStaleCache,
+            "guards the premise: staleness must NOT change, or the invalidation "
+                + "could have come from `isShowingStaleCache` alone"
+        )
+        XCTAssertTrue(vm.isStaleCacheReportable)
+    }
+
+    func testFleetCoverageReportabilityIsObservable() async throws {
+        let service = ControlledFilamentCoverageService()
+        let vm = try await makeHydratedFleetCoverageVM(service: service)
+        XCTAssertTrue(vm.isShowingStaleCache, "precondition: stale is already true")
+
+        let invalidated = expectation(description: "observation fired")
+        withObservationTracking {
+            _ = vm.isStaleCacheReportable
+        } onChange: {
+            invalidated.fulfill()
+        }
+
+        async let load: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeError(index: 0, error: NetworkError.transportError(URLError(.timedOut)))
+        _ = await load
+
+        await fulfillment(of: [invalidated], timeout: 2)
+        XCTAssertTrue(
+            vm.isShowingStaleCache,
+            "guards the premise: staleness must NOT change across the conclusion"
+        )
+        XCTAssertTrue(vm.isStaleCacheReportable)
     }
 }

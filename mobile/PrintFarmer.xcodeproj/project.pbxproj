@@ -258,6 +258,7 @@
 		CF11AA0000000000000C0001 /* ConnectionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0002 /* ConnectionMonitor.swift */; };
 		CF11AA0000000000000D0001 /* NetworkPathObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000D0002 /* NetworkPathObserver.swift */; };
 		CF11AA0000000000000C0003 /* ConnectionStatusBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0004 /* ConnectionStatusBar.swift */; };
+		CF11AA0000000000000E0001 /* LaunchSplashView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000E0002 /* LaunchSplashView.swift */; };
 		CF11AA0000000000000C0005 /* ConnectionMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */; };
 		D23130000000000000000001 /* BackendReadinessDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D23130000000000000000002 /* BackendReadinessDiagnostics.swift */; };
 		D23130000000000000000003 /* BackendReadinessDiagnosticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D23130000000000000000004 /* BackendReadinessDiagnosticsTests.swift */; };
@@ -780,6 +781,7 @@
 		CF11AA0000000000000C0002 /* ConnectionMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMonitor.swift; sourceTree = "<group>"; };
 		CF11AA0000000000000D0002 /* NetworkPathObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPathObserver.swift; sourceTree = "<group>"; };
 		CF11AA0000000000000C0004 /* ConnectionStatusBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStatusBar.swift; sourceTree = "<group>"; };
+		CF11AA0000000000000E0002 /* LaunchSplashView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchSplashView.swift; sourceTree = "<group>"; };
 		CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMonitorTests.swift; sourceTree = "<group>"; };
 		D23130000000000000000002 /* BackendReadinessDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendReadinessDiagnostics.swift; sourceTree = "<group>"; };
 		D23130000000000000000004 /* BackendReadinessDiagnosticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendReadinessDiagnosticsTests.swift; sourceTree = "<group>"; };
@@ -1417,6 +1419,7 @@
 			children = (
 				94B82574E19FCFCF60B9C152 /* DemoModeBanner.swift */,
 				CF11AA0000000000000C0004 /* ConnectionStatusBar.swift */,
+				CF11AA0000000000000E0002 /* LaunchSplashView.swift */,
 				534568DC689B743CE69E44A4 /* EmptyStateView.swift */,
 				46DEBCDF7D99C0F2AEFB6AEC /* ActionButtonStyle.swift */,
 				93B8E20F526E7CE3E92BE781 /* JobCardView.swift */,
@@ -1882,6 +1885,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CF11AA0000000000000E0001 /* LaunchSplashView.swift in Sources */,
 				1667A0000000000000000101 /* NetworkHostClassifier.swift in Sources */,
 				1667A0000000000000000102 /* CertificatePinStore.swift in Sources */,
 				1667A0000000000000000103 /* CertificateTrustCoordinator.swift in Sources */,

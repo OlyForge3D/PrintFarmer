@@ -664,7 +664,160 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
         XCTAssertFalse(viewModel.hasNoCachedData)
     }
 
+    // MARK: Stale-banner reportability (cold-launch flash regression)
+
+    /// THE REGRESSION: hydrating the cache sets `farmSource = .cached` before any
+    /// canonical pass has concluded, so the cold-offline shell asserted "offline"
+    /// during a window in which nothing was known about reachability. The shell
+    /// itself must still render immediately (#817) — only the claim waits.
+    func testStaleBannerIsNotReportableBeforeFirstCanonicalPass() async throws {
+        let printer = try TestData.decodePrinter()
+        store.hydration = .snapshot(cachedEnvelope(printers: [printer], millis: 1_699_999_000_000))
+
+        await viewModel.hydrateFromCache()
+
+        XCTAssertTrue(viewModel.isStale, "hydrated cache is still unconfirmed")
+        XCTAssertTrue(viewModel.isReadOnly, "mutations stay denied while unconfirmed")
+        XCTAssertFalse(viewModel.hasConcludedCanonicalLoad, "no canonical pass has concluded")
+        XCTAssertFalse(
+            viewModel.isStaleBannerReportable,
+            "the offline banner must stay hidden while the first canonical pass is undecided"
+        )
+    }
+
+    /// A healthy launch must never show the banner: the successful pass clears
+    /// staleness, so there is no instant at which both inputs are true.
+    func testStaleBannerNeverBecomesReportableOnHealthyLaunch() async throws {
+        let cached = try TestData.decodePrinter()
+        store.hydration = .snapshot(cachedEnvelope(printers: [cached], millis: 1_699_000_000_000))
+        await viewModel.hydrateFromCache()
+        XCTAssertFalse(viewModel.isStaleBannerReportable)
+
+        mockPrinterService.printersToReturn = [try TestData.decodePrinter()]
+        await viewModel.loadDashboard()
+
+        XCTAssertFalse(viewModel.isStale, "a confirmed-live fleet is not stale")
+        XCTAssertTrue(viewModel.hasConcludedCanonicalLoad, "the pass concluded")
+        XCTAssertFalse(
+            viewModel.isStaleBannerReportable,
+            "a healthy launch must never report the offline banner"
+        )
+    }
+
+    /// A genuinely unreachable backend must still surface the banner — the fix
+    /// suppresses the startup flash, not the honest offline signal.
+    func testStaleBannerBecomesReportableWhenFirstCanonicalPassFails() async throws {
+        let cached = try TestData.decodePrinter()
+        store.hydration = .snapshot(cachedEnvelope(printers: [cached], millis: 1_699_000_000_000))
+        await viewModel.hydrateFromCache()
+        XCTAssertFalse(viewModel.isStaleBannerReportable, "undecided before the attempt")
+
+        mockPrinterService.listHandler = { _ in
+            throw NetworkError.transportError(URLError(.notConnectedToInternet))
+        }
+        await viewModel.loadDashboard()
+
+        XCTAssertTrue(viewModel.isStale, "cached fleet is still on screen and unconfirmed")
+        XCTAssertTrue(viewModel.hasConcludedCanonicalLoad, "the attempt concluded, unsuccessfully")
+        XCTAssertTrue(
+            viewModel.isStaleBannerReportable,
+            "a confirmed-unreachable backend must still show the offline banner"
+        )
+    }
+
+    /// The "No Cached Fleet / Reconnect" dead-end is an equally strong claim: it
+    /// tells the user the fleet is unreachable. Before a canonical pass concludes
+    /// we only know nothing was cached, so the undecided window must not show it.
+    func testAbsentFleetDeadEndIsNotReportableBeforeFirstCanonicalPass() async {
+        store.hydration = .absent
+
+        await viewModel.hydrateFromCache()
+
+        XCTAssertTrue(viewModel.hasNoCachedData, "the underlying absent state is unchanged")
+        XCTAssertFalse(viewModel.hasConcludedCanonicalLoad)
+        XCTAssertFalse(
+            viewModel.isAbsentFleetReportable,
+            "the reconnect dead-end must wait for a concluded canonical pass"
+        )
+    }
+
+    func testAbsentFleetDeadEndBecomesReportableAfterAFailedCanonicalPass() async {
+        store.hydration = .absent
+        await viewModel.hydrateFromCache()
+        XCTAssertFalse(viewModel.isAbsentFleetReportable)
+
+        mockPrinterService.listHandler = { _ in
+            throw NetworkError.transportError(URLError(.notConnectedToInternet))
+        }
+        await viewModel.loadDashboard()
+
+        XCTAssertTrue(viewModel.hasNoCachedData)
+        XCTAssertTrue(viewModel.hasConcludedCanonicalLoad)
+        XCTAssertTrue(
+            viewModel.isAbsentFleetReportable,
+            "once the pass concluded unreachable, the dead-end is honest"
+        )
+    }
+
     // MARK: Commit / stale clearing
+
+    /// Mirrors the coverage view models' wrapped-cancellation tests. Without
+    /// this, reverting the `isCancellationError` guard in
+    /// `loadCanonicalSnapshot`'s terminal catch passes CI: the existing
+    /// cancellation tests only exercise the `Task.isCancelled` branch, which
+    /// short-circuits first, so the guard behind it is never reached.
+    func testDashboardWrappedCancellationDoesNotConclude() async throws {
+        let cached = try TestData.decodePrinter()
+        store.hydration = .snapshot(cachedEnvelope(printers: [cached], millis: 1_699_000_000_000))
+        await viewModel.hydrateFromCache()
+        XCTAssertTrue(viewModel.isStale, "precondition: showing unconfirmed cached data")
+
+        mockPrinterService.listHandler = { _ in
+            throw NetworkError.transportError(URLError(.cancelled))
+        }
+        await viewModel.loadDashboard()
+
+        XCTAssertTrue(viewModel.isStale, "still unconfirmed: nothing was answered")
+        XCTAssertFalse(
+            viewModel.hasConcludedCanonicalLoad,
+            "a cancelled pass concludes nothing, however the cancellation was wrapped"
+        )
+        XCTAssertFalse(
+            viewModel.isStaleBannerReportable,
+            "a cancelled pass must not flash the offline banner"
+        )
+    }
+
+    /// Guards the #2400 `@Observable` trap: if `hasConcludedCanonicalLoad` were
+    /// `@ObservationIgnored`, SwiftUI would never re-evaluate
+    /// `isStaleBannerReportable` and the banner could never appear. The failing
+    /// pass leaves `isStale` untouched, so the invalidation can only have come
+    /// from the conclusion flag.
+    func testStaleBannerReportabilityIsObservable() async throws {
+        let cached = try TestData.decodePrinter()
+        store.hydration = .snapshot(cachedEnvelope(printers: [cached], millis: 1_699_000_000_000))
+        await viewModel.hydrateFromCache()
+        XCTAssertTrue(viewModel.isStale, "precondition: stale is already true")
+
+        let invalidated = expectation(description: "observation fired")
+        withObservationTracking {
+            _ = viewModel.isStaleBannerReportable
+        } onChange: {
+            invalidated.fulfill()
+        }
+
+        mockPrinterService.listHandler = { _ in
+            throw NetworkError.transportError(URLError(.timedOut))
+        }
+        await viewModel.loadDashboard()
+
+        await fulfillment(of: [invalidated], timeout: 2)
+        XCTAssertTrue(
+            viewModel.isStale,
+            "guards the premise: staleness must NOT change across the conclusion"
+        )
+        XCTAssertTrue(viewModel.isStaleBannerReportable)
+    }
 
     func testSuccessfulLoadCommitsSnapshotAndClearsStale() async throws {
         // Start stale from cache.

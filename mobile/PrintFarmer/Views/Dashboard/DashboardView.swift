@@ -20,7 +20,7 @@ struct DashboardView: View {
                     // snapshot as a read-only farm shell. No mutation or command
                     // affordances are mounted while stale.
                     coldOfflineShell
-                } else if viewModel.hasNoCachedData {
+                } else if viewModel.isAbsentFleetReportable {
                     // Authoritative session but a snapshot was never written while
                     // online — distinct from a present-but-empty fleet.
                     absentFleetState
@@ -913,11 +913,16 @@ struct DashboardView: View {
     /// parity), but mounts NO mutation or command affordances.
     private var coldOfflineShell: some View {
         VStack(spacing: 0) {
-            ConnectionStatusBar(
-                status: .offline,
-                lastConfirmedAt: viewModel.lastUpdatedAt,
-                hasCache: true
-            )
+            // Only claim "offline" once a canonical pass has actually concluded.
+            // The cached fleet below still renders immediately (#817); what waits
+            // is the assertion that it could not be confirmed.
+            if viewModel.isStaleBannerReportable {
+                ConnectionStatusBar(
+                    status: .offline,
+                    lastConfirmedAt: viewModel.lastUpdatedAt,
+                    hasCache: true
+                )
+            }
             Group {
                 if viewModel.printers.isEmpty {
                     // Present-but-empty cached snapshot: the last confirmed fleet had

@@ -28,6 +28,41 @@ final class ConnectionMonitor {
     /// by the first success. Exposed for tests and diagnostics.
     private(set) var consecutiveReachabilityFailures = 0
 
+    /// True once this monitoring session has observed a fully-established hub.
+    ///
+    /// Until that happens the app is still *starting*, not *degraded* — see
+    /// ``isWithinStartupGrace``. Exposed for tests and diagnostics.
+    private(set) var hasSettledSinceStart = false
+
+    /// Whether the current state is worth showing the user at all.
+    ///
+    /// `.connecting` is the "still working on it" baseline the monitor holds
+    /// during startup and brief hub handshakes. Surfacing a banner for it made
+    /// the global bar flash on every cold launch for a condition that resolves
+    /// itself a second later, so the bar stays hidden *for the launch window
+    /// only*. A `.connecting` that outlives the grace — a hub handshake that
+    /// stalls against a black-holed port, say — is a real problem the operator
+    /// needs to see, so it reports normally (as the neutral grey bar).
+    ///
+    /// Reads the *observed* ``isInStartupGrace`` rather than computing
+    /// ``isWithinStartupGrace`` directly. That is load-bearing, not incidental:
+    /// the latter derives from `@ObservationIgnored` state, so its true→false
+    /// transition is invisible to SwiftUI. Without an observed mirror, a hub
+    /// that stalls while the server stays reachable holds every observed
+    /// property constant, `@Observable` suppresses the equal re-assignments,
+    /// and the bar stays hidden forever — precisely the case this property
+    /// exists to surface.
+    var isReportable: Bool { status != .connecting || !isInStartupGrace }
+
+    /// Observed mirror of ``isWithinStartupGrace``, republished on every poll.
+    ///
+    /// `@Observable` only notifies when an assignment actually changes the
+    /// value (verified empirically — it holds even for non-`Equatable` types),
+    /// so something the view reads must *change* when the grace lapses. This
+    /// flips true→false on the first poll after expiry, which bounds the delay
+    /// before the bar appears at one ``pollInterval``.
+    private(set) var isInStartupGrace = false
+
     @ObservationIgnored private var apiClient: APIClient?
     @ObservationIgnored private var signalRService: (any SignalRServiceProtocol)?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
@@ -55,8 +90,20 @@ final class ConnectionMonitor {
     /// or ahead of — a newer healthy sample and paint the banner red. Only
     /// the newest *issued* sample is allowed to publish.
     @ObservationIgnored private var sampleTicket: UInt64 = 0
+
     /// Ticket of the most recently *published* sample.
     @ObservationIgnored private var appliedTicket: UInt64 = 0
+
+    /// Number of samples that have been fully applied to published state.
+    ///
+    /// A test seam. ``start()`` spawns a poll task whose first act is
+    /// ``refresh()``; an explicit `refresh()` racing it is silently dropped by
+    /// the ticket guard above, leaving assertions looking at the `.connecting`
+    /// baseline from ``resetState()``. Because that baseline is also what
+    /// several tests assert, a sleep-based wait could pass *vacuously*. Awaiting
+    /// a monotonic count of completed samples makes "the initial poll landed" an
+    /// observed fact instead of a timing assumption.
+    @ObservationIgnored private(set) var completedSampleCount: UInt64 = 0
 
     /// Interval between connectivity samples.
     @ObservationIgnored var pollInterval: Duration = .seconds(5)
@@ -79,6 +126,30 @@ final class ConnectionMonitor {
     /// Each trigger cancels the pending resume and starts a new one, so a burst
     /// collapses into a single probe instead of hammering `ensureConnected()`.
     @ObservationIgnored var pathChangeDebounce: Duration = .milliseconds(400)
+
+    /// How long after ``start()`` the monitor treats a not-yet-established
+    /// connection as "still connecting" rather than "degraded"/"offline".
+    ///
+    /// A cold launch starts the poll loop *before* the SignalR handshake has
+    /// completed, so the very first sample always sees `.disconnected` and used
+    /// to publish `.degraded` — painting the alarming global banner for two to
+    /// three seconds on every single launch before quietly going green. That is
+    /// a startup race, not a fault, so it must not be reported as one. The grace
+    /// ends early the moment the hub actually connects, so a genuine outage is
+    /// still surfaced promptly once the window closes.
+    @ObservationIgnored var startupGrace: Duration = .seconds(8)
+
+    /// When the current monitoring session began. `nil` while stopped.
+    @ObservationIgnored private var startedAt: ContinuousClock.Instant?
+    @ObservationIgnored private let clock = ContinuousClock()
+
+    /// True while the app is still in its initial connect window and has not yet
+    /// confirmed a healthy hub. Once the hub connects once, or the grace window
+    /// expires, this is permanently false for the session.
+    private var isWithinStartupGrace: Bool {
+        guard !hasSettledSinceStart, let startedAt else { return false }
+        return clock.now - startedAt < startupGrace
+    }
 
     /// - Parameter pathObserver: Injected in tests. Production passes `nil`,
     ///   which makes ``start()`` create a real ``NWPathMonitorObserver``.
@@ -111,10 +182,43 @@ final class ConnectionMonitor {
         consecutiveFailures: Int,
         threshold: Int
     ) -> ConnectionStatus {
+        resolve(
+            isServerReachable: isServerReachable,
+            signalR: signalR,
+            consecutiveFailures: consecutiveFailures,
+            threshold: threshold,
+            isWithinStartupGrace: false
+        )
+    }
+
+    /// Hysteresis- and startup-aware resolution.
+    ///
+    /// `isWithinStartupGrace` folds only `.degraded` into `.connecting`. During
+    /// a cold launch the poll loop samples before the hub handshake finishes,
+    /// and reporting that as `.degraded` flashed an alarming banner for a
+    /// condition that simply had not finished starting. A confirmed `.offline`
+    /// always escalates, grace or not — masking a real outage would leave the
+    /// operator with no indicator at all. Outside the grace window behaviour is
+    /// unchanged.
+    static func resolve(
+        isServerReachable: Bool,
+        signalR: SignalRConnectionState,
+        consecutiveFailures: Int,
+        threshold: Int,
+        isWithinStartupGrace: Bool
+    ) -> ConnectionStatus {
         if !isServerReachable && consecutiveFailures < max(threshold, 1) {
-            return .degraded
+            return isWithinStartupGrace ? .connecting : .degraded
         }
-        return resolve(isServerReachable: isServerReachable, signalR: signalR)
+        let resolved = resolve(isServerReachable: isServerReachable, signalR: signalR)
+        // Only `.degraded` represents "has not finished starting". A confirmed
+        // `.offline` (failures at/past threshold) is a real outage and must
+        // escalate even during the grace window — masking it would leave the
+        // operator with no indicator at all while the farm is unreachable.
+        if isWithinStartupGrace && resolved == .degraded {
+            return .connecting
+        }
+        return resolved
     }
 
     /// Points the monitor at the currently-active services. Safe to call again
@@ -134,6 +238,12 @@ final class ConnectionMonitor {
         // Reset to a neutral state so a restart (e.g. a server switch) never
         // surfaces the previous server's status while the first probe is in flight.
         resetState()
+        startedAt = clock.now
+        // Arm the observed mirror synchronously. `resetState()` cleared it, and
+        // the first poll has not landed yet, so leaving it false here would let
+        // the banner flash for the whole first interval — the very defect the
+        // grace exists to prevent.
+        isInStartupGrace = true
         startPathObserver()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -157,6 +267,14 @@ final class ConnectionMonitor {
         // Clear the displayed state immediately so a stopped monitor (e.g. during
         // a server switch) never keeps showing the previous server's status while
         // the next connect attempt is still in flight.
+        //
+        // Note this leaves `status == .connecting` with the grace disarmed, so
+        // ``isReportable`` reads `true` for a stopped monitor. That is safe only
+        // because every caller of `stop()` (logout, server-generation change) also
+        // leaves `RootView` outside `isShowingMainContent`, which gates the bar
+        // independently. Preserve that pairing: a refactor that shows main content
+        // over a stopped monitor would surface a grey "Connecting…" bar for a
+        // session that has already been torn down.
         resetState()
     }
 
@@ -166,10 +284,19 @@ final class ConnectionMonitor {
     private func resetState() {
         sampleTicket &+= 1
         appliedTicket = sampleTicket
+        // Scoped per session, so `drainInitialPoll()` waits for *this*
+        // session's first sample rather than being satisfied by the previous
+        // one after a stop()/start() restart.
+        completedSampleCount = 0
         status = .connecting
         signalRState = .disconnected
         isServerReachable = false
         consecutiveReachabilityFailures = 0
+        hasSettledSinceStart = false
+        startedAt = nil
+        // Kept consistent with `startedAt`: a stopped monitor is not in a
+        // startup window. ``start()`` re-arms it immediately afterwards.
+        isInStartupGrace = false
     }
 
     /// Performs a single connectivity sample and updates ``status``.
@@ -193,14 +320,28 @@ final class ConnectionMonitor {
         } else {
             consecutiveReachabilityFailures += 1
         }
+        // A fully-established connection ends the startup grace immediately, so
+        // any later drop escalates on the normal (unforgiving) schedule instead
+        // of being softened by a window that belongs to launch.
+        if reachable && signalR == .connected {
+            hasSettledSinceStart = true
+        }
         isServerReachable = reachable
         signalRState = signalR
+        let withinGrace = isWithinStartupGrace
+        // Republish the grace as observed state so its expiry is visible to
+        // SwiftUI; see ``isInStartupGrace``.
+        isInStartupGrace = withinGrace
         status = Self.resolve(
             isServerReachable: reachable,
             signalR: signalR,
             consecutiveFailures: consecutiveReachabilityFailures,
-            threshold: offlineFailureThreshold
+            threshold: offlineFailureThreshold,
+            isWithinStartupGrace: withinGrace
         )
+        // Bumped last, past every early return, so awaiting it in a test proves
+        // the sample was fully applied rather than merely started.
+        completedSampleCount &+= 1
     }
 
     // MARK: - Network path observation

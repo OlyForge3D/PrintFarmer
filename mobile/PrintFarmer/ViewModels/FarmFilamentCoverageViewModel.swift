@@ -94,6 +94,24 @@ final class FarmFilamentCoverageViewModel {
     /// True exactly while the on-screen fleet is UNCONFIRMED cached data (offline
     /// hydrate not yet replaced by a canonical response). Drives the stale banner.
     private(set) var isShowingStaleCache: Bool = false
+    /// True once a canonical load has CONCLUDED at least once under the current
+    /// coverage authority — success, `featureDisabled`, or error. Starts false,
+    /// so the interval between a cache hydrate and the first canonical result is
+    /// *undecided* rather than "offline".
+    ///
+    /// This must be observed (never `@ObservationIgnored`): `isStaleCacheReportable`
+    /// is read by SwiftUI, and a derived property whose only changing input is
+    /// untracked state is never re-evaluated, so the banner would never appear.
+    /// The same trap made `ConnectionMonitor.isReportable` inert (PR #2400).
+    private(set) var hasConcludedCanonicalLoad: Bool = false
+    /// Drives the shared stale banner on the printer list. `isShowingStaleCache`
+    /// alone is true from the instant `hydrateFromCache()` lands, which claims
+    /// "offline" before anything is known about reachability. The startup
+    /// prefetch usually short-circuits hydration, which is why this surface
+    /// flashed less often than the printer detail — not because it was correct.
+    var isStaleCacheReportable: Bool {
+        isShowingStaleCache && hasConcludedCanonicalLoad
+    }
     /// Epoch-millis of the cached fleet's originating canonical completion.
     private(set) var cacheLastUpdatedAtMillis: Int64?
     /// The cached fleet's last-updated instant, for the shared stale banner.
@@ -114,6 +132,28 @@ final class FarmFilamentCoverageViewModel {
     func configure(coverageService: any FilamentCoverageServiceProtocol) {
         self.coverageService = coverageService
         coverageAuthorityEpoch &+= 1
+        // The new authority has concluded nothing yet, so the next undecided
+        // window must not inherit the previous authority's conclusion and flash
+        // its banner. Reset ONLY the conclusion flag.
+        //
+        // `isShowingStaleCache` and `cacheLastUpdatedAtMillis` are provenance FOR
+        // `coverageByPrinter`, which `configure` deliberately does not clear, and
+        // they must stay coupled to it. Clearing them here would leave retained
+        // cached data marked as confirmed-live -- and because `hydrateFromCache`
+        // refuses to re-run once `coverageByPrinter` is non-empty (line 170),
+        // nothing would ever restore the flag, permanently suppressing the banner
+        // even when the next load fails. Authority changes that DO clear the
+        // payload (`disableForCapabilityGate`) call `resetReadCacheState()`.
+        hasConcludedCanonicalLoad = false
+    }
+
+    /// Clear all read-cache provenance. Only valid where the cached payload it
+    /// describes is cleared in the same breath, or provenance desynchronises
+    /// from the data on screen.
+    private func resetReadCacheState() {
+        isShowingStaleCache = false
+        hasConcludedCanonicalLoad = false
+        cacheLastUpdatedAtMillis = nil
     }
 
     func disableForCapabilityGate() {
@@ -123,8 +163,7 @@ final class FarmFilamentCoverageViewModel {
         coverageByPrinter = [:]
         isFeatureDisabled = true
         lastLoadError = nil
-        isShowingStaleCache = false
-        cacheLastUpdatedAtMillis = nil
+        resetReadCacheState()
     }
 
     /// Wire the #789 fleet read-cache. Additive: when never called the view model
@@ -227,6 +266,7 @@ final class FarmFilamentCoverageViewModel {
                 requestGeneration &+= 1
                 commitSuccess(fleet: entry.value, generation: requestGeneration)
                 isShowingStaleCache = false
+                hasConcludedCanonicalLoad = true
                 cacheLastUpdatedAtMillis = entry.lastUpdatedAtMillis
                 prefetched = entry
             }
@@ -335,6 +375,7 @@ final class FarmFilamentCoverageViewModel {
             // cache state (criterion 6).
             if lastCommittedGeneration == myGen {
                 isShowingStaleCache = false
+                hasConcludedCanonicalLoad = true
                 if let cache = coverageCache, let session = capturedCacheSession {
                     _ = await cache.recordFleet(fleet, capturedSession: session)
                 }
@@ -346,16 +387,26 @@ final class FarmFilamentCoverageViewModel {
                 commitFeatureDisabled(generation: myGen)
                 if lastCommittedGeneration == myGen {
                     isShowingStaleCache = false
+                    hasConcludedCanonicalLoad = true
                     if let cache = coverageCache, let session = capturedCacheSession {
                         _ = await cache.recordFleetDisabled(capturedSession: session)
                     }
                 }
             default:
                 commitError(error, generation: myGen)
+                // The load genuinely failed, so the cached fleet really is
+                // unconfirmed: this is the one path that should raise the
+                // banner. Cancellation is excluded — it answers nothing.
+                if lastCommittedGeneration == myGen, !isCancellationError(error) {
+                    hasConcludedCanonicalLoad = true
+                }
             }
         } catch {
             guard cvEpoch == coverageAuthorityEpoch else { return }
             commitError(error, generation: myGen)
+            if lastCommittedGeneration == myGen, !isCancellationError(error) {
+                hasConcludedCanonicalLoad = true
+            }
         }
     }
 
