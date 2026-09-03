@@ -15,6 +15,7 @@
  */
 
 import { parseDetailedLayersCore, detailedParseBuffersTransferList } from './gcodeParserCore';
+import { resolveTrustedGcodeArtifactUrl } from './gcode-artifact-url';
 
 export interface GCodeWorkerRequest {
   requestId: number;
@@ -44,7 +45,8 @@ self.onmessage = async (event: MessageEvent<GCodeWorkerRequest>) => {
   const { requestId, gcodeUrl, requestHeaders } = event.data;
 
   try {
-    const res = await fetch(gcodeUrl, { headers: requestHeaders });
+    const trustedGcodeUrl = resolveTrustedGcodeArtifactUrl(gcodeUrl);
+    const res = await fetch(trustedGcodeUrl, { headers: requestHeaders });
     if (!res.ok) throw new Error(`Failed to load G-code: ${res.status}`);
     const gcodeText = await res.text();
 
