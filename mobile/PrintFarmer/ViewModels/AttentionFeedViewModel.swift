@@ -1896,7 +1896,17 @@ final class AttentionFeedViewModel {
         // the cached feed, so the stale banner is now honest rather than a
         // startup flash. Network timeouts land here too, so a hung refresh
         // still resolves into a visible banner rather than silence.
-        hasConcludedCanonicalRefresh = true
+        //
+        // Vasquez (round 1): a CANCELLED refresh is not evidence the backend is
+        // unreachable — it was merely abandoned (tab switch, view disappearing).
+        // SwiftUI does not guarantee `.task` cancellation is delivered after
+        // `onDisappear -> deactivate()` bumps the activation epoch, so a
+        // cancellation can still pass `matchesActive` and reach here. Latching
+        // "concluded" on it would flash exactly the banner this change removes.
+        // Every other error path in this type already makes this distinction.
+        if !Self.isCancellation(error) {
+            hasConcludedCanonicalRefresh = true
+        }
         isRefreshing = false
         if snapshot == nil {
             phase = .error
@@ -1917,6 +1927,14 @@ final class AttentionFeedViewModel {
         paginationFailure = nil
         isRefreshing = false
         isLoadingMore = false
+        // Bishop (round 1): a live refresh has confirmed the feature is off and
+        // we just discarded the snapshot, so there is no cached feed on screen.
+        // Deliberately makes the invariant explicit rather than relying on
+        // `hasConcludedCanonicalRefresh` staying unset on this path: without it,
+        // any future change that concludes the disabled path would render an
+        // "offline, showing cached fleet" banner above the disabled fallback.
+        isShowingStaleCache = false
+        cacheLastUpdatedAtMillis = nil
         phase = .disabled
     }
 
@@ -2346,6 +2364,14 @@ final class AttentionFeedViewModel {
         // undecided window rather than inheriting the previous session's
         // verdict, which would flash the banner again on re-activation.
         hasConcludedCanonicalRefresh = false
+        // Stale-cache state is per-authority. We have just discarded the
+        // snapshot above, so there is no cached feed on screen any more and
+        // both of these describe an authority the user has left. Leaving them
+        // latched let the NEXT authority's first failed refresh report
+        // "showing cached fleet" — with the previous authority's timestamp —
+        // over a feed that was never hydrated from any cache.
+        isShowingStaleCache = false
+        cacheLastUpdatedAtMillis = nil
         phase = .idle
     }
 }
