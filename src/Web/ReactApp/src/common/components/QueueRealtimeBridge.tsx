@@ -278,7 +278,10 @@ export function QueueRealtimeBridge() {
     });
     const unsubscribeConnection =
       printerSignalRService.onConnectionStateChange((connected) => {
-        if (connected) void refreshBoth();
+        if (connected) {
+          void refreshBoth();
+          void queryClient.invalidateQueries({ queryKey: ['file-browser'] });
+        }
       });
     const unsubscribeResources =
       printerSignalRService.onQueueResourcesChanged?.(() => {
