@@ -108,6 +108,168 @@ final class FeatureReadCacheVMTests: XCTestCase {
         XCTAssertEqual(payload.healthyPrinterCount, 9)
     }
 
+    // MARK: - Stale banner reportability (cold-launch flash regression)
+
+    /// Seeds a cached snapshot and returns a view model wired to `service`,
+    /// with the cache hydrated but no canonical refresh performed yet.
+    private func makeHydratedAttentionVM(
+        service: ScriptedAttentionService
+    ) async throws -> AttentionFeedViewModel {
+        let (store, _, session) = try makeStore()
+        let adapter = AttentionReadCacheAdapter(store: store)
+        let seed = await adapter.recordRefresh(
+            items: [makeAttentionItem(id: "failure:a", severity: .critical, title: "A")],
+            nextCursor: nil,
+            healthyPrinterCount: 1,
+            capturedSession: session
+        )
+        XCTAssertEqual(seed, .committed)
+
+        let vm = AttentionFeedViewModel()
+        vm.configure(
+            attentionService: service,
+            signalRService: MockSignalRService(),
+            attentionEnabled: true
+        )
+        vm.configureCache(adapter)
+        await vm.hydrateFromCache()
+        return vm
+    }
+
+    /// THE REGRESSION: between a cold-launch cache hydrate and the first
+    /// canonical result, the feed is genuinely stale but we do not yet KNOW the
+    /// backend is unreachable. Reporting "offline" here flashed a red banner on
+    /// every healthy launch. The underlying `isShowingStaleCache` must keep its
+    /// value, because it still refuses offline load-more (#789 criterion 3).
+    func testStaleBannerIsNotReportableBeforeFirstCanonicalResult() async throws {
+        let vm = try await makeHydratedAttentionVM(
+            service: ScriptedAttentionService(steps: [])
+        )
+
+        XCTAssertTrue(vm.isShowingStaleCache, "hydrated cache is still unconfirmed-stale")
+        XCTAssertFalse(
+            vm.hasConcludedCanonicalRefresh,
+            "no canonical refresh has concluded yet"
+        )
+        XCTAssertFalse(
+            vm.isStaleCacheReportable,
+            "the stale banner must stay hidden while the first canonical refresh is undecided"
+        )
+    }
+
+    /// A healthy cold launch must never show the banner at all: the successful
+    /// refresh clears staleness, so there is no instant at which both inputs are
+    /// true.
+    func testStaleBannerNeverBecomesReportableOnHealthyLaunch() async throws {
+        let fresh = makeAttentionFeed(
+            items: [makeAttentionItem(id: "failure:c", title: "C")],
+            nextCursor: nil,
+            healthyPrinterCount: 3
+        )
+        let vm = try await makeHydratedAttentionVM(
+            service: ScriptedAttentionService(steps: [.value(fresh)])
+        )
+        XCTAssertFalse(vm.isStaleCacheReportable)
+
+        let ok = await vm.refresh()
+        XCTAssertTrue(ok)
+
+        XCTAssertFalse(vm.isShowingStaleCache, "a confirmed-live snapshot is not stale")
+        XCTAssertTrue(vm.hasConcludedCanonicalRefresh, "the refresh concluded")
+        XCTAssertFalse(
+            vm.isStaleCacheReportable,
+            "a healthy launch must never report the stale banner"
+        )
+    }
+
+    /// A genuinely unreachable backend must still surface the banner — the fix
+    /// suppresses the startup flash, not the honest offline signal.
+    func testStaleBannerBecomesReportableWhenFirstCanonicalRefreshFails() async throws {
+        let vm = try await makeHydratedAttentionVM(
+            service: ScriptedAttentionService(steps: [.failure(.network("offline"))])
+        )
+        XCTAssertFalse(vm.isStaleCacheReportable, "undecided before the attempt")
+
+        let ok = await vm.refresh()
+        XCTAssertFalse(ok, "the scripted failure must surface as a failed refresh")
+
+        XCTAssertTrue(vm.isShowingStaleCache, "cached data is still on screen and unconfirmed")
+        XCTAssertTrue(vm.hasConcludedCanonicalRefresh, "the attempt concluded, unsuccessfully")
+        XCTAssertTrue(
+            vm.isStaleCacheReportable,
+            "a confirmed-unreachable backend must still show the stale banner"
+        )
+    }
+
+    /// Hicks (round 1): stale-cache state is per-authority. A full teardown
+    /// discards the snapshot, so leaving `isShowingStaleCache` and the cached
+    /// timestamp latched let the NEXT authority's first failed refresh report
+    /// "offline, showing cached fleet" — carrying the PREVIOUS authority's
+    /// last-updated time — over a feed that was never hydrated from any cache.
+    func testStaleBannerDoesNotLeakAcrossAFullAuthorityTeardown() async throws {
+        // Authority A: hydrate real cached data, then fail the refresh so the
+        // banner is legitimately reportable.
+        let vmA = try await makeHydratedAttentionVM(
+            service: ScriptedAttentionService(steps: [.failure(.network("offline"))])
+        )
+        _ = await vmA.refresh()
+        XCTAssertTrue(vmA.isStaleCacheReportable, "A is genuinely offline with cache")
+        XCTAssertNotNil(vmA.cacheLastUpdatedAt)
+
+        // Switch to authority B: a different service identity forces the full
+        // teardown path (`invalidateAuthority(resetState: true)`).
+        let (storeB, _, _) = try makeStore()
+        vmA.configure(
+            attentionService: ScriptedAttentionService(steps: [.failure(.network("offline"))]),
+            signalRService: MockSignalRService(),
+            attentionEnabled: true
+        )
+        vmA.configureCache(AttentionReadCacheAdapter(store: storeB))
+
+        XCTAssertFalse(
+            vmA.isShowingStaleCache,
+            "teardown discarded the snapshot, so no cached feed is on screen"
+        )
+        XCTAssertNil(vmA.cacheLastUpdatedAt, "A's timestamp must not describe B")
+        XCTAssertFalse(vmA.isStaleCacheReportable)
+
+        // B has no cached data at all, so hydrate is a no-op.
+        await vmA.hydrateFromCache()
+        XCTAssertFalse(vmA.isShowingStaleCache, "B has nothing cached to hydrate")
+
+        // B's first canonical refresh fails. Without the reset this reported a
+        // cached-fleet banner for an authority that never had a cache.
+        _ = await vmA.refresh()
+        XCTAssertTrue(vmA.hasConcludedCanonicalRefresh, "B's attempt concluded")
+        XCTAssertFalse(
+            vmA.isStaleCacheReportable,
+            "B never hydrated a cache, so it must not claim to be showing one"
+        )
+        XCTAssertNil(vmA.cacheLastUpdatedAt)
+    }
+
+    /// Vasquez (round 1): a cancelled refresh (tab switch, view disappearing) is
+    /// not evidence the backend is unreachable. Concluding on it would flash the
+    /// very banner this change removes.
+    func testCancelledRefreshDoesNotConcludeAndDoesNotShowTheBanner() async throws {
+        let vm = try await makeHydratedAttentionVM(
+            service: ScriptedAttentionService(steps: [.cancelled])
+        )
+        XCTAssertFalse(vm.isStaleCacheReportable, "undecided before the attempt")
+
+        _ = await vm.refresh()
+
+        XCTAssertTrue(vm.isShowingStaleCache, "cached data is still on screen")
+        XCTAssertFalse(
+            vm.hasConcludedCanonicalRefresh,
+            "an abandoned refresh concluded nothing about reachability"
+        )
+        XCTAssertFalse(
+            vm.isStaleCacheReportable,
+            "a cancelled refresh must not flash the offline banner"
+        )
+    }
+
     // MARK: - Fleet coverage (criteria 4 + 8)
 
     func testFleetCoverageOfflineHydratePreservesUnknownThenReconnectReplaces() async throws {

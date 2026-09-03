@@ -322,6 +322,10 @@ enum AttentionLoadStep: Sendable {
     case value(AttentionFeed)
     /// Throw the given error synchronously.
     case failure(AttentionProofError)
+    /// Throw a real `CancellationError` synchronously, modelling a refresh
+    /// abandoned by a tab switch or a disappearing view rather than an
+    /// unreachable backend.
+    case cancelled
     /// Throw `NetworkError.featureDisabled` synchronously.
     case featureDisabled
     /// Hold the call open until the gate resolves.
@@ -412,6 +416,8 @@ actor ScriptedAttentionService: AttentionServiceProtocol {
             return feed
         case .failure(let error):
             throw error
+        case .cancelled:
+            throw CancellationError()
         case .featureDisabled:
             throw NetworkError.featureDisabled(
                 APIError(
