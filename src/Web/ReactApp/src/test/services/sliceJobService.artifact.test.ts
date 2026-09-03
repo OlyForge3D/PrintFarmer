@@ -191,6 +191,47 @@ describe('SliceJobService artifact URL helpers', () => {
           data: { sliceJobId: 'job-1', artifactId: 'artifact-1' },
         });
       });
+
+      describe('print contracts', () => {
+        it('includes the selected artifact ID in the direct-print request', async () => {
+          mockRequest.mockResolvedValue({});
+
+          await service.sendToPrinter(
+            'job-1',
+            'artifact-selected',
+            'printer-1',
+            false,
+          );
+
+          expect(mockRequest).toHaveBeenCalledWith({
+            url: '/slice/job-1/send-to-printer',
+            method: 'POST',
+            data: {
+              artifactId: 'artifact-selected',
+              printerId: 'printer-1',
+              startPrint: false,
+            },
+          });
+        });
+
+        it('includes the selected artifact ID in the queue request', async () => {
+          mockRequest.mockResolvedValue({});
+
+          await service.addSliceToQueue('job-1', {
+            artifactId: 'artifact-selected',
+            priority: 'Normal',
+          });
+
+          expect(mockRequest).toHaveBeenCalledWith({
+            url: '/slice/job-1/add-to-queue',
+            method: 'POST',
+            data: {
+              artifactId: 'artifact-selected',
+              priority: 'Normal',
+            },
+          });
+        });
+      });
     });
   });
 });

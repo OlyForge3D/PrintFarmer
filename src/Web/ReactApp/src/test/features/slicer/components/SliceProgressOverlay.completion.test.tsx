@@ -8,10 +8,12 @@ import type { SliceJobProgressState } from '@/features/slicer/hooks/useSliceJobP
 
 const downloadGcodeArtifact = vi.fn();
 const saveGcodeArtifactToLibrary = vi.fn();
+const resolveGcodeArtifactForAction = vi.fn();
 
 vi.mock('@/features/slicer/utils/sliceArtifactActions', () => ({
   downloadGcodeArtifact: (...args: unknown[]) => downloadGcodeArtifact(...args),
   saveGcodeArtifactToLibrary: (...args: unknown[]) => saveGcodeArtifactToLibrary(...args),
+  resolveGcodeArtifactForAction: (...args: unknown[]) => resolveGcodeArtifactForAction(...args),
 }));
 
 vi.mock('@/features/slicer/components/GcodePreviewModal', () => ({
@@ -32,7 +34,17 @@ vi.mock('@/features/slicer/components/GcodePreviewModal', () => ({
 }));
 
 vi.mock('@/features/slicer/components/SendToPrinterModal', () => ({
-  SendToPrinterModal: () => null,
+  SendToPrinterModal: ({
+    isOpen,
+    jobId,
+    artifactId,
+  }: {
+    isOpen: boolean;
+    jobId: string;
+    artifactId: string;
+  }) => isOpen
+    ? <div data-testid="print-modal">{jobId}:{artifactId}</div>
+    : null,
 }));
 
 const processingProgress: SliceJobProgressState = {
@@ -60,6 +72,7 @@ describe('SliceProgressOverlay completion actions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     downloadGcodeArtifact.mockResolvedValue(undefined);
+    resolveGcodeArtifactForAction.mockReset();
   });
 
   it('reveals persistent actions from a live completion and auto-opens preview only once', async () => {
@@ -196,5 +209,39 @@ describe('SliceProgressOverlay completion actions', () => {
     await waitFor(() => expect(saveGcodeArtifactToLibrary).toHaveBeenCalledTimes(2));
     expect(await screen.findByRole('status')).toHaveTextContent('Already in File Library');
     expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it('opens Print with the exact selected artifact when multiple artifacts exist', async () => {
+    const artifacts = [
+      { id: 'selected-artifact', fileName: 'selected.gcode' },
+      { id: 'newest-artifact', fileName: 'newest.gcode' },
+    ];
+    resolveGcodeArtifactForAction.mockResolvedValue(
+      artifacts.find(artifact => artifact.fileName.endsWith('.gcode')),
+    );
+    const completedProgress: SliceJobProgressState = {
+      ...processingProgress,
+      status: 'Completed',
+      progressPercent: 100,
+      artifactsRoute: '/api/artifacts/job/job-1',
+    };
+    renderOverlay(
+      <SliceProgressOverlay
+        jobId="job-1"
+        progress={completedProgress}
+        onNewJob={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Print' }));
+
+    expect(await screen.findByTestId('print-modal')).toHaveTextContent(
+      'job-1:selected-artifact',
+    );
+    expect(resolveGcodeArtifactForAction).toHaveBeenCalledWith(
+      '/api/artifacts/job/job-1',
+    );
+    expect(screen.getByTestId('print-modal')).not.toHaveTextContent('newest-artifact');
   });
 });

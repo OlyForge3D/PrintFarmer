@@ -27,6 +27,7 @@ const getMyJobs = vi.fn();
 const artifactActions = vi.hoisted(() => ({
   download: vi.fn(),
   save: vi.fn(),
+  resolveForAction: vi.fn(),
 }));
 
 vi.mock('sonner', () => ({
@@ -70,6 +71,7 @@ vi.mock('@/features/slicer/components/GcodePreviewModal', () => ({
 vi.mock('@/features/slicer/utils/sliceArtifactActions', () => ({
   downloadGcodeArtifact: (...args: unknown[]) => artifactActions.download(...args),
   saveGcodeArtifactToLibrary: (...args: unknown[]) => artifactActions.save(...args),
+  resolveGcodeArtifactForAction: (...args: unknown[]) => artifactActions.resolveForAction(...args),
 }));
 
 vi.mock('@/common/hooks/useViewModePreference', () => ({
@@ -82,6 +84,7 @@ describe('SliceJobsPanel live completion', () => {
     realtime.handler = null;
     artifactActions.download.mockReset();
     artifactActions.save.mockReset();
+    artifactActions.resolveForAction.mockReset();
     getMyJobs.mockResolvedValue([{
       id: 'job-1',
       status: 'Processing',

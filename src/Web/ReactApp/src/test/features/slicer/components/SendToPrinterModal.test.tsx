@@ -48,6 +48,7 @@ function renderModal(props: Partial<React.ComponentProps<typeof SendToPrinterMod
     isOpen: true,
     onClose: vi.fn(),
     jobId: 'job-123',
+    artifactId: 'artifact-selected',
     ...props,
   };
   const { Wrapper, queryClient } = createWrapper();
@@ -102,7 +103,12 @@ describe('SendToPrinterModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /send to printer/i }));
 
     await waitFor(() => {
-      expect(mockSendToPrinter).toHaveBeenCalledWith('job-123', 'printer-1', false);
+      expect(mockSendToPrinter).toHaveBeenCalledWith(
+        'job-123',
+        'artifact-selected',
+        'printer-1',
+        false,
+      );
     });
   });
 
@@ -122,7 +128,12 @@ describe('SendToPrinterModal', () => {
     fireEvent.click(screen.getByRole('button', { name: /send to printer/i }));
 
     await waitFor(() => {
-      expect(mockSendToPrinter).toHaveBeenCalledWith('job-123', 'printer-2', true);
+      expect(mockSendToPrinter).toHaveBeenCalledWith(
+        'job-123',
+        'artifact-selected',
+        'printer-2',
+        true,
+      );
     });
   });
 
@@ -197,6 +208,7 @@ describe('SendToPrinterModal', () => {
 
       await waitFor(() => {
         expect(mockAddSliceToQueue).toHaveBeenCalledWith('job-123', expect.objectContaining({
+          artifactId: 'artifact-selected',
           priority: 'Normal',
           copies: 1,
           spoolId: 42,

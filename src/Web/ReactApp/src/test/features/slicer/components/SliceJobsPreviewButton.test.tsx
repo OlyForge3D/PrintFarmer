@@ -10,11 +10,13 @@ vi.mock('sonner', () => ({
 }));
 
 const mockGetMyJobs = vi.fn();
+const mockGetArtifactsByRoute = vi.fn();
 const viewModeState = vi.hoisted(() => ({ value: 'grid' as 'grid' | 'explorer' }));
 
 vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
     getMyJobs: (...args: unknown[]) => mockGetMyJobs(...args),
+    getArtifactsByRoute: (...args: unknown[]) => mockGetArtifactsByRoute(...args),
     cancelJob: vi.fn(),
     retryJob: vi.fn(),
     getEstimatedTimeRemaining: () => null,
@@ -36,7 +38,17 @@ vi.mock('@/features/slicer/hooks/useSliceJobsRealtime', () => ({
 }));
 
 vi.mock('@/features/slicer/components/SendToPrinterModal', () => ({
-  SendToPrinterModal: () => null,
+  SendToPrinterModal: ({
+    isOpen,
+    jobId,
+    artifactId,
+  }: {
+    isOpen: boolean;
+    jobId: string;
+    artifactId: string;
+  }) => isOpen
+    ? <div data-testid="print-modal">{jobId}:{artifactId}</div>
+    : null,
 }));
 
 vi.mock('@/features/slicer/components/GcodePreviewModal', () => ({
@@ -69,6 +81,7 @@ function renderPanel() {
 describe('SliceJobsPanel Preview button', () => {
   beforeEach(() => {
     mockGetMyJobs.mockReset();
+    mockGetArtifactsByRoute.mockReset();
     viewModeState.value = 'grid';
   });
 
@@ -86,13 +99,33 @@ describe('SliceJobsPanel Preview button', () => {
           artifactsRoute: '/api/artifacts/job/job-completed-actions',
         },
       ]);
+      mockGetArtifactsByRoute.mockResolvedValue([
+        {
+          id: 'selected-artifact',
+          fileName: 'selected.gcode',
+          createdAt: '2026-09-03T10:00:00Z',
+        },
+        {
+          id: 'newest-artifact',
+          fileName: 'newest.gcode',
+          createdAt: '2026-09-03T10:01:00Z',
+        },
+      ]);
 
       renderPanel();
 
       expect(await screen.findByRole('button', { name: /preview/i })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /download/i })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /save to library/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /print/i })).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: /print/i }));
+
+      expect(await screen.findByTestId('print-modal')).toHaveTextContent(
+        'job-completed-actions:selected-artifact',
+      );
+      expect(mockGetArtifactsByRoute).toHaveBeenCalledWith(
+        '/api/artifacts/job/job-completed-actions',
+      );
+      expect(screen.getByTestId('print-modal')).not.toHaveTextContent('newest-artifact');
     },
   );
 

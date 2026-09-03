@@ -218,6 +218,7 @@ export enum SlicerEngine {
 }
 
 export interface SendToPrinterRequest {
+  artifactId: string;
   printerId: string;
   startPrint: boolean;
 }
@@ -237,6 +238,7 @@ export interface SpoolCostResponse {
 }
 
 export interface AddSliceToQueueRequest {
+  artifactId: string;
   priority?: string;
   spoolId?: number;
   copies?: number;
@@ -333,11 +335,16 @@ export class SliceJobService {
   /**
    * Send completed gcode to a printer for printing
    */
-  async sendToPrinter(jobId: string, printerId: string, startPrint: boolean): Promise<SendToPrinterResponse> {
+  async sendToPrinter(
+    jobId: string,
+    artifactId: string,
+    printerId: string,
+    startPrint: boolean,
+  ): Promise<SendToPrinterResponse> {
     const response = await apiClient.request<SendToPrinterResponse>({
       url: `/slice/${jobId}/send-to-printer`,
       method: 'POST',
-      data: { printerId, startPrint } satisfies SendToPrinterRequest
+      data: { artifactId, printerId, startPrint } satisfies SendToPrinterRequest
     });
     return response;
   }
