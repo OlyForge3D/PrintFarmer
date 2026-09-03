@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   downloadGcodeArtifact,
   resolveGcodeArtifact,
+  resolveGcodeArtifactForAction,
   saveGcodeArtifactToLibrary,
 } from './sliceArtifactActions';
 
@@ -66,6 +67,25 @@ describe('sliceArtifactActions', () => {
     await expect(resolveGcodeArtifact('/api/artifacts/job/job-1')).resolves.toMatchObject({
       id: 'text-1',
     });
+  });
+
+  it('selects the first supported action artifact without falling back to the newest', async () => {
+    getArtifactsByRoute.mockResolvedValue([
+      {
+        id: 'selected-artifact',
+        fileName: 'selected.gcode',
+        createdAt: '2026-09-03T10:00:00Z',
+      },
+      {
+        id: 'newest-artifact',
+        fileName: 'newest.gcode',
+        createdAt: '2026-09-03T10:01:00Z',
+      },
+    ]);
+
+    await expect(
+      resolveGcodeArtifactForAction('/api/artifacts/job/job-1'),
+    ).resolves.toMatchObject({ id: 'selected-artifact' });
   });
 
   it('downloads the selected artifact endpoint as a blob without opening a raw URL', async () => {

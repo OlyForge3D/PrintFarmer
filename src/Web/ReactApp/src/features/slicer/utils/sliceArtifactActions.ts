@@ -22,8 +22,14 @@ export async function resolveGcodeArtifact(
   return findGcodeArtifact(artifactsRoute, isTextGcodeFileName);
 }
 
+export async function resolveGcodeArtifactForAction(
+  artifactsRoute: string,
+): Promise<ArtifactListItemResponse | null> {
+  return findGcodeArtifact(artifactsRoute, isGcodeFileName);
+}
+
 export async function downloadGcodeArtifact(artifactsRoute: string): Promise<void> {
-  const artifact = await findGcodeArtifact(artifactsRoute, isGcodeFileName);
+  const artifact = await resolveGcodeArtifactForAction(artifactsRoute);
   if (!artifact) {
     throw new Error('No G-code artifact is available for this job.');
   }
@@ -46,7 +52,7 @@ export async function saveGcodeArtifactToLibrary(
   artifactsRoute: string,
   sliceJobId: string,
 ): Promise<PromoteSliceArtifactResponse> {
-  const artifact = await findGcodeArtifact(artifactsRoute, isGcodeFileName);
+  const artifact = await resolveGcodeArtifactForAction(artifactsRoute);
   if (!artifact) {
     throw new Error('No G-code artifact is available for this job.');
   }

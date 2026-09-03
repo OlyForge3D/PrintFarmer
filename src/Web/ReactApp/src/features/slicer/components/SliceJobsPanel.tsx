@@ -34,12 +34,14 @@ import { SendToPrinterModal } from '@/features/slicer/components/SendToPrinterMo
 import { GcodePreviewModal } from '@/features/slicer/components/GcodePreviewModal';
 import {
   downloadGcodeArtifact,
+  resolveGcodeArtifactForAction,
   saveGcodeArtifactToLibrary,
 } from '@/features/slicer/utils/sliceArtifactActions';
 import type { BadgeVariant } from '@/common/components/ui/Badge';
 
 type StatusFilter = 'all' | SliceJobStatus;
 type SaveFeedback = { kind: 'success' | 'error'; message: string };
+type PrintSelection = { jobId: string; artifactId: string };
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'All Jobs' },
@@ -104,12 +106,14 @@ export function SliceJobsPanel() {
   const { viewMode, setViewMode } = useViewModePreference('printfarmer-slice-jobs-viewmode');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
-  const [sendToJobId, setSendToJobId] = useState<string | null>(null);
+  const [printSelection, setPrintSelection] = useState<PrintSelection | null>(null);
   const [previewJobId, setPreviewJobId] = useState<string | null>(null);
   const [downloadingJobId, setDownloadingJobId] = useState<string | null>(null);
   const [savingJobIds, setSavingJobIds] = useState<ReadonlySet<string>>(() => new Set());
   const [saveFeedbackByJobId, setSaveFeedbackByJobId] = useState<Record<string, SaveFeedback>>({});
   const saveInFlightRef = useRef(new Set<string>());
+  const [resolvingPrintJobIds, setResolvingPrintJobIds] = useState<ReadonlySet<string>>(() => new Set());
+  const printResolutionInFlightRef = useRef(new Set<string>());
 
   const { isConnected: isRealtimeConnected } = useSliceJobsRealtime();
 
@@ -224,6 +228,30 @@ export function SliceJobsPanel() {
     }
   };
 
+  const handlePrintArtifact = async (jobId: string) => {
+    if (printResolutionInFlightRef.current.has(jobId)) return;
+    const artifactsRoute = jobs.find(job => job.id === jobId)?.artifactsRoute;
+    if (!artifactsRoute) {
+      toast.error('No G-code artifact is available for this job.');
+      return;
+    }
+
+    printResolutionInFlightRef.current.add(jobId);
+    setResolvingPrintJobIds(new Set(printResolutionInFlightRef.current));
+    try {
+      const artifact = await resolveGcodeArtifactForAction(artifactsRoute);
+      if (!artifact) {
+        throw new Error('No G-code artifact is available for this job.');
+      }
+      setPrintSelection({ jobId, artifactId: artifact.id });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to prepare G-code for printing.');
+    } finally {
+      printResolutionInFlightRef.current.delete(jobId);
+      setResolvingPrintJobIds(new Set(printResolutionInFlightRef.current));
+    }
+  };
+
   const toggleExpand = (jobId: string) => {
     setExpandedJobId(prev => prev === jobId ? null : jobId);
   };
@@ -299,11 +327,12 @@ export function SliceJobsPanel() {
           onRetry={(id) => retryMutation.mutate(id)}
           onDownload={handleDownloadArtifact}
           onSave={handleSaveArtifact}
-          onSendToPrinter={(id) => setSendToJobId(id)}
+          onSendToPrinter={handlePrintArtifact}
           onPreview={(id) => setPreviewJobId(id)}
           cancellingId={cancelMutation.isPending ? (cancelMutation.variables ?? null) : null}
           downloadingId={downloadingJobId}
           savingIds={savingJobIds}
+          resolvingPrintJobIds={resolvingPrintJobIds}
           saveFeedbackByJobId={saveFeedbackByJobId}
         />
       ) : (
@@ -313,20 +342,24 @@ export function SliceJobsPanel() {
           onRetry={(id) => retryMutation.mutate(id)}
           onDownload={handleDownloadArtifact}
           onSave={handleSaveArtifact}
-          onSendToPrinter={(id) => setSendToJobId(id)}
+          onSendToPrinter={handlePrintArtifact}
           onPreview={(id) => setPreviewJobId(id)}
           cancellingId={cancelMutation.isPending ? (cancelMutation.variables ?? null) : null}
           downloadingId={downloadingJobId}
           savingIds={savingJobIds}
+          resolvingPrintJobIds={resolvingPrintJobIds}
           saveFeedbackByJobId={saveFeedbackByJobId}
         />
       )}
 
-      <SendToPrinterModal
-        isOpen={sendToJobId !== null}
-        onClose={() => setSendToJobId(null)}
-        jobId={sendToJobId ?? ''}
-      />
+      {printSelection && (
+        <SendToPrinterModal
+          isOpen
+          onClose={() => setPrintSelection(null)}
+          jobId={printSelection.jobId}
+          artifactId={printSelection.artifactId}
+        />
+      )}
 
       <GcodePreviewModal
         isOpen={previewJobId !== null}
@@ -352,6 +385,7 @@ function JobTable({
   cancellingId,
   downloadingId,
   savingIds,
+  resolvingPrintJobIds,
   saveFeedbackByJobId,
 }: {
   jobs: SliceJobStatusResponse[];
@@ -366,6 +400,7 @@ function JobTable({
   cancellingId: string | null;
   downloadingId: string | null;
   savingIds: ReadonlySet<string>;
+  resolvingPrintJobIds: ReadonlySet<string>;
   saveFeedbackByJobId: Record<string, SaveFeedback>;
 }) {
   return (
@@ -397,6 +432,7 @@ function JobTable({
               isCancelling={cancellingId === job.id}
               isDownloading={downloadingId === job.id}
               isSaving={savingIds.has(job.id)}
+              isResolvingPrint={resolvingPrintJobIds.has(job.id)}
               saveFeedback={saveFeedbackByJobId[job.id]}
             />
           ))}
@@ -419,6 +455,7 @@ function JobTableRow({
   isCancelling,
   isDownloading,
   isSaving,
+  isResolvingPrint,
   saveFeedback,
 }: {
   job: SliceJobStatusResponse;
@@ -433,6 +470,7 @@ function JobTableRow({
   isCancelling: boolean;
   isDownloading: boolean;
   isSaving: boolean;
+  isResolvingPrint: boolean;
   saveFeedback?: SaveFeedback;
 }) {
   const canCancel = job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing;
@@ -538,6 +576,8 @@ function JobTableRow({
                 variant="primary"
                 size="sm"
                 onClick={onSendToPrinter}
+                loading={isResolvingPrint}
+                disabled={isResolvingPrint}
                 aria-label="Print"
                 title="Print"
               >
@@ -579,6 +619,7 @@ function JobCardGrid({
   cancellingId,
   downloadingId,
   savingIds,
+  resolvingPrintJobIds,
   saveFeedbackByJobId,
 }: {
   jobs: SliceJobStatusResponse[];
@@ -591,6 +632,7 @@ function JobCardGrid({
   cancellingId: string | null;
   downloadingId: string | null;
   savingIds: ReadonlySet<string>;
+  resolvingPrintJobIds: ReadonlySet<string>;
   saveFeedbackByJobId: Record<string, SaveFeedback>;
 }) {
   return (
@@ -608,6 +650,7 @@ function JobCardGrid({
           isCancelling={cancellingId === job.id}
           isDownloading={downloadingId === job.id}
           isSaving={savingIds.has(job.id)}
+          isResolvingPrint={resolvingPrintJobIds.has(job.id)}
           saveFeedback={saveFeedbackByJobId[job.id]}
         />
       ))}
@@ -626,6 +669,7 @@ function JobCard({
   isCancelling,
   isDownloading,
   isSaving,
+  isResolvingPrint,
   saveFeedback,
 }: {
   job: SliceJobStatusResponse;
@@ -638,6 +682,7 @@ function JobCard({
   isCancelling: boolean;
   isDownloading: boolean;
   isSaving: boolean;
+  isResolvingPrint: boolean;
   saveFeedback?: SaveFeedback;
 }) {
   const canCancel = job.status === SliceJobStatus.Queued || job.status === SliceJobStatus.Processing;
@@ -770,6 +815,8 @@ function JobCard({
               variant="primary"
               size="sm"
               onClick={onSendToPrinter}
+              loading={isResolvingPrint}
+              disabled={isResolvingPrint}
               iconLeft={<PrinterIcon className="w-3.5 h-3.5" />}
             >
               Print

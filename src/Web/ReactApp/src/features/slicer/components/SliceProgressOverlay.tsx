@@ -9,6 +9,7 @@ import { SendToPrinterModal } from '@/features/slicer/components/SendToPrinterMo
 import type { SliceJobProgressState } from '@/features/slicer/hooks/useSliceJobProgress';
 import {
   downloadGcodeArtifact,
+  resolveGcodeArtifactForAction,
   saveGcodeArtifactToLibrary,
 } from '@/features/slicer/utils/sliceArtifactActions';
 
@@ -58,6 +59,8 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
+  const [printArtifactId, setPrintArtifactId] = useState<string | null>(null);
+  const [isResolvingPrint, setIsResolvingPrint] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<{
@@ -65,6 +68,7 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
     message: string;
   } | null>(null);
   const saveInFlightRef = useRef(false);
+  const printResolutionInFlightRef = useRef(false);
   const autoOpenedJobRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -110,6 +114,25 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
       setIsSaving(false);
     }
   }, [jobId, progress.artifactsRoute, queryClient]);
+
+  const handlePrint = useCallback(async () => {
+    if (!progress.artifactsRoute || printResolutionInFlightRef.current) return;
+    printResolutionInFlightRef.current = true;
+    setIsResolvingPrint(true);
+    try {
+      const artifact = await resolveGcodeArtifactForAction(progress.artifactsRoute);
+      if (!artifact) {
+        throw new Error('No G-code artifact is available for this job.');
+      }
+      setPrintArtifactId(artifact.id);
+      setSendOpen(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to prepare G-code for printing.');
+    } finally {
+      printResolutionInFlightRef.current = false;
+      setIsResolvingPrint(false);
+    }
+  }, [progress.artifactsRoute]);
 
   const materialCost = resolvedCostPerGram != null
     ? sliceJobService.computeMaterialCostPerGram(progress.filamentUsedGrams, resolvedCostPerGram)
@@ -256,7 +279,13 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
               >
                 Save to Library
               </Button>
-              <Button variant="success" size="sm" onClick={() => setSendOpen(true)}>
+              <Button
+                variant="success"
+                size="sm"
+                onClick={handlePrint}
+                loading={isResolvingPrint}
+                disabled={!progress.artifactsRoute || isResolvingPrint}
+              >
                 Print
               </Button>
               <Button variant="secondary" size="sm" onClick={onNewJob}>
@@ -297,15 +326,21 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
         onClose={() => setPreviewOpen(false)}
         artifactsRoute={progress.artifactsRoute ?? ''}
       />
-      <SendToPrinterModal
-        isOpen={sendOpen}
-        onClose={() => setSendOpen(false)}
-        jobId={jobId}
-        selectedSpoolId={selectedSpoolId}
-        requiredPrinterModel={requiredPrinterModel}
-        requiredMaterialType={requiredMaterialType}
-        requiredNozzleDiameter={requiredNozzleDiameter}
-      />
+      {printArtifactId && (
+        <SendToPrinterModal
+          isOpen={sendOpen}
+          onClose={() => {
+            setSendOpen(false);
+            setPrintArtifactId(null);
+          }}
+          jobId={jobId}
+          artifactId={printArtifactId}
+          selectedSpoolId={selectedSpoolId}
+          requiredPrinterModel={requiredPrinterModel}
+          requiredMaterialType={requiredMaterialType}
+          requiredNozzleDiameter={requiredNozzleDiameter}
+        />
+      )}
     </div>
   );
 }
