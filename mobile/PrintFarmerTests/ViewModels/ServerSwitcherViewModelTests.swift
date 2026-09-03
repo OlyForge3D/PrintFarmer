@@ -174,4 +174,28 @@ final class ServerSwitcherViewModelTests: XCTestCase {
         try reloaded.setActive(id: client.id)
         XCTAssertFalse(reloaded.advancedPrinterControlsEnabled)
     }
+
+    func testChangingServerURLClearsAdvancedPrinterControlsPreference() throws {
+        let registry = ServerRegistry(
+            userDefaults: userDefaults,
+            migrateLegacyServerURL: false
+        )
+        var server = try registry.add(
+            displayName: "Personal",
+            baseURL: URL(string: "https://personal.example.com")!
+        )
+        registry.setAdvancedPrinterControlsEnabled(true)
+
+        server.baseURL = URL(string: "https://client.example.com")!
+        try registry.update(server)
+
+        XCTAssertFalse(registry.advancedPrinterControlsEnabled)
+
+        let reloaded = ServerRegistry(
+            userDefaults: userDefaults,
+            migrateLegacyServerURL: false
+        )
+        XCTAssertFalse(reloaded.advancedPrinterControlsEnabled)
+        XCTAssertEqual(reloaded.activeServer?.normalizedURLString, "https://client.example.com")
+    }
 }

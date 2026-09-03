@@ -181,8 +181,9 @@ final class ServerRegistry {
         let normalized = try Self.normalizedURLString(for: server.baseURL.absoluteString)
         try rejectDuplicate(normalizedURLString: normalized, ignoring: server.id)
 
+        let endpointChanged = servers[index].normalizedURLString != normalized
         var updated = server
-        if updated.normalizedURLString != normalized {
+        if endpointChanged {
             updated.originServerId = nil
         }
         updated.displayName = normalizedDisplayName(updated.displayName, fallbackURL: updated.baseURL)
@@ -191,6 +192,9 @@ final class ServerRegistry {
         updated.updatedAt = now()
 
         servers[index] = updated
+        if endpointChanged {
+            clearAdvancedPrinterControlsPreference(for: server.id)
+        }
         persist()
     }
 
@@ -206,7 +210,7 @@ final class ServerRegistry {
         if activeServerID == id {
             activeServerID = servers.first?.id
         }
-        userDefaults.removeObject(forKey: Self.advancedPrinterControlsPreferenceKey(for: id))
+        clearAdvancedPrinterControlsPreference(for: id)
         persist()
     }
 
@@ -246,7 +250,7 @@ final class ServerRegistry {
         // Consume the revision CAS FIRST (side-effect-free on failure).
         guard Self.consumeAddRevision(candidate.id, expected: expectedRevision) else { return false }
         servers.remove(at: index)
-        userDefaults.removeObject(forKey: Self.advancedPrinterControlsPreferenceKey(for: candidate.id))
+        clearAdvancedPrinterControlsPreference(for: candidate.id)
         persist()
         return true
     }
@@ -433,6 +437,15 @@ final class ServerRegistry {
         advancedPrinterControlsEnabled = userDefaults.bool(
             forKey: Self.advancedPrinterControlsPreferenceKey(for: activeServerID)
         )
+    }
+
+    private func clearAdvancedPrinterControlsPreference(for serverID: UUID) {
+        userDefaults.removeObject(
+            forKey: Self.advancedPrinterControlsPreferenceKey(for: serverID)
+        )
+        if activeServerID == serverID {
+            advancedPrinterControlsEnabled = false
+        }
     }
 
     private func persist() {

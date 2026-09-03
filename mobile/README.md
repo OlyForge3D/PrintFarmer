@@ -68,7 +68,9 @@ preheat, home, z-offset, or disable motors, open **Settings** → **Printer
 Safety** and enable **Advanced Printer Controls** for the active server.
 Enabling the controls on one server does not enable them on another. Turning
 the setting off removes access immediately, including an open advanced-controls
-screen, because misuse may damage a printer or ruin a print.
+screen. Changing a registered server's URL also resets the setting to off so an
+opt-in cannot carry over to a different endpoint. Misuse may damage a printer or
+ruin a print.
 
 ### Post-Login Connection Check
 
