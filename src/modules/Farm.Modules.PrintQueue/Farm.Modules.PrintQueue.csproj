@@ -21,7 +21,9 @@ completing the move-first-rename-last strategy.</Description>
   <ItemGroup>
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
     <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
-    <!-- SlicePrintBridgeController bridges to IArtifactsService/Artifact/ISliceJobRepository/SliceJob. -->
+    <ProjectReference Include="..\Farm.Modules.Calibration\Farm.Modules.Calibration.csproj" />
+    <ProjectReference Include="..\Farm.Modules.Gcode\Farm.Modules.Gcode.csproj" />
+    <!-- SlicePrintBridgeController bridges slicer jobs to durable G-code promotion and print workflows. -->
     <ProjectReference Include="..\..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
   </ItemGroup>
 

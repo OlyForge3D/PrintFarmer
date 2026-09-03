@@ -39,7 +39,7 @@ public sealed class GcodeArtifactPromoter(
     IStoragePathService storagePaths,
     GcodePromotionReconcilerState reconcilerState,
     ILogger<GcodeArtifactPromoter> logger,
-    IArtifactsService? artifacts = null,
+    IPromotionArtifactContentSource? contentSource = null,
     IArtifactsRepository? artifactsRepository = null,
     ISliceJobRepository? sliceJobs = null) : IGcodeArtifactPromoter
 {
@@ -59,7 +59,7 @@ public sealed class GcodeArtifactPromoter(
         reconcilerState ?? throw new ArgumentNullException(nameof(reconcilerState));
 
     private readonly ILogger<GcodeArtifactPromoter> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    private readonly IArtifactsService? _artifacts = artifacts;
+    private readonly IPromotionArtifactContentSource? _contentSource = contentSource;
     private readonly IArtifactsRepository? _artifactsRepository = artifactsRepository;
     private readonly ISliceJobRepository? _sliceJobs = sliceJobs;
 
@@ -67,7 +67,7 @@ public sealed class GcodeArtifactPromoter(
     public async Task<GcodePromotionCapabilityDto> GetCapabilityAsync(CancellationToken cancellationToken)
     {
         bool artifactSourceAvailable =
-            _artifacts is not null && _artifactsRepository is not null && _sliceJobs is not null;
+            _contentSource is not null && _artifactsRepository is not null && _sliceJobs is not null;
         bool libraryStorageWritable = IsLibraryStorageWritable();
         bool checkpointStoreAvailable = await IsCheckpointStoreAvailableAsync(cancellationToken);
         bool reconcilerHealthy = _reconcilerState.IsHealthy;
@@ -116,7 +116,9 @@ public sealed class GcodeArtifactPromoter(
         GcodePromotionCapabilityDto capability = await GetCapabilityAsync(cancellationToken);
         if (!capability.Operational)
         {
-            return Failure(StatusCodes.Status503ServiceUnavailable, "promotion_dependency_unavailable");
+            return Failure(
+                StatusCodes.Status503ServiceUnavailable,
+                "promotion_dependency_unavailable");
         }
 
         Artifact? artifact = await _artifactsRepository!.GetByIdAsync(request.SourceArtifactId, cancellationToken);
@@ -392,7 +394,7 @@ public sealed class GcodeArtifactPromoter(
                 replayed: true);
         }
 
-        if (_artifacts is null || _artifactsRepository is null || _sliceJobs is null)
+        if (_contentSource is null || _artifactsRepository is null || _sliceJobs is null)
         {
             return Failure(StatusCodes.Status503ServiceUnavailable, "promotion_dependency_unavailable");
         }
@@ -681,17 +683,19 @@ public sealed class GcodeArtifactPromoter(
         GcodePromotionLineage lineage = await BuildLineageAsync(checkpoint, artifact, job, manifestJson, cancellationToken);
 
         GcodeStreamIngestResult ingest;
-        await using ArtifactContentStream? content = await _artifacts!.OpenReadStreamAsync(
-            checkpoint.SourceArtifactId,
-            cancellationToken);
-        if (content is null)
-        {
-            await FailCheckpointAsync(checkpoint, "source_artifact_bytes_unavailable", cancellationToken);
-            return Failure(StatusCodes.Status409Conflict, "source_artifact_bytes_unavailable");
-        }
-
         try
         {
+            await using PromotionArtifactContent? content = await _contentSource!.OpenReadAsync(
+                checkpoint.SourceArtifactId,
+                checkpoint.ScopedOperationKey(),
+                checkpoint.SourceSizeBytes,
+                cancellationToken);
+            if (content is null)
+            {
+                await FailCheckpointAsync(checkpoint, "source_artifact_bytes_unavailable", cancellationToken);
+                return Failure(StatusCodes.Status409Conflict, "source_artifact_bytes_unavailable");
+            }
+
             ingest = await _gcodeFiles.IngestStreamAsync(
                 new GcodeStreamIngestRequest
                 {
@@ -705,6 +709,16 @@ public sealed class GcodeArtifactPromoter(
                     Lineage = lineage,
                 },
                 cancellationToken);
+        }
+        catch (PromotionSourceTransportException exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Promotion {OperationId} could not read its source bytes and remains pending",
+                LogSanitizer.Sanitize(checkpoint.OperationId));
+            return Failure(
+                StatusCodes.Status503ServiceUnavailable,
+                "promotion_source_transport_unavailable");
         }
         catch (GcodeStreamIngestException exception)
         {

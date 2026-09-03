@@ -265,6 +265,63 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
     }
 
+    [Fact(DisplayName = "Explicit slice save derives one stable server-owned operation identity")]
+    public async Task SliceArtifactLibraryService_ExplicitSaveAndReplay_ReturnStableDurableIdentity()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        string expectedOperationId =
+            SliceArtifactLibraryService.BuildOperationId(fixture.JobId, fixture.ArtifactId);
+
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(0);
+        _ = (await _harness.CountCheckpointsAsync()).Should().Be(0);
+
+        CalibrationApiResult<SliceArtifactLibraryResult> first =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None);
+        CalibrationApiResult<SliceArtifactLibraryResult> replay =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None);
+
+        _ = first.StatusCode.Should().Be(StatusCodes.Status201Created, first.Code);
+        _ = first.Value!.CreatedNew.Should().BeTrue();
+        _ = replay.StatusCode.Should().Be(StatusCodes.Status200OK, replay.Code);
+        _ = replay.Value!.CreatedNew.Should().BeFalse();
+        _ = replay.Value.GcodeFileId.Should().Be(first.Value.GcodeFileId);
+        _ = (await _harness.GetCheckpointByOperationAsync(expectedOperationId))
+            .SourceArtifactId.Should().Be(fixture.ArtifactId);
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Concurrent explicit saves converge on one durable identity")]
+    public async Task SliceArtifactLibraryService_ConcurrentSaves_ConvergeOnOneFile()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+
+        CalibrationApiResult<SliceArtifactLibraryResult>[] results = await Task.WhenAll(
+            Task.Run(() => _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None)),
+            Task.Run(() => _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None)));
+
+        _ = results.Should().OnlyContain(result => result.IsSuccess);
+        _ = results.Select(result => result.Value!.GcodeFileId).Distinct()
+            .Should().ContainSingle();
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+        _ = (await _harness.CountCheckpointsAsync()).Should().Be(1);
+    }
+
     [Fact(DisplayName = "A changed payload under the same operation key conflicts")]
     public async Task PromoteAsync_WithChangedPayloadForSameOperation_ReturnsConflict()
     {
@@ -1041,6 +1098,39 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = cleanupSafe.Should().BeTrue();
     }
 
+    [Fact(DisplayName = "A truncated transport remains pending and succeeds on retry")]
+    public async Task PromoteAsync_WhenTransportIsTruncated_RetryKeepsCheckpointAndPinRecoverable()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        byte[] bytes = Encoding.UTF8.GetBytes(GcodeContent);
+        var source = new TruncatedThenCompleteContentSource(bytes);
+        GcodeArtifactPromotionRequest request = fixture.Request("promotion-transport-retry");
+
+        CalibrationApiResult<GcodePromotionDto> first = await _harness
+            .CreatePromoter(contentSource: source)
+            .PromoteAsync(request, fixture.Owner, CancellationToken.None);
+        GcodePromotionCheckpoint pending =
+            await _harness.GetCheckpointByOperationAsync(request.OperationId);
+        Artifact pinned = await _harness.GetArtifactAsync(fixture.ArtifactId);
+
+        _ = first.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        _ = first.Code.Should().Be("promotion_source_transport_unavailable");
+        _ = pending.State.Should().Be(GcodePromotionState.Pending);
+        _ = pending.FailureCode.Should().BeNull();
+        _ = pinned.PromotionCheckpointId.Should().Be(pending.Id);
+        _ = pinned.PromotionStartedAtUtc.Should().NotBeNull();
+        _ = pinned.PromotedAtUtc.Should().BeNull();
+
+        CalibrationApiResult<GcodePromotionDto> retry = await _harness
+            .CreatePromoter(contentSource: source)
+            .PromoteAsync(request, fixture.Owner, CancellationToken.None);
+
+        _ = retry.StatusCode.Should().Be(StatusCodes.Status201Created, retry.Code);
+        _ = (await _harness.GetCheckpointAsync(pending.Id)).State
+            .Should().Be(GcodePromotionState.Completed);
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+    }
+
     [Fact(DisplayName = "The promotion status route returns the caller's own promotion only")]
     public async Task GetPromotionAsync_IsScopedToTheOwningCaller()
     {
@@ -1333,22 +1423,37 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         public SlicerDbContext CreateSlicerContext() =>
             new(new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(_slicerConnectionString).Options);
 
-        public GcodeArtifactPromoter CreatePromoter(bool withArtifactRouting = true)
+        public GcodeArtifactPromoter CreatePromoter(
+            bool withArtifactRouting = true,
+            IPromotionArtifactContentSource? contentSource = null)
         {
             AppDbContext core = CreateCoreContext();
             SlicerContextFactory slicerFactory = new(_slicerConnectionString);
             IArtifactsRepository artifactsRepository = new EfArtifactsRepository(slicerFactory);
             ISliceJobRepository sliceJobs = new EfSliceJobRepository(CreateSlicerContext());
+            IArtifactsService artifactsService = CreateArtifactsService(artifactsRepository);
             return new GcodeArtifactPromoter(
                 core,
                 CreateGcodeFilesService(core),
                 CreateStoragePaths(),
                 ReconcilerState,
                 NullLogger<GcodeArtifactPromoter>.Instance,
-                withArtifactRouting ? CreateArtifactsService(artifactsRepository) : null,
+                withArtifactRouting
+                    ? contentSource ?? new LocalPromotionArtifactContentSource(artifactsService)
+                    : null,
                 withArtifactRouting ? artifactsRepository : null,
                 withArtifactRouting ? sliceJobs : null);
         }
+
+        public SliceArtifactLibraryService CreateSliceArtifactLibraryService() =>
+            new(
+                CreateCoreContext(),
+                CreatePromoter(),
+                new Mock<Microsoft.AspNetCore.SignalR.IHubContext<
+                    Farm.Infrastructure.Services.SignalR.PrinterHub>>().Object,
+                NullLogger<SliceArtifactLibraryService>.Instance,
+                CreateArtifactsRepository(),
+                new EfSliceJobRepository(CreateSlicerContext()));
 
         public EfArtifactsRepository CreateArtifactsRepository() =>
             new EfArtifactsRepository(new SlicerContextFactory(_slicerConnectionString));
@@ -1650,10 +1755,23 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 .SingleAsync(checkpoint => checkpoint.Id == checkpointId);
         }
 
+        public async Task<GcodePromotionCheckpoint> GetCheckpointByOperationAsync(string operationId)
+        {
+            await using AppDbContext core = CreateCoreContext();
+            return await core.GcodePromotionCheckpoints.AsNoTracking()
+                .SingleAsync(checkpoint => checkpoint.OperationId == operationId);
+        }
+
         public async Task<int> CountGcodeFilesAsync()
         {
             await using AppDbContext core = CreateCoreContext();
             return await core.GcodeFiles.CountAsync();
+        }
+
+        public async Task<int> CountCheckpointsAsync()
+        {
+            await using AppDbContext core = CreateCoreContext();
+            return await core.GcodePromotionCheckpoints.CountAsync();
         }
 
         public async Task<byte[]> ReadPromotedBytesAsync(Guid fileId)
@@ -1681,6 +1799,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             {
                 // Temporary test data is reclaimed by the operating system.
             }
+
         }
 
         private async Task SeedCalibrationContextAsync(
@@ -1806,6 +1925,32 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         {
             public SlicerDbContext CreateDbContext() =>
                 new(new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connectionString).Options);
+        }
+    }
+
+    private sealed class TruncatedThenCompleteContentSource(byte[] bytes)
+        : IPromotionArtifactContentSource
+    {
+        private int _calls;
+
+        public Task<PromotionArtifactContent?> OpenReadAsync(
+            Guid artifactId,
+            string operationKey,
+            long expectedSizeBytes,
+            CancellationToken cancellationToken)
+        {
+            _ = artifactId;
+            _ = operationKey;
+            cancellationToken.ThrowIfCancellationRequested();
+            int length = Interlocked.Increment(ref _calls) == 1
+                ? bytes.Length - 1
+                : bytes.Length;
+            Stream stream = new MemoryStream(bytes, 0, length, writable: false);
+            return Task.FromResult<PromotionArtifactContent?>(
+                PromotionArtifactContent.Create(
+                    stream,
+                    expectedSizeBytes,
+                    stream.DisposeAsync));
         }
     }
 }
