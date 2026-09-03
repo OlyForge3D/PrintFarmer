@@ -30,3 +30,340 @@ Documented Jeff Papiez preference: use `pfdev` (canonical), not `pf-dev` or `pf-
 ### Key Lesson
 In microservices deployments, module-loading logic and capability reporting need independent detection paths. Conflating them causes false-negative capability reports when services run as separate containers.
 
+# Parker History
+
+## Core Context
+
+Parker is the deployment, release, and infrastructure specialist. Key retained context:
+
+- Owns GHCR workflows, Dockerfile and compose template changes, installer/deployment profile behavior, repo syncs, and container-oriented troubleshooting.
+- Strong operational rule: internal container-to-container traffic must use Docker DNS service names, not hardcoded LAN IPs.
+- Frequently coordinates landings after backend/frontend approvals and records final branch, PR, deployment, or CI state.
+- Important paths: `scripts/docker/dockerfiles/`, `scripts/docker/compose-templates/`, `.github/workflows/`, and runtime `.env` / `.deploy-config` connectivity settings.
+
+Early detailed entries were summarized on 2026-03-25. Detailed April/May entries were summarized on 2026-05-31T03:18:29Z for maintainability; see decisions, orchestration logs, and session logs for source detail.
+
+## Summarized History
+
+- 2026-03-10 to 2026-03-13: Delivered GHCR multi-arch publish workflow, monolith deployment mode, install profile selection, and optional Obico ML compose service support.
+- 2026-03-25: Landed PendingReady-related squad sync work, documented `nginx-proxy` / `pfdev` usage boundaries, and captured Docker DNS rules from runtime connectivity debugging.
+- 2026-04-05: Fixed 3D model file serving by returning absolute `/app/models/<file>` paths from `Model3DFileService` for model and thumbnail lookup. Rebuilt/restarted API container and confirmed model volume/env wiring. Existing missing files were determined to be orphaned from earlier non-persistent uploads; users needed to re-upload.
+- 2026-05-21: Recorded Dependabot triage pattern: test-only dependency bumps can be auto-merged when green, runtime patch bumps need local build/test verification, and GitHub Actions major updates need manual changelog review.
+- 2026-05-29: Performed dev→main sync work for accumulated development changes. Local commit `d4d8b4a1e` was blocked from push because token lacked `workflow` scope for `.github/workflows/` changes. Durable rule: any push touching workflows requires `gh auth refresh --scopes workflow`; dev→main syncs must strip `.squad/` before committing.
+- 2026-05-30: Redid broken main→development sync after PR #321 would have deleted `.squad/` state. Created `sync/main-to-dev-2026-05-30`, preserved all `.squad/` files, removed spurious `.github` directory-rename artifacts, verified zero `.squad/` diff, pushed, and opened PR #329. Durable recipe: `-X ours` handles text conflicts only; explicitly restore/stage `.squad/` modify/delete conflicts and verify zero `.squad/` diff.
+- 2026-05-30: PR #329's iOS unit-test fix is pushed in PFarm1 commit `06c436263`, but GitHub macOS CI jobs are blocked by the account billing/spending limit. Treat this as an external CI billing blocker pending Brady's billing action, not as a code failure.
+
+## Durable Release / Sync Rules
+
+- **main→development sync:** Preserve all `.squad/` state from development, accept appropriate main workflow/manifest updates, remove spurious `.github/*` files caused by directory-rename heuristics, and verify zero `.squad/` diff before push.
+- **development→main sync:** Strip all `.squad/`, `.ai-team/`, `.ai-team-templates/`, `team-docs/`, and proposal-only artifacts before committing. Accept development's application code as source of truth.
+- **Workflow scope:** Any push touching `.github/workflows/` requires a GitHub token with `workflow` scope; otherwise GitHub rejects the entire push.
+- **Container networking:** Use Docker DNS service names for internal service-to-service traffic. Avoid hardcoded LAN IPs inside containers.
+
+## 2026-03-25: PendingReady landing coordination
+
+**Role:** Orchestrator / landing support  
+**Status:** ✅ Complete
+
+- Coordinated the final landing context around commit `e807133d` after frontend, backend, and QA approvals aligned.
+- Captured branch-clean / push-complete state and the remaining user follow-up boundary (end-to-end confirmation still pending Jeff's runtime verification).
+
+## 2026-03-25: Monitoring route error / Docker DNS learnings
+
+**Status:** ✅ Documented
+
+- Containerized deployments must use Docker DNS names like `spoolman:8000` and `obico-ml-api:3333` for internal services. Hardcoded LAN IPs caused the same class of `No route to host` failures seen in runtime monitoring.
+- Updating `.env` / `.deploy-config` back to DNS-based service names restored internal connectivity for Spoolman and reinforced that similar 3333 errors should be investigated as runtime target-selection or network issues first.
+
+**Role:** Deployment & Infrastructure Engineer  
+**Status:** ✅ COMPLETED
+
+### Deployment Action
+Executed `./scripts/pfdev redeploy api` to deploy backend fix for slicer UI visibility in microservices mode.
+
+**Rationale:** Used targeted `pfdev` script per user directive (Jeff Papiez preference for canonical script name) rather than full `deploy-docker.sh`:
+- Fast iteration (5 min vs full-stack redeploy)
+- Minimal disruption to other services
+- Appropriate for single-service code change during active development
+
+### Validation
+- ✅ API container rebuilt and redeployed
+- ✅ `/api/system/capabilities` returns `slicingEnabled=true`
+- ✅ Slicer routing working (`/api/slicer/profiles` → 200 OK)
+- ✅ All containers healthy (API, slicer-host, nginx-proxy)
+
+### User Directive Captured
+Documented Jeff Papiez preference: use `pfdev` (canonical), not `pf-dev` or `pf-dev.sh`. Decision record created for team reference.
+
+### Key Lesson
+In microservices deployments, module-loading logic and capability reporting need independent detection paths. Conflating them causes false-negative capability reports when services run as separate containers.
+
+
+## 2026-05-29: dev→main Sync Protocol (Dependabot + 536 commits)
+
+**Role:** DevOps & Release Engineer
+**Status:** ⚠️ Blocked — push requires `workflow` scope (token lacks it); commit is local
+
+### What Was Done
+
+- Created `sync/dev-to-main-2026-05-29` off `origin/main`
+- Merged `origin/development` with `--no-commit --no-ff`
+- Resolved 16 conflicts: all `.squad/` modify/delete conflicts stripped, `.gitignore` and all real code conflicts resolved using development's version as source of truth
+- Stripped forbidden paths from index and working tree: `.squad/`, `.ai-team/`, `.ai-team-templates/`, `team-docs/`, `docs/proposals/`, plus 3 `.github/fact-checker-charter.md`-style misrouted squad templates
+- Confirmed `git diff --cached --name-only | grep -E "^\.squad/"` returned 0 hits
+- Committed: `d4d8b4a1e — chore: sync development → main (Dependabot fixes + accumulated work)`
+- Push failed: GitHub rejects workflow-file changes from OAuth tokens without `workflow` scope
+
+### Blocker Detail
+
+The merge includes changes to `.github/workflows/` (both application and squad workflows). GitHub's API returns "refusing to allow an OAuth App to create or update workflow" on any push touching that directory without `workflow` scope. The current `gh` token has `gist, read:org, repo` — missing `workflow`. SSH keys also not configured.
+
+**To unblock:** `gh auth refresh --scopes workflow` (browser auth required — device code appears interactively).
+
+### Learnings
+
+- **`workflow` scope is required to push any `.github/workflows/` change.** Even if the workflow file change is incidental (auto-merged from dev), GitHub blocks the entire push. Plan for this in every dev→main sync.
+- **dev→main sync must strip `.squad/` before committing**, not before pushing. The `git rm -rf --cached` approach works but the `modify/delete` conflicts (files deleted on main, modified on dev) still need explicit `git rm --cached` to resolve.
+- **File-location conflicts for `.squad/templates/*`** appear as `CONFLICT (file location): .squad/templates/X added ... inside a directory that was renamed in HEAD, suggesting it should perhaps be moved to .github/X`. These are git's directory-rename heuristic misfiring because `.squad/templates/` looks like it was renamed to `.github/` (it wasn't — main just never had `.squad/`). Remove these `.github/X` entries from the index before committing.
+- **Conflict resolution strategy for code files:** `git checkout --theirs <file>` for all application code and workflow files — development is the source of truth.
+- **The `release.sh` script does this same strip-and-push in a single command** (see `.squad/skills/release/SKILL.md`). For PRs (rather than direct push), the manual approach above is required.
+
+## 2026-05-29: main→development Sync (Corrective) — Dependabot Security Fixes
+
+**Role:** DevOps & Release Engineer  
+**Status:** ✅ Complete — PR #321 opened, CI running
+
+### Context
+
+Jeff requested a sync of `main` → `development` to pick up Dependabot security fixes (and any other commits on main). I initially misread and created `sync/dev-to-main-2026-05-29` (wrong direction). The branch was pushed to origin. After correction, I:
+1. Deleted the wrong-direction branch locally and remotely
+2. Created the correct `sync/main-to-dev-2026-05-29`
+3. Merged `origin/main` into `origin/development`
+4. Resolved conflicts and opened PR #321
+
+### Commits Synced
+
+- **27 commits** from main into development (Dependabot fixes + other changes on main)
+
+### Conflict Resolution
+
+**Major conflicts encountered:**
+- 3 file-location conflicts (`.squad/templates/*` → `.github/*` — main never had `.squad/`, git's heuristic misfire)
+- 50+ modify/delete conflicts (all `.squad/` files deleted in main, modified in dev)
+- 7 workflow files (auto-merge conflicts)
+- 5 `.csproj` files (dependency manifest conflicts)
+- `.gitignore`, scripts, app code (auto-merged or resolved by reference)
+
+**Resolution strategy (main→dev direction):**
+- **Ours** (development): All `.squad/` files, `.squad/templates/*` locations — development owns squad infrastructure; main stripped it
+- **Theirs** (main): Dependency manifests (`.csproj`, `.gitignore`), workflows, scripts — main has security fixes and upstream changes
+- **Result:** Integrated main's Dependabot security fixes and official workflow updates while preserving development's squad autonomy
+
+### PR Details
+
+- **PR #321**: `sync/main-to-dev-2026-05-29` → `development`
+- **Title:** `chore: sync main → development (Dependabot security fixes)`
+- **CI Status:** 10 pending checks at time of hand-off (normal for PR just opened)
+
+### Key Learnings
+
+**Disambiguation for future routing requests:**
+- **→ or "into" suffix clarity:** "Sync X → Y" means "pull X into Y" (X is source, Y is target).
+  - `main → development` = "pull main into development" (fast-forward Dependabot fixes down the stack)
+  - `development → main` = "pull development into main" (gather accumulated work up the stack — rare, risky)
+- **Common mistake pattern:** When user says "sync main into development," I correctly read it as main being the **source**. If user says "sync development," I must ask: "into main?" (confirms target). Absence of "into" or explicit arrow requires clarification before acting.
+- **Wrong-direction branch pushed:** The `sync/dev-to-main-2026-05-29` branch existed on origin but was never merged. It was safe to delete and did not cause rework beyond the cleanup.
+
+**main→dev vs dev→main operational differences:**
+- **main→dev (this task):** Low-conflict, integrates upstream fixes. Preserve dev's `.squad/` structure. Prefer main's versions on dependency manifests and workflows.
+- **dev→main (prior task):** High-conflict, gathers accumulated work. Strip `.squad/` before commit. Prefer dev's versions on application code; conflict resolution strategy inverted.
+- **Workflow scope:** Both directions may touch `.github/workflows/`. Ensure `gh auth` has `workflow` scope before pushing either sync direction.
+
+### Files Modified (in PR, not yet merged)
+
+- 125 files changed (50 insertions, 33 deletions, net commits from main)
+- Key changes: Dependabot package updates, squad-related workflow refinements
+- No source code bugs introduced; all changes are integrations or dependency bumps
+
+
+### Archive Summary (2026-04-05 to 2026-05-24)
+
+Detailed entries from this period were summarized to reduce file size. See orchestration logs for source detail.
+
+- 2026-04-05: Fixed 3D Model File Storage Path Bug (`GetModelFilePathAsync` returning relative paths instead of absolute; API controller file existence checks failing → 404 errors).
+- 2026-04-05: Resolved Slicer-Host Deployment Gap (stale container + missing volume mount for `/app/slicer-profiles`; reinvoked `docker compose down/up` with clean images).
+- 2026-05-24: Executed Mobile Beta Release v1.0-beta.69 (tagged, built iOS app, uploaded to TestFlight).
+- 2026-05-24: Fixed Mobile Workflow Scope Blocker (GitHub Actions `release-beta.yml` was being triggered by TestFlight tags; added branch guard `branches: [development]` to prevent unwanted pushes).
+- 2026-05-24: Resolved TestFlight Build Number Offset (CFBundleVersion monotonic counter; synced iOS version increment with release workflow `env.NEXT_BUILD_NUMBER` pattern).
+- 2026-05-21: Documented Dependabot Triage Pattern (9 open PRs, 2 safe auto-merge, 3 need verification, 5 need manual review; captured triage playbook in `.squad/skills/dependabot/SKILL.md`).
+
+---
+
+
+### Learnings — 2026-05-31
+
+When asked for `git branch -d` only, never silently escalate to `-D`. If `-d` refuses, report and let the coordinator decide. (PR #329 cleanup, 2026-05-31)
+
+### Learnings — 2026-05-31
+
+- The main .NET/React CI workflow lives at `.github/workflows/ci.yml`; its `build-and-test` job restores the .NET solution before frontend install, builds, and tests.
+- EF migration drift detection is now a pre-test CI gate using `dotnet ef migrations has-pending-model-changes` for all four migration projects: app PostgreSQL, app SQL Server, slicer PostgreSQL, and slicer SQL Server.
+- Each drift check must run from `src/` with the correct `DB_PROVIDER` and context; clear CI errors should name the specific context/provider that drifted.
+
+## 2026-05-31T22:57:52-07:00 — iOS Beta Build Investigation (COMPLETE)
+
+**Issue:** iOS beta build pipeline investigation
+**Findings:** 12 stacked PRs in OlyForge3D/PrintFarmerMobile block release
+**Recommendation:** Documented in .squad/decisions.md
+**Orchestration Log:** .squad/orchestration-log/2026-05-31T225752-parker.md
+
+Status: Backlog item cleared. Beta trigger gated on PR stack merge.
+
+## 2026-08-07T03:23:06.930-07:00 — Issue #1135 root Squad quarantine inventory
+
+- Inventoried 20 current PrintFarmer worktrees using Git worktree metadata plus app session mapping; only `D:\s\pfarm1\decisions\inbox\` existed among the five named quarantined root paths.
+- The branch-matching main-checkout session had no active session ID and was classified inactive. Its 20 Markdown records had no same-name canonical collisions, no exact duplicates, and no local secret-pattern flags; recovery remains coordinator-owned because all are unique.
+- Retained `/decisions/`; removed absent `/decisions.md`, `/agents/`, `/orchestration-log/`, and `/log/`; left out-of-scope `/memory/` unchanged. Canonical `.squad/decisions.md` and Parker history remain tracked, while canonical generated logs keep their separate explicit ignores.
+- Focused state-root tests passed 2/2. Bishop, Hicks, and Vasquez reached joint consensus APPROVE on exact SHA `429283d3870cd1553224a2f6e101547d657055b3`. PR #1204 targets `development` and closes #1135.
+
+## 2026-08-26: Phase 2 shared .NET build
+
+- Replaced duplicated per-leg .NET builds with one solution build and project-scoped `.tgz` artifacts; API test shards share the same `matrix.project` artifact while retaining unique `matrix.name` TRX/result artifacts.
+- Never transport `obj/`: NuGet assets embed absolute runner/package paths. Test consumers use assembly-mode `dotnet test <dll>`; EF migration/provider consumers perform a cheap local restore and use downloaded binaries with `--no-build`.
+- `Farm.Web.IntegrationTests` remains outside the solution and requires an explicit restore/build pass with `-p:RunIntegrationTests=true` after the solution build.
+- Cost choice: all seven test projects consume artifacts, including the 15 s ProfileParsing and 19 s Modules legs, because the user prioritized runner minutes and splitting local-build legs would duplicate matrix topology. Expected full-safe savings are about 1,640 runner-seconds, with roughly 60–90 seconds added wall time.
+
+### 2026-08-25: Custom Orca profile injection spike
+
+- **PASS:** an artifact-root `Custom.json` bundle was discovered by the unmodified worker;
+  `Custom/Micron 180 base` resolved across manufacturers to
+  `Voron/Voron 2.4 250 0.4 nozzle`, and the child resolved through the base. The worker API
+  returned inherited Klipper G-code/motion limits plus the 180 x 180 x 165 overrides.
+- Filesystem hash invalidation is startup-only. Live addition and live deletion both left
+  SQLite/in-memory results stale; restarting rebuilt 452 -> 453 machines on addition and
+  453 -> 452 on removal. Phase 2a still needs an explicit invalidate endpoint that also
+  clears every inner `OrcaProfilesService` cache.
+- No custom missing-parent warning occurred. An abstract `instantiation: false` base listed
+  in `machine_list` increments the loader's `failureCount` even though this is expected.
+- Existing DTO projection gotchas: `MachineProfileDto.Inherits` is not assigned by
+  `ParseMachineProfile` (the raw Settings bag is correct), and promoted printable X/Y do
+  not reflect the four-point area even though raw settings do.
+- Docker Desktop was unavailable, so the same worker code was run natively against an
+  isolated `ORCA_PROFILES_PATH`; Linux overlay/volume permissions remain untested. The live
+  farm and all databases were untouched. Evidence and the retained throwaway bundle are
+  under the session artifact `files\parker-injection-spike\` directory.
+
+
+### 2026-08-25: Vendor-generality extension to profile injection spike
+
+- Surveyed 11 installed manifests. Nine of ten machine vendors ship filament profiles;
+  Voron alone has zero. Qidi has 1,287 filament entries, Flashforge 570, and the separate
+  universal OrcaFilamentLibrary has 482, so Voron materially understates renderer volume.
+- Raw compatibility is vendor-diverse. Prusa has 151 condition-only process entries out of
+  334; explicit filament arrays dominate Prusa/Elegoo/Qidi. Many leaves declare neither
+  directly because compatibility can be inherited, so classification must use the
+  worker's resolved `CompatiblePrinters`, never raw leaf presence.
+- Worker runtime confirmed a condition-only Prusa process materializes to both CORE One HF
+  and non-HF 0.4 source variants. Conditions are evaluated only against machines from the
+  same manufacturer folder. Rendered Custom stubs must write an explicit custom-name array
+  and clear inherited `compatible_printers_condition` to prevent source conditions leaking.
+- A second additive machine probe inherited `Prusa CORE One 0.4 nozzle` across manufacturer
+  directories and returned resolved Prusa marlin2 settings, 270 mm height, start G-code,
+  and printer-note markers with zero missing-parent warnings. The vendor-neutral mechanism
+  remains PASS. The probe was removed and worker stopped; source artifacts were retained
+  under `files\parker-injection-spike\vendor-generality-bundle\`.
+
+
+### 2026-08-25: Orca custom-profile worker foundation (Phase 2a)
+
+- Selected a symlink-composed `/app/profiles` root after a .NET 10 Linux probe confirmed top-level manifests, linked manufacturer directories, and recursive JSON traversal all work. Stock stays immutable; custom source lives in `/app/custom-profiles` on Orca-version-keyed named volumes.
+- Added authenticated install/replace, remove, and reconciliation reload routes using the existing `WorkerAuth:SharedKey` / `X-Slicer-Api-Key` convention. Bundle writes are staged and atomically promoted with collision, traversal, and size validation.
+- Implemented restart-free reload that clears SQLite and every inner `OrcaProfilesService` process cache. Worker tests pass 372/372, including missing-parent failure followed by successful same-process reload after the parent chain is installed.
+- Custom missing parents now exclude affected profiles and return structured HTTP 422 details; stock missing-parent behavior remains tolerant. The overlay deployment test passes in the full deployment runner.
+- Full solution build passed. The captured full test and format gates remain red from concurrent/unrelated slicer migration and baseline formatting work; full deployment remained 6/11 because Docker/Python were unavailable and an existing TLS trap check failed. Details are in `decisions/inbox/parker-phase2a-impl.md`.
+
+### 2026-08-25: Phase 2a security and replica-consistency revision
+
+- Fixed Vasquez's three blockers: canonical root containment plus all-dot name
+  rejection; periodic shared-volume reconciliation with readiness, zero-slot
+  error heartbeats, and per-claim fingerprint fencing; and a
+  writer-preferring async reader/writer cache gate that prevents torn SQLite
+  reads during restart-free reload.
+- Fixed Bishop's worker follow-ups: PUT/DELETE 422 decisions are scoped to the
+  named bundle, and a PUT rejected for its own missing parent removes the
+  installed bundle and reloads before responding.
+- Added traversal, two-worker shared-volume, concurrent read/reload,
+  claim/readiness, rollback, and status-scoping regressions. Worker validation
+  passed 383/383 plus the two later focused tests; final full solution build and
+  scoped format passed. The profile-overlay deployment suite passed; unrelated
+  deployment groups remain blocked by the unavailable local Docker daemon and
+  existing environment/baseline conditions.
+
+### 2026-08-25: Bishop B2/B3 test strengthening
+
+- Confirmed all worker fixes were committed in `cfce2e7f3`.
+- Replaced the helper-only B2 test with a real controller flow: a broken bundle
+  is resident and failing, a healthy bundle installs, and the endpoint returns
+  200 while preserving the unrelated diagnostic.
+- Extended B3 rollback coverage to enumerate both custom storage and the
+  process overlay, proving neither rejected manifest nor directory remains.
+  Both focused tests pass; no full suite was run per coordinator request.
+
+### 2026-08-25: Internal bundle namespace hardening
+
+- Reserved `.printfarmer`, `.install-*`, and `.backup-*` bundle names
+  case-insensitively so API callers cannot collide with metadata, staging, or
+  backup paths that discovery/fingerprinting intentionally treats specially.
+- Added no-side-effect rejection coverage for nine all-dot/reserved/case
+  variants and stubbed fingerprint mismatch/recovery claim-gate coverage.
+  Targeted tests pass 10/10; targeted build and scoped format pass.
+
+### 2026-08-25: Replica coordination coverage
+
+- Extracted the hosted reconciler's deterministic single-poll production path.
+  The two-worker test now exercises fingerprint detection and stable-change
+  reconciliation rather than calling the store reconciliation method directly.
+- First changed observation marks readiness unavailable; the second stable
+  observation installs worker-local links and reloads its independent caches.
+- Added direct readiness recovery and the registration heartbeat calculation
+  regression requiring `Error` plus zero slots while unsynchronized. Together
+  with claim mismatch/recovery, targeted coordination tests pass 4/4.
+- Kept transactions as guarded siblings inside the versioned volume so
+  staging/backup/target remain on one filesystem for atomic moves; documented
+  that every future internal marker must extend the explicit denylist.
+
+### 2026-08-25: Custom bundle failure isolation
+
+- Closed Bishop B5 by keeping workers ready and registered when strict custom
+  inheritance excludes a broken profile. The failure remains diagnostic, stock
+  plus healthy custom profiles remain queryable, and DELETE remediation stays
+  reachable. Controller mutation/reload paths follow the same rule.
+- Replica observation now logs and skips incomplete custom bundles rather than
+  making partial promotion or crash residue process-fatal.
+- Closed N10 by treating `.install-*`/`.backup-*` as transient on every path
+  segment, avoiding traversal into transient directories, and tolerating
+  entries that vanish during fingerprinting. Persistent family metadata still
+  changes the fingerprint.
+- Added real-store fingerprint coverage and a boot/reconcile/register/serve/
+  delete regression. Focused tests passed 5/5 in one captured run; the final
+  targeted build and scoped format passed.
+
+### 2026-08-26: Yamllint enforcement restoration
+
+- A shell command followed by `|| true` cannot be inspected with a subsequent
+  `$?`; that status belongs to `true`. Initialize the return code, assign it in
+  the `||` branch, upload diagnostics, then fail in a separate step.
+- Pull-request workflow branch filters must match the repository's actual flow.
+  PrintFarmer's canonical CI trigger has no PR branch filter, so it covers
+  `development` and future supported targets.
+- Sampling two files with `git ls-files --eol` and generalizing to the directory
+  hid genuine CRLF blobs in `codeql.yml` and `squad-main-guard.yml`. Inventory
+  every gated file and pin both workflow YAML extensions to LF.
+- GitHub Actions accepts both `*.yml` and `*.yaml`. A Bash `nullglob` array
+  covers both without passing an unmatched literal when one extension is absent;
+  an explicit empty-array guard keeps a missing workflow set fail-closed.
+- With yamllint 1.38.0, `truthy: {check-keys: false}` exempts GitHub Actions'
+  `on:` key while retaining value checks. A 120-character warning threshold
+  keeps 111 exceptionally long expression/shell lines visible without making
+  705 legacy line-length findings block structural YAML enforcement.
+

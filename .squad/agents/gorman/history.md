@@ -48,3 +48,22 @@
   - `mobile/PrintFarmer/Services/PrinterService.swift` — implementation with fallback
   - `mobile/PrintFarmerTests/Models/PrinterBackendCapabilitiesTests.swift` — 15 XCTest cases
 - **Build note**: `swiftc -typecheck` clean. Local `xcodebuild` unavailable (CoreSimulator out of date). Relying on CI. PR: https://github.com/OlyForge3D/PrintFarmerMobile/pull/2
+
+## 2026-09-03: iOS Navigation Redesign — Farm-Shape API (1 child issue)
+
+Assigned to backend API endpoint for farm-shape data exposure.
+
+**Epic**: #2410 — iOS Navigation Redesign
+**Assigned issue**: #2415 (farm-shape API endpoint)
+**Role**: Backend API — PlatformCapabilitiesDto.farmShape field, anonymous redaction, cache headers
+**Status**: PENDING (awaiting implementation start)
+
+## 2026-09-03: Epic #2410 — iOS Navigation Redesign (overview)
+
+**Direction**: A′ · Two Hats, adaptive shell architecture approved.
+- Simple Shell (default): 4 tabs
+- Two-Modes Shell (staffed): Floor + Oversight modes
+- Farm-shape API endpoint assigned to Gorman
+- 17 child issues, 8-agent team
+
+**Reference**: Decisions recorded in `.squad/decisions.md` (2026-09-03 entry).

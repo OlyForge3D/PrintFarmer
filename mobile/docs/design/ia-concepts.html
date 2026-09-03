@@ -1,0 +1,2199 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PrintFarmer iOS — navigation concepts</title>
+<style>
+/* ============================================================
+   PrintFarmer iOS · navigation concept mockups
+   Self-contained. No network dependencies.
+   ============================================================ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+:root {
+  --page-bg:      #080c18;
+  --page-bg-2:    #0c1120;
+  --page-panel:   #0f1524;
+  --page-line:    #1d2637;
+  --page-line-2:  #2a3549;
+  --page-text:    #e8ecf3;
+  --page-text-2:  #a3aec1;
+  --page-text-3:  #7b8698;
+  --accent:       #10b981;
+  --accent-dim:   #0b7a5b;
+  --amber:        #f5a623;
+  --red:          #f87171;
+
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 24px; --sp-6: 32px; --sp-7: 48px; --sp-8: 72px; --sp-9: 112px;
+
+  --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+        "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--page-bg);
+  color: var(--page-text);
+  font-family: var(--ui);
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--accent); }
+
+/* ---------- page shell ---------- */
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 var(--sp-5); }
+
+.topbar {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(8,12,24,.86);
+  backdrop-filter: saturate(160%) blur(14px);
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  border-bottom: 1px solid var(--page-line);
+}
+.topbar-in {
+  max-width: 1180px; margin: 0 auto; padding: 10px var(--sp-5);
+  display: flex; align-items: center; gap: var(--sp-4);
+}
+.topbar-mark {
+  font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+  white-space: nowrap; margin-right: auto;
+}
+.topbar-mark span { color: var(--page-text-3); font-weight: 400; }
+
+.jump { display: flex; gap: 2px; }
+.jump a {
+  display: block; padding: 7px 11px; border-radius: 8px;
+  font-size: 13px; font-weight: 500; color: var(--page-text-2);
+  text-decoration: none; white-space: nowrap;
+  transition: background 160ms ease, color 160ms ease;
+}
+.jump a:hover { background: var(--page-panel); color: var(--page-text); }
+
+.themeToggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--page-panel); border: 1px solid var(--page-line-2);
+  border-radius: 999px; padding: 3px;
+}
+.themeToggle button {
+  font: inherit; font-size: 12px; font-weight: 600;
+  padding: 5px 12px; min-height: 30px;
+  border: 0; border-radius: 999px; cursor: pointer;
+  background: transparent; color: var(--page-text-2);
+  transition: background 160ms ease, color 160ms ease;
+}
+.themeToggle button[aria-pressed="true"] { background: var(--accent); color: #04120d; }
+.themeToggle button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- masthead ---------- */
+
+.masthead { padding: var(--sp-9) 0 var(--sp-7); border-bottom: 1px solid var(--page-line); }
+.masthead h1 {
+  font-size: 68px; line-height: 1.02; letter-spacing: -0.035em;
+  font-weight: 700; margin: 0 0 var(--sp-5); max-width: 15ch;
+  text-wrap: balance;
+}
+.lede { font-size: 21px; line-height: 1.55; color: var(--page-text-2); max-width: 62ch; margin: 0; }
+.lede strong { color: var(--page-text); font-weight: 600; }
+
+.meta {
+  margin-top: var(--sp-6); display: flex; flex-wrap: wrap; gap: var(--sp-5);
+  font-size: 13px; color: var(--page-text-3);
+}
+.meta b { display: block; color: var(--page-text-2); font-weight: 600; margin-bottom: 2px; }
+
+/* ---------- generic sections ---------- */
+
+section { padding: var(--sp-8) 0; border-bottom: 1px solid var(--page-line); }
+section:last-of-type { border-bottom: 0; }
+
+h2 {
+  font-size: 38px; line-height: 1.12; letter-spacing: -0.028em;
+  font-weight: 700; margin: 0 0 var(--sp-4); text-wrap: balance;
+}
+h3 {
+  font-size: 19px; line-height: 1.35; letter-spacing: -0.012em;
+  font-weight: 650; margin: var(--sp-6) 0 var(--sp-2);
+}
+h3:first-child { margin-top: 0; }
+
+p { max-width: 68ch; }
+.dek { font-size: 19px; color: var(--page-text-2); max-width: 64ch; margin: 0 0 var(--sp-6); }
+
+/* ---------- diagnosis ---------- */
+
+.diag { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-7); margin-top: var(--sp-6); }
+@media (max-width: 900px) { .diag { grid-template-columns: 1fr; } }
+
+.ledger { font-size: 15px; }
+.ledger dt {
+  font-weight: 650; padding: var(--sp-3) 0 2px;
+  border-top: 1px solid var(--page-line-2);
+  display: flex; align-items: baseline; gap: var(--sp-2);
+}
+.ledger dt .n { font: 600 11px/1 var(--mono); color: var(--page-text-3); letter-spacing: .04em; }
+.ledger dd { margin: 0 0 var(--sp-3); color: var(--page-text-2); }
+.ledger dd em { font-style: normal; color: var(--amber); }
+
+.orphans { columns: 2; column-gap: var(--sp-5); font-size: 14px; line-height: 1.9; margin: var(--sp-3) 0 0; padding: 0; list-style: none; }
+@media (max-width: 620px) { .orphans { columns: 1; } }
+.orphans li { break-inside: avoid; color: var(--page-text-2); border-top: 1px solid var(--page-line); padding-top: 2px; }
+.orphans li b { color: var(--page-text); font-weight: 600; }
+
+.callout {
+  margin-top: var(--sp-6); padding: var(--sp-4) var(--sp-5);
+  background: var(--page-panel); border-radius: 14px;
+  border: 1px solid var(--page-line-2);
+  font-size: 15px; color: var(--page-text-2);
+}
+.callout b { color: var(--page-text); }
+
+/* ---------- concept block ---------- */
+
+.concept { padding: var(--sp-8) 0; border-bottom: 1px solid var(--page-line); }
+.concept-head { margin-bottom: var(--sp-6); }
+.concept-head h2 { margin-bottom: var(--sp-3); }
+.concept-head h2 .letter {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.thesis { font-size: 21px; line-height: 1.5; color: var(--page-text); max-width: 60ch; margin: 0; font-weight: 450; }
+
+.concept-body { display: grid; grid-template-columns: 393px 1fr; gap: var(--sp-8); align-items: start; }
+@media (max-width: 1080px) { .concept-body { grid-template-columns: 1fr; justify-items: center; } .concept-body .prose { max-width: 68ch; } }
+
+.stage { position: sticky; top: 84px; }
+@media (max-width: 1080px) { .stage { position: static; } }
+
+.stage-note {
+  margin-top: var(--sp-4); font-size: 12px; line-height: 1.6;
+  color: var(--page-text-3); text-align: center;
+}
+.stage-controls { margin-top: var(--sp-3); display: flex; justify-content: center; gap: var(--sp-2); }
+.ctl {
+  font: inherit; font-size: 12px; font-weight: 600;
+  padding: 8px 14px; min-height: 36px; cursor: pointer;
+  background: var(--page-panel); color: var(--page-text-2);
+  border: 1px solid var(--page-line-2); border-radius: 999px;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.ctl:hover { background: #141b2d; color: var(--page-text); border-color: #3a4761; }
+.ctl:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- prose blocks inside a concept ---------- */
+
+.prose > p { color: var(--page-text-2); font-size: 17px; }
+.prose > p strong { color: var(--page-text); font-weight: 600; }
+
+.map { margin: var(--sp-3) 0 0; font-size: 15px; }
+.map div {
+  display: grid; grid-template-columns: 132px 1fr; gap: var(--sp-4);
+  padding: 9px 0; border-top: 1px solid var(--page-line);
+}
+.map div > b { font-weight: 650; letter-spacing: -0.01em; }
+.map div > span { color: var(--page-text-2); }
+
+.tradeoffs { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); margin-top: var(--sp-5); }
+@media (max-width: 700px) { .tradeoffs { grid-template-columns: 1fr; } }
+.tradeoffs h3 { margin: 0 0 var(--sp-2); font-size: 15px; }
+.tradeoffs ul { margin: 0; padding-left: 1.15em; font-size: 15px; color: var(--page-text-2); }
+.tradeoffs li { margin-bottom: 6px; }
+.tradeoffs .win h3 { color: var(--accent); }
+.tradeoffs .cost h3 { color: var(--amber); }
+
+/* ---------- comparison ---------- */
+
+.matrix { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: var(--sp-5); }
+.matrix th, .matrix td { text-align: left; padding: 11px var(--sp-3); border-top: 1px solid var(--page-line); vertical-align: top; }
+.matrix thead th { border-top: 0; border-bottom: 1px solid var(--page-line-2); font-size: 13px; font-weight: 650; color: var(--page-text); }
+.matrix tbody th { font-weight: 550; color: var(--page-text); width: 210px; }
+.matrix td { color: var(--page-text-2); }
+.matrix .yes { color: var(--accent); font-weight: 600; }
+.matrix .part { color: var(--amber); font-weight: 600; }
+.wide-scroll { overflow-x: auto; }
+
+/* ============================================================
+   iPhone frame + screens
+   ============================================================ */
+
+.phone {
+  width: 393px; height: 852px; position: relative; flex: none;
+  border-radius: 56px; padding: 11px;
+  background: linear-gradient(160deg, #3b4457 0%, #171d2a 30%, #0e131e 60%, #333c4d 100%);
+  box-shadow: 0 2px 3px rgba(0,0,0,.7), 0 28px 60px -18px rgba(0,0,0,.85),
+              0 0 0 1px rgba(255,255,255,.06) inset;
+}
+.phone-screen {
+  position: relative; width: 100%; height: 100%;
+  border-radius: 45px; overflow: hidden;
+  background: var(--bg);
+  color: var(--tx);
+  font-size: 17px; line-height: 1.29;
+  display: flex; flex-direction: column;
+  isolation: isolate;
+}
+
+/* phone palettes — PrintFarmer tokens, with contrast-corrected status text */
+.phone-screen[data-theme="dark"] {
+  --bg: #0b1020; --bg2: #0f172a; --bg3: #111827;
+  --card: #0f172a; --card2: #151f33; --fill: #1c2739;
+  --sep: #243145; --sep2: #2f3d54;
+  --tx: #e5e7eb; --tx2: #9ca3af; --tx3: #7d8595;
+  --acc: #10b981; --acc-bg: #047857; --acc-soft: rgba(16,185,129,.16);
+  --blue: #60a5fa; --blue-bg: #1d4ed8;
+  --warn: #f5a623; --warn-bg: #b45309; --warn-soft: rgba(245,166,35,.17);
+  --err: #f87171; --err-bg: #b91c1c; --err-soft: rgba(248,113,113,.16);
+  --purple: #a78bfa; --teal: #22d3ee;
+  --bar: rgba(11,16,32,.82); --bar-line: #243145;
+  --shadow: 0 1px 2px rgba(0,0,0,.5), 0 8px 24px -10px rgba(0,0,0,.8);
+}
+.phone-screen[data-theme="light"] {
+  --bg: #ffffff; --bg2: #f8fafc; --bg3: #f1f5f9;
+  --card: #ffffff; --card2: #f8fafc; --fill: #eef2f7;
+  --sep: #e2e8f0; --sep2: #cbd5e1;
+  --tx: #1e293b; --tx2: #475569; --tx3: #64748b;
+  --acc: #047857; --acc-bg: #047857; --acc-soft: rgba(4,120,87,.13);
+  --blue: #1e40af; --blue-bg: #1d4ed8;
+  --warn: #92400e; --warn-bg: #b45309; --warn-soft: rgba(180,83,9,.14);
+  --err: #b91c1c; --err-bg: #b91c1c; --err-soft: rgba(185,28,28,.11);
+  --purple: #6d28d9; --teal: #0e7490;
+  --bar: rgba(255,255,255,.82); --bar-line: #e2e8f0;
+  --shadow: 0 1px 2px rgba(15,23,42,.06), 0 8px 22px -12px rgba(15,23,42,.22);
+}
+
+/* --- status bar --- */
+.sbar {
+  height: 54px; flex: none; position: relative; z-index: 6;
+  display: flex; align-items: flex-end; justify-content: space-between;
+  padding: 0 26px 4px; font-size: 15px; font-weight: 600;
+  letter-spacing: -0.01em; color: var(--tx);
+  font-variant-numeric: tabular-nums;
+  background: var(--bar);
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+}
+.sbar .glyphs { display: flex; align-items: center; gap: 5px; }
+.island {
+  position: absolute; top: 11px; left: 50%; transform: translateX(-50%);
+  width: 124px; height: 36px; border-radius: 20px; background: #000; z-index: 8;
+}
+.home-ind {
+  position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+  width: 140px; height: 5px; border-radius: 3px; background: var(--tx);
+  opacity: .32; z-index: 9;
+}
+
+/* --- nav bar --- */
+.nav {
+  flex: none; position: relative; z-index: 5;
+  background: var(--bar);
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  border-bottom: .5px solid var(--bar-line);
+}
+.nav-row {
+  min-height: 44px; display: flex; align-items: center; gap: var(--sp-2);
+  padding: 0 10px;
+}
+.nav-title { font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
+.nav-row .spacer { flex: 1; }
+.nav-large { padding: 4px 20px 8px; }
+.nav-large h1 {
+  margin: 0; font-size: 34px; line-height: 41px; font-weight: 700;
+  letter-spacing: -0.024em;
+}
+.nav-large .sub { font-size: 13px; color: var(--tx2); margin-top: -1px; }
+
+.navbtn {
+  min-width: 44px; min-height: 44px; padding: 0 8px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  background: none; border: 0; cursor: pointer; color: var(--acc);
+  font: inherit; font-size: 16px; border-radius: 10px;
+  transition: background 150ms ease;
+}
+.navbtn:hover { background: var(--fill); }
+.navbtn:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
+.navbtn.plain { color: var(--tx); }
+
+.serverchip {
+  display: inline-flex; align-items: center; gap: 5px;
+  min-height: 34px; padding: 0 11px; border-radius: 999px;
+  background: var(--acc-soft); color: var(--acc);
+  font-size: 14px; font-weight: 600; letter-spacing: -0.01em;
+  border: 0; cursor: pointer; font-family: inherit;
+}
+.serverchip .ic { width: 13px; height: 13px; }
+
+/* --- scroll body --- */
+.body {
+  flex: 1; overflow-y: auto; overscroll-behavior: contain;
+  padding-bottom: 108px;
+  scrollbar-width: thin; scrollbar-color: var(--sep2) transparent;
+}
+.body::-webkit-scrollbar { width: 5px; }
+.body::-webkit-scrollbar-thumb { background: var(--sep2); border-radius: 3px; }
+.pad { padding: 0 16px; }
+
+/* --- tab bar --- */
+.tabbar {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 7;
+  height: 83px; padding: 6px 4px 0;
+  display: flex; align-items: flex-start;
+  background: var(--bar);
+  backdrop-filter: blur(22px); -webkit-backdrop-filter: blur(22px);
+  border-top: .5px solid var(--bar-line);
+}
+.tab {
+  flex: 1; min-height: 49px; padding: 2px 0 0;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: none; border: 0; cursor: pointer; font-family: inherit;
+  color: var(--tx3); position: relative;
+  transition: color 150ms ease;
+}
+.tab[aria-selected="true"] { color: var(--acc); }
+.tab:focus-visible { outline: 2px solid var(--acc); outline-offset: -3px; border-radius: 8px; }
+.tab .ic { width: 25px; height: 25px; }
+.tab .lbl { font-size: 10px; font-weight: 550; letter-spacing: -0.01em; }
+.tab .dot {
+  position: absolute; top: 0; left: 50%; margin-left: 6px;
+  min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px;
+  background: var(--err-bg); color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 17px; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.tab .dot.warn { background: var(--warn-bg); }
+
+/* --- common iOS-ish parts --- */
+.ic { width: 20px; height: 20px; flex: none; display: inline-block; vertical-align: -3px; fill: none;
+      stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.ic.solid { fill: currentColor; stroke: none; }
+
+.sect-h {
+  font-size: 13px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase;
+  color: var(--tx3); padding: 22px 16px 7px;
+}
+.sect-h.tight { padding-top: 14px; }
+
+.card {
+  background: var(--card); border-radius: 14px; margin-bottom: 10px;
+  box-shadow: var(--shadow); overflow: hidden;
+}
+.card-pad { padding: 13px 14px; }
+
+.row {
+  display: flex; align-items: center; gap: 11px;
+  min-height: 48px; padding: 9px 14px; width: 100%;
+  background: none; border: 0; font-family: inherit; text-align: left;
+  color: inherit; cursor: pointer;
+  transition: background 140ms ease;
+}
+.row:hover { background: var(--fill); }
+.row:focus-visible { outline: 2px solid var(--acc); outline-offset: -2px; }
+.row + .row { border-top: .5px solid var(--sep); }
+.row .rt { flex: 1; min-width: 0; display: block; }
+.row .t1 { display: block; font-size: 16px; font-weight: 500; letter-spacing: -0.012em; }
+.row .t2 { display: block; font-size: 13px; color: var(--tx2); margin-top: 1px; }
+.row .chev { color: var(--tx3); width: 15px; height: 15px; }
+.row .lead, .gal-row .lead {
+  width: 30px; height: 30px; border-radius: 8px; flex: none;
+  display: grid; place-items: center; background: var(--fill); color: var(--tx2);
+}
+.row .lead .ic, .gal-row .lead .ic { width: 17px; height: 17px; }
+.row .lead.acc, .gal-row .lead.acc { background: var(--acc-soft); color: var(--acc); }
+.row .lead.warn, .gal-row .lead.warn { background: var(--warn-soft); color: var(--warn); }
+.row .lead.err, .gal-row .lead.err { background: var(--err-soft); color: var(--err); }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 21px; padding: 0 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 650; letter-spacing: .01em;
+  background: var(--fill); color: var(--tx2); white-space: nowrap;
+}
+.chip .ic { width: 11px; height: 11px; stroke-width: 2.2; }
+.chip.acc { background: var(--acc-soft); color: var(--acc); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.err { background: var(--err-soft); color: var(--err); }
+.chip.blue { color: var(--blue); background: color-mix(in srgb, var(--blue) 15%, transparent); }
+.chip.purple { color: var(--purple); background: color-mix(in srgb, var(--purple) 16%, transparent); }
+
+.count { font-variant-numeric: tabular-nums; }
+
+.segmented {
+  display: flex; padding: 2px; gap: 2px; border-radius: 9px;
+  background: var(--fill); margin: 0 16px 4px;
+}
+.segmented button {
+  flex: 1; min-height: 30px; border: 0; border-radius: 7px; cursor: pointer;
+  font-family: inherit; font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
+  background: transparent; color: var(--tx2);
+  transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+.segmented button[aria-pressed="true"] { background: var(--card); color: var(--tx); box-shadow: var(--shadow); }
+.segmented button:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+
+.lanes { display: flex; gap: 6px; padding: 4px 16px 10px; overflow-x: auto; scrollbar-width: none; }
+.lanes::-webkit-scrollbar { display: none; }
+.lane {
+  flex: none; min-height: 32px; padding: 0 13px; border-radius: 999px; cursor: pointer;
+  font-family: inherit; font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
+  background: var(--fill); color: var(--tx2); border: 0;
+  display: inline-flex; align-items: center; gap: 5px;
+  transition: background 150ms ease, color 150ms ease;
+}
+.lane[aria-pressed="true"] { background: var(--acc); color: #fff; }
+.phone-screen[data-theme="dark"] .lane[aria-pressed="true"] { color: #04120d; }
+.lane .n { font-variant-numeric: tabular-nums; opacity: .75; }
+
+.searchfield {
+  display: flex; align-items: center; gap: 7px; margin: 2px 16px 10px;
+  min-height: 36px; padding: 0 10px; border-radius: 10px;
+  background: var(--fill); color: var(--tx2); font-size: 17px;
+}
+.searchfield .ic { width: 16px; height: 16px; }
+
+.btn {
+  width: 100%; min-height: 50px; border-radius: 13px; border: 0; cursor: pointer;
+  font-family: inherit; font-size: 17px; font-weight: 600; letter-spacing: -0.01em;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  background: var(--acc-bg); color: #fff;
+  transition: filter 150ms ease;
+}
+.btn:hover { filter: brightness(1.08); }
+.btn:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.btn.sec { background: var(--fill); color: var(--tx); }
+.btn.warnb { background: var(--warn-bg); color: #fff; }
+.btn.small { min-height: 40px; font-size: 15px; }
+
+.prog { height: 5px; border-radius: 3px; background: var(--fill); overflow: hidden; }
+.prog i { display: block; height: 100%; border-radius: 3px; background: var(--acc); }
+.prog i.warn { background: var(--warn-bg); }
+
+.thumb {
+  width: 52px; height: 52px; border-radius: 10px; flex: none;
+  background: var(--fill); display: grid; place-items: center; color: var(--tx3);
+  overflow: hidden; position: relative;
+}
+.swatch { width: 22px; height: 22px; border-radius: 999px; flex: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); }
+
+.stale {
+  display: flex; align-items: center; gap: 7px; padding: 7px 16px;
+  background: var(--warn-soft); color: var(--warn);
+  font-size: 12px; font-weight: 600;
+}
+.stale .ic { width: 13px; height: 13px; }
+
+.empty { text-align: center; padding: 40px 28px; color: var(--tx2); }
+.empty .ic { width: 44px; height: 44px; stroke-width: 1.3; color: var(--tx3); }
+.empty h4 { margin: 12px 0 4px; font-size: 19px; font-weight: 650; color: var(--tx); }
+.empty p { margin: 0; font-size: 14px; max-width: none; }
+
+/* --- board (concept B) --- */
+.board { padding: 0 12px; }
+.brow {
+  display: grid; grid-template-columns: 62px 1fr auto; gap: 11px; align-items: center;
+  width: 100%; text-align: left; font-family: inherit; color: inherit;
+  background: var(--card); border: 0; cursor: pointer;
+  border-radius: 12px; padding: 11px 12px; margin-bottom: 7px;
+  box-shadow: var(--shadow);
+  transition: box-shadow 200ms ease, background 200ms ease;
+}
+.brow:hover { background: var(--card2); }
+.brow:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.brow .when {
+  font: 650 19px/1.05 var(--ui); letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums; text-align: right; color: var(--tx);
+}
+.brow .when small { display: block; font-size: 10px; font-weight: 600; color: var(--tx3); letter-spacing: .04em; margin-top: 3px; }
+.brow.now .when { color: var(--err); }
+.brow.soon .when { color: var(--warn); }
+.brow .who { display: block; font-size: 16px; font-weight: 600; letter-spacing: -0.012em; }
+.brow .what { display: block; font-size: 13px; color: var(--tx2); margin-top: 2px; }
+.brow .go { color: var(--tx3); width: 16px; height: 16px; }
+.brow.changed { box-shadow: 0 0 0 2px var(--warn), var(--shadow); background: var(--warn-soft); }
+.brow.changed .flag {
+  display: inline-flex; align-items: center; gap: 3px; margin-top: 5px;
+  font-size: 11px; font-weight: 700; color: var(--warn); letter-spacing: .02em;
+}
+.flag { display: none; }
+
+/* --- peepholes (concept C) --- */
+.peeps { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 16px; }
+.peep {
+  background: var(--card); border-radius: 16px; padding: 11px 12px 10px;
+  box-shadow: var(--shadow); border: 0; cursor: pointer; font-family: inherit;
+  text-align: left; color: inherit; overflow: hidden;
+  transition: transform 200ms cubic-bezier(.2,.8,.3,1), box-shadow 200ms ease;
+}
+.peep:hover { transform: translateY(-2px); box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 14px 28px -12px rgba(0,0,0,.7); }
+.peep:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+.peep-h { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 650; color: var(--tx2); letter-spacing: -0.005em; }
+.peep-h .ic { width: 14px; height: 14px; }
+.peep-n { display: block; font-size: 27px; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; margin: 3px 0 1px; }
+.peep-n.acc { color: var(--acc); } .peep-n.warn { color: var(--warn); } .peep-n.err { color: var(--err); }
+.peep-live { display: block; margin-top: 6px; border-top: .5px solid var(--sep); padding-top: 6px; }
+.peep-live div {
+  font-size: 11.5px; color: var(--tx2); line-height: 1.65;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.peep-live div::before { content: ""; display: inline-block; width: 4px; height: 4px; border-radius: 2px; background: var(--tx3); margin-right: 6px; vertical-align: 2px; }
+.peep.wide { grid-column: span 2; }
+
+/* --- workbench panels (concept D) --- */
+.panel {
+  background: var(--card); border-radius: 16px; margin: 0 16px 11px;
+  box-shadow: var(--shadow); overflow: hidden;
+}
+.panel-h {
+  display: flex; align-items: center; gap: 8px; padding: 11px 14px 8px;
+  font-size: 13px; font-weight: 650; color: var(--tx2); letter-spacing: -0.005em;
+}
+.panel-h .ic { width: 15px; height: 15px; }
+.panel-h .more { margin-left: auto; color: var(--acc); font-size: 13px; font-weight: 600; }
+.panel-b { padding: 0 14px 12px; }
+.grip { color: var(--tx3); }
+
+.gal-row { display: flex; align-items: center; gap: 11px; padding: 10px 14px; border-top: .5px solid var(--sep); }
+.gal-row:first-child { border-top: 0; }
+.gal-row .rt { flex: 1; min-width: 0; display: block; }
+.gal-row .t1 { display: block; font-size: 15px; font-weight: 550; }
+.gal-row .t2 { display: block; font-size: 12px; color: var(--tx2); margin-top: 1px; line-height: 1.4; }
+.add {
+  width: 30px; height: 30px; border-radius: 999px; flex: none; cursor: pointer;
+  border: 0; display: grid; place-items: center; background: var(--fill); color: var(--acc);
+  transition: background 150ms ease, color 150ms ease;
+}
+.add[aria-pressed="true"] { background: var(--acc-bg); color: #fff; }
+.add .ic { width: 15px; height: 15px; stroke-width: 2.4; }
+
+/* --- screens container --- */
+.screens { position: relative; flex: 1; display: flex; min-height: 0; }
+.screen { position: absolute; inset: 0; display: none; flex-direction: column; }
+.screen.on { display: flex; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  .peep:hover { transform: none; }
+}
+
+.footnote { font-size: 13px; color: var(--page-text-3); max-width: 70ch; }
+.footnote code { font-family: var(--mono); font-size: 12px; background: var(--page-panel); padding: 1px 5px; border-radius: 4px; }
+
+.skip { position: absolute; left: -9999px; }
+.skip:focus { left: var(--sp-5); top: var(--sp-2); z-index: 99; background: var(--accent); color: #04120d; padding: 10px 16px; border-radius: 8px; }
+</style>
+</head>
+<body>
+
+<a class="skip" href="#concepts">Skip to concepts</a>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8.5a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16s-2-1.5-2-6.5Z"/><path d="M13.7 19a2 2 0 0 1-3.4 0"/></symbol>
+<symbol id="i-printer" viewBox="0 0 24 24"><path d="M6 9V4h12v5"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v6H6z"/></symbol>
+<symbol id="i-checklist" viewBox="0 0 24 24"><path d="m3 6 1.8 1.8L8 4.5"/><path d="m3 15 1.8 1.8L8 13.5"/><path d="M11 6.5h10M11 16h10"/></symbol>
+<symbol id="i-scan" viewBox="0 0 24 24"><path d="M3 8V5.5A2.5 2.5 0 0 1 5.5 3H8M16 3h2.5A2.5 2.5 0 0 1 21 5.5V8M21 16v2.5a2.5 2.5 0 0 1-2.5 2.5H16M8 21H5.5A2.5 2.5 0 0 1 3 18.5V16"/><path d="M7 8v8M10.5 8v8M14 8v8M17 8v8"/></symbol>
+<symbol id="i-spool" viewBox="0 0 24 24"><ellipse cx="12" cy="6.5" rx="7" ry="3"/><path d="M5 6.5v11c0 1.7 3.1 3 7 3s7-1.3 7-3v-11"/><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></symbol>
+<symbol id="i-wrench" viewBox="0 0 24 24"><path d="M15.5 3a5.5 5.5 0 0 0-5 7.8L3.6 17.7a2 2 0 0 0 2.8 2.8l6.9-6.9A5.5 5.5 0 0 0 20 5.6l-3 3-2.6-2.6 3-3A5.5 5.5 0 0 0 15.5 3Z"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.6v2.2M12 19.2v2.2M4.4 4.4l1.6 1.6M18 18l1.6 1.6M2.6 12h2.2M19.2 12h2.2M4.4 19.6 6 18M18 6l1.6-1.6"/></symbol>
+<symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+<symbol id="i-chevL" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+<symbol id="i-chevD" viewBox="0 0 24 24"><path d="m5 9 7 7 7-7"/></symbol>
+<symbol id="i-filter" viewBox="0 0 24 24"><path d="M3.5 6h17M6.5 12h11M10 18h4"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></symbol>
+<symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.7"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/></symbol>
+<symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.2V12l3.2 2"/></symbol>
+<symbol id="i-box" viewBox="0 0 24 24"><path d="M3.5 7.6 12 3.2l8.5 4.4v8.8L12 20.8l-8.5-4.4z"/><path d="M3.5 7.6 12 12l8.5-4.4M12 12v8.8"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m4.5 12.5 5 5 10-11"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+<symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3.6 21.5 20H2.5z"/><path d="M12 9.5v4.2M12 17h.01"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s6.5-6.2 6.5-10.5a6.5 6.5 0 1 0-13 0C5.5 14.8 12 21 12 21Z"/><circle cx="12" cy="10.4" r="2.4"/></symbol>
+<symbol id="i-offline" viewBox="0 0 24 24"><path d="M3 4.5 21 20"/><path d="M5 12.5a10 10 0 0 1 4-2.4M2 8.8A15 15 0 0 1 7.5 5.9M22 8.8a15 15 0 0 0-8-3.6M19 12.5a10 10 0 0 0-2.6-1.8"/><path d="M12 19h.01"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.6 19 12 7 19.4z"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><path d="M8.5 5v14M15.5 5v14"/></symbol>
+<symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 7.5h3l1.6-2.4h6.8L17 7.5h3a1 1 0 0 1 1 1v9.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8.5a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.4"/></symbol>
+<symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3.2 13.9 9l5.8 1.9-5.8 1.9L12 18.6 10.1 12.8 4.3 10.9 10.1 9z"/><path d="M18.5 3.5v3M20 5h-3"/></symbol>
+<symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 3s5 4.2 5 8.6a5 5 0 0 1-10 0C7 9 9 7.5 9 7.5s.3 2.2 1.6 2.2C11.9 9.7 12 6.4 12 3Z"/></symbol>
+<symbol id="i-drop" viewBox="0 0 24 24"><path d="M12 3.2c3.2 3.6 6 6.6 6 9.7a6 6 0 0 1-12 0c0-3.1 2.8-6.1 6-9.7Z"/></symbol>
+<symbol id="i-list" viewBox="0 0 24 24"><path d="M4 6.5h.01M4 12h.01M4 17.5h.01M8.5 6.5H20M8.5 12H20M8.5 17.5H20"/></symbol>
+<symbol id="i-stack" viewBox="0 0 24 24"><path d="m12 3 9 4.5-9 4.5-9-4.5z"/><path d="m3 12.5 9 4.5 9-4.5"/><path d="m3 17 9 4.5L21 17"/></symbol>
+<symbol id="i-ellipsis" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-.7 4.5"/><path d="M20 4.5V11h-6"/></symbol>
+<symbol id="i-cal" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="16" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
+<symbol id="i-nfc" viewBox="0 0 24 24"><path d="M6.5 17.5a7.5 7.5 0 0 1 0-11M9.8 14.6a3.2 3.2 0 0 1 0-5.2M17.5 6.5a7.5 7.5 0 0 1 0 11M14.2 9.4a3.2 3.2 0 0 1 0 5.2"/></symbol>
+<symbol id="i-arrows" viewBox="0 0 24 24"><path d="M8 3v18M8 3 4.5 6.5M8 3l3.5 3.5M16 21V3M16 21l3.5-3.5M16 21l-3.5-3.5"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.8-6.5 10-6.5S22 12 22 12s-3.8 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="2.8"/></symbol>
+<symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4 18a9 9 0 1 1 16 0"/><path d="M12 18v-.5M15.5 9.5 12 14"/></symbol>
+<symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2 8.8a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.3 16a5.2 5.2 0 0 1 7.4 0M12 19.4h.01"/></symbol>
+<symbol id="i-cell" viewBox="0 0 24 24"><path d="M3 18v-3M9 18v-7M15 18v-11M21 18V4" stroke-width="2.6"/></symbol>
+<symbol id="i-batt" viewBox="0 0 24 24"><rect x="2" y="7" width="17" height="10" rx="3"/><path d="M21.5 11v2"/><rect x="4" y="9" width="12" height="6" rx="1.6" fill="currentColor" stroke="none"/></symbol>
+</defs></svg>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <div class="topbar-mark">PrintFarmer iOS <span>· navigation concepts</span></div>
+    <nav class="jump" aria-label="Concepts">
+      <a href="#diagnosis">Today</a>
+      <a href="#c-a">A · Two Hats</a>
+      <a href="#c-aa">A′ · Adaptive</a>
+      <a href="#c-b">B · Gate Board</a>
+      <a href="#c-c">C · Fleet Spine</a>
+      <a href="#c-d">D · Workbench</a>
+      <a href="#compare">Compare</a>
+    </nav>
+    <div class="themeToggle" role="group" aria-label="Mockup appearance">
+      <button type="button" data-theme-set="dark" aria-pressed="true">Dark</button>
+      <button type="button" data-theme-set="light" aria-pressed="false">Light</button>
+    </div>
+  </div>
+</header>
+
+<main>
+<div class="wrap">
+
+  <div class="masthead">
+    <h1>Five tabs, one hidden menu, and fourteen features with nowhere to live.</h1>
+    <p class="lede">PrintFarmer's iPhone app serves two people equally: the operator walking the
+      farm with a phone in one hand, and the owner checking whether the farm is healthy.
+      Right now both of them share one structure that was designed for neither.
+      <strong>Four ways to fix it, built and tappable.</strong></p>
+    <div class="meta">
+      <div><b>Surface</b>mobile/PrintFarmer — iPhone shell</div>
+      <div><b>Mode</b>Operate</div>
+      <div><b>Fidelity</b>Interactive concept, not shipping code</div>
+      <div><b>Data</b>Illustrative — no real farms, printers, or jobs</div>
+    </div>
+  </div>
+
+  <section id="diagnosis">
+    <h2>Where everything lives today</h2>
+    <p class="dek">Read from <code style="font-family:var(--mono);font-size:15px">ContentView.swift</code>,
+      <code style="font-family:var(--mono);font-size:15px">AttentionView.swift</code>, and the
+      <code style="font-family:var(--mono);font-size:15px">AppDestination</code> enum. Nothing here is a guess.</p>
+
+    <div class="diag">
+      <div>
+        <h3 style="margin-top:0">The five tabs, and what hides behind them</h3>
+        <dl class="ledger">
+          <dt><span class="n">1</span> Attention</dt>
+          <dd>The feed. Also the <em>only</em> place the <b>⋯</b> menu exists, and behind it,
+            as sheets: Notifications, Dashboard, Maintenance, Settings. Server switcher sits
+            top-<em>leading</em>.</dd>
+          <dt><span class="n">2</span> Farm</dt>
+          <dd>Printer list, search, status filter, location chips. Server switcher sits
+            top-<em>trailing</em> here — the opposite corner from Attention.</dd>
+          <dt><span class="n">3</span> Tasks</dt>
+          <dd>Shift plan. Disappears entirely when <code style="font-family:var(--mono);font-size:13px">shiftPlanEnabled</code> is off.</dd>
+          <dt><span class="n">4</span> Scan</dt>
+          <dd>Barcode, QR, NFC, bin scan, harvest, printer lookup, offline queue.
+            A top-level tab spent on an input method rather than a job.</dd>
+          <dt><span class="n">5</span> Inventory</dt>
+          <dd>Spools and Printed Parts, behind a segmented control.</dd>
+        </dl>
+      </div>
+
+      <div>
+        <h3 style="margin-top:0">No entry point in the tab bar at all</h3>
+        <ul class="orphans">
+          <li><b>Dashboard</b> ⋯ menu only</li>
+          <li><b>Maintenance</b> ⋯ menu only</li>
+          <li><b>Notifications</b> ⋯ menu only</li>
+          <li><b>Settings</b> ⋯ menu only</li>
+          <li><b>Dispatch Dashboard</b> unreachable</li>
+          <li><b>Job History</b> unreachable</li>
+          <li><b>Job Timeline</b> unreachable</li>
+          <li><b>Uptime &amp; Reliability</b> unreachable</li>
+          <li><b>Maintenance Analytics</b> unreachable</li>
+          <li><b>Predictive Insights</b> deep in printer detail</li>
+          <li><b>Advanced Printer Controls</b> deep in printer detail</li>
+          <li><b>Locations</b> unreachable</li>
+          <li><b>Offline Queue</b> deep in Scan</li>
+          <li><b>Manage Servers</b> three levels down</li>
+        </ul>
+
+        <div class="callout">
+          <b>The structural fault, stated plainly.</b> An overflow menu that belongs to
+          one screen is being used as the app's second navigation layer. Leave that tab
+          and the entire oversight half of the product vanishes. Every concept below
+          starts by deleting that menu.
+        </div>
+      </div>
+    </div>
+
+    <div class="callout" style="margin-top:var(--sp-5)">
+      <b>Two contrast defects found while building these.</b>
+      <code>pfError #dc2626</code> is identical in both themes and measures <b>3.9:1</b> as text
+      on the dark navy background — under the 4.5:1 floor. <code>pfWarning #d97706</code> measures
+      <b>3.2:1</b> as text on white in light mode. Both are fine as filled badges with white text;
+      both fail as label text. The mockups use lifted variants
+      (<code>#f87171</code> / <code>#b45309</code>) following the same adaptive pattern
+      <code>pfSuccess</code> already uses. Worth a separate fix regardless of which concept wins.
+    </div>
+  </section>
+
+  <div id="concepts"></div>
+
+  <!-- ============ CONCEPT A ============ -->
+  <article class="concept" id="c-a">
+    <div class="concept-head">
+      <h2><span class="letter">A</span> · Two Hats</h2>
+      <p class="thesis">The app has two jobs. Stop pretending it has one. A mode control in the
+        navigation bar swaps the entire shell between <b>Floor</b> and <b>Oversight</b>:
+        five complete destinations each, nothing in an overflow.</p>
+    </div>
+    <div class="concept-body">
+      <div class="stage">
+        <div class="phone" data-concept="a"></div>
+        <p class="stage-note">Tap <b>Floor / Oversight</b> in the nav bar. Both tab bars are live.</p>
+      </div>
+      <div class="prose">
+        <h3>Where everything lives</h3>
+        <div class="map">
+          <div><b>Floor tabs</b><span>Attention, Farm, Tasks, Scan, Inventory, exactly as they are today</span></div>
+          <div><b>Oversight tabs</b><span>Overview · Fleet · Jobs · Upkeep · Reports</span></div>
+          <div><b>Overview</b><span>Dashboard + Dispatch Dashboard, merged</span></div>
+          <div><b>Jobs</b><span>Job History, Job Timeline, job analytics</span></div>
+          <div><b>Upkeep</b><span>Maintenance, Maintenance Analytics, Predictive Insights</span></div>
+          <div><b>Reports</b><span>Uptime &amp; Reliability, filament coverage rollups, Locations</span></div>
+          <div><b>Both modes</b><span>Account button, same corner, always: Notifications, Settings, Manage Servers, sign out</span></div>
+          <div><b>Server switcher</b><span>One fixed position in every mode and on every screen</span></div>
+        </div>
+
+        <h3>Behaviour that matters</h3>
+        <p>The mode is remembered per device, but urgency crosses it: a critical failure raises
+          the badge in <b>both</b> tab bars, and tapping it from Oversight switches modes and lands
+          on the item. A mode is a lens, never a wall.</p>
+        <p>On iPad the mode control disappears entirely; the sidebar shows both groups at once
+          under <b>Floor</b> and <b>Oversight</b> headers, which is what the extra width is for.</p>
+        <p>When capability flags disable a destination, that mode simply has four tabs.
+          If a mode drops below two, it collapses and its survivors merge into the other.</p>
+
+        <div class="tradeoffs">
+          <div class="win">
+            <h3>What it buys</h3>
+            <ul>
+              <li>Every orphaned destination gets a real, top-level home.</li>
+              <li>The two-audience truth is stated in the interface instead of hidden in it.</li>
+              <li>Smallest possible change to the floor workflow — operators lose nothing.</li>
+              <li>Cheapest to build: it is a second <code style="font-family:var(--mono);font-size:14px">TabView</code>, not a new interaction model.</li>
+            </ul>
+          </div>
+          <div class="cost">
+            <h3>What it costs</h3>
+            <ul>
+              <li>Ten destinations to learn instead of five.</li>
+              <li>Modes strand people. Someone will look for Job History in Floor mode and conclude it is gone.</li>
+              <li>The solo maker who is both audiences at once flips modes all day.</li>
+              <li>Deep links must carry their mode or land on the wrong shell.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- ============ CONCEPT A-PRIME ============ -->
+  <article class="concept" id="c-aa">
+    <div class="concept-head">
+      <h2><span class="letter">A′</span> · Two Hats, adaptive</h2>
+      <p class="thesis">Two Hats, except the second hat only appears when there is a second person.
+        The app reads what the server already knows and ships the shell that matches. One operator
+        gets one shell with no mode to be lost in. A staffed farm gets the mode. Same destinations
+        either way, so growing is an expansion rather than a migration.</p>
+    </div>
+    <div class="concept-body">
+      <div class="stage">
+        <div class="phone" data-concept="p"></div>
+        <div class="stage-controls">
+          <button type="button" class="ctl" data-go-p="p-offer">The farm grew</button>
+          <button type="button" class="ctl" data-go-p="p-settings">Override</button>
+        </div>
+        <p class="stage-note">Starts in the solo shell: four tabs, <b>Oversight</b> as a tab rather
+          than a mode, and no scanner in the tab bar. Open <b>Inventory</b> to find it.</p>
+      </div>
+      <div class="prose">
+        <h3>What it derives from, all of which already exists</h3>
+        <div class="map">
+          <div><b>shiftPlanEnabled</b><span>The server capability flag that literally means "this farm runs shifts". Already gates the Tasks tab</span></div>
+          <div><b>Account count</b><span><code style="font-family:var(--mono);font-size:14px">GET /api/users</code> — one account is a solo shop</span></div>
+          <div><b>Role</b><span><code style="font-family:var(--mono);font-size:14px">farm_admin</code> decides whether this person should see Oversight at all</span></div>
+          <div><b>Locations</b><span>One bay is a workshop. Three bays is a farm</span></div>
+          <div><b>Override</b><span>Settings → Navigation. Automatic, Simple, or Two modes. Never asked during onboarding</span></div>
+        </div>
+
+        <h3>Five tabs at both scales, and the swap is the trick</h3>
+        <div class="map">
+          <div><b>Solo</b><span>Attention · Farm · Inventory · <b>Oversight</b></span></div>
+          <div><b>Farm, floor</b><span>Attention · Farm · <b>Tasks</b> · Inventory</span></div>
+          <div><b>Farm, oversight</b><span>Overview · Fleet · Jobs · Upkeep · Reports</span></div>
+        </div>
+        <p>A solo shop has shift planning off, so Tasks is already gone. That freed slot is exactly
+          where Oversight goes. Neither shell is crowded, neither is padded, and nobody had to
+          answer a question to get the right one.</p>
+
+        <h3>Scan is not a place, so it stopped being a tab</h3>
+        <p>Scanning is an input method. Spending a fifth of the most valuable navigation in the app
+          on one is the same mistake as putting a keyboard in the tab bar. It now lives in three
+          places instead, all of them where the work already is:</p>
+        <div class="map">
+          <div><b>In the task</b><span>The harvest item's primary action is <b>Scan bin</b>. Full-width, because that task genuinely is scanning. The operator never navigates to a scanner and then hunts for the job</span></div>
+          <div><b>Inventory</b><span>One icon in the navigation bar, where it stays put while the list scrolls</span></div>
+          <div><b>Outside the app</b><span>Action Button, Control Center, and Lock Screen. For gloved hands this beats any in-app button</span></div>
+        </div>
+        <p><strong>One affordance per context.</strong> An earlier pass of this mockup put a
+          navigation-bar scan icon <em>and</em> a full-width scan button on the same Inventory
+          screen: two controls, one action, one screen. That is what removing a tab does to your
+          nerve. The prominent button belongs to a task that is actually about scanning; the screen
+          gets the icon, which also survives scrolling.</p>
+        <p>One caution on <em>"put it in Inventory"</em>: today's <code style="font-family:var(--mono);font-size:14px">ScanView</code>
+          also drives the harvest flow, bin scanning, printer lookup, and the offline queue. Those
+          are Farm and Attention jobs, not inventory jobs. Inventory earns the persistent entry for
+          intake; the rest have to be reachable from the task, or the highest-frequency floor use
+          gets harder rather than easier.</p>
+        <p>Dropping it leaves <strong>four tabs</strong> on the floor. Bigger targets, less to scan,
+          and room for Oversight without the shell feeling full.</p>
+
+        <h3>Persistent chrome, stated as a rule</h3>
+        <p>The original diagnosis was that the server switcher sits top-leading on Attention and
+          top-trailing on Farm. Fixing that needs a rule rather than a habit, because a habit is
+          how it drifted in the first place, and an earlier pass of this very mockup dropped the
+          account button from Farm and stranded the Oversight screens with no way back to Floor.</p>
+        <div class="map">
+          <div><b>Leading</b><span>Server chip. Every tab root, identical position, because every screen shows one farm's data and you must always know which</span></div>
+          <div><b>Trailing</b><span>Account, <em>always last</em>. Screen actions such as filter, search, or scan sit to its left</span></div>
+          <div><b>Pinned</b><span>The mode control, on every root of both modes, so no screen is a dead end</span></div>
+          <div><b>Pushed screens</b><span>None of it. Back button and title take over, which is why Navigation has neither</span></div>
+        </div>
+        <p>Account survives in the navigation bar for the reason Attention does not: it is
+          low-frequency and terminal, which is exactly the profile iOS puts top-right on a tab root
+          in App Store, Music, and Photos. Attention is high-frequency, badged, and deep. Same
+          corner, opposite jobs.</p>
+
+        <h3>Why Attention stays in the tab bar</h3>
+        <p>Moving it up between the server chip and the account button is tempting for the same
+          reason it is risky: it is the move that produced the bug we started with. A navigation
+          bar belongs to <em>the screen you are on</em>. Put a top-level destination there and it
+          either has to be duplicated on every screen, or it vanishes the moment you leave, which is
+          precisely how Dashboard, Maintenance, and Settings ended up unreachable behind one screen's
+          overflow menu.</p>
+        <p>Three more things break. Attention is a destination with its own feed, filters, and
+          detail navigation, and iOS reserves navigation bars for actions on the current screen.
+          The badge would shrink from a system-standard, always-visible tab badge to a non-standard
+          one on a small glyph. And Attention is the floor operator's most frequent destination, so
+          it would move from the easiest one-handed reach on the phone to the hardest.</p>
+        <p>If the goal is <em>"see alerts from anywhere"</em>, the tab badge already does that on
+          every screen in the app. The nav bar would make it less visible, not more.</p>
+
+        <h3>Why onboarding is the wrong place to ask</h3>
+        <p>At first run the operator has never used the app, so <em>"how should the interface
+          accommodate you"</em> is unanswerable. The fact underneath it, how big this operation is,
+          the server already knows more accurately than any self-report. And an answer captured once
+          during setup is wrong permanently: the one-person shop that hires someone never reopens
+          onboarding.</p>
+        <p>So the upgrade arrives <strong>in context and once</strong>. When the farm crosses a
+          threshold, a second account, a second bay, shift planning switched on, Oversight offers to
+          become its own mode. One tap, dismissible, reversible in Settings.</p>
+
+        <h3>Two different things are called "advanced"</h3>
+        <p>The brief was that features are hard to find, so an opt-in that <em>hides</em> features
+          would rebuild the overflow menu as a preference pane. The split has to be honest:</p>
+        <div class="map">
+          <div><b>Secondary</b><span>Job History, Timeline, Uptime, Analytics. Never hidden. The layout changes their prominence, never their existence</span></div>
+          <div><b>Dangerous</b><span>Jog, preheat, home, z-offset, disable motors. A real opt-in, because misuse damages hardware or a running print</span></div>
+        </div>
+        <p>Only the second one earns a switch. Conflating them is how a product ends up gating the
+          manual and shipping the loaded gun.</p>
+
+        <div class="tradeoffs">
+          <div class="win">
+            <h3>What it buys</h3>
+            <ul>
+              <li>The common case, one owner-operator, never sees a mode at all.</li>
+              <li>Correct by default with zero questions asked, and self-correcting as the farm changes.</li>
+              <li>All fourteen orphans still get a home in both shells.</li>
+              <li>Growth expands the same structure instead of relocating it.</li>
+            </ul>
+          </div>
+          <div class="cost">
+            <h3>What it costs</h3>
+            <ul>
+              <li>Two shells to build, test, and screenshot, plus the threshold logic between them.</li>
+              <li>Derivation can be wrong. A solo owner running a 40-printer farm reads as staffed.</li>
+              <li>Needs an account-count endpoint the mobile client does not call today.</li>
+              <li>Anything automatic needs a visible, plain-language override or it feels arbitrary.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- ============ CONCEPT B ============ -->
+  <article class="concept" id="c-b">
+    <div class="concept-head">
+      <h2><span class="letter">B</span> · Gate Board</h2>
+      <p class="thesis">A farm is a departures board. One ranked, live list of everything the farm
+        needs, ordered by when it needs it. Rows rerank <b>in place</b> and hold their alert
+        until someone has actually seen them. Tapping a row hands you a pass: one screen
+        carrying the whole task, scanner included.</p>
+    </div>
+    <div class="concept-body">
+      <div class="stage">
+        <div class="phone" data-concept="b"></div>
+        <div class="stage-controls">
+          <button type="button" class="ctl" data-sim="b">Simulate a farm event</button>
+        </div>
+        <p class="stage-note">Tap any row to open its pass. The simulate button is a mockup
+          control, not part of the design.</p>
+      </div>
+      <div class="prose">
+        <h3>Where everything lives</h3>
+        <div class="map">
+          <div><b>Tabs</b><span>Board · Fleet · Inventory · Reports · You</span></div>
+          <div><b>Board</b><span>Attention, Tasks, harvests, runouts, maintenance due, as one ranked list filtered by lane</span></div>
+          <div><b>Lanes</b><span>All · Now · Printers · Filament · Parts · Upkeep</span></div>
+          <div><b>Pass</b><span>The full task: countdown, one primary action, the scanner, the camera, the history</span></div>
+          <div><b>Fleet</b><span>Printer list, detail, advanced controls, locations</span></div>
+          <div><b>Reports</b><span>Dashboard, Dispatch, Job History, Timeline, Uptime, Maintenance Analytics, Predictive</span></div>
+          <div><b>You</b><span>Notifications, Settings, Manage Servers, Offline Queue, account</span></div>
+        </div>
+
+        <h3>The one authored moment</h3>
+        <p>When a printer's state changes, its row <strong>does not disappear and come back
+          somewhere else</strong>. It travels to its new rank, keeps its identity, and holds an amber
+          ring until it is opened. Rank changes silently all day; a change you need to know about
+          announces itself and then waits. Reduce Motion swaps the travel for a held flash,
+          never for a silent jump.</p>
+        <p>Scan stops being a tab. It becomes what it actually is: an input method that appears
+          inside the task that needs it. The operator scans a bin <em>from</em> the harvest pass
+          instead of navigating to a scanner and then finding the job.</p>
+
+        <div class="tradeoffs">
+          <div class="win">
+            <h3>What it buys</h3>
+            <ul>
+              <li>The operator stops navigating. Work arrives in order.</li>
+              <li>One structure serves both audiences: the board is the floor, Reports is the office.</li>
+              <li>Change is impossible to miss and impossible to miss <em>twice</em>.</li>
+              <li>Capability gating is free: a disabled feature contributes no rows.</li>
+            </ul>
+          </div>
+          <div class="cost">
+            <h3>What it costs</h3>
+            <ul>
+              <li>Only as good as its ranking. A bad rank order turns the board into noise.</li>
+              <li>Needs real server work: a unified, ranked, cross-domain feed endpoint.</li>
+              <li>"Where is the printer list" becomes a genuine question for the first week.</li>
+              <li>Deferring something you have seen needs a real snooze model or the board nags.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- ============ CONCEPT C ============ -->
+  <article class="concept" id="c-c">
+    <div class="concept-head">
+      <h2><span class="letter">C</span> · Fleet Spine</h2>
+      <p class="thesis">Printers are the noun this product is about, so the fleet is home.
+        And nothing is ever hidden again, because every destination shows you what is inside it
+        before you go there. You cannot fail to discover a feature that is currently telling you
+        it has four things waiting.</p>
+    </div>
+    <div class="concept-body">
+      <div class="stage">
+        <div class="phone" data-concept="c"></div>
+        <p class="stage-note">Tap any live window to open it. <b>More</b> is the full gallery.</p>
+      </div>
+      <div class="prose">
+        <h3>Where everything lives</h3>
+        <div class="map">
+          <div><b>Tabs</b><span>Fleet · Attention · Scan · Inventory · More</span></div>
+          <div><b>Fleet</b><span>Printer cards, then a grid of live windows into every other destination</span></div>
+          <div><b>Live window</b><span>Name, current count, and the two or three actual rows inside it</span></div>
+          <div><b>More</b><span>Every remaining destination, each one showing its live contents</span></div>
+          <div><b>Identity chip</b><span>Server name in the same header position on all five tabs</span></div>
+          <div><b>Printer detail</b><span>Controls, Advanced, Predictive, history, reached through its printer where it belongs</span></div>
+        </div>
+
+        <h3>Why the preview is the whole idea</h3>
+        <p>Discoverability is not a labelling problem. Operators do not open <b>Maintenance</b>
+          to find out whether maintenance is due; they open it because they already suspect it is.
+          A window that reads <strong>2 due · Voron-02 nozzle, X1C-04 belt</strong> answers the
+          question without the trip, and earns the trip when the answer is interesting.</p>
+        <p>This also makes capability flags graceful: a disabled feature's window simply is not
+          in the grid. No empty tab, no placeholder, no explanation needed.</p>
+        <p>The cost is honest: every window is a fetch. This needs cheap summary endpoints
+          returning counts and a two-row preview, or the home screen becomes the slowest screen
+          in the app.</p>
+
+        <div class="tradeoffs">
+          <div class="win">
+            <h3>What it buys</h3>
+            <ul>
+              <li>Discovery by evidence rather than by memorising a menu.</li>
+              <li>The fleet — the thing both audiences actually care about — leads.</li>
+              <li>Familiar: it is still five tabs, so nothing about today's muscle memory breaks.</li>
+              <li>Degrades gracefully to plain rows when the summaries fail.</li>
+            </ul>
+          </div>
+          <div class="cost">
+            <h3>What it costs</h3>
+            <ul>
+              <li>New backend surface: cheap per-feature summary endpoints.</li>
+              <li>A long home screen. Scrolling past the fleet to reach the windows is real friction.</li>
+              <li>Oversight is present but never <em>foregrounded</em>; the owner still starts on the floor.</li>
+              <li>Live previews plus SignalR is a real performance budget, not a free one.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- ============ CONCEPT D ============ -->
+  <article class="concept" id="c-d">
+    <div class="concept-head">
+      <h2><span class="letter">D</span> · Workbench</h2>
+      <p class="thesis">Two audiences, one app, so stop choosing. Home is a stack of panels each
+        person composes themselves, drawn from a complete, readable catalogue of everything the app
+        can do. The catalogue <em>is</em> the discoverability fix: you find features by reading
+        the list of features.</p>
+    </div>
+    <div class="concept-body">
+      <div class="stage">
+        <div class="phone" data-concept="d"></div>
+        <p class="stage-note">Tap <b>Edit</b> to open the catalogue, or the <b>Search</b> tab.</p>
+      </div>
+      <div class="prose">
+        <h3>Where everything lives</h3>
+        <div class="map">
+          <div><b>Tabs</b><span>Workbench · Fleet · Scan · Search · You</span></div>
+          <div><b>Workbench</b><span>Pinned, reorderable panels. Ships with a Floor preset and an Oversight preset</span></div>
+          <div><b>Catalogue</b><span>Every destination, grouped, each with one line saying what it is for</span></div>
+          <div><b>Search</b><span>A real tab. Printers, spools, jobs, parts, locations, and settings by name</span></div>
+          <div><b>You</b><span>Notifications, Settings, Manage Servers, Offline Queue, account</span></div>
+          <div><b>Panels</b><span>Attention, Ready to harvest, Low spools, Maintenance due, Fleet strip, Dispatch queue, Today's jobs, Uptime</span></div>
+        </div>
+
+        <h3>Why a catalogue beats a menu</h3>
+        <p>An overflow menu is a list of names. A catalogue is a list of names <strong>with a
+          sentence explaining what each one does</strong>, and it is searchable. "Predictive
+          Insights" means nothing in a menu; <em>"Which printers are trending toward a failure"</em>
+          is findable. This is the only concept where a feature can be discovered by someone who
+          does not already know it exists.</p>
+        <p>Search as a tab is the escape hatch that makes the whole app addressable: type
+          <em>z-offset</em>, get Advanced Controls; type a spool colour, get the spool;
+          type <em>uptime</em>, get the report.</p>
+        <p>The risk is first run. An unconfigured workbench is the worst screen in any of these
+          four concepts, so the presets are not a nicety. They are load-bearing.</p>
+
+        <div class="tradeoffs">
+          <div class="win">
+            <h3>What it buys</h3>
+            <ul>
+              <li>Serves both audiences without a mode, and serves the person who is both.</li>
+              <li>The catalogue is a permanent, self-updating answer to "what can this app do".</li>
+              <li>Search makes every destination reachable in two taps regardless of layout.</li>
+              <li>New features ship into the catalogue instead of into an overflow menu.</li>
+            </ul>
+          </div>
+          <div class="cost">
+            <h3>What it costs</h3>
+            <ul>
+              <li>By far the most engineering: a panel system, persistence, reordering, presets.</li>
+              <li>Configurability is a tax on people who just want it to work.</li>
+              <li>Two users' apps no longer look alike — support and documentation get harder.</li>
+              <li>Panel layout must survive capability flags turning a pinned panel off.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <!-- ============ COMPARE ============ -->
+  <section id="compare">
+    <h2>Side by side</h2>
+    <p class="dek">The same questions asked of all four.</p>
+    <div class="wide-scroll">
+    <table class="matrix">
+      <thead>
+        <tr><th scope="col">&nbsp;</th><th scope="col">A · Two Hats</th><th scope="col">B · Gate Board</th><th scope="col">C · Fleet Spine</th><th scope="col">D · Workbench</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">Overflow menu deleted</th>
+          <td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+        <tr><th scope="row">All 14 orphans get a home</th>
+          <td class="yes">Yes, split across two modes</td><td class="yes">Yes: Reports and You</td><td class="yes">Yes: the More gallery</td><td class="yes">Yes: the catalogue</td></tr>
+        <tr><th scope="row">Serves the floor operator</th>
+          <td class="yes">Unchanged</td><td class="yes">Best: work arrives ranked</td><td class="yes">Strong</td><td class="part">Only once configured</td></tr>
+        <tr><th scope="row">Serves the owner</th>
+          <td class="yes">Best: a whole mode</td><td class="yes">Strong: the Reports tab</td><td class="part">Present but never leads</td><td class="yes">Strong: the Oversight preset</td></tr>
+        <tr><th scope="row">Discoverable without prior knowledge</th>
+          <td class="part">Names only</td><td class="part">Names only</td><td class="yes">Live previews</td><td class="yes">Catalogue with descriptions</td></tr>
+        <tr><th scope="row">Handles capability flags</th>
+          <td class="part">Mode may collapse</td><td class="yes">Rows just stop appearing</td><td class="yes">Window leaves the grid</td><td class="part">Pinned panel may vanish</td></tr>
+        <tr><th scope="row">iPad translation</th>
+          <td class="yes">Both groups in one sidebar</td><td class="yes">Board + pass in split view</td><td class="yes">Direct</td><td class="yes">Wider panel grid</td></tr>
+        <tr><th scope="row">Backend work required</th>
+          <td class="yes">None</td><td class="part">Unified ranked feed</td><td class="part">Summary endpoints</td><td class="part">Preferences sync (optional)</td></tr>
+        <tr><th scope="row">iOS build effort</th>
+          <td>Low</td><td>High</td><td>Medium</td><td>Highest</td></tr>
+        <tr><th scope="row">Risk if it is wrong</th>
+          <td>Mode confusion</td><td>Bad ranking = noise</td><td>Slow home screen</td><td>Bad first run</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>What to do with this</h3>
+    <p><b>A′ is the recommendation.</b> It keeps Two Hats' structure, which is what makes every
+      orphaned destination reachable, and removes the one thing that hurts your most common user:
+      a mode that a single owner-operator has to flip all day. The staffed farm still gets the mode
+      when the server says it is a staffed farm.</p>
+    <p>The other three are not runners-up so much as different bets. Averaging any of them together
+      produces the app that exists today. Pick the one whose <em>cost</em> you are willing to pay,
+      and the rest of the design follows from it.</p>
+    <p class="footnote" style="margin-top:var(--sp-5)">
+      Product truth captured in <code>mobile/PRODUCT.md</code>. Printer names, farm names, spool
+      colours, job names, counts, and timings in these mockups are illustrative and must be
+      replaced with real data before any of this is shown as a product claim. Rendered with the
+      system font stack — SF Pro on Apple hardware — using PrintFarmer's own palette tokens.
+    </p>
+  </section>
+
+</div>
+</main>
+
+<style>
+.sbar .ic { width: 17px; height: 17px; }
+.sbar .ic[data-n="cell"] { width: 18px; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.hstack { display: flex; align-items: center; gap: 8px; }
+.vstack { display: flex; flex-direction: column; }
+.acard { display: flex; gap: 11px; align-items: flex-start; }
+.acard .rt { flex: 1; min-width: 0; display: block; }
+.acard .who { display: block; font-size: 16px; font-weight: 650; letter-spacing: -0.014em; }
+.acard .what { display: block; font-size: 14px; color: var(--tx2); line-height: 1.35; margin-top: 2px; }
+.acts { display: flex; gap: 8px; margin-top: 11px; }
+.acts .btn { flex: 1; }
+.acts .btn.sec { flex: 0 0 96px; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+
+.pcard { padding: 12px 14px; }
+.pcard .top { display: flex; align-items: center; gap: 9px; }
+.pcard .nm { font-size: 16px; font-weight: 650; letter-spacing: -0.014em; flex: 1; }
+.pcard .jb { font-size: 13px; color: var(--tx2); margin-top: 8px; display: flex; justify-content: space-between; gap: 8px; }
+.pcard .jb .mono { font-size: 13px; }
+
+.ledgerline { display: flex; border-radius: 12px; overflow: hidden; background: var(--card); box-shadow: var(--shadow); }
+.ledgerline div { flex: 1; padding: 10px 4px; text-align: center; border-left: .5px solid var(--sep); }
+.ledgerline div:first-child { border-left: 0; }
+.ledgerline b { display: block; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.ledgerline span { font-size: 10px; font-weight: 600; color: var(--tx3); letter-spacing: .03em; text-transform: uppercase; }
+
+.kv { display: flex; justify-content: space-between; gap: 12px; padding: 11px 14px; font-size: 16px; }
+.kv + .kv { border-top: .5px solid var(--sep); }
+.kv span { color: var(--tx2); }
+.kv b { font-weight: 550; font-variant-numeric: tabular-nums; }
+
+.pass-seg { display: flex; border-top: .5px solid var(--sep); }
+.pass-seg div { flex: 1; padding: 10px 12px; border-left: .5px solid var(--sep); }
+.pass-seg div:first-child { border-left: 0; }
+.pass-seg dt { font-size: 10px; font-weight: 700; letter-spacing: .06em; color: var(--tx3); text-transform: uppercase; margin: 0; }
+.pass-seg dd { margin: 3px 0 0; font-size: 17px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+
+.scanblock {
+  margin: 0; padding: 16px 14px; text-align: center;
+  border-top: .5px dashed var(--sep2); background: var(--card2);
+}
+.scanblock .ic { width: 34px; height: 34px; color: var(--tx2); stroke-width: 1.4; }
+.scanblock .cap { font-size: 12px; color: var(--tx2); margin-top: 6px; }
+.scanblock .code { font-family: var(--mono); font-size: 15px; letter-spacing: .18em; margin-top: 4px; color: var(--tx); }
+
+.shot {
+  height: 132px; border-radius: 12px; background: var(--fill);
+  display: grid; place-items: center; color: var(--tx3); margin-bottom: 10px;
+  position: relative; overflow: hidden;
+}
+.shot .ic { width: 30px; height: 30px; stroke-width: 1.3; }
+.shot .tag {
+  position: absolute; left: 8px; bottom: 8px; font-size: 10px; font-weight: 700;
+  letter-spacing: .05em; color: var(--tx2); background: var(--card);
+  padding: 3px 7px; border-radius: 5px;
+}
+
+.presets { display: flex; gap: 7px; padding: 2px 16px 12px; }
+.presets button {
+  flex: 1; min-height: 40px; border-radius: 11px; border: 0; cursor: pointer;
+  font-family: inherit; font-size: 14px; font-weight: 600;
+  background: var(--fill); color: var(--tx);
+}
+.presets button[aria-pressed="true"] { background: var(--acc-bg); color: #fff; }
+
+.strip { display: flex; gap: 7px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.strip::-webkit-scrollbar { display: none; }
+.strip .s {
+  flex: none; width: 84px; padding: 9px 8px; border-radius: 10px; background: var(--fill);
+}
+.strip .s .n { font-size: 12.5px; font-weight: 650; letter-spacing: -0.015em; white-space: nowrap; }
+.strip .s .st { font-size: 11px; color: var(--tx2); margin-top: 2px; }
+.strip .s i { display: block; height: 3px; border-radius: 2px; margin-top: 6px; background: var(--acc); }
+.strip .s i.warn { background: var(--warn-bg); } .strip .s i.err { background: var(--err-bg); }
+.strip .s i.off { background: var(--sep2); }
+
+.offer {
+  margin: 4px 16px 14px; padding: 14px; border-radius: 16px;
+  background: var(--acc-soft);
+  border: 1px solid color-mix(in srgb, var(--acc) 34%, transparent);
+}
+.offer h4 { margin: 0 0 5px; font-size: 17px; font-weight: 650; letter-spacing: -0.014em; }
+.offer p { margin: 0 0 12px; font-size: 14px; line-height: 1.45; color: var(--tx2); max-width: none; }
+.offer .acts { margin-top: 0; }
+
+.sw {
+  width: 51px; height: 31px; border-radius: 999px; flex: none; position: relative;
+  background: var(--sep2); border: 0; cursor: pointer; transition: background 200ms ease;
+}
+.sw::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 27px; height: 27px;
+  border-radius: 999px; background: #fff; box-shadow: 0 1px 1px rgba(0,0,0,.14), 0 3px 8px rgba(0,0,0,.28);
+  transition: transform 220ms cubic-bezier(.2,.8,.3,1);
+}
+.sw[aria-checked="true"] { background: var(--acc-bg); }
+.sw[aria-checked="true"]::after { transform: translateX(20px); }
+.sw:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+
+.row.static { cursor: default; }
+.row.static:hover { background: none; }
+.tick { color: var(--acc); display: inline-flex; }
+.tick .ic { width: 17px; height: 17px; stroke-width: 2.4; }
+
+.foot { font-size: 12.5px; line-height: 1.5; color: var(--tx2); padding: 8px 18px 0; }
+.foot b { color: var(--tx); font-weight: 600; }
+</style>
+
+<script>
+(function () {
+  "use strict";
+  var REDUCED = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var ic = function (n, c) { return '<svg class="ic ' + (c || '') + '" data-n="' + n + '" aria-hidden="true"><use href="#i-' + n + '"/></svg>'; };
+  var esc = function (s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
+
+  /* ---------- shared chrome ---------- */
+  function sbar() {
+    return '<div class="sbar"><span>9:41</span><span class="glyphs">' +
+      ic('cell') + ic('wifi') + ic('batt') + '</span></div>';
+  }
+  function serverChip(name) {
+    return '<button class="serverchip" type="button">' + ic('server') + esc(name) + ic('chevD') + '</button>';
+  }
+  function navBtn(icon, label, attrs) {
+    return '<button class="navbtn" type="button" ' + (attrs || '') + '>' +
+      (icon ? ic(icon) : '') + (label ? '<span>' + esc(label) + '</span>' : '') + '</button>';
+  }
+  function navLarge(o) {
+    return '<div class="nav">' +
+      '<div class="nav-row">' + (o.left || '') + '<div class="spacer"></div>' + (o.right || '') + '</div>' +
+      (o.pinned || '') +
+      '<div class="nav-large"><h1>' + esc(o.title) + '</h1>' +
+      (o.sub ? '<div class="sub">' + esc(o.sub) + '</div>' : '') + '</div>' +
+      (o.below || '') + '</div>';
+  }
+  function navInline(o) {
+    return '<div class="nav"><div class="nav-row">' +
+      '<button class="navbtn" type="button" data-go="' + o.backTo + '">' + ic('chevL') + '<span>' + esc(o.back) + '</span></button>' +
+      '<div class="spacer"></div><div class="nav-title">' + esc(o.title) + '</div><div class="spacer"></div>' +
+      (o.right || '<span style="min-width:44px"></span>') +
+      '</div>' + (o.below || '') + '</div>';
+  }
+  function tabbar(items, active) {
+    return '<nav class="tabbar" role="tablist">' + items.map(function (t) {
+      return '<button class="tab" type="button" role="tab" aria-selected="' + (t.id === active) + '" data-go="' + t.id + '">' +
+        (t.badge ? '<span class="dot ' + (t.badgeKind || '') + '">' + t.badge + '</span>' : '') +
+        ic(t.icon) + '<span class="lbl">' + esc(t.label) + '</span></button>';
+    }).join('') + '</nav>';
+  }
+  function sect(t, tight) { return '<div class="sect-h' + (tight ? ' tight' : '') + '">' + esc(t) + '</div>'; }
+  function chip(t, k, icon) { return '<span class="chip ' + (k || '') + '">' + (icon ? ic(icon) : '') + esc(t) + '</span>'; }
+  function row(o) {
+    return '<button class="row" type="button"' + (o.go ? ' data-go="' + o.go + '"' : '') + '>' +
+      (o.icon ? '<span class="lead ' + (o.tone || '') + '">' + ic(o.icon) + '</span>' : '') +
+      (o.swatch ? '<span class="swatch" style="background:' + o.swatch + '"></span>' : '') +
+      '<span class="rt"><span class="t1">' + esc(o.t1) + '</span>' +
+      (o.t2 ? '<span class="t2">' + esc(o.t2) + '</span>' : '') + '</span>' +
+      (o.value ? '<span class="chip ' + (o.valueTone || '') + '">' + esc(o.value) + '</span>' : '') +
+      ic('chev', 'chev') + '</button>';
+  }
+  function card(inner) { return '<div class="card">' + inner + '</div>'; }
+  function group(rows) { return '<div class="pad"><div class="card">' + rows.join('') + '</div></div>'; }
+
+  /* ---------- illustrative content ---------- */
+  var FARM = 'Olympia Farm';
+
+  function attnCard(o) {
+    return card('<div class="card-pad"><div class="acard">' +
+      '<span class="lead ' + o.tone + '">' + ic(o.icon) + '</span>' +
+      '<span class="rt"><span class="who">' + esc(o.who) + '</span>' +
+      '<span class="what">' + esc(o.what) + '</span>' +
+      '<span class="chips">' + o.chips.map(function (c) { return chip(c[0], c[1]); }).join('') + '</span></span>' +
+      '</div><div class="acts">' +
+      '<button class="btn small' + (o.tone === 'err' ? '' : ' ') + '" type="button">' + esc(o.action) + '</button>' +
+      '<button class="btn small sec" type="button">Snooze</button></div></div>');
+  }
+  var ATTN = [
+    { tone: 'err', icon: 'warn', who: 'X1C-04 · Print failed', what: 'Spaghetti detected at layer 342 of bracket-v4', chips: [['Critical', 'err'], ['Bay A', '']], action: 'Clear failure' },
+    { tone: 'acc', icon: 'box', who: 'MK4-11 · Ready to harvest', what: 'hinge-left-x8 finished 6 minutes ago', chips: [['Harvest', 'acc'], ['8 parts', '']], action: 'Harvest' },
+    { tone: 'warn', icon: 'drop', who: 'Voron-02 · Filament runout', what: 'Galaxy Black PLA, slot 1 empty', chips: [['Runout', 'warn'], ['Bay B', '']], action: 'Guided swap' },
+    { tone: 'warn', icon: 'wrench', who: 'P1S-07 · Maintenance due', what: 'Nozzle replacement at 412 h', chips: [['Upkeep', 'purple']], action: 'Open task' }
+  ];
+
+  function printerCard(o) {
+    return card('<div class="pcard"><div class="top">' +
+      '<span class="nm">' + esc(o.name) + '</span>' + chip(o.state, o.tone) +
+      (o.cov ? chip(o.cov, 'blue', 'drop') : '') + '</div>' +
+      (o.pct != null ? '<div style="margin-top:9px" class="prog"><i class="' + (o.pbar || '') + '" style="width:' + o.pct + '%"></i></div>' : '') +
+      '<div class="jb"><span>' + esc(o.job) + '</span><span class="mono">' + esc(o.right) + '</span></div>' +
+      '</div>');
+  }
+  var PRINTERS = [
+    { name: 'X1C-04', state: 'Failed', tone: 'err', job: 'bracket-v4 · stopped at layer 342', right: '—', pct: 41, pbar: 'warn', cov: 'No match' },
+    { name: 'MK4-11', state: 'Complete', tone: 'acc', job: 'hinge-left-x8 · awaiting harvest', right: '100%', pct: 100 },
+    { name: 'Voron-02', state: 'Paused', tone: 'warn', job: 'gantry-clip ×24, paused on runout', right: '68%', pct: 68, pbar: 'warn' },
+    { name: 'P1S-07', state: 'Printing', tone: 'acc', job: 'bracket-v4 ×6 · 18 min left', right: '62%', pct: 62, cov: 'Covered' },
+    { name: 'A1-03', state: 'Idle', tone: '', job: 'No job assigned', right: '—' },
+    { name: 'MK4-12', state: 'Offline', tone: '', job: 'Last seen 2 h ago', right: '—' }
+  ];
+  function printerList(n) { return '<div class="pad">' + PRINTERS.slice(0, n).map(printerCard).join('') + '</div>'; }
+
+  /* ============================================================
+     CONCEPT A — Two Hats
+     ============================================================ */
+  var A_FLOOR = [
+    { id: 'a-attention', icon: 'bell', label: 'Attention', badge: 4 },
+    { id: 'a-farm', icon: 'printer', label: 'Farm', badge: 2, badgeKind: 'warn' },
+    { id: 'a-tasks', icon: 'checklist', label: 'Tasks' },
+    { id: 'a-scan', icon: 'scan', label: 'Scan' },
+    { id: 'a-inv', icon: 'spool', label: 'Inventory' }
+  ];
+  var A_OVER = [
+    { id: 'a-overview', icon: 'grid', label: 'Overview' },
+    { id: 'a-fleet', icon: 'printer', label: 'Fleet' },
+    { id: 'a-jobs', icon: 'list', label: 'Jobs' },
+    { id: 'a-upkeep', icon: 'wrench', label: 'Upkeep' },
+    { id: 'a-reports', icon: 'chart', label: 'Reports' }
+  ];
+  function modeBar(active) {
+    return '<div class="segmented" style="margin-bottom:6px">' +
+      '<button type="button" aria-pressed="' + (active === 'floor') + '" data-go="a-attention">Floor</button>' +
+      '<button type="button" aria-pressed="' + (active === 'over') + '" data-go="a-overview">Oversight</button>' +
+      '</div>';
+  }
+  var A_SCREENS = [
+    {
+      id: 'a-attention',
+      html: sbar() + navLarge({
+        left: serverChip(FARM), right: navBtn('person', '', ''),
+        pinned: modeBar('floor'), title: 'Attention', sub: '4 items · updated just now'
+      }) + '<div class="body"><div class="pad" style="padding-top:12px">' +
+        ATTN.map(attnCard).join('') + '</div></div>' + tabbar(A_FLOOR, 'a-attention')
+    },
+    {
+      id: 'a-farm',
+      html: sbar() + navLarge({
+        left: serverChip(FARM), right: navBtn('filter', '', '') + navBtn('person', '', ''),
+        pinned: modeBar('floor'), title: 'Farm', sub: '21 printers · 2 need you'
+      }) + '<div class="body">' +
+        '<div class="lanes"><button class="lane" type="button" aria-pressed="true">All<span class="n">21</span></button>' +
+        '<button class="lane" type="button" aria-pressed="false">Bay A<span class="n">8</span></button>' +
+        '<button class="lane" type="button" aria-pressed="false">Bay B<span class="n">9</span></button>' +
+        '<button class="lane" type="button" aria-pressed="false">Annex<span class="n">4</span></button></div>' +
+        printerList(5) + '</div>' + tabbar(A_FLOOR, 'a-farm')
+    },
+    {
+      id: 'a-overview',
+      html: sbar() + navLarge({
+        left: serverChip(FARM), right: navBtn('person', '', ''),
+        pinned: modeBar('over'), title: 'Overview', sub: 'Today · 34 jobs done, 2 failed'
+      }) + '<div class="body">' +
+        '<div class="pad" style="padding-top:10px"><div class="ledgerline">' +
+        '<div><b>14</b><span>Printing</span></div><div><b>3</b><span>Idle</span></div>' +
+        '<div><b>1</b><span>Failed</span></div><div><b>2</b><span>Offline</span></div>' +
+        '<div><b>1</b><span>Upkeep</span></div></div></div>' +
+        sect('Dispatch queue') +
+        group([
+          row({ icon: 'list', t1: 'bracket-v4 ×12', t2: 'Waiting for a PLA printer in Bay A', value: 'Next' }),
+          row({ icon: 'list', t1: 'gantry-clip ×24', t2: 'Blocked, no Galaxy Black PLA in stock', value: 'Blocked', valueTone: 'warn' }),
+          row({ icon: 'list', t1: 'hinge-right-x8', t2: 'Queued behind 2 jobs', value: '~40m' })
+        ]) +
+        sect('Today') +
+        '<div class="pad"><div class="card">' +
+        '<div class="kv"><span>Jobs completed</span><b>34</b></div>' +
+        '<div class="kv"><span>Jobs failed</span><b>2</b></div>' +
+        '<div class="kv"><span>Filament used</span><b>1.94 kg</b></div>' +
+        '<div class="kv"><span>Fleet uptime</span><b>96.4%</b></div>' +
+        '</div></div><div style="height:8px"></div></div>' + tabbar(A_OVER, 'a-overview')
+    },
+    {
+      id: 'a-reports',
+      html: sbar() + navLarge({
+        left: serverChip(FARM), right: navBtn('person', '', ''),
+        pinned: modeBar('over'), title: 'Reports'
+      }) + '<div class="body">' +
+        sect('Reliability', true) +
+        group([
+          row({ icon: 'gauge', t1: 'Uptime & Reliability', t2: 'Per-printer availability and failure rate', value: '96.4%', valueTone: 'acc' }),
+          row({ icon: 'chart', t1: 'Maintenance Analytics', t2: 'Intervals, overdue trend, cost per printer' }),
+          row({ icon: 'sparkle', t1: 'Predictive Insights', t2: 'Printers trending toward a failure', value: '3', valueTone: 'warn' })
+        ]) +
+        sect('Records') +
+        group([
+          row({ icon: 'clock', t1: 'Job History', t2: 'Every completed and failed job' }),
+          row({ icon: 'cal', t1: 'Job Timeline', t2: 'What ran when, printer by printer' }),
+          row({ icon: 'drop', t1: 'Filament Coverage', t2: 'Which jobs the fleet can currently print' }),
+          row({ icon: 'pin', t1: 'Locations', t2: 'Bays, shelves, and bins' })
+        ]) + '<div style="height:8px"></div></div>' + tabbar(A_OVER, 'a-reports')
+    }
+  ];
+
+  /* ============================================================
+     CONCEPT B — Gate Board
+     ============================================================ */
+  var B_TABS = [
+    { id: 'b-board', icon: 'list', label: 'Board', badge: 3 },
+    { id: 'b-fleet', icon: 'printer', label: 'Fleet' },
+    { id: 'b-inv', icon: 'spool', label: 'Inventory' },
+    { id: 'b-reports', icon: 'chart', label: 'Reports' },
+    { id: 'b-you', icon: 'person', label: 'You' }
+  ];
+  var BOARD = [
+    { k: 'x1c', when: 'NOW', unit: '9 min ago', tone: 'now', who: 'X1C-04', what: 'Print failed at layer 342 of bracket-v4' },
+    { k: 'mk11', when: 'NOW', unit: '6 min ago', tone: 'now', who: 'MK4-11', what: 'Ready to harvest · hinge-left-x8 · 8 parts', go: 'b-pass' },
+    { k: 'vor', when: '4', unit: 'min', tone: 'soon', who: 'Voron-02', what: 'Filament runs out · Galaxy Black PLA' },
+    { k: 'p1s', when: '18', unit: 'min', tone: '', who: 'P1S-07', what: 'Print completes · bracket-v4 ×6' },
+    { k: 'a103', when: '40', unit: 'min', tone: 'soon', who: 'A1-03', what: 'Spool below par · Matte Ivory PETG at 12%' },
+    { k: 'mk12', when: '2', unit: 'hrs', tone: '', who: 'MK4-12', what: 'Maintenance due · nozzle at 412 h' },
+    { k: 'bin', when: '—', unit: 'today', tone: '', who: 'Bin B-14', what: '24 printed parts waiting to be logged' },
+    { k: 'vor1', when: '—', unit: 'today', tone: '', who: 'Voron-01', what: 'Calibration needed after belt change' }
+  ];
+  function brow(r) {
+    return '<button class="brow ' + r.tone + '" type="button" data-row="' + r.k + '" data-go="' + (r.go || 'b-pass') + '">' +
+      '<span class="when" data-when>' + esc(r.when) + '<small>' + esc(r.unit) + '</small></span>' +
+      '<span><span class="who">' + esc(r.who) + '</span><span class="what" data-what>' + esc(r.what) + '</span>' +
+      '<span class="flag">' + ic('warn') + 'CHANGED · TAP TO ACKNOWLEDGE</span></span>' +
+      ic('chev', 'go') + '</button>';
+  }
+  var B_SCREENS = [
+    {
+      id: 'b-board',
+      html: sbar() + navLarge({
+        left: serverChip(FARM), right: navBtn('search', '', ''),
+        title: 'Board', sub: '21 printers · 8 things need you',
+        below: '<div class="lanes">' +
+          '<button class="lane" type="button" aria-pressed="true">All<span class="n">8</span></button>' +
+          '<button class="lane" type="button" aria-pressed="false">Now<span class="n">2</span></button>' +
+          '<button class="lane" type="button" aria-pressed="false">Printers<span class="n">4</span></button>' +
+          '<button class="lane" type="button" aria-pressed="false">Filament<span class="n">2</span></button>' +
+          '<button class="lane" type="button" aria-pressed="false">Parts<span class="n">1</span></button>' +
+          '<button class="lane" type="button" aria-pressed="false">Upkeep<span class="n">1</span></button></div>'
+      }) + '<div class="body"><div class="board" data-board>' + BOARD.map(brow).join('') + '</div></div>' +
+        tabbar(B_TABS, 'b-board')
+    },
+    {
+      id: 'b-pass',
+      html: sbar() + navInline({ back: 'Board', backTo: 'b-board', title: 'Harvest', right: navBtn('ellipsis', '', '') }) +
+        '<div class="body" style="padding-bottom:120px"><div class="pad" style="padding-top:14px">' +
+        '<div style="font-size:34px;font-weight:700;letter-spacing:-0.026em;line-height:1.06">MK4-11</div>' +
+        '<div style="font-size:17px;color:var(--tx2);margin:2px 0 14px">Finished 6 minutes ago · Bay A, shelf 2</div>' +
+        '<div class="shot">' + ic('camera') + '<span class="tag">LIVE SNAPSHOT</span></div>' +
+        '<div class="card" style="margin-bottom:12px">' +
+        '<div class="pass-seg"><div><dt>JOB</dt><dd>hinge-left-x8</dd></div><div><dt>PARTS</dt><dd>8</dd></div></div>' +
+        '<div class="pass-seg"><div><dt>MATERIAL</dt><dd style="font-size:15px">Galaxy Black PLA</dd></div>' +
+        '<div><dt>RUN TIME</dt><dd>2:14</dd></div></div>' +
+        '<div class="scanblock">' + ic('scan') +
+        '<div class="code">BIN B-14</div><div class="cap">Scan the bin to confirm where these parts went</div></div>' +
+        '</div>' +
+        '<button class="btn" type="button" style="margin-bottom:8px">' + ic('scan') + 'Scan bin</button>' +
+        '<div class="acts" style="margin-top:0">' +
+        '<button class="btn small sec" type="button" style="flex:1">Wrong bin</button>' +
+        '<button class="btn small sec" type="button" style="flex:1">Snooze 30 min</button></div>' +
+        '</div></div>' + tabbar(B_TABS, 'b-board')
+    },
+    {
+      id: 'b-reports',
+      html: sbar() + navLarge({ left: serverChip(FARM), right: navBtn('search', '', ''), title: 'Reports' }) +
+        '<div class="body">' + sect('Right now', true) +
+        '<div class="pad"><div class="ledgerline">' +
+        '<div><b>14</b><span>Printing</span></div><div><b>3</b><span>Idle</span></div>' +
+        '<div><b>1</b><span>Failed</span></div><div><b>2</b><span>Offline</span></div>' +
+        '<div><b>1</b><span>Upkeep</span></div></div></div>' +
+        sect('Oversight') +
+        group([
+          row({ icon: 'grid', t1: 'Dashboard', t2: 'Fleet health at a glance' }),
+          row({ icon: 'arrows', t1: 'Dispatch', t2: 'What is queued and what is blocking it', value: '5' }),
+          row({ icon: 'gauge', t1: 'Uptime & Reliability', t2: 'Availability and failure rate', value: '96.4%', valueTone: 'acc' }),
+          row({ icon: 'sparkle', t1: 'Predictive Insights', t2: 'Printers trending toward a failure', value: '3', valueTone: 'warn' })
+        ]) +
+        sect('Records') +
+        group([
+          row({ icon: 'clock', t1: 'Job History', t2: 'Completed and failed jobs' }),
+          row({ icon: 'cal', t1: 'Job Timeline', t2: 'What ran when' }),
+          row({ icon: 'chart', t1: 'Maintenance Analytics', t2: 'Intervals and overdue trend' }),
+          row({ icon: 'pin', t1: 'Locations', t2: 'Bays, shelves, and bins' })
+        ]) + '<div style="height:8px"></div></div>' + tabbar(B_TABS, 'b-reports')
+    },
+    {
+      id: 'b-you',
+      html: sbar() + navLarge({ left: serverChip(FARM), title: 'You', sub: 'jpapiez · farm_admin' }) +
+        '<div class="body">' +
+        sect('Farm', true) +
+        group([
+          row({ icon: 'server', t1: 'Manage Servers', t2: '3 registered · Olympia Farm active' }),
+          row({ icon: 'offline', t1: 'Offline Queue', t2: '3 actions waiting to send', value: '3', valueTone: 'warn' }),
+          row({ icon: 'bell', t1: 'Notifications', t2: 'Push, alerts, and history' })
+        ]) +
+        sect('App') +
+        group([
+          row({ icon: 'gear', t1: 'Settings', t2: 'Appearance, NFC tag format, account' }),
+          row({ icon: 'nfc', t1: 'NFC Tags', t2: 'Write format · OpenPrintTag' }),
+          row({ icon: 'eye', t1: 'About', t2: 'Version 1.0 · build 218' })
+        ]) + '<div style="height:8px"></div></div>' + tabbar(B_TABS, 'b-you')
+    }
+  ];
+
+  /* ============================================================
+     CONCEPT C — Fleet Spine
+     ============================================================ */
+  var C_TABS = [
+    { id: 'c-fleet', icon: 'printer', label: 'Fleet' },
+    { id: 'c-attn', icon: 'bell', label: 'Attention', badge: 4 },
+    { id: 'c-scan', icon: 'scan', label: 'Scan' },
+    { id: 'c-inv', icon: 'spool', label: 'Inventory' },
+    { id: 'c-more', icon: 'grid', label: 'More' }
+  ];
+  function peep(o) {
+    return '<button class="peep' + (o.wide ? ' wide' : '') + '" type="button" data-go="' + (o.go || 'c-maint') + '">' +
+      '<span class="peep-h">' + ic(o.icon) + esc(o.title) + '</span>' +
+      '<span class="peep-n ' + (o.tone || '') + '">' + esc(o.n) + '</span>' +
+      '<span class="peep-h" style="font-size:11px;font-weight:500;color:var(--tx3)">' + esc(o.unit) + '</span>' +
+      '<span class="peep-live">' + o.live.map(function (l) { return '<div>' + esc(l) + '</div>'; }).join('') + '</span>' +
+      '</button>';
+  }
+  var C_SCREENS = [
+    {
+      id: 'c-fleet',
+      html: sbar() + navLarge({
+        left: serverChip(FARM), right: navBtn('filter', '', '') + navBtn('search', '', ''),
+        title: 'Fleet', sub: '21 printers · 2 need you'
+      }) + '<div class="body">' + printerList(3) +
+        sect('Live everywhere else') +
+        '<div class="peeps">' +
+        peep({ icon: 'wrench', title: 'Maintenance', n: '2', unit: 'due this week', tone: 'warn', live: ['Voron-02 · nozzle at 412 h', 'X1C-04 · belt tension'] }) +
+        peep({ icon: 'spool', title: 'Spools', n: '4', unit: 'below par', tone: 'warn', live: ['Galaxy Black PLA · 8%', 'Matte Ivory PETG · 12%'] }) +
+        peep({ icon: 'arrows', title: 'Dispatch', n: '5', unit: 'queued', live: ['bracket-v4 ×12 · next', 'gantry-clip ×24 · blocked'] }) +
+        peep({ icon: 'box', title: 'Parts', n: '24', unit: 'to log', live: ['Bin B-14 · 24 parts', 'Bin A-03 · 6 parts'] }) +
+        peep({ icon: 'clock', title: 'Jobs today', n: '34', unit: 'done, 2 failed', tone: 'acc', live: ['bracket-v4 ×12 · 11:02', 'hinge-left-x8 · 10:41'] }) +
+        peep({ icon: 'gauge', title: 'Uptime', n: '96.4%', unit: 'last 7 days', tone: 'acc', live: ['MK4-12 · 61% worst', '3 printers trending down'] }) +
+        '</div><div style="height:14px"></div></div>' + tabbar(C_TABS, 'c-fleet')
+    },
+    {
+      id: 'c-more',
+      html: sbar() + navLarge({ left: serverChip(FARM), title: 'More', sub: 'Everything, showing what is inside it' }) +
+        '<div class="body">' +
+        '<div class="peeps" style="padding-top:6px">' +
+        peep({ icon: 'grid', title: 'Dashboard', n: '18', unit: 'printers active', tone: 'acc', live: ['14 printing · 3 idle', '1 failed · 2 offline'] }) +
+        peep({ icon: 'sparkle', title: 'Predictive', n: '3', unit: 'at risk', tone: 'warn', live: ['MK4-12 · extruder drift', 'Voron-01 · bed levelling'] }) +
+        peep({ icon: 'cal', title: 'Timeline', n: '41', unit: 'runs today', live: ['Bay A · 18 runs', 'Bay B · 23 runs'] }) +
+        peep({ icon: 'pin', title: 'Locations', n: '3', unit: 'bays · 14 bins', live: ['Bay A · 8 printers', 'Annex · 4 printers'] }) +
+        '</div>' +
+        sect('Records') +
+        group([
+          row({ icon: 'clock', t1: 'Job History', t2: '1,284 jobs · 2 failed today' }),
+          row({ icon: 'chart', t1: 'Maintenance Analytics', t2: '2 overdue · 6 due within 7 days' }),
+          row({ icon: 'drop', t1: 'Filament Coverage', t2: '3 queued jobs have no matching spool', value: '3', valueTone: 'warn' })
+        ]) +
+        sect('System') +
+        group([
+          row({ icon: 'bell', t1: 'Notifications', t2: '4 unread' }),
+          row({ icon: 'offline', t1: 'Offline Queue', t2: '3 actions waiting to send', value: '3', valueTone: 'warn' }),
+          row({ icon: 'server', t1: 'Manage Servers', t2: '3 registered · Olympia Farm active' }),
+          row({ icon: 'gear', t1: 'Settings', t2: 'Appearance, NFC, account' })
+        ]) + '<div style="height:8px"></div></div>' + tabbar(C_TABS, 'c-more')
+    },
+    {
+      id: 'c-maint',
+      html: sbar() + navInline({ back: 'Fleet', backTo: 'c-fleet', title: 'Maintenance', right: navBtn('filter', '', '') }) +
+        '<div class="body">' +
+        '<div class="stale">' + ic('offline') + 'Showing cached data from 4 minutes ago</div>' +
+        sect('Due this week', true) +
+        '<div class="pad">' +
+        card('<div class="card-pad"><div class="acard">' +
+          '<span class="lead warn">' + ic('wrench') + '</span><span class="rt">' +
+          '<span class="who">Voron-02 · Nozzle replacement</span>' +
+          '<span class="what">412 h since last change · interval is 400 h</span>' +
+          '<span class="chips">' + chip('Overdue 12 h', 'warn') + chip('Bay B', '') + '</span></span></div>' +
+          '<div class="acts"><button class="btn small" type="button">Start task</button>' +
+          '<button class="btn small sec" type="button">Defer</button></div></div>') +
+        card('<div class="card-pad"><div class="acard">' +
+          '<span class="lead warn">' + ic('wrench') + '</span><span class="rt">' +
+          '<span class="who">X1C-04 · Belt tension check</span>' +
+          '<span class="what">Due in 3 days · flagged by predictive insights</span>' +
+          '<span class="chips">' + chip('In 3 days', '') + chip('Bay A', '') + '</span></span></div>' +
+          '<div class="acts"><button class="btn small" type="button">Start task</button>' +
+          '<button class="btn small sec" type="button">Defer</button></div></div>') +
+        '</div>' +
+        sect('Later') +
+        group([
+          row({ icon: 'wrench', t1: 'MK4-11 · Lubricate rods', t2: 'Due in 11 days' }),
+          row({ icon: 'wrench', t1: 'P1S-07 · Bed levelling', t2: 'Due in 18 days' }),
+          row({ icon: 'chart', t1: 'Maintenance Analytics', t2: 'Intervals, overdue trend, cost per printer' })
+        ]) + '<div style="height:8px"></div></div>' + tabbar(C_TABS, 'c-fleet')
+    }
+  ];
+
+  /* ============================================================
+     CONCEPT D — Workbench
+     ============================================================ */
+  var D_TABS = [
+    { id: 'd-work', icon: 'stack', label: 'Workbench', badge: 4 },
+    { id: 'd-fleet', icon: 'printer', label: 'Fleet' },
+    { id: 'd-scan', icon: 'scan', label: 'Scan' },
+    { id: 'd-search', icon: 'search', label: 'Search' },
+    { id: 'd-you', icon: 'person', label: 'You' }
+  ];
+  function panel(o) {
+    return '<div class="panel"><div class="panel-h">' + ic(o.icon) + esc(o.title) +
+      '<span class="more">' + esc(o.more) + '</span></div>' + o.body + '</div>';
+  }
+  function miniRow(a, b, tone, swatch) {
+    return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-top:.5px solid var(--sep)">' +
+      (swatch ? '<span class="swatch" style="width:16px;height:16px;background:' + swatch + '"></span>' : '') +
+      '<span style="flex:1;font-size:14px;font-weight:500">' + esc(a) + '</span>' +
+      '<span class="chip ' + (tone || '') + '">' + esc(b) + '</span></div>';
+  }
+  function galRow(o) {
+    return '<div class="gal-row"><span class="lead ' + (o.tone || '') + '">' + ic(o.icon) + '</span>' +
+      '<span class="rt"><span class="t1">' + esc(o.t1) + '</span><span class="t2">' + esc(o.t2) + '</span></span>' +
+      '<button class="add" type="button" aria-pressed="' + (o.on ? 'true' : 'false') + '" aria-label="Add ' + esc(o.t1) + ' to workbench">' +
+      ic(o.on ? 'check' : 'plus') + '</button></div>';
+  }
+  var D_SCREENS = [
+    {
+      id: 'd-work',
+      html: sbar() + navLarge({
+        left: serverChip(FARM), right: navBtn('', 'Edit', 'data-go="d-gallery"'),
+        title: 'Workbench', sub: 'Floor preset · 5 panels'
+      }) + '<div class="body">' +
+        panel({
+          icon: 'bell', title: 'Attention', more: 'See all 4',
+          body: '<div class="panel-b" style="padding-top:2px">' +
+            miniRow('X1C-04 · Print failed', 'Critical', 'err') +
+            miniRow('Voron-02 · Filament runout', 'Runout', 'warn') +
+            miniRow('P1S-07 · Maintenance due', 'Upkeep', 'purple') + '</div>'
+        }) +
+        panel({
+          icon: 'box', title: 'Ready to harvest', more: 'Open',
+          body: '<div class="panel-b" style="padding-top:2px">' +
+            miniRow('MK4-11 · hinge-left-x8', '8 parts', 'acc') +
+            miniRow('A1-03 · spacer-ring ×16', '16 parts', 'acc') + '</div>'
+        }) +
+        panel({
+          icon: 'spool', title: 'Low spools', more: 'Inventory',
+          body: '<div class="panel-b" style="padding-top:2px">' +
+            miniRow('Galaxy Black PLA', '8%', 'err', '#101317') +
+            miniRow('Matte Ivory PETG', '12%', 'warn', '#efe7d6') +
+            miniRow('Signal Orange ABS', '19%', 'warn', '#e8590c') + '</div>'
+        }) +
+        panel({
+          icon: 'printer', title: 'Fleet', more: '21 printers',
+          body: '<div class="panel-b" style="padding-top:4px"><div class="strip">' +
+            '<div class="s"><div class="n">X1C-04</div><div class="st">Failed</div><i class="err"></i></div>' +
+            '<div class="s"><div class="n">MK4-11</div><div class="st">Complete</div><i></i></div>' +
+            '<div class="s"><div class="n">Voron-02</div><div class="st">Paused</div><i class="warn"></i></div>' +
+            '<div class="s"><div class="n">P1S-07</div><div class="st">62%</div><i></i></div>' +
+            '<div class="s"><div class="n">MK4-12</div><div class="st">Offline</div><i class="off"></i></div>' +
+            '</div></div>'
+        }) +
+        '<div class="pad"><button class="btn sec" type="button" data-go="d-gallery">' + ic('plus') + 'Add a panel</button></div>' +
+        '<div style="height:14px"></div></div>' + tabbar(D_TABS, 'd-work')
+    },
+    {
+      id: 'd-gallery',
+      html: sbar() + navInline({ back: 'Workbench', backTo: 'd-work', title: 'Add to Workbench' }) +
+        '<div class="body">' +
+        '<div style="height:10px"></div><div class="searchfield">' + ic('search') + 'Search all features</div>' +
+        '<div class="presets"><button type="button" aria-pressed="true">Floor</button>' +
+        '<button type="button" aria-pressed="false">Oversight</button>' +
+        '<button type="button" aria-pressed="false">Everything</button></div>' +
+        sect('On the floor', true) +
+        '<div class="pad"><div class="card">' +
+        galRow({ icon: 'bell', tone: 'err', t1: 'Attention', t2: 'Everything the farm needs from you right now', on: true }) +
+        galRow({ icon: 'box', tone: 'acc', t1: 'Ready to harvest', t2: 'Finished plates waiting to be cleared', on: true }) +
+        galRow({ icon: 'spool', tone: 'warn', t1: 'Low spools', t2: 'Filament below the level you set as par', on: true }) +
+        galRow({ icon: 'checklist', t1: 'Shift tasks', t2: 'The plan for this shift, in order' }) +
+        '</div></div>' +
+        sect('Oversight') +
+        '<div class="pad"><div class="card">' +
+        galRow({ icon: 'arrows', t1: 'Dispatch queue', t2: 'What is queued next and what is blocking it' }) +
+        galRow({ icon: 'gauge', t1: 'Uptime & Reliability', t2: 'How often each printer is actually available' }) +
+        galRow({ icon: 'sparkle', t1: 'Predictive Insights', t2: 'Which printers are trending toward a failure' }) +
+        galRow({ icon: 'chart', t1: 'Maintenance Analytics', t2: 'Service intervals, overdue trend, cost per printer' }) +
+        '</div></div>' +
+        sect('Records') +
+        '<div class="pad"><div class="card">' +
+        galRow({ icon: 'clock', t1: 'Job History', t2: 'Every job the farm has run, with its outcome' }) +
+        galRow({ icon: 'cal', t1: 'Job Timeline', t2: 'What ran when, printer by printer' }) +
+        galRow({ icon: 'pin', t1: 'Locations', t2: 'Bays, shelves, and the bins parts get logged into' }) +
+        '</div></div><div style="height:14px"></div></div>' + tabbar(D_TABS, 'd-work')
+    },
+    {
+      id: 'd-search',
+      html: sbar() + '<div class="nav"><div class="nav-row" style="padding:4px 10px 0"><div class="nav-title">Search</div></div>' +
+        '<div class="searchfield" style="margin-top:8px;color:var(--tx)">' + ic('search') + 'nozzle' +
+        '<span style="margin-left:auto;color:var(--tx3)">' + ic('x') + '</span></div></div>' +
+        '<div class="body">' +
+        sect('Needs you now', true) +
+        group([
+          row({ icon: 'wrench', tone: 'warn', t1: 'Voron-02 · Nozzle replacement', t2: 'Overdue by 12 h, maintenance task', value: 'Task' })
+        ]) +
+        sect('Features') +
+        group([
+          row({ icon: 'wrench', t1: 'Maintenance', t2: 'Service tasks, intervals, and overdue printers' }),
+          row({ icon: 'flame', t1: 'Advanced Printer Controls', t2: 'Jog, preheat, home, z-offset, disable motors' }),
+          row({ icon: 'chart', t1: 'Maintenance Analytics', t2: 'How often nozzles and belts actually fail' })
+        ]) +
+        sect('Printers') +
+        group([
+          row({ icon: 'printer', t1: 'X1C-04', t2: '0.4 mm hardened steel · 88 h since change' }),
+          row({ icon: 'printer', t1: 'Voron-02', t2: '0.6 mm brass · 412 h since change', value: 'Overdue', valueTone: 'warn' })
+        ]) +
+        sect('Settings') +
+        group([
+          row({ icon: 'gear', t1: 'Toolhead defaults', t2: 'Default nozzle size and material for new printers' })
+        ]) + '<div style="height:8px"></div></div>' + tabbar(D_TABS, 'd-search')
+    },
+    {
+      id: 'd-you',
+      html: sbar() + navLarge({ left: serverChip(FARM), title: 'You', sub: 'jpapiez · farm_admin' }) +
+        '<div class="body">' +
+        sect('Farm', true) +
+        group([
+          row({ icon: 'server', t1: 'Manage Servers', t2: '3 registered · Olympia Farm active' }),
+          row({ icon: 'offline', t1: 'Offline Queue', t2: '3 actions waiting to send', value: '3', valueTone: 'warn' }),
+          row({ icon: 'bell', t1: 'Notifications', t2: 'Push, alerts, and history' })
+        ]) +
+        sect('App') +
+        group([
+          row({ icon: 'stack', t1: 'Workbench presets', t2: 'Floor, Oversight, or your own layout' }),
+          row({ icon: 'gear', t1: 'Settings', t2: 'Appearance, NFC tag format, account' }),
+          row({ icon: 'nfc', t1: 'NFC Tags', t2: 'Write format · OpenPrintTag' })
+        ]) + '<div style="height:8px"></div></div>' + tabbar(D_TABS, 'd-you')
+    }
+  ];
+
+  /* ---------- placeholder screens for tabs we did not draw ---------- */
+  function stub(id, tabs, active, title, icon, line, opts) {
+    opts = opts || {};
+    return {
+      id: id,
+      html: sbar() + navLarge({
+        left: serverChip(FARM),
+        right: opts.right || '',
+        pinned: opts.pinned || '',
+        title: title
+      }) + '<div class="body"><div class="empty">' + ic(icon) +
+        '<h4>' + esc(title) + '</h4><p>' + esc(line) + '</p></div></div>' + tabbar(tabs, active)
+    };
+  }
+  A_SCREENS.push(
+    stub('a-tasks', A_FLOOR, 'a-tasks', 'Tasks', 'checklist', 'Shift plan, unchanged from the app today.'),
+    stub('a-scan', A_FLOOR, 'a-scan', 'Scan', 'scan', 'Barcode, QR, and NFC, unchanged from the app today.'),
+    stub('a-inv', A_FLOOR, 'a-inv', 'Inventory', 'spool', 'Spools and printed parts, unchanged from the app today.'),
+    stub('a-fleet', A_OVER, 'a-fleet', 'Fleet', 'printer', 'The same printers, read as a fleet rather than as work.'),
+    stub('a-jobs', A_OVER, 'a-jobs', 'Jobs', 'list', 'Job history and timeline, together at last.'),
+    stub('a-upkeep', A_OVER, 'a-upkeep', 'Upkeep', 'wrench', 'Maintenance, analytics, and predictive insights.')
+  );
+  B_SCREENS.push(
+    stub('b-fleet', B_TABS, 'b-fleet', 'Fleet', 'printer', 'Printer list, detail, and advanced controls.'),
+    stub('b-inv', B_TABS, 'b-inv', 'Inventory', 'spool', 'Spools and printed parts.')
+  );
+  C_SCREENS.push(
+    stub('c-attn', C_TABS, 'c-attn', 'Attention', 'bell', 'The feed, unchanged, but no longer carrying the app on its back.'),
+    stub('c-scan', C_TABS, 'c-scan', 'Scan', 'scan', 'Barcode, QR, and NFC.'),
+    stub('c-inv', C_TABS, 'c-inv', 'Inventory', 'spool', 'Spools and printed parts.')
+  );
+  D_SCREENS.push(
+    stub('d-fleet', D_TABS, 'd-fleet', 'Fleet', 'printer', 'Printer list, detail, and advanced controls.'),
+    stub('d-scan', D_TABS, 'd-scan', 'Scan', 'scan', 'Barcode, QR, and NFC.')
+  );
+
+  /* ============================================================
+     CONCEPT A-PRIME — Two Hats, adaptive
+     ============================================================ */
+  var P_SOLO = [
+    { id: 'p-solo-attn', icon: 'bell', label: 'Attention', badge: 4 },
+    { id: 'p-farm', icon: 'printer', label: 'Farm', badge: 2, badgeKind: 'warn' },
+    { id: 'p-inv', icon: 'spool', label: 'Inventory' },
+    { id: 'p-solo', icon: 'chart', label: 'Oversight' }
+  ];
+  var P_FLOOR = [
+    { id: 'p-floor', icon: 'bell', label: 'Attention', badge: 4 },
+    { id: 'p-farm2', icon: 'printer', label: 'Farm', badge: 2, badgeKind: 'warn' },
+    { id: 'p-tasks', icon: 'checklist', label: 'Tasks' },
+    { id: 'p-inv2', icon: 'spool', label: 'Inventory' }
+  ];
+  var P_OVER = [
+    { id: 'p-mode', icon: 'grid', label: 'Overview' },
+    { id: 'p-fleet2', icon: 'printer', label: 'Fleet' },
+    { id: 'p-jobs2', icon: 'list', label: 'Jobs' },
+    { id: 'p-upkeep2', icon: 'wrench', label: 'Upkeep' },
+    { id: 'p-reports2', icon: 'chart', label: 'Reports' }
+  ];
+  function pModeBar(active) {
+    return '<div class="segmented" style="margin-bottom:6px">' +
+      '<button type="button" aria-pressed="' + (active === 'floor') + '" data-go="p-floor">Floor</button>' +
+      '<button type="button" aria-pressed="' + (active === 'over') + '" data-go="p-mode">Oversight</button>' +
+      '</div>';
+  }
+  // Persistent chrome. The account button is ALWAYS the rightmost item on the root
+  // of every tab; screen-specific actions sit to its left. Never on a pushed screen.
+  var PERSON = navBtn('person', '', '');
+  function checkRow(o) {
+    return '<button class="row" type="button"><span class="rt">' +
+      '<span class="t1">' + esc(o.t1) + '</span>' +
+      (o.t2 ? '<span class="t2">' + esc(o.t2) + '</span>' : '') + '</span>' +
+      (o.on ? '<span class="tick">' + ic('check') + '</span>' : '') + '</button>';
+  }
+  function switchRow(o) {
+    return '<div class="row static"><span class="lead ' + (o.tone || '') + '">' + ic(o.icon) + '</span>' +
+      '<span class="rt"><span class="t1">' + esc(o.t1) + '</span>' +
+      (o.t2 ? '<span class="t2">' + esc(o.t2) + '</span>' : '') + '</span>' +
+      '<button class="sw" type="button" role="switch" aria-checked="' + (o.on ? 'true' : 'false') +
+      '" aria-label="' + esc(o.t1) + '"></button></div>';
+  }
+  // A′ removes Scan as a destination, so scanning has to arrive inside the task
+  // that needs it. The harvest item's primary action IS the scanner.
+  var ATTN_P = ATTN.map(function (a, i) {
+    return i === 1 ? Object.assign({}, a, { action: 'Scan bin' }) : a;
+  });
+  function pFarm(tabs, active, pinned) {
+    return sbar() + navLarge({
+      left: serverChip(FARM),
+      right: navBtn('filter', '', '') + navBtn('search', '', '') + navBtn('person', '', ''),
+      pinned: pinned || '',
+      title: 'Farm', sub: '21 printers · 2 need you'
+    }) + '<div class="body">' + printerList(4) + '<div style="height:10px"></div></div>' +
+      tabbar(tabs, active);
+  }
+  function pInventory(tabs, active, pinned) {
+    return sbar() + navLarge({
+      left: serverChip(FARM),
+      right: navBtn('scan', '', '') + navBtn('person', '', ''),
+      pinned: pinned || '',
+      title: 'Inventory', sub: '48 spools · 312 printed parts'
+    }) + '<div class="body">' +
+      '<div class="segmented" style="margin-top:4px">' +
+      '<button type="button" aria-pressed="true">Spools</button>' +
+      '<button type="button" aria-pressed="false">Printed Parts</button></div>' +
+      sect('Below par', true) +
+      group([
+        row({ swatch: '#101317', t1: 'Galaxy Black PLA', t2: '1 spool left · 8% remaining', value: '8%', valueTone: 'err' }),
+        row({ swatch: '#efe7d6', t1: 'Matte Ivory PETG', t2: '2 spools · 12% remaining', value: '12%', valueTone: 'warn' }),
+        row({ swatch: '#e8590c', t1: 'Signal Orange ABS', t2: '1 spool · 19% remaining', value: '19%', valueTone: 'warn' })
+      ]) +
+      sect('In stock') +
+      group([
+        row({ swatch: '#f3f4f6', t1: 'Pearl White PLA', t2: '6 spools · 84% average' }),
+        row({ swatch: '#64748b', t1: 'Slate Grey PETG', t2: '4 spools · 66% average' }),
+        row({ swatch: '#166534', t1: 'Forest Green PLA', t2: '3 spools · 91% average' })
+      ]) +
+      '<p class="foot">One scanner, in the navigation bar, where it stays put while the list ' +
+      'scrolls. The big full-width scan button belongs to a task that needs it, not to a ' +
+      'whole screen.</p><div style="height:10px"></div></div>' + tabbar(tabs, active);
+  }
+  // The solo Oversight hub: one tab holding everything the staffed farm gets as five.
+  function pOversightHub(offer) {
+    return '<div class="body">' + (offer || '') +
+      '<div class="pad" style="padding-top:' + (offer ? '0' : '12px') + '"><div class="ledgerline">' +
+      '<div><b>14</b><span>Printing</span></div><div><b>3</b><span>Idle</span></div>' +
+      '<div><b>1</b><span>Failed</span></div><div><b>2</b><span>Offline</span></div>' +
+      '<div><b>1</b><span>Upkeep</span></div></div></div>' +
+      sect('Right now') +
+      group([
+        row({ icon: 'grid', t1: 'Dashboard', t2: 'Fleet health at a glance' }),
+        row({ icon: 'arrows', t1: 'Dispatch', t2: 'What is queued and what is blocking it', value: '5' }),
+        row({ icon: 'drop', t1: 'Filament Coverage', t2: '3 queued jobs have no matching spool', value: '3', valueTone: 'warn' })
+      ]) +
+      sect('Upkeep') +
+      group([
+        row({ icon: 'wrench', t1: 'Maintenance', t2: 'Voron-02 nozzle overdue, X1C-04 belt in 3 days', value: '2', valueTone: 'warn' }),
+        row({ icon: 'chart', t1: 'Maintenance Analytics', t2: 'Intervals, overdue trend, cost per printer' }),
+        row({ icon: 'sparkle', t1: 'Predictive Insights', t2: 'Printers trending toward a failure', value: '3', valueTone: 'warn' })
+      ]) +
+      sect('Records') +
+      group([
+        row({ icon: 'clock', t1: 'Job History', t2: '1,284 jobs · 2 failed today' }),
+        row({ icon: 'cal', t1: 'Job Timeline', t2: 'What ran when, printer by printer' }),
+        row({ icon: 'pin', t1: 'Locations', t2: '1 bay · 14 bins' })
+      ]) +
+      sect('Reports') +
+      group([
+        row({ icon: 'gauge', t1: 'Uptime & Reliability', t2: 'Availability and failure rate', value: '96.4%', valueTone: 'acc' }),
+        row({ icon: 'gear', t1: 'Navigation', t2: 'Automatic · currently the simple layout', go: 'p-settings' })
+      ]) + '<div style="height:10px"></div></div>';
+  }
+  var P_SCREENS = [
+    {
+      id: 'p-solo',
+      html: sbar() + navLarge({
+        left: serverChip(FARM), right: navBtn('person', '', ''),
+        title: 'Oversight', sub: '21 printers · 1 bay · you'
+      }) + pOversightHub(null) + tabbar(P_SOLO, 'p-solo')
+    },
+    {
+      id: 'p-solo-attn',
+      html: sbar() + navLarge({
+        left: serverChip(FARM), right: navBtn('person', '', ''),
+        title: 'Attention', sub: '4 items · updated just now'
+      }) + '<div class="body"><div class="pad" style="padding-top:12px">' +
+        ATTN_P.map(attnCard).join('') + '</div></div>' + tabbar(P_SOLO, 'p-solo-attn')
+    },
+    {
+      id: 'p-offer',
+      html: sbar() + navLarge({
+        left: serverChip(FARM), right: navBtn('person', '', ''),
+        title: 'Oversight', sub: '21 printers · 2 bays · 3 people'
+      }) + pOversightHub(
+        '<div class="offer"><h4>Your farm grew</h4>' +
+        '<p>There are 3 accounts on this server now, a second bay, and shift planning is on. ' +
+        'Oversight can become its own mode with five destinations instead of this one tab. ' +
+        'Nothing moves out of reach either way.</p>' +
+        '<div class="acts"><button class="btn small" type="button" data-go="p-mode">Turn on Oversight mode</button>' +
+        '<button class="btn small sec" type="button" data-go="p-solo">Not now</button></div></div>'
+      ) + tabbar(P_SOLO, 'p-solo')
+    },
+    {
+      id: 'p-mode',
+      html: sbar() + navLarge({
+        left: serverChip(FARM), right: navBtn('person', '', ''),
+        pinned: pModeBar('over'), title: 'Overview', sub: 'Today · 34 jobs done, 2 failed'
+      }) + '<div class="body">' +
+        '<div class="pad" style="padding-top:10px"><div class="ledgerline">' +
+        '<div><b>14</b><span>Printing</span></div><div><b>3</b><span>Idle</span></div>' +
+        '<div><b>1</b><span>Failed</span></div><div><b>2</b><span>Offline</span></div>' +
+        '<div><b>1</b><span>Upkeep</span></div></div></div>' +
+        sect('Dispatch queue') +
+        group([
+          row({ icon: 'list', t1: 'bracket-v4 ×12', t2: 'Waiting for a PLA printer in Bay A', value: 'Next' }),
+          row({ icon: 'list', t1: 'gantry-clip ×24', t2: 'Blocked, no Galaxy Black PLA in stock', value: 'Blocked', valueTone: 'warn' })
+        ]) +
+        sect('Today') +
+        '<div class="pad"><div class="card">' +
+        '<div class="kv"><span>Jobs completed</span><b>34</b></div>' +
+        '<div class="kv"><span>Jobs failed</span><b>2</b></div>' +
+        '<div class="kv"><span>Fleet uptime</span><b>96.4%</b></div>' +
+        '</div></div>' +
+        '<p class="foot">Same four groups the solo shell holds in one tab. They are now ' +
+        'Overview, Jobs, Upkeep, and Reports.</p><div style="height:10px"></div></div>' +
+        tabbar(P_OVER, 'p-mode')
+    },
+    {
+      id: 'p-floor',
+      html: sbar() + navLarge({
+        left: serverChip(FARM), right: navBtn('person', '', ''),
+        pinned: pModeBar('floor'), title: 'Attention', sub: '4 items · updated just now'
+      }) + '<div class="body"><div class="pad" style="padding-top:12px">' +
+        ATTN_P.map(attnCard).join('') + '</div></div>' + tabbar(P_FLOOR, 'p-floor')
+    },
+    {
+      id: 'p-settings',
+      html: sbar() + navInline({ back: 'Oversight', backTo: 'p-solo', title: 'Navigation' }) +
+        '<div class="body">' + sect('Layout', true) +
+        '<div class="pad"><div class="card">' +
+        checkRow({ t1: 'Automatic', t2: 'Match the layout to this server', on: true }) +
+        checkRow({ t1: 'Simple', t2: 'One shell, Oversight as a tab' }) +
+        checkRow({ t1: 'Two modes', t2: 'Floor and Oversight, five tabs each' }) +
+        '</div></div>' +
+        '<p class="foot">Automatic is reading this server right now: <b>1 account</b>, ' +
+        '<b>1 bay</b>, <b>shift planning off</b>. That is the simple layout. It will offer two modes ' +
+        'when the farm grows, and never change without asking.</p>' +
+        sect('Printer controls') +
+        '<div class="pad"><div class="card">' +
+        switchRow({ icon: 'flame', tone: 'warn', t1: 'Advanced controls', t2: 'Jog, preheat, home, z-offset, disable motors' }) +
+        '</div></div>' +
+        '<p class="foot">These move real hardware and can damage a printer or ruin a running print, ' +
+        'so they stay off until you turn them on. <b>Nothing else in the app is hidden by either ' +
+        'setting.</b> Layout changes what is prominent, never what exists.</p>' +
+        '<div style="height:14px"></div></div>' + tabbar(P_SOLO, 'p-solo')
+    }
+  ];
+  P_SCREENS.push(
+    { id: 'p-farm', html: pFarm(P_SOLO, 'p-farm') },
+    { id: 'p-inv', html: pInventory(P_SOLO, 'p-inv') },
+    { id: 'p-farm2', html: pFarm(P_FLOOR, 'p-farm2', pModeBar('floor')) },
+    { id: 'p-inv2', html: pInventory(P_FLOOR, 'p-inv2', pModeBar('floor')) },
+    stub('p-tasks', P_FLOOR, 'p-tasks', 'Tasks', 'checklist',
+      'The shift plan. Present only because this server has shift planning on.',
+      { right: PERSON, pinned: pModeBar('floor') }),
+    stub('p-fleet2', P_OVER, 'p-fleet2', 'Fleet', 'printer',
+      'The same printers, read as a fleet rather than as work.',
+      { right: PERSON, pinned: pModeBar('over') }),
+    stub('p-jobs2', P_OVER, 'p-jobs2', 'Jobs', 'list', 'Job history and timeline.',
+      { right: PERSON, pinned: pModeBar('over') }),
+    stub('p-upkeep2', P_OVER, 'p-upkeep2', 'Upkeep', 'wrench',
+      'Maintenance, analytics, and predictive insights.',
+      { right: PERSON, pinned: pModeBar('over') }),
+    stub('p-reports2', P_OVER, 'p-reports2', 'Reports', 'chart',
+      'Uptime, filament coverage, and locations.',
+      { right: PERSON, pinned: pModeBar('over') })
+  );
+
+  /* ---------- mount ---------- */
+  var SETS = { a: { s: A_SCREENS, start: 'a-attention' }, p: { s: P_SCREENS, start: 'p-solo' }, b: { s: B_SCREENS, start: 'b-board' }, c: { s: C_SCREENS, start: 'c-fleet' }, d: { s: D_SCREENS, start: 'd-work' } };
+  var phones = {};
+
+  Object.keys(SETS).forEach(function (k) {
+    var host = document.querySelector('.phone[data-concept="' + k + '"]');
+    if (!host) return;
+    var set = SETS[k];
+    host.innerHTML = '<div class="phone-screen" data-theme="dark">' +
+      '<div class="island"></div><div class="screens">' +
+      set.s.map(function (s) {
+        return '<div class="screen' + (s.id === set.start ? ' on' : '') + '" data-id="' + s.id + '">' + s.html + '</div>';
+      }).join('') +
+      '</div><div class="home-ind"></div></div>';
+    phones[k] = host;
+  });
+
+  function show(host, id) {
+    var target = host.querySelector('.screen[data-id="' + id + '"]');
+    if (!target) return;
+    Array.prototype.forEach.call(host.querySelectorAll('.screen'), function (s) { s.classList.remove('on'); });
+    target.classList.add('on');
+    var body = target.querySelector('.body');
+    if (body) body.scrollTop = 0;
+  }
+
+  document.addEventListener('click', function (e) {
+    var pressable = e.target.closest('.lane, .segmented button, .presets button, .add');
+    if (pressable && !pressable.hasAttribute('data-go')) {
+      var scope = pressable.closest('.lanes, .segmented, .presets');
+      if (scope) {
+        Array.prototype.forEach.call(scope.children, function (c) { c.setAttribute('aria-pressed', 'false'); });
+        pressable.setAttribute('aria-pressed', 'true');
+      } else if (pressable.classList.contains('add')) {
+        var on = pressable.getAttribute('aria-pressed') === 'true';
+        pressable.setAttribute('aria-pressed', on ? 'false' : 'true');
+        pressable.innerHTML = ic(on ? 'plus' : 'check');
+      }
+    }
+
+    var sw = e.target.closest('.sw');
+    if (sw) {
+      var checked = sw.getAttribute('aria-checked') === 'true';
+      sw.setAttribute('aria-checked', checked ? 'false' : 'true');
+    }
+
+    var go = e.target.closest('[data-go]');
+    if (go) {
+      var host = go.closest('.phone');
+      if (!host) return;
+      var brow = go.closest('.brow');
+      if (brow) brow.classList.remove('changed');
+      if (go.classList.contains('segmented') || go.parentElement.classList.contains('segmented')) {
+        var seg = go.parentElement;
+        Array.prototype.forEach.call(seg.children, function (c) { c.setAttribute('aria-pressed', 'false'); });
+        go.setAttribute('aria-pressed', 'true');
+      }
+      show(host, go.getAttribute('data-go'));
+    }
+  });
+
+  /* ---------- A′ stage controls ---------- */
+  Array.prototype.forEach.call(document.querySelectorAll('[data-go-p]'), function (btn) {
+    btn.addEventListener('click', function () {
+      if (phones.p) show(phones.p, btn.getAttribute('data-go-p'));
+    });
+  });
+
+  /* ---------- the one authored moment: board rerank ---------- */
+  var simBtn = document.querySelector('[data-sim="b"]');
+  if (simBtn) {
+    simBtn.addEventListener('click', function () {
+      var host = phones.b;
+      if (!host) return;
+      show(host, 'b-board');
+      var board = host.querySelector('[data-board]');
+      var target = board.querySelector('[data-row="p1s"]');
+      if (!target) return;
+
+      if (target === board.firstElementChild && target.classList.contains('changed')) {
+        simBtn.textContent = 'Reset the board';
+        resetBoard(board, target);
+        simBtn.textContent = 'Simulate a farm event';
+        return;
+      }
+
+      var rows = Array.prototype.slice.call(board.children);
+      var first = rows.map(function (r) { return r.getBoundingClientRect().top; });
+
+      target.classList.remove('soon');
+      target.classList.add('now', 'changed');
+      target.querySelector('[data-when]').innerHTML = 'NOW<small>just now</small>';
+      target.querySelector('[data-what]').textContent = 'Print failed · thermal runaway on the hotend';
+      board.insertBefore(target, board.firstElementChild);
+
+      if (REDUCED) { simBtn.textContent = 'Reset the board'; return; }
+
+      rows.forEach(function (r, i) {
+        var delta = first[i] - r.getBoundingClientRect().top;
+        if (!delta) return;
+        r.style.transition = 'none';
+        r.style.transform = 'translateY(' + delta + 'px)';
+      });
+      requestAnimationFrame(function () {
+        rows.forEach(function (r) {
+          r.style.transition = 'transform 520ms cubic-bezier(.16,1,.3,1)';
+          r.style.transform = '';
+        });
+      });
+      setTimeout(function () { rows.forEach(function (r) { r.style.transition = ''; }); }, 600);
+      simBtn.textContent = 'Reset the board';
+    });
+  }
+  function resetBoard(board, target) {
+    target.classList.remove('now', 'changed');
+    target.classList.add('soon');
+    target.querySelector('[data-when]').innerHTML = '18<small>min</small>';
+    target.querySelector('[data-what]').textContent = 'Print completes — bracket-v4 ×6';
+    var anchor = board.querySelector('[data-row="a103"]');
+    board.insertBefore(target, anchor);
+    target.classList.remove('soon');
+  }
+
+  /* ---------- appearance toggle ---------- */
+  var toggles = document.querySelectorAll('[data-theme-set]');
+  Array.prototype.forEach.call(toggles, function (b) {
+    b.addEventListener('click', function () {
+      var mode = b.getAttribute('data-theme-set');
+      Array.prototype.forEach.call(toggles, function (o) {
+        o.setAttribute('aria-pressed', String(o === b));
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('.phone-screen'), function (s) {
+        s.setAttribute('data-theme', mode);
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>

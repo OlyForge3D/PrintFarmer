@@ -91,3 +91,12 @@ Do NOT introduce a fifth shape for two call sites. Match #1 or #2 to the call sh
 `SystemLogsContent.exportLogs` creates a blob URL for the download `<a>` and never revokes it —
 small memory leak per export. Noted in the #943 PR but not fixed (scope). Worth grepping the
 codebase for the same shape before touching any other export path.
+
+## 2026-09-03: iOS Navigation Redesign Testing (1 child issue)
+
+Assigned to testing and validation of A′ · Two Hats, adaptive shell.
+
+**Epic**: #2410 — iOS Navigation Redesign
+**Assigned issue**: #2413 (testing and validation)
+**Role**: QA and test coverage — shell behavior, mode transitions, edge cases
+**Status**: PENDING (awaiting implementation start)
