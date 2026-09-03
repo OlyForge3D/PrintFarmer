@@ -19,6 +19,7 @@ import { parseDetailedLayersCore, detailedParseBuffersTransferList } from './gco
 export interface GCodeWorkerRequest {
   requestId: number;
   gcodeUrl: string;
+  requestHeaders: Record<string, string>;
 }
 
 export interface GCodeWorkerSuccessResponse {
@@ -40,10 +41,10 @@ export type GCodeWorkerResponse = GCodeWorkerSuccessResponse | GCodeWorkerErrorR
 // tsconfig). Cast narrowly where the Worker-only two-arg `postMessage`
 // overload (message, transferList) is needed.
 self.onmessage = async (event: MessageEvent<GCodeWorkerRequest>) => {
-  const { requestId, gcodeUrl } = event.data;
+  const { requestId, gcodeUrl, requestHeaders } = event.data;
 
   try {
-    const res = await fetch(gcodeUrl);
+    const res = await fetch(gcodeUrl, { headers: requestHeaders });
     if (!res.ok) throw new Error(`Failed to load G-code: ${res.status}`);
     const gcodeText = await res.text();
 

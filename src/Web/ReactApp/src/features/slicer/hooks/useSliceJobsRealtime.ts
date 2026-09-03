@@ -29,7 +29,7 @@ function applyEventToJob(
     progressMessage: event.progressMessage ?? existing.progressMessage,
     startedAt: event.startedAt ?? existing.startedAt,
     completedAt: event.completedAt ?? existing.completedAt,
-    resultFileUrl: event.resultFileUrl ?? existing.resultFileUrl,
+    artifactsRoute: event.artifactsRoute ?? existing.artifactsRoute,
     estimatedPrintTimeSeconds: event.estimatedPrintTimeSeconds ?? existing.estimatedPrintTimeSeconds,
     filamentUsedGrams: event.filamentUsedGrams ?? existing.filamentUsedGrams,
     errorMessage: event.errorMessage ?? existing.errorMessage,

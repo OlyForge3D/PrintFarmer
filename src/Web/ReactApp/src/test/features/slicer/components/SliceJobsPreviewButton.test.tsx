@@ -39,8 +39,13 @@ vi.mock('@/features/slicer/components/SendToPrinterModal', () => ({
 }));
 
 vi.mock('@/features/slicer/components/GcodePreviewModal', () => ({
-  GcodePreviewModal: ({ isOpen, jobId }: { isOpen: boolean; jobId: string }) =>
-    isOpen ? <div data-testid="gcode-preview-modal">Preview: {jobId}</div> : null,
+  GcodePreviewModal: ({
+    isOpen,
+    artifactsRoute,
+  }: {
+    isOpen: boolean;
+    artifactsRoute: string;
+  }) => isOpen ? <div data-testid="gcode-preview-modal">Preview: {artifactsRoute}</div> : null,
 }));
 
 vi.mock('@/common/hooks/useViewModePreference', () => ({
@@ -76,6 +81,7 @@ describe('SliceJobsPanel Preview button', () => {
         completedAt: '2026-05-31T09:05:00Z',
         artifactsCount: 1,
         artifactsTotalBytes: 5000,
+        artifactsRoute: '/api/artifacts/job/job-completed-1',
       },
     ]);
 
@@ -136,6 +142,7 @@ describe('SliceJobsPanel Preview button', () => {
         completedAt: '2026-05-31T09:05:00Z',
         artifactsCount: 1,
         artifactsTotalBytes: 8000,
+        artifactsRoute: '/api/artifacts/job/job-completed-2',
       },
     ]);
 
@@ -145,6 +152,6 @@ describe('SliceJobsPanel Preview button', () => {
     await user.click(previewButton);
 
     const modal = await screen.findByTestId('gcode-preview-modal');
-    expect(modal.textContent).toContain('job-completed-2');
+    expect(modal.textContent).toContain('/api/artifacts/job/job-completed-2');
   });
 });

@@ -158,6 +158,7 @@ function filterLayerByTools(layer: DetailedLayer, enabledTools: Set<number>): De
 
 export interface GCodeViewerProps {
   gcodeUrl: string;
+  requestHeaders?: Record<string, string>;
   className?: string;
   /** Optional pre-created service instance (for testing/DI). */
   service?: IGcodePreviewService;
@@ -177,9 +178,11 @@ const RENDER_QUALITIES: RenderQuality[] = [
 ];
 
 const TOOL_COLORS = ['#FF6B35', '#4ECDC4', '#C77DFF', '#FFD93D', '#6BCB77', '#FF6B6B'];
+const EMPTY_REQUEST_HEADERS: Record<string, string> = {};
 
 export const GCodeViewer: React.FC<GCodeViewerProps> = ({
   gcodeUrl,
+  requestHeaders = EMPTY_REQUEST_HEADERS,
   className = "h-96 w-full",
   service: externalService,
 }) => {
@@ -218,7 +221,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
         // result once it eventually resolves — an abandoned parse would
         // otherwise keep monopolizing the shared worker and head-of-line
         // block the newer request.
-        const result = await service.parseGCodeDetailed(gcodeUrl, controller.signal);
+        const result = await service.parseGCodeDetailed(gcodeUrl, requestHeaders, controller.signal);
         setParseResult(result);
         setCurrentLayer(result.layerCount - 1);
         setEnabledTools(new Set(result.tools));
@@ -232,7 +235,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
 
     loadGCode();
     return () => { controller.abort(); };
-  }, [gcodeUrl]);
+  }, [gcodeUrl, requestHeaders]);
 
   useEffect(() => {
     const service = serviceRef.current;

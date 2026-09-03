@@ -3,12 +3,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { GcodePreviewModal } from '@/features/slicer/components/GcodePreviewModal';
 
-const mockGetArtifactsByJob = vi.fn();
+const mockGetArtifactsByRoute = vi.fn();
 const mockGetArtifactDownloadUrl = vi.fn((id: string) => `/api/artifacts/${id}`);
 
 vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
-    getArtifactsByJob: (...args: unknown[]) => mockGetArtifactsByJob(...args),
+    getArtifactsByRoute: (...args: unknown[]) => mockGetArtifactsByRoute(...args),
     getArtifactDownloadUrl: (id: string) => mockGetArtifactDownloadUrl(id),
   },
 }));
@@ -23,7 +23,7 @@ vi.mock('@/features/models3d/components/3d/GCodeViewer3D', () => ({
   },
 }));
 
-function renderModal(props: { isOpen: boolean; jobId: string; onClose?: () => void }) {
+function renderModal(props: { isOpen: boolean; artifactsRoute: string; onClose?: () => void }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -31,7 +31,7 @@ function renderModal(props: { isOpen: boolean; jobId: string; onClose?: () => vo
     <QueryClientProvider client={queryClient}>
       <GcodePreviewModal
         isOpen={props.isOpen}
-        jobId={props.jobId}
+        artifactsRoute={props.artifactsRoute}
         onClose={props.onClose ?? vi.fn()}
       />
     </QueryClientProvider>,
@@ -40,12 +40,12 @@ function renderModal(props: { isOpen: boolean; jobId: string; onClose?: () => vo
 
 describe('GcodePreviewModal URL contract', () => {
   beforeEach(() => {
-    mockGetArtifactsByJob.mockReset();
+    mockGetArtifactsByRoute.mockReset();
     capturedUrls.length = 0;
   });
 
   it('fetches artifact list and passes the PhysicalFile URL (not the list endpoint) to the viewer', async () => {
-    mockGetArtifactsByJob.mockResolvedValue([
+    mockGetArtifactsByRoute.mockResolvedValue([
       {
         id: 'art-abc',
         jobId: 'job-1',
@@ -57,11 +57,11 @@ describe('GcodePreviewModal URL contract', () => {
       },
     ]);
 
-    renderModal({ isOpen: true, jobId: 'job-1' });
+    renderModal({ isOpen: true, artifactsRoute: '/api/artifacts/job/job-1' });
 
     // Resolves artifact list for the job
     await waitFor(() => {
-      expect(mockGetArtifactsByJob).toHaveBeenCalledWith('job-1');
+      expect(mockGetArtifactsByRoute).toHaveBeenCalledWith('/api/artifacts/job/job-1');
     });
 
     // Viewer receives the file-serving URL, NOT the list endpoint
@@ -74,7 +74,7 @@ describe('GcodePreviewModal URL contract', () => {
   });
 
   it('prefers a .gcode file when multiple artifacts are present', async () => {
-    mockGetArtifactsByJob.mockResolvedValue([
+    mockGetArtifactsByRoute.mockResolvedValue([
       {
         id: 'art-log',
         jobId: 'job-2',
@@ -95,14 +95,14 @@ describe('GcodePreviewModal URL contract', () => {
       },
     ]);
 
-    renderModal({ isOpen: true, jobId: 'job-2' });
+    renderModal({ isOpen: true, artifactsRoute: '/api/artifacts/job/job-2' });
 
     const viewer = await screen.findByTestId('gcode-viewer');
     expect(viewer.getAttribute('data-url')).toBe('/api/artifacts/art-gcode');
   });
 
   it('recognizes .bgcode and .g extensions as G-code', async () => {
-    mockGetArtifactsByJob.mockResolvedValue([
+    mockGetArtifactsByRoute.mockResolvedValue([
       {
         id: 'art-stl',
         jobId: 'job-4',
@@ -123,14 +123,14 @@ describe('GcodePreviewModal URL contract', () => {
       },
     ]);
 
-    renderModal({ isOpen: true, jobId: 'job-4' });
+    renderModal({ isOpen: true, artifactsRoute: '/api/artifacts/job/job-4' });
 
     const viewer = await screen.findByTestId('gcode-viewer');
     expect(viewer.getAttribute('data-url')).toBe('/api/artifacts/art-bgcode');
   });
 
   it('does not render viewer when only non-G-code artifacts exist', async () => {
-    mockGetArtifactsByJob.mockResolvedValue([
+    mockGetArtifactsByRoute.mockResolvedValue([
       {
         id: 'art-img',
         jobId: 'job-5',
@@ -151,7 +151,7 @@ describe('GcodePreviewModal URL contract', () => {
       },
     ]);
 
-    renderModal({ isOpen: true, jobId: 'job-5' });
+    renderModal({ isOpen: true, artifactsRoute: '/api/artifacts/job/job-5' });
 
     // Wait for loading to finish and message to appear
     await waitFor(() => {
@@ -163,7 +163,7 @@ describe('GcodePreviewModal URL contract', () => {
   });
 
   it('does not fetch when modal is closed', () => {
-    renderModal({ isOpen: false, jobId: 'job-3' });
-    expect(mockGetArtifactsByJob).not.toHaveBeenCalled();
+    renderModal({ isOpen: false, artifactsRoute: '/api/artifacts/job/job-3' });
+    expect(mockGetArtifactsByRoute).not.toHaveBeenCalled();
   });
 });

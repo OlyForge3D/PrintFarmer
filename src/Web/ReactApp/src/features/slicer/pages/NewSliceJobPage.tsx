@@ -57,6 +57,8 @@ import { useSTLFile } from '@/common/hooks/useSTLFile';
 import { useSliceJobProgress } from '@/features/slicer/hooks/useSliceJobProgress';
 import { useSlicerMode } from '@/features/slicer/hooks/useSlicerMode';
 import { SliceProgressOverlay } from '@/features/slicer/components/SliceProgressOverlay';
+import { GcodePreviewModal } from '@/features/slicer/components/GcodePreviewModal';
+import { downloadGcodeArtifact } from '@/features/slicer/utils/sliceArtifactActions';
 import type { LoadedModel, BedConfig } from '@/features/slicer/components/viewer';
 import type { BufferGeometry } from 'three';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
@@ -811,26 +813,6 @@ export const NewSliceJobPage: React.FC = () => {
     requiredNozzleDiameter: number | undefined;
   } | null>(null);
 
-  // Auto-clear submittedJobId (and snapshot) when the job completes successfully,
-  // returning the form to a fresh "ready to slice" state. This intentionally does
-  // NOT fire for 'Failed': a failed job's failure/retry UI must stay visible until
-  // the user explicitly acts (Retry or New Job) via onRetry/onNewJob below — those
-  // are the only paths that clear `message`, so auto-clearing 'Failed' here left
-  // `message` still holding the original "Job queued (id ...)" text, which would
-  // reappear as soon as submittedJobId went null (the `!submittedJobId && message`
-  // Alert), making a terminal failure look like it silently reverted to a stale
-  // "Job queued" state (issue #2214).
-  useEffect(() => {
-    if (jobProgress.status === 'Completed') {
-      const timer = setTimeout(() => {
-        setSubmittedJobId(prev => prev ? null : prev);
-        setSliceSnapshot(null);
-        setMessage(null);
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [jobProgress.status]);
-  
   const stlFile = useSTLFile();
 
   // === Queries ===
@@ -3470,6 +3452,8 @@ function SliceJobProgressPanel({
   /** True while a Retry-triggered resubmission is in flight (issue #2374). */
   retryDisabled?: boolean;
 }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const isCompleted = progress.status === 'Completed';
   const isFailed = progress.status === 'Failed';
   const isCancelled = progress.status === 'Cancelled';
@@ -3480,6 +3464,18 @@ function SliceJobProgressPanel({
     : isCompleted
       ? 'bg-pf-success'
       : undefined;
+
+  const handleDownload = async () => {
+    if (!progress.artifactsRoute) return;
+    setIsDownloading(true);
+    try {
+      await downloadGcodeArtifact(progress.artifactsRoute);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to download G-code.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   return (
     <div className="rounded-lg border border-pf-border bg-pf-bg-1/50 p-4 space-y-3">
@@ -3527,12 +3523,19 @@ function SliceJobProgressPanel({
       {/* Completion actions */}
       {isCompleted && (
         <div className="flex items-center gap-2 pt-1">
-          {progress.resultFileUrl && (
+          {progress.artifactsRoute && (
+            <Button variant="primary" size="sm" onClick={() => setPreviewOpen(true)}>
+              Preview
+            </Button>
+          )}
+          {progress.artifactsRoute && (
             <Button
               variant="success"
               size="sm"
               iconLeft={<DownloadIcon className="w-3.5 h-3.5" />}
-              onClick={() => window.open(`${getApiBaseUrl()}/artifacts/job/${jobId}`, '_blank')}
+              onClick={handleDownload}
+              loading={isDownloading}
+              disabled={isDownloading}
             >
               Download G-code
             </Button>
@@ -3580,6 +3583,12 @@ function SliceJobProgressPanel({
           {progress.isConnected ? 'Waiting for updates…' : 'Connecting to real-time updates…'}
         </p>
       )}
+
+      <GcodePreviewModal
+        isOpen={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        artifactsRoute={progress.artifactsRoute ?? ''}
+      />
     </div>
   );
 }
