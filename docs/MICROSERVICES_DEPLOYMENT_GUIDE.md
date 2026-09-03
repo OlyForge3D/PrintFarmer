@@ -208,6 +208,75 @@ Production deployments must run the API with `ASPNETCORE_ENVIRONMENT=Production`
 Production) and, with the dev bypass enabled, allows unauthenticated GET requests. Neither is
 acceptable on a production farm.
 
+## G-code artifact staging and promotion
+
+A completed slice produces a staged artifact on slicer-host. Completion does
+not automatically import it into the File Library, and no service scans
+completed jobs for historical backfill.
+
+- **Preview** and **Download G-code** use the authenticated artifact API while
+  the file remains staged.
+- **Save to Library** explicitly persists the artifact as a durable
+  `GcodeFile`.
+- **Print** invokes the same idempotent persistence operation before queueing
+  or sending the durable file.
+
+If the operator takes neither action, no File Library entry is created.
+Durable `GcodeFile` entries retain the farm-wide visibility model used by the
+existing File Library; they are not per-user library partitions.
+
+### Split-host transport
+
+The main API reads pinned artifact bytes from:
+
+```text
+http://slicer-host:5246/api/internal/slicer-promotion/artifacts/{artifactId}/content
+```
+
+This is private service-network traffic. The route is intentionally absent
+from nginx and must not be added to the public proxy. The response contains
+only artifact bytes and `Content-Length`; metadata and ownership lineage remain
+in the shared database. The API sends only `X-Slicer-Promotion-Key` and the
+server-derived operation key. It does not forward the end-user bearer token.
+
+Configure the transport as follows:
+
+| Service | Setting | Value |
+| --- | --- | --- |
+| `api` | `SlicerHost__BaseUrl` | `http://slicer-host:5246` by default |
+| `api` + `slicer-host` | `SlicerPromotion__SharedKey` | Same dedicated secret, supplied by `PROMOTION_SHARED_API_KEY` |
+| `api` | `SlicerPromotion__StreamTimeoutSeconds` | `240` by default |
+| `slicer-host` | `ArtifactStorage__RootPath` | `/data/artifacts` |
+
+The 240-second stream timeout must remain strictly below nginx's 300-second
+`location /api/` read timeout so the API can return a retryable transport error
+instead of nginx emitting an opaque 504.
+
+The deployment script generates and preserves `PROMOTION_SHARED_API_KEY`
+without printing it. Direct Compose users must generate a strong random secret
+and provide the same value to both services. Do not reuse
+`WORKER_SHARED_API_KEY`: workers do not need artifact promotion access.
+
+Missing or mismatched promotion configuration fails closed. The API reports
+the staged source as unavailable, and slicer-host never returns content without
+both the matching shared key and the operation that currently pins the
+artifact. To rotate the credential, replace it in the secret manager or
+`.env`, then recreate `api` and `slicer-host` together. A temporary mismatch
+causes retryable failures rather than exposing bytes.
+
+Slicer-host stages data under `/data/artifacts`, which is covered by its
+persistent `/data` mount. Monolith deployments use
+`/app/data/artifacts`, covered by the persistent `/app/data` volume. Mounting
+slicer-host's artifact directory into the API is not a supported workaround:
+it creates shared-volume coupling and bypasses the authenticated,
+operation-bound transfer contract.
+
+### Delivery scope
+
+The split-host contract is delivered with the explicit-action workflow:
+issue #2401 closes in the same change as #2398. Issue #2402 is closed and is
+not planned; this work preserves the current farm-wide File Library model.
+
 ## Database Setup
 
 ### PostgreSQL (Recommended)

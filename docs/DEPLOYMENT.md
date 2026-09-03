@@ -162,15 +162,36 @@ never a user-facing API credential.
 │────────────────────────────────────────────────────────────────│
 ```
 
-#### Completed slice artifact behavior differs by topology
+## Sliced G-code lifecycle
 
-Completed slices are always previewable and downloadable via the authenticated slicer
-artifact API. Automatic promotion of the resulting G-code into the File Library is
-**monolith-only today**; the default microservices Docker topology reports
-`artifact_source_unroutable` and does not promote until [#2401](https://github.com/OlyForge3D/PrintFarmer/issues/2401)
-lands. See
-[MICROSERVICES_DEPLOYMENT_GUIDE.md — Completed Slice Artifacts](MICROSERVICES_DEPLOYMENT_GUIDE.md#completed-slice-artifacts)
-for the mechanism.
+Slice completion creates a staged artifact; it does not add a file to the
+File Library. The completion view exposes four distinct actions:
+
+- **Preview** and **Download G-code** read the staged file through the
+  authenticated artifact API.
+- **Save to Library** explicitly copies the staged artifact into durable
+  File Library storage.
+- **Print** performs the same durable, idempotent library save first, then
+  queues or sends that `GcodeFile`.
+
+If neither Save nor Print is selected, the artifact remains staging data and
+does not appear in the File Library. There is no completion-time importer,
+background candidate scan, or historical backfill. Existing completed jobs
+remain actionable through their Save and Print controls.
+
+This behavior is identical in monolith and microservices deployments. Monolith
+staging is stored under `/app/data/artifacts` on the persistent application-data
+volume. In split deployments, slicer-host staging is stored under
+`/data/artifacts` on its persistent data mount. Once explicitly saved, a
+G-code file follows the existing farm-wide File Library visibility model; the
+library is not partitioned per user.
+
+In microservices mode the API obtains the pinned staged bytes over the private
+Compose network from slicer-host. The internal content endpoint is protected by
+a dedicated promotion key plus the current operation key and is not routed by
+nginx. See
+[Microservices Deployment Guide](MICROSERVICES_DEPLOYMENT_GUIDE.md#g-code-artifact-staging-and-promotion)
+for configuration and rotation details.
 
 ## Database Configuration
 
