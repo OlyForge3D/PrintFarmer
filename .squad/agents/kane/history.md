@@ -42,3 +42,12 @@ Early detailed entries were summarized on 2026-03-25 for maintainability. See de
 - Mocking pattern for React-Query queries in JSDOM: `mockResolvedValue({ data: dto })` on `apiClient.get` works, but you MUST `waitFor` on the loading marker disappearing before asserting downstream DOM — otherwise the assertion runs in the loading state and fails. Pattern: `await waitFor(() => expect(screen.queryByLabelText('Loading X')).not.toBeInTheDocument())`.
 - Section-level search filter in `search-utils.ts` matches on `description` too — if you search a word that appears in the section description, ALL properties in that section stay visible even if they don't match. Landed me on `retention` matching everything. Use property-specific terms (`days`, not `retention`).
 - `getByLabelText` returns multiple hits when a checkbox has both `<label htmlFor>` and `aria-label` mapping to the same accessible name; if a duplicate `id` also exists (see above), it degrades further. Prefer `document.querySelector('[data-setting-property="Section.Property"] input')` for cross-section disambiguation.
+
+## 2026-09-03: iOS Navigation Redesign — Analytics & Telemetry (2 child issues)
+
+Assigned to analytics and telemetry instrumentation.
+
+**Epic**: #2410 — iOS Navigation Redesign
+**Assigned issues**: #2424, #2425 (analytics and telemetry)
+**Role**: Instrumentation — shell selection telemetry, mode transition events, user interaction tracking
+**Status**: PENDING (awaiting implementation start)
