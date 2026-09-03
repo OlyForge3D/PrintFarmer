@@ -185,6 +185,19 @@ final class ConnectionMonitorTests: XCTestCase {
         )
     }
 
+    // MARK: - Startup grace
+
+    /// Lets the immediate `refresh()` that `start()` kicks off complete.
+    ///
+    /// `start()` spawns a poll task whose first action is a `refresh()`. That
+    /// refresh issues its own sample ticket, so an explicit `refresh()` racing
+    /// it is silently dropped by the newest-sample guard and the assertion then
+    /// sees the neutral `.connecting` baseline left by `resetState()`. Draining
+    /// first makes the subsequent explicit refresh the only sample in flight.
+    private func drainInitialPoll() async {
+        try? await Task.sleep(for: .milliseconds(100))
+    }
+
     func testColdLaunchWithHubStillHandshakingDoesNotSurfaceABanner() async {
         // End-to-end reproduction of the reported bug: server reachable, hub not
         // yet connected, immediately after start(). Previously `.degraded`.
@@ -196,6 +209,7 @@ final class ConnectionMonitorTests: XCTestCase {
         monitor.pollInterval = .seconds(3600)
         monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
         monitor.start()
+        await drainInitialPoll()
         await monitor.refresh()
 
         XCTAssertEqual(monitor.status, .connecting)
@@ -216,6 +230,7 @@ final class ConnectionMonitorTests: XCTestCase {
         monitor.pollInterval = .seconds(3600)
         monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
         monitor.start()
+        await drainInitialPoll()
         await monitor.refresh()
         XCTAssertEqual(monitor.status, .connected)
 
@@ -241,6 +256,7 @@ final class ConnectionMonitorTests: XCTestCase {
         monitor.startupGrace = .zero
         monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
         monitor.start()
+        await drainInitialPoll()
         await monitor.refresh()
 
         XCTAssertEqual(
@@ -267,16 +283,16 @@ final class ConnectionMonitorTests: XCTestCase {
         monitor.pollInterval = .seconds(3600)
         monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
         monitor.start()
+        await drainInitialPoll()
 
-        // First failure is below the hysteresis threshold: softened to
-        // `.connecting` by the grace, so still no banner.
-        await monitor.refresh()
+        // `start()`'s own poll refresh has already recorded failure #1, which is
+        // below the hysteresis threshold and so is softened to `.connecting` by
+        // the grace — still no banner.
         XCTAssertEqual(monitor.status, .connecting)
         XCTAssertFalse(monitor.isReportable)
 
         // Second consecutive failure confirms the outage. Even though we are
         // still inside the grace window, this must escalate and be reported.
-        mockAPIClient.stubError(.cannotConnectToHost)
         await monitor.refresh()
 
         XCTAssertEqual(
@@ -302,6 +318,7 @@ final class ConnectionMonitorTests: XCTestCase {
         monitor.pollInterval = .seconds(3600)
         monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
         monitor.start()
+        await drainInitialPoll()
         await monitor.refresh()
         XCTAssertTrue(monitor.hasSettledSinceStart)
 
@@ -315,6 +332,7 @@ final class ConnectionMonitorTests: XCTestCase {
         mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
         signalR.connectionState = .disconnected
         monitor.start()
+        await drainInitialPoll()
         await monitor.refresh()
 
         XCTAssertEqual(
