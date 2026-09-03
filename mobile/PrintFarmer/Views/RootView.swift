@@ -27,7 +27,8 @@ struct RootView: View {
                 DemoModeBanner()
             }
 
-            if authViewModel.isAuthenticated && !DemoMode.shared.isActive && isShowingMainContent {
+            if authViewModel.isAuthenticated && !DemoMode.shared.isActive && isShowingMainContent
+                && connectionMonitor.isReportable {
                 ConnectionStatusBar(monitor: connectionMonitor)
             }
 
@@ -229,24 +230,14 @@ struct RootView: View {
             }
     }
 
-    /// Shown briefly while `restoreSession()` checks for a saved token.
+    /// Shown while `restoreSession()` checks for a saved token. Same component
+    /// as every later startup phase so the launch reads as one screen.
     private var launchScreen: some View {
-        VStack(spacing: 16) {
-            Image("AppLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 56, height: 56)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-
-            Text("PrintFarmer")
-                .font(.largeTitle.bold())
-                .foregroundStyle(Color("LaunchText"))
-
-            ProgressView()
-                .padding(.top, 8)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color("LaunchBackground"))
+        LaunchSplashView(
+            statusText: nil,
+            detailText: nil,
+            busyAccessibilityLabel: "Starting PrintFarmer"
+        )
     }
 
     private func signOutIfServerRegistryUnavailable() {
@@ -261,51 +252,14 @@ struct RootView: View {
         let statusText: String
 
         var body: some View {
-            GeometryReader { proxy in
-                ScrollView {
-                    VStack(spacing: 16) {
-                        Image("AppLogo")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 56, height: 56)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .accessibilityHidden(true)
-
-                        Text("PrintFarmer")
-                            .font(.largeTitle.bold())
-                            .foregroundStyle(Color("LaunchText"))
-
-                        if isChecking {
-                            ProgressView()
-                                .controlSize(.large)
-                                .tint(Color("LaunchText"))
-                                .accessibilityLabel("Connecting to backend services")
-                        } else {
-                            Image(systemName: "wifi.exclamationmark")
-                                .font(.title)
-                                .foregroundStyle(Color("LaunchText"))
-                                .accessibilityHidden(true)
-                        }
-
-                        Text(statusText)
-                            .font(.headline)
-                            .foregroundStyle(Color("LaunchText"))
-
-                        Text(
-                            isChecking
-                                ? "Preparing your farm and checking each enabled mobile feature."
-                                : "Try again, or continue with cached data and available services."
-                        )
-                            .font(.subheadline)
-                            .foregroundStyle(Color("LaunchText"))
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(24)
-                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
-                }
-                .scrollBounceBehavior(.basedOnSize)
-                .background(Color("LaunchBackground"))
-            }
+            LaunchSplashView(
+                statusText: statusText,
+                detailText: isChecking
+                    ? "Preparing your farm and checking each enabled mobile feature."
+                    : "Try again, or continue with cached data and available services.",
+                isBusy: isChecking,
+                busyAccessibilityLabel: "Connecting to backend services"
+            )
             .accessibilityIdentifier("backendConnectionGate")
         }
     }
