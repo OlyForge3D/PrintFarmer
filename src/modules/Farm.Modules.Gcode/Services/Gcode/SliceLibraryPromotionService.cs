@@ -1,8 +1,12 @@
 ﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Modules.Calibration.Services.Calibration;
 using Farm.Modules.Calibration.Services.Gcode;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -17,10 +21,13 @@ namespace Farm.Modules.Gcode.Services.Gcode;
 /// The scan is the durable source of truth for both newly completed and historical jobs. Promotion
 /// remains asynchronous so worker completion acknowledgements never wait for G-code parsing or copy
 /// operations, while <see cref="IGcodeArtifactPromoter"/> retains ownership of pinning, verified copy,
-/// checkpoint, and replay semantics.
+/// checkpoint, and replay semantics. Promoted files intentionally enter the existing farm-global
+/// G-code library; owner isolation applies to the temporary source artifact and the notification,
+/// not to visibility of the durable destination library.
 /// </remarks>
 public sealed class SliceLibraryPromotionService(
     IServiceScopeFactory scopeFactory,
+    IHubContext<PrinterHub> hub,
     ILogger<SliceLibraryPromotionService> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromMinutes(2);
@@ -32,6 +39,9 @@ public sealed class SliceLibraryPromotionService(
 
     private readonly IServiceScopeFactory _scopeFactory =
         scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+
+    private readonly IHubContext<PrinterHub> _hub =
+        hub ?? throw new ArgumentNullException(nameof(hub));
 
     private readonly ILogger<SliceLibraryPromotionService> _logger =
         logger ?? throw new ArgumentNullException(nameof(logger));
@@ -91,13 +101,22 @@ public sealed class SliceLibraryPromotionService(
 
         _ = Interlocked.Exchange(ref _capabilityUnavailableLogged, 0);
 
+        AppDbContext appDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Guid[] terminalArtifactIds = await appDb.GcodePromotionCheckpoints
+            .AsNoTracking()
+            .Where(checkpoint => checkpoint.State == GcodePromotionState.Failed)
+            .Select(checkpoint => checkpoint.SourceArtifactId)
+            .Distinct()
+            .ToArrayAsync(cancellationToken);
+
         SlicerDbContext slicerDb = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         List<PromotionCandidate> candidates = await (
             from artifact in slicerDb.Artifacts.AsNoTracking()
             join job in slicerDb.SliceJobs.AsNoTracking() on artifact.JobId equals job.Id
             where job.Status == SliceJobStatus.Completed &&
                 artifact.Kind == SlicerArtifactKinds.Gcode &&
-                artifact.PromotedGcodeFileId == null
+                artifact.PromotedGcodeFileId == null &&
+                !terminalArtifactIds.Contains(artifact.Id)
             orderby artifact.CreatedAt, artifact.Id
             select new PromotionCandidate(
                 job.Id,
@@ -114,20 +133,18 @@ public sealed class SliceLibraryPromotionService(
             return 0;
         }
 
-        Guid[] candidateJobIds = [.. candidates.Select(candidate => candidate.JobId).Distinct()];
-        AppDbContext appDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        HashSet<Guid> promotedJobIds = await appDb.GcodeFiles
+        Guid[] candidateArtifactIds = [.. candidates.Select(candidate => candidate.ArtifactId)];
+        HashSet<Guid> promotedArtifactIds = await appDb.GcodeFiles
             .AsNoTracking()
             .Where(file =>
-                file.SourceSliceJobId.HasValue &&
-                candidateJobIds.Contains(file.SourceSliceJobId.Value))
-            .Select(file => file.SourceSliceJobId!.Value)
+                file.SourceArtifactId.HasValue &&
+                candidateArtifactIds.Contains(file.SourceArtifactId.Value))
+            .Select(file => file.SourceArtifactId!.Value)
             .ToHashSetAsync(cancellationToken);
 
         int promotedCount = 0;
         IEnumerable<PromotionCandidate> missing = candidates
-            .Where(candidate => !promotedJobIds.Contains(candidate.JobId))
-            .DistinctBy(candidate => candidate.JobId)
+            .Where(candidate => !promotedArtifactIds.Contains(candidate.ArtifactId))
             .Take(MaxPromotionsPerPass);
 
         foreach (PromotionCandidate candidate in missing)
@@ -152,6 +169,11 @@ public sealed class SliceLibraryPromotionService(
             if (result.IsSuccess)
             {
                 promotedCount++;
+                if (!result.Replayed)
+                {
+                    await NotifyLibraryUpdatedAsync(candidate.OwnerUserId, cancellationToken);
+                }
+
                 continue;
             }
 
@@ -172,6 +194,26 @@ public sealed class SliceLibraryPromotionService(
         }
 
         return promotedCount;
+    }
+
+    private async Task NotifyLibraryUpdatedAsync(Guid ownerUserId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _hub.Clients.Group(AuthorizedHubGroups.User(ownerUserId))
+                .SendAsync("gcodelibraryupdated", cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Could not notify owner {OwnerUserId} that the G-code library was updated.",
+                ownerUserId);
+        }
     }
 
     /// <summary>Builds the stable idempotency key for one slice artifact.</summary>
