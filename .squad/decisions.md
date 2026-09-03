@@ -288,3 +288,8 @@ Fixed by PR #1136 (merged 2026-08-05): removes `"teamRoot": "."` from `.squad/co
 3. **Canonical locations**: Accepted decisions belong in `.squad/decisions.md`; pending proposals and coordination drop-box entries belong in `.squad/decisions/inbox/`. Repo-root state paths are invalid and must not be treated as durable.
 4. **Interim operating rule**: Until #1130 is fixed and verified, accepted decisions must be written directly to the tracked `.squad/decisions.md` path and checked with `git check-ignore`/`git status`; do not rely on `squad_state` for decision durability.
 5. **Recovery boundary**: Do not move or delete stranded files while their owning sessions are active. Recovery and migration must be deliberate, owned, and verified through #1130/#1131.
+
+## 2026-09-02 — #2398 review-cycle amendment
+
+- Replace the completion-time client-only invalidation ruling: asynchronous durable G-code promotion emits the payload-free lowercase `gcodelibraryupdated` event through `PrinterHub` to `AuthorizedHubGroups.User(ownerUserId)` only after a new promotion succeeds. Clients invalidate the file library on that signal, not on slice completion.
+- Promoted slice G-code intentionally enters the existing farm-global G-code library. Temporary artifacts and the update signal remain owner-scoped, but durable `GcodeFile` visibility remains consistent with uploaded and harvested G-code. Whole-library owner scoping is a separate product/data-migration feature tracked by #2402.
