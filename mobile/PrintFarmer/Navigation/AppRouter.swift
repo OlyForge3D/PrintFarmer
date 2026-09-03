@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// App router owning the operator-shell tab selection, the per-tab
-/// navigation stacks, and the legacy fallback sheet stacks. The five
-/// operator destinations are Attention, Farm, Tasks, Scan, and Inventory.
+/// App router owning shell-aware tab selection, per-tab navigation stacks,
+/// and the legacy fallback sheet stacks.
 ///
 /// Tab-owned `NavigationPath` properties back each tab's stack:
 /// * `printersPath` — Farm tab (PrinterListView)
@@ -10,6 +9,12 @@ import SwiftUI
 /// * `notificationsPath` — Attention tab (AttentionView / NotificationsViewModel)
 /// * `scanPath` — Scan tab (ScanView)
 /// * `inventoryPath` — Inventory tab (SpoolInventoryView)
+/// * `oversightPath` — Simple-shell Oversight tab
+/// * `overviewPath` — Oversight-mode Overview tab
+/// * `fleetPath` — Oversight-mode Fleet tab
+/// * `oversightJobsPath` — Oversight-mode Jobs tab
+/// * `upkeepPath` — Oversight-mode Upkeep tab
+/// * `reportsPath` — Oversight-mode Reports tab
 ///
 /// Legacy fallback sheet stacks (#727) are owned by the sheets themselves,
 /// NOT the tabs, so dismissing a sheet can safely reset its stack without
@@ -31,12 +36,20 @@ final class AppRouter {
         let jobId: UUID?
     }
 
+    private(set) var activeShell: NavigationShell = .current
+    private(set) var activeMode: OversightMode = .floor
     var selectedTab: AppTab = .attention
     var printersPath = NavigationPath()
     var jobsPath = NavigationPath()
     var notificationsPath = NavigationPath()
     var inventoryPath = NavigationPath()
     var scanPath = NavigationPath()
+    var oversightPath = NavigationPath()
+    var overviewPath = NavigationPath()
+    var fleetPath = NavigationPath()
+    var oversightJobsPath = NavigationPath()
+    var upkeepPath = NavigationPath()
+    var reportsPath = NavigationPath()
 
     // Legacy fallback sheet stacks (#727) — owned by the sheets, reset on
     // dismissal via `resetLegacySheet(_:)`. Never shared with a tab stack.
@@ -70,29 +83,37 @@ final class AppRouter {
         let capturedEpoch = navigationEpoch
         switch destination {
         case .printerDetail(let id):
-            selectedTab = .farm
-            printersPath = NavigationPath()
+            let tab = printerDestinationTab
+            selectedTab = tab
+            resetPrinterPath(for: tab)
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(50))
                 guard capturedEpoch == navigationEpoch else { return }
-                printersPath.append(AppDestination.printerDetail(id: id))
+                appendPrinterDestination(.printerDetail(id: id), to: tab)
             }
         case .printerReady(let id):
-            selectedTab = .farm
-            printersPath = NavigationPath()
+            let tab = printerDestinationTab
+            selectedTab = tab
+            resetPrinterPath(for: tab)
             pendingNFCReadyPrinterId = id
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(50))
                 guard capturedEpoch == navigationEpoch else { return }
-                printersPath.append(AppDestination.printerDetail(id: id))
+                appendPrinterDestination(.printerDetail(id: id), to: tab)
             }
         case .spoolDetail(let id):
+            guard visibleTabs(for: capabilities).contains(.inventory) else {
+                selectedTab = fallbackTab(for: capabilities)
+                inventoryPath = NavigationPath()
+                pendingSpoolHighlightId = nil
+                return
+            }
             selectedTab = .inventory
             inventoryPath = NavigationPath()
             pendingSpoolHighlightId = id
         case .attentionItem(let id):
-            guard capabilities.attentionEnabled else {
-                selectedTab = AppTab.fallbackTab(for: capabilities)
+            guard visibleTabs(for: capabilities).contains(.attention) else {
+                selectedTab = fallbackTab(for: capabilities)
                 notificationsPath = NavigationPath()
                 pendingAttentionItemId = nil
                 return
@@ -101,8 +122,9 @@ final class AppRouter {
             notificationsPath = NavigationPath()
             pendingAttentionItemId = id
         case .filamentSwap(let printerId, let toolheadIndex, let jobId):
-            selectedTab = .farm
-            printersPath = NavigationPath()
+            let tab = printerDestinationTab
+            selectedTab = tab
+            resetPrinterPath(for: tab)
             pendingFilamentSwap = capabilities.guidedSwapEnabled
                 ? FilamentSwapDeepLink(
                     printerId: printerId,
@@ -113,7 +135,10 @@ final class AppRouter {
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(50))
                 guard capturedEpoch == navigationEpoch else { return }
-                printersPath.append(AppDestination.printerDetail(id: printerId))
+                appendPrinterDestination(
+                    .printerDetail(id: printerId),
+                    to: tab
+                )
             }
         }
     }
@@ -125,6 +150,12 @@ final class AppRouter {
         notificationsPath = NavigationPath()
         inventoryPath = NavigationPath()
         scanPath = NavigationPath()
+        oversightPath = NavigationPath()
+        overviewPath = NavigationPath()
+        fleetPath = NavigationPath()
+        oversightJobsPath = NavigationPath()
+        upkeepPath = NavigationPath()
+        reportsPath = NavigationPath()
         dashboardSheetPath = NavigationPath()
         maintenanceSheetPath = NavigationPath()
         notificationsSheetPath = NavigationPath()
@@ -152,16 +183,48 @@ final class AppRouter {
         }
     }
 
+    func visibleTabs(
+        for capabilities: ResolvedSystemCapabilities
+    ) -> [AppTab] {
+        AppTab.visibleTabs(
+            for: activeShell,
+            mode: activeMode,
+            capabilities: capabilities
+        )
+    }
+
+    func fallbackTab(
+        for capabilities: ResolvedSystemCapabilities
+    ) -> AppTab {
+        AppTab.fallbackTab(
+            for: activeShell,
+            mode: activeMode,
+            capabilities: capabilities
+        )
+    }
+
     func resolvedTab(for capabilities: ResolvedSystemCapabilities) -> AppTab {
-        selectedTab.isEnabled(in: capabilities)
+        visibleTabs(for: capabilities).contains(selectedTab)
             ? selectedTab
-            : AppTab.fallbackTab(for: capabilities)
+            : fallbackTab(for: capabilities)
     }
 
     func selectTab(_ tab: AppTab, capabilities: ResolvedSystemCapabilities) {
-        selectedTab = tab.isEnabled(in: capabilities)
+        selectedTab = visibleTabs(for: capabilities).contains(tab)
             ? tab
-            : AppTab.fallbackTab(for: capabilities)
+            : fallbackTab(for: capabilities)
+    }
+
+    func setNavigationShell(
+        _ shell: NavigationShell,
+        mode: OversightMode? = nil,
+        capabilities: ResolvedSystemCapabilities
+    ) {
+        activeShell = shell
+        if let mode {
+            activeMode = mode
+        }
+        selectedTab = resolvedTab(for: capabilities)
     }
 
     func reconcileCapabilities(_ capabilities: ResolvedSystemCapabilities) {
@@ -193,9 +256,10 @@ final class AppRouter {
     /// been dismissed and the stack is mounted — no timing delay is needed, so
     /// the destination is testable without waiting on elapsed time.
     func routeToFilamentSwap(printerID: UUID, toolheadID: String?) {
-        selectedTab = .farm
-        printersPath = NavigationPath()
-        printersPath.append(AppDestination.printerDetail(id: printerID))
+        let tab = printerDestinationTab
+        selectedTab = tab
+        resetPrinterPath(for: tab)
+        appendPrinterDestination(.printerDetail(id: printerID), to: tab)
     }
 
     func resetToRoot(tab: AppTab) {
@@ -210,6 +274,18 @@ final class AppRouter {
             scanPath = NavigationPath()
         case .inventory:
             inventoryPath = NavigationPath()
+        case .oversight:
+            oversightPath = NavigationPath()
+        case .overview:
+            overviewPath = NavigationPath()
+        case .fleet:
+            fleetPath = NavigationPath()
+        case .jobs:
+            oversightJobsPath = NavigationPath()
+        case .upkeep:
+            upkeepPath = NavigationPath()
+        case .reports:
+            reportsPath = NavigationPath()
         }
     }
 
@@ -237,6 +313,35 @@ final class AppRouter {
             break
         }
     }
+
+    private var printerDestinationTab: AppTab {
+        // IOS-1 must bind `fleetPath` to the Fleet NavigationStack before it
+        // enables the Oversight shell in production.
+        activeShell == .twoModes && activeMode == .oversight
+            ? .fleet
+            : .farm
+    }
+
+    private func resetPrinterPath(for tab: AppTab) {
+        switch tab {
+        case .fleet:
+            fleetPath = NavigationPath()
+        default:
+            printersPath = NavigationPath()
+        }
+    }
+
+    private func appendPrinterDestination(
+        _ destination: AppDestination,
+        to tab: AppTab
+    ) {
+        switch tab {
+        case .fleet:
+            fleetPath.append(destination)
+        default:
+            printersPath.append(destination)
+        }
+    }
 }
 
 /// Legacy fallback sheets presented from `AttentionView` (#706 / #725).
@@ -248,33 +353,4 @@ enum LegacySheet: Hashable, CaseIterable {
     case maintenance
     case notifications
     case settings
-}
-
-/// The five operator-shell destinations. Order matches the tab bar layout
-/// on iPhone and the sidebar ordering on iPad (see `ContentView`).
-enum AppTab: Hashable, CaseIterable {
-    case attention
-    case farm
-    case tasks
-    case scan
-    case inventory
-
-    func isEnabled(in capabilities: ResolvedSystemCapabilities) -> Bool {
-        switch self {
-        case .attention:
-            capabilities.attentionEnabled
-        case .tasks:
-            capabilities.shiftPlanEnabled
-        case .farm, .scan, .inventory:
-            true
-        }
-    }
-
-    static func visibleTabs(for capabilities: ResolvedSystemCapabilities) -> [AppTab] {
-        allCases.filter { $0.isEnabled(in: capabilities) }
-    }
-
-    static func fallbackTab(for capabilities: ResolvedSystemCapabilities) -> AppTab {
-        visibleTabs(for: capabilities).first ?? .farm
-    }
 }

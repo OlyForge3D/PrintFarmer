@@ -58,6 +58,7 @@
 		1DC1666AD87080FDC1140528 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 574F629AF29665D4872351E8 /* LoginView.swift */; };
 		1FA5B5ADDBE8376D1A607E06 /* JobStatsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43FEB78EDB93736282BDCB0B /* JobStatsCard.swift */; };
 		2007393C70EEAD89185ADC84 /* AppRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FD237969E9A136249F6351A /* AppRouter.swift */; };
+		F24120020000000000000002 /* AppDestinationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24120010000000000000001 /* AppDestinationView.swift */; };
 		20C7007EC7BAF78868D23835 /* DemoMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1813AB98B7AEA3A598863F /* DemoMode.swift */; };
 		20D74DCE5420BC3260D6FF7E /* DispatchDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C82B536DAB8128A0A3905EBE /* DispatchDashboardView.swift */; };
 		2145660BC57194889CDBC78A /* JobCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B8E20F526E7CE3E92BE781 /* JobCardView.swift */; };
@@ -618,6 +619,7 @@
 		4EF6960887D6BE3947D944C8 /* MaintenanceViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceViewModel.swift; sourceTree = "<group>"; };
 		4F5C0DDAD4063D1EA8540264 /* PrinterListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterListViewModel.swift; sourceTree = "<group>"; };
 		4FD237969E9A136249F6351A /* AppRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouter.swift; sourceTree = "<group>"; };
+		F24120010000000000000001 /* AppDestinationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDestinationView.swift; sourceTree = "<group>"; };
 		534568DC689B743CE69E44A4 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
 		574F629AF29665D4872351E8 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		57A3A3E21352CC6A4514221E /* PrinterCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterCardView.swift; sourceTree = "<group>"; };
@@ -1248,6 +1250,7 @@
 			isa = PBXGroup;
 			children = (
 				E83CE3867D23C7CA26C423AB /* AppDestination.swift */,
+				F24120010000000000000001 /* AppDestinationView.swift */,
 				AF81383E489642A1A80EE943 /* DeepLinkHandler.swift */,
 				4FD237969E9A136249F6351A /* AppRouter.swift */,
 				F78800000000000000000001 /* TaskActionRoute.swift */,
@@ -1949,6 +1952,7 @@
 				AC275E3BCF7CF6F70474DA5A /* RequestModels.swift in Sources */,
 				4D9D08DD59DF23C812B2963C /* SignalRModels.swift in Sources */,
 				4097E554D29B3551A59C943D /* AppDestination.swift in Sources */,
+				F24120020000000000000002 /* AppDestinationView.swift in Sources */,
 				14D1CA5B7AC14F03A2C76A77 /* DeepLinkHandler.swift in Sources */,
 				2007393C70EEAD89185ADC84 /* AppRouter.swift in Sources */,
 				3D4D27461FC81A2D849419A4 /* JobServiceProtocol.swift in Sources */,

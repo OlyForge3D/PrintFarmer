@@ -17,3 +17,160 @@ enum AppDestination: Hashable {
     /// behind an "Advanced" navigation destination inside Printer Detail.
     case advancedPrinterControls(printerId: UUID)
 }
+
+/// Navigation shells supported by the tab model.
+///
+/// `current` keeps the shipping five-tab operator UI unchanged while the
+/// adaptive shells are introduced incrementally by the IOS navigation epic.
+enum NavigationShell: Hashable, CaseIterable {
+    case current
+    case simple
+    case twoModes
+}
+
+enum OversightMode: Hashable, CaseIterable {
+    case floor
+    case oversight
+}
+
+/// Every tab addressable by the current and adaptive navigation shells.
+enum AppTab: String, Hashable, CaseIterable {
+    case attention
+    case farm
+    case tasks
+    case scan
+    case inventory
+    case oversight
+    case overview
+    case fleet
+    case jobs
+    case upkeep
+    case reports
+
+    static func tabs(
+        for shell: NavigationShell,
+        mode: OversightMode
+    ) -> [AppTab] {
+        switch shell {
+        case .current:
+            [.attention, .farm, .tasks, .scan, .inventory]
+        case .simple:
+            [.attention, .farm, .inventory, .oversight]
+        case .twoModes:
+            switch mode {
+            case .floor:
+                [.attention, .farm, .tasks, .inventory]
+            case .oversight:
+                [.overview, .fleet, .jobs, .upkeep, .reports]
+            }
+        }
+    }
+
+    func isEnabled(in capabilities: ResolvedSystemCapabilities) -> Bool {
+        switch self {
+        case .attention:
+            capabilities.attentionEnabled
+        case .tasks:
+            capabilities.shiftPlanEnabled
+        case .farm, .scan, .inventory, .oversight,
+             .overview, .fleet, .jobs, .upkeep, .reports:
+            true
+        }
+    }
+
+    static func visibleTabs(
+        for shell: NavigationShell,
+        mode: OversightMode,
+        capabilities: ResolvedSystemCapabilities
+    ) -> [AppTab] {
+        tabs(for: shell, mode: mode).filter { $0.isEnabled(in: capabilities) }
+    }
+
+    static func fallbackTab(
+        for shell: NavigationShell,
+        mode: OversightMode,
+        capabilities: ResolvedSystemCapabilities
+    ) -> AppTab {
+        visibleTabs(
+            for: shell,
+            mode: mode,
+            capabilities: capabilities
+        ).first ?? tabs(for: shell, mode: mode).first ?? .farm
+    }
+
+    /// Compatibility helpers for callers that intentionally target today's
+    /// five-tab operator shell.
+    static func visibleTabs(
+        for capabilities: ResolvedSystemCapabilities
+    ) -> [AppTab] {
+        visibleTabs(
+            for: .current,
+            mode: .floor,
+            capabilities: capabilities
+        )
+    }
+
+    static func fallbackTab(
+        for capabilities: ResolvedSystemCapabilities
+    ) -> AppTab {
+        fallbackTab(
+            for: .current,
+            mode: .floor,
+            capabilities: capabilities
+        )
+    }
+
+    var title: String {
+        switch self {
+        case .attention:
+            "Attention"
+        case .farm:
+            "Farm"
+        case .tasks:
+            "Tasks"
+        case .scan:
+            "Scan"
+        case .inventory:
+            "Inventory"
+        case .oversight:
+            "Oversight"
+        case .overview:
+            "Overview"
+        case .fleet:
+            "Fleet"
+        case .jobs:
+            "Jobs"
+        case .upkeep:
+            "Upkeep"
+        case .reports:
+            "Reports"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .attention:
+            "bell.badge"
+        case .farm:
+            "printer"
+        case .tasks:
+            "checklist"
+        case .scan:
+            "barcode.viewfinder"
+        case .inventory:
+            "cylinder.fill"
+        case .oversight:
+            "chart.bar.xaxis"
+        case .overview:
+            "rectangle.grid.2x2"
+        case .fleet:
+            "printer"
+        case .jobs:
+            "list.bullet.rectangle"
+        case .upkeep:
+            "wrench.and.screwdriver"
+        case .reports:
+            "chart.bar.doc.horizontal"
+        }
+    }
+}
