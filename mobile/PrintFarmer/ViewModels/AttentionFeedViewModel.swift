@@ -329,6 +329,29 @@ final class AttentionFeedViewModel {
     /// hydrate not yet confirmed by a canonical refresh). Drives the stale banner
     /// and disables load-more (offline pagination is refused — criterion 3).
     private(set) var isShowingStaleCache: Bool = false
+    /// True once a canonical refresh has CONCLUDED at least once for the current
+    /// feed session — success or failure. Starts false, so the interval between
+    /// a cold-launch cache hydrate and the first canonical result is *undecided*
+    /// rather than "offline".
+    ///
+    /// This must be observed (never `@ObservationIgnored`): `isStaleCacheReportable`
+    /// is read by SwiftUI, and a derived property whose only changing input is
+    /// untracked state is never re-evaluated, so the banner would never appear.
+    /// The same trap made `ConnectionMonitor.isReportable` inert (PR #2400).
+    private(set) var hasConcludedCanonicalRefresh: Bool = false
+    /// Drives the shared stale banner. `isShowingStaleCache` alone is true from
+    /// the instant a cold launch hydrates cache, which flashes an "offline"
+    /// banner during an entirely healthy startup — the canonical refresh simply
+    /// had not landed yet. Gating on a concluded refresh means the banner
+    /// appears only once we genuinely know the data could not be confirmed
+    /// (network failure surfaces through `applyFailure`, including timeouts),
+    /// and a successful refresh clears `isShowingStaleCache` before it can show.
+    ///
+    /// Deliberately separate from `isShowingStaleCache`, which also refuses
+    /// load-more while offline (#789 criterion 3) — that semantic must not move.
+    var isStaleCacheReportable: Bool {
+        isShowingStaleCache && hasConcludedCanonicalRefresh
+    }
     /// Epoch-millis of the cached snapshot's originating canonical completion.
     private(set) var cacheLastUpdatedAtMillis: Int64?
     /// The cached feed's last-updated instant, for the shared stale banner.
@@ -995,6 +1018,7 @@ final class AttentionFeedViewModel {
                     coverSequence: 0
                 )
                 isShowingStaleCache = false
+                hasConcludedCanonicalRefresh = true
                 cacheLastUpdatedAtMillis = entry.lastUpdatedAtMillis
                 prefetched = entry
             }
@@ -1167,6 +1191,7 @@ final class AttentionFeedViewModel {
             // #789: a confirmed-live snapshot is now on screen — it is no longer
             // unconfirmed cached data. Pure state flip, no suspension.
             isShowingStaleCache = false
+            hasConcludedCanonicalRefresh = true
             // Advance coverage. Any event with sequence ≤ startCover is
             // now proven covered by an applied successful refresh.
             lastCoveredEventSequence = max(lastCoveredEventSequence, startCoverSnapshot)
@@ -1867,6 +1892,11 @@ final class AttentionFeedViewModel {
         let message = (error as? LocalizedError)?.errorDescription
             ?? error.localizedDescription
         loadFailure = AttentionLoadFailure(id: UUID(), message: message)
+        // A concluded attempt — the refresh had its chance and could not confirm
+        // the cached feed, so the stale banner is now honest rather than a
+        // startup flash. Network timeouts land here too, so a hung refresh
+        // still resolves into a visible banner rather than silence.
+        hasConcludedCanonicalRefresh = true
         isRefreshing = false
         if snapshot == nil {
             phase = .error
@@ -2312,6 +2342,10 @@ final class AttentionFeedViewModel {
         groups = []
         loadFailure = nil
         paginationFailure = nil
+        // Fresh feed session: the next cache hydrate must get a fresh
+        // undecided window rather than inheriting the previous session's
+        // verdict, which would flash the banner again on re-activation.
+        hasConcludedCanonicalRefresh = false
         phase = .idle
     }
 }

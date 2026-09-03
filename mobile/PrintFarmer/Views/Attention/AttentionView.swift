@@ -292,7 +292,12 @@ struct AttentionView: View {
                 // the honestly-stale state (never color alone), identical on
                 // iPhone and iPad. Only shown while offline cached data is on
                 // screen (cleared the moment a canonical refresh confirms live).
-                if feedViewModel.isShowingStaleCache {
+                //
+                // Gated on `isStaleCacheReportable`, not `isShowingStaleCache`:
+                // the latter is true from the instant a cold launch hydrates
+                // cache, which flashed this banner for a few seconds on every
+                // healthy startup before the first canonical refresh landed.
+                if feedViewModel.isStaleCacheReportable {
                     ConnectionStatusBar(
                         status: .offline,
                         lastConfirmedAt: feedViewModel.cacheLastUpdatedAt,
