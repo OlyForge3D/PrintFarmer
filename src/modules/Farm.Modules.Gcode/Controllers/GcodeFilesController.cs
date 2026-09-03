@@ -718,7 +718,7 @@ public class GcodeFilesController(
                 return NotFound("Thumbnail not available");
             }
 
-            string absolutePath = ResolveGcodePath(thumbnailPath);
+            string absolutePath = thumbnailPath;
             string gcodeRoot = storagePathService.GetGcodeStorageDirectory();
 
             logger.LogInformation("[Thumbnail] Resolved absolute path: {AbsolutePath}", absolutePath);

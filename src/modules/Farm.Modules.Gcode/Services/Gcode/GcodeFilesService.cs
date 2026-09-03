@@ -1233,9 +1233,7 @@ public class GcodeFilesService(
             return null;
         }
 
-        // Combine the file directory with the thumbnail filename
-        string fileDirectory = Path.GetDirectoryName(file.FilePath) ?? string.Empty;
-        return Path.Join(fileDirectory, file.ThumbnailFileName);
+        return ResolveStoredFilePath(file, file.ThumbnailFileName);
     }
 
     /// <summary>
