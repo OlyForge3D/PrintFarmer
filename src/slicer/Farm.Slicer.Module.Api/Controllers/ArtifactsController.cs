@@ -80,7 +80,7 @@ public class ArtifactsController(
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("{id}")]
     [RequirePermission(PrintFarmerPermissions.Slicing.ReadArtifact)]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(IReadOnlyList<ArtifactListItemDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetAsync(Guid id, CancellationToken ct)
@@ -131,18 +131,45 @@ public class ArtifactsController(
         }
 
         IReadOnlyList<Artifact> artifacts = await _service.ListByJobAsync(jobId, ct);
-        var response = artifacts.Select(a => new
-        {
-            id = a.Id,
-            jobId = a.JobId,
-            fileName = a.FileName,
-            contentType = a.ContentType,
-            sizeBytes = a.SizeBytes,
-            downloadUrl = $"/api/artifacts/{a.Id}",
-            createdAt = a.CreatedAt,
-        }).ToList();
+        Guid? primaryArtifactId = TryGetPrimaryArtifactId(job.ResultFileUrl);
+        bool hasValidPrimaryGcode = primaryArtifactId.HasValue &&
+            artifacts.Count(artifact =>
+                artifact.Id == primaryArtifactId.Value &&
+                string.Equals(artifact.Kind, SlicerArtifactKinds.Gcode, StringComparison.OrdinalIgnoreCase)) == 1;
+        List<ArtifactListItemDto> response = artifacts.Select(artifact => new ArtifactListItemDto(
+            artifact.Id,
+            artifact.JobId,
+            artifact.FileName,
+            artifact.ContentType,
+            artifact.SizeBytes,
+            $"/api/artifacts/{artifact.Id}",
+            artifact.CreatedAt,
+            hasValidPrimaryGcode && artifact.Id == primaryArtifactId)).ToList();
 
         return Ok(response);
+    }
+
+    private static Guid? TryGetPrimaryArtifactId(string? resultFileUrl)
+    {
+        if (string.IsNullOrWhiteSpace(resultFileUrl))
+        {
+            return null;
+        }
+
+        string path = Uri.TryCreate(resultFileUrl, UriKind.Absolute, out Uri? absoluteUri)
+            ? absoluteUri.AbsolutePath
+            : resultFileUrl.Split(['?', '#'], 2)[0];
+        string[] segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        for (int index = 0; index < segments.Length - 1; index++)
+        {
+            if (string.Equals(segments[index], "artifacts", StringComparison.OrdinalIgnoreCase) &&
+                Guid.TryParse(segments[index + 1], out Guid artifactId))
+            {
+                return artifactId;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

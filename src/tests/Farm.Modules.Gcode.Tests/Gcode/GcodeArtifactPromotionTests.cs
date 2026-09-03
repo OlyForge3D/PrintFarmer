@@ -322,6 +322,82 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = File.Exists(downloadPath).Should().BeTrue();
     }
 
+    [Fact(DisplayName = "Promotion persists its virtual directory and replay cannot relocate it")]
+    public async Task PromoteAsync_NonRootVirtualDirectory_ReadsAndReplaysOriginalLocation()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        GcodeArtifactPromotionRequest request = fixture.Request("promotion-subdirectory") with
+        {
+            VirtualDirectory = "/slice-results/nested",
+        };
+
+        CalibrationApiResult<GcodePromotionDto> promoted = await _harness.CreatePromoter()
+            .PromoteAsync(request, fixture.Owner, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> replay = await _harness.CreatePromoter()
+            .PromoteAsync(request, fixture.Owner, CancellationToken.None);
+        CalibrationApiResult<GcodePromotionDto> relocation = await _harness.CreatePromoter()
+            .PromoteAsync(
+                request with { VirtualDirectory = "/different-directory" },
+                fixture.Owner,
+                CancellationToken.None);
+
+        GcodeFile stored = await _harness.GetGcodeFileAsync(promoted.Value!.GcodeFileId);
+        string? downloadPath = await _harness.ResolveGcodeDownloadPathAsync(stored.Id);
+        byte[]? bytes = await _harness.ReadGcodeFileBytesAsync(stored.Id);
+        _ = promoted.StatusCode.Should().Be(StatusCodes.Status201Created);
+        _ = replay.StatusCode.Should().Be(StatusCodes.Status200OK);
+        _ = replay.Value!.GcodeFileId.Should().Be(stored.Id);
+        _ = relocation.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = relocation.Code.Should().Be("idempotency_payload_mismatch");
+        _ = stored.FilePath.Should().Be("/slice-results/nested");
+        _ = downloadPath.Should().Be(
+            Path.Join(_harness.GcodeRoot, "slice-results", "nested", stored.FileName));
+        _ = bytes.Should().Equal(Encoding.UTF8.GetBytes(GcodeContent));
+    }
+
+    [Fact(DisplayName = "Promotion rejects a traversing virtual directory")]
+    public async Task PromoteAsync_TraversingVirtualDirectory_ReturnsStableFailure()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+
+        CalibrationApiResult<GcodePromotionDto> result = await _harness.CreatePromoter()
+            .PromoteAsync(
+                fixture.Request("promotion-traversal") with { VirtualDirectory = "../outside" },
+                fixture.Owner,
+                CancellationToken.None);
+
+        _ = result.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = result.Code.Should().Be(GcodeStreamIngestException.InvalidVirtualDirectory);
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(0);
+        _ = Directory.Exists(Path.Join(_harness.GcodeRoot, "outside")).Should().BeFalse();
+    }
+
+    [Theory(DisplayName = "Deleting a promoted file removes durable bytes from its virtual directory")]
+    [InlineData("/")]
+    [InlineData("/slice-results/delete")]
+    public async Task DeleteFileAsync_PromotedFile_RemovesRootAndSubdirectoryBytes(
+        string virtualDirectory)
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        CalibrationApiResult<GcodePromotionDto> promoted = await _harness.CreatePromoter()
+            .PromoteAsync(
+                fixture.Request($"promotion-delete-{Guid.NewGuid():N}") with
+                {
+                    VirtualDirectory = virtualDirectory,
+                },
+                fixture.Owner,
+                CancellationToken.None);
+        string? physicalPath = await _harness.ResolveGcodeDownloadPathAsync(
+            promoted.Value!.GcodeFileId);
+
+        bool deleted = await _harness.DeleteGcodeFileAsync(promoted.Value.GcodeFileId);
+
+        _ = deleted.Should().BeTrue();
+        _ = physicalPath.Should().NotBeNull();
+        _ = File.Exists(physicalPath).Should().BeFalse();
+        _ = (await _harness.GcodeFileExistsAsync(promoted.Value.GcodeFileId)).Should().BeFalse();
+    }
+
     [Fact(DisplayName = "Explicit Save replays the durable file after staged artifact cleanup")]
     public async Task SliceArtifactLibraryService_SaveAfterArtifactCleanup_ReplaysDurableFile()
     {
@@ -2126,6 +2202,19 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             await using AppDbContext core = CreateCoreContext();
             return await CreateGcodeFilesService(core)
                 .DownloadFileAsync(fileId, string.Empty, CancellationToken.None);
+        }
+
+        public async Task<bool> DeleteGcodeFileAsync(Guid fileId)
+        {
+            await using AppDbContext core = CreateCoreContext();
+            return await CreateGcodeFilesService(core)
+                .DeleteFileAsync(fileId, CancellationToken.None);
+        }
+
+        public async Task<bool> GcodeFileExistsAsync(Guid fileId)
+        {
+            await using AppDbContext core = CreateCoreContext();
+            return await core.GcodeFiles.AnyAsync(file => file.Id == fileId);
         }
 
         public async Task<GcodePromotionCheckpoint> GetCheckpointAsync(Guid checkpointId)

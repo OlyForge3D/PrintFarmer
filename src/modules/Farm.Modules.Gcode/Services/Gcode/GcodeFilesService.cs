@@ -772,6 +772,7 @@ public class GcodeFilesService(
             computedHash,
             copiedBytes,
             targetFolder.Id,
+            virtualDirectory,
             metadata,
             thumbnailPath,
             request.Source,
@@ -1046,6 +1047,25 @@ public class GcodeFilesService(
             }
         }
 
+        Dictionary<Guid, (string FilePath, string? ThumbnailPath)> resolvedTargets = new();
+        foreach (GcodeFile file in filesToDelete)
+        {
+            string? filePath = ResolveStoredFilePath(file);
+            string? thumbnailPath = string.IsNullOrWhiteSpace(file.ThumbnailFileName)
+                ? null
+                : ResolveStoredFilePath(file, file.ThumbnailFileName);
+            if (filePath is null ||
+                (!string.IsNullOrWhiteSpace(file.ThumbnailFileName) && thumbnailPath is null))
+            {
+                _logger.LogWarning(
+                    "[DeleteFilesAsync] Refusing to delete G-code {FileId} because its stored path is unsafe or unresolvable",
+                    file.Id);
+                return false;
+            }
+
+            resolvedTargets[file.Id] = (filePath, thumbnailPath);
+        }
+
         // F4 — Wrap Step 3 compensating deletes + Step 4 parent GcodeFile removal in a
         // single transaction so a failure late in the sequence rolls back the earlier
         // ExecuteDeleteAsync writes (queue references cleared, harvest import mappings
@@ -1121,7 +1141,7 @@ public class GcodeFilesService(
         {
             try
             {
-                string fullPath = Path.Join(file.FilePath, file.FileName);
+                (string fullPath, string? thumbnailPath) = resolvedTargets[file.Id];
 
                 if (File.Exists(fullPath))
                 {
@@ -1139,7 +1159,6 @@ public class GcodeFilesService(
                 // Delete associated thumbnail if it exists
                 if (!string.IsNullOrEmpty(file.ThumbnailFileName))
                 {
-                    string thumbnailPath = Path.Join(file.FilePath, file.ThumbnailFileName);
                     _logger.LogInformation("[DeleteFilesAsync] Checking for thumbnail: {ThumbnailPath}", thumbnailPath);
                     if (TryDeleteFile(thumbnailPath, "thumbnail"))
                     {
@@ -1396,29 +1415,37 @@ public class GcodeFilesService(
         string storageRoot)
     {
         // Normalize incoming virtual path
-        string vPath = string.IsNullOrWhiteSpace(virtualPath) ? "/" : virtualPath.Trim();
+        string vPath = string.IsNullOrWhiteSpace(virtualPath)
+            ? "/"
+            : virtualPath.Trim().Replace('\\', '/');
         if (!vPath.StartsWith('/'))
         {
             vPath = "/" + vPath;
         }
 
-        // Collapse .. segments and remove . segments
-        string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
-            .Where(s => s != "." && s != "..")
-            .ToArray();
+        string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Any(segment => segment is "." or ".."))
+        {
+            throw new GcodeStreamIngestException(
+                GcodeStreamIngestException.InvalidVirtualDirectory,
+                "The virtual G-code directory contains an invalid traversal segment.");
+        }
 
+        string normalizedStorageRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(storageRoot));
         string safeRel = segments.Length == 0 ? string.Empty : Path.Join(segments);
-        string candidate = Path.GetFullPath(Path.Join(storageRoot, safeRel));
+        string candidate = Path.GetFullPath(Path.Join(normalizedStorageRoot, safeRel));
 
         // Security check: ensure path doesn't escape the storage root
-        if (!candidate.StartsWith(storageRoot, StringComparison.Ordinal))
+        if (!IsPathContained(normalizedStorageRoot, candidate))
         {
-            throw new InvalidOperationException("Path escapes storage root");
+            throw new GcodeStreamIngestException(
+                GcodeStreamIngestException.InvalidVirtualDirectory,
+                "The virtual G-code directory escapes the configured storage root.");
         }
 
         string virtualNormalized = segments.Length == 0 ? "/" : "/" + string.Join('/', segments);
 
-        return (storageRoot, candidate, virtualNormalized);
+        return (normalizedStorageRoot, candidate, virtualNormalized);
     }
 
     /// <summary>
@@ -1552,6 +1579,7 @@ public class GcodeFilesService(
             fileHash,
             fileSizeBytes,
             targetFolder.Id,
+            normalizedVirtualDir,
             metadata,
             thumbnailPath,
             GcodeSource.Upload,
@@ -1569,6 +1597,7 @@ public class GcodeFilesService(
     /// <param name="fileHash">SHA256 hash of the file content.</param>
     /// <param name="fileSizeBytes">Size of the file in bytes.</param>
     /// <param name="folderId">ID of the virtual folder containing the file.</param>
+    /// <param name="virtualDirectory">Canonical virtual directory containing the physical file.</param>
     /// <param name="metadata">Extracted metadata from the G-code file, or null if extraction failed.</param>
     /// <param name="thumbnailPath">Path to the extracted thumbnail, or null if none available.</param>
     /// <param name="source">Source of the G-code file (Upload, Harvested, etc.).</param>
@@ -1582,6 +1611,7 @@ public class GcodeFilesService(
         string fileHash,
         long fileSizeBytes,
         Guid folderId,
+        string virtualDirectory,
         GcodeMetadataExtracted? metadata,
         string? thumbnailPath,
         GcodeSource source,
@@ -1596,7 +1626,9 @@ public class GcodeFilesService(
             Name = originalFileName,
             FileName = $"{fileId}{fileExtension}",
             FolderId = folderId,
-            FilePath = "/",  // Virtual folder path - always root for stored files
+            FilePath = ResolveVirtualPath(
+                virtualDirectory,
+                _storagePathService.GetGcodeStorageDirectory()).VirtualNormalized,
             FileSizeBytes = fileSizeBytes,
             FileHash = fileHash,
             UploadedAt = DateTime.UtcNow,
@@ -1881,13 +1913,23 @@ public class GcodeFilesService(
             return false;
         }
 
-        // Delete physical
-        string fullFilePath = Path.Join(file.FilePath, file.FileName);
+        string? fullFilePath = ResolveStoredFilePath(file);
+        string? fullThumbnailPath = string.IsNullOrWhiteSpace(file.ThumbnailFileName)
+            ? null
+            : ResolveStoredFilePath(file, file.ThumbnailFileName);
+        if (fullFilePath is null ||
+            (!string.IsNullOrWhiteSpace(file.ThumbnailFileName) && fullThumbnailPath is null))
+        {
+            _logger.LogWarning(
+                "Refusing to delete G-code {FileId} because its stored path is unsafe or unresolvable",
+                id);
+            return false;
+        }
+
         TryDeleteFile(fullFilePath, $"gcode file {id}");
 
-        if (!string.IsNullOrEmpty(file.ThumbnailFileName))
+        if (fullThumbnailPath is not null)
         {
-            string fullThumbnailPath = Path.Join(file.FilePath, file.ThumbnailFileName);
             TryDeleteFile(fullThumbnailPath, $"thumbnail for gcode {id}");
         }
 
@@ -1936,10 +1978,11 @@ public class GcodeFilesService(
             : await System.IO.File.ReadAllBytesAsync(path, ct);
     }
 
-    private string? ResolveStoredFilePath(GcodeFile file)
+    private string? ResolveStoredFilePath(GcodeFile file, string? storedFileName = null)
     {
-        if (string.IsNullOrWhiteSpace(file.FileName) ||
-            !string.Equals(Path.GetFileName(file.FileName), file.FileName, StringComparison.Ordinal))
+        string? fileName = storedFileName ?? file.FileName;
+        if (string.IsNullOrWhiteSpace(fileName) ||
+            !string.Equals(Path.GetFileName(fileName), fileName, StringComparison.Ordinal))
         {
             return null;
         }
@@ -1968,7 +2011,7 @@ public class GcodeFilesService(
                 physicalDirectory = Path.GetFullPath(Path.Join(storageRoot, relativeDirectory));
             }
 
-            string candidate = Path.GetFullPath(Path.Join(physicalDirectory, file.FileName));
+            string candidate = Path.GetFullPath(Path.Join(physicalDirectory, fileName));
             return IsPathContained(storageRoot, candidate) ? candidate : null;
         }
         catch (Exception exception) when (
@@ -2229,6 +2272,7 @@ public class GcodeFilesService(
             fileHash,
             fileContent.Length,
             folderId,
+            "/",
             metadata,
             thumbnailPath,
             sourcePrinterId.HasValue ? GcodeSource.Harvested : GcodeSource.Upload,
