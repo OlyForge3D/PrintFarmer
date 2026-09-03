@@ -520,11 +520,19 @@ export class SliceJobService {
    */
   async getArtifactsByRoute(artifactsRoute: string): Promise<ArtifactListItemResponse[]> {
     const apiBaseUrl = getApiBaseUrl().replace(/\/$/, '');
-    const requestUrl = artifactsRoute.startsWith(`${apiBaseUrl}/`)
-      ? artifactsRoute.slice(apiBaseUrl.length)
-      : artifactsRoute.startsWith('/api/')
-        ? artifactsRoute.slice('/api'.length)
-        : artifactsRoute;
+    let requestUrl: string;
+    if (artifactsRoute.startsWith(`${apiBaseUrl}/`)) {
+      requestUrl = artifactsRoute.slice(apiBaseUrl.length);
+    } else if (artifactsRoute.startsWith('/api/')) {
+      requestUrl = artifactsRoute.slice('/api'.length);
+    } else {
+      throw new Error('Invalid slice artifacts route.');
+    }
+    const artifactJobRoute =
+      /^\/artifacts\/job\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!artifactJobRoute.test(requestUrl)) {
+      throw new Error('Invalid slice artifacts route.');
+    }
     return apiClient.request<ArtifactListItemResponse[]>({
       url: requestUrl,
       method: 'GET',

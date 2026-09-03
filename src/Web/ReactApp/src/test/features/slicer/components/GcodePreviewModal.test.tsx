@@ -101,7 +101,7 @@ describe('GcodePreviewModal URL contract', () => {
     expect(viewer.getAttribute('data-url')).toBe('/api/artifacts/art-gcode');
   });
 
-  it('recognizes .bgcode and .g extensions as G-code', async () => {
+  it('does not feed binary G-code into the text preview parser', async () => {
     mockGetArtifactsByRoute.mockResolvedValue([
       {
         id: 'art-stl',
@@ -125,8 +125,38 @@ describe('GcodePreviewModal URL contract', () => {
 
     renderModal({ isOpen: true, artifactsRoute: '/api/artifacts/job/job-4' });
 
+    await waitFor(() => {
+      expect(screen.getByText(/no g-code artifact available/i)).toBeDefined();
+    });
+    expect(screen.queryByTestId('gcode-viewer')).toBeNull();
+  });
+
+  it('prefers a text G-code artifact over binary G-code', async () => {
+    mockGetArtifactsByRoute.mockResolvedValue([
+      {
+        id: 'art-bgcode',
+        jobId: 'job-6',
+        fileName: 'output.bgcode',
+        contentType: 'application/octet-stream',
+        sizeBytes: 40000,
+        downloadUrl: '/api/artifacts/art-bgcode',
+        createdAt: '2026-05-31T10:01:00Z',
+      },
+      {
+        id: 'art-gcode',
+        jobId: 'job-6',
+        fileName: 'output.gcode',
+        contentType: 'text/plain',
+        sizeBytes: 50000,
+        downloadUrl: '/api/artifacts/art-gcode',
+        createdAt: '2026-05-31T10:02:00Z',
+      },
+    ]);
+
+    renderModal({ isOpen: true, artifactsRoute: '/api/artifacts/job/job-6' });
+
     const viewer = await screen.findByTestId('gcode-viewer');
-    expect(viewer.getAttribute('data-url')).toBe('/api/artifacts/art-bgcode');
+    expect(viewer.getAttribute('data-url')).toBe('/api/artifacts/art-gcode');
   });
 
   it('does not render viewer when only non-G-code artifacts exist', async () => {

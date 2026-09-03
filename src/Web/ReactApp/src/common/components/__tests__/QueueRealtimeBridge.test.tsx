@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => {
     | undefined;
   let connectionCallback: ((connected: boolean) => void) | undefined;
   let resourcesChangedCallback: (() => void) | undefined;
+  let gcodeLibraryUpdatedCallback: (() => void) | undefined;
+  const unsubscribeGcodeLibraryUpdated = vi.fn();
   return {
     getQueueSubscriptionResources: vi.fn(),
     getPrinters: vi.fn(),
@@ -50,6 +52,11 @@ const mocks = vi.hoisted(() => {
       resourcesChangedCallback = callback;
       return vi.fn();
     }),
+    onGcodeLibraryUpdated: vi.fn((callback: () => void) => {
+      gcodeLibraryUpdatedCallback = callback;
+      return unsubscribeGcodeLibraryUpdated;
+    }),
+    unsubscribeGcodeLibraryUpdated,
     // Defaults to a generic, non-actuation-only event type -- matching real
     // ordinary queue events (job dispatched/completed/etc.) that #1731's
     // narrowing must still fall back to the full invalidation set for.
@@ -64,6 +71,7 @@ const mocks = vi.hoisted(() => {
       }),
     emitConnection: (connected: boolean) => connectionCallback?.(connected),
     emitResourcesChanged: () => resourcesChangedCallback?.(),
+    emitGcodeLibraryUpdated: () => gcodeLibraryUpdatedCallback?.(),
   };
 });
 
@@ -86,6 +94,7 @@ vi.mock('@/services/printer-signalr', () => ({
     onQueueEvent: mocks.onQueueEvent,
     onConnectionStateChange: mocks.onConnectionStateChange,
     onQueueResourcesChanged: mocks.onQueueResourcesChanged,
+    onGcodeLibraryUpdated: mocks.onGcodeLibraryUpdated,
   },
 }));
 
@@ -98,6 +107,30 @@ describe('QueueRealtimeBridge', () => {
       projectIds: ['project-1'],
     });
     mocks.getPrinters.mockResolvedValue([{ id: 'visible-printer' }]);
+  });
+
+  it('invalidates the file browser once per durable G-code library update and unsubscribes on teardown', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    const { unmount } = render(
+      <QueryClientProvider client={queryClient}>
+        <QueueRealtimeBridge />
+      </QueryClientProvider>
+    );
+    await waitFor(() =>
+      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledOnce()
+    );
+    invalidate.mockClear();
+
+    mocks.emitGcodeLibraryUpdated();
+
+    expect(invalidate).toHaveBeenCalledOnce();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['file-browser'] });
+
+    unmount();
+    expect(mocks.unsubscribeGcodeLibraryUpdated).toHaveBeenCalledOnce();
   });
 
   it('discovers a post-connect resource from the server hint and refetches queue keys', async () => {

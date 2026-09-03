@@ -78,6 +78,7 @@ describe('SliceJobsPanel live completion', () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
     render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>
@@ -105,5 +106,6 @@ describe('SliceJobsPanel live completion', () => {
     expect(await screen.findByRole('button', { name: /preview/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /download/i })).toBeInTheDocument();
     expect(getMyJobs).toHaveBeenCalledOnce();
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ['file-browser'] });
   });
 });
