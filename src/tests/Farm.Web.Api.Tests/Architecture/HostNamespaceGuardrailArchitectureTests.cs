@@ -56,7 +56,10 @@ public sealed class HostNamespaceGuardrailArchitectureTests
         "Farm.Web.Api.Controllers.Requests.UploadGcodeRequest",
 
         // Services/Startup/**, Services/StorageManagement/**, Services/SlicerHost/**
+        "Farm.Web.Api.Services.SlicerHost.SlicerHostPromotionArtifactContentSource",
+        "Farm.Web.Api.Services.SlicerHost.SlicerHostPromotionOptions",
         "Farm.Web.Api.Services.SlicerHost.SlicerHostServiceAuthenticator",
+        "Farm.Web.Api.Services.SlicerHost.SlicerPromotionAuthenticationHandler",
         "Farm.Web.Api.Services.StorageManagement.AspNetCorePathProvider",
         "Farm.Web.Api.Services.Startup.DatabaseInitializer",
         "Farm.Web.Api.Services.Startup.GracefulShutdownService",

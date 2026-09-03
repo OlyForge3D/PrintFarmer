@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Text;
 using Farm.Infrastructure;
 using Farm.Slicer.Module.Api.Controllers;
 using Farm.Slicer.Module.Api.Services;
@@ -136,13 +137,10 @@ public sealed class PromotionArtifactContentSourceTests
         await action.Should().ThrowAsync<PromotionSourceTransportException>();
     }
 
-    [Theory]
-    [InlineData(HttpStatusCode.Forbidden)]
-    [InlineData(HttpStatusCode.NotFound)]
-    public async Task HttpSource_WhenArtifactCannotBeServed_ReturnsMissingContent(
-        HttpStatusCode statusCode)
+    [Fact]
+    public async Task HttpSource_WhenArtifactIsMissing_ReturnsMissingContent()
     {
-        var inner = new RecordingHandler(_ => new HttpResponseMessage(statusCode));
+        var inner = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
         using HttpClient client = BuildAuthenticatedClient(inner);
         var source = new SlicerHostPromotionArtifactContentSource(
             client,
@@ -155,6 +153,30 @@ public sealed class PromotionArtifactContentSourceTests
             CancellationToken.None);
 
         content.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task HttpSource_WhenPromotionPinMismatches_ThrowsRaceSignal()
+    {
+        var inner = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden)
+        {
+            Content = new StringContent(
+                "{\"code\":\"promotion_pin_mismatch\"}",
+                Encoding.UTF8,
+                "application/problem+json"),
+        });
+        using HttpClient client = BuildAuthenticatedClient(inner);
+        var source = new SlicerHostPromotionArtifactContentSource(
+            client,
+            new SlicerHostPromotionOptions(client.BaseAddress!, TimeSpan.FromSeconds(10)));
+
+        Func<Task> action = async () => _ = await source.OpenReadAsync(
+            Guid.NewGuid(),
+            "scoped-operation-key",
+            3,
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<PromotionSourcePinMismatchException>();
     }
 
     [Fact]

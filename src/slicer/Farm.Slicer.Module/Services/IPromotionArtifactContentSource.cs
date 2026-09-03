@@ -179,3 +179,31 @@ public sealed class PromotionSourceTransportException : IOException
     {
     }
 }
+
+/// <summary>
+/// Indicates that the source pin was completed or replaced while another request was resolving
+/// the same promotion operation.
+/// </summary>
+public sealed class PromotionSourcePinMismatchException : IOException
+{
+    /// <summary>Creates a pin-race signal that callers must resolve through durable promotion state.</summary>
+    public PromotionSourcePinMismatchException()
+        : base("The promotion source pin no longer matches the requested operation.")
+    {
+    }
+
+    /// <summary>Creates a pin-race signal with a non-sensitive description.</summary>
+    /// <param name="message">Non-sensitive failure description.</param>
+    public PromotionSourcePinMismatchException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Creates a pin-race signal with its underlying cause.</summary>
+    /// <param name="message">Non-sensitive failure description.</param>
+    /// <param name="innerException">Underlying failure.</param>
+    public PromotionSourcePinMismatchException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
