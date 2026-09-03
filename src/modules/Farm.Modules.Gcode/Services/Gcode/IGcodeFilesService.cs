@@ -209,7 +209,10 @@ public interface IGcodeFilesService
     /// </summary>
     /// <param name="id">Unique identifier of the file.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>Thumbnail path if found and exists, otherwise null.</returns>
+    /// <returns>
+    /// Containment-checked physical thumbnail path when metadata is valid; otherwise null.
+    /// The caller must not resolve the returned path a second time.
+    /// </returns>
     Task<string?> GetThumbnailPathAsync(Guid id, CancellationToken ct);
 
     /// <summary>
