@@ -710,6 +710,23 @@ public sealed class GcodeArtifactPromoter(
                 },
                 cancellationToken);
         }
+        catch (PromotionSourcePinMismatchException exception)
+        {
+            _logger.LogInformation(
+                exception,
+                "Promotion {OperationId} observed a completed or replaced source pin and is resolving durable state",
+                LogSanitizer.Sanitize(checkpoint.OperationId));
+            GcodePromotionCheckpoint? winner = await ReloadCheckpointAsync(checkpoint.Id, cancellationToken);
+            if (winner?.State == GcodePromotionState.Completed)
+            {
+                return CalibrationApiResult<GcodePromotionDto>.Success(
+                    await ToDtoAsync(winner, cancellationToken),
+                    StatusCodes.Status200OK,
+                    replayed: true);
+            }
+
+            return Failure(StatusCodes.Status409Conflict, "promotion_in_progress");
+        }
         catch (PromotionSourceTransportException exception)
         {
             _logger.LogWarning(

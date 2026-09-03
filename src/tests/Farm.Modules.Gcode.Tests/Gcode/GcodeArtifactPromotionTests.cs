@@ -5,9 +5,11 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.FolderManagement;
 using Farm.Infrastructure.Services.Gcode;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
@@ -23,6 +25,7 @@ using Farm.Slicer.Module.Services.Metrics;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -298,6 +301,39 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
     }
 
+    [Fact(DisplayName = "A new farm-wide file notifies every authenticated user without metadata")]
+    public async Task SliceArtifactLibraryService_NewFile_NotifiesAuthenticatedUsersWithoutPayload()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        var proxy = new Mock<IClientProxy>();
+        var clients = new Mock<IHubClients>();
+        clients.Setup(value => value.Group(AuthorizedHubGroups.AuthenticatedUsers))
+            .Returns(proxy.Object);
+        var hub = new Mock<IHubContext<PrinterHub>>();
+        hub.SetupGet(value => value.Clients).Returns(clients.Object);
+
+        CalibrationApiResult<SliceArtifactLibraryResult> result =
+            await _harness.CreateSliceArtifactLibraryService(hub: hub.Object).PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None);
+
+        _ = result.IsSuccess.Should().BeTrue(result.Code);
+        clients.Verify(
+            value => value.Group(AuthorizedHubGroups.AuthenticatedUsers),
+            Times.Once);
+        clients.Verify(
+            value => value.Group(AuthorizedHubGroups.User(fixture.Owner.UserId)),
+            Times.Never);
+        proxy.Verify(
+            value => value.SendCoreAsync(
+                "gcodelibraryupdated",
+                It.Is<object?[]>(arguments => arguments.Length == 0),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     [Fact(DisplayName = "Concurrent explicit saves converge on one durable identity")]
     public async Task SliceArtifactLibraryService_ConcurrentSaves_ConvergeOnOneFile()
     {
@@ -318,6 +354,40 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = results.Should().OnlyContain(result => result.IsSuccess);
         _ = results.Select(result => result.Value!.GcodeFileId).Distinct()
             .Should().ContainSingle();
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+        _ = (await _harness.CountCheckpointsAsync()).Should().Be(1);
+    }
+
+    [Fact(DisplayName = "A split-host pin race resolves the sibling's completed durable file")]
+    public async Task SliceArtifactLibraryService_PinMismatchRace_ConvergesWithinRequest()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        string operationId =
+            SliceArtifactLibraryService.BuildOperationId(fixture.JobId, fixture.ArtifactId);
+        CalibrationApiResult<GcodePromotionDto>? siblingResult = null;
+        var racingSource = new SiblingCompletionContentSource(async () =>
+        {
+            siblingResult = await _harness.CreatePromoter(
+                contentSource: _harness.CreateLocalContentSource()).PromoteAsync(
+                    fixture.Request(operationId),
+                    fixture.Owner,
+                    CancellationToken.None);
+        });
+        IGcodeArtifactPromoter racingPromoter =
+            _harness.CreatePromoter(contentSource: racingSource);
+
+        CalibrationApiResult<SliceArtifactLibraryResult> result =
+            await _harness.CreateSliceArtifactLibraryService(promoter: racingPromoter).PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None);
+
+        _ = siblingResult.Should().NotBeNull();
+        _ = siblingResult!.IsSuccess.Should().BeTrue(siblingResult.Code);
+        _ = result.IsSuccess.Should().BeTrue(result.Code);
+        _ = result.Value!.GcodeFileId.Should().Be(siblingResult.Value!.GcodeFileId);
+        _ = result.Value.CreatedNew.Should().BeFalse();
         _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
         _ = (await _harness.CountCheckpointsAsync()).Should().Be(1);
     }
@@ -1445,15 +1515,23 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 withArtifactRouting ? sliceJobs : null);
         }
 
-        public SliceArtifactLibraryService CreateSliceArtifactLibraryService() =>
+        public SliceArtifactLibraryService CreateSliceArtifactLibraryService(
+            IGcodeArtifactPromoter? promoter = null,
+            IHubContext<PrinterHub>? hub = null) =>
             new(
                 CreateCoreContext(),
-                CreatePromoter(),
-                new Mock<Microsoft.AspNetCore.SignalR.IHubContext<
-                    Farm.Infrastructure.Services.SignalR.PrinterHub>>().Object,
+                promoter ?? CreatePromoter(),
+                hub ?? new Mock<IHubContext<PrinterHub>>().Object,
                 NullLogger<SliceArtifactLibraryService>.Instance,
                 CreateArtifactsRepository(),
                 new EfSliceJobRepository(CreateSlicerContext()));
+
+        public LocalPromotionArtifactContentSource CreateLocalContentSource()
+        {
+            IArtifactsRepository artifactsRepository = CreateArtifactsRepository();
+            return new LocalPromotionArtifactContentSource(
+                CreateArtifactsService(artifactsRepository));
+        }
 
         public EfArtifactsRepository CreateArtifactsRepository() =>
             new EfArtifactsRepository(new SlicerContextFactory(_slicerConnectionString));
@@ -1726,6 +1804,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
 
                 _deleteArtifactFile(path);
             }
+
         }
 
         public async Task<bool> ArtifactExistsAsync(Guid artifactId)
@@ -1925,6 +2004,24 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         {
             public SlicerDbContext CreateDbContext() =>
                 new(new DbContextOptionsBuilder<SlicerDbContext>().UseSqlite(connectionString).Options);
+        }
+    }
+
+    private sealed class SiblingCompletionContentSource(Func<Task> completeSiblingAsync)
+        : IPromotionArtifactContentSource
+    {
+        public async Task<PromotionArtifactContent?> OpenReadAsync(
+            Guid artifactId,
+            string operationKey,
+            long expectedSizeBytes,
+            CancellationToken cancellationToken)
+        {
+            _ = artifactId;
+            _ = operationKey;
+            _ = expectedSizeBytes;
+            cancellationToken.ThrowIfCancellationRequested();
+            await completeSiblingAsync();
+            throw new PromotionSourcePinMismatchException();
         }
     }
 

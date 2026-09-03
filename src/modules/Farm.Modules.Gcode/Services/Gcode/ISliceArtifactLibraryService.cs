@@ -180,7 +180,7 @@ public sealed class SliceArtifactLibraryService(
 
         if (createdNew)
         {
-            await NotifyLibraryUpdatedAsync(job.UserId, cancellationToken);
+            await NotifyLibraryUpdatedAsync(cancellationToken);
         }
 
         return CalibrationApiResult<SliceArtifactLibraryResult>.Success(
@@ -213,11 +213,11 @@ public sealed class SliceArtifactLibraryService(
     private static CalibrationApiResult<SliceArtifactLibraryResult> Failure(int statusCode, string code) =>
         CalibrationApiResult<SliceArtifactLibraryResult>.Failure(statusCode, code);
 
-    private async Task NotifyLibraryUpdatedAsync(Guid ownerUserId, CancellationToken cancellationToken)
+    private async Task NotifyLibraryUpdatedAsync(CancellationToken cancellationToken)
     {
         try
         {
-            await _hub.Clients.Group(AuthorizedHubGroups.User(ownerUserId))
+            await _hub.Clients.Group(AuthorizedHubGroups.AuthenticatedUsers)
                 .SendAsync("gcodelibraryupdated", cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -228,8 +228,7 @@ public sealed class SliceArtifactLibraryService(
         {
             _logger.LogWarning(
                 exception,
-                "Could not notify owner {OwnerUserId} that the G-code library was updated.",
-                ownerUserId);
+                "Could not notify authenticated users that the G-code library was updated.");
         }
     }
 }

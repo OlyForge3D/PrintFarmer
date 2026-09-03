@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Slicer.Module.Services;
 
@@ -38,9 +39,18 @@ public sealed class SlicerHostPromotionArtifactContentSource(
                 HttpCompletionOption.ResponseHeadersRead,
                 timeoutSource.Token);
 
-            if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
+            if (response.StatusCode == HttpStatusCode.NotFound)
             {
                 return null;
+            }
+
+            if (response.StatusCode == HttpStatusCode.Forbidden &&
+                string.Equals(
+                    await ReadProblemCodeAsync(response, timeoutSource.Token),
+                    "promotion_pin_mismatch",
+                    StringComparison.Ordinal))
+            {
+                throw new PromotionSourcePinMismatchException();
             }
 
             if (!response.IsSuccessStatusCode)
@@ -71,6 +81,10 @@ public sealed class SlicerHostPromotionArtifactContentSource(
                 },
                 ownedTimeoutSource.Token);
         }
+        catch (PromotionSourcePinMismatchException)
+        {
+            throw;
+        }
         catch (PromotionSourceTransportException)
         {
             throw;
@@ -88,6 +102,29 @@ public sealed class SlicerHostPromotionArtifactContentSource(
         {
             response?.Dispose();
             timeoutSource?.Dispose();
+        }
+    }
+
+    private static async Task<string?> ReadProblemCodeAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using Stream content = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using JsonDocument problem = await JsonDocument.ParseAsync(
+                content,
+                cancellationToken: cancellationToken);
+            return problem.RootElement.TryGetProperty("code", out JsonElement code) &&
+                code.ValueKind == JsonValueKind.String
+                    ? code.GetString()
+                    : null;
+        }
+        catch (JsonException exception)
+        {
+            throw new PromotionSourceTransportException(
+                "Slicer promotion content returned an invalid problem response.",
+                exception);
         }
     }
 }
