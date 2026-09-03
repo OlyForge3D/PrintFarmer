@@ -142,6 +142,42 @@ public class GcodeFilesControllerDownloadTests
     }
 
     [Theory]
+    [InlineData("/var/lib/printfarmer/gcode/model.gcode")]
+    [InlineData("/var/lib/printfarmer/gcode/slice-results/nested/model.gcode")]
+    public async Task GetGcodeFileAsync_UsesContainedPhysicalPathWithoutResolvingTwice(
+        string physicalPath)
+    {
+        const string storageRoot = "/var/lib/printfarmer/gcode";
+        Guid fileId = Guid.NewGuid();
+        var gcodeFiles = new Mock<IGcodeFilesService>(MockBehavior.Strict);
+        gcodeFiles.Setup(service => service.GetFilePathAndNameAsync(
+                fileId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((physicalPath, "model.gcode"));
+        var storagePaths = new Mock<IStoragePathService>(MockBehavior.Strict);
+        storagePaths.Setup(service => service.GetGcodeStorageDirectory()).Returns(storageRoot);
+        var storedFileOperations = new Mock<IStoredFileOperationsService>(MockBehavior.Strict);
+        storedFileOperations.Setup(service => service.FileExistsAndIsSafe(physicalPath, storageRoot))
+            .Returns(true);
+        storedFileOperations.Setup(service => service.GetContentTypeForFile(".gcode"))
+            .Returns("application/octet-stream");
+        GcodeFilesController controller = CreateController(
+            gcodeFiles,
+            storagePathService: storagePaths,
+            storedFileOperationsService: storedFileOperations);
+
+        IActionResult result = await controller.GetGcodeFileAsync(fileId);
+
+        PhysicalFileResult physicalFile = Assert.IsType<PhysicalFileResult>(result);
+        Assert.Equal(physicalPath, physicalFile.FileName);
+        Assert.Equal("model.gcode", physicalFile.FileDownloadName);
+        Assert.Equal("application/octet-stream", physicalFile.ContentType);
+        storedFileOperations.Verify(
+            service => service.ResolveStoragePath(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("nested/thumbnails")]
     public async Task GetGcodeThumbnailAsync_UsesContainedPhysicalPathWithoutResolvingTwice(
