@@ -301,6 +301,27 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
     }
 
+    [Fact(DisplayName = "Promoted virtual-path G-code can be downloaded and read from durable storage")]
+    public async Task SliceArtifactLibraryService_PromotedFile_ReadsFromConfiguredStorageRoot()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        CalibrationApiResult<SliceArtifactLibraryResult> saved =
+            await _harness.CreateSliceArtifactLibraryService().PromoteAsync(
+                fixture.JobId,
+                fixture.ArtifactId,
+                fixture.Owner,
+                CancellationToken.None);
+
+        byte[]? bytes = await _harness.ReadGcodeFileBytesAsync(saved.Value!.GcodeFileId);
+        string? downloadPath = await _harness.ResolveGcodeDownloadPathAsync(saved.Value.GcodeFileId);
+        GcodeFile stored = await _harness.GetGcodeFileAsync(saved.Value.GcodeFileId);
+
+        _ = stored.FilePath.Should().Be("/");
+        _ = bytes.Should().Equal(Encoding.UTF8.GetBytes(GcodeContent));
+        _ = downloadPath.Should().Be(Path.Join(_harness.GcodeRoot, stored.FileName));
+        _ = File.Exists(downloadPath).Should().BeTrue();
+    }
+
     [Fact(DisplayName = "Explicit Save replays the durable file after staged artifact cleanup")]
     public async Task SliceArtifactLibraryService_SaveAfterArtifactCleanup_ReplaysDurableFile()
     {
@@ -2091,6 +2112,20 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         {
             await using AppDbContext core = CreateCoreContext();
             return await core.GcodeFiles.AsNoTracking().SingleAsync(file => file.Id == fileId);
+        }
+
+        public async Task<byte[]?> ReadGcodeFileBytesAsync(Guid fileId)
+        {
+            await using AppDbContext core = CreateCoreContext();
+            return await CreateGcodeFilesService(core)
+                .ReadFileBytesAsync(fileId, CancellationToken.None);
+        }
+
+        public async Task<string?> ResolveGcodeDownloadPathAsync(Guid fileId)
+        {
+            await using AppDbContext core = CreateCoreContext();
+            return await CreateGcodeFilesService(core)
+                .DownloadFileAsync(fileId, string.Empty, CancellationToken.None);
         }
 
         public async Task<GcodePromotionCheckpoint> GetCheckpointAsync(Guid checkpointId)
