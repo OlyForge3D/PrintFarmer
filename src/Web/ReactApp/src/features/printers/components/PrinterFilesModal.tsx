@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon, DownloadIcon, SaveIcon } from '@/common/components/icons/MdiIcons';
 import { Button, ProgressBar, Select } from '@/common/components/ui';
 import { Modal, ConfirmationModal } from '@/common/components/modals';
@@ -34,7 +34,109 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   const [isDownloading, setIsDownloading] = useState<string | null>(null);
   const [harvestProgress, setHarvestProgress] = useState<Record<string, FileHarvestProgress>>({});
   const [confirmDialog, setConfirmDialog] = useState<{ type: 'print' | 'delete'; file: PrinterFileDto } | null>(null);
-  const { objectUrls: thumbnailObjectUrls } = usePrinterFileThumbnails(files);
+  const [visibleFileNames, setVisibleFileNames] = useState<Set<string>>(new Set());
+  const thumbnailObserverRef = useRef<IntersectionObserver | null>(null);
+  const observedRowsRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const rowRefCallbacksRef = useRef<Map<string, (node: HTMLDivElement | null) => void>>(new Map());
+
+  // Only fetch thumbnails for rows that are visible or near-visible in the scrollable file
+  // list, instead of eagerly fetching every file's thumbnail as soon as the list loads -
+  // large libraries otherwise trigger a thumbnail fetch storm the moment the modal opens.
+  // See issue #2393.
+  useEffect(() => {
+    // jsdom (used by the test suite) has no native IntersectionObserver; degrade to "treat
+    // every row as visible is unnecessary here" by simply not gating - mirrors the guard
+    // already used by usePrinterSnapshotPreview.ts for the same environment gap.
+    if (typeof IntersectionObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const newlyVisible = entries.filter((entry) => entry.isIntersecting);
+        if (newlyVisible.length === 0) {
+          return;
+        }
+
+        setVisibleFileNames((prev) => {
+          let changed = false;
+          const next = new Set(prev);
+          for (const entry of newlyVisible) {
+            const fileName = (entry.target as HTMLElement).dataset.fileName;
+            if (fileName && !next.has(fileName)) {
+              next.add(fileName);
+              changed = true;
+            }
+          }
+          return changed ? next : prev;
+        });
+      },
+      // rootMargin extends the trigger zone beyond the visible viewport so thumbnails for
+      // rows just off-screen are ready before the user scrolls to them.
+      { rootMargin: '300px 0px', threshold: 0 }
+    );
+    thumbnailObserverRef.current = observer;
+
+    // Capture the ref containers at effect-setup time: the cleanup below intentionally clears
+    // whatever these refs point to at teardown (component unmount / re-open), not a snapshot
+    // frozen from this render.
+    const observedRows = observedRowsRef.current;
+    const rowRefCallbacks = rowRefCallbacksRef.current;
+
+    // Rows already mounted (and registered via getRowRef) before this effect ran need to be
+    // attached to the observer now that it exists.
+    for (const node of observedRows.values()) {
+      observer.observe(node);
+    }
+
+    return () => {
+      observer.disconnect();
+      thumbnailObserverRef.current = null;
+      observedRows.clear();
+      rowRefCallbacks.clear();
+    };
+  }, []);
+
+  // Returns a stable ref callback per file name so that re-renders (e.g. re-sorting) don't
+  // churn the IntersectionObserver by detaching and reattaching every row on every render.
+  const getRowRef = useCallback((fileName: string) => {
+    let callback = rowRefCallbacksRef.current.get(fileName);
+    if (!callback) {
+      callback = (node: HTMLDivElement | null) => {
+        const previousNode = observedRowsRef.current.get(fileName);
+        if (previousNode && previousNode !== node) {
+          thumbnailObserverRef.current?.unobserve(previousNode);
+          observedRowsRef.current.delete(fileName);
+        }
+
+        if (node) {
+          node.dataset.fileName = fileName;
+          if (typeof IntersectionObserver === 'undefined') {
+            // No visibility tracking available in this environment (e.g. older browsers, or
+            // jsdom in tests) - fall back to eagerly fetching every row's thumbnail rather
+            // than never fetching any, matching the pre-#2393 behavior for this case.
+            setVisibleFileNames((prev) => (prev.has(fileName) ? prev : new Set(prev).add(fileName)));
+            return;
+          }
+
+          observedRowsRef.current.set(fileName, node);
+          thumbnailObserverRef.current?.observe(node);
+        }
+      };
+      rowRefCallbacksRef.current.set(fileName, callback);
+    }
+    return callback;
+  }, []);
+
+  // Memoized so the array reference is stable across renders that don't actually change which
+  // files are visible - usePrinterFileThumbnails' effect depends on this array by reference, so
+  // an unmemoized `.filter()` here would re-trigger an abort+refetch of every thumbnail on every
+  // unrelated re-render of this component (e.g. sort changes, progress updates). See #2393.
+  const filesForThumbnails = useMemo(
+    () => files.filter((file) => visibleFileNames.has(file.fileName)),
+    [files, visibleFileNames]
+  );
+  const { objectUrls: thumbnailObjectUrls } = usePrinterFileThumbnails(filesForThumbnails);
 
   const loadFiles = useCallback(async () => {
     try {
@@ -337,6 +439,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                     return (
                       <div
                         key={file.fileName}
+                        ref={getRowRef(file.fileName)}
                         className="relative flex flex-col bg-pf-bg-1 border border-pf-border rounded-lg p-4 hover:border-pf-accent transition-colors group"
                       >
                         <div className="flex items-center justify-between">
