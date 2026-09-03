@@ -761,11 +761,6 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
 
     // MARK: Commit / stale clearing
 
-    /// Guards the #2400 `@Observable` trap: if `hasConcludedCanonicalLoad` were
-    /// `@ObservationIgnored`, SwiftUI would never re-evaluate
-    /// `isStaleBannerReportable` and the banner could never appear. The failing
-    /// pass leaves `isStale` untouched, so the invalidation can only have come
-    /// from the conclusion flag.
     /// Mirrors the coverage view models' wrapped-cancellation tests. Without
     /// this, reverting the `isCancellationError` guard in
     /// `loadCanonicalSnapshot`'s terminal catch passes CI: the existing
@@ -793,6 +788,11 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
         )
     }
 
+    /// Guards the #2400 `@Observable` trap: if `hasConcludedCanonicalLoad` were
+    /// `@ObservationIgnored`, SwiftUI would never re-evaluate
+    /// `isStaleBannerReportable` and the banner could never appear. The failing
+    /// pass leaves `isStale` untouched, so the invalidation can only have come
+    /// from the conclusion flag.
     func testStaleBannerReportabilityIsObservable() async throws {
         let cached = try TestData.decodePrinter()
         store.hydration = .snapshot(cachedEnvelope(printers: [cached], millis: 1_699_000_000_000))
