@@ -141,6 +141,9 @@ public sealed class GcodeStreamIngestException : InvalidOperationException
     /// <summary>The copied bytes had a different length than the caller declared.</summary>
     public const string SizeMismatch = "gcode_content_size_mismatch";
 
+    /// <summary>The requested virtual directory was unsafe or malformed.</summary>
+    public const string InvalidVirtualDirectory = "gcode_virtual_directory_invalid";
+
     /// <summary>Initializes a new instance of the <see cref="GcodeStreamIngestException"/> class.</summary>
     /// <param name="code">A stable machine-readable reason.</param>
     /// <param name="message">A non-sensitive explanation.</param>

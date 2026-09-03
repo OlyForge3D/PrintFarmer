@@ -520,6 +520,7 @@ public class GcodeFilesServiceTests
         var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
         var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
         var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
         var folderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
@@ -595,6 +596,7 @@ public class GcodeFilesServiceTests
         var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
         var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
         var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
         var folderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
@@ -684,6 +686,7 @@ public class GcodeFilesServiceTests
         var repo = new Mock<IGcodeRepository>(MockBehavior.Strict);
         var logger = new Mock<ILogger<GcodeFilesService>>(MockBehavior.Loose);
         var storagePath = new Mock<IStoragePathService>(MockBehavior.Strict);
+        storagePath.Setup(x => x.GetGcodeStorageDirectory()).Returns(storageDir);
         var metadataExtractor = new Mock<IGcodeMetadataExtractorService>(MockBehavior.Strict);
         var thumbnailExtractor = new Mock<IGcodeThumbnailExtractorService>(MockBehavior.Strict);
         var folderService = new Mock<IFolderManagementService>(MockBehavior.Loose);
