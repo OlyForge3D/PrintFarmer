@@ -1190,9 +1190,7 @@ public class GcodeFilesService(
             return null;
         }
 
-        // Return path by combining FilePath (directory) with FileName (GUID filename)
-        // FilePath is the storage directory, FileName is the GUID-based filename
-        return Path.Join(file.FilePath, file.FileName);
+        return ResolveStoredFilePath(file);
     }
 
     public async Task<(string FilePath, string OriginalFileName)?> GetFilePathAndNameAsync(Guid id, CancellationToken ct)
@@ -1203,9 +1201,8 @@ public class GcodeFilesService(
             return null;
         }
 
-        // Return path AND original filename for download scenarios
-        string filePath = Path.Join(file.FilePath, file.FileName);
-        return (filePath, file.Name);
+        string? filePath = ResolveStoredFilePath(file);
+        return filePath is null ? null : (filePath, file.Name);
     }
 
     public async Task<string?> GetThumbnailPathAsync(Guid id, CancellationToken ct)
@@ -1926,12 +1923,7 @@ public class GcodeFilesService(
             return null;
         }
 
-        if (string.IsNullOrEmpty(file.FilePath))
-        {
-            return null;
-        }
-
-        string fullPath = Path.Join(file.FilePath, file.FileName);
+        string? fullPath = ResolveStoredFilePath(file);
         return System.IO.File.Exists(fullPath) ? fullPath : null;
     }
 
@@ -1942,6 +1934,62 @@ public class GcodeFilesService(
         return path is null
             ? null
             : await System.IO.File.ReadAllBytesAsync(path, ct);
+    }
+
+    private string? ResolveStoredFilePath(GcodeFile file)
+    {
+        if (string.IsNullOrWhiteSpace(file.FileName) ||
+            !string.Equals(Path.GetFileName(file.FileName), file.FileName, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        try
+        {
+            string storageRoot = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(_storagePathService.GetGcodeStorageDirectory()));
+            string storedDirectory = string.IsNullOrWhiteSpace(file.FilePath)
+                ? "/"
+                : file.FilePath;
+            string physicalDirectory;
+            string? legacyAbsoluteDirectory = Path.IsPathFullyQualified(storedDirectory)
+                ? Path.GetFullPath(storedDirectory)
+                : null;
+            if (legacyAbsoluteDirectory is not null &&
+                IsPathContained(storageRoot, legacyAbsoluteDirectory))
+            {
+                physicalDirectory = legacyAbsoluteDirectory;
+            }
+            else
+            {
+                string relativeDirectory = storedDirectory.TrimStart(
+                    Path.DirectorySeparatorChar,
+                    Path.AltDirectorySeparatorChar);
+                physicalDirectory = Path.GetFullPath(Path.Join(storageRoot, relativeDirectory));
+            }
+
+            string candidate = Path.GetFullPath(Path.Join(physicalDirectory, file.FileName));
+            return IsPathContained(storageRoot, candidate) ? candidate : null;
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or IOException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsPathContained(string storageRoot, string candidate)
+    {
+        StringComparison comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (string.Equals(storageRoot, candidate, comparison))
+        {
+            return true;
+        }
+
+        string rootPrefix = storageRoot + Path.DirectorySeparatorChar;
+        return candidate.StartsWith(rootPrefix, comparison);
     }
 
     /// <summary>
