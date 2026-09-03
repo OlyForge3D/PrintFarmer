@@ -462,30 +462,6 @@ artifact.
   internal storage location for the slicer service; it is not a user-facing API, and
   operators should not read, move, or delete files there by hand — do so and you will
   break artifact pin/ack and cleanup guarantees.
-- **Monolith mode only — automatic G-code library promotion.** When the API and slicer
-  module run in a single process (`DEPLOYMENT_MODE=monolith`, which is the default for
-  local development and the monolithic Docker image), the hosted
-  `SliceLibraryPromotionService` asynchronously and idempotently promotes each completed
-  G-code artifact into a durable `GcodeFile` in the File Library, and backfills eligible
-  historical jobs on the same cadence. Promotion is safe to run repeatedly: it keys on
-  the source artifact ID and skips artifacts that have already been promoted or that a
-  prior attempt has terminally failed.
-- **Microservices mode — automatic library promotion is intentionally unavailable
-  today.** The default `scripts/deploy-docker.sh` topology runs the main API and
-  `slicer-host` as separate services. In that split-host configuration the promotion
-  service reports its capability as `artifact_source_unroutable` and takes no action:
-  the main API cannot read slicer-owned artifact bytes over an authenticated
-  service-to-service channel yet. Completed slices remain fully previewable and
-  downloadable from the slice job, but they will not appear in the File Library
-  automatically. This is tracked by [#2401](https://github.com/OlyForge3D/PrintFarmer/issues/2401),
-  which will add the authenticated service-to-service artifact contract required to
-  enable promotion across hosts.
-
-Mounting the slicer artifact volume into the `api` service is **not** a supported
-workaround — the artifact byte reader is not part of the API's compile-time graph and
-loading the slicer plugin into the API would double-run cleanup, timeout, and worker
-health services against the shared database. Wait for #2401 rather than sharing state
-by hand.
 
 ## Security Best Practices
 
