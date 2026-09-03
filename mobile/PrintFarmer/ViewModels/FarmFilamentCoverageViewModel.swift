@@ -132,13 +132,24 @@ final class FarmFilamentCoverageViewModel {
     func configure(coverageService: any FilamentCoverageServiceProtocol) {
         self.coverageService = coverageService
         coverageAuthorityEpoch &+= 1
-        // A new coverage authority invalidates the previous one's read-cache
-        // provenance; leaving it latched lets a slow first load render the old
-        // authority's banner and timestamp. Callers configure before hydrating.
-        resetReadCacheState()
+        // The new authority has concluded nothing yet, so the next undecided
+        // window must not inherit the previous authority's conclusion and flash
+        // its banner. Reset ONLY the conclusion flag.
+        //
+        // `isShowingStaleCache` and `cacheLastUpdatedAtMillis` are provenance FOR
+        // `coverageByPrinter`, which `configure` deliberately does not clear, and
+        // they must stay coupled to it. Clearing them here would leave retained
+        // cached data marked as confirmed-live -- and because `hydrateFromCache`
+        // refuses to re-run once `coverageByPrinter` is non-empty (line 170),
+        // nothing would ever restore the flag, permanently suppressing the banner
+        // even when the next load fails. Authority changes that DO clear the
+        // payload (`disableForCapabilityGate`) call `resetReadCacheState()`.
+        hasConcludedCanonicalLoad = false
     }
 
-    /// Clear all read-cache provenance so it cannot outlive its authority.
+    /// Clear all read-cache provenance. Only valid where the cached payload it
+    /// describes is cleared in the same breath, or provenance desynchronises
+    /// from the data on screen.
     private func resetReadCacheState() {
         isShowingStaleCache = false
         hasConcludedCanonicalLoad = false

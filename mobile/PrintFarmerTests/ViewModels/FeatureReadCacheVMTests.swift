@@ -475,14 +475,22 @@ final class FeatureReadCacheVMTests: XCTestCase {
         )
     }
 
-    /// Stale-cache state is per-authority. Swapping the coverage service is a
-    /// server switch: leaving the flags latched would let the NEW authority's
-    /// first failed load report "offline" carrying the PREVIOUS authority's
-    /// cached timestamp.
-    func testPrinterCoverageStaleBannerDoesNotLeakAcrossAuthorityChange() async throws {
+    /// A conclusion is per-authority. Swapping the coverage service is a server
+    /// switch, so the new authority must not inherit the old one's conclusion and
+    /// flash its banner during the new undecided window.
+    ///
+    /// Equally, `configure` must NOT clear `isShowingStaleCache` or the cache
+    /// timestamp: those are provenance for `coverage`, which `configure`
+    /// deliberately retains. Clearing them would mark retained cached data as
+    /// confirmed-live, and since `hydrateFromCache` refuses to re-run once
+    /// `coverage` is non-nil, nothing would ever restore the flag -- the banner
+    /// would be suppressed permanently, even once the new authority failed.
+    func testPrinterCoverageStaleBannerIsRearmedButNotSuppressedAcrossAuthorityChange() async throws {
         let printerID = UUID()
         let serviceA = ControlledFilamentCoverageService()
         let vm = try await makeHydratedPrinterCoverageVM(service: serviceA, printerID: printerID)
+        let hydratedMillis = vm.cacheLastUpdatedAtMillis
+        XCTAssertNotNil(hydratedMillis, "precondition: hydrated with a timestamp")
 
         // Authority A concludes unsuccessfully: the banner is legitimately shown.
         async let loadA: Void = vm.load()
@@ -491,16 +499,35 @@ final class FeatureReadCacheVMTests: XCTestCase {
         _ = await loadA
         XCTAssertTrue(vm.isStaleCacheReportable, "A concluded unreachable, so the banner is honest")
 
-        // Switch to authority B. Nothing A said survives the switch.
+        // Switch to authority B.
         let serviceB = ControlledFilamentCoverageService()
         vm.configure(coverageService: serviceB)
 
-        XCTAssertFalse(vm.isShowingStaleCache, "B has hydrated nothing")
         XCTAssertFalse(vm.hasConcludedCanonicalLoad, "B has concluded nothing")
-        XCTAssertNil(vm.cacheLastUpdatedAtMillis, "A's cache timestamp must not leak into B")
         XCTAssertFalse(
             vm.isStaleCacheReportable,
-            "the previous authority's banner must not carry into the new one"
+            "B's undecided window must not inherit A's conclusion"
+        )
+        XCTAssertTrue(
+            vm.isShowingStaleCache,
+            "the retained payload is still unconfirmed; erasing its provenance "
+                + "would mark it confirmed-live and permanently suppress the banner"
+        )
+        XCTAssertEqual(
+            vm.cacheLastUpdatedAtMillis,
+            hydratedMillis,
+            "the timestamp describes the retained payload, which configure keeps"
+        )
+
+        // The banner is only deferred, never lost: B failing restores it.
+        async let loadB: Void = vm.load()
+        await serviceB.awaitPending(count: 1)
+        await serviceB.completeError(index: 0, error: NetworkError.transportError(URLError(.timedOut)))
+        _ = await loadB
+        XCTAssertTrue(
+            vm.isStaleCacheReportable,
+            "once B concludes unreachable the banner must return -- suppression "
+                + "across an authority switch must be temporary, not permanent"
         )
     }
 
@@ -565,6 +592,109 @@ final class FeatureReadCacheVMTests: XCTestCase {
 
         XCTAssertFalse(vm.hasConcludedCanonicalLoad, "a cancelled load concluded nothing")
         XCTAssertFalse(vm.isStaleCacheReportable, "a cancelled load must not flash the offline banner")
+    }
+
+    /// Fleet mirror of
+    /// `testPrinterCoverageStaleBannerIsRearmedButNotSuppressedAcrossAuthorityChange`.
+    func testFleetCoverageStaleBannerIsRearmedButNotSuppressedAcrossAuthorityChange() async throws {
+        let serviceA = ControlledFilamentCoverageService()
+        let vm = try await makeHydratedFleetCoverageVM(service: serviceA)
+        let hydratedMillis = vm.cacheLastUpdatedAtMillis
+        XCTAssertNotNil(hydratedMillis, "precondition: hydrated with a timestamp")
+
+        async let loadA: Void = vm.load()
+        await serviceA.awaitPending(count: 1)
+        await serviceA.completeError(index: 0, error: NetworkError.transportError(URLError(.timedOut)))
+        _ = await loadA
+        XCTAssertTrue(vm.isStaleCacheReportable, "A concluded unreachable, so the banner is honest")
+
+        let serviceB = ControlledFilamentCoverageService()
+        vm.configure(coverageService: serviceB)
+
+        XCTAssertFalse(vm.hasConcludedCanonicalLoad, "B has concluded nothing")
+        XCTAssertFalse(vm.isStaleCacheReportable, "B's undecided window must not inherit A's conclusion")
+        XCTAssertTrue(
+            vm.isShowingStaleCache,
+            "the retained fleet payload is still unconfirmed; erasing its "
+                + "provenance would permanently suppress the banner"
+        )
+        XCTAssertEqual(vm.cacheLastUpdatedAtMillis, hydratedMillis)
+
+        async let loadB: Void = vm.load()
+        await serviceB.awaitPending(count: 1)
+        await serviceB.completeError(index: 0, error: NetworkError.transportError(URLError(.timedOut)))
+        _ = await loadB
+        XCTAssertTrue(
+            vm.isStaleCacheReportable,
+            "suppression across an authority switch must be temporary, not permanent"
+        )
+    }
+
+    // MARK: - Cancellation classification
+
+    /// The PRODUCTION cancellation shape, and the one behind the user-reported
+    /// bug. `PrinterDetailView`'s `.task(id:)` is auto-cancelled on disappear;
+    /// `URLSession` then throws `URLError(.cancelled)`, which `APIClient` wraps
+    /// as `NetworkError.transportError(URLError(.cancelled))`. That is caught by
+    /// the view model's `NetworkError` clause and lands in its `default` arm --
+    /// a DIFFERENT arm from the one a raw `CancellationError` reaches. Without
+    /// this test, reverting the guard in that arm leaves the whole suite green
+    /// while reintroducing the flash on every navigate-away.
+    func testPrinterCoverageWrappedCancellationDoesNotConclude() async throws {
+        let printerID = UUID()
+        let service = ControlledFilamentCoverageService()
+        let vm = try await makeHydratedPrinterCoverageVM(service: service, printerID: printerID)
+
+        async let load: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeError(
+            index: 0,
+            error: NetworkError.transportError(URLError(.cancelled))
+        )
+        _ = await load
+
+        XCTAssertFalse(
+            vm.hasConcludedCanonicalLoad,
+            "a cancelled request answered nothing, however it was wrapped"
+        )
+        XCTAssertFalse(vm.isStaleCacheReportable, "navigating away must not flash the banner")
+    }
+
+    func testFleetCoverageWrappedCancellationDoesNotConclude() async throws {
+        let service = ControlledFilamentCoverageService()
+        let vm = try await makeHydratedFleetCoverageVM(service: service)
+
+        async let load: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeError(
+            index: 0,
+            error: NetworkError.transportError(URLError(.cancelled))
+        )
+        _ = await load
+
+        XCTAssertFalse(
+            vm.hasConcludedCanonicalLoad,
+            "a cancelled request answered nothing, however it was wrapped"
+        )
+        XCTAssertFalse(vm.isStaleCacheReportable)
+    }
+
+    /// Direct coverage of the shared helper. The dangerous direction is a FALSE
+    /// POSITIVE: misclassifying a real failure as a cancellation would suppress
+    /// the offline banner permanently, leaving the user acting on stale data.
+    func testIsCancellationErrorClassifiesEveryShape() {
+        XCTAssertTrue(isCancellationError(CancellationError()))
+        XCTAssertTrue(isCancellationError(URLError(.cancelled)))
+        XCTAssertTrue(isCancellationError(NetworkError.transportError(URLError(.cancelled))))
+
+        // Real failures must never be mistaken for cancellation.
+        XCTAssertFalse(isCancellationError(URLError(.timedOut)))
+        XCTAssertFalse(isCancellationError(URLError(.notConnectedToInternet)))
+        XCTAssertFalse(isCancellationError(URLError(.networkConnectionLost)))
+        XCTAssertFalse(isCancellationError(NetworkError.transportError(URLError(.timedOut))))
+        XCTAssertFalse(isCancellationError(NetworkError.noConnection))
+        XCTAssertFalse(isCancellationError(NetworkError.timeout))
+        XCTAssertFalse(isCancellationError(NetworkError.serverUnreachable))
     }
 
     // MARK: - @Observable wiring

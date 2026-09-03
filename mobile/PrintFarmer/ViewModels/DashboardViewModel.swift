@@ -517,6 +517,13 @@ final class DashboardViewModel {
             )
         } catch {
             guard !Task.isCancelled else { return .superseded }
+            // Defend the invariant structurally rather than by timing. A
+            // cancellation answered nothing, so it must never reach `.failure`,
+            // which concludes the canonical pass. `Task.isCancelled` covers the
+            // ordinary case, but a nested sub-task cancelled without the parent
+            // would surface `URLError(.cancelled)` with the parent still live.
+            // Keeps all three read-cache view models consistent.
+            guard !isCancellationError(error) else { return .superseded }
             return .failure(error)
         }
     }

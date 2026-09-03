@@ -74,16 +74,24 @@ final class PrinterFilamentCoverageViewModel {
     func configure(coverageService: any FilamentCoverageServiceProtocol) {
         self.coverageService = coverageService
         coverageAuthorityEpoch &+= 1
-        // A new coverage authority invalidates everything the previous one said,
-        // including its read-cache provenance. Leaving these latched lets a new
-        // authority's slow first load render the PREVIOUS authority's stale
-        // banner and timestamp over a feed it never hydrated. Callers always
-        // invoke `configure` before `hydrateFromCache`, so clearing here is the
-        // correct point. (Same leak the Attention teardown fixed in #2404.)
-        resetReadCacheState()
+        // The new authority has concluded nothing yet, so the next undecided
+        // window must not inherit the previous authority's conclusion and flash
+        // its banner. Reset ONLY the conclusion flag.
+        //
+        // `isShowingStaleCache` and `cacheLastUpdatedAtMillis` are provenance FOR
+        // `coverage`, which `configure` deliberately does not clear, and they
+        // must stay coupled to it. Clearing them here would leave retained
+        // cached data marked as confirmed-live -- and because `hydrateFromCache`
+        // refuses to re-run once `coverage` is non-nil (line 114), nothing would
+        // ever restore the flag, permanently suppressing the banner even when
+        // the next load fails. Authority changes that DO clear the payload
+        // (`disableForCapabilityGate`) call `resetReadCacheState()` instead.
+        hasConcludedCanonicalLoad = false
     }
 
-    /// Clear all read-cache provenance so it cannot outlive its authority.
+    /// Clear all read-cache provenance. Only valid where the cached payload it
+    /// describes is cleared in the same breath, or provenance desynchronises
+    /// from the data on screen.
     private func resetReadCacheState() {
         isShowingStaleCache = false
         hasConcludedCanonicalLoad = false
