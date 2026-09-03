@@ -1,13 +1,12 @@
 import XCTest
 @testable import PrintFarmer
 
-/// Tests for the system capability contract consumed by the iOS shell.
+/// Tests for the operator feature-gate capability contract (issue #725)
+/// consumed by F1's Attention shell (issue #706).
 ///
 /// Verifies:
 /// * `SystemCapabilities` decodes the camelCase payload from
 ///   `/api/system/capabilities`.
-/// * Optional farm-shape counts tolerate absent and partial payloads while
-///   preserving unknown-versus-known semantics.
 /// * Missing/omitted flags fall back to the documented defaults so an
 ///   older PrintFarmer server (predating #725) is treated as fully
 ///   enabled.
@@ -53,7 +52,6 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertTrue(defaults.shiftPlanEnabled)
         XCTAssertFalse(defaults.printedPartsInventoryEnabled)
         XCTAssertTrue(defaults.offlineWriteReplayEnabled)
-        XCTAssertEqual(defaults.farmShape, .unknown)
     }
 
     // MARK: - Decoding
@@ -70,11 +68,6 @@ final class SystemCapabilitiesTests: XCTestCase {
                 "shiftPlanEnabled": false,
                 "printedPartsInventoryEnabled": false,
                 "offlineWriteReplayEnabled": false
-            },
-            "farmShape": {
-                "accountCount": 2,
-                "locationCount": 3,
-                "printerCount": 21
             }
         }
         """.data(using: .utf8)!
@@ -90,9 +83,6 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertFalse(resolved.shiftPlanEnabled)
         XCTAssertFalse(resolved.printedPartsInventoryEnabled)
         XCTAssertFalse(resolved.offlineWriteReplayEnabled)
-        XCTAssertEqual(resolved.farmShape.accountCount, 2)
-        XCTAssertEqual(resolved.farmShape.locationCount, 3)
-        XCTAssertEqual(resolved.farmShape.printerCount, 21)
     }
 
     func testMissingFlagsResolveToDocumentedDefaults() throws {
@@ -134,78 +124,12 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertTrue(resolved.offlineWriteReplayEnabled)
     }
 
-    func testAbsentFarmShapeResolvesUnknown() throws {
-        let json = """
-        {
-            "operatorFeatures": {
-                "attentionEnabled": true
-            }
-        }
-        """.data(using: .utf8)!
-
-        let decoded = try JSONDecoder().decode(SystemCapabilities.self, from: json)
-
-        XCTAssertNil(decoded.farmShape)
-        XCTAssertEqual(decoded.resolved.farmShape, .unknown)
-    }
-
-    func testExplicitNullFarmShapeResolvesUnknown() throws {
-        let json = """
-        {
-            "operatorFeatures": {
-                "attentionEnabled": true
-            },
-            "farmShape": null
-        }
-        """.data(using: .utf8)!
-
-        let decoded = try JSONDecoder().decode(SystemCapabilities.self, from: json)
-
-        XCTAssertNil(decoded.farmShape)
-        XCTAssertEqual(decoded.resolved.farmShape, .unknown)
-    }
-
-    func testEmptyFarmShapeObjectResolvesUnknown() throws {
-        let json = """
-        {
-            "farmShape": {}
-        }
-        """.data(using: .utf8)!
-
-        let decoded = try JSONDecoder().decode(SystemCapabilities.self, from: json)
-
-        XCTAssertEqual(decoded.farmShape, .unknown)
-        XCTAssertEqual(decoded.resolved.farmShape, .unknown)
-    }
-
-    func testPartiallyPopulatedFarmShapePreservesAvailableCounts() throws {
-        let json = """
-        {
-            "farmShape": {
-                "accountCount": 4,
-                "printerCount": 18
-            }
-        }
-        """.data(using: .utf8)!
-
-        let decoded = try JSONDecoder().decode(SystemCapabilities.self, from: json)
-
-        XCTAssertEqual(decoded.resolved.farmShape.accountCount, 4)
-        XCTAssertNil(decoded.resolved.farmShape.locationCount)
-        XCTAssertEqual(decoded.resolved.farmShape.printerCount, 18)
-    }
-
     func testLegacyTopLevelFlagsRemainSupported() throws {
         let json = """
         {
             "attentionEnabled": false,
             "nativePushEnabled": true,
-            "shiftPlanEnabled": false,
-            "farmShape": {
-                "accountCount": 1,
-                "locationCount": 1,
-                "printerCount": 7
-            }
+            "shiftPlanEnabled": false
         }
         """.data(using: .utf8)!
 
@@ -217,9 +141,6 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertTrue(resolved.nativePushEnabled)
         XCTAssertFalse(resolved.shiftPlanEnabled)
         XCTAssertFalse(resolved.printedPartsInventoryEnabled)
-        XCTAssertEqual(resolved.farmShape.accountCount, 1)
-        XCTAssertEqual(resolved.farmShape.locationCount, 1)
-        XCTAssertEqual(resolved.farmShape.printerCount, 7)
     }
 
     func testCanonicalNestedFlagsTakePrecedenceAndLegacyFillsNestedOmissions() throws {
@@ -243,43 +164,6 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertFalse(resolved.filamentCoverageEnabled)
         XCTAssertFalse(resolved.shiftPlanEnabled)
         XCTAssertFalse(resolved.printedPartsInventoryEnabled)
-    }
-
-    func testUnknownFarmShapeDiffersFromKnownShapeOfOne() {
-        let unknown = ResolvedSystemCapabilities.defaults
-        var knownOne = ResolvedSystemCapabilities.defaults
-        knownOne.farmShape = FarmShape(
-            accountCount: 1,
-            locationCount: 1,
-            printerCount: 1
-        )
-
-        XCTAssertNotEqual(unknown.farmShape, knownOne.farmShape)
-        XCTAssertNotEqual(unknown, knownOne)
-    }
-
-    func testEncodingRoundTripsFarmShapeInCanonicalPayload() throws {
-        let json = """
-        {
-            "attentionEnabled": false,
-            "farmShape": {
-                "accountCount": 2,
-                "printerCount": 12
-            }
-        }
-        """.data(using: .utf8)!
-        let decoded = try JSONDecoder().decode(SystemCapabilities.self, from: json)
-
-        let encoded = try JSONEncoder().encode(decoded)
-        let roundTrip = try JSONDecoder().decode(SystemCapabilities.self, from: encoded)
-        let object = try XCTUnwrap(
-            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
-        )
-
-        XCTAssertEqual(roundTrip, decoded)
-        XCTAssertNotNil(object["operatorFeatures"])
-        XCTAssertNotNil(object["farmShape"])
-        XCTAssertNil(object["attentionEnabled"])
     }
 
     // MARK: - APIError.code (ProblemDetails extension)
@@ -326,11 +210,6 @@ final class SystemCapabilitiesTests: XCTestCase {
             "operatorFeatures": {
                 "attentionEnabled": false,
                 "nativePushEnabled": true
-            },
-            "farmShape": {
-                "accountCount": 2,
-                "locationCount": 1,
-                "printerCount": 9
             }
         }
         """)
@@ -345,11 +224,6 @@ final class SystemCapabilitiesTests: XCTestCase {
                       "nativePushEnabled should be honored from the response")
         XCTAssertTrue(service.resolved.filamentCoverageEnabled,
                       "Omitted flags must fall back to defaults")
-        XCTAssertEqual(
-            service.resolved.farmShape,
-            FarmShape(accountCount: 2, locationCount: 1, printerCount: 9),
-            "The shared resolved snapshot must cache the observed farm shape"
-        )
     }
 
     func testRefreshKeepsDefaultsWhenEndpointReturns404() async {
