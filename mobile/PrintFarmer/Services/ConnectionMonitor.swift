@@ -43,7 +43,25 @@ final class ConnectionMonitor {
     /// only*. A `.connecting` that outlives the grace — a hub handshake that
     /// stalls against a black-holed port, say — is a real problem the operator
     /// needs to see, so it reports normally (as the neutral grey bar).
-    var isReportable: Bool { status != .connecting || !isWithinStartupGrace }
+    ///
+    /// Reads the *observed* ``isInStartupGrace`` rather than computing
+    /// ``isWithinStartupGrace`` directly. That is load-bearing, not incidental:
+    /// the latter derives from `@ObservationIgnored` state, so its true→false
+    /// transition is invisible to SwiftUI. Without an observed mirror, a hub
+    /// that stalls while the server stays reachable holds every observed
+    /// property constant, `@Observable` suppresses the equal re-assignments,
+    /// and the bar stays hidden forever — precisely the case this property
+    /// exists to surface.
+    var isReportable: Bool { status != .connecting || !isInStartupGrace }
+
+    /// Observed mirror of ``isWithinStartupGrace``, republished on every poll.
+    ///
+    /// `@Observable` only notifies when an assignment actually changes the
+    /// value (verified empirically — it holds even for non-`Equatable` types),
+    /// so something the view reads must *change* when the grace lapses. This
+    /// flips true→false on the first poll after expiry, which bounds the delay
+    /// before the bar appears at one ``pollInterval``.
+    private(set) var isInStartupGrace = false
 
     @ObservationIgnored private var apiClient: APIClient?
     @ObservationIgnored private var signalRService: (any SignalRServiceProtocol)?
@@ -72,8 +90,20 @@ final class ConnectionMonitor {
     /// or ahead of — a newer healthy sample and paint the banner red. Only
     /// the newest *issued* sample is allowed to publish.
     @ObservationIgnored private var sampleTicket: UInt64 = 0
+
     /// Ticket of the most recently *published* sample.
     @ObservationIgnored private var appliedTicket: UInt64 = 0
+
+    /// Number of samples that have been fully applied to published state.
+    ///
+    /// A test seam. ``start()`` spawns a poll task whose first act is
+    /// ``refresh()``; an explicit `refresh()` racing it is silently dropped by
+    /// the ticket guard above, leaving assertions looking at the `.connecting`
+    /// baseline from ``resetState()``. Because that baseline is also what
+    /// several tests assert, a sleep-based wait could pass *vacuously*. Awaiting
+    /// a monotonic count of completed samples makes "the initial poll landed" an
+    /// observed fact instead of a timing assumption.
+    @ObservationIgnored private(set) var completedSampleCount: UInt64 = 0
 
     /// Interval between connectivity samples.
     @ObservationIgnored var pollInterval: Duration = .seconds(5)
@@ -163,12 +193,13 @@ final class ConnectionMonitor {
 
     /// Hysteresis- and startup-aware resolution.
     ///
-    /// `isWithinStartupGrace` folds every not-yet-established outcome into
-    /// `.connecting`. During a cold launch the poll loop samples before the hub
-    /// handshake finishes, and an unreachability probe may not have completed
-    /// either; reporting those as `.degraded`/`.offline` flashed an alarming
-    /// banner for a condition that simply had not finished starting. Outside the
-    /// grace window behaviour is unchanged, so a real outage still escalates.
+    /// `isWithinStartupGrace` folds only `.degraded` into `.connecting`. During
+    /// a cold launch the poll loop samples before the hub handshake finishes,
+    /// and reporting that as `.degraded` flashed an alarming banner for a
+    /// condition that simply had not finished starting. A confirmed `.offline`
+    /// always escalates, grace or not — masking a real outage would leave the
+    /// operator with no indicator at all. Outside the grace window behaviour is
+    /// unchanged.
     static func resolve(
         isServerReachable: Bool,
         signalR: SignalRConnectionState,
@@ -208,6 +239,11 @@ final class ConnectionMonitor {
         // surfaces the previous server's status while the first probe is in flight.
         resetState()
         startedAt = clock.now
+        // Arm the observed mirror synchronously. `resetState()` cleared it, and
+        // the first poll has not landed yet, so leaving it false here would let
+        // the banner flash for the whole first interval — the very defect the
+        // grace exists to prevent.
+        isInStartupGrace = true
         startPathObserver()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -240,12 +276,19 @@ final class ConnectionMonitor {
     private func resetState() {
         sampleTicket &+= 1
         appliedTicket = sampleTicket
+        // Scoped per session, so `drainInitialPoll()` waits for *this*
+        // session's first sample rather than being satisfied by the previous
+        // one after a stop()/start() restart.
+        completedSampleCount = 0
         status = .connecting
         signalRState = .disconnected
         isServerReachable = false
         consecutiveReachabilityFailures = 0
         hasSettledSinceStart = false
         startedAt = nil
+        // Kept consistent with `startedAt`: a stopped monitor is not in a
+        // startup window. ``start()`` re-arms it immediately afterwards.
+        isInStartupGrace = false
     }
 
     /// Performs a single connectivity sample and updates ``status``.
@@ -277,13 +320,20 @@ final class ConnectionMonitor {
         }
         isServerReachable = reachable
         signalRState = signalR
+        let withinGrace = isWithinStartupGrace
+        // Republish the grace as observed state so its expiry is visible to
+        // SwiftUI; see ``isInStartupGrace``.
+        isInStartupGrace = withinGrace
         status = Self.resolve(
             isServerReachable: reachable,
             signalR: signalR,
             consecutiveFailures: consecutiveReachabilityFailures,
             threshold: offlineFailureThreshold,
-            isWithinStartupGrace: isWithinStartupGrace
+            isWithinStartupGrace: withinGrace
         )
+        // Bumped last, past every early return, so awaiting it in a test proves
+        // the sample was fully applied rather than merely started.
+        completedSampleCount &+= 1
     }
 
     // MARK: - Network path observation

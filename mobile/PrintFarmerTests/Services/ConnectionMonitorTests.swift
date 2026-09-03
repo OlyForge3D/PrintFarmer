@@ -187,15 +187,40 @@ final class ConnectionMonitorTests: XCTestCase {
 
     // MARK: - Startup grace
 
-    /// Lets the immediate `refresh()` that `start()` kicks off complete.
+    /// Waits until the immediate `refresh()` that `start()` kicks off has been
+    /// fully applied.
     ///
     /// `start()` spawns a poll task whose first action is a `refresh()`. That
     /// refresh issues its own sample ticket, so an explicit `refresh()` racing
     /// it is silently dropped by the newest-sample guard and the assertion then
     /// sees the neutral `.connecting` baseline left by `resetState()`. Draining
     /// first makes the subsequent explicit refresh the only sample in flight.
-    private func drainInitialPoll() async {
-        try? await Task.sleep(for: .milliseconds(100))
+    ///
+    /// This polls `completedSampleCount` rather than sleeping a fixed duration.
+    /// A sleep would be worse than flaky here: several callers assert
+    /// `.connecting`/`!isReportable`, which is *also* the `resetState()`
+    /// baseline, so a too-short sleep would let them pass vacuously — green for
+    /// the wrong reason, on exactly the assertions guarding "no banner at
+    /// launch". Waiting on a monotonic counter cannot pass vacuously, and fails
+    /// loudly if the sample never lands.
+    private func drainInitialPoll(
+        _ monitor: ConnectionMonitor,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async {
+        let deadline = ContinuousClock().now + .seconds(5)
+        while monitor.completedSampleCount == 0 {
+            guard ContinuousClock().now < deadline else {
+                XCTFail(
+                    "Initial poll never completed within 5s.",
+                    file: file,
+                    line: line
+                )
+                return
+            }
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     func testColdLaunchWithHubStillHandshakingDoesNotSurfaceABanner() async {
@@ -209,7 +234,7 @@ final class ConnectionMonitorTests: XCTestCase {
         monitor.pollInterval = .seconds(3600)
         monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
         monitor.start()
-        await drainInitialPoll()
+        await drainInitialPoll(monitor)
         await monitor.refresh()
 
         XCTAssertEqual(monitor.status, .connecting)
@@ -230,7 +255,7 @@ final class ConnectionMonitorTests: XCTestCase {
         monitor.pollInterval = .seconds(3600)
         monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
         monitor.start()
-        await drainInitialPoll()
+        await drainInitialPoll(monitor)
         await monitor.refresh()
         XCTAssertEqual(monitor.status, .connected)
 
@@ -256,7 +281,7 @@ final class ConnectionMonitorTests: XCTestCase {
         monitor.startupGrace = .zero
         monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
         monitor.start()
-        await drainInitialPoll()
+        await drainInitialPoll(monitor)
         await monitor.refresh()
 
         XCTAssertEqual(
@@ -283,7 +308,7 @@ final class ConnectionMonitorTests: XCTestCase {
         monitor.pollInterval = .seconds(3600)
         monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
         monitor.start()
-        await drainInitialPoll()
+        await drainInitialPoll(monitor)
 
         // `start()`'s own poll refresh has already recorded failure #1, which is
         // below the hysteresis threshold and so is softened to `.connecting` by
@@ -318,7 +343,7 @@ final class ConnectionMonitorTests: XCTestCase {
         monitor.pollInterval = .seconds(3600)
         monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
         monitor.start()
-        await drainInitialPoll()
+        await drainInitialPoll(monitor)
         await monitor.refresh()
         XCTAssertTrue(monitor.hasSettledSinceStart)
 
@@ -332,7 +357,7 @@ final class ConnectionMonitorTests: XCTestCase {
         mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
         signalR.connectionState = .disconnected
         monitor.start()
-        await drainInitialPoll()
+        await drainInitialPoll(monitor)
         await monitor.refresh()
 
         XCTAssertEqual(
@@ -341,6 +366,65 @@ final class ConnectionMonitorTests: XCTestCase {
             "The restarted session must get its own grace window"
         )
         XCTAssertFalse(monitor.isReportable)
+        monitor.stop()
+    }
+
+    func testGraceExpiryIsObservableBySwiftUI() async {
+        // Regression test for a defect that unit assertions alone cannot catch.
+        //
+        // `isReportable` used to derive the grace from `@ObservationIgnored`
+        // state. In the *exact* scenario it exists to surface — a hub stalled
+        // against a reachable server — every observed property holds its value,
+        // and `@Observable` does not notify on an equal re-assignment (verified:
+        // this is identity-based, so it holds even for non-`Equatable` types).
+        // The flag therefore flipped with no invalidation and the bar stayed
+        // hidden forever. Asserting `isReportable` directly still passed, because
+        // reading it recomputes; only observation exposes the bug.
+        mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        let signalR = MockSignalRService()
+        // `.connecting` (not `.disconnected`) is essential. It resolves to
+        // `.connecting` both inside and outside the grace, so `status`,
+        // `isServerReachable` and `signalRState` are all identical across the
+        // expiry — only the grace changes, which is precisely the state in which
+        // the old code produced no invalidation. With `.disconnected` the status
+        // would flip to `.degraded` and fire an observation on its own, and this
+        // test would pass even against the bug (verified: it did).
+        signalR.connectionState = .connecting
+
+        let monitor = ConnectionMonitor(pathObserver: FakeNetworkPathObserver())
+        monitor.pollInterval = .seconds(3600)
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
+        monitor.start()
+        await drainInitialPoll(monitor)
+
+        XCTAssertFalse(
+            monitor.isReportable,
+            "Precondition: inside the grace the bar is suppressed"
+        )
+
+        // Stand in for SwiftUI's dependency tracking on the body that reads the
+        // flag. Nothing else about the sample changes across the expiry.
+        let invalidated = expectation(description: "observation fired")
+        withObservationTracking {
+            _ = monitor.isReportable
+        } onChange: {
+            invalidated.fulfill()
+        }
+
+        monitor.startupGrace = .zero
+        await monitor.refresh()
+
+        await fulfillment(of: [invalidated], timeout: 2)
+        XCTAssertEqual(
+            monitor.status,
+            .connecting,
+            "Guards the test's own premise: status must NOT change across the "
+                + "expiry, or the invalidation could have come from status alone"
+        )
+        XCTAssertTrue(
+            monitor.isReportable,
+            "A stalled hub outliving the grace must surface the bar"
+        )
         monitor.stop()
     }
 
