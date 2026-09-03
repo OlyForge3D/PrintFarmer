@@ -162,6 +162,16 @@ never a user-facing API credential.
 │────────────────────────────────────────────────────────────────│
 ```
 
+#### Completed slice artifact behavior differs by topology
+
+Completed slices are always previewable and downloadable via the authenticated slicer
+artifact API. Automatic promotion of the resulting G-code into the File Library is
+**monolith-only today**; the default microservices Docker topology reports
+`artifact_source_unroutable` and does not promote until [#2401](https://github.com/OlyForge3D/PrintFarmer/issues/2401)
+lands. See
+[MICROSERVICES_DEPLOYMENT_GUIDE.md — Completed Slice Artifacts](MICROSERVICES_DEPLOYMENT_GUIDE.md#completed-slice-artifacts)
+for the mechanism.
+
 ## Database Configuration
 
 The current release supports this migration-safe database provider matrix:
