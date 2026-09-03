@@ -242,6 +242,27 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertEqual(service.resolved, ResolvedSystemCapabilities.defaults)
     }
 
+    func testPreparedRefreshIsConsumedByReadinessWithoutSecondRequest() async {
+        mockAPIClient.stubResponse(json: """
+        {
+            "operatorFeatures": {
+                "attentionEnabled": false
+            }
+        }
+        """)
+        let service = SystemCapabilitiesService(apiClient: apiClient)
+
+        let prepared = await service.prepareForReadiness()
+        let consumed = await service.refreshForReadiness()
+
+        XCTAssertEqual(prepared, .loaded)
+        XCTAssertEqual(consumed, .loaded)
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+
+        _ = await service.refreshForReadiness()
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 2)
+    }
+
     func testRefreshFailsOpenOnTransportError() async {
         // Transient network failure must not disable any feature —
         // documented contract in #725 is fail-open on unavailability.

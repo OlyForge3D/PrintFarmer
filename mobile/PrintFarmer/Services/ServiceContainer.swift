@@ -745,7 +745,7 @@ final class ServiceContainer: @unchecked Sendable {
 
         let expectedCapabilities = capabilitiesService
         let expectedShape = farmShapeService
-        async let capabilitiesRefresh = expectedCapabilities.refresh()
+        async let capabilitiesRefresh = expectedCapabilities.prepareForReadiness()
         await expectedShape.resolveForAuthenticatedSession(
             serverID: serverID,
             timeout: FarmShapeService.startupTimeout

@@ -73,6 +73,7 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
     @ObservationIgnored private let fetchShape: FetchShape
     @ObservationIgnored private let sleep: Sleep
     @ObservationIgnored private var sessionGeneration: UInt64 = 0
+    @ObservationIgnored private var resolvedSessionServerID: UUID?
 
     init(
         apiClient: APIClient,
@@ -114,6 +115,8 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
         serverID: UUID,
         timeout: Duration
     ) async {
+        guard resolvedSessionServerID != serverID else { return }
+        resolvedSessionServerID = serverID
         sessionGeneration &+= 1
         let generation = sessionGeneration
         let persisted = store.shape(serverID: serverID)

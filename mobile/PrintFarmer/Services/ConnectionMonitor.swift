@@ -1141,7 +1141,7 @@ struct BackendReadinessChecker: Sendable {
         let clock = ContinuousClock()
         let startedAt = clock.now
         let result = await runBackendReadinessWithTimeout(timeout: capabilitiesTimeout) {
-            await service.refresh()
+            await service.refreshForReadiness()
         }
         let elapsed = startedAt.duration(to: clock.now)
 

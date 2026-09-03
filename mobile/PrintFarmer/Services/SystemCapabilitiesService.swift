@@ -29,6 +29,26 @@ protocol SystemCapabilitiesServiceProtocol: AnyObject, Sendable {
     /// older servers and missing flags.
     @discardableResult
     func refresh() async -> SystemCapabilitiesRefreshOutcome
+
+    /// Performs the authenticated-startup refresh and retains its outcome for
+    /// the immediately-following readiness gate.
+    @discardableResult
+    func prepareForReadiness() async -> SystemCapabilitiesRefreshOutcome
+
+    /// Consumes a prepared startup outcome when available; otherwise performs
+    /// the normal readiness refresh.
+    @discardableResult
+    func refreshForReadiness() async -> SystemCapabilitiesRefreshOutcome
+}
+
+extension SystemCapabilitiesServiceProtocol {
+    func prepareForReadiness() async -> SystemCapabilitiesRefreshOutcome {
+        await refresh()
+    }
+
+    func refreshForReadiness() async -> SystemCapabilitiesRefreshOutcome {
+        await refresh()
+    }
 }
 
 enum SystemCapabilitiesRefreshOutcome: Equatable, Sendable {
@@ -52,6 +72,7 @@ final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unche
     @ObservationIgnored private let apiClient: APIClient
     @ObservationIgnored private var issuedRefreshGeneration: UInt64 = 0
     @ObservationIgnored private var appliedRefreshGeneration: UInt64 = 0
+    @ObservationIgnored private var preparedReadinessOutcome: SystemCapabilitiesRefreshOutcome?
     private(set) var resolved: ResolvedSystemCapabilities = .defaults
 
     init(apiClient: APIClient) {
@@ -60,6 +81,26 @@ final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unche
 
     @discardableResult
     func refresh() async -> SystemCapabilitiesRefreshOutcome {
+        await performRefresh()
+    }
+
+    @discardableResult
+    func prepareForReadiness() async -> SystemCapabilitiesRefreshOutcome {
+        let outcome = await performRefresh()
+        preparedReadinessOutcome = outcome
+        return outcome
+    }
+
+    @discardableResult
+    func refreshForReadiness() async -> SystemCapabilitiesRefreshOutcome {
+        if let preparedReadinessOutcome {
+            self.preparedReadinessOutcome = nil
+            return preparedReadinessOutcome
+        }
+        return await performRefresh()
+    }
+
+    private func performRefresh() async -> SystemCapabilitiesRefreshOutcome {
         issuedRefreshGeneration &+= 1
         let generation = issuedRefreshGeneration
 

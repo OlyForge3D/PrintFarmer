@@ -211,13 +211,28 @@ final class FarmShapeServiceTests: XCTestCase {
             serverId: serverB.id
         )
         let mock = MockAPIClient()
-        mock.stubResponse(json: """
-        {
-            "accountCount": 4,
-            "locationCount": 5,
-            "printerCount": 6
-        }
-        """)
+        mock.stubResponses([
+            "/api/system/farm-shape": (
+                200,
+                """
+                {
+                    "accountCount": 4,
+                    "locationCount": 5,
+                    "printerCount": 6
+                }
+                """
+            ),
+            "/api/system/capabilities": (
+                200,
+                """
+                {
+                    "operatorFeatures": {
+                        "attentionEnabled": true
+                    }
+                }
+                """
+            ),
+        ])
         let container = ServiceContainer(
             serverRegistry: registry,
             credentialsStore: credentials,
@@ -246,13 +261,30 @@ final class FarmShapeServiceTests: XCTestCase {
         )
 
         await container.switchToServer(serverB)
+        await container.prepareAuthenticatedStartup()
+        let readiness = BackendReadinessChecker(timeout: .seconds(1))
+        _ = await readiness.check(
+            plan: BackendReadinessPlan(
+                capabilitiesService: container.capabilitiesService,
+                probes: []
+            )
+        )
 
         XCTAssertEqual(
             container.farmShapeService.sessionShape,
             FarmShape(accountCount: 4, locationCount: 5, printerCount: 6)
         )
-        XCTAssertTrue(
-            mock.capturedRequests.contains { $0.url?.path == "/api/system/farm-shape" }
+        XCTAssertEqual(
+            mock.capturedRequests.filter {
+                $0.url?.path == "/api/system/farm-shape"
+            }.count,
+            1
+        )
+        XCTAssertEqual(
+            mock.capturedRequests.filter {
+                $0.url?.path == "/api/system/capabilities"
+            }.count,
+            1
         )
     }
 
