@@ -1,5 +1,9 @@
 import SwiftUI
 
+private enum ShiftTasksDestination: Hashable {
+    case printQueue
+}
+
 struct ShiftTasksView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(AppRouter.self) private var router
@@ -8,14 +12,14 @@ struct ShiftTasksView: View {
     @State private var actionCapabilities = TaskActionCapabilities()
 
     var body: some View {
-        NavigationStack {
+        @Bindable var router = router
+
+        NavigationStack(path: $router.tasksPath) {
             content
                 .navigationTitle("Tasks")
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        NavigationLink {
-                            JobListView()
-                        } label: {
+                        NavigationLink(value: ShiftTasksDestination.printQueue) {
                             Label("Print queue", systemImage: "tray.full")
                         }
                         .accessibilityLabel("Print queue")
@@ -35,6 +39,12 @@ struct ShiftTasksView: View {
                 .sheet(item: maintenancePresentationBinding) { presentation in
                     MaintenanceView()
                         .accessibilityIdentifier("shiftTasks.destination.maintenance.\(presentation.taskID)")
+                }
+                .navigationDestination(for: ShiftTasksDestination.self) { destination in
+                    switch destination {
+                    case .printQueue:
+                        JobListView()
+                    }
                 }
         }
         .task(id: services.activeServerGeneration) {

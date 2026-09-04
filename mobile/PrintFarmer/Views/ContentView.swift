@@ -7,6 +7,17 @@ import SwiftUI
 /// Attention overflow menu; jog/preheat/z-offset controls live behind
 /// Printer Detail → Advanced.
 struct ContentView: View {
+    static let sidebarRowMinimumHeight: CGFloat = 44
+    static func shippingTabs(
+        for capabilities: ResolvedSystemCapabilities
+    ) -> [AppTab] {
+        AppTab.visibleTabs(
+            for: .current,
+            mode: .floor,
+            capabilities: capabilities
+        )
+    }
+
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(ServerRegistry.self) private var serverRegistry
@@ -34,40 +45,21 @@ struct ContentView: View {
 
     private func compactLayout(capabilities: ResolvedSystemCapabilities) -> some View {
         let selection = Binding(
-            get: { router.resolvedTab(for: capabilities) },
-            set: { router.selectTab($0, capabilities: capabilities) }
+            get: { resolvedShippingTab(for: capabilities) },
+            set: { selectShippingTab($0, capabilities: capabilities) }
         )
+        let tabs = Self.shippingTabs(for: capabilities)
 
         return TabView(selection: selection) {
-            if capabilities.attentionEnabled {
-                AttentionView()
-                    .tabItem { Label("Attention", systemImage: "bell.badge") }
-                    .tag(AppTab.attention)
-                    .badge(router.notificationBadgeCount)
-                    .accessibilityIdentifier("tab.attention")
+            ForEach(tabs, id: \.self) { tab in
+                tabContentView(for: tab)
+                    .tabItem {
+                        Label(tab.title, systemImage: tab.systemImage)
+                    }
+                    .tag(tab)
+                    .badge(badgeCount(for: tab))
+                    .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
             }
-
-            PrinterListView()
-                .tabItem { Label("Farm", systemImage: "printer") }
-                .tag(AppTab.farm)
-                .badge(router.pendingReadyCount)
-                .accessibilityIdentifier("tab.farm")
-
-            if capabilities.shiftPlanEnabled {
-                ShiftTasksView()
-                    .tabItem { Label("Tasks", systemImage: "checklist") }
-                    .tag(AppTab.tasks)
-                    .accessibilityIdentifier("tab.tasks")
-            }
-
-            ScanView()
-                .tabItem { Label("Scan", systemImage: "barcode.viewfinder") }
-                .tag(AppTab.scan)
-                .accessibilityIdentifier("tab.scan")
-
-            InventoryView()
-                .tabItem { Label("Inventory", systemImage: "cylinder.fill") }
-                .tag(AppTab.inventory)
         }
     }
 
@@ -75,37 +67,17 @@ struct ContentView: View {
 
     private func iPadLayout(capabilities: ResolvedSystemCapabilities) -> some View {
         @Bindable var router = router
+        let tabs = Self.shippingTabs(for: capabilities)
 
         return NavigationSplitView(columnVisibility: $router.sidebarVisibility) {
             List {
                 Section {
-                    if capabilities.attentionEnabled {
-                        sidebarAttentionButton(capabilities: capabilities)
-                    }
-                    sidebarFarmButton
-                    if capabilities.shiftPlanEnabled {
+                    ForEach(tabs, id: \.self) { tab in
                         sidebarButton(
-                            tab: .tasks,
-                            title: "Tasks",
-                            icon: "checklist",
-                            identifier: "sidebar.tasks",
+                            tab: tab,
                             capabilities: capabilities
                         )
                     }
-                    sidebarButton(
-                        tab: .scan,
-                        title: "Scan",
-                        icon: "barcode.viewfinder",
-                        identifier: "sidebar.scan",
-                        capabilities: capabilities
-                    )
-                    sidebarButton(
-                        tab: .inventory,
-                        title: "Inventory",
-                        icon: "cylinder.fill",
-                        identifier: "sidebar.inventory",
-                        capabilities: capabilities
-                    )
                 } header: {
                     Text("Operator")
                 }
@@ -113,86 +85,95 @@ struct ContentView: View {
             .listStyle(.sidebar)
             .navigationTitle("PrintFarmer")
         } detail: {
-            tabContentView(for: router.resolvedTab(for: capabilities))
+            tabContentView(for: resolvedShippingTab(for: capabilities))
         }
         .navigationSplitViewStyle(.balanced)
     }
 
     private func sidebarButton(
         tab: AppTab,
-        title: String,
-        icon: String,
-        identifier: String,
         capabilities: ResolvedSystemCapabilities
     ) -> some View {
-        Button {
-            router.selectTab(tab, capabilities: capabilities)
-        } label: {
-            Label(title, systemImage: icon)
-                .frame(minHeight: 44)
-        }
-        .listRowBackground(router.selectedTab == tab ? Color.accentColor.opacity(0.15) : nil)
-        .foregroundStyle(router.selectedTab == tab ? Color.accentColor : .primary)
-        .accessibilityLabel(title)
-        .accessibilityHint("Opens the \(title) destination.")
-        .accessibilityAddTraits(router.selectedTab == tab ? [.isButton, .isSelected] : .isButton)
-        .accessibilityIdentifier(identifier)
-    }
+        let isSelected = resolvedShippingTab(for: capabilities) == tab
+        let badgeCount = badgeCount(for: tab)
 
-    private var sidebarFarmButton: some View {
-        Button {
-            router.selectedTab = .farm
+        return Button {
+            selectShippingTab(tab, capabilities: capabilities)
         } label: {
             HStack {
-                Label("Farm", systemImage: "printer")
+                Label(tab.title, systemImage: tab.systemImage)
                 Spacer()
-                if router.pendingReadyCount > 0 {
-                    Text("\(router.pendingReadyCount)")
+                if badgeCount > 0 {
+                    Text("\(badgeCount)")
                         .font(.caption2.weight(.bold))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.pfWarning, in: Capsule())
+                        .background(sidebarBadgeColor(for: tab), in: Capsule())
                         .foregroundStyle(.white)
                         .accessibilityHidden(true)
                 }
             }
-            .frame(minHeight: 44)
+            .frame(minHeight: Self.sidebarRowMinimumHeight)
         }
-        .listRowBackground(router.selectedTab == .farm ? Color.accentColor.opacity(0.15) : nil)
-        .foregroundStyle(router.selectedTab == .farm ? Color.accentColor : .primary)
-        .accessibilityLabel(router.pendingReadyCount > 0 ? "Farm, \(router.pendingReadyCount) ready" : "Farm")
-        .accessibilityHint("Opens the Farm destination.")
-        .accessibilityAddTraits(router.selectedTab == .farm ? [.isButton, .isSelected] : .isButton)
-        .accessibilityIdentifier("sidebar.farm")
+        .listRowBackground(isSelected ? Color.accentColor.opacity(0.15) : nil)
+        .foregroundStyle(isSelected ? Color.accentColor : .primary)
+        .accessibilityLabel(sidebarAccessibilityLabel(for: tab))
+        .accessibilityHint("Opens the \(tab.title) destination.")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier(tab.sidebarAccessibilityIdentifier)
     }
 
-    private func sidebarAttentionButton(
+    private func resolvedShippingTab(
+        for capabilities: ResolvedSystemCapabilities
+    ) -> AppTab {
+        let tabs = Self.shippingTabs(for: capabilities)
+        return tabs.contains(router.selectedTab)
+            ? router.selectedTab
+            : AppTab.fallbackTab(
+                for: .current,
+                mode: .floor,
+                capabilities: capabilities
+            )
+    }
+
+    private func selectShippingTab(
+        _ tab: AppTab,
         capabilities: ResolvedSystemCapabilities
-    ) -> some View {
-        Button {
-            router.selectTab(.attention, capabilities: capabilities)
-        } label: {
-            HStack {
-                Label("Attention", systemImage: "bell.badge")
-                Spacer()
-                if router.notificationBadgeCount > 0 {
-                    Text("\(router.notificationBadgeCount)")
-                        .font(.caption2.weight(.bold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.red, in: Capsule())
-                        .foregroundStyle(.white)
-                        .accessibilityHidden(true)
-                }
-            }
-            .frame(minHeight: 44)
+    ) {
+        let tabs = Self.shippingTabs(for: capabilities)
+        router.selectedTab = tabs.contains(tab)
+            ? tab
+            : AppTab.fallbackTab(
+                for: .current,
+                mode: .floor,
+                capabilities: capabilities
+            )
+    }
+
+    private func badgeCount(for tab: AppTab) -> Int {
+        switch tab.badgeKind {
+        case .notifications:
+            router.notificationBadgeCount
+        case .pendingReady:
+            router.pendingReadyCount
+        case .none:
+            0
         }
-        .listRowBackground(router.selectedTab == .attention ? Color.accentColor.opacity(0.15) : nil)
-        .foregroundStyle(router.selectedTab == .attention ? Color.accentColor : .primary)
-        .accessibilityLabel(router.notificationBadgeCount > 0 ? "Attention, \(router.notificationBadgeCount) unread" : "Attention")
-        .accessibilityHint("Opens the Attention destination.")
-        .accessibilityAddTraits(router.selectedTab == .attention ? [.isButton, .isSelected] : .isButton)
-        .accessibilityIdentifier("sidebar.attention")
+    }
+
+    private func sidebarBadgeColor(for tab: AppTab) -> Color {
+        tab.badgeKind == .pendingReady ? Color.pfWarning : Color.red
+    }
+
+    private func sidebarAccessibilityLabel(for tab: AppTab) -> String {
+        switch tab.badgeKind {
+        case .notifications where router.notificationBadgeCount > 0:
+            "Attention, \(router.notificationBadgeCount) unread"
+        case .pendingReady where router.pendingReadyCount > 0:
+            "Farm, \(router.pendingReadyCount) ready"
+        case .none, .notifications, .pendingReady:
+            tab.title
+        }
     }
 
     @ViewBuilder
@@ -208,6 +189,8 @@ struct ContentView: View {
             ScanView()
         case .inventory:
             InventoryView()
+        case .oversight, .overview, .fleet, .jobs, .upkeep, .reports:
+            EmptyView()
         }
     }
 }
