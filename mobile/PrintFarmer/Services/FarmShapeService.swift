@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 
 @MainActor
 protocol FarmShapeServiceProtocol: AnyObject, Sendable {
@@ -13,6 +14,7 @@ protocol FarmShapeServiceProtocol: AnyObject, Sendable {
 
     func resolveForAuthenticatedSession(serverID: UUID, timeout: Duration) async
     func refreshLatest(serverID: UUID) async
+    func resetSession()
 }
 
 /// Persists the last known shape independently for each registered server.
@@ -61,6 +63,7 @@ final class FarmShapeStore: @unchecked Sendable {
 @Observable
 final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
     static let startupTimeout: Duration = .milliseconds(750)
+    private static let logger = Logger(subsystem: "com.printfarmer.ios", category: "FarmShape")
 
     typealias FetchShape = @Sendable () async throws -> FarmShape?
     typealias Sleep = @Sendable (Duration) async throws -> Void
@@ -125,10 +128,13 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
         isSessionResolved = false
 
         let race = FarmShapeResolutionRace()
-        let fetchShape = self.fetchShape
         Task { @MainActor [weak self] in
-            let shape = try? await fetchShape()
-            self?.completeFetch(shape, serverID: serverID, generation: generation)
+            guard let self else {
+                race.resolve()
+                return
+            }
+            let shape = await self.fetchShapeOrUnknown()
+            self.completeFetch(shape, serverID: serverID, generation: generation)
             race.resolve()
         }
 
@@ -148,9 +154,17 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
     }
 
     func refreshLatest(serverID: UUID) async {
-        guard let shape = try? await fetchShape() else { return }
+        guard let shape = await fetchShapeOrUnknown() else { return }
         store.setShape(shape, serverID: serverID)
         latestShape = shape
+    }
+
+    func resetSession() {
+        sessionGeneration &+= 1
+        resolvedSessionServerID = nil
+        sessionShape = nil
+        latestShape = nil
+        isSessionResolved = true
     }
 
     private func completeFetch(
@@ -173,6 +187,38 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
         guard generation == sessionGeneration else { return }
         isSessionResolved = true
     }
+
+    private func fetchShapeOrUnknown() async -> FarmShape? {
+        do {
+            return try await fetchShape()
+        } catch let error as NetworkError {
+            switch error {
+            case .unauthorized,
+                 .notFound,
+                 .noConnection,
+                 .timeout,
+                 .serverUnreachable,
+                 .transportError,
+                 .staleServerResponse,
+                 .insecureTransportBlocked,
+                 .certificateChanged,
+                 .certificateNotTrusted:
+                return nil
+            default:
+                Self.logger.warning(
+                    "Unexpected farm-shape failure: \(error.localizedDescription, privacy: .public)"
+                )
+                return nil
+            }
+        } catch is URLError {
+            return nil
+        } catch {
+            Self.logger.warning(
+                "Unexpected farm-shape failure: \(error.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
+    }
 }
 
 @MainActor
@@ -191,6 +237,12 @@ final class StubFarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable 
     }
 
     func refreshLatest(serverID: UUID) async {}
+
+    func resetSession() {
+        sessionShape = nil
+        latestShape = nil
+        isSessionResolved = true
+    }
 }
 
 private final class FarmShapeResolutionRace: @unchecked Sendable {

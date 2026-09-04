@@ -1080,11 +1080,13 @@ struct BackendReadinessChecker: Sendable {
             case .succeeded, .unsupported:
                 break
             case .failed(let failure):
+                plan.capabilitiesService.discardPreparedReadiness()
                 return BackendReadinessResult(
                     failures: [failure],
                     wasCancelled: false
                 )
             case .cancelled:
+                plan.capabilitiesService.discardPreparedReadiness()
                 return .cancelled
             }
         }

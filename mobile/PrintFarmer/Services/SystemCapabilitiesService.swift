@@ -39,6 +39,10 @@ protocol SystemCapabilitiesServiceProtocol: AnyObject, Sendable {
     /// the normal readiness refresh.
     @discardableResult
     func refreshForReadiness() async -> SystemCapabilitiesRefreshOutcome
+
+    /// Drops a prepared result when readiness exits before reaching the
+    /// capabilities probe so a later retry performs a fresh request.
+    func discardPreparedReadiness()
 }
 
 extension SystemCapabilitiesServiceProtocol {
@@ -49,6 +53,8 @@ extension SystemCapabilitiesServiceProtocol {
     func refreshForReadiness() async -> SystemCapabilitiesRefreshOutcome {
         await refresh()
     }
+
+    func discardPreparedReadiness() {}
 }
 
 enum SystemCapabilitiesRefreshOutcome: Equatable, Sendable {
@@ -98,6 +104,10 @@ final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unche
             return preparedReadinessOutcome
         }
         return await performRefresh()
+    }
+
+    func discardPreparedReadiness() {
+        preparedReadinessOutcome = nil
     }
 
     private func performRefresh() async -> SystemCapabilitiesRefreshOutcome {

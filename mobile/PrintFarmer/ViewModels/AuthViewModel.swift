@@ -76,6 +76,7 @@ final class AuthViewModel {
         guard services.isActiveGeneration(generation),
               services.authOperationEpoch.isCurrent(authSessionToken) else { return }
         await services.revokeFarmSnapshot()
+        services.resetFarmShapeSession()
         await services.authService.logout(operation: AuthOperationToken(value: authSessionToken))
         guard services.authOperationEpoch.isCurrent(authSessionToken) else { return }
         isAuthenticated = false
@@ -313,6 +314,7 @@ final class AuthViewModel {
             return
         }
         #endif
+        services.resetFarmShapeSession()
         await services.authService.logout(operation: token)
         guard services.authOperationEpoch.isCurrent(token.value) else { return }
         isAuthenticated = false

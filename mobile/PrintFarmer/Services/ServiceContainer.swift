@@ -753,6 +753,10 @@ final class ServiceContainer: @unchecked Sendable {
         _ = await capabilitiesRefresh
     }
 
+    func resetFarmShapeSession() {
+        farmShapeService.resetSession()
+    }
+
     /// Whether `generation` is the current active-server generation. Used to discard a
     /// stale session-expiry event posted by an APIClient we already switched away from
     /// (issue #816 H2).

@@ -82,6 +82,30 @@ final class FarmShapeServiceTests: XCTestCase {
         XCTAssertTrue(service.isSessionResolved)
     }
 
+    func testServerFailureResolvesUnknownWithoutPersisting() async {
+        await assertFailureResolvesUnknown(statusCode: 500)
+    }
+
+    func testMalformedPayloadResolvesUnknownWithoutPersisting() async {
+        let mock = MockAPIClient()
+        mock.stubResponse(json: "{}")
+        let service = FarmShapeService(
+            apiClient: mock.apiClient,
+            serverID: serverID,
+            store: store
+        )
+
+        await service.resolveForAuthenticatedSession(
+            serverID: serverID,
+            timeout: .seconds(1)
+        )
+
+        XCTAssertNil(service.sessionShape)
+        XCTAssertNil(service.latestShape)
+        XCTAssertTrue(service.isSessionResolved)
+        XCTAssertNil(store.shape(serverID: serverID))
+    }
+
     func testTimeoutResolvesUnknownWithoutWaitingForLateResponse() async {
         let request = AsyncBarrier()
         defer { request.close() }
@@ -152,6 +176,50 @@ final class FarmShapeServiceTests: XCTestCase {
         XCTAssertEqual(relaunched.sessionShape, persisted)
         XCTAssertEqual(relaunched.latestShape, persisted)
         XCTAssertTrue(relaunched.isSessionResolved)
+    }
+
+    func testResetAllowsFreshResolutionForSameServerLogin() async {
+        let mock = MockAPIClient()
+        mock.stubResponse(json: """
+        {
+            "accountCount": 1,
+            "locationCount": 1,
+            "printerCount": 2
+        }
+        """)
+        let service = FarmShapeService(
+            apiClient: mock.apiClient,
+            serverID: serverID,
+            store: store
+        )
+        await service.resolveForAuthenticatedSession(
+            serverID: serverID,
+            timeout: .seconds(1)
+        )
+
+        service.resetSession()
+        mock.stubResponse(json: """
+        {
+            "accountCount": 2,
+            "locationCount": 3,
+            "printerCount": 9
+        }
+        """)
+        await service.resolveForAuthenticatedSession(
+            serverID: serverID,
+            timeout: .seconds(1)
+        )
+
+        XCTAssertEqual(
+            service.sessionShape,
+            FarmShape(accountCount: 2, locationCount: 3, printerCount: 9)
+        )
+        XCTAssertEqual(
+            mock.capturedRequests.filter {
+                $0.url?.path == "/api/system/farm-shape"
+            }.count,
+            2
+        )
     }
 
     func testSwitchingActiveServerSelectsThatServersPersistedShape() throws {
@@ -404,6 +472,12 @@ private final class BlockingFarmShapeService: FarmShapeServiceProtocol, @uncheck
     }
 
     func refreshLatest(serverID: UUID) async {}
+
+    func resetSession() {
+        sessionShape = nil
+        latestShape = nil
+        isSessionResolved = true
+    }
 }
 
 @MainActor
