@@ -78,7 +78,7 @@ final class AuthViewModel {
         await services.revokeFarmSnapshot()
         guard services.isActiveGeneration(generation),
               services.authOperationEpoch.isCurrent(authSessionToken) else { return }
-        services.resetFarmShapeSession()
+        services.resetAuthenticatedStartupState()
         await services.authService.logout(operation: AuthOperationToken(value: authSessionToken))
         guard services.authOperationEpoch.isCurrent(authSessionToken) else { return }
         isAuthenticated = false
@@ -178,6 +178,7 @@ final class AuthViewModel {
         // during the activation await cannot rebind.
         let token = AuthOperationToken(value: services.authOperationEpoch.advance())
         services.invalidateOfflineWriteReplayAuthority()
+        services.beginAuthenticatedStartup(authToken: token.value)
         isLoading = true
         if case .restored(let user) = await services.authService.restoreSession(operation: token) {
             guard services.authOperationEpoch.isCurrent(token.value) else {
@@ -208,6 +209,7 @@ final class AuthViewModel {
             guard services.authOperationEpoch.isCurrent(token.value) else {
                 return
             }
+            services.resetAuthenticatedStartupState()
         }
         isLoading = false
         hasCheckedAuth = true
@@ -239,6 +241,7 @@ final class AuthViewModel {
         // fails the final snapshot-publication CAS.
         let token = AuthOperationToken(value: services.authOperationEpoch.advance())
         services.invalidateOfflineWriteReplayAuthority()
+        services.beginAuthenticatedStartup(authToken: token.value)
         isLoading = true
         errorMessage = nil
 
@@ -288,10 +291,12 @@ final class AuthViewModel {
         } catch let error as NetworkError {
             // Stale failure after a newer operation must not clobber its error/loading.
             guard services.authOperationEpoch.isCurrent(token.value) else { return }
+            services.resetAuthenticatedStartupState()
             errorMessage = friendlyMessage(for: error)
             isLoading = false
         } catch {
             guard services.authOperationEpoch.isCurrent(token.value) else { return }
+            services.resetAuthenticatedStartupState()
             errorMessage = error.localizedDescription
             isLoading = false
         }
@@ -317,7 +322,7 @@ final class AuthViewModel {
         }
         #endif
         guard services.authOperationEpoch.isCurrent(token.value) else { return }
-        services.resetFarmShapeSession()
+        services.resetAuthenticatedStartupState()
         await services.authService.logout(operation: token)
         guard services.authOperationEpoch.isCurrent(token.value) else { return }
         isAuthenticated = false

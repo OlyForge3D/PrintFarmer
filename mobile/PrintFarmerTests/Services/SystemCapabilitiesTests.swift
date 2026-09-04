@@ -280,9 +280,32 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertEqual(mockAPIClient.capturedRequests.count, 2)
     }
 
+    func testAuthenticatedStartupResetDiscardsPreparedCapabilities() async {
+        mockAPIClient.stubResponse(json: """
+        {
+            "operatorFeatures": {
+                "attentionEnabled": true
+            }
+        }
+        """)
+        let service = SystemCapabilitiesService(apiClient: apiClient)
+        let container = ServiceContainer(
+            observeRegistry: false,
+            synchronizeOfflineQueueOnStartup: false
+        )
+        container.capabilitiesService = service
+
+        _ = await service.prepareForReadiness()
+        container.resetAuthenticatedStartupState()
+        _ = await service.refreshForReadiness()
+
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 2)
+    }
+
     func testConcurrentReadinessPreparationsShareOneRequest() async {
         let request = AsyncBarrier()
         addTeardownBlock { request.close() }
+        let joined = expectation(description: "second preparation joined in-flight request")
         mockAPIClient.asyncRequestHandler = { urlRequest in
             await request.arriveAndWait()
             return (
@@ -290,11 +313,17 @@ final class SystemCapabilitiesTests: XCTestCase {
                 Data(#"{"operatorFeatures":{"attentionEnabled":true}}"#.utf8)
             )
         }
-        let service = SystemCapabilitiesService(apiClient: apiClient)
+        let service = SystemCapabilitiesService(
+            apiClient: apiClient,
+            readinessPreparationJoinHook: {
+                joined.fulfill()
+            }
+        )
 
         async let first = service.prepareForReadiness()
         await request.waitUntilArrived()
         async let second = service.prepareForReadiness()
+        await fulfillment(of: [joined], timeout: 2)
         request.release()
         _ = await (first, second)
 

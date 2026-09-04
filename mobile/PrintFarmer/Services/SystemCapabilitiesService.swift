@@ -82,10 +82,15 @@ final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unche
     @ObservationIgnored private var readinessPreparationGeneration: UInt64 = 0
     @ObservationIgnored private var readinessPreparation:
         (generation: UInt64, task: Task<SystemCapabilitiesRefreshOutcome, Never>)?
+    @ObservationIgnored private let readinessPreparationJoinHook: @MainActor @Sendable () -> Void
     private(set) var resolved: ResolvedSystemCapabilities = .defaults
 
-    init(apiClient: APIClient) {
+    init(
+        apiClient: APIClient,
+        readinessPreparationJoinHook: @escaping @MainActor @Sendable () -> Void = {}
+    ) {
         self.apiClient = apiClient
+        self.readinessPreparationJoinHook = readinessPreparationJoinHook
     }
 
     @discardableResult
@@ -99,6 +104,7 @@ final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unche
             return preparedReadinessOutcome
         }
         if let readinessPreparation {
+            readinessPreparationJoinHook()
             let outcome = await readinessPreparation.task.value
             if self.readinessPreparation?.generation == readinessPreparation.generation {
                 self.readinessPreparation = nil

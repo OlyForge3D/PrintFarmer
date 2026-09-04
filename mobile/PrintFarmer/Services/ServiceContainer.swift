@@ -193,9 +193,6 @@ final class ServiceContainer: @unchecked Sendable {
             return
         }
         let expectedCapabilitiesService = capabilitiesService
-        if refreshCapabilities {
-            await expectedCapabilitiesService.prepareForReadiness()
-        }
         guard serverRegistry.activeServerID == active.id,
               activeServerID == active.id,
               farmSnapshotOwnerStore.ownerUserID(serverID: active.id) == ownerID,
@@ -211,6 +208,23 @@ final class ServiceContainer: @unchecked Sendable {
             return
         }
         guard await queue.bind(binding: binding) else { return }
+        guard serverRegistry.activeServerID == active.id,
+              activeServerID == active.id,
+              farmSnapshotOwnerStore.ownerUserID(serverID: active.id) == ownerID,
+              capabilitiesService === expectedCapabilitiesService,
+              offlineWriteReplayAuthority.isCurrent(binding) else {
+            return
+        }
+        if refreshCapabilities {
+            await expectedCapabilitiesService.prepareForReadiness()
+        }
+        guard serverRegistry.activeServerID == active.id,
+              activeServerID == active.id,
+              farmSnapshotOwnerStore.ownerUserID(serverID: active.id) == ownerID,
+              capabilitiesService === expectedCapabilitiesService,
+              offlineWriteReplayAuthority.isCurrent(binding) else {
+            return
+        }
         await queue.setReplayEnabled(expectedCapabilitiesService.resolved.offlineWriteReplayEnabled)
         guard offlineWriteReplayAuthority.isCurrent(binding) else { return }
         await queue.replayPending()
@@ -745,6 +759,9 @@ final class ServiceContainer: @unchecked Sendable {
 
         let expectedCapabilities = capabilitiesService
         let expectedShape = farmShapeService
+        if let authToken {
+            expectedShape.beginSession(authToken: authToken)
+        }
         async let capabilitiesRefresh = expectedCapabilities.prepareForReadiness()
         await expectedShape.resolveForAuthenticatedSession(
             serverID: serverID,
@@ -753,7 +770,13 @@ final class ServiceContainer: @unchecked Sendable {
         _ = await capabilitiesRefresh
     }
 
-    func resetFarmShapeSession() {
+    func beginAuthenticatedStartup(authToken: Int) {
+        capabilitiesService.discardPreparedReadiness()
+        farmShapeService.beginSession(authToken: authToken)
+    }
+
+    func resetAuthenticatedStartupState() {
+        capabilitiesService.discardPreparedReadiness()
         farmShapeService.resetSession()
     }
 
@@ -974,6 +997,7 @@ final class ServiceContainer: @unchecked Sendable {
         guard transitionEpoch.isCurrent(epoch) else { return } // superseded during the awaits
         if accessToken != nil {
             let shapeService = farmShapeService
+            shapeService.beginSession(authToken: authOperationEpoch.current)
             await shapeService.resolveForAuthenticatedSession(
                 serverID: server.id,
                 timeout: FarmShapeService.startupTimeout

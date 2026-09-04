@@ -178,7 +178,7 @@ final class FarmShapeServiceTests: XCTestCase {
         XCTAssertTrue(relaunched.isSessionResolved)
     }
 
-    func testResetAllowsFreshResolutionForSameServerLogin() async {
+    func testNewAuthTokenAllowsFreshResolutionForSameServerLogin() async {
         let mock = MockAPIClient()
         mock.stubResponse(json: """
         {
@@ -192,12 +192,13 @@ final class FarmShapeServiceTests: XCTestCase {
             serverID: serverID,
             store: store
         )
+        service.beginSession(authToken: 1)
         await service.resolveForAuthenticatedSession(
             serverID: serverID,
             timeout: .seconds(1)
         )
 
-        service.resetSession()
+        service.beginSession(authToken: 2)
         mock.stubResponse(json: """
         {
             "accountCount": 2,
@@ -306,7 +307,8 @@ final class FarmShapeServiceTests: XCTestCase {
             serverId: serverB.id
         )
         let ownerStore = FarmSnapshotOwnerStore(userDefaults: userDefaults)
-        ownerStore.setOwner(userID: UUID(), serverID: serverB.id)
+        let ownerID = UUID()
+        ownerStore.setOwner(userID: ownerID, serverID: serverB.id)
         let snapshotRoot = FarmSnapshotFixtures.tempRoot()
         addTeardownBlock {
             try? FileManager.default.removeItem(at: snapshotRoot)
@@ -370,9 +372,21 @@ final class FarmShapeServiceTests: XCTestCase {
             },
             signalRServiceFactory: { _, _ in MockSignalRService() }
         )
+        let authToken = container.authOperationEpoch.advance()
 
         await container.switchToServer(serverB)
-        await container.prepareAuthenticatedStartup()
+        XCTAssertEqual(
+            container.currentOfflineWriteReplayIdentity,
+            OfflineWriteReplayIdentity(serverID: serverB.id, userID: ownerID)
+        )
+        XCTAssertEqual(
+            mock.capturedRequests.filter {
+                $0.url?.path == "/api/system/capabilities"
+            }.count,
+            1
+        )
+
+        await container.prepareAuthenticatedStartup(authToken: authToken)
         let readiness = BackendReadinessChecker(timeout: .seconds(1))
         _ = await readiness.check(
             plan: BackendReadinessPlan(
@@ -507,6 +521,8 @@ private final class BlockingFarmShapeService: FarmShapeServiceProtocol, @uncheck
     private(set) var latestShape: FarmShape?
     private(set) var isSessionResolved = false
     private(set) var serverID: UUID?
+
+    func beginSession(authToken: Int) {}
 
     func resolveForAuthenticatedSession(serverID: UUID, timeout: Duration) async {
         self.serverID = serverID

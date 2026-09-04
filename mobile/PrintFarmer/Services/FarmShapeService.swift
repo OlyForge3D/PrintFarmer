@@ -12,6 +12,7 @@ protocol FarmShapeServiceProtocol: AnyObject, Sendable {
 
     var isSessionResolved: Bool { get }
 
+    func beginSession(authToken: Int)
     func resolveForAuthenticatedSession(serverID: UUID, timeout: Duration) async
     func refreshLatest(serverID: UUID) async
     func resetSession()
@@ -76,6 +77,7 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
     @ObservationIgnored private let fetchShape: FetchShape
     @ObservationIgnored private let sleep: Sleep
     @ObservationIgnored private var sessionGeneration: UInt64 = 0
+    @ObservationIgnored private var sessionAuthToken: Int?
     @ObservationIgnored private var resolvedSessionServerID: UUID?
 
     init(
@@ -112,6 +114,16 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
         let persisted = serverID.flatMap(store.shape(serverID:))
         self.sessionShape = persisted
         self.latestShape = persisted
+    }
+
+    func beginSession(authToken: Int) {
+        guard sessionAuthToken != authToken else { return }
+        sessionGeneration &+= 1
+        sessionAuthToken = authToken
+        resolvedSessionServerID = nil
+        sessionShape = nil
+        latestShape = nil
+        isSessionResolved = true
     }
 
     func resolveForAuthenticatedSession(
@@ -163,6 +175,7 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
 
     func resetSession() {
         sessionGeneration &+= 1
+        sessionAuthToken = nil
         resolvedSessionServerID = nil
         sessionShape = nil
         latestShape = nil
@@ -233,6 +246,8 @@ final class StubFarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable 
         sessionShape = shape
         latestShape = shape
     }
+
+    func beginSession(authToken: Int) {}
 
     func resolveForAuthenticatedSession(serverID: UUID, timeout: Duration) async {
         isSessionResolved = true
