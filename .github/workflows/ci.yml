@@ -191,6 +191,12 @@ jobs:
       - name: Test squad verdict gate rules
         run: node --test scripts/ci/tests/test-squad-verdict-gate.mjs
 
+      - name: Test epic dependency gate
+        run: >-
+          node --test
+          scripts/ci/tests/test-verify-epic-dependencies.mjs
+          scripts/ci/tests/test-epic-dependency-workflow.mjs
+
       - name: Test squad triage routing
         run: node --test scripts/ci/tests/test-squad-routing.mjs
 

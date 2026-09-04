@@ -4,6 +4,7 @@ struct PrinterDetailView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(AppRouter.self) private var router
     @Environment(AuthViewModel.self) private var authViewModel
+    @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: PrinterDetailViewModel
@@ -1221,7 +1222,10 @@ struct PrinterDetailView: View {
 
     @ViewBuilder
     private func advancedControlsLink(for printer: Printer) -> some View {
-        if !PrinterControlsSection.isHidden(for: printer) {
+        if AdvancedPrinterControlsAccess.isEntryVisible(
+            isEnabled: serverRegistry.advancedPrinterControlsEnabled,
+            for: printer
+        ) {
             NavigationLink(value: AppDestination.advancedPrinterControls(printerId: printer.id)) {
                 HStack(spacing: 12) {
                     Image(systemName: "slider.horizontal.3")
