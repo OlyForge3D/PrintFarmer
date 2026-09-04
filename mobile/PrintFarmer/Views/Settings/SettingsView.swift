@@ -6,6 +6,7 @@ import UserNotifications
 struct SettingsView: View {
     @Environment(AuthViewModel.self) private var authViewModel
     @Environment(AppRouter.self) private var router
+    @Environment(ServiceContainer.self) private var services
     @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(ThemeManager.self) private var themeManager
     private let ownsNavigationStack: Bool
@@ -22,6 +23,9 @@ struct SettingsView: View {
             if ownsNavigationStack {
                 NavigationStack {
                     screenContent
+                        .navigationDestination(for: AppDestination.self) { destination in
+                            destinationView(for: destination)
+                        }
                 }
             } else {
                 screenContent
@@ -100,6 +104,15 @@ struct SettingsView: View {
                         }
                     }
 
+                    if services.capabilitiesService.resolved.offlineWriteReplayEnabled {
+                        NavigationLink(value: AppDestination.offlineQueue) {
+                            Label("Offline Queue", systemImage: "tray.full")
+                        }
+                        .accessibilityLabel("Offline Queue")
+                        .accessibilityHint("Reviews and retries writes waiting to sync.")
+                        .accessibilityIdentifier("account.destination.offlineQueue")
+                    }
+
                     Button("Sign Out", role: .destructive) {
                         showLogoutConfirmation = true
                     }
@@ -164,6 +177,9 @@ struct SettingsView: View {
                 }
         }
         .navigationTitle("Settings")
+        .task {
+            await services.capabilitiesService.refresh()
+        }
         .confirmationDialog("Sign Out?", isPresented: $showLogoutConfirmation, titleVisibility: .visible) {
             Button("Sign Out", role: .destructive) {
                 logoutTask = Task { await authViewModel.logout() }

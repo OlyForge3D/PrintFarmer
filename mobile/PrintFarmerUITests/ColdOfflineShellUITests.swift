@@ -139,4 +139,31 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
             "Read-only cold-offline shell must not mount live active-job command affordances"
         )
     }
+
+    func testOfflineQueueRemainsReachableFromAccountWhileOffline() {
+        let attention = operatorDestinationButton(
+            tabTitle: "Attention",
+            sidebarIdentifier: "sidebar.attention",
+            timeout: 8
+        )
+        XCTAssertTrue(attention.exists)
+        attention.tap()
+
+        let overflow = app.buttons["attention.overflow"]
+        XCTAssertTrue(overflow.waitForExistence(timeout: 10))
+        overflow.tap()
+
+        let settings = app.buttons["attention.overflow.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.tap()
+
+        let offlineQueue = app.buttons["account.destination.offlineQueue"]
+        XCTAssertTrue(
+            offlineQueue.waitForExistence(timeout: 8),
+            "Offline Queue must remain reachable from the account area while offline"
+        )
+        offlineQueue.tap()
+
+        XCTAssertTrue(app.navigationBars["Offline Queue"].waitForExistence(timeout: 8))
+    }
 }
