@@ -49,7 +49,7 @@ struct OversightHubView: View {
             )
         }
         .onAppear(perform: refreshUpgradeOffer)
-        .onChange(of: services.farmShapeService.sessionShape) {
+        .onChange(of: services.farmShapeService.latestShape) {
             refreshUpgradeOffer()
         }
         .onChange(of: capabilities.shiftPlanEnabled) {
@@ -62,6 +62,15 @@ struct OversightHubView: View {
             refreshUpgradeOffer()
         }
         .onChange(of: router.activeShell) {
+            refreshUpgradeOffer()
+        }
+        .onChange(of: router.configuredServerID) {
+            refreshUpgradeOffer()
+        }
+        .onChange(of: router.configuredIsFarmAdmin) {
+            refreshUpgradeOffer()
+        }
+        .onChange(of: router.appliedNavigationPreference) {
             refreshUpgradeOffer()
         }
         .accessibilityIdentifier("oversight.hub")
@@ -85,9 +94,8 @@ struct OversightHubView: View {
             offerServerID = nil
             return
         }
-        guard !showsUpgradeOffer else { return }
         showsUpgradeOffer = serverRegistry.observeOversightUpgradeOffer(
-            farmShape: services.farmShapeService.sessionShape,
+            farmShape: services.farmShapeService.latestShape,
             shiftPlanEnabled: capabilities.shiftPlanEnabled,
             isFarmAdmin: router.configuredIsFarmAdmin
         )
@@ -95,14 +103,21 @@ struct OversightHubView: View {
     }
 
     private func acceptUpgradeOffer() {
-        guard let offerServerID else { return }
-        serverRegistry.acceptOversightUpgradeOffer(for: offerServerID)
+        guard let offerServerID,
+              router.configuredIsFarmAdmin,
+              serverRegistry.acceptOversightUpgradeOffer(for: offerServerID) else {
+            refreshUpgradeOffer()
+            return
+        }
         showsUpgradeOffer = false
         self.offerServerID = nil
     }
 
     private func dismissUpgradeOffer() {
-        guard let offerServerID else { return }
+        guard let offerServerID, router.configuredIsFarmAdmin else {
+            refreshUpgradeOffer()
+            return
+        }
         serverRegistry.dismissOversightUpgradeOffer(for: offerServerID)
         showsUpgradeOffer = false
         self.offerServerID = nil

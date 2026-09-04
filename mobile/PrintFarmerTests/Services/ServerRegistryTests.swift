@@ -333,6 +333,38 @@ final class ServerRegistryTests: XCTestCase {
         ))
     }
 
+    func testOversightUpgradeOfferRetractsWhenThresholdRegressesAndReoffersOnNewCrossing() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://farm.example.com")!
+        )
+        let smallFarm = FarmShape(accountCount: 1, locationCount: 1, printerCount: 1)
+        let grownFarm = FarmShape(accountCount: 2, locationCount: 1, printerCount: 1)
+
+        XCTAssertFalse(registry.observeOversightUpgradeOffer(
+            farmShape: smallFarm,
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        ))
+        XCTAssertTrue(registry.observeOversightUpgradeOffer(
+            farmShape: grownFarm,
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        ))
+        XCTAssertFalse(registry.observeOversightUpgradeOffer(
+            farmShape: smallFarm,
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        ))
+        XCTAssertFalse(registry.acceptOversightUpgradeOffer(for: server.id))
+        XCTAssertTrue(registry.observeOversightUpgradeOffer(
+            farmShape: grownFarm,
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        ))
+    }
+
     func testNormalizationAddsHTTPSLowercasesHostAndStripsTrailingSlash() throws {
         let normalized = try ServerRegistry.normalizedURLString(for: "  PRINT.example.COM/  ")
 

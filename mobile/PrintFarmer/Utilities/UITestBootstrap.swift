@@ -113,6 +113,9 @@ enum UITestBootstrap {
         /// F2-U2 feed with failure media, stable-ID destinations, and
         /// server-backed failure + maintenance actions.
         case authenticatedAttentionActions
+        /// Authenticated compact shell with a persisted pre-shift-plan baseline
+        /// that deterministically produces the inline Oversight upgrade offer.
+        case authenticatedOversightUpgradeOffer
         #if DEBUG
         case authenticatedShiftTaskMutationError
         case authenticatedShiftTaskInitialLoadFailure
@@ -170,6 +173,9 @@ enum UITestBootstrap {
         }
         if arguments.contains(attentionActionsLaunchArgument) {
             return .authenticatedAttentionActions
+        }
+        if arguments.contains(oversightUpgradeOfferLaunchArgument) {
+            return .authenticatedOversightUpgradeOffer
         }
         if arguments.contains(filamentCoverageScenarioLaunchArgument) {
             return .authenticatedFilamentCoverageScenario
@@ -241,10 +247,10 @@ enum UITestBootstrap {
         if arguments.contains(twoModesNavigationLaunchArgument) {
             registry.setNavigationLayoutPreference(.twoModes)
         }
-        if arguments.contains(oversightUpgradeOfferLaunchArgument) {
+        if mode == .authenticatedOversightUpgradeOffer {
             _ = registry.observeOversightUpgradeOffer(
                 farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1),
-                shiftPlanEnabled: true,
+                shiftPlanEnabled: false,
                 isFarmAdmin: true
             )
         }
@@ -264,7 +270,7 @@ enum UITestBootstrap {
         } else {
             injectedSnapshotStore = nil
         }
-        let testUser = arguments.contains(oversightUpgradeOfferLaunchArgument)
+        let testUser = mode == .authenticatedOversightUpgradeOffer
             ? UserDTO(
                 id: DemoData.demoUser.id,
                 username: DemoData.demoUser.username,
@@ -283,20 +289,11 @@ enum UITestBootstrap {
             serverRegistry: registry,
             farmSnapshotStore: injectedSnapshotStore
         )
-        if arguments.contains(oversightUpgradeOfferLaunchArgument) {
+        if mode == .authenticatedOversightUpgradeOffer {
             services.authService = DemoAuthService(user: testUser)
-        }
-        if arguments.contains(oversightUpgradeOfferLaunchArgument) {
-            let upgradeOfferShapeService = StubFarmShapeService(
+            services.farmShapeService = StubFarmShapeService(
                 shape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1)
             )
-            services.farmShapeService = upgradeOfferShapeService
-            Task {
-                try? await Task.sleep(for: .seconds(3))
-                upgradeOfferShapeService.setShape(
-                    FarmShape(accountCount: 2, locationCount: 1, printerCount: 1)
-                )
-            }
         }
 
         // #1353: `ResolvedSystemCapabilities.defaults.printedPartsInventoryEnabled`

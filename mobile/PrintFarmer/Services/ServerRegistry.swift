@@ -39,6 +39,8 @@ final class ServerRegistry {
 
     private struct OversightUpgradeOfferState: Codable {
         var lastObserved: OversightUpgradeOfferSignature?
+        /// A dismissal latches each threshold category so the same category
+        /// cannot re-offer after later farm-size fluctuations.
         var dismissedThresholds: Set<OversightUpgradeThreshold> = []
         var pendingThresholds: Set<OversightUpgradeThreshold> = []
         var hasAccepted = false
@@ -434,13 +436,16 @@ final class ServerRegistry {
         setOversightUpgradeOfferState(state, for: activeServerID)
     }
 
-    func acceptOversightUpgradeOffer(for serverID: UUID) {
-        guard let activeServerID, activeServerID == serverID else { return }
+    @discardableResult
+    func acceptOversightUpgradeOffer(for serverID: UUID) -> Bool {
+        guard let activeServerID, activeServerID == serverID else { return false }
         var state = oversightUpgradeOfferState(for: activeServerID)
+        guard !state.pendingThresholds.isEmpty else { return false }
         state.hasAccepted = true
         state.pendingThresholds = []
         setOversightUpgradeOfferState(state, for: activeServerID)
         setNavigationLayoutPreference(.twoModes)
+        return true
     }
 
     func associateOriginServerId(_ originServerId: UUID, with serverID: UUID) throws {

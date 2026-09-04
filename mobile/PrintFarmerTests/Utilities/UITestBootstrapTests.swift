@@ -65,6 +65,16 @@ final class UITestBootstrapTests: XCTestCase {
         )
     }
 
+    func test_mode_isOversightUpgradeOffer_whenArgumentPresent() {
+        XCTAssertEqual(
+            UITestBootstrap.mode(in: [
+                "--uitesting",
+                "--uitesting-oversight-upgrade-offer",
+            ]),
+            .authenticatedOversightUpgradeOffer
+        )
+    }
+
     // MARK: - Operator-features-disabled mode (#2117)
 
     func test_operatorFeaturesDisabledLaunchArgument_matchesUITestsHarness() {

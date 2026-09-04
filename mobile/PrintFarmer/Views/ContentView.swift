@@ -304,6 +304,11 @@ struct ContentView: View {
             oversightAvailability: oversightAvailability,
             preserveNavigationOnContextChange: preserveNavigationOnIdentityUpgrade
         )
+        _ = serverRegistry.observeOversightUpgradeOffer(
+            farmShape: services.farmShapeService.latestShape,
+            shiftPlanEnabled: capabilities.shiftPlanEnabled,
+            isFarmAdmin: navigationIdentity.isFarmAdmin
+        )
     }
 
     private var navigationIdentityRequest: NavigationIdentityRequest? {
