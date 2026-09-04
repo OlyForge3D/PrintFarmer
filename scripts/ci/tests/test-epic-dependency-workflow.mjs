@@ -15,6 +15,12 @@ const workflowPath = path.join(
   'workflows',
   'epic-dependency-gate.yml',
 );
+const ciWorkflowPath = path.join(
+  repositoryRoot,
+  '.github',
+  'workflows',
+  'ci.yml',
+);
 
 async function loadWorkflow() {
   return yaml.load(await readFile(workflowPath, 'utf8'));
@@ -52,6 +58,9 @@ test('workflow uses least privilege and serializes each epic', async () => {
     workflow.jobs.verify.strategy.matrix.issue,
     '${{ fromJSON(needs.targets.outputs.issues) }}',
   );
+  const targetScript = workflow.jobs.targets.steps[0].with.script;
+  assert.match(targetScript, /Number\.isSafeInteger/);
+  assert.match(targetScript, /JSON\.stringify\(\[input\]\)/);
 });
 
 test('workflow loads default-branch logic and fails graph violations', async () => {
@@ -66,4 +75,15 @@ test('workflow loads default-branch logic and fails graph violations', async () 
   assert.match(script, /core\.setFailed/);
   assert.match(script, /formatGateComment/);
   assert.match(script, /if \(!gate\.hasEpicLabel\(issue\.labels\)\)/);
+  assert.match(script, /Matrix issue number must be a positive safe integer/);
+});
+
+test('ci-tools runs both epic dependency regression files', async () => {
+  const ci = yaml.load(await readFile(ciWorkflowPath, 'utf8'));
+  const commands = ci.jobs['ci-tools'].steps
+    .map((step) => step.run)
+    .filter(Boolean)
+    .join('\n');
+  assert.match(commands, /test-verify-epic-dependencies\.mjs/);
+  assert.match(commands, /test-epic-dependency-workflow\.mjs/);
 });

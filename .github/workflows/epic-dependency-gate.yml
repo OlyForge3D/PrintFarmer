@@ -36,12 +36,16 @@ jobs:
           script: |
             const input = String(process.env.ISSUE_NUMBER ?? '').trim();
             if (input !== '') {
-              if (!/^[1-9]\d*$/.test(input)) {
-                throw new Error('issue_number must be a positive integer.');
+              const number = Number(input);
+              if (
+                !/^[1-9]\d*$/.test(input) ||
+                !Number.isSafeInteger(number)
+              ) {
+                throw new Error(
+                  'issue_number must be a positive safe integer.'
+                );
               }
-              core.setOutput('issues', JSON.stringify([
-                Number.parseInt(input, 10),
-              ]));
+              core.setOutput('issues', JSON.stringify([input]));
               return;
             }
             const issues = await github.paginate(github.rest.issues.listForRepo, {
@@ -54,7 +58,7 @@ jobs:
             core.setOutput('issues', JSON.stringify(
               issues
                 .filter((issue) => issue.pull_request === undefined)
-                .map((issue) => issue.number)
+                .map((issue) => String(issue.number))
             ));
 
   verify:
@@ -162,7 +166,16 @@ jobs:
               }
             }
 
-            const number = Number.parseInt(process.env.ISSUE_NUMBER, 10);
+            const issueNumberInput = String(process.env.ISSUE_NUMBER ?? '');
+            const number = Number(issueNumberInput);
+            if (
+              !/^[1-9]\d*$/.test(issueNumberInput) ||
+              !Number.isSafeInteger(number)
+            ) {
+              throw new Error(
+                'Matrix issue number must be a positive safe integer.'
+              );
+            }
             let result;
             try {
               result = gate.evaluateEpicDependencies(await loadGraph(number));

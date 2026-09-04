@@ -25,18 +25,52 @@ function labelName(label) {
   return typeof label === 'string' ? label : label?.name;
 }
 
+export function parsePositiveSafeInteger(value, name) {
+  const text = String(value ?? '');
+  const number = Number(text);
+  if (!/^[1-9]\d*$/.test(text) || !Number.isSafeInteger(number)) {
+    throw new Error(`${name} must be a positive safe integer.`);
+  }
+  return number;
+}
+
 export function hasEpicLabel(labels = []) {
   return labels.some((label) =>
     labelName(label)?.trim().toLowerCase() === epicLabel);
 }
 
+function stripFencedBlocks(body) {
+  const visibleLines = [];
+  let fence = undefined;
+  for (const line of body.split('\n')) {
+    if (fence === undefined) {
+      const opening = /^[ \t]*(?<delimiter>`{3,}|~{3,})/.exec(line);
+      if (opening) {
+        fence = {
+          character: opening.groups.delimiter[0],
+          length: opening.groups.delimiter.length,
+        };
+      } else {
+        visibleLines.push(line);
+      }
+      continue;
+    }
+
+    const closing = /^[ \t]*(?<delimiter>`{3,}|~{3,})[ \t]*$/.exec(line);
+    if (
+      closing &&
+      closing.groups.delimiter[0] === fence.character &&
+      closing.groups.delimiter.length >= fence.length
+    ) {
+      fence = undefined;
+    }
+  }
+  return visibleLines.join('\n');
+}
+
 export function parseEpicDeclarations(body = '') {
   const errors = [];
-  const fencedBlock = /^[ \t]*(?:```|~~~)[^\n]*\n[\s\S]*?^[ \t]*(?:```|~~~)[ \t]*$/gm;
-  const unterminatedFence = /^[ \t]*(?:```|~~~)[^\n]*\n[\s\S]*$/m;
-  const declarationBody = body
-    .replace(fencedBlock, '')
-    .replace(unterminatedFence, '');
+  const declarationBody = stripFencedBlocks(body);
   const declarationComments = [
     ...declarationBody.matchAll(/<!--[\s\S]*?(?:-->|$)/g),
   ].map((match) => match[0].trim());
@@ -295,10 +329,10 @@ function parseArgs(argv) {
   if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(args.repo ?? '')) {
     throw new Error('--repo must be OWNER/REPOSITORY.');
   }
-  if (!/^[1-9]\d*$/.test(args.issue ?? '')) {
-    throw new Error('--issue must be a positive integer.');
-  }
-  return { ...args, issue: Number.parseInt(args.issue, 10) };
+  return {
+    ...args,
+    issue: parsePositiveSafeInteger(args.issue, '--issue'),
+  };
 }
 
 function ghApi(path) {

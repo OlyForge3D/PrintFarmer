@@ -8,6 +8,7 @@ import {
   formatGateComment,
   gateCommentMarker,
   parseEpicDeclarations,
+  parsePositiveSafeInteger,
 } from '../verify-epic-dependencies.mjs';
 
 function epic(overrides = {}) {
@@ -152,6 +153,33 @@ test('declaration examples inside fenced code blocks are not binding', () => {
   });
   assert.equal(result.classification, 'PASS');
   assert.equal(result.flatGraph, false);
+});
+
+test('mixed fence delimiters cannot expose a marker inside an open fence', () => {
+  const result = evaluateEpicDependencies({
+    issue: epic({
+      body: [
+        '```text',
+        '~~~',
+        '<!-- epic-dependencies: flat -->',
+      ].join('\n'),
+    }),
+    children: children(11, 12),
+  });
+  assert.equal(result.classification, 'FAIL');
+  assert.equal(result.flatGraph, false);
+  assert.match(result.reason, /zero internal dependency edges/);
+});
+
+test('issue numbers must be positive safe integers', () => {
+  assert.equal(parsePositiveSafeInteger('2410', '--issue'), 2410);
+  for (const value of ['0', '-1', '1.5', '9007199254740992', '1e3', '']) {
+    assert.throws(
+      () => parsePositiveSafeInteger(value, '--issue'),
+      /positive safe integer/,
+      value,
+    );
+  }
 });
 
 test('the workflow comment is marker-bound and reports graph counts', () => {
