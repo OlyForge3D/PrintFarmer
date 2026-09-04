@@ -20,7 +20,7 @@ final class OversightUpgradeOfferUITests: PrintFarmerUITestCase {
         let notNow = app.buttons["oversight.upgradeOffer.notNow"]
         XCTAssertTrue(notNow.exists)
         notNow.tap()
-        XCTAssertFalse(turnOn.waitForExistence(timeout: 2))
+        XCTAssertTrue(turnOn.waitForNonExistence(timeout: 2))
     }
 
     func testTurningOnOfferSwitchesToTwoModes() {

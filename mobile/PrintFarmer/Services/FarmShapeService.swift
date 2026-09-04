@@ -330,6 +330,7 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
 }
 
 @MainActor
+@Observable
 final class StubFarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
     private(set) var sessionShape: FarmShape?
     private(set) var latestShape: FarmShape?
