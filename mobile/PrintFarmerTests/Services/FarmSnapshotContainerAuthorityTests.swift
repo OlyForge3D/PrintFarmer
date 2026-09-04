@@ -148,6 +148,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
 
     private struct ParkedOfflineReplay {
         let container: ServiceContainer
+        let apiClient: MockAPIClient
         let registry: ServerRegistry
         let owners: FarmSnapshotOwnerStore
         let server: RegisteredServer
@@ -205,6 +206,8 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
             tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!
         )
         let store = FarmSnapshotStore(authority: authority, rootURL: newRoot())
+        let mockAPIClient = MockAPIClient()
+        mockAPIClient.stubResponse(json: "{}", statusCode: 404)
         let container = ServiceContainer(
             serverRegistry: reg,
             credentialsStore: credentials,
@@ -215,6 +218,23 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
             farmSnapshotOwnerStore: owners,
             synchronizeOfflineQueueOnStartup: false,
             offlineWriteQueueStore: InMemoryOfflineWriteQueueStore(),
+            apiClientFactory: { baseURL, generation, accessToken, authSessionToken, serverID in
+                let identity = accessToken.flatMap { token in
+                    serverID.map {
+                        AuthenticatedIdentity(
+                            accessToken: token,
+                            serverID: $0,
+                            authSessionToken: authSessionToken
+                        )
+                    }
+                }
+                return APIClient(
+                    baseURL: baseURL,
+                    session: mockAPIClient.urlSession,
+                    serverGeneration: generation,
+                    authenticated: identity
+                )
+            },
             signalRServiceFactory: { _, _ in signalRService }
         )
         container.capabilitiesService = StubSystemCapabilitiesService()
@@ -248,6 +268,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
 
         return ParkedOfflineReplay(
             container: container,
+            apiClient: mockAPIClient,
             registry: reg,
             owners: owners,
             server: server,
@@ -308,6 +329,13 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
             serverURL: parked.server.normalizedURLString,
             username: "owner-b",
             password: "password"
+        )
+        XCTAssertEqual(
+            parked.apiClient.capturedRequests.filter {
+                $0.url?.path == "/api/system/farm-shape"
+            }.count,
+            1,
+            "authenticated startup must use the fixture's MockURLProtocol session"
         )
 
         XCTAssertEqual(

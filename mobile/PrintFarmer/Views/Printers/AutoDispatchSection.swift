@@ -227,7 +227,7 @@ struct AutoDispatchSection: View {
                 .fullWidthActionButton()
             }
             .buttonStyle(.borderedProminent)
-            .tint(viewModel.parsedState == .pendingReady ? Color.pfWarning : Color.pfAccent)
+            .tint(viewModel.parsedState == .pendingReady ? Color.pfWarningFill : Color.pfAccent)
             .disabled(isActionInProgress || viewModel.isMarkingReady || (!hasQueuedJobs && viewModel.parsedState != .pendingReady))
             .opacity((isActionInProgress || viewModel.isMarkingReady || (!hasQueuedJobs && viewModel.parsedState != .pendingReady)) ? 0.4 : 1.0)
 

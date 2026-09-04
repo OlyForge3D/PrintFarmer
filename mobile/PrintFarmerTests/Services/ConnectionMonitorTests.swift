@@ -798,6 +798,28 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertTrue(diagnosticSnapshot.allSatisfy { $0.outcome == .succeeded })
     }
 
+    func testReadinessRetryRefreshesCapabilitiesAfterAPIFailure() async {
+        let capabilities = TestCapabilitiesService()
+        _ = await capabilities.prepareForReadiness()
+        let failedPlan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [
+                BackendReadinessProbe(endpoint: .api) {
+                    throw ReadinessTestError.failed
+                },
+            ]
+        )
+
+        _ = await BackendReadinessChecker().check(plan: failedPlan)
+        let retryPlan = BackendReadinessPlan(
+            capabilitiesService: capabilities,
+            probes: [BackendReadinessProbe(endpoint: .api) {}]
+        )
+        _ = await BackendReadinessChecker().check(plan: retryPlan)
+
+        XCTAssertEqual(capabilities.refreshCount, 2)
+    }
+
     func testSuccessfulReadinessPublishesAttentionCoverageAndPrinters() async throws {
         let root = FarmSnapshotFixtures.tempRoot()
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
@@ -1886,6 +1908,7 @@ private final class TestCapabilitiesService: SystemCapabilitiesServiceProtocol, 
     private(set) var resolved: ResolvedSystemCapabilities
     private(set) var refreshCount = 0
     private let outcome: SystemCapabilitiesRefreshOutcome
+    private var preparedOutcome: SystemCapabilitiesRefreshOutcome?
 
     init(
         resolved: ResolvedSystemCapabilities = .defaults,
@@ -1899,6 +1922,24 @@ private final class TestCapabilitiesService: SystemCapabilitiesServiceProtocol, 
     func refresh() async -> SystemCapabilitiesRefreshOutcome {
         refreshCount += 1
         return outcome
+    }
+
+    func prepareForReadiness() async -> SystemCapabilitiesRefreshOutcome {
+        let outcome = await refresh()
+        preparedOutcome = outcome
+        return outcome
+    }
+
+    func refreshForReadiness() async -> SystemCapabilitiesRefreshOutcome {
+        if let preparedOutcome {
+            self.preparedOutcome = nil
+            return preparedOutcome
+        }
+        return await refresh()
+    }
+
+    func discardPreparedReadiness() {
+        preparedOutcome = nil
     }
 }
 

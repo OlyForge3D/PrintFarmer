@@ -454,6 +454,9 @@
 		F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A041 /* SystemCapabilitiesService.swift */; };
 		F7060001000000000000B002 /* AppRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000B001 /* AppRouterTests.swift */; };
 		F7060001000000000000B012 /* SystemCapabilitiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000B011 /* SystemCapabilitiesTests.swift */; };
+		241500000000000000000002 /* FarmShape.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241500000000000000000001 /* FarmShape.swift */; };
+		241500000000000000000004 /* FarmShapeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241500000000000000000003 /* FarmShapeService.swift */; };
+		241500000000000000000006 /* FarmShapeServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241500000000000000000005 /* FarmShapeServiceTests.swift */; };
 		F711A0003000000000000002 /* FilamentFallbackGroupModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F711A0003000000000000001 /* FilamentFallbackGroupModelsTests.swift */; };
 		F711A0004000000000000002 /* ToolheadModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F711A0004000000000000001 /* ToolheadModelsTests.swift */; };
 		F711A0005000000000000002 /* PrinterServiceFallbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F711A0005000000000000001 /* PrinterServiceFallbackTests.swift */; };
@@ -464,6 +467,7 @@
 		F78010000000000000000002 /* AttentionActionsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78000000000000000000002 /* AttentionActionsUITests.swift */; };
 		F7060003000000000000A002 /* UITestBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060003000000000000A001 /* UITestBootstrap.swift */; };
 		F7060003000000000000B002 /* UITestBootstrapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060003000000000000B001 /* UITestBootstrapTests.swift */; };
+		F82413000000000000000002 /* ThemeColorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82413000000000000000001 /* ThemeColorsTests.swift */; };
 		F7A48E9C1C18B76092C052AE /* LocationServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF16548F3F1D5C3EAB3E4E14 /* LocationServiceProtocol.swift */; };
 		F7A8B2C3D4E5F6A7B8C9D0E1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E2F3A4B5C6D7E8F9A0B1C2D3 /* Assets.xcassets */; };
 		FA1B2C3D4E5F6A7B8C9D0E1F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = FA2B3C4D5E6F7A8B9C0D1E2F /* LaunchScreen.storyboard */; };
@@ -848,6 +852,9 @@
 		F7060001000000000000A041 /* SystemCapabilitiesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesService.swift; sourceTree = "<group>"; };
 		F7060001000000000000B001 /* AppRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouterTests.swift; sourceTree = "<group>"; };
 		F7060001000000000000B011 /* SystemCapabilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesTests.swift; sourceTree = "<group>"; };
+		241500000000000000000001 /* FarmShape.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmShape.swift; sourceTree = "<group>"; };
+		241500000000000000000003 /* FarmShapeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmShapeService.swift; sourceTree = "<group>"; };
+		241500000000000000000005 /* FarmShapeServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmShapeServiceTests.swift; sourceTree = "<group>"; };
 		F711A0003000000000000001 /* FilamentFallbackGroupModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentFallbackGroupModelsTests.swift; sourceTree = "<group>"; };
 		F711A0004000000000000001 /* ToolheadModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolheadModelsTests.swift; sourceTree = "<group>"; };
 		F711A0005000000000000001 /* PrinterServiceFallbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterServiceFallbackTests.swift; sourceTree = "<group>"; };
@@ -859,6 +866,7 @@
 		F7060002000000000000C0F1 /* PrintFarmerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrintFarmerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F7060003000000000000A001 /* UITestBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestBootstrap.swift; sourceTree = "<group>"; };
 		F7060003000000000000B001 /* UITestBootstrapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestBootstrapTests.swift; sourceTree = "<group>"; };
+		F82413000000000000000001 /* ThemeColorsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeColorsTests.swift; sourceTree = "<group>"; };
 		F8C434327E249041DEB43A8E /* PredictiveViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PredictiveViewModel.swift; sourceTree = "<group>"; };
 		F9121CFE5C6DFAB79CD12B21 /* JobDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobDetailViewModel.swift; sourceTree = "<group>"; };
 		F9613964BDF412E866655E27 /* UptimeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UptimeView.swift; sourceTree = "<group>"; };
@@ -1044,6 +1052,7 @@
 				C1D2E3F4A5B6C7D8E9F0A1B2 /* PushNotificationManager.swift */,
 				967769D7BBE893354EE7158A /* ServiceContainer.swift */,
 				F7060001000000000000A041 /* SystemCapabilitiesService.swift */,
+				241500000000000000000003 /* FarmShapeService.swift */,
 				45FDB4137FE34914C387AE17 /* SignalRService.swift */,
 				CA110D6A7E1234567890AB04 /* SignalRSubscription.swift */,
 				CA110D6A7E1234567890AD04 /* CompletionRegistry.swift */,
@@ -1084,6 +1093,7 @@
 				A2D4EF0123456789ABCD0006 /* Views */,
 				A1C5DEF1234567890ABC0022 /* Views */,
 				CA22CAC2DD8479E1B2EE791A /* ModelsTests.swift */,
+				F82413000000000000000001 /* ThemeColorsTests.swift */,
 			);
 			path = PrintFarmerTests;
 			sourceTree = "<group>";
@@ -1097,6 +1107,7 @@
 				B8D7C5C4CE62E9F3684E5B1F /* Models.swift */,
 				A3C7DEF1234567890BCD0001 /* PrinterBackendCapabilities.swift */,
 				F7060001000000000000A031 /* SystemCapabilities.swift */,
+				241500000000000000000001 /* FarmShape.swift */,
 				62BAD7F52A9EFEE471AA461C /* RequestModels.swift */,
 				6208E685EEDD0498124C143A /* SignalRModels.swift */,
 				B7D1020247C4116936C828DD /* AutoDispatchModels.swift */,
@@ -1484,6 +1495,7 @@
 				D23130000000000000000004 /* BackendReadinessDiagnosticsTests.swift */,
 				CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */,
 				F7060001000000000000B011 /* SystemCapabilitiesTests.swift */,
+				241500000000000000000005 /* FarmShapeServiceTests.swift */,
 				F711A0005000000000000001 /* PrinterServiceFallbackTests.swift */,
 				A78220000000000000000004 /* ShiftTaskSignalRTests.swift */,
 				F7778BD2000000000000B002 /* FilamentCoverageServiceTests.swift */,
@@ -1858,6 +1870,7 @@
 				F1A1B2C3D4E5F6A7B8C9D0E1 /* QRCodeParserTests.swift in Sources */,
 				F1C3D4E5F6A7B8C9D0E1F2A3 /* NFCTagParserTests.swift in Sources */,
 				F7060003000000000000B002 /* UITestBootstrapTests.swift in Sources */,
+				F82413000000000000000002 /* ThemeColorsTests.swift in Sources */,
 				F1E5F6A7B8C9D0E1F2A3B4C5 /* MockScannerService.swift in Sources */,
 				F1A7B8C9D0E1F2A3B4C5D6E7 /* SpoolPickerViewModelScanTests.swift in Sources */,
 				F1C9D0E1F2A3B4C5D6E7F8A9 /* MockSpoolService.swift in Sources */,
@@ -1865,6 +1878,7 @@
 				F2C1D2E3F4A5B6C7D8E9F0A1 /* SpoolInventoryViewModelTests.swift in Sources */,
 				F7060001000000000000B002 /* AppRouterTests.swift in Sources */,
 				F7060001000000000000B012 /* SystemCapabilitiesTests.swift in Sources */,
+				241500000000000000000006 /* FarmShapeServiceTests.swift in Sources */,
 				F711A0003000000000000002 /* FilamentFallbackGroupModelsTests.swift in Sources */,
 				F711A0004000000000000002 /* ToolheadModelsTests.swift in Sources */,
 				F711A0005000000000000002 /* PrinterServiceFallbackTests.swift in Sources */,
@@ -2094,6 +2108,8 @@
 				F7060001000000000000A022 /* AdvancedPrinterControlsView.swift in Sources */,
 				F7060001000000000000A032 /* SystemCapabilities.swift in Sources */,
 				F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */,
+				241500000000000000000002 /* FarmShape.swift in Sources */,
+				241500000000000000000004 /* FarmShapeService.swift in Sources */,
 				BA6F96A8C3FF086DCFC85DA9 /* PartsInventoryModels.swift in Sources */,
 				9CBA0D1BC5C4E473C5C2ADF0 /* PartsInventoryServiceProtocol.swift in Sources */,
 				184E27C86DE99E52FD10C836 /* PartsInventoryService.swift in Sources */,

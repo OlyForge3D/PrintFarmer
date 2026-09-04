@@ -33,6 +33,8 @@ final class ServiceContainer: @unchecked Sendable {
     /// `resolved.attentionEnabled` etc. to render safe fallbacks when a
     /// gated feature is disabled server-side.
     var capabilitiesService: any SystemCapabilitiesServiceProtocol
+    /// Observed farm counts used only to select the shell arrangement.
+    var farmShapeService: any FarmShapeServiceProtocol
     var activeServerGeneration = 0
     #if canImport(UIKit)
     var qrScannerService: QRSpoolScannerService?
@@ -45,6 +47,7 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored private let userDefaultsBox: AuthServiceUserDefaultsBox
     @ObservationIgnored private let apiClientFactory: APIClientFactory
     @ObservationIgnored private let signalRServiceFactory: SignalRServiceFactory
+    @ObservationIgnored private let farmShapeStore: FarmShapeStore
     @ObservationIgnored private let offlineReplayProviderResolutionHook: @Sendable () async -> Void
     @ObservationIgnored private let activeGeneration: ActiveServerGeneration
     @ObservationIgnored private var observesRegistry: Bool
@@ -177,7 +180,7 @@ final class ServiceContainer: @unchecked Sendable {
     /// namespace (or unbinds when there is no verified active identity), applies
     /// `offlineWriteReplayEnabled`, and triggers a single serialized replay.
     /// Safe to call repeatedly — duplicate calls collapse to one replay owner.
-    func syncOfflineWriteQueue() async {
+    func syncOfflineWriteQueue(refreshCapabilities: Bool = true) async {
         let queue = offlineWriteQueue
         let authorityRevision = offlineWriteReplayAuthority.captureRevision()
         guard let serverRegistry,
@@ -190,7 +193,6 @@ final class ServiceContainer: @unchecked Sendable {
             return
         }
         let expectedCapabilitiesService = capabilitiesService
-        await expectedCapabilitiesService.refresh()
         guard serverRegistry.activeServerID == active.id,
               activeServerID == active.id,
               farmSnapshotOwnerStore.ownerUserID(serverID: active.id) == ownerID,
@@ -206,6 +208,23 @@ final class ServiceContainer: @unchecked Sendable {
             return
         }
         guard await queue.bind(binding: binding) else { return }
+        guard serverRegistry.activeServerID == active.id,
+              activeServerID == active.id,
+              farmSnapshotOwnerStore.ownerUserID(serverID: active.id) == ownerID,
+              capabilitiesService === expectedCapabilitiesService,
+              offlineWriteReplayAuthority.isCurrent(binding) else {
+            return
+        }
+        if refreshCapabilities {
+            await expectedCapabilitiesService.prepareForReadiness()
+        }
+        guard serverRegistry.activeServerID == active.id,
+              activeServerID == active.id,
+              farmSnapshotOwnerStore.ownerUserID(serverID: active.id) == ownerID,
+              capabilitiesService === expectedCapabilitiesService,
+              offlineWriteReplayAuthority.isCurrent(binding) else {
+            return
+        }
         await queue.setReplayEnabled(expectedCapabilitiesService.resolved.offlineWriteReplayEnabled)
         guard offlineWriteReplayAuthority.isCurrent(binding) else { return }
         await queue.replayPending()
@@ -264,6 +283,7 @@ final class ServiceContainer: @unchecked Sendable {
         farmSnapshotAuthority: FarmSnapshotAuthority? = nil,
         farmSnapshotStore: (any FarmSnapshotStoring)? = nil,
         farmSnapshotOwnerStore: FarmSnapshotOwnerStore? = nil,
+        farmShapeStore: FarmShapeStore? = nil,
         /// H (issue #816 reject, Hicks): injectable canonical durable
         /// authority record. Tests pass a temp-rooted instance so the
         /// production-container reopen test can prove distinct record
@@ -306,6 +326,9 @@ final class ServiceContainer: @unchecked Sendable {
         self.userDefaultsBox = userDefaultsBox
         self.apiClientFactory = apiClientFactory
         self.signalRServiceFactory = signalRServiceFactory
+        let shapeStore = farmShapeStore
+            ?? FarmShapeStore(userDefaults: userDefaultsBox.userDefaults)
+        self.farmShapeStore = shapeStore
         self.offlineReplayProviderResolutionHook = offlineReplayProviderResolutionHook
         self.activeGeneration = ActiveServerGeneration()
         self.observesRegistry = observeRegistry
@@ -403,6 +426,11 @@ final class ServiceContainer: @unchecked Sendable {
         self.dispatchService = DispatchService(apiClient: client)
         self.failureDetectionService = FailureDetectionService(apiClient: client)
         self.capabilitiesService = SystemCapabilitiesService(apiClient: client)
+        self.farmShapeService = FarmShapeService(
+            apiClient: client,
+            serverID: activeServer?.id,
+            store: shapeStore
+        )
         self.signalRService = signalRServiceFactory(resolvedURL, client)
         self.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
         self.activeServerID = activeServer?.id
@@ -461,10 +489,15 @@ final class ServiceContainer: @unchecked Sendable {
     private func wireSnapshotPurgeHandler() {
         guard let serverRegistry else { return }
         let store = farmSnapshotStore
+        let shapeStore = farmShapeStore
         let startupPrefetchStore = startupPrefetchStore
         serverRegistry.snapshotPurgeHandler = { serverID in
             startupPrefetchStore.removeAll()
-            return await store.purge(serverID: serverID)
+            let result = await store.purge(serverID: serverID)
+            if result == .purged {
+                shapeStore.purgeShape(serverID: serverID)
+            }
+            return result
         }
         let pinStore = CertificatePinStore()
         serverRegistry.certificatePinPurgeHandler = { server, remainingServers in
@@ -536,6 +569,7 @@ final class ServiceContainer: @unchecked Sendable {
             dispatchService: DemoDispatchService(),
             failureDetectionService: DemoFailureDetectionService(),
             capabilitiesService: StubSystemCapabilitiesService(resolved: demoCapabilitiesDefaults),
+            farmShapeService: StubFarmShapeService(),
             serverRegistry: serverRegistry,
             farmSnapshotAuthority: farmSnapshotAuthority,
             farmSnapshotStore: farmSnapshotStore,
@@ -599,6 +633,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.dispatchService = DemoDispatchService()
         self.failureDetectionService = DemoFailureDetectionService()
         self.capabilitiesService = StubSystemCapabilitiesService(resolved: Self.demoCapabilitiesDefaults)
+        self.farmShapeService = StubFarmShapeService()
         self.activeServerID = nil
         self.activeServerGeneration = activeGeneration.advance()
         #if canImport(UIKit)
@@ -708,6 +743,42 @@ final class ServiceContainer: @unchecked Sendable {
     /// pending-activation state to the failed server and invalidate the pending record
     /// when the user switches servers.
     var currentActiveServerID: UUID? { serverRegistry?.activeServerID }
+
+    /// Starts the shape and capability reads together while authentication is
+    /// still holding the root loading gate. Shape waits only for its bounded
+    /// startup race while capability refresh completes under the existing gate.
+    func prepareAuthenticatedStartup(authToken: Int) async {
+        await activeServerSwitchTask?.value
+        guard let serverID = serverRegistry?.activeServerID,
+              activeServerID == serverID,
+              authOperationEpoch.isCurrent(authToken) else {
+            return
+        }
+
+        let expectedCapabilities = capabilitiesService
+        let expectedShape = farmShapeService
+        expectedShape.beginSession(authToken: authToken)
+        async let capabilitiesRefresh = expectedCapabilities.prepareForReadiness()
+        await expectedShape.resolveForAuthenticatedSession(
+            serverID: serverID,
+            timeout: FarmShapeService.startupTimeout
+        )
+        _ = await capabilitiesRefresh
+    }
+
+    func beginAuthenticatedStartup(authToken: Int) {
+        capabilitiesService.discardPreparedReadiness()
+        farmShapeService.beginSession(authToken: authToken)
+    }
+
+    func resetAuthenticatedStartupState() {
+        capabilitiesService.discardPreparedReadiness()
+        farmShapeService.resetSession()
+    }
+
+    func discardPreparedCapabilities() {
+        capabilitiesService.discardPreparedReadiness()
+    }
 
     /// Whether `generation` is the current active-server generation. Used to discard a
     /// stale session-expiry event posted by an APIClient we already switched away from
@@ -924,6 +995,21 @@ final class ServiceContainer: @unchecked Sendable {
         // overwrite this client's identity with a superseded token.
         await configureTokenExpiryChecker(client: client, serverID: server.id)
         guard transitionEpoch.isCurrent(epoch) else { return } // superseded during the awaits
+        if accessToken != nil {
+            let shapeService = farmShapeService
+            let expectedCapabilities = capabilitiesService
+            shapeService.beginSession(authToken: authOperationEpoch.current)
+            async let capabilitiesPreparation = expectedCapabilities.prepareForReadiness()
+            await shapeService.resolveForAuthenticatedSession(
+                serverID: server.id,
+                timeout: FarmShapeService.startupTimeout
+            )
+            _ = await capabilitiesPreparation
+            guard transitionEpoch.isCurrent(epoch),
+                  capabilitiesService === expectedCapabilities else {
+                return
+            }
+        }
 
         // Bind the snapshot to the SAME captured server + generation the services
         // were rebuilt for.
@@ -1082,6 +1168,11 @@ final class ServiceContainer: @unchecked Sendable {
         self.dispatchService = DispatchService(apiClient: client)
         self.failureDetectionService = FailureDetectionService(apiClient: client)
         self.capabilitiesService = SystemCapabilitiesService(apiClient: client)
+        self.farmShapeService = FarmShapeService(
+            apiClient: client,
+            serverID: server?.id,
+            store: farmShapeStore
+        )
         self.signalRService = signalRServiceFactory(baseURL, client)
         self.barcodeIntakeService = BarcodeIntakeService(apiClient: client)
         self.activeServerID = server?.id
@@ -1172,6 +1263,7 @@ final class ServiceContainer: @unchecked Sendable {
         dispatchService: any DispatchServiceProtocol,
         failureDetectionService: any FailureDetectionServiceProtocol,
         capabilitiesService: any SystemCapabilitiesServiceProtocol,
+        farmShapeService: any FarmShapeServiceProtocol,
         serverRegistry: ServerRegistry? = nil,
         farmSnapshotAuthority: FarmSnapshotAuthority? = nil,
         farmSnapshotStore: (any FarmSnapshotStoring)? = nil,
@@ -1195,6 +1287,7 @@ final class ServiceContainer: @unchecked Sendable {
             }
         }
         self.offlineReplayProviderResolutionHook = {}
+        self.farmShapeStore = FarmShapeStore()
         self.activeGeneration = ActiveServerGeneration()
         self.offlineWriteQueueStore = FileOfflineWriteQueueStore(
             directory: Self.offlineWriteQueueDirectory()
@@ -1248,6 +1341,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.dispatchService = dispatchService
         self.failureDetectionService = failureDetectionService
         self.capabilitiesService = capabilitiesService
+        self.farmShapeService = farmShapeService
         #if canImport(UIKit)
         self.qrScannerService = nil
         self.barcodeScannerService = nil

@@ -59,6 +59,7 @@ final class APIClientAuthSessionTests: XCTestCase {
     }
 
     private struct AcceptedPostResponse: Decodable, Sendable {}
+    private struct MissingGetResponse: Decodable, Sendable {}
 
     private enum AcceptedPostVariant: Sendable {
         case body
@@ -167,6 +168,36 @@ final class APIClientAuthSessionTests: XCTestCase {
 
     func testAcceptedStatusHeaderPostUsesOneRequestSessionAcrossT1ToT2Race() async throws {
         try await assertAcceptedPostUsesOneRequestSession(.headerOnly)
+    }
+
+    func testMissingStatusGetSuppressesSessionExpiredForAuthenticatedClient() async throws {
+        let observer = ExpiryObserver()
+        let epoch = AuthOperationEpoch()
+        let gen = ActiveServerGeneration()
+        _ = gen.advance()
+        let transport = MockURLProtocol.makeSession()
+        let client = await makeClient(gen: gen, transport: transport)
+        let token = epoch.advance()
+        _ = await client.applyAuthenticatedSessionIfCurrent(
+            baseURL: nil,
+            identity: AuthenticatedIdentity(
+                accessToken: "bearer",
+                serverID: Self.testServerID
+            ),
+            epoch: epoch,
+            token: token
+        )
+        transport.requestHandler = { request in
+            (TestData.httpResponse(url: request.url, statusCode: 401), Data())
+        }
+
+        let response: MissingGetResponse? = try await client.get(
+            "/api/system/farm-shape",
+            treating: [401, 404]
+        )
+
+        XCTAssertNil(response)
+        XCTAssertTrue(observer.snapshot().isEmpty)
     }
 
     /// A: T1 request enters expiry checker → parks on await → T2 (a newer login)

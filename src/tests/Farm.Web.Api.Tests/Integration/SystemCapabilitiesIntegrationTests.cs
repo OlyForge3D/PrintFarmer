@@ -95,6 +95,27 @@ public class SystemCapabilitiesIntegrationTests : IClassFixture<CustomWebApplica
         dto!.ModelFilesEnabled.Should().BeTrue(
             "standard x64 mode should have model files enabled");
     }
+
+    [Fact]
+    public async Task Capabilities_RemainsUnchangedByFarmShapeEndpoint()
+    {
+        // REGRESSION GUARD (issue #2411): adding GET /api/system/farm-shape must not alter
+        // this endpoint in any way. It must remain anonymous, Public/30s cached, and must never
+        // populate the auth-only fields (EffectivePermissions/EffectiveCapabilities) that the
+        // authenticated calibration capabilities endpoint uses — those are only set when a
+        // real user is passed to ICalibrationCapabilityService, never here (user: null).
+        HttpResponseMessage response = await _client!.GetAsync("/api/system/capabilities");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Headers.CacheControl.Should().NotBeNull();
+        response.Headers.CacheControl!.Public.Should().BeTrue();
+        response.Headers.CacheControl!.MaxAge.Should().Be(TimeSpan.FromSeconds(30));
+
+        PlatformCapabilitiesDto? dto = await response.Content.ReadFromJsonAsync<PlatformCapabilitiesDto>();
+        dto.Should().NotBeNull();
+        dto!.EffectivePermissions.Should().BeNull("capabilities is passed user: null, unaffected by auth");
+        dto.EffectiveCapabilities.Should().BeNull("capabilities is passed user: null, unaffected by auth");
+    }
 }
 
 /// <summary>
