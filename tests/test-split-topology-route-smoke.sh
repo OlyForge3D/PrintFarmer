@@ -249,6 +249,10 @@ if ! prepare_orcaslicer_worker_temp_directories; then
   log "FAIL: could not prepare OrcaSlicer worker temp directories (see output above)"
   exit 1
 fi
+if ! prepare_slicer_artifact_directories; then
+  log "FAIL: could not prepare slicer artifact directory (see output above)"
+  exit 1
+fi
 
 log "Confirming the generated stack actually switched to the split nginx config"
 if ! grep -q 'slicer_upstream' "$STACK_DIR/deploy/nginx/nginx-proxy-split.conf" 2>/dev/null \

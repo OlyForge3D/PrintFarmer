@@ -6747,6 +6747,8 @@ prepare_external_storage_directories() {
 # prepare_orcaslicer_worker_temp_directories() now lives in docker-utils.sh (sourced above)
 # so scripts/ci/smoke-daily-validation-stack.sh can call the same helper when it boots the
 # daily immutable-image validation stack directly via compose-generator.sh (issue #2174).
+# prepare_slicer_artifact_directories() likewise prepares the slicer-host bind mount
+# before startup so /data/artifacts is writable by appuser (UID/GID 1001).
 
 # Prepare pgAdmin volume directory and auto-configuration
 prepare_pgadmin_setup() {
@@ -7464,6 +7466,10 @@ redeploy_existing() {
     # this bind mount is not optional when the worker is enabled, so it runs regardless
     # of USE_EXTERNAL_STORAGE (issue #1908).
     prepare_orcaslicer_worker_temp_directories || print_warning "OrcaSlicer worker temp directories could not be prepared - Docker will attempt to create them"
+    if ! prepare_slicer_artifact_directories; then
+        print_error "Slicer artifact storage could not be prepared; refusing to start slicing services"
+        return 1
+    fi
     
     # Prepare pgAdmin volume and configuration
     prepare_pgadmin_setup || print_warning "pgAdmin setup could not be fully prepared"
@@ -7863,6 +7869,10 @@ main() {
     # this bind mount is not optional when the worker is enabled, so it runs regardless
     # of USE_EXTERNAL_STORAGE (issue #1908).
     prepare_orcaslicer_worker_temp_directories || print_warning "OrcaSlicer worker temp directories could not be prepared - Docker will attempt to create them"
+    if ! prepare_slicer_artifact_directories; then
+        print_error "Slicer artifact storage could not be prepared; refusing to start slicing services"
+        return 1
+    fi
     
     # Prepare pgAdmin volume and configuration
     prepare_pgadmin_setup || print_warning "pgAdmin setup could not be fully prepared"

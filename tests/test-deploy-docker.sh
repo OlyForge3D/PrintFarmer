@@ -591,6 +591,67 @@ EOF
     pass_test
 }
 
+test_slicer_artifact_directory_permissions() {
+    start_test "slicer artifact directory is pre-created for appuser (UID/GID 1001)"
+
+    cd "$TEST_TEMP_DIR"
+    cat > "$TEST_TEMP_DIR/.deploy-config" << 'EOF'
+ARCHITECTURE=microservices
+ENABLE_ORCA_WORKER=yes
+ORCA_WORKER_COUNT=1
+ENABLE_DISTRIBUTED_SLICING=true
+DB_PROVIDER=postgres
+USE_EXTERNAL_STORAGE=no
+EOF
+
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
+    local output=$(get_output)
+
+    assert_contains "$output" "Pre-creating Slicer Artifact Directory" \
+        "Should announce slicer artifact directory preparation"
+    assert_dir_exists "$TEST_TEMP_DIR/.volumes/printfarmer-slicer-data/artifacts" \
+        "Slicer artifact directory should be pre-created"
+
+    local perms
+    perms=$(stat -c '%a' "$TEST_TEMP_DIR/.volumes/printfarmer-slicer-data/artifacts" 2>/dev/null || stat -f '%A' "$TEST_TEMP_DIR/.volumes/printfarmer-slicer-data/artifacts" 2>/dev/null || echo "unknown")
+    assert_equals "777" "$perms" \
+        "Only the slicer artifact leaf should be writable by appuser regardless of host ownership"
+
+    write_default_deploy_config
+    pass_test
+}
+
+test_slicer_artifact_directory_idempotent_rerun() {
+    start_test "slicer artifact directory preparation is idempotent"
+
+    cd "$TEST_TEMP_DIR"
+    mkdir -p "$TEST_TEMP_DIR/.volumes/printfarmer-slicer-data/artifacts"
+    chmod 777 "$TEST_TEMP_DIR/.volumes/printfarmer-slicer-data/artifacts"
+    printf 'sentinel\n' > "$TEST_TEMP_DIR/.volumes/printfarmer-slicer-data/artifacts/sentinel.txt"
+
+    cat > "$TEST_TEMP_DIR/.deploy-config" << 'EOF'
+ARCHITECTURE=microservices
+ENABLE_ORCA_WORKER=yes
+ORCA_WORKER_COUNT=1
+ENABLE_DISTRIBUTED_SLICING=true
+DB_PROVIDER=postgres
+USE_EXTERNAL_STORAGE=no
+EOF
+
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
+    local output=$(get_output)
+
+    assert_dir_exists "$TEST_TEMP_DIR/.volumes/printfarmer-slicer-data/artifacts" \
+        "Existing slicer artifact directory should remain"
+    assert_file_exists "$TEST_TEMP_DIR/.volumes/printfarmer-slicer-data/artifacts/sentinel.txt" \
+        "Idempotent preparation must preserve existing artifacts"
+    assert_contains "$output" "Directory already exists: $TEST_TEMP_DIR/.volumes/printfarmer-slicer-data/artifacts" \
+        "Rerun should recognize the existing artifact directory"
+
+    write_default_deploy_config
+    pass_test
+}
+
 # Test network configuration
 test_network_configuration() {
     start_test "network configuration"
@@ -2040,6 +2101,8 @@ run_all_tests() {
     test_orcaslicer_worker_temp_directory_permissions
     test_orcaslicer_worker_temp_directory_recreated_when_permissions_are_wrong
     test_orcaslicer_worker_temp_directory_skipped_when_disabled
+    test_slicer_artifact_directory_permissions
+    test_slicer_artifact_directory_idempotent_rerun
     test_network_configuration  
     test_database_configuration
     test_all_database_combinations

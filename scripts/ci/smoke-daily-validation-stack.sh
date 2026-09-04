@@ -165,6 +165,10 @@ if ! prepare_orcaslicer_worker_temp_directories; then
   log "FAIL: could not prepare OrcaSlicer worker temp directories (see output above)"
   exit 1
 fi
+if ! prepare_slicer_artifact_directories; then
+  log "FAIL: could not prepare slicer artifact directory (see output above)"
+  exit 1
+fi
 
 if [[ "$USE_REGISTRY" == "true" ]]; then
   log "Pulling the exact digest-pinned daily image set"

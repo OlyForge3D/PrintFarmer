@@ -1,75 +1,27 @@
-# Copilot Processing — Slice Job Failure Diagnostics
+# Copilot Processing
 
-## User Request
-
-Improve the Workers -> Jobs admin page (SliceJobsPanel) so failed slice jobs
-expose actionable diagnostics instead of only "Slicing failed." Coordinate
-conceptually with the backend's existing safe `failureReason`/`failureHint`/
-`errorDetail` rules: do not expose sensitive raw details to unauthorized
-users, but ensure farm admins can see the useful server diagnostic when the
-API provides it. Preserve the compact table/expanded-row UX and
-accessibility conventions. Add/update focused React tests. Run the smallest
-relevant test/lint/build commands, update this tracking file, commit with
-the required Co-authored-by trailer, and report files/behavior/tests.
+## User request
+Fix deploy-docker.sh/templates so host-backed slicer artifact storage is created before startup and writable by slicer-host UID/GID 1001, including fresh root-owned bind mounts. Add focused tests for missing directory and idempotent reruns. Preserve ownership strategy and deployment modes. Run relevant tests and commit with trailer.
 
 ## Plan
-
-1. Inspect `SliceJobsPanel.tsx`, `sliceJobService.ts` DTO, failure notice
-   components, backend `errorDetail` visibility contract, and existing
-   focused tests.
-2. Render the admin-only `errorDetail` diagnostic (already fetched by the
-   frontend type but never displayed) gated behind `hasRole('farm_admin')`,
-   alongside the existing client-safe `failureHint`.
-3. Ensure `useSliceJobsRealtime` clears stale `errorDetail` the same way it
-   already clears `failureReason`/`failureHint` once a job is no longer
-   `Failed`.
-4. Update/add focused React tests for admin vs non-admin visibility and for
-   the realtime staleness-clearing behavior.
-5. Validate with targeted `test:run`, `lint`, and `build`.
-
-## Tasks
-
-- [x] Read `SliceJobsPanel.tsx`, `sliceJobService.ts`, `useSliceJobsRealtime.ts`,
-      backend `SliceJobController.cs` / `SliceJobErrorDetailVisibilityTests.cs`.
-- [x] Add `useAuth` import and gate `errorDetail` rendering behind
-      `hasRole('farm_admin')` in `SliceFailureNotice`.
-- [x] Update `JobDetailPanel` gating condition to show the notice when either
-      `failureHint` or `errorDetail` is present.
-- [x] Clear stale `errorDetail` in `useSliceJobsRealtime.applyEventToJob`.
-- [x] Add `useAuth` mocks to existing tests that render `SliceJobsPanel`
-      (`SliceJobsPanel.keyboard.test.tsx`, `SliceJobsLayoutDegradationNotice.test.tsx`,
-      `SliceJobsPreviewButton.test.tsx`, `SliceJobsPanel.completionEvent.test.tsx`).
-- [x] Add 3 new cases to `SliceJobsFailureNotice.test.tsx` (hide from
-      non-admin, show to admin, show to admin even without failureHint).
-- [x] Add a new case to `useSliceJobsRealtime.test.ts` covering `errorDetail`
-      staleness-clearing.
-- [x] Run targeted `npm run test:run` for the touched slicer test files — all
-      6 files / 30 tests pass.
-- [x] Run `npm run lint` — clean.
-- [x] Run `npm run build` — succeeds.
-- [x] Commit changes with Co-authored-by trailer.
+- [x] Read Docker hierarchy instructions and deployment test guidance.
+- [x] Trace artifact storage setup and ownership handling in deployment templates.
+- [x] Add narrow directory creation/ownership fix in source templates.
+- [x] Add/update tests for missing artifacts directory and idempotent reruns.
+- [x] Run focused deployment tests and inspect results.
+- [ ] Review diff, commit with required trailer, and summarize.
 
 ## Summary
+Implemented `prepare_slicer_artifact_directories` in `scripts/docker-utils.sh`.
+Deployment and direct validation stacks now create the artifact leaf before startup,
+align it to UID/GID 1001 when possible, and use a narrowly scoped writable fallback.
+Regression tests cover missing-directory creation and idempotent reruns.
 
-- **Files changed**:
-  - `src/Web/ReactApp/src/features/slicer/components/SliceJobsPanel.tsx`
-  - `src/Web/ReactApp/src/features/slicer/hooks/useSliceJobsRealtime.ts`
-  - `src/Web/ReactApp/src/test/features/slicer/components/SliceJobsFailureNotice.test.tsx`
-  - `src/Web/ReactApp/src/test/features/slicer/components/SliceJobsPanel.keyboard.test.tsx`
-  - `src/Web/ReactApp/src/test/features/slicer/components/SliceJobsLayoutDegradationNotice.test.tsx`
-  - `src/Web/ReactApp/src/test/features/slicer/components/SliceJobsPreviewButton.test.tsx`
-  - `src/Web/ReactApp/src/test/features/slicer/components/SliceJobsPanel.completionEvent.test.tsx`
-  - `src/Web/ReactApp/src/test/features/slicer/hooks/useSliceJobsRealtime.test.ts`
-
-- **Behavior**: The failed-job detail panel now renders, in addition to the
-  existing client-safe `failureHint` warning, a separate error-styled
-  "Diagnostic:" block containing the real worker-side `errorDetail` — but
-  only for users with the `farm_admin` role. Non-admins never see it (the
-  backend already omits it for them; the frontend adds a defense-in-depth
-  gate). The failure notice now also appears when a job has `errorDetail`
-  but no classified `failureHint`. Stale `errorDetail` from a previous
-  attempt is cleared once a retried job's realtime status moves away from
-  `Failed`, mirroring the existing `failureReason`/`failureHint` clearing.
-
-- **Tests**: 6 targeted test files / 30 tests pass (`npm run test:run`),
-  `npm run lint` clean, `npm run build` succeeds.
+Validation:
+- `bash -n` passed for all changed shell scripts.
+- `git diff --check` passed.
+- Direct helper verification passed, including preserving a sentinel on rerun.
+- `bash tests/test-deploy-docker.sh` reaches the existing worker permission test but
+  fails on Windows Git Bash because filesystem `chmod 777` reports mode `755`; this
+  prevents the suite from reaching the new tests. The same assertion requires `777`
+  on Linux CI.

@@ -453,6 +453,50 @@ prepare_orcaslicer_worker_temp_directories() {
     return 0
 }
 
+# Pre-create the slicer-host artifact directory used by distributed slicing.
+# The slicer-host image runs as appuser (UID/GID 1001), while Docker creates a
+# missing bind-mount root as root:root. Only the artifact leaf is made writable;
+# the parent data directory remains governed by the existing host ownership.
+prepare_slicer_artifact_directories() {
+    if [ "${ENABLE_ORCA_WORKER:-no}" != "yes" ]; then
+        return 0
+    fi
+
+    print_header "📁 Pre-creating Slicer Artifact Directory"
+
+    local slicer_data_path="${EXTERNAL_SLICER_DATA_PATH:-.volumes/printfarmer-slicer-data}"
+    local artifact_path="$slicer_data_path/artifacts"
+
+    if [ ! -d "$artifact_path" ]; then
+        if ! mkdir -p "$artifact_path" 2>/dev/null; then
+            print_info "Host data directory is not writable; retrying with sudo"
+            if ! sudo -n mkdir -p "$artifact_path" 2>/dev/null; then
+                print_error "Failed to create slicer artifact directory: $artifact_path"
+                return 1
+            fi
+        fi
+        print_success "Created: $artifact_path"
+    else
+        print_info "Directory already exists: $artifact_path"
+    fi
+
+    # Prefer exact appuser ownership. The narrow 777 fallback is limited to
+    # this artifact leaf so non-root deploy users can recover root-created
+    # bind-mounts without weakening the entire /data tree.
+    chown 1001:1001 "$artifact_path" 2>/dev/null \
+        || sudo -n chown 1001:1001 "$artifact_path" 2>/dev/null \
+        || true
+    if ! chmod 777 "$artifact_path" 2>/dev/null; then
+        if ! sudo -n chmod 777 "$artifact_path" 2>/dev/null; then
+            print_error "Failed to make slicer artifact directory writable: $artifact_path"
+            return 1
+        fi
+    fi
+
+    print_success "✓ Slicer artifact directory ready: $artifact_path"
+    return 0
+}
+
 validate_orcaslicer_rebuild_request() {
     local force_rebuild="$1"
     local worker_enabled="$2"
