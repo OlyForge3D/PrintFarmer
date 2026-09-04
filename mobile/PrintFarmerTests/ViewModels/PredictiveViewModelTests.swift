@@ -5490,6 +5490,23 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.hasFarmWideData)
     }
 
+    func testFarmWideLoadingWithExistingDataReportsRefreshingState() {
+        viewModel.alerts = [
+            PredictiveAlert(
+                alertType: "previous_alert",
+                severity: "info",
+                message: "Previously loaded alert",
+                recommendedAction: "Keep monitoring"
+            )
+        ]
+        viewModel.farmWideStatus = .loading
+
+        XCTAssertTrue(viewModel.isRefreshingFarmWideInsights)
+
+        viewModel.alerts = []
+        XCTAssertFalse(viewModel.isRefreshingFarmWideInsights)
+    }
+
     // MARK: - Computed Properties
 
     func testRiskPercentageConvertsTo0To100Scale() {

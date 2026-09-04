@@ -59,6 +59,7 @@ final class ServerRegistry {
     /// not view state.
     @ObservationIgnored var snapshotPurgeHandler: (@Sendable (UUID) async -> FarmSnapshotPurgeResult)?
     @ObservationIgnored var certificatePinPurgeHandler: (@Sendable (RegisteredServer, [RegisteredServer]) async -> Bool)?
+    @ObservationIgnored var farmShapeResetHandler: (@Sendable (UUID) -> Void)?
 
     @ObservationIgnored private let userDefaults: UserDefaults
     @ObservationIgnored private let now: () -> Date
@@ -188,6 +189,7 @@ final class ServerRegistry {
         let endpointChanged = servers[index].normalizedURLString != normalized
         var updated = server
         if endpointChanged {
+            farmShapeResetHandler?(server.id)
             updated.originServerId = nil
         }
         updated.displayName = normalizedDisplayName(updated.displayName, fallbackURL: updated.baseURL)

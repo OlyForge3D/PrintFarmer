@@ -226,6 +226,21 @@ final class FarmFilamentCoverageViewModelTests: XCTestCase {
                        "Newer success must remain visible even when a stale error resolves later.")
     }
 
+    func testCancelledLoadDoesNotCommitAnErrorOrConsumeTheCommitSlot() async {
+        let service = ControlledFilamentCoverageService()
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configure(coverageService: service)
+
+        async let load: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeError(index: 0, error: CancellationError())
+        _ = await load
+
+        XCTAssertNil(vm.lastLoadError)
+        XCTAssertEqual(vm.lastCommittedGenerationForTesting, 0)
+        XCTAssertFalse(vm.hasConcludedCanonicalLoad)
+    }
+
     // MARK: - Equal-timestamp newer-generation wins
 
     func testEqualEvaluatedAtNewerGenerationWins() async throws {

@@ -355,6 +355,82 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(router.activeMode, .floor)
     }
 
+    func testReturningToAutomaticRestoresTheSessionEstablishedDerivation() {
+        let router = AppRouter()
+        let serverID = UUID()
+        let userID = UUID()
+        let initialShape = FarmShape(accountCount: 1, locationCount: 1, printerCount: 4)
+        let changedShape = FarmShape(accountCount: 3, locationCount: 2, printerCount: 40)
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .automatic,
+            farmShape: initialShape,
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        let establishedDerivation = router.establishedAutomaticDerivation
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .twoModes,
+            farmShape: changedShape,
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .automatic,
+            farmShape: changedShape,
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.establishedAutomaticDerivation, establishedDerivation)
+        XCTAssertEqual(router.requestedShell, .simple)
+        XCTAssertEqual(router.activeShell, .simple)
+    }
+
+    func testServerChangeReplacesAutomaticDerivationWithVerifiedDestinationIdentity() {
+        let router = AppRouter()
+        let firstServerID = UUID()
+        let secondServerID = UUID()
+
+        router.configureAdaptiveShell(
+            serverID: firstServerID,
+            userID: UUID(),
+            preference: .automatic,
+            farmShape: FarmShape(accountCount: 3, locationCount: 2, printerCount: 40),
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        XCTAssertEqual(router.establishedAutomaticDerivation?.shell, .twoModes)
+
+        router.configureAdaptiveShell(
+            serverID: secondServerID,
+            userID: UUID(),
+            preference: .automatic,
+            farmShape: FarmShape(accountCount: 3, locationCount: 2, printerCount: 40),
+            isFarmAdmin: false,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.configuredServerID, secondServerID)
+        XCTAssertEqual(router.establishedAutomaticDerivation?.shell, .simple)
+        XCTAssertEqual(router.requestedShell, .simple)
+        XCTAssertTrue(
+            router.establishedAutomaticDerivation?.explanation.contains("not a farm administrator") == true
+        )
+    }
+
     func testShippingPresentationPreservesAdaptiveSelectionForCompactReturn() {
         let router = AppRouter()
         let serverID = UUID()
@@ -732,7 +808,7 @@ final class AppRouterTests: XCTestCase {
         XCTAssertTrue(router.fleetPath.isEmpty)
     }
 
-    func testAttentionDeepLinkFallsBackWhenActiveSetOmitsAttention() {
+    func testAttentionDeepLinkSwitchesToFloorModeAndPreservesItem() {
         let router = AppRouter()
         router.setNavigationShell(
             .twoModes,
@@ -745,12 +821,13 @@ final class AppRouterTests: XCTestCase {
             capabilities: capabilities
         )
 
-        XCTAssertEqual(router.selectedTab, .overview)
-        XCTAssertNil(router.pendingAttentionItemId)
+        XCTAssertEqual(router.activeMode, .floor)
+        XCTAssertEqual(router.selectedTab, .attention)
+        XCTAssertEqual(router.pendingAttentionItemId, "failure-123")
         XCTAssertTrue(router.notificationsPath.isEmpty)
     }
 
-    func testSpoolDeepLinkFallsBackWhenActiveSetOmitsInventory() {
+    func testSpoolDeepLinkSwitchesToFloorModeAndPreservesHighlight() {
         let router = AppRouter()
         router.setNavigationShell(
             .twoModes,
@@ -763,8 +840,9 @@ final class AppRouterTests: XCTestCase {
             capabilities: capabilities
         )
 
-        XCTAssertEqual(router.selectedTab, .overview)
-        XCTAssertNil(router.pendingSpoolHighlightId)
+        XCTAssertEqual(router.activeMode, .floor)
+        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertEqual(router.pendingSpoolHighlightId, spoolId)
         XCTAssertTrue(router.inventoryPath.isEmpty)
     }
 

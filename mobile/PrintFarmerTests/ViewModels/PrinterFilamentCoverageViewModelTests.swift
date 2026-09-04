@@ -464,6 +464,21 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         XCTAssertNil(vm.lastLoadError,
                      "Stale error from OLD service MUST NOT overwrite the replacement's clean state.")
     }
+
+    func testCancelledLoadDoesNotCommitAnErrorOrConsumeTheCommitSlot() async {
+        let service = ControlledFilamentCoverageService()
+        let vm = PrinterFilamentCoverageViewModel(printerId: printerA)
+        vm.configure(coverageService: service)
+
+        async let load: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeError(index: 0, error: CancellationError())
+        _ = await load
+
+        XCTAssertNil(vm.lastLoadError)
+        XCTAssertEqual(vm.lastCommittedGenerationForTesting, 0)
+        XCTAssertFalse(vm.hasConcludedCanonicalLoad)
+    }
     #endif
 
     func testTeardownBeforeDrainCausesNoCommit() async {

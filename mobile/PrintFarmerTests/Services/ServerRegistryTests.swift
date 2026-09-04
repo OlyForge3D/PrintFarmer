@@ -374,7 +374,7 @@ final class ServerRegistryTests: XCTestCase {
 
         try registry.setActive(id: second.id)
         try await waitForBaseURL(second.baseURL, in: container)
-        let user = await container.currentUserForNavigation(
+        let user = try await container.currentUserForNavigation(
             serverID: second.id,
             generation: container.activeServerGeneration
         )
@@ -386,6 +386,62 @@ final class ServerRegistryTests: XCTestCase {
             })?.url?.host,
             "two.example.com"
         )
+    }
+
+    func testNavigationIdentityVerificationCanRetryAfterTransientFailure() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://farm.example.com")!
+        )
+        let credentialsStore = isolatedCredentialsStore()
+        credentialsStore.save(
+            ServerCredentials(accessToken: "token", expiresAt: nil),
+            serverId: server.id
+        )
+        let container = switchingTestContainer(
+            registry: registry,
+            credentialsStore: credentialsStore,
+            signalRRecorder: SignalRRecorder()
+        )
+        var attempts = 0
+        mockAPIClient.requestHandler = { request in
+            guard request.url?.path == "/api/auth/me" else {
+                return (
+                    TestData.httpResponse(url: request.url, statusCode: 404),
+                    Data()
+                )
+            }
+            attempts += 1
+            if attempts == 1 {
+                return (
+                    TestData.httpResponse(url: request.url, statusCode: 503),
+                    Data()
+                )
+            }
+            return (
+                TestData.httpResponse(url: request.url, statusCode: 200),
+                Data(TestJSON.userDTO.utf8)
+            )
+        }
+
+        do {
+            _ = try await container.currentUserForNavigation(
+                serverID: server.id,
+                generation: container.activeServerGeneration
+            )
+            XCTFail("Expected the first identity verification to fail")
+        } catch {
+            XCTAssertEqual(attempts, 1)
+        }
+
+        let user = try await container.currentUserForNavigation(
+            serverID: server.id,
+            generation: container.activeServerGeneration
+        )
+
+        XCTAssertEqual(user?.username, "admin")
+        XCTAssertEqual(attempts, 2)
     }
 
     func testServiceContainerReconcilesRapidSwitchesToLatestServer() async throws {

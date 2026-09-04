@@ -121,7 +121,7 @@ final class AppRouter {
                 appendPrinterDestination(.printerDetail(id: id), to: tab)
             }
         case .spoolDetail(let id):
-            guard visibleTabs(for: capabilities).contains(.inventory) else {
+            guard makeTabVisibleIfPossible(.inventory, capabilities: capabilities) else {
                 selectedTab = fallbackTab(for: capabilities)
                 inventoryPath = NavigationPath()
                 pendingSpoolHighlightId = nil
@@ -131,7 +131,7 @@ final class AppRouter {
             inventoryPath = NavigationPath()
             pendingSpoolHighlightId = id
         case .attentionItem(let id):
-            guard visibleTabs(for: capabilities).contains(.attention) else {
+            guard makeTabVisibleIfPossible(.attention, capabilities: capabilities) else {
                 selectedTab = fallbackTab(for: capabilities)
                 notificationsPath = NavigationPath()
                 pendingAttentionItemId = nil
@@ -280,18 +280,27 @@ final class AppRouter {
             invalidatePendingNavigation()
         }
 
-        if contextChanged || preferenceChanged || appliedNavigationPreference == nil {
-            let automaticDerivation = NavigationShellDerivation.automatic(
+        let automaticDerivation: NavigationShellDerivation
+        if contextChanged || establishedAutomaticDerivation == nil {
+            automaticDerivation = NavigationShellDerivation.automatic(
                 farmShape: farmShape,
                 shiftPlanEnabled: capabilities.shiftPlanEnabled,
                 isFarmAdmin: isFarmAdmin
             )
+            establishedAutomaticDerivation = automaticDerivation
+        } else {
+            automaticDerivation = establishedAutomaticDerivation
+                ?? NavigationShellDerivation.automatic(
+                    farmShape: farmShape,
+                    shiftPlanEnabled: capabilities.shiftPlanEnabled,
+                    isFarmAdmin: isFarmAdmin
+                )
+        }
+
+        if contextChanged || preferenceChanged || appliedNavigationPreference == nil {
             configuredServerID = serverID
             configuredUserID = userID
             appliedNavigationPreference = preference
-            establishedAutomaticDerivation = preference == .automatic
-                ? automaticDerivation
-                : nil
             requestedShell = AdaptiveNavigationShell.requestedShell(
                 preference: preference,
                 automaticDerivation: automaticDerivation
@@ -518,6 +527,35 @@ final class AppRouter {
         default:
             printersPath.append(destination)
         }
+    }
+
+    private func makeTabVisibleIfPossible(
+        _ tab: AppTab,
+        capabilities: ResolvedSystemCapabilities
+    ) -> Bool {
+        if visibleTabs(for: capabilities).contains(tab) {
+            return true
+        }
+
+        guard activeShell == .twoModes, activeMode == .oversight else {
+            return false
+        }
+
+        let floorTabs = AppTab.visibleTabs(
+            for: .twoModes,
+            mode: .floor,
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
+        )
+        guard floorTabs.contains(tab) else { return false }
+
+        transition(
+            to: .twoModes,
+            mode: .floor,
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
+        )
+        return visibleTabs(for: capabilities).contains(tab)
     }
 
     private func clearDisabledFeatureState(

@@ -497,6 +497,9 @@ final class ServiceContainer: @unchecked Sendable {
         let store = farmSnapshotStore
         let shapeStore = farmShapeStore
         let startupPrefetchStore = startupPrefetchStore
+        serverRegistry.farmShapeResetHandler = { serverID in
+            shapeStore.invalidateShape(serverID: serverID)
+        }
         serverRegistry.snapshotPurgeHandler = { serverID in
             startupPrefetchStore.removeAll()
             let result = await store.purge(serverID: serverID)
@@ -756,7 +759,7 @@ final class ServiceContainer: @unchecked Sendable {
     func currentUserForNavigation(
         serverID: UUID,
         generation: Int
-    ) async -> UserDTO? {
+    ) async throws -> UserDTO? {
         await activeServerSwitchTask?.value
 
         guard activeServerGeneration == generation,
@@ -779,7 +782,7 @@ final class ServiceContainer: @unchecked Sendable {
             Self.logger.warning(
                 "Could not verify navigation identity for server \(serverID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
-            return nil
+            throw error
         }
     }
 

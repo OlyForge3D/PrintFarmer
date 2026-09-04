@@ -3,8 +3,8 @@ import SwiftUI
 private struct NavigationIdentityRequest: Hashable {
     let serverID: UUID
     let generation: Int
-    let fallbackUserID: UUID?
-    let fallbackRoles: [String]
+    let observedUserID: UUID?
+    let observedRoles: [String]
 }
 
 private struct ResolvedNavigationIdentity: Equatable {
@@ -296,33 +296,46 @@ struct ContentView: View {
         return NavigationIdentityRequest(
             serverID: serverID,
             generation: services.activeServerGeneration,
-            fallbackUserID: authViewModel.currentUser?.id,
-            fallbackRoles: authViewModel.currentUser?.roles ?? []
+            observedUserID: authViewModel.currentUser?.id,
+            observedRoles: authViewModel.currentUser?.roles ?? []
         )
     }
 
     private func resolveNavigationIdentity(_ request: NavigationIdentityRequest) async {
         navigationIdentity = nil
-        let verifiedUser = await services.currentUserForNavigation(
-            serverID: request.serverID,
-            generation: request.generation
-        )
-        guard !Task.isCancelled,
-              navigationIdentityRequest == request else {
-            return
-        }
+        while !Task.isCancelled, navigationIdentityRequest == request {
+            do {
+                guard let verifiedUser = try await services.currentUserForNavigation(
+                    serverID: request.serverID,
+                    generation: request.generation
+                ) else {
+                    return
+                }
+                guard !Task.isCancelled,
+                      navigationIdentityRequest == request else {
+                    return
+                }
 
-        navigationIdentity = ResolvedNavigationIdentity(
-            serverID: request.serverID,
-            userID: verifiedUser?.id ?? request.fallbackUserID ?? request.serverID,
-            isFarmAdmin: verifiedUser?.roles.contains("farm_admin") == true
-        )
-        synchronizeAdaptiveShell(
-            capabilities: services.capabilitiesService.resolved,
-            oversightAvailability: currentOversightAvailability(
-                capabilities: services.capabilitiesService.resolved
-            )
-        )
+                navigationIdentity = ResolvedNavigationIdentity(
+                    serverID: request.serverID,
+                    userID: verifiedUser.id,
+                    isFarmAdmin: verifiedUser.roles.contains("farm_admin")
+                )
+                synchronizeAdaptiveShell(
+                    capabilities: services.capabilitiesService.resolved,
+                    oversightAvailability: currentOversightAvailability(
+                        capabilities: services.capabilitiesService.resolved
+                    )
+                )
+                return
+            } catch {
+                do {
+                    try await Task.sleep(for: .seconds(1))
+                } catch {
+                    return
+                }
+            }
+        }
     }
 
     private var isCompactShellReady: Bool {

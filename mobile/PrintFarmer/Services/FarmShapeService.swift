@@ -20,11 +20,16 @@ protocol FarmShapeServiceProtocol: AnyObject, Sendable {
 
 /// Persists the last known shape independently for each registered server.
 final class FarmShapeStore: @unchecked Sendable {
+    struct Authority: Sendable, Equatable {
+        fileprivate let revision: UInt64
+    }
+
     static let keyPrefix = "pf_farm_shape_"
 
     private let userDefaults: UserDefaults
     private let lock = NSLock()
     private var purgedServerIDs: Set<UUID> = []
+    private var revisions: [UUID: UInt64] = [:]
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -38,6 +43,26 @@ final class FarmShapeStore: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard !purgedServerIDs.contains(serverID) else { return nil }
+        return storedShape(serverID: serverID)
+    }
+
+    func authority(serverID: UUID) -> Authority {
+        lock.lock()
+        defer { lock.unlock() }
+        return Authority(revision: revisions[serverID] ?? 0)
+    }
+
+    func shape(serverID: UUID, authority: Authority) -> FarmShape? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !purgedServerIDs.contains(serverID),
+              authority.revision == (revisions[serverID] ?? 0) else {
+            return nil
+        }
+        return storedShape(serverID: serverID)
+    }
+
+    private func storedShape(serverID: UUID) -> FarmShape? {
         guard let data = userDefaults.data(forKey: shapeKey(serverID: serverID)) else {
             return nil
         }
@@ -52,9 +77,28 @@ final class FarmShapeStore: @unchecked Sendable {
         userDefaults.set(data, forKey: shapeKey(serverID: serverID))
     }
 
+    func setShape(_ shape: FarmShape, serverID: UUID, authority: Authority) {
+        guard let data = try? JSONEncoder().encode(shape) else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        guard !purgedServerIDs.contains(serverID),
+              authority.revision == (revisions[serverID] ?? 0) else {
+            return
+        }
+        userDefaults.set(data, forKey: shapeKey(serverID: serverID))
+    }
+
+    func invalidateShape(serverID: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        revisions[serverID] = (revisions[serverID] ?? 0) &+ 1
+        userDefaults.removeObject(forKey: shapeKey(serverID: serverID))
+    }
+
     func purgeShape(serverID: UUID) {
         lock.lock()
         defer { lock.unlock() }
+        revisions[serverID] = (revisions[serverID] ?? 0) &+ 1
         purgedServerIDs.insert(serverID)
         userDefaults.removeObject(forKey: shapeKey(serverID: serverID))
     }
@@ -80,6 +124,7 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
     @ObservationIgnored private let store: FarmShapeStore
     @ObservationIgnored private let fetchShape: FetchShape
     @ObservationIgnored private let sleep: Sleep
+    @ObservationIgnored private var storeAuthorities: [UUID: FarmShapeStore.Authority]
     @ObservationIgnored private var sessionGeneration: UInt64 = 0
     @ObservationIgnored private var sessionAuthToken: Int?
     @ObservationIgnored private var resolvedSessionServerID: UUID?
@@ -90,6 +135,11 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
         store: FarmShapeStore
     ) {
         self.store = store
+        var authorities: [UUID: FarmShapeStore.Authority] = [:]
+        if let serverID {
+            authorities[serverID] = store.authority(serverID: serverID)
+        }
+        self.storeAuthorities = authorities
         self.fetchShape = {
             try await apiClient.get(
                 "/api/system/farm-shape",
@@ -99,7 +149,11 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
         self.sleep = {
             try await Task.sleep(for: $0)
         }
-        let persisted = serverID.flatMap(store.shape(serverID:))
+        let persisted = serverID.flatMap { id in
+            authorities[id].flatMap {
+                store.shape(serverID: id, authority: $0)
+            }
+        }
         self.sessionShape = persisted
         self.latestShape = persisted
     }
@@ -113,9 +167,18 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
         }
     ) {
         self.store = store
+        var authorities: [UUID: FarmShapeStore.Authority] = [:]
+        if let serverID {
+            authorities[serverID] = store.authority(serverID: serverID)
+        }
+        self.storeAuthorities = authorities
         self.fetchShape = fetchShape
         self.sleep = sleep
-        let persisted = serverID.flatMap(store.shape(serverID:))
+        let persisted = serverID.flatMap { id in
+            authorities[id].flatMap {
+                store.shape(serverID: id, authority: $0)
+            }
+        }
         self.sessionShape = persisted
         self.latestShape = persisted
     }
@@ -138,7 +201,8 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
         resolvedSessionServerID = serverID
         sessionGeneration &+= 1
         let generation = sessionGeneration
-        let persisted = store.shape(serverID: serverID)
+        let authority = storeAuthority(for: serverID)
+        let persisted = store.shape(serverID: serverID, authority: authority)
         sessionShape = persisted
         latestShape = persisted
         isSessionResolved = false
@@ -150,7 +214,12 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
                 return
             }
             let shape = await self.fetchShapeOrUnknown()
-            self.completeFetch(shape, serverID: serverID, generation: generation)
+            self.completeFetch(
+                shape,
+                serverID: serverID,
+                authority: authority,
+                generation: generation
+            )
             race.resolve()
         }
 
@@ -171,9 +240,10 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
 
     func refreshLatest(serverID: UUID) async {
         let generation = sessionGeneration
+        let authority = storeAuthority(for: serverID)
         guard let shape = await fetchShapeOrUnknown() else { return }
         guard generation == sessionGeneration else { return }
-        store.setShape(shape, serverID: serverID)
+        store.setShape(shape, serverID: serverID, authority: authority)
         latestShape = shape
     }
 
@@ -189,17 +259,27 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
     private func completeFetch(
         _ shape: FarmShape?,
         serverID: UUID,
+        authority: FarmShapeStore.Authority,
         generation: UInt64
     ) {
         guard generation == sessionGeneration else { return }
         if let shape {
-            store.setShape(shape, serverID: serverID)
+            store.setShape(shape, serverID: serverID, authority: authority)
             latestShape = shape
             if !isSessionResolved {
                 sessionShape = shape
             }
         }
         isSessionResolved = true
+    }
+
+    private func storeAuthority(for serverID: UUID) -> FarmShapeStore.Authority {
+        if let authority = storeAuthorities[serverID] {
+            return authority
+        }
+        let authority = store.authority(serverID: serverID)
+        storeAuthorities[serverID] = authority
+        return authority
     }
 
     private func freezeSession(generation: UInt64) {

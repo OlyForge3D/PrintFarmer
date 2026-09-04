@@ -208,6 +208,63 @@ final class FarmShapeServiceTests: XCTestCase {
         )
     }
 
+    func testEndpointChangePurgesShapeAndRejectsLateOldEndpointWrite() async throws {
+        let registry = ServerRegistry(
+            userDefaults: userDefaults,
+            migrateLegacyServerURL: false
+        )
+        var server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://old.example.com")!
+        )
+        let initialShape = FarmShape(accountCount: 3, locationCount: 2, printerCount: 12)
+        let staleShape = FarmShape(accountCount: 7, locationCount: 4, printerCount: 40)
+        let replacementShape = FarmShape(accountCount: 1, locationCount: 1, printerCount: 2)
+        store.setShape(initialShape, serverID: server.id)
+
+        let request = AsyncBarrier()
+        defer { request.close() }
+        let staleService = FarmShapeService(
+            serverID: server.id,
+            store: store,
+            fetchShape: {
+                await request.arriveAndWait()
+                return staleShape
+            }
+        )
+        let container = ServiceContainer(
+            serverRegistry: registry,
+            observeRegistry: false,
+            farmShapeStore: store,
+            synchronizeOfflineQueueOnStartup: false
+        )
+        _ = container
+
+        let refresh = Task {
+            await staleService.refreshLatest(serverID: server.id)
+        }
+        await request.waitUntilArrived()
+
+        server.baseURL = URL(string: "https://new.example.com")!
+        try registry.update(server)
+        XCTAssertNil(store.shape(serverID: server.id))
+
+        request.release()
+        await refresh.value
+        XCTAssertNil(
+            store.shape(serverID: server.id),
+            "the old endpoint must not repopulate the invalidated server identity"
+        )
+
+        let replacementService = FarmShapeService(
+            serverID: server.id,
+            store: store,
+            fetchShape: { replacementShape }
+        )
+        await replacementService.refreshLatest(serverID: server.id)
+        XCTAssertEqual(store.shape(serverID: server.id), replacementShape)
+    }
+
     func testUnknownDiffersFromKnownShapeOfOne() {
         let unknown: FarmShape? = nil
         let knownOne = FarmShape(accountCount: 1, locationCount: 1, printerCount: 1)

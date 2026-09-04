@@ -8,7 +8,8 @@ struct PredictiveInsightsView: View {
     var body: some View {
         Group {
             if printerId == nil,
-               viewModel.farmWideStatus == .idle || viewModel.farmWideStatus == .loading {
+               (viewModel.farmWideStatus == .idle || viewModel.farmWideStatus == .loading),
+               !viewModel.hasFarmWideData {
                 ProgressView("Loading predictive insights…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if printerId == nil,
@@ -69,6 +70,8 @@ struct PredictiveInsightsView: View {
                     }
                 } else if case .failed(let message) = viewModel.farmWideStatus {
                     staleFarmWideBanner(message: message)
+                } else if viewModel.isRefreshingFarmWideInsights {
+                    refreshingFarmWideBanner
                 }
                 alertsSection
                 forecastsSection
@@ -180,6 +183,33 @@ struct PredictiveInsightsView: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("predictiveInsights.farmWideStale")
+    }
+
+    private var refreshingFarmWideBanner: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Refreshing farm-wide predictive data…")
+                    .font(.subheadline.weight(.medium))
+                Text("Alerts and forecasts below reflect the last successful reading.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.pfBorder, lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "Refreshing farm-wide predictive data. Displayed values reflect the last successful reading."
+        )
+        .accessibilityIdentifier("predictiveInsights.farmWideRefreshing")
     }
 
     private func farmWideUnavailable(message: String) -> some View {

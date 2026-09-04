@@ -34,6 +34,13 @@ struct FilamentCoverageView: View {
                         .accessibilityIdentifier("oversight.filamentCoverage.loading")
                 } else if let error = viewModel.lastLoadError, coverage.isEmpty {
                     errorState(error)
+                } else if viewModel.isFeatureDisabled {
+                    EmptyStateView(
+                        icon: "gauge.with.dots.needle.50percent",
+                        title: "Filament Coverage Unavailable",
+                        message: "This server has filament coverage turned off."
+                    )
+                    .accessibilityIdentifier("oversight.filamentCoverage.disabled")
                 } else if coverage.isEmpty {
                     EmptyStateView(
                         icon: "gauge.with.dots.needle.50percent",
@@ -53,6 +60,7 @@ struct FilamentCoverageView: View {
         }
         .task(id: filamentCoverageEnabled) {
             guard filamentCoverageEnabled else {
+                retryTask?.cancel()
                 viewModel.disableForCapabilityGate()
                 isLoading = false
                 dismiss()
@@ -127,6 +135,7 @@ struct FilamentCoverageView: View {
     private func reload() async {
         isLoading = coverage.isEmpty
         await viewModel.load()
+        guard !Task.isCancelled else { return }
         isLoading = false
     }
 

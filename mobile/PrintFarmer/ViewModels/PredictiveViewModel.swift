@@ -158,6 +158,10 @@ final class PredictiveViewModel {
         !alerts.isEmpty || !forecasts.isEmpty
     }
 
+    var isRefreshingFarmWideInsights: Bool {
+        farmWideStatus == .loading && hasFarmWideData
+    }
+
     // MARK: - Computed
 
     /// True when the model has a `prediction` whose
