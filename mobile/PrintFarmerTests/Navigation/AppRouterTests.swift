@@ -399,6 +399,28 @@ final class AppRouterTests: XCTestCase {
         )
     }
 
+    func testShippingPresentationClearsDisabledCapabilityState() {
+        var disabled = capabilities
+        disabled.attentionEnabled = false
+        disabled.shiftPlanEnabled = false
+        let router = AppRouter()
+        router.notificationBadgeCount = 3
+        router.pendingReadyCount = 2
+        router.pendingAttentionItemId = "attention-1"
+        router.notificationsPath.append(AppDestination.jobDetail(id: printerId))
+        router.tasksPath.append(AppDestination.jobDetail(id: printerId))
+
+        router.presentShippingShell(capabilities: disabled)
+
+        XCTAssertEqual(router.activeShell, .current)
+        XCTAssertEqual(router.selectedTab, .farm)
+        XCTAssertEqual(router.notificationBadgeCount, 0)
+        XCTAssertEqual(router.pendingReadyCount, 0)
+        XCTAssertNil(router.pendingAttentionItemId)
+        XCTAssertTrue(router.notificationsPath.isEmpty)
+        XCTAssertTrue(router.tasksPath.isEmpty)
+    }
+
     func testTwoModesCollapsesWhenOversightHasFewerThanTwoTabs() {
         let router = AppRouter()
         let availability = OversightNavigationAvailability(
@@ -684,6 +706,30 @@ final class AppRouterTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(120))
         XCTAssertTrue(router.printersPath.isEmpty)
         XCTAssertEqual(router.fleetPath.count, 1)
+    }
+
+    func testPrinterDeepLinkFallsBackWhenFleetIsUnavailable() async {
+        let router = AppRouter()
+        let availability = OversightNavigationAvailability(
+            hasVisibleHubDestinations: true,
+            visibleTabs: [.overview, .reports]
+        )
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities,
+            oversightAvailability: availability
+        )
+
+        router.navigate(
+            to: .printerDetail(id: printerId),
+            capabilities: capabilities
+        )
+
+        XCTAssertEqual(router.selectedTab, .overview)
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertTrue(router.printersPath.isEmpty)
+        XCTAssertTrue(router.fleetPath.isEmpty)
     }
 
     func testAttentionDeepLinkFallsBackWhenActiveSetOmitsAttention() {

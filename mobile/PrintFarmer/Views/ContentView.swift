@@ -1,5 +1,18 @@
 import SwiftUI
 
+private struct NavigationIdentityRequest: Hashable {
+    let serverID: UUID
+    let generation: Int
+    let fallbackUserID: UUID?
+    let fallbackRoles: [String]
+}
+
+private struct ResolvedNavigationIdentity: Equatable {
+    let serverID: UUID
+    let userID: UUID
+    let isFarmAdmin: Bool
+}
+
 /// Adaptive operator shell for compact devices, with the existing split view
 /// retained until the dedicated iPad navigation work lands.
 struct ContentView: View {
@@ -21,6 +34,7 @@ struct ContentView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var navigationIdentity: ResolvedNavigationIdentity?
 
     var body: some View {
         let capabilities = services.capabilitiesService.resolved
@@ -59,29 +73,18 @@ struct ContentView: View {
                 oversightAvailability: oversightAvailability
             )
         }
-        .onChange(of: authViewModel.currentUser?.id) {
-            synchronizeAdaptiveShell(
-                capabilities: capabilities,
-                oversightAvailability: oversightAvailability
-            )
-        }
-        .onChange(of: authViewModel.currentUser?.roles) {
-            synchronizeAdaptiveShell(
-                capabilities: capabilities,
-                oversightAvailability: oversightAvailability
-            )
-        }
-        .onChange(of: serverRegistry.activeServerID) {
-            synchronizeAdaptiveShell(
-                capabilities: capabilities,
-                oversightAvailability: oversightAvailability
-            )
-        }
         .onChange(of: serverRegistry.navigationLayoutPreference) {
             synchronizeAdaptiveShell(
                 capabilities: capabilities,
                 oversightAvailability: oversightAvailability
             )
+        }
+        .task(id: navigationIdentityRequest) {
+            guard let request = navigationIdentityRequest else {
+                navigationIdentity = nil
+                return
+            }
+            await resolveNavigationIdentity(request)
         }
         .onChange(of: sizeClass) {
             synchronizeAdaptiveShell(
@@ -268,7 +271,8 @@ struct ContentView: View {
         }
 
         guard let serverID = serverRegistry.activeServerID,
-              let currentUser = authViewModel.currentUser else {
+              let navigationIdentity,
+              navigationIdentity.serverID == serverID else {
             router.reconcileCapabilities(
                 capabilities,
                 oversightAvailability: oversightAvailability
@@ -278,23 +282,58 @@ struct ContentView: View {
 
         router.configureAdaptiveShell(
             serverID: serverID,
-            userID: currentUser.id,
+            userID: navigationIdentity.userID,
             preference: serverRegistry.navigationLayoutPreference,
             farmShape: services.farmShapeService.sessionShape,
-            isFarmAdmin: currentUser.roles.contains("farm_admin"),
+            isFarmAdmin: navigationIdentity.isFarmAdmin,
             capabilities: capabilities,
             oversightAvailability: oversightAvailability
         )
     }
 
+    private var navigationIdentityRequest: NavigationIdentityRequest? {
+        guard let serverID = serverRegistry.activeServerID else { return nil }
+        return NavigationIdentityRequest(
+            serverID: serverID,
+            generation: services.activeServerGeneration,
+            fallbackUserID: authViewModel.currentUser?.id,
+            fallbackRoles: authViewModel.currentUser?.roles ?? []
+        )
+    }
+
+    private func resolveNavigationIdentity(_ request: NavigationIdentityRequest) async {
+        navigationIdentity = nil
+        let verifiedUser = await services.currentUserForNavigation(
+            serverID: request.serverID,
+            generation: request.generation
+        )
+        guard !Task.isCancelled,
+              navigationIdentityRequest == request else {
+            return
+        }
+
+        navigationIdentity = ResolvedNavigationIdentity(
+            serverID: request.serverID,
+            userID: verifiedUser?.id ?? request.fallbackUserID ?? request.serverID,
+            isFarmAdmin: verifiedUser?.roles.contains("farm_admin") == true
+        )
+        synchronizeAdaptiveShell(
+            capabilities: services.capabilitiesService.resolved,
+            oversightAvailability: currentOversightAvailability(
+                capabilities: services.capabilitiesService.resolved
+            )
+        )
+    }
+
     private var isCompactShellReady: Bool {
         guard let serverID = serverRegistry.activeServerID,
-              let userID = authViewModel.currentUser?.id else {
+              let navigationIdentity,
+              navigationIdentity.serverID == serverID else {
             return false
         }
         return router.hasAdaptiveShellConfiguration(
             serverID: serverID,
-            userID: userID
+            userID: navigationIdentity.userID
         )
     }
 

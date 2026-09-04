@@ -1,11 +1,17 @@
 import Foundation
 import Observation
+import OSLog
 
 /// Dependency container providing access to all services.
 /// Created once at app startup and passed via SwiftUI environment.
 @MainActor
 @Observable
 final class ServiceContainer: @unchecked Sendable {
+    private static let logger = Logger(
+        subsystem: "com.printfarmer.ios",
+        category: "ServiceContainer"
+    )
+
     typealias APIClientFactory = @MainActor (URL, ActiveServerGeneration, String?, Int?, UUID?) -> APIClient
     typealias SignalRServiceFactory = @MainActor (URL, APIClient) -> any SignalRServiceProtocol
 
@@ -743,6 +749,39 @@ final class ServiceContainer: @unchecked Sendable {
     /// pending-activation state to the failed server and invalidate the pending record
     /// when the user switches servers.
     var currentActiveServerID: UUID? { serverRegistry?.activeServerID }
+
+    /// Resolves the authenticated identity from the destination server only
+    /// after its service composition has settled. Navigation uses this instead
+    /// of carrying the previous server's roles across a switch.
+    func currentUserForNavigation(
+        serverID: UUID,
+        generation: Int
+    ) async -> UserDTO? {
+        await activeServerSwitchTask?.value
+
+        guard activeServerGeneration == generation,
+              activeGeneration.isCurrent(generation),
+              activeServerID == serverID,
+              serverRegistry?.activeServerID == serverID else {
+            return nil
+        }
+
+        do {
+            let user = try await authService.currentUser()
+            guard activeServerGeneration == generation,
+                  activeGeneration.isCurrent(generation),
+                  activeServerID == serverID,
+                  serverRegistry?.activeServerID == serverID else {
+                return nil
+            }
+            return user
+        } catch {
+            Self.logger.warning(
+                "Could not verify navigation identity for server \(serverID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            return nil
+        }
+    }
 
     /// Starts the shape and capability reads together while authentication is
     /// still holding the root loading gate. Shape waits only for its bounded

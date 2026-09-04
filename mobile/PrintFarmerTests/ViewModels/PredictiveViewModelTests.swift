@@ -5434,6 +5434,62 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
     }
 
+    func testFarmWideInsightsPopulateBothSectionsBeforeReportingSuccess() async {
+        mockPredictiveService.alertsToReturn = [
+            PredictiveAlert(
+                alertType: "maintenance_due",
+                severity: "warning",
+                message: "Maintenance is due",
+                recommendedAction: "Schedule maintenance"
+            )
+        ]
+        mockPredictiveService.forecastsToReturn = [
+            MaintenanceForecast(
+                printerId: testPrinterId,
+                printerName: "Prusa MK3",
+                upcomingTasks: []
+            )
+        ]
+
+        await viewModel.loadFarmWideInsights()
+
+        XCTAssertEqual(viewModel.farmWideStatus, .success)
+        XCTAssertTrue(viewModel.hasFarmWideData)
+        XCTAssertEqual(viewModel.alerts.count, 1)
+        XCTAssertEqual(viewModel.forecasts.count, 1)
+        XCTAssertNil(mockPredictiveService.getActiveAlertsCalledWithPrinterId)
+        XCTAssertNil(mockPredictiveService.getMaintenanceForecastCalledWithPrinterId)
+    }
+
+    func testFarmWideInsightsFailurePreservesStaleDataAndSupportsRetry() async {
+        viewModel.alerts = [
+            PredictiveAlert(
+                alertType: "previous_alert",
+                severity: "info",
+                message: "Previously loaded alert",
+                recommendedAction: "Keep monitoring"
+            )
+        ]
+        mockPredictiveService.errorToThrow = NetworkError.timeout
+
+        await viewModel.loadFarmWideInsights()
+
+        XCTAssertEqual(
+            viewModel.farmWideStatus,
+            .failed(PredictiveViewModel.farmWideFailureMessage)
+        )
+        XCTAssertEqual(viewModel.alerts.first?.alertType, "previous_alert")
+        XCTAssertTrue(viewModel.hasFarmWideData)
+
+        mockPredictiveService.errorToThrow = nil
+        mockPredictiveService.alertsToReturn = []
+        mockPredictiveService.forecastsToReturn = []
+        await viewModel.retryFarmWideInsights()
+
+        XCTAssertEqual(viewModel.farmWideStatus, .success)
+        XCTAssertFalse(viewModel.hasFarmWideData)
+    }
+
     // MARK: - Computed Properties
 
     func testRiskPercentageConvertsTo0To100Scale() {
