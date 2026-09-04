@@ -18,7 +18,7 @@ struct DemoModeBanner: View {
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
-            .background(Color.pfWarning)
+            .background(Color.pfWarningFill)
         }
         .buttonStyle(.plain)
         .alert("Demo Mode", isPresented: $showingInfo) {

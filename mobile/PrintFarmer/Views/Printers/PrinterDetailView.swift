@@ -342,16 +342,11 @@ struct PrinterDetailView: View {
             }
             .buttonStyle(.bordered)
 
-            Button(role: .destructive) {
+            PrinterDetailBorderedDestructiveButton(kind: .eject) {
                 UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                 let task = Task { await viewModel.ejectFilament() }
                 activeTasks.append(task)
-            } label: {
-                Label("Eject", systemImage: "eject.fill")
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
-            .tint(Color.pfError)
         }
         .disabled(viewModel.isPerformingAction)
 
@@ -433,15 +428,10 @@ struct PrinterDetailView: View {
                     }
                 }
 
-                Button(role: .destructive) {
+                PrinterDetailBorderedDestructiveButton(kind: .cancel) {
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     viewModel.requestCancel()
-                } label: {
-                    Label("Cancel", systemImage: "xmark.circle.fill")
-                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(.bordered)
-                .tint(Color.pfError)
                 .disabled(viewModel.isPerformingAction)
                 .accessibilityIdentifier("printer.detail.control.cancel")
                 .accessibilityLabel("Cancel current print")
@@ -1656,7 +1646,7 @@ struct PrinterDetailView: View {
                         .fontWeight(.semibold)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(Color.pfError)
+                .tint(Color.pfErrorFill)
                 .accessibilityLabel("Emergency stop printer")
             }
         }
@@ -1677,6 +1667,46 @@ struct PrinterDetailView: View {
                 .fullWidthActionButton()
         }
         .buttonStyle(.bordered)
+    }
+}
+
+struct PrinterDetailBorderedDestructiveButton: View {
+    enum Kind {
+        case eject
+        case cancel
+
+        var title: String {
+            switch self {
+            case .eject: "Eject"
+            case .cancel: "Cancel"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .eject: "eject.fill"
+            case .cancel: "xmark.circle.fill"
+            }
+        }
+
+        var minimumHeight: CGFloat? {
+            switch self {
+            case .eject: nil
+            case .cancel: 44
+            }
+        }
+    }
+
+    let kind: Kind
+    let action: () -> Void
+
+    var body: some View {
+        Button(role: .destructive, action: action) {
+            Label(kind.title, systemImage: kind.systemImage)
+                .frame(maxWidth: .infinity, minHeight: kind.minimumHeight)
+        }
+        .buttonStyle(.bordered)
+        .tint(Color.pfError)
     }
 }
 

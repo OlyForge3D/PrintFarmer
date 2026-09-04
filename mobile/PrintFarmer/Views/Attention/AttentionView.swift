@@ -1083,7 +1083,6 @@ struct AttentionView: View {
         .scrollBounceBehavior(.always)
         .accessibilityIdentifier("attention.disabled.fallback")
     }
-
 }
 
 // MARK: - Item card
@@ -1588,7 +1587,7 @@ struct AttentionItemRow: View {
 
     private func actionTint(_ kind: AttentionActionKind) -> Color {
         switch kind {
-        case .cancel, .dismiss: .pfError
+        case .cancel, .dismiss: .pfErrorFill
         default: .accentColor
         }
     }

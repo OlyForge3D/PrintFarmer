@@ -64,15 +64,19 @@ extension Color {
 
     /// Success — green (slightly different shades per mode)
     static let pfSuccess = adaptive(light: "#059669", dark: "#10b981")
-    /// Error — red (same in both themes)
-    static let pfError = Color(hex: "#dc2626")
-    /// Warning — amber (same in both themes)
-    static let pfWarning = Color(hex: "#d97706")
+    /// Error foreground for text, icons, and bordered controls — deep red / lighter red
+    static let pfError = adaptive(light: "#dc2626", dark: "#f87171")
+    /// Error fill for prominent controls with white labels
+    static let pfErrorFill = Color(hex: "#dc2626")
+    /// Warning foreground for text, icons, and bordered controls — deep amber / amber
+    static let pfWarning = adaptive(light: "#b45309", dark: "#d97706")
+    /// Warning fill for prominent controls with white labels
+    static let pfWarningFill = Color(hex: "#b45309")
 
     // MARK: Buttons
 
-    /// Primary button background — green / deeper green in dark
-    static let pfButtonPrimary = adaptive(light: "#10b981", dark: "#047857")
+    /// Primary button background — deep green in both themes
+    static let pfButtonPrimary = adaptive(light: "#047857", dark: "#047857")
     /// Primary button text — always white
     static let pfButtonPrimaryText = Color.white
 
