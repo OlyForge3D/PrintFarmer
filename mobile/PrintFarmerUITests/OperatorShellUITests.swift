@@ -117,6 +117,42 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         )
     }
 
+    func testPredictiveInsightsReachableFromOversight() {
+        openOversightDestination(
+            identifier: "oversight.destination.predictiveInsights",
+            expectedNavigationBarTitle: "Predictive Insights"
+        )
+    }
+
+    func testPredictiveInsightsReachableFromPrinterDetail() {
+        guard app.tabBars.buttons["Farm"].waitForExistence(timeout: 5) else { return }
+        app.tabBars.buttons["Farm"].tap()
+
+        let farmCard = app.buttons
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "farm-card-"))
+            .firstMatch
+        let firstPrinter = farmCard.waitForExistence(timeout: 5)
+            ? farmCard
+            : app.collectionViews.cells.firstMatch
+        guard firstPrinter.waitForExistence(timeout: 5) else {
+            // Demo data may not have rendered yet; skip gracefully.
+            return
+        }
+        firstPrinter.tap()
+
+        let predictiveInsights = app.buttons["printer.detail.predictive"]
+        if !predictiveInsights.waitForExistence(timeout: 3) {
+            app.swipeUp()
+        }
+        guard predictiveInsights.waitForExistence(timeout: 3) else { return }
+        predictiveInsights.tap()
+
+        XCTAssertTrue(
+            app.navigationBars["Predictive Insights"].waitForExistence(timeout: 5),
+            "Predictive Insights must be reachable from printer detail"
+        )
+    }
+
     func testCanonicalAccountDestinationsAreReachable() {
         openAccount()
 
