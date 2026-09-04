@@ -1080,11 +1080,13 @@ struct BackendReadinessChecker: Sendable {
             case .succeeded, .unsupported:
                 break
             case .failed(let failure):
+                plan.capabilitiesService.discardPreparedReadiness()
                 return BackendReadinessResult(
                     failures: [failure],
                     wasCancelled: false
                 )
             case .cancelled:
+                plan.capabilitiesService.discardPreparedReadiness()
                 return .cancelled
             }
         }
@@ -1141,7 +1143,7 @@ struct BackendReadinessChecker: Sendable {
         let clock = ContinuousClock()
         let startedAt = clock.now
         let result = await runBackendReadinessWithTimeout(timeout: capabilitiesTimeout) {
-            await service.refresh()
+            await service.refreshForReadiness()
         }
         let elapsed = startedAt.duration(to: clock.now)
 
