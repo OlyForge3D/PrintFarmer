@@ -98,24 +98,7 @@ final class FarmSnapshotStartupFailureRetryTests: XCTestCase {
             observeRegistry: false,
             farmSnapshotAuthority: authority,
             farmSnapshotStore: failing,
-            farmSnapshotOwnerStore: owners,
-            apiClientFactory: { baseURL, generation, accessToken, authSessionToken, serverID in
-                let identity = accessToken.flatMap { token in
-                    serverID.map {
-                        AuthenticatedIdentity(
-                            accessToken: token,
-                            serverID: $0,
-                            authSessionToken: authSessionToken
-                        )
-                    }
-                }
-                return APIClient(
-                    baseURL: baseURL,
-                    session: mockAPIClient.urlSession,
-                    serverGeneration: generation,
-                    authenticated: identity
-                )
-            })
+            farmSnapshotOwnerStore: owners)
 
         // Mint a valid auth token from the epoch (0 is not "current" — never issued).
         let token = container.authOperationEpoch.advance()
@@ -176,7 +159,25 @@ final class FarmSnapshotStartupFailureRetryTests: XCTestCase {
             observeRegistry: false,
             farmSnapshotAuthority: authority,
             farmSnapshotStore: failing,
-            farmSnapshotOwnerStore: owners)
+            farmSnapshotOwnerStore: owners,
+            synchronizeOfflineQueueOnStartup: false,
+            apiClientFactory: { baseURL, generation, accessToken, authSessionToken, serverID in
+                let identity = accessToken.flatMap { token in
+                    serverID.map {
+                        AuthenticatedIdentity(
+                            accessToken: token,
+                            serverID: $0,
+                            authSessionToken: authSessionToken
+                        )
+                    }
+                }
+                return APIClient(
+                    baseURL: baseURL,
+                    session: mockAPIClient.urlSession,
+                    serverGeneration: generation,
+                    authenticated: identity
+                )
+            })
         // Replace the container's default AuthService with one bound to the mock.
         services.authService = AuthService(
             apiClient: mockAPIClient.apiClient,
