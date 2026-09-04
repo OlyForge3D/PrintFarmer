@@ -97,7 +97,7 @@ struct ContentView: View {
         let isSelected = resolvedShippingTab(for: capabilities) == tab
         let badgeCount = badgeCount(for: tab)
 
-        Button {
+        return Button {
             selectShippingTab(tab, capabilities: capabilities)
         } label: {
             HStack {
