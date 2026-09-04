@@ -823,7 +823,7 @@ final class AppRouterTests: XCTestCase {
         for tab: AppTab,
         router: AppRouter
     ) -> Int {
-        switch tab {
+        return switch tab {
         case .oversight:
             router.oversightPath.count
         case .overview:
