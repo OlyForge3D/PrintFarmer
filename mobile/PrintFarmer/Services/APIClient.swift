@@ -866,6 +866,40 @@ actor APIClient {
         return try await execute(request, session: requestSession)
     }
 
+    func get<T: Decodable & Sendable>(
+        _ path: String,
+        treating statusCodesAsMissing: Set<Int>
+    ) async throws -> T? {
+        let requestSession = captureRequestSession()
+        try await checkTokenExpiry(session: requestSession)
+        let request = try buildRequest(session: requestSession, path: path, method: "GET")
+        let (data, response) = try await performRequest(request)
+        try validateResponseGeneration(session: requestSession)
+        guard let http = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        if statusCodesAsMissing.contains(http.statusCode) {
+            return nil
+        }
+        try validateResponse(
+            response,
+            data: data,
+            authSessionToken: requestSession.authSessionToken
+        )
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            #if DEBUG
+            let preview = String(data: data.prefix(2000), encoding: .utf8) ?? "<binary>"
+            print("⚠️ [APIClient] Decode failed for \(T.self) at \(request.url?.path ?? "?"): \(error)")
+            print("⚠️ [APIClient] Response body preview: \(preview)")
+            #endif
+            throw NetworkError.decodingFailed(
+                ResponseDecodingFailure(error: error, targetType: T.self)
+            )
+        }
+    }
+
     func post<T: Decodable & Sendable, B: Encodable & Sendable>(_ path: String, body: B) async throws -> T {
         let requestSession = captureRequestSession()
         var request = try buildRequest(session: requestSession, path: path, method: "POST")
