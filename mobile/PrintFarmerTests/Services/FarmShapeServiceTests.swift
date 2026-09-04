@@ -270,6 +270,38 @@ final class FarmShapeServiceTests: XCTestCase {
         XCTAssertEqual(store.shape(serverID: server.id), replacementShape)
     }
 
+    func testAuthorityRejectedStartupFetchStillResolvesSession() async {
+        let initialShape = FarmShape(accountCount: 1, locationCount: 1, printerCount: 3)
+        let staleShape = FarmShape(accountCount: 4, locationCount: 3, printerCount: 30)
+        store.setShape(initialShape, serverID: serverID)
+        let request = AsyncBarrier()
+        defer { request.close() }
+        let service = FarmShapeService(
+            serverID: serverID,
+            store: store,
+            fetchShape: {
+                await request.arriveAndWait()
+                return staleShape
+            }
+        )
+        service.beginSession(authToken: 1)
+
+        let resolution = Task {
+            await service.resolveForAuthenticatedSession(
+                serverID: serverID,
+                timeout: .seconds(1)
+            )
+        }
+        await request.waitUntilArrived()
+        store.invalidateShape(serverID: serverID)
+        request.release()
+        await resolution.value
+
+        XCTAssertTrue(service.isSessionResolved)
+        XCTAssertEqual(service.latestShape, initialShape)
+        XCTAssertNil(store.shape(serverID: serverID))
+    }
+
     func testUnknownDiffersFromKnownShapeOfOne() {
         let unknown: FarmShape? = nil
         let knownOne = FarmShape(accountCount: 1, locationCount: 1, printerCount: 1)

@@ -246,7 +246,10 @@ enum UITestBootstrap {
         } else {
             injectedSnapshotStore = nil
         }
-        let services = ServiceContainer.demo(farmSnapshotStore: injectedSnapshotStore)
+        let services = ServiceContainer.demo(
+            serverRegistry: registry,
+            farmSnapshotStore: injectedSnapshotStore
+        )
 
         // #1353: `ResolvedSystemCapabilities.defaults.printedPartsInventoryEnabled`
         // is `false` in production so a freshly-provisioned server without any

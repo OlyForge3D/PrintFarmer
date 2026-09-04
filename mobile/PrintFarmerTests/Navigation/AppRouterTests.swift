@@ -431,6 +431,39 @@ final class AppRouterTests: XCTestCase {
         )
     }
 
+    func testVerifiedIdentityUpgradeCanPreserveCurrentNavigationStack() {
+        let router = AppRouter()
+        let serverID = UUID()
+        let provisionalUserID = UUID()
+        let verifiedUserID = UUID()
+        let printerID = UUID()
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: provisionalUserID,
+            preference: .simple,
+            farmShape: nil,
+            isFarmAdmin: false,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.printersPath.append(AppDestination.printerDetail(id: printerID))
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: verifiedUserID,
+            preference: .automatic,
+            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 4),
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable,
+            preserveNavigationOnContextChange: true
+        )
+
+        XCTAssertEqual(router.configuredUserID, verifiedUserID)
+        XCTAssertEqual(router.printersPath.count, 1)
+    }
+
     func testShippingPresentationPreservesAdaptiveSelectionForCompactReturn() {
         let router = AppRouter()
         let serverID = UUID()

@@ -271,12 +271,13 @@ final class AppRouter {
         farmShape: FarmShape?,
         isFarmAdmin: Bool,
         capabilities: ResolvedSystemCapabilities,
-        oversightAvailability: OversightNavigationAvailability
+        oversightAvailability: OversightNavigationAvailability,
+        preserveNavigationOnContextChange: Bool = false
     ) {
         let contextChanged = configuredServerID != serverID || configuredUserID != userID
         let preferenceChanged = appliedNavigationPreference != preference
 
-        if contextChanged {
+        if contextChanged && !preserveNavigationOnContextChange {
             invalidatePendingNavigation()
         }
 

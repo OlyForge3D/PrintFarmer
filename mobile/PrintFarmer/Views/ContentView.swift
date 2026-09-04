@@ -14,6 +14,7 @@ private struct ResolvedNavigationIdentity: Equatable {
     let endpoint: String
     let userID: UUID
     let isFarmAdmin: Bool
+    let isProvisional: Bool
 }
 
 /// Adaptive operator shell for compact devices, with the existing split view
@@ -271,16 +272,18 @@ struct ContentView: View {
 
     private func synchronizeAdaptiveShell(
         capabilities: ResolvedSystemCapabilities,
-        oversightAvailability: OversightNavigationAvailability
+        oversightAvailability: OversightNavigationAvailability,
+        preserveNavigationOnIdentityUpgrade: Bool = false
     ) {
         if sizeClass == .regular {
             router.presentShippingShell(capabilities: capabilities)
             return
         }
 
-        guard let serverID = serverRegistry.activeServerID,
+        guard let activeServer = serverRegistry.activeServer,
               let navigationIdentity,
-              navigationIdentity.serverID == serverID else {
+              navigationIdentity.serverID == activeServer.id,
+              navigationIdentity.endpoint == activeServer.normalizedURLString else {
             router.reconcileCapabilities(
                 capabilities,
                 oversightAvailability: oversightAvailability
@@ -289,13 +292,16 @@ struct ContentView: View {
         }
 
         router.configureAdaptiveShell(
-            serverID: serverID,
+            serverID: activeServer.id,
             userID: navigationIdentity.userID,
-            preference: serverRegistry.navigationLayoutPreference,
+            preference: navigationIdentity.isProvisional
+                ? .simple
+                : serverRegistry.navigationLayoutPreference,
             farmShape: services.farmShapeService.sessionShape,
             isFarmAdmin: navigationIdentity.isFarmAdmin,
             capabilities: capabilities,
-            oversightAvailability: oversightAvailability
+            oversightAvailability: oversightAvailability,
+            preserveNavigationOnContextChange: preserveNavigationOnIdentityUpgrade
         )
     }
 
@@ -331,18 +337,24 @@ struct ContentView: View {
 
             switch resolution {
             case .verified(let identity):
+                let preservesProvisionalNavigation =
+                    navigationIdentity?.serverID == request.serverID
+                    && navigationIdentity?.endpoint == request.endpoint
+                    && navigationIdentity?.isProvisional == true
                 navigationIdentityError = nil
                 navigationIdentity = ResolvedNavigationIdentity(
                     serverID: request.serverID,
                     endpoint: request.endpoint,
                     userID: identity.userID,
-                    isFarmAdmin: identity.roles.contains("farm_admin")
+                    isFarmAdmin: identity.roles.contains("farm_admin"),
+                    isProvisional: false
                 )
                 synchronizeAdaptiveShell(
                     capabilities: services.capabilitiesService.resolved,
                     oversightAvailability: currentOversightAvailability(
                         capabilities: services.capabilitiesService.resolved
-                    )
+                    ),
+                    preserveNavigationOnIdentityUpgrade: preservesProvisionalNavigation
                 )
                 return
             case .offline:
@@ -353,7 +365,8 @@ struct ContentView: View {
                         serverID: request.serverID,
                         endpoint: request.endpoint,
                         userID: provisionalUserID,
-                        isFarmAdmin: false
+                        isFarmAdmin: false,
+                        isProvisional: true
                     )
                     synchronizeAdaptiveShell(
                         capabilities: services.capabilitiesService.resolved,

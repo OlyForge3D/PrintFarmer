@@ -460,6 +460,28 @@ final class UITestBootstrapTests: XCTestCase {
         XCTAssertNotNil(defaults.data(forKey: ServerRegistry.storageKey))
     }
 
+    func test_makeBundle_resolvesNavigationIdentityForActiveDemoServer() async throws {
+        let defaults = try makeEphemeralDefaults()
+        let environment = UITestBootstrap.makeBundle(defaults: defaults)
+        let activeServer = try XCTUnwrap(environment.serverRegistry.activeServer)
+
+        let resolution = await environment.services.currentUserForNavigation(
+            serverID: activeServer.id,
+            generation: environment.services.activeServerGeneration,
+            expectedEndpoint: activeServer.normalizedURLString
+        )
+
+        XCTAssertEqual(
+            resolution,
+            .verified(
+                NavigationUserIdentity(
+                    userID: DemoData.demoUser.id,
+                    roles: DemoData.demoUser.roles
+                )
+            )
+        )
+    }
+
     // MARK: - Helpers
 
     /// A fresh in-memory-ish UserDefaults suite unique per test, to keep

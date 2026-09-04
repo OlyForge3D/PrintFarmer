@@ -268,16 +268,15 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
     ) {
         guard generation == sessionGeneration else { return }
         if let shape {
-            guard store.setShape(
+            if store.setShape(
                 shape,
                 serverID: serverID,
                 authority: authority
-            ) else {
-                return
-            }
-            latestShape = shape
-            if !isSessionResolved {
-                sessionShape = shape
+            ) {
+                latestShape = shape
+                if !isSessionResolved {
+                    sessionShape = shape
+                }
             }
         }
         isSessionResolved = true
