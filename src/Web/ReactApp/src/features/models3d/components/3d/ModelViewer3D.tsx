@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { TextureLoader } from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PerspectiveIcon, OrthographicIcon, RecenterIcon, RulerIcon, SimplifyIcon } from '../../../../common/components/icons/MdiIcons';
+import { STUDIO_HDRI_URL } from '../../../../common/constants/environmentAssets';
 import { Button } from '@/common/components/ui/Button';
 import { MeasurementTool } from './MeasurementTool';
 import { MeasurementOverlay } from './MeasurementOverlay';
@@ -1153,7 +1154,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
 
         {/* Environment. Served locally (see public/assets/hdri) so this viewer does not
             depend on any third-party runtime host. */}
-        <Environment files="/assets/hdri/studio_small_03_1k.hdr" />
+        <Environment files={STUDIO_HDRI_URL} />
 
         {/* Print bed - if printer dimensions provided */}
         {bedDimensions && (
