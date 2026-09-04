@@ -1,8 +1,7 @@
 import Foundation
 import SwiftUI
 
-/// App router owning shell-aware tab selection, per-tab navigation stacks,
-/// and the legacy fallback sheet stacks.
+/// App router owning shell-aware tab selection and per-tab navigation stacks.
 ///
 /// Tab-owned `NavigationPath` properties back each tab's stack:
 /// * `printersPath` — Farm tab (PrinterListView)
@@ -17,18 +16,7 @@ import SwiftUI
 /// * `upkeepPath` — Oversight-mode Upkeep tab
 /// * `reportsPath` — Oversight-mode Reports tab
 ///
-/// Legacy fallback sheet stacks (#727) are owned by the sheets themselves,
-/// NOT the tabs, so dismissing a sheet can safely reset its stack without
-/// disturbing the underlying tab. Reset via `resetLegacySheet(_:)` from the
-/// sheet presenter on dismissal:
-/// * `dashboardSheetPath` — Dashboard sheet (from Attention overflow)
-/// * `maintenanceSheetPath` — Maintenance sheet (from Attention overflow)
-/// * `notificationsSheetPath` — legacy Notifications sheet (from Attention
-///   overflow). Kept distinct from `notificationsPath` so the sheet never
-///   shares state with the Attention tab stack.
-///
-/// See issue #706 (F1 operator shell) and #727 (legacy sheet reset) for
-/// the migration and hardening rationale.
+/// See issue #706 for the operator-shell migration rationale.
 @MainActor @Observable
 final class AppRouter {
     static let selectedTabDefaultsKey = "app.selectedTab"
@@ -63,12 +51,6 @@ final class AppRouter {
     var upkeepPath = NavigationPath()
     var reportsPath = NavigationPath()
 
-    // Legacy fallback sheet stacks (#727) — owned by the sheets, reset on
-    // dismissal via `resetLegacySheet(_:)`. Never shared with a tab stack.
-    var dashboardSheetPath = NavigationPath()
-    var maintenanceSheetPath = NavigationPath()
-    var notificationsSheetPath = NavigationPath()
-
     var notificationBadgeCount: Int = 0
     var pendingReadyCount: Int = 0
     var sidebarVisibility: NavigationSplitViewVisibility = .automatic
@@ -94,14 +76,6 @@ final class AppRouter {
         }
         return AppTab(rawValue: persistedRawValue) ?? .attention
     }
-
-    /// Monotonic token observed by legacy/operator sheet presenters to close
-    /// any active sheet before a task-action destination is applied (#726).
-    /// Bumped by `requestTransientSheetDismissal()`. Presenters react via
-    /// `.onChange(of:)` and close their local `@State` sheet bindings, which in
-    /// turn resets the corresponding legacy sheet stack through the existing
-    /// dismissal wiring.
-    var sheetDismissalNonce: Int = 0
 
     func navigate(
         to destination: DeepLinkDestination,
@@ -184,9 +158,6 @@ final class AppRouter {
         oversightJobsPath = NavigationPath()
         upkeepPath = NavigationPath()
         reportsPath = NavigationPath()
-        dashboardSheetPath = NavigationPath()
-        maintenanceSheetPath = NavigationPath()
-        notificationsSheetPath = NavigationPath()
         pendingNFCReadyPrinterId = nil
         pendingSpoolHighlightId = nil
         pendingAttentionItemId = nil
@@ -209,9 +180,6 @@ final class AppRouter {
         oversightJobsPath = NavigationPath()
         upkeepPath = NavigationPath()
         reportsPath = NavigationPath()
-        dashboardSheetPath = NavigationPath()
-        maintenanceSheetPath = NavigationPath()
-        notificationsSheetPath = NavigationPath()
     }
 
     func routeNotification(
@@ -416,13 +384,6 @@ final class AppRouter {
         selectedTab = .attention
     }
 
-    /// Requests that any active legacy/operator sheet be dismissed. Task-action
-    /// routing calls this (and awaits the acknowledgement seam) BEFORE applying
-    /// a destination so an action never opens behind a sheet (#726).
-    func requestTransientSheetDismissal() {
-        sheetDismissalNonce &+= 1
-    }
-
     /// Applies the guided-swap (#710) destination for a task-action handoff:
     /// selects the Farm tab and deterministically drives the Farm stack to the
     /// target printer's detail (where the guided filament swap lives). Unlike
@@ -459,31 +420,6 @@ final class AppRouter {
             upkeepPath = NavigationPath()
         case .reports:
             reportsPath = NavigationPath()
-        }
-    }
-
-    /// Resets navigation state owned by the given legacy fallback sheet so
-    /// that reopening the sheet starts at its documented root (#727).
-    ///
-    /// Callers should invoke this from the sheet presenter (e.g.
-    /// `AttentionView`) when the sheet's `isPresented` binding transitions
-    /// from `true` to `false`. This must never touch a tab's stack — the
-    /// active tab's `NavigationPath` (e.g. `notificationsPath`) is
-    /// deliberately independent of the sheet paths.
-    func resetLegacySheet(_ sheet: LegacySheet) {
-        switch sheet {
-        case .dashboard:
-            dashboardSheetPath = NavigationPath()
-        case .maintenance:
-            maintenanceSheetPath = NavigationPath()
-        case .notifications:
-            notificationsSheetPath = NavigationPath()
-        case .settings:
-            // `SettingsView` owns a local `NavigationStack` with no shared
-            // path, so there is nothing to reset here. The case exists so
-            // presenters can wire every legacy sheet through the same
-            // reset entry point without branching.
-            break
         }
     }
 
@@ -546,15 +482,4 @@ final class AppRouter {
             ? selectedTab
             : fallbackTab(for: capabilities)
     }
-}
-
-/// Legacy fallback sheets presented from `AttentionView` (#706 / #725).
-/// These sheets are the compatibility path while the operator shell rolls
-/// out — each owns its own navigation state via `AppRouter` so dismissing
-/// one never disturbs the active tab (#727).
-enum LegacySheet: Hashable, CaseIterable {
-    case dashboard
-    case maintenance
-    case notifications
-    case settings
 }

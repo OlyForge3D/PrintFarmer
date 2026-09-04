@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct DashboardView: View {
-    @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
+    @Environment(AppRouter.self) private var router
     @Environment(\.horizontalSizeClass) private var sizeClass
     private let ownsNavigationStack: Bool
     @State private var viewModel = DashboardViewModel()
@@ -16,11 +16,9 @@ struct DashboardView: View {
     }
 
     var body: some View {
-        @Bindable var router = router
-
         Group {
             if ownsNavigationStack {
-                NavigationStack(path: $router.dashboardSheetPath) {
+                NavigationStack {
                     screenContent
                 }
             } else {

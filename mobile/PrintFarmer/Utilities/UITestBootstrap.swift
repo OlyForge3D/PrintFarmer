@@ -333,8 +333,8 @@ enum UITestBootstrap {
         #endif
         // #817: make the canonical fleet load fail offline, so the pre-seeded
         // cached snapshot is preserved as the read-only stale shell instead of
-        // being replaced by live data. Dashboard remains reachable from the
-        // enabled Attention overflow.
+        // being replaced by live data. Dashboard remains reachable from its
+        // stable Oversight destination.
         if mode == .authenticatedColdOfflineShell {
             services.capabilitiesService = StubSystemCapabilitiesService(
                 resolved: .defaults

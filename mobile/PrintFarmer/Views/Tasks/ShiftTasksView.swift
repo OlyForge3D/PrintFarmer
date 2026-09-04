@@ -276,11 +276,9 @@ struct ShiftTasksView: View {
         let viewModel = viewModel
         actionRouter.configure(
             environment: TaskActionRoutingEnvironment(
-                dismissActiveSheets: {
-                    // Dismiss any active operator/legacy sheet and yield one
-                    // runloop turn so SwiftUI applies the dismissal before the
-                    // destination mutates (#726 dismiss-before-destination).
-                    router.requestTransientSheetDismissal()
+                awaitPresentationDismissal: {
+                    // Yield one runloop turn so SwiftUI applies the cleared
+                    // task-action presentation before its replacement.
                     await Task { @MainActor in }.value
                 },
                 navigateToSwap: { printerID, toolheadID in

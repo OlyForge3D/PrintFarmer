@@ -294,12 +294,7 @@ enum AttentionAccessibility {
 struct AttentionView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
-    @Environment(ServerRegistry.self) private var serverRegistry
     @State private var feedViewModel = AttentionFeedViewModel()
-    @State private var showingSettings = false
-    @State private var showingDashboard = false
-    @State private var showingMaintenance = false
-    @State private var showingNotifications = false
     @State private var pendingAction: AttentionPendingAction?
     @State private var resolvingAttentionItemId: String?
     @State private var loadingHarvestItemID: String?
@@ -346,9 +341,7 @@ struct AttentionView: View {
                 reconcilePendingAction()
             }
             .navigationTitle("Attention")
-            .rootNavigationChrome(for: .attention) {
-                attentionOverflowMenu
-            }
+            .rootNavigationChrome(for: .attention)
             .refreshable {
                 // Cycle-8 blocker B fix: capture owner provenance
                 // synchronously at .refreshable closure entry (before
@@ -436,18 +429,6 @@ struct AttentionView: View {
             loadingHarvestItemID = nil
             feedViewModel.deactivate()
         }
-        .sheet(isPresented: $showingSettings) {
-            SettingsView()
-        }
-        .sheet(isPresented: $showingDashboard) {
-            DashboardView()
-        }
-        .sheet(isPresented: $showingMaintenance) {
-            MaintenanceView()
-        }
-        .sheet(isPresented: $showingNotifications) {
-            NotificationsView()
-        }
         .confirmationDialog(
             pendingAction.map { "Confirm \($0.action.label)" } ?? "Confirm action",
             isPresented: Binding(
@@ -469,28 +450,6 @@ struct AttentionView: View {
             }
         } message: { pending in
             Text("This sends \(pending.action.label) for this item to the PrintFarmer server.")
-        }
-        .onChange(of: showingDashboard) { _, isPresented in
-            if !isPresented { router.resetLegacySheet(.dashboard) }
-        }
-        .onChange(of: showingMaintenance) { _, isPresented in
-            if !isPresented { router.resetLegacySheet(.maintenance) }
-        }
-        .onChange(of: showingNotifications) { _, isPresented in
-            if !isPresented { router.resetLegacySheet(.notifications) }
-        }
-        .onChange(of: showingSettings) { _, isPresented in
-            if !isPresented { router.resetLegacySheet(.settings) }
-        }
-        .onChange(of: router.sheetDismissalNonce) { _, _ in
-            // #726 sheet-safe routing: a task-action handoff requested that any
-            // active operator/legacy sheet be dismissed before the destination
-            // is applied. Close every legacy sheet; the per-sheet `.onChange`
-            // handlers above reset their stacks as they transition to false.
-            showingSettings = false
-            showingDashboard = false
-            showingMaintenance = false
-            showingNotifications = false
         }
     }
 
@@ -1096,7 +1055,7 @@ struct AttentionView: View {
                         .font(.title3.weight(.semibold))
                         .multilineTextAlignment(.center)
 
-                    Text("The operator attention feed is turned off on this server. Use the legacy screens below while it's disabled, or check for a re-enable with Try again.")
+                    Text("The operator attention feed is turned off on this server. Use the other navigation destinations for farm work, or check for a re-enable with Try again.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -1117,34 +1076,6 @@ struct AttentionView: View {
                 .controlSize(.large)
                 .accessibilityIdentifier("attention.disabled.retry")
 
-                VStack(spacing: 12) {
-                    fallbackButton(
-                        title: "Notifications",
-                        systemImage: "bell",
-                        hint: "Opens the classic notifications list.",
-                        identifier: "attention.fallback.notifications"
-                    ) {
-                        showingNotifications = true
-                    }
-                    fallbackButton(
-                        title: "Dashboard",
-                        systemImage: "square.grid.2x2",
-                        hint: "Opens the printer dashboard summary.",
-                        identifier: "attention.fallback.dashboard"
-                    ) {
-                        showingDashboard = true
-                    }
-                    fallbackButton(
-                        title: "Maintenance",
-                        systemImage: "wrench.adjustable",
-                        hint: "Opens the maintenance tasks screen.",
-                        identifier: "attention.fallback.maintenance"
-                    ) {
-                        showingMaintenance = true
-                    }
-                }
-                .padding(.horizontal, 24)
-
                 Spacer(minLength: 40)
             }
             .frame(maxWidth: .infinity)
@@ -1153,90 +1084,6 @@ struct AttentionView: View {
         .accessibilityIdentifier("attention.disabled.fallback")
     }
 
-    @ViewBuilder
-    private func fallbackButton(
-        title: String,
-        systemImage: String,
-        hint: String,
-        identifier: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: systemImage)
-                    .font(.headline)
-                    .frame(width: 28)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .font(.body.weight(.semibold))
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frame(minHeight: 44)
-            .frame(maxWidth: .infinity)
-            .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.pfBorder, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityHint(hint)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier(identifier)
-    }
-
-    // MARK: - Toolbar
-
-    private var attentionOverflowMenu: some View {
-        Menu {
-            Button {
-                showingNotifications = true
-            } label: {
-                Label("Notifications", systemImage: "bell")
-            }
-            .accessibilityIdentifier("attention.overflow.notifications")
-
-            Button {
-                showingDashboard = true
-            } label: {
-                Label("Dashboard", systemImage: "square.grid.2x2")
-            }
-            .accessibilityIdentifier("attention.overflow.dashboard")
-
-            Button {
-                showingMaintenance = true
-            } label: {
-                Label("Maintenance", systemImage: "wrench.adjustable")
-            }
-            .accessibilityIdentifier("attention.overflow.maintenance")
-
-            Divider()
-
-            Button {
-                showingSettings = true
-            } label: {
-                Label("Settings", systemImage: "gear")
-            }
-            .accessibilityIdentifier("attention.overflow.settings")
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                .imageScale(.large)
-                .frame(
-                    minWidth: RootNavigationChrome.minimumTouchTarget,
-                    minHeight: RootNavigationChrome.minimumTouchTarget
-                )
-        }
-        .accessibilityLabel("More")
-        .accessibilityHint("Opens dashboard, maintenance, and settings.")
-        .accessibilityIdentifier("attention.overflow")
-    }
 }
 
 // MARK: - Item card

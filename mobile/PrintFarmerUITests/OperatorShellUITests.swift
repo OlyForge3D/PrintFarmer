@@ -2,13 +2,13 @@ import XCTest
 
 /// UI tests for the F1 operator shell (issue #706).
 ///
-/// Verifies that the app launches into the Attention tab, that the tab
-/// bar exposes the five operator destinations in the required order, and
-/// that reachable destinations satisfy the two-tap requirement:
+/// Verifies that the app launches into the Attention tab, that the operator
+/// shell exposes its stable destinations, and that moved screens remain
+/// reachable from Oversight and Account:
 ///
-/// * Attention → overflow → Settings (2 taps)
-/// * Attention → overflow → Dashboard (2 taps)
-/// * Attention → overflow → Maintenance (2 taps)
+/// * Oversight → Dashboard
+/// * Oversight → Maintenance
+/// * Account → Notifications / Settings / Manage Servers / Offline Queue
 /// * Farm → printer → Advanced (advanced cockpit is intentionally deeper)
 ///
 /// These tests are best-effort: without a configured mock server the
@@ -54,8 +54,8 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         let expectedDestinations: [(tabTitle: String, sidebarIdentifier: String)] = [
             ("Attention", "sidebar.attention"),
             ("Farm", "sidebar.farm"),
-            ("Tasks", "sidebar.tasks"),
-            ("Inventory", "sidebar.inventory")
+            ("Inventory", "sidebar.inventory"),
+            ("Oversight", "sidebar.oversight")
         ]
         for destination in expectedDestinations {
             let button = operatorDestinationButton(
@@ -72,7 +72,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
 
     func testRetiredTabsAreNotVisible() {
         // The old shell exposed dedicated Notifications, Settings, and Scan tabs.
-        // Their flows now live under Attention, Farm, and Inventory.
+        // Their flows now live under Account, Farm, and Inventory.
         for retired in ["Notifications", "Settings", "Scan"] {
             let tab = app.tabBars.buttons[retired]
             XCTAssertFalse(tab.exists,
@@ -81,23 +81,59 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         XCTAssertFalse(app.buttons["sidebar.scan"].exists)
     }
 
-    // MARK: - Attention overflow reachability (two-tap gate)
+    // MARK: - Re-homed destination reachability
 
-    func testSettingsReachableFromAttentionOverflow() {
-        guard app.tabBars.buttons["Attention"].waitForExistence(timeout: 5) else { return }
-        app.tabBars.buttons["Attention"].tap()
+    func testAttentionOverflowIsRemoved() {
+        let attention = operatorDestinationButton(
+            tabTitle: "Attention",
+            sidebarIdentifier: "sidebar.attention",
+            timeout: 5
+        )
+        XCTAssertTrue(attention.exists)
+        attention.tap()
 
-        let overflow = app.buttons["attention.overflow"]
-        guard overflow.waitForExistence(timeout: 5) else {
-            XCTFail("Attention overflow control should be reachable in one tap")
-            return
+        XCTAssertFalse(
+            app.buttons["attention.overflow"].exists,
+            "Attention must not expose the retired overflow menu"
+        )
+    }
+
+    func testDashboardReachableFromOversight() {
+        openOversightDestination(
+            identifier: "oversight.destination.dashboard",
+            expectedNavigationBarTitle: "Dashboard"
+        )
+    }
+
+    func testMaintenanceReachableFromOversight() {
+        openOversightDestination(
+            identifier: "oversight.destination.maintenance",
+            expectedNavigationBarTitle: "Maintenance"
+        )
+    }
+
+    func testCanonicalAccountDestinationsAreReachable() {
+        openAccount()
+
+        for identifier in [
+            "account.destination.notifications",
+            "account.destination.settings",
+            "account.destination.manageServers",
+            "account.destination.offlineQueue"
+        ] {
+            XCTAssertTrue(
+                app.buttons[identifier].waitForExistence(timeout: 3),
+                "Account destination '\(identifier)' must be present"
+            )
         }
-        overflow.tap()
+    }
 
-        let settingsItem = app.buttons["Settings"]
-        XCTAssertTrue(settingsItem.waitForExistence(timeout: 3),
-                      "Settings must be reachable within two taps via Attention overflow")
-        settingsItem.tap()
+    func testSettingsReachableFromAccount() {
+        openAccount()
+
+        let settings = app.buttons["account.destination.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 3))
+        settings.tap()
 
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
         let advancedControlsToggle = app.switches["settings.advancedPrinterControls"]
@@ -113,32 +149,6 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
             "0",
             "Advanced Printer Controls must default off for the active server"
         )
-    }
-
-    func testDashboardReachableFromAttentionOverflow() {
-        guard app.tabBars.buttons["Attention"].waitForExistence(timeout: 5) else { return }
-        app.tabBars.buttons["Attention"].tap()
-
-        let overflow = app.buttons["attention.overflow"]
-        guard overflow.waitForExistence(timeout: 5) else { return }
-        overflow.tap()
-
-        let dashboardItem = app.buttons["Dashboard"]
-        XCTAssertTrue(dashboardItem.waitForExistence(timeout: 3),
-                      "Dashboard must be reachable within two taps via Attention overflow")
-    }
-
-    func testMaintenanceReachableFromAttentionOverflow() {
-        guard app.tabBars.buttons["Attention"].waitForExistence(timeout: 5) else { return }
-        app.tabBars.buttons["Attention"].tap()
-
-        let overflow = app.buttons["attention.overflow"]
-        guard overflow.waitForExistence(timeout: 5) else { return }
-        overflow.tap()
-
-        let maintenanceItem = app.buttons["Maintenance"]
-        XCTAssertTrue(maintenanceItem.waitForExistence(timeout: 3),
-                      "Maintenance must be reachable within two taps via Attention overflow")
     }
 
     // MARK: - Advanced controls gating (Farm → printer → Advanced)
@@ -178,319 +188,49 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         )
     }
 
-    // MARK: - Legacy sheet dismiss → reopen (#727)
-    //
-    // Contract these tests enforce:
-    //   1. Open a legacy fallback sheet from the Attention overflow (or
-    //      every still-reachable legacy sheet).
-    //   2. Push a NESTED destination inside that sheet's NavigationStack.
-    //   3. Dismiss the sheet.
-    //   4. Reopen it. It MUST land on its documented root; the previously
-    //      pushed child MUST be absent.
-    //
-    // A test that never creates stale nested state cannot detect broken
-    // #727 wiring: removing the `.onChange { resetLegacySheet }` handlers
-    // on AttentionView would still let a root-only reopen appear correct.
-    // Every helper therefore fails loudly on missing prerequisites via
-    // XCTFail — silent `guard ... return` is banned.
-
-    /// Dismisses a sheet presented from the Attention overflow via a
-    /// swipe-down gesture on its navigation bar. Returns true only when
-    /// the navigation bar has disappeared afterward.
-    private func dismissAttentionSheet(
-        navigationBarTitle: String,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> Bool {
-        let bar = app.navigationBars[navigationBarTitle]
-        guard bar.waitForExistence(timeout: 3) else {
-            XCTFail("Cannot dismiss \(navigationBarTitle) sheet — its navigation bar is not on screen",
-                    file: file, line: line)
-            return false
-        }
-        let start = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        let end = start.withOffset(CGVector(dx: 0, dy: 700))
-        start.press(forDuration: 0.05, thenDragTo: end)
-
-        // Poll for absence — the swipe animates for ~300ms.
-        let deadline = Date().addingTimeInterval(3)
-        while Date() < deadline {
-            if !bar.exists { return true }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
-        }
-        return false
-    }
-
-    private func selectAttentionSurface(
+    private func openAccount(
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        // Compact-width devices (iPhone) surface a bottom TabBar. Tap
-        // the Attention tab directly.
-        let tabAttention = app.tabBars.buttons["Attention"]
-        if tabAttention.waitForExistence(timeout: 5) {
-            tabAttention.tap()
-            return
-        }
+        let attention = operatorDestinationButton(
+            tabTitle: "Attention",
+            sidebarIdentifier: "sidebar.attention",
+            timeout: 5
+        )
+        XCTAssertTrue(attention.exists, file: file, line: line)
+        attention.tap()
 
-        // Regular-width devices (iPad) use NavigationSplitView. The
-        // Attention destination is the default tab, so the Attention
-        // navigation bar is already on screen — no selection needed.
-        // If the sidebar happens to be collapsed, tapping the visible
-        // Attention nav bar is a no-op that still leaves us on Attention.
-        if app.navigationBars["Attention"].waitForExistence(timeout: 5) {
-            return
-        }
-
-        // Last resort: try the explicit sidebar identifier. On iPad
-        // portrait the sidebar may be behind a system-provided toggle;
-        // attempt to reveal it.
-        if let toggle = firstMatchingSidebarToggle(), toggle.waitForExistence(timeout: 1) {
-            toggle.tap()
-        }
-        let sidebarAttention = app.buttons["sidebar.attention"]
-        if sidebarAttention.waitForExistence(timeout: 3) {
-            sidebarAttention.tap()
-            return
-        }
-
-        XCTFail("Attention destination is not reachable — no tab bar, no Attention nav bar, no sidebar entry",
-                file: file, line: line)
+        let account = app.buttons["navigation.account"]
+        XCTAssertTrue(account.waitForExistence(timeout: 5), file: file, line: line)
+        account.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["account.root"].waitForExistence(timeout: 5),
+            file: file,
+            line: line
+        )
     }
 
-    /// Returns the system-provided sidebar toggle if present. The
-    /// element is unlabeled by identifier; XCUI exposes it as a
-    /// navigation-bar button with label 'Sidebar' or 'Toggle Sidebar'.
-    private func firstMatchingSidebarToggle() -> XCUIElement? {
-        let candidates = ["Sidebar", "Toggle Sidebar", "Show Sidebar"]
-        for label in candidates {
-            let button = app.navigationBars.buttons[label]
-            if button.exists { return button }
-        }
-        return nil
-    }
-
-    /// Taps the Attention overflow menu and its named item. Fails loudly
-    /// if either control is missing or if the sheet's navigation bar
-    /// never appears — silent skipping is banned.
-    private func openAttentionOverflowSheet(
-        itemIdentifier: String,
+    private func openOversightDestination(
+        identifier: String,
         expectedNavigationBarTitle: String,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let overflow = app.buttons["attention.overflow"]
-        guard overflow.waitForExistence(timeout: 5) else {
-            XCTFail("Attention overflow control is missing — required to open \(expectedNavigationBarTitle) sheet",
-                    file: file, line: line)
-            return
-        }
-        overflow.tap()
+        let oversight = operatorDestinationButton(
+            tabTitle: "Oversight",
+            sidebarIdentifier: "sidebar.oversight",
+            timeout: 5
+        )
+        XCTAssertTrue(oversight.exists, file: file, line: line)
+        oversight.tap()
 
-        let item = app.buttons[itemIdentifier]
-        guard item.waitForExistence(timeout: 3) else {
-            XCTFail("Overflow item '\(itemIdentifier)' is missing — cannot present \(expectedNavigationBarTitle) sheet",
-                    file: file, line: line)
-            return
-        }
-        item.tap()
-
+        let destination = app.buttons[identifier]
+        XCTAssertTrue(destination.waitForExistence(timeout: 5), file: file, line: line)
+        destination.tap()
         XCTAssertTrue(
             app.navigationBars[expectedNavigationBarTitle].waitForExistence(timeout: 5),
-            "\(expectedNavigationBarTitle) sheet did not present after tapping overflow item '\(itemIdentifier)'",
-            file: file, line: line
-        )
-    }
-
-    /// Verifies the strict #727 contract: the sheet is opened, a nested
-    /// destination is pushed on its NavigationStack, the sheet is
-    /// dismissed, and on reopen the sheet must be back at its root with
-    /// the nested destination absent.
-    ///
-    /// `pushNestedDestination` must push exactly one child destination
-    /// and return `true` when the child is on screen; if it cannot make
-    /// nested state deterministically (e.g. required fixture missing),
-    /// it must call `XCTFail` itself and return `false`. Silent success
-    /// or silent skip is banned.
-    private func assertLegacySheetResetsAfterDismissal(
-        sheetLabel: String,
-        openSheet: () -> Void,
-        rootNavigationBarTitle: String,
-        pushNestedDestination: () -> Bool,
-        nestedNavigationBarTitle: String,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        // 1. Open the sheet.
-        openSheet()
-        guard app.navigationBars[rootNavigationBarTitle].waitForExistence(timeout: 5) else {
-            XCTFail("[\(sheetLabel)] sheet failed to present its root '\(rootNavigationBarTitle)'",
-                    file: file, line: line)
-            return
-        }
-
-        // 2. Push a nested destination. If the helper cannot, it must
-        // have failed already.
-        guard pushNestedDestination() else {
-            XCTFail("[\(sheetLabel)] could not push nested destination '\(nestedNavigationBarTitle)' — test cannot verify #727 without stale nested state",
-                    file: file, line: line)
-            return
-        }
-        XCTAssertTrue(
-            app.navigationBars[nestedNavigationBarTitle].waitForExistence(timeout: 5),
-            "[\(sheetLabel)] nested destination '\(nestedNavigationBarTitle)' did not appear after push",
-            file: file, line: line
-        )
-
-        // 3. Dismiss the sheet (from the nested destination).
-        guard dismissAttentionSheet(navigationBarTitle: nestedNavigationBarTitle) else {
-            XCTFail("[\(sheetLabel)] failed to dismiss sheet while '\(nestedNavigationBarTitle)' was on screen",
-                    file: file, line: line)
-            return
-        }
-
-        // 4. Reopen. The sheet MUST be back at its root, and the
-        // previously pushed nested destination MUST NOT be on screen.
-        openSheet()
-        XCTAssertTrue(
-            app.navigationBars[rootNavigationBarTitle].waitForExistence(timeout: 5),
-            "[\(sheetLabel)] reopened sheet must present its root '\(rootNavigationBarTitle)' — #727 regression: nested state survived dismissal",
-            file: file, line: line
-        )
-        XCTAssertFalse(
-            app.navigationBars[nestedNavigationBarTitle].exists,
-            "[\(sheetLabel)] nested destination '\(nestedNavigationBarTitle)' must be gone after dismissal + reopen — #727 regression",
-            file: file, line: line
-        )
-    }
-
-    // MARK: - Nested-destination push helpers
-
-    /// Swipes the Dashboard sheet horizontally until the Active-jobs page
-    /// (currentPage=1) is on screen. iPad renders the whole page linearly
-    /// so no swipe is needed and the row is already queryable after a
-    /// short scroll.
-    private func revealFirstDashboardActiveJob() -> XCUIElement {
-        let row = app.buttons["dashboard.activeJob.0"]
-        if row.waitForExistence(timeout: 3), row.isHittable { return row }
-
-        // Compact size class uses TabView paging — swipe left up to three
-        // times to reach the Active page. The row's presence check
-        // succeeds once the page is realized.
-        for _ in 0..<3 {
-            app.swipeLeft()
-            if row.waitForExistence(timeout: 2), row.isHittable {
-                return row
-            }
-        }
-        // Last resort — scroll the current page (iPad iPadContent is a
-        // ScrollView; the row may just be below the fold).
-        app.swipeUp()
-        _ = row.waitForExistence(timeout: 2)
-        return row
-    }
-
-    private func pushDashboardPrinterDetail(
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> Bool {
-        let row = revealFirstDashboardActiveJob()
-        guard row.exists else {
-            XCTFail("Dashboard active-job row is missing — required demo fixture 'dashboard.activeJob.0' is not on screen",
-                    file: file, line: line)
-            return false
-        }
-        row.tap()
-        return app.navigationBars["Printer"].waitForExistence(timeout: 5)
-    }
-
-    private func pushMaintenanceAnalytics(
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> Bool {
-        let analytics = app.buttons["maintenance.analytics.link"]
-        if !analytics.waitForExistence(timeout: 3) {
-            // Compact iPhone renders MaintenanceView pages; Alerts page
-            // (currentPage=0) already contains analyticsLink but it may
-            // sit below the fold — scroll to reveal.
-            app.swipeUp()
-        }
-        guard analytics.waitForExistence(timeout: 3) else {
-            XCTFail("Maintenance analytics link ('maintenance.analytics.link') is missing — required to push Maintenance Analytics",
-                    file: file, line: line)
-            return false
-        }
-        analytics.tap()
-        return app.navigationBars["Maintenance Analytics"].waitForExistence(timeout: 5)
-    }
-
-    private func pushSettingsManageServers(
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) -> Bool {
-        let manage = app.buttons["settings.manageServers"]
-        if !manage.waitForExistence(timeout: 3) {
-            app.swipeUp()
-        }
-        guard manage.waitForExistence(timeout: 3) else {
-            XCTFail("Settings 'Manage Servers' link ('settings.manageServers') is missing — required to push ServersView",
-                    file: file, line: line)
-            return false
-        }
-        manage.tap()
-        return app.navigationBars["Servers"].waitForExistence(timeout: 5)
-    }
-
-    // MARK: - Strict #727 scenarios (default authenticated bootstrap)
-
-    func testDashboardSheetResetsPushedPrinterDetailAfterDismissal() {
-        selectAttentionSurface()
-
-        assertLegacySheetResetsAfterDismissal(
-            sheetLabel: "Dashboard",
-            openSheet: {
-                self.openAttentionOverflowSheet(
-                    itemIdentifier: "attention.overflow.dashboard",
-                    expectedNavigationBarTitle: "Dashboard"
-                )
-            },
-            rootNavigationBarTitle: "Dashboard",
-            pushNestedDestination: { self.pushDashboardPrinterDetail() },
-            nestedNavigationBarTitle: "Printer"
-        )
-    }
-
-    func testMaintenanceSheetResetsPushedAnalyticsAfterDismissal() {
-        selectAttentionSurface()
-
-        assertLegacySheetResetsAfterDismissal(
-            sheetLabel: "Maintenance",
-            openSheet: {
-                self.openAttentionOverflowSheet(
-                    itemIdentifier: "attention.overflow.maintenance",
-                    expectedNavigationBarTitle: "Maintenance"
-                )
-            },
-            rootNavigationBarTitle: "Maintenance",
-            pushNestedDestination: { self.pushMaintenanceAnalytics() },
-            nestedNavigationBarTitle: "Maintenance Analytics"
-        )
-    }
-
-    func testSettingsSheetResetsPushedManageServersAfterDismissal() {
-        selectAttentionSurface()
-
-        assertLegacySheetResetsAfterDismissal(
-            sheetLabel: "Settings",
-            openSheet: {
-                self.openAttentionOverflowSheet(
-                    itemIdentifier: "attention.overflow.settings",
-                    expectedNavigationBarTitle: "Settings"
-                )
-            },
-            rootNavigationBarTitle: "Settings",
-            pushNestedDestination: { self.pushSettingsManageServers() },
-            nestedNavigationBarTitle: "Servers"
+            file: file,
+            line: line
         )
     }
 }
