@@ -333,6 +333,61 @@ final class ServerRegistryTests: XCTestCase {
         XCTAssertTrue(signalRRecorder.services.last?.connectCalled ?? false)
     }
 
+    func testNavigationIdentityIsVerifiedAgainstSettledDestinationServer() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let first = try registry.add(
+            displayName: "One",
+            baseURL: URL(string: "https://one.example.com")!
+        )
+        let second = try registry.add(
+            displayName: "Two",
+            baseURL: URL(string: "https://two.example.com")!
+        )
+        try registry.setActive(id: first.id)
+
+        let credentialsStore = isolatedCredentialsStore()
+        credentialsStore.save(
+            ServerCredentials(accessToken: "token-one", expiresAt: nil),
+            serverId: first.id
+        )
+        credentialsStore.save(
+            ServerCredentials(accessToken: "token-two", expiresAt: nil),
+            serverId: second.id
+        )
+        let container = switchingTestContainer(
+            registry: registry,
+            credentialsStore: credentialsStore,
+            signalRRecorder: SignalRRecorder()
+        )
+        mockAPIClient.requestHandler = { request in
+            if request.url?.path == "/api/auth/me" {
+                return (
+                    TestData.httpResponse(url: request.url, statusCode: 200),
+                    Data(TestJSON.userDTO.utf8)
+                )
+            }
+            return (
+                TestData.httpResponse(url: request.url, statusCode: 404),
+                Data()
+            )
+        }
+
+        try registry.setActive(id: second.id)
+        try await waitForBaseURL(second.baseURL, in: container)
+        let user = await container.currentUserForNavigation(
+            serverID: second.id,
+            generation: container.activeServerGeneration
+        )
+
+        XCTAssertEqual(user?.username, "admin")
+        XCTAssertEqual(
+            mockAPIClient.capturedRequests.last(where: {
+                $0.url?.path == "/api/auth/me"
+            })?.url?.host,
+            "two.example.com"
+        )
+    }
+
     func testServiceContainerReconcilesRapidSwitchesToLatestServer() async throws {
         let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
         let first = try registry.add(displayName: "One", baseURL: URL(string: "https://one.example.com")!)

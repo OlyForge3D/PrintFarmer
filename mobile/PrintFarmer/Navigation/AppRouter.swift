@@ -92,6 +92,11 @@ final class AppRouter {
         switch destination {
         case .printerDetail(let id):
             let tab = printerDestinationTab
+            guard visibleTabs(for: capabilities).contains(tab) else {
+                resetPrinterPath(for: tab)
+                selectedTab = fallbackTab(for: capabilities)
+                return
+            }
             selectedTab = tab
             resetPrinterPath(for: tab)
             Task { @MainActor in
@@ -101,6 +106,12 @@ final class AppRouter {
             }
         case .printerReady(let id):
             let tab = printerDestinationTab
+            guard visibleTabs(for: capabilities).contains(tab) else {
+                resetPrinterPath(for: tab)
+                pendingNFCReadyPrinterId = nil
+                selectedTab = fallbackTab(for: capabilities)
+                return
+            }
             selectedTab = tab
             resetPrinterPath(for: tab)
             pendingNFCReadyPrinterId = id
@@ -131,6 +142,12 @@ final class AppRouter {
             pendingAttentionItemId = id
         case .filamentSwap(let printerId, let toolheadIndex, let jobId):
             let tab = printerDestinationTab
+            guard visibleTabs(for: capabilities).contains(tab) else {
+                resetPrinterPath(for: tab)
+                pendingFilamentSwap = nil
+                selectedTab = fallbackTab(for: capabilities)
+                return
+            }
             selectedTab = tab
             resetPrinterPath(for: tab)
             pendingFilamentSwap = capabilities.guidedSwapEnabled
@@ -325,6 +342,7 @@ final class AppRouter {
     }
 
     func presentShippingShell(capabilities: ResolvedSystemCapabilities) {
+        clearDisabledFeatureState(capabilities)
         transition(
             to: .current,
             mode: activeMode,
@@ -339,18 +357,7 @@ final class AppRouter {
     ) {
         let nextOversightAvailability = oversightAvailability ?? self.oversightAvailability
 
-        if !capabilities.attentionEnabled {
-            notificationsPath = NavigationPath()
-            pendingAttentionItemId = nil
-            notificationBadgeCount = 0
-        }
-        if !capabilities.shiftPlanEnabled {
-            tasksPath = NavigationPath()
-            jobsPath = NavigationPath()
-        }
-        if !capabilities.guidedSwapEnabled {
-            pendingFilamentSwap = nil
-        }
+        clearDisabledFeatureState(capabilities)
 
         transition(
             to: AdaptiveNavigationShell.effectiveShell(
@@ -510,6 +517,24 @@ final class AppRouter {
             fleetPath.append(destination)
         default:
             printersPath.append(destination)
+        }
+    }
+
+    private func clearDisabledFeatureState(
+        _ capabilities: ResolvedSystemCapabilities
+    ) {
+        if !capabilities.attentionEnabled {
+            notificationsPath = NavigationPath()
+            pendingAttentionItemId = nil
+            notificationBadgeCount = 0
+        }
+        if !capabilities.shiftPlanEnabled {
+            tasksPath = NavigationPath()
+            jobsPath = NavigationPath()
+            pendingReadyCount = 0
+        }
+        if !capabilities.guidedSwapEnabled {
+            pendingFilamentSwap = nil
         }
     }
 
