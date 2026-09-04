@@ -10,4 +10,10 @@ public sealed record SendToPrinterRequest
 
     /// <summary>Whether to start printing immediately after upload completes.</summary>
     public bool StartPrint { get; init; }
+
+    /// <summary>
+    /// Optional staged G-code artifact to print. Required when the slice job has multiple G-code
+    /// outputs.
+    /// </summary>
+    public Guid? ArtifactId { get; init; }
 }

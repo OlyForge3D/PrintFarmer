@@ -64,7 +64,9 @@ public sealed class DatabaseMigrationTests
             "20260828155919_AddPrinterCorneringFields",
             "20260829174516_AddCalibrationMethodProgressAndDraftProfile",
             "20260829182206_AddCalibrationDraftProfilePromotionClaim",
-            "20260901184722_AddActualPrintTimeTicksShadowColumn");
+            "20260901184722_AddActualPrintTimeTicksShadowColumn",
+            "20260903201543_PersistGcodePromotionVirtualDirectory",
+            "20260903210517_AllowSharedGcodeFilePromotionCheckpoints");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -657,7 +659,9 @@ public sealed class DatabaseMigrationTests
             "20260828155919_AddPrinterCorneringFields",
             "20260829174516_AddCalibrationMethodProgressAndDraftProfile",
             "20260829182206_AddCalibrationDraftProfilePromotionClaim",
-            "20260901184722_AddActualPrintTimeTicksShadowColumn");
+            "20260901184722_AddActualPrintTimeTicksShadowColumn",
+            "20260903201543_PersistGcodePromotionVirtualDirectory",
+            "20260903210517_AllowSharedGcodeFilePromotionCheckpoints");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1199,6 +1203,8 @@ public sealed class DatabaseMigrationTests
                 "20260829174442_AddCalibrationMethodProgressAndDraftProfile",
                 "20260829182140_AddCalibrationDraftProfilePromotionClaim",
                 "20260901184652_AddActualPrintTimeTicksShadowColumn",
+                "20260903201256_PersistGcodePromotionVirtualDirectory",
+                "20260903210453_AllowSharedGcodeFilePromotionCheckpoints",
             ]
             :
             [
@@ -1228,6 +1234,8 @@ public sealed class DatabaseMigrationTests
                 "20260829174453_AddCalibrationMethodProgressAndDraftProfile",
                 "20260829182150_AddCalibrationDraftProfilePromotionClaim",
                 "20260901184704_AddActualPrintTimeTicksShadowColumn",
+                "20260903201308_PersistGcodePromotionVirtualDirectory",
+                "20260903210505_AllowSharedGcodeFilePromotionCheckpoints",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");

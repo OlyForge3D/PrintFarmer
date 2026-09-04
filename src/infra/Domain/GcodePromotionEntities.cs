@@ -90,6 +90,9 @@ public sealed class GcodePromotionCheckpoint
     /// <summary>SHA-256 (hex) of the canonical immutable request payload.</summary>
     public string RequestSha256 { get; set; } = string.Empty;
 
+    /// <summary>Normalized virtual library directory requested for the promoted file.</summary>
+    public string VirtualDirectory { get; set; } = string.Empty;
+
     /// <summary>Source artifact identifier (soft ref — the artifact lives in the slicer context).</summary>
     public Guid SourceArtifactId { get; set; }
 

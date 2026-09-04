@@ -201,7 +201,10 @@ public interface IGcodeFilesService
     /// </summary>
     /// <param name="id">G-code file ID.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>Tuple of (filePath, originalFileName) if found, otherwise null.</returns>
+    /// <returns>
+    /// Tuple containing the containment-checked physical file path and original filename when found;
+    /// otherwise null. The caller must not resolve the returned path a second time.
+    /// </returns>
     Task<(string FilePath, string OriginalFileName)?> GetFilePathAndNameAsync(Guid id, CancellationToken ct);
 
     /// <summary>
@@ -209,7 +212,10 @@ public interface IGcodeFilesService
     /// </summary>
     /// <param name="id">Unique identifier of the file.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>Thumbnail path if found and exists, otherwise null.</returns>
+    /// <returns>
+    /// Containment-checked physical thumbnail path when metadata is valid; otherwise null.
+    /// The caller must not resolve the returned path a second time.
+    /// </returns>
     Task<string?> GetThumbnailPathAsync(Guid id, CancellationToken ct);
 
     /// <summary>
@@ -340,6 +346,12 @@ public interface IGcodeFilesService
     /// file has been deleted.
     /// </remarks>
     Task<string?> DownloadFileAsync(Guid id, string webRootPath, CancellationToken ct);
+
+    /// <summary>Reads durable G-code bytes without exposing the server-side storage path.</summary>
+    /// <param name="id">Unique identifier of the durable file.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The stored bytes, or <see langword="null"/> when the file is unavailable.</returns>
+    Task<byte[]?> ReadFileBytesAsync(Guid id, CancellationToken ct);
 
     #endregion
 }

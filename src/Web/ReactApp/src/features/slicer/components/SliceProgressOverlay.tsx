@@ -1,11 +1,17 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { Button } from '@/common/components/ui';
-import { DownloadIcon } from '@/common/components/icons/MdiIcons';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
+import { DownloadIcon, SaveIcon } from '@/common/components/icons/MdiIcons';
 import { sliceJobService } from '@/services/sliceJobService';
 import { GcodePreviewModal } from '@/features/slicer/components/GcodePreviewModal';
 import { SendToPrinterModal } from '@/features/slicer/components/SendToPrinterModal';
 import type { SliceJobProgressState } from '@/features/slicer/hooks/useSliceJobProgress';
+import {
+  downloadGcodeArtifact,
+  resolveGcodeArtifactForAction,
+  saveGcodeArtifactToLibrary,
+} from '@/features/slicer/utils/sliceArtifactActions';
 
 interface SliceProgressOverlayProps {
   jobId: string;
@@ -44,6 +50,7 @@ interface SliceProgressOverlayProps {
  * with real-time progress ring and status details.
  */
 export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filamentCostPerKg, resolvedCostPerGram, costSource, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter, retryDisabled }: SliceProgressOverlayProps) {
+  const queryClient = useQueryClient();
   const isCompleted = progress.status === 'Completed';
   const isFailed = progress.status === 'Failed';
   const isCancelled = progress.status === 'Cancelled';
@@ -52,10 +59,80 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
+  const [printArtifactId, setPrintArtifactId] = useState<string | null>(null);
+  const [isResolvingPrint, setIsResolvingPrint] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveFeedback, setSaveFeedback] = useState<{
+    kind: 'success' | 'error';
+    message: string;
+  } | null>(null);
+  const saveInFlightRef = useRef(false);
+  const printResolutionInFlightRef = useRef(false);
+  const autoOpenedJobRef = useRef<string | null>(null);
 
-  const handleDownload = useCallback(() => {
-    window.open(`${getApiBaseUrl()}/artifacts/job/${jobId}`, '_blank');
-  }, [jobId]);
+  useEffect(() => {
+    if (isCompleted && progress.artifactsRoute && autoOpenedJobRef.current !== jobId) {
+      autoOpenedJobRef.current = jobId;
+      setPreviewOpen(true);
+    }
+  }, [isCompleted, jobId, progress.artifactsRoute]);
+
+  const handleDownload = useCallback(async () => {
+    if (!progress.artifactsRoute) return;
+    setIsDownloading(true);
+    try {
+      await downloadGcodeArtifact(progress.artifactsRoute);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to download G-code.');
+    } finally {
+      setIsDownloading(false);
+    }
+  }, [progress.artifactsRoute]);
+
+  const handleSave = useCallback(async () => {
+    if (!progress.artifactsRoute || saveInFlightRef.current) return;
+    saveInFlightRef.current = true;
+    setIsSaving(true);
+    setSaveFeedback(null);
+    try {
+      const result = await saveGcodeArtifactToLibrary(progress.artifactsRoute, jobId);
+      if (result.createdNew) {
+        await queryClient.invalidateQueries({ queryKey: ['file-browser'] });
+      }
+      const message = result.createdNew
+        ? 'Saved to Library'
+        : 'Already in File Library';
+      setSaveFeedback({ kind: 'success', message });
+      toast.success(message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to save G-code.';
+      setSaveFeedback({ kind: 'error', message });
+      toast.error(message);
+    } finally {
+      saveInFlightRef.current = false;
+      setIsSaving(false);
+    }
+  }, [jobId, progress.artifactsRoute, queryClient]);
+
+  const handlePrint = useCallback(async () => {
+    if (!progress.artifactsRoute || printResolutionInFlightRef.current) return;
+    printResolutionInFlightRef.current = true;
+    setIsResolvingPrint(true);
+    try {
+      const artifact = await resolveGcodeArtifactForAction(progress.artifactsRoute);
+      if (!artifact) {
+        throw new Error('No G-code artifact is available for this job.');
+      }
+      setPrintArtifactId(artifact.id);
+      setSendOpen(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to prepare G-code for printing.');
+    } finally {
+      printResolutionInFlightRef.current = false;
+      setIsResolvingPrint(false);
+    }
+  }, [progress.artifactsRoute]);
 
   const materialCost = resolvedCostPerGram != null
     ? sliceJobService.computeMaterialCostPerGram(progress.filamentUsedGrams, resolvedCostPerGram)
@@ -172,26 +249,57 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
 
         {/* Terminal actions */}
         {isCompleted && (
-          <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
-            <Button variant="primary" size="sm" onClick={() => setPreviewOpen(true)}>
-              Preview
-            </Button>
-            <Button variant="success" size="sm" onClick={() => setSendOpen(true)}>
-              Send to Printer
-            </Button>
-            {progress.resultFileUrl && (
+          <div className="flex flex-col items-center gap-2 mt-2">
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              {progress.artifactsRoute && (
+                <Button variant="primary" size="sm" onClick={() => setPreviewOpen(true)}>
+                  Preview
+                </Button>
+              )}
+              {progress.artifactsRoute && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  iconLeft={<DownloadIcon className="w-4 h-4" />}
+                  onClick={handleDownload}
+                  loading={isDownloading}
+                  disabled={isDownloading}
+                >
+                  Download G-code
+                </Button>
+              )}
               <Button
                 variant="secondary"
                 size="sm"
-                iconLeft={<DownloadIcon className="w-4 h-4" />}
-                onClick={handleDownload}
+                iconLeft={<SaveIcon className="w-4 h-4" />}
+                onClick={handleSave}
+                loading={isSaving}
+                disabled={!progress.artifactsRoute || isSaving}
+                title={progress.artifactsRoute ? undefined : 'No staged G-code artifact is available.'}
               >
-                Download G-code
+                Save to Library
               </Button>
+              <Button
+                variant="success"
+                size="sm"
+                onClick={handlePrint}
+                loading={isResolvingPrint}
+                disabled={!progress.artifactsRoute || isResolvingPrint}
+              >
+                Print
+              </Button>
+              <Button variant="secondary" size="sm" onClick={onNewJob}>
+                New Job
+              </Button>
+            </div>
+            {saveFeedback && (
+              <p
+                role={saveFeedback.kind === 'error' ? 'alert' : 'status'}
+                className={saveFeedback.kind === 'error' ? 'text-xs text-pf-error' : 'text-xs text-pf-success'}
+              >
+                {saveFeedback.message}
+              </p>
             )}
-            <Button variant="secondary" size="sm" onClick={onNewJob}>
-              New Job
-            </Button>
           </div>
         )}
 
@@ -213,16 +321,26 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
       </div>
 
       {/* Post-slice modals */}
-      <GcodePreviewModal isOpen={previewOpen} onClose={() => setPreviewOpen(false)} jobId={jobId} />
-      <SendToPrinterModal
-        isOpen={sendOpen}
-        onClose={() => setSendOpen(false)}
-        jobId={jobId}
-        selectedSpoolId={selectedSpoolId}
-        requiredPrinterModel={requiredPrinterModel}
-        requiredMaterialType={requiredMaterialType}
-        requiredNozzleDiameter={requiredNozzleDiameter}
+      <GcodePreviewModal
+        isOpen={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        artifactsRoute={progress.artifactsRoute ?? ''}
       />
+      {printArtifactId && (
+        <SendToPrinterModal
+          isOpen={sendOpen}
+          onClose={() => {
+            setSendOpen(false);
+            setPrintArtifactId(null);
+          }}
+          jobId={jobId}
+          artifactId={printArtifactId}
+          selectedSpoolId={selectedSpoolId}
+          requiredPrinterModel={requiredPrinterModel}
+          requiredMaterialType={requiredMaterialType}
+          requiredNozzleDiameter={requiredNozzleDiameter}
+        />
+      )}
     </div>
   );
 }

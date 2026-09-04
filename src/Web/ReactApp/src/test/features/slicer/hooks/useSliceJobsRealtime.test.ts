@@ -144,13 +144,13 @@ describe('useSliceJobsRealtime', () => {
         jobId: 'job-1',
         status: 'Completed',
         progressPercent: 100,
-        resultFileUrl: '/artifacts/job-1/output.gcode',
+        artifactsRoute: '/api/artifacts/job/job-1',
       }));
     });
 
     const cached = queryClient.getQueryData<SliceJobStatusResponse[]>(['slice-jobs']);
     expect(cached![0].status).toBe('Completed');
-    expect(cached![0].resultFileUrl).toBe('/artifacts/job-1/output.gcode');
+    expect(cached![0].artifactsRoute).toBe('/api/artifacts/job/job-1');
   });
 
   it('invalidates query for unknown job IDs', async () => {

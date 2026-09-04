@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button, Select, FormField, Checkbox, NumberStepper } from '@/common/components/ui';
@@ -8,6 +8,7 @@ import { usePrintersFast } from '@/common/hooks/useApi';
 import { sortPrintersByAvailability } from '@/utils/printerSort';
 import { sliceJobService } from '@/services/sliceJobService';
 import type { SendToPrinterResponse, AddSliceToQueueResponse } from '@/services/sliceJobService';
+import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
 
 type SendMode = 'queue' | 'direct';
 
@@ -21,24 +22,26 @@ interface SendToPrinterModalProps {
   isOpen: boolean;
   onClose: () => void;
   jobId: string;
+  artifactId: string;
   selectedSpoolId?: number | null;
   requiredPrinterModel?: string;
   requiredMaterialType?: string;
   requiredNozzleDiameter?: number;
 }
 
-export function SendToPrinterModal({ isOpen, onClose, jobId, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: SendToPrinterModalProps) {
+export function SendToPrinterModal({ isOpen, onClose, jobId, artifactId, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: SendToPrinterModalProps) {
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Send to Printer"
+      title="Print"
       titleIcon={<PrinterIcon className="w-5 h-5" />}
       size="sm"
     >
       {isOpen && (
         <SendToPrinterForm
           jobId={jobId}
+          artifactId={artifactId}
           onClose={onClose}
           selectedSpoolId={selectedSpoolId}
           requiredPrinterModel={requiredPrinterModel}
@@ -52,6 +55,7 @@ export function SendToPrinterModal({ isOpen, onClose, jobId, selectedSpoolId, re
 
 interface SendToPrinterFormProps {
   jobId: string;
+  artifactId: string;
   onClose: () => void;
   selectedSpoolId?: number | null;
   requiredPrinterModel?: string;
@@ -59,7 +63,7 @@ interface SendToPrinterFormProps {
   requiredNozzleDiameter?: number;
 }
 
-function SendToPrinterForm({ jobId, onClose, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: SendToPrinterFormProps) {
+function SendToPrinterForm({ jobId, artifactId, onClose, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: SendToPrinterFormProps) {
   const [sendMode, setSendMode] = useState<SendMode>('direct');
 
   return (
@@ -89,10 +93,11 @@ function SendToPrinterForm({ jobId, onClose, selectedSpoolId, requiredPrinterMod
       </div>
 
       {sendMode === 'direct' ? (
-        <DirectSendForm jobId={jobId} onClose={onClose} />
+        <DirectSendForm jobId={jobId} artifactId={artifactId} onClose={onClose} />
       ) : (
         <QueueForm
           jobId={jobId}
+          artifactId={artifactId}
           onClose={onClose}
           selectedSpoolId={selectedSpoolId}
           requiredPrinterModel={requiredPrinterModel}
@@ -104,7 +109,7 @@ function SendToPrinterForm({ jobId, onClose, selectedSpoolId, requiredPrinterMod
   );
 }
 
-function DirectSendForm({ jobId, onClose }: { jobId: string; onClose: () => void }) {
+function DirectSendForm({ jobId, artifactId, onClose }: { jobId: string; artifactId: string; onClose: () => void }) {
   const [selectedPrinterId, setSelectedPrinterId] = useState('');
   const [startPrint, setStartPrint] = useState(false);
 
@@ -113,7 +118,7 @@ function DirectSendForm({ jobId, onClose }: { jobId: string; onClose: () => void
 
   const sendMutation = useMutation({
     mutationFn: () =>
-      sliceJobService.sendToPrinter(jobId, selectedPrinterId, startPrint),
+      sliceJobService.sendToPrinter(jobId, artifactId, selectedPrinterId, startPrint),
     onSuccess: (data: SendToPrinterResponse) => {
       const printerName = onlinePrinters.find(p => p.id === selectedPrinterId)?.name ?? 'printer';
       toast.success(`Sent ${data.fileName} to ${printerName}`);
@@ -174,6 +179,7 @@ function DirectSendForm({ jobId, onClose }: { jobId: string; onClose: () => void
 
 interface QueueFormProps {
   jobId: string;
+  artifactId: string;
   onClose: () => void;
   selectedSpoolId?: number | null;
   requiredPrinterModel?: string;
@@ -181,13 +187,15 @@ interface QueueFormProps {
   requiredNozzleDiameter?: number;
 }
 
-function QueueForm({ jobId, onClose, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: QueueFormProps) {
+function QueueForm({ jobId, artifactId, onClose, selectedSpoolId, requiredPrinterModel, requiredMaterialType, requiredNozzleDiameter }: QueueFormProps) {
+  const queryClient = useQueryClient();
   const [priority, setPriority] = useState('Normal');
   const [copies, setCopies] = useState(1);
 
   const queueMutation = useMutation({
     mutationFn: () =>
       sliceJobService.addSliceToQueue(jobId, {
+        artifactId,
         priority,
         copies,
         spoolId: selectedSpoolId ?? undefined,
@@ -196,6 +204,12 @@ function QueueForm({ jobId, onClose, selectedSpoolId, requiredPrinterModel, requ
         requiredNozzleDiameter: requiredNozzleDiameter,
       }),
     onSuccess: (data: AddSliceToQueueResponse) => {
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['job-queue'] }),
+        queryClient.invalidateQueries({ queryKey: ['queue-jobs'] }),
+        queryClient.invalidateQueries({ queryKey: ['queue-stats'] }),
+        queryClient.invalidateQueries({ queryKey: queueSummariesFleetQueryKey }),
+      ]);
       const positionText = data.queuePosition != null ? ` — position ${data.queuePosition}` : '';
       toast.success(`Queued${positionText}`);
       onClose();

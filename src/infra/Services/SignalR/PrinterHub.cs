@@ -44,6 +44,7 @@ public class PrinterHub(
         if (PrintFarmerPermissions.TryGetUserId(Context.User!, out Guid userId))
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.User(userId));
+            await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.AuthenticatedUsers);
         }
 
         if (PrintFarmerPermissions.IsFarmAdmin(Context.User!))

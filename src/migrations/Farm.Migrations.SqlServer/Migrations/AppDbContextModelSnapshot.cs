@@ -2701,10 +2701,14 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("VirtualDirectory")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("GcodeFileId")
-                        .IsUnique();
+                    b.HasIndex("GcodeFileId");
 
                     b.HasIndex("OperationScope", "OperationId")
                         .IsUnique();

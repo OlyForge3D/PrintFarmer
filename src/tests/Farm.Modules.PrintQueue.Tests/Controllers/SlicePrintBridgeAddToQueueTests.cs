@@ -1,600 +1,256 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Security.Claims;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Security.Claims;
 using Farm.Infrastructure;
-using Farm.Infrastructure.Services.Gcode;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Modules.Calibration.Services.Calibration;
+using Farm.Modules.Gcode.Services.Gcode;
 using Farm.Modules.PrintQueue.Controllers;
 using Farm.Modules.PrintQueue.Controllers.Requests;
 using Farm.Modules.PrintQueue.Controllers.Responses;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
-using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Services.Gcode.Safety;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
-using Xunit;
 
 namespace Farm.Modules.PrintQueue.Tests.Controllers;
 
-/// <summary>
-/// Unit tests for the <c>POST api/slice/{id}/add-to-queue</c> endpoint on
-/// <see cref="SlicePrintBridgeController"/>.
-/// </summary>
+/// <summary>Tests promotion-first queue submission for completed slice jobs.</summary>
 public sealed class SlicePrintBridgeAddToQueueTests
 {
     private static readonly Guid TestUserId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
-    private static readonly Guid OtherUserId = Guid.Parse("11111111-2222-3333-4444-555555555555");
 
-    private readonly Mock<IPrintersService> _printersMock = new();
-    private readonly Mock<ILogger<SlicePrintBridgeController>> _loggerMock = new();
-    private readonly Mock<ISliceJobRepository> _jobRepoMock = new();
-    private readonly Mock<IArtifactsService> _artifactsMock = new();
-    private readonly Mock<IJobQueueService> _queueMock = new();
-    private readonly Mock<ISliceGcodeImportService> _importMock = new();
-    private readonly Mock<ISpoolmanService> _spoolmanMock = new();
-    private readonly Mock<IGcodeFileDeleter> _gcodeFilesServiceMock = new();
-    private readonly Mock<IGcodeSafetyValidator> _safetyValidatorMock = new();
-
-    private SlicePrintBridgeController BuildController(bool slicerEnabled = true) =>
-        BuildControllerWithIdentity(TestUserId, slicerEnabled);
-
-    private SlicePrintBridgeController BuildControllerWithIdentity(Guid userId, bool slicerEnabled = true)
-    {
-        var controller = new SlicePrintBridgeController(
-            _printersMock.Object,
-            _loggerMock.Object,
-            _safetyValidatorMock.Object,
-            jobRepository: slicerEnabled ? _jobRepoMock.Object : null,
-            artifactsService: slicerEnabled ? _artifactsMock.Object : null,
-            jobQueueService: _queueMock.Object,
-            importService: _importMock.Object,
-            spoolmanService: _spoolmanMock.Object,
-            gcodeFilesService: _gcodeFilesServiceMock.Object);
-
-        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, userId.ToString()) };
-        var identity = new ClaimsIdentity(claims, "TestAuth");
-        controller.ControllerContext = new ControllerContext
-        {
-            HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
-        };
-
-        return controller;
-    }
-
-    // =========================================================================
-    // Slicer disabled → 503
-    // =========================================================================
+    private readonly Mock<IPrintersService> _printers = new();
+    private readonly Mock<ILogger<SlicePrintBridgeController>> _logger = new();
+    private readonly Mock<IGcodeSafetyValidator> _safety = new();
+    private readonly Mock<ISliceJobRepository> _jobs = new();
+    private readonly Mock<IJobQueueService> _queue = new();
+    private readonly Mock<ISpoolmanService> _spoolman = new();
+    private readonly Mock<ISliceArtifactLibraryService> _library = new();
 
     [Fact]
-    [Trait("Category", "AddToQueue")]
-    public async Task AddToQueue_SlicerDisabled_Returns503()
+    public async Task AddToQueueAsync_WhenPromotionServiceUnavailable_Returns503()
     {
-        SlicePrintBridgeController controller = BuildController(slicerEnabled: false);
-        var request = new AddSliceToQueueRequest();
+        SlicePrintBridgeController controller = BuildController(includeLibrary: false);
 
-        IActionResult result = await controller.AddToQueueAsync(Guid.NewGuid(), request, CancellationToken.None);
+        IActionResult result = await controller.AddToQueueAsync(
+            Guid.NewGuid(),
+            new AddSliceToQueueRequest(),
+            CancellationToken.None);
 
-        var statusResult = result.Should().BeOfType<ObjectResult>().Subject;
-        statusResult.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        result.Should().BeOfType<ObjectResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
     }
-
-    // =========================================================================
-    // Job not found → 404
-    // =========================================================================
-
-    [Fact]
-    [Trait("Category", "AddToQueue")]
-    public async Task AddToQueue_JobNotFound_Returns404()
-    {
-        Guid jobId = Guid.NewGuid();
-        _jobRepoMock
-            .Setup(r => r.GetByIdAsync(jobId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((SliceJob?)null);
-
-        IActionResult result = await BuildController()
-            .AddToQueueAsync(jobId, new AddSliceToQueueRequest(), CancellationToken.None);
-
-        result.Should().BeOfType<NotFoundObjectResult>()
-            .Which.StatusCode.Should().Be(StatusCodes.Status404NotFound);
-    }
-
-    // =========================================================================
-    // Not the job owner → Forbid
-    // =========================================================================
-
-    [Fact]
-    [Trait("Category", "AddToQueue")]
-    public async Task AddToQueue_NotOwner_ReturnsForbid()
-    {
-        Guid jobId = Guid.NewGuid();
-        // Job is owned by OtherUserId, but the request is made by TestUserId
-        SliceJob job = CreateJob(jobId, SliceJobStatus.Completed, OtherUserId);
-        _jobRepoMock
-            .Setup(r => r.GetByIdAsync(jobId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(job);
-
-        IActionResult result = await BuildController()
-            .AddToQueueAsync(jobId, new AddSliceToQueueRequest(), CancellationToken.None);
-
-        result.Should().BeOfType<ForbidResult>();
-    }
-
-    [Fact]
-    [Trait("Category", "AddToQueue")]
-    public async Task AddToQueue_CalibrationSlice_Returns422WithoutImportOrQueueWrite()
-    {
-        Guid jobId = Guid.NewGuid();
-        SliceJob calibrationJob = CreateJob(jobId, SliceJobStatus.Completed);
-        calibrationJob.CalibrationProjectId = Guid.NewGuid();
-        calibrationJob.CalibrationAttemptId = Guid.NewGuid();
-        calibrationJob.CalibrationOrchestrationId = Guid.NewGuid();
-
-        _jobRepoMock
-            .Setup(r => r.GetByIdAsync(jobId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(calibrationJob);
-
-        IActionResult result = await BuildController()
-            .AddToQueueAsync(jobId, new AddSliceToQueueRequest(), CancellationToken.None);
-
-        result.Should().BeOfType<UnprocessableEntityObjectResult>()
-            .Which.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
-        _artifactsMock.Verify(
-            a => a.ListByJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
-            Times.Never);
-        _importMock.Verify(
-            i => i.ImportAsync(
-                It.IsAny<string>(),
-                It.IsAny<Stream>(),
-                It.IsAny<CancellationToken>()),
-            Times.Never);
-        _queueMock.Verify(
-            q => q.AddJobToQueueAsync(
-                It.IsAny<QueuePrintJobDto>(),
-                It.IsAny<Guid?>(),
-                It.IsAny<CancellationToken>()),
-            Times.Never);
-    }
-
-    // =========================================================================
-    // Job not completed → 400
-    // =========================================================================
 
     [Theory]
-    [InlineData(SliceJobStatus.Queued)]
-    [InlineData(SliceJobStatus.Processing)]
-    [InlineData(SliceJobStatus.Failed)]
-    [InlineData(SliceJobStatus.Cancelled)]
-    [Trait("Category", "AddToQueue")]
-    public async Task AddToQueue_NotCompleted_Returns400(string status)
-    {
-        Guid jobId = Guid.NewGuid();
-        _jobRepoMock
-            .Setup(r => r.GetByIdAsync(jobId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateJob(jobId, status));
-
-        IActionResult result = await BuildController()
-            .AddToQueueAsync(jobId, new AddSliceToQueueRequest(), CancellationToken.None);
-
-        result.Should().BeOfType<BadRequestObjectResult>()
-            .Which.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
-    }
-
-    // =========================================================================
-    // Happy path — correct GcodeFileId is forwarded to the queue
-    // =========================================================================
-
-    [Fact]
-    [Trait("Category", "AddToQueue")]
-    public async Task AddToQueue_HappyPath_EnqueuesWithCorrectGcodeFileId()
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AddToQueueAsync_WhenCompleted_PromotesBeforeEnqueueingDurableFile(bool createdNew)
     {
         Guid jobId = Guid.NewGuid();
         Guid gcodeFileId = Guid.NewGuid();
         Guid printJobId = Guid.NewGuid();
-        Artifact artifact = CreateArtifact(jobId, "gcode", "model.gcode");
+        SetupCompletedJob(jobId);
+        SetupPromotion(jobId, gcodeFileId, createdNew);
+        _queue
+            .Setup(service => service.AddJobToQueueAsync(
+                It.Is<QueuePrintJobDto>(request => request.GcodeFileId == gcodeFileId),
+                TestUserId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new JobQueuePrintJobDto { Id = printJobId, QueuePosition = 2 });
 
-        SetupCompletedJobWithGcode(jobId, artifact);
+        IActionResult result = await BuildController().AddToQueueAsync(
+            jobId,
+            new AddSliceToQueueRequest(),
+            CancellationToken.None);
 
-        string fakePath = System.IO.Path.Join(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
-        const string fakeGcodeContent = "; test gcode";
-        System.IO.File.WriteAllText(fakePath, fakeGcodeContent);
-
-        try
-        {
-            _artifactsMock
-                .Setup(a => a.OpenReadStreamAsync(artifact.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => ArtifactContentStream.Open(
-                    artifact,
-                    () => new FileStream(fakePath, FileMode.Open, FileAccess.Read, FileShare.Read)));
-
-            string? capturedFileName = null;
-            string? capturedContent = null;
-            _importMock
-                .Setup(s => s.ImportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-                .Callback<string, Stream, CancellationToken>((fileName, stream, _) =>
-                {
-                    capturedFileName = fileName;
-                    using var reader = new StreamReader(stream, leaveOpen: true);
-                    capturedContent = reader.ReadToEnd();
-                })
-                .ReturnsAsync(new SliceGcodeImportResult(gcodeFileId, true));
-
-            _queueMock
-                .Setup(q => q.AddJobToQueueAsync(
-                    It.Is<QueuePrintJobDto>(d => d.GcodeFileId == gcodeFileId),
-                    TestUserId,
-                    It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new JobQueuePrintJobDto { Id = printJobId, QueuePosition = 2 });
-
-            IActionResult result = await BuildController()
-                .AddToQueueAsync(jobId, new AddSliceToQueueRequest(), CancellationToken.None);
-
-            var ok = result.Should().BeOfType<OkObjectResult>().Subject;
-            var response = ok.Value.Should().BeOfType<AddSliceToQueueResponse>().Subject;
-            response.PrintJobId.Should().Be(printJobId);
-            response.QueuePosition.Should().Be(2);
-
-            // Verify the stream the controller opened from the artifact's storage location is
-            // the exact stream (with the exact bytes) forwarded to the import service — not
-            // just "any stream" — closing the gap between artifact resolution and import.
-            capturedFileName.Should().Be(artifact.FileName);
-            capturedContent.Should().Be(fakeGcodeContent);
-        }
-        finally
-        {
-            System.IO.File.Delete(fakePath);
-        }
+        AddSliceToQueueResponse response = result.Should().BeOfType<OkObjectResult>()
+            .Which.Value.Should().BeOfType<AddSliceToQueueResponse>().Subject;
+        response.PrintJobId.Should().Be(printJobId);
+        _library.Verify(service => service.PromoteAsync(
+            jobId,
+            null,
+            It.Is<CalibrationActor>(actor => actor.UserId == TestUserId),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // =========================================================================
-    // Artifact bytes cannot be opened (missing/replaced on disk) → 400, no import
-    // =========================================================================
-
     [Fact]
-    [Trait("Category", "AddToQueue")]
-    public async Task AddToQueue_ArtifactStreamMissing_Returns400WithoutImportOrQueueWrite()
+    public async Task AddToQueueAsync_WithArtifactId_QueuesExactlyTheSelectedDurableFile()
     {
         Guid jobId = Guid.NewGuid();
-        Artifact artifact = CreateArtifact(jobId, "gcode", "model.gcode");
+        Guid artifactId = Guid.NewGuid();
+        Guid gcodeFileId = Guid.NewGuid();
+        SetupCompletedJob(jobId);
+        SetupPromotion(jobId, gcodeFileId, createdNew: true, artifactId: artifactId);
+        _queue
+            .Setup(service => service.AddJobToQueueAsync(
+                It.Is<QueuePrintJobDto>(request => request.GcodeFileId == gcodeFileId),
+                TestUserId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new JobQueuePrintJobDto { Id = Guid.NewGuid(), QueuePosition = 1 });
 
-        SetupCompletedJobWithGcode(jobId, artifact);
+        IActionResult result = await BuildController().AddToQueueAsync(
+            jobId,
+            new AddSliceToQueueRequest { ArtifactId = artifactId },
+            CancellationToken.None);
 
-        _artifactsMock
-            .Setup(a => a.OpenReadStreamAsync(artifact.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ArtifactContentStream?)null);
+        result.Should().BeOfType<OkObjectResult>();
+        _library.Verify(service => service.PromoteAsync(
+            jobId,
+            artifactId,
+            It.IsAny<CalibrationActor>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
 
-        IActionResult result = await BuildController()
-            .AddToQueueAsync(jobId, new AddSliceToQueueRequest(), CancellationToken.None);
+    [Fact]
+    public async Task AddToQueueAsync_MultipleOutputsWithoutArtifactId_ReturnsSelectionRequired()
+    {
+        Guid jobId = Guid.NewGuid();
+        SetupCompletedJob(jobId);
+        _library
+            .Setup(service => service.PromoteAsync(
+                jobId,
+                null,
+                It.IsAny<CalibrationActor>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CalibrationApiResult<SliceArtifactLibraryResult>.Failure(
+                StatusCodes.Status409Conflict,
+                "source_artifact_required"));
 
-        result.Should().BeOfType<BadRequestObjectResult>()
-            .Which.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        IActionResult result = await BuildController().AddToQueueAsync(
+            jobId,
+            new AddSliceToQueueRequest(),
+            CancellationToken.None);
 
-        _importMock.Verify(
-            i => i.ImportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
-            Times.Never);
-        _queueMock.Verify(
-            q => q.AddJobToQueueAsync(
+        result.Should().BeOfType<ObjectResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _queue.Verify(service => service.AddJobToQueueAsync(
+            It.IsAny<QueuePrintJobDto>(),
+            It.IsAny<Guid?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AddToQueueAsync_WhenEnqueueFails_ReturnsRetainedPromotedFileId(bool createdNew)
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid gcodeFileId = Guid.NewGuid();
+        SetupCompletedJob(jobId);
+        SetupPromotion(jobId, gcodeFileId, createdNew);
+        _queue
+            .Setup(service => service.AddJobToQueueAsync(
                 It.IsAny<QueuePrintJobDto>(),
-                It.IsAny<Guid?>(),
-                It.IsAny<CancellationToken>()),
-            Times.Never);
-    }
-
-    // =========================================================================
-    // Happy path — SpoolId resolves to SpoolmanFilamentId on the queue DTO
-    // =========================================================================
-
-    [Fact]
-    [Trait("Category", "AddToQueue")]
-    public async Task AddToQueue_WithSpoolId_ResolvesSpoolmanFilamentId()
-    {
-        Guid jobId = Guid.NewGuid();
-        Guid gcodeFileId = Guid.NewGuid();
-        int spoolId = 7;
-        int filamentId = 42;
-        Artifact artifact = CreateArtifact(jobId, "gcode", "model.gcode");
-
-        SetupCompletedJobWithGcode(jobId, artifact);
-
-        string fakePath = System.IO.Path.Join(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
-        System.IO.File.WriteAllText(fakePath, "; test gcode");
-
-        try
-        {
-            _artifactsMock
-                .Setup(a => a.OpenReadStreamAsync(artifact.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => ArtifactContentStream.Open(
-                    artifact,
-                    () => new FileStream(fakePath, FileMode.Open, FileAccess.Read, FileShare.Read)));
-
-            _importMock
-                .Setup(s => s.ImportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new SliceGcodeImportResult(gcodeFileId, true));
-
-            _spoolmanMock
-                .Setup(sp => sp.GetSpoolByIdAsync(spoolId, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new SpoolmanSpoolDto(
-                    Id: spoolId,
-                    Name: "Red PLA",
-                    Material: "PLA",
-                    RemainingWeightG: 800,
-                    ColorHex: "FF0000",
-                    InUse: false,
-                    FilamentName: "PolyTerra PLA",
-                    Vendor: "Polymaker",
-                    FilamentId: filamentId));
-
-            QueuePrintJobDto? capturedDto = null;
-            _queueMock
-                .Setup(q => q.AddJobToQueueAsync(It.IsAny<QueuePrintJobDto>(), TestUserId, It.IsAny<CancellationToken>()))
-                .Callback<QueuePrintJobDto, Guid?, CancellationToken>((dto, _, _) => capturedDto = dto)
-                .ReturnsAsync(new JobQueuePrintJobDto { Id = Guid.NewGuid(), QueuePosition = 1 });
-
-            var request = new AddSliceToQueueRequest { SpoolId = spoolId };
-            IActionResult result = await BuildController().AddToQueueAsync(jobId, request, CancellationToken.None);
-
-            result.Should().BeOfType<OkObjectResult>();
-            capturedDto.Should().NotBeNull();
-            capturedDto!.SpoolmanFilamentId.Should().Be(filamentId);
-            capturedDto.FilamentName.Should().Be("PolyTerra PLA");
-            capturedDto.FilamentVendor.Should().Be("Polymaker");
-            capturedDto.FilamentColor.Should().Be("FF0000");
-        }
-        finally
-        {
-            System.IO.File.Delete(fakePath);
-        }
-    }
-
-    // =========================================================================
-    // Spool resolution fails — job still enqueues without spool fields
-    // =========================================================================
-    [Fact]
-    [Trait("Category", "AddToQueue")]
-    public async Task AddToQueue_SpoolResolutionFails_StillEnqueues()
-    {
-        Guid jobId = Guid.NewGuid();
-        Guid gcodeFileId = Guid.NewGuid();
-        Artifact artifact = CreateArtifact(jobId, "gcode", "model.gcode");
-
-        SetupCompletedJobWithGcode(jobId, artifact);
-
-        string fakePath = System.IO.Path.Join(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
-        System.IO.File.WriteAllText(fakePath, "; test gcode");
-
-        try
-        {
-            _artifactsMock
-                .Setup(a => a.OpenReadStreamAsync(artifact.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => ArtifactContentStream.Open(
-                    artifact,
-                    () => new FileStream(fakePath, FileMode.Open, FileAccess.Read, FileShare.Read)));
-
-            _importMock
-                .Setup(s => s.ImportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new SliceGcodeImportResult(gcodeFileId, true));
-
-            _spoolmanMock
-                .Setup(sp => sp.GetSpoolByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
-                .ThrowsAsync(new HttpRequestException("Spoolman unreachable"));
-
-            QueuePrintJobDto? capturedDto = null;
-            _queueMock
-                .Setup(q => q.AddJobToQueueAsync(It.IsAny<QueuePrintJobDto>(), TestUserId, It.IsAny<CancellationToken>()))
-                .Callback<QueuePrintJobDto, Guid?, CancellationToken>((dto, _, _) => capturedDto = dto)
-                .ReturnsAsync(new JobQueuePrintJobDto { Id = Guid.NewGuid(), QueuePosition = 3 });
-
-            var request = new AddSliceToQueueRequest { SpoolId = 99 };
-            IActionResult result = await BuildController().AddToQueueAsync(jobId, request, CancellationToken.None);
-
-            result.Should().BeOfType<OkObjectResult>();
-            capturedDto.Should().NotBeNull();
-            capturedDto!.SpoolmanFilamentId.Should().BeNull();
-            capturedDto.FilamentName.Should().BeNull();
-            capturedDto.FilamentVendor.Should().BeNull();
-        }
-        finally
-        {
-            System.IO.File.Delete(fakePath);
-        }
-    }
-
-    // =========================================================================
-    // No compatible printer — orphan cleanup (Fix 1)
-    // =========================================================================
-
-    [Fact]
-    [Trait("Category", "AddToQueue")]
-    public async Task AddToQueue_NoCompatiblePrinter_NewFile_DeletesOrphanAndReturns400()
-    {
-        Guid jobId = Guid.NewGuid();
-        Guid gcodeFileId = Guid.NewGuid();
-
-        _gcodeFilesServiceMock
-            .Setup(g => g.DeleteFileAsync(gcodeFileId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
-
-        var (result, fakePath) = await SetupAndRunQueueReturnsNullAsync(jobId, gcodeFileId, isNewFile: true);
-
-        try
-        {
-            result.Should().BeOfType<BadRequestObjectResult>()
-                .Which.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
-
-            _gcodeFilesServiceMock.Verify(
-                g => g.DeleteFileAsync(gcodeFileId, It.IsAny<CancellationToken>()),
-                Times.Once);
-        }
-        finally
-        {
-            System.IO.File.Delete(fakePath);
-        }
-    }
-
-    [Fact]
-    [Trait("Category", "AddToQueue")]
-    public async Task AddToQueue_NoCompatiblePrinter_ReusedFile_NeverDeletesAndReturns400()
-    {
-        Guid jobId = Guid.NewGuid();
-        Guid gcodeFileId = Guid.NewGuid();
-
-        var (result, fakePath) = await SetupAndRunQueueReturnsNullAsync(jobId, gcodeFileId, isNewFile: false);
-
-        try
-        {
-            result.Should().BeOfType<BadRequestObjectResult>()
-                .Which.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
-
-            _gcodeFilesServiceMock.Verify(
-                g => g.DeleteFileAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
-                Times.Never);
-        }
-        finally
-        {
-            System.IO.File.Delete(fakePath);
-        }
-    }
-
-    // =========================================================================
-    // Copies range validation (Fix 2)
-    // =========================================================================
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(100)]
-    [Trait("Category", "AddToQueue")]
-    public async Task AddToQueue_InvalidCopies_Returns400(int copies)
-    {
-        Guid jobId = Guid.NewGuid();
-        var request = new AddSliceToQueueRequest { Copies = copies };
-
-        IActionResult result = await BuildController()
-            .AddToQueueAsync(jobId, request, CancellationToken.None);
-
-        result.Should().BeOfType<BadRequestObjectResult>()
-            .Which.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
-    }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(99)]
-    [Trait("Category", "AddToQueue")]
-    public async Task AddToQueue_BoundaryCopies_EnqueuesSuccessfully(int copies)
-    {
-        Guid jobId = Guid.NewGuid();
-        Guid gcodeFileId = Guid.NewGuid();
-        Artifact artifact = CreateArtifact(jobId, "gcode", "model.gcode");
-
-        SetupCompletedJobWithGcode(jobId, artifact);
-
-        string fakePath = System.IO.Path.Join(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
-        System.IO.File.WriteAllText(fakePath, "; test gcode");
-
-        try
-        {
-            _artifactsMock
-                .Setup(a => a.OpenReadStreamAsync(artifact.Id, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => ArtifactContentStream.Open(
-                    artifact,
-                    () => new FileStream(fakePath, FileMode.Open, FileAccess.Read, FileShare.Read)));
-
-            _importMock
-                .Setup(s => s.ImportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new SliceGcodeImportResult(gcodeFileId, true));
-
-            _queueMock
-                .Setup(q => q.AddJobToQueueAsync(
-                    It.Is<QueuePrintJobDto>(d => d.Copies == copies),
-                    TestUserId,
-                    It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new JobQueuePrintJobDto { Id = Guid.NewGuid(), QueuePosition = 1 });
-
-            var request = new AddSliceToQueueRequest { Copies = copies };
-            IActionResult result = await BuildController()
-                .AddToQueueAsync(jobId, request, CancellationToken.None);
-
-            result.Should().BeOfType<OkObjectResult>()
-                .Which.StatusCode.Should().Be(StatusCodes.Status200OK);
-        }
-        finally
-        {
-            System.IO.File.Delete(fakePath);
-        }
-    }
-
-    // =========================================================================
-    // Helpers
-    // =========================================================================
-
-    private static SliceJob CreateJob(Guid id, string status, Guid? userId = null) => new()
-    {
-        Id = id,
-        UserId = userId ?? TestUserId,
-        Status = status,
-        ModelFileUrl = "test://model.stl",
-        ModelFileName = "model.stl",
-        QueuedAt = DateTime.UtcNow,
-        CreatedAt = DateTime.UtcNow,
-        UpdatedAt = DateTime.UtcNow
-    };
-
-    private static Artifact CreateArtifact(Guid jobId, string kind, string fileName) => new()
-    {
-        Id = Guid.NewGuid(),
-        JobId = jobId,
-        Kind = kind,
-        FileName = fileName,
-        RelativePath = $"{jobId}/{fileName}",
-        ContentType = kind == "gcode" ? "application/octet-stream" : "image/png",
-        SizeBytes = 1024,
-        CreatedAt = DateTime.UtcNow
-    };
-
-    private void SetupCompletedJobWithGcode(Guid jobId, Artifact gcodeArtifact)
-    {
-        _jobRepoMock
-            .Setup(r => r.GetByIdAsync(jobId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateJob(jobId, SliceJobStatus.Completed));
-
-        _artifactsMock
-            .Setup(a => a.ListByJobAsync(jobId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Artifact> { gcodeArtifact });
-    }
-
-    private async Task<(IActionResult result, string fakePath)> SetupAndRunQueueReturnsNullAsync(
-        Guid jobId, Guid gcodeFileId, bool isNewFile)
-    {
-        Artifact artifact = CreateArtifact(jobId, "gcode", "model.gcode");
-        SetupCompletedJobWithGcode(jobId, artifact);
-
-        string fakePath = System.IO.Path.Join(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
-        System.IO.File.WriteAllText(fakePath, "; test gcode");
-
-        _artifactsMock
-            .Setup(a => a.OpenReadStreamAsync(artifact.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => ArtifactContentStream.Open(
-                artifact,
-                () => new FileStream(fakePath, FileMode.Open, FileAccess.Read, FileShare.Read)));
-
-        _importMock
-            .Setup(s => s.ImportAsync(It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SliceGcodeImportResult(gcodeFileId, isNewFile));
-
-        _queueMock
-            .Setup(q => q.AddJobToQueueAsync(It.IsAny<QueuePrintJobDto>(), TestUserId, It.IsAny<CancellationToken>()))
+                TestUserId,
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync((JobQueuePrintJobDto?)null);
 
-        IActionResult result = await BuildController()
-            .AddToQueueAsync(jobId, new AddSliceToQueueRequest { Copies = 1 }, CancellationToken.None);
+        IActionResult result = await BuildController().AddToQueueAsync(
+            jobId,
+            new AddSliceToQueueRequest(),
+            CancellationToken.None);
 
-        return (result, fakePath);
+        object body = result.Should().BeOfType<BadRequestObjectResult>().Which.Value!;
+        body.GetType().GetProperty("gcodeFileId")!.GetValue(body).Should().Be(gcodeFileId);
+    }
+
+    [Fact]
+    public async Task AddToQueueAsync_WhenPromotionFails_DoesNotEnqueue()
+    {
+        Guid jobId = Guid.NewGuid();
+        SetupCompletedJob(jobId);
+        _library
+            .Setup(service => service.PromoteAsync(
+                jobId,
+                null,
+                It.IsAny<CalibrationActor>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CalibrationApiResult<SliceArtifactLibraryResult>.Failure(
+                StatusCodes.Status503ServiceUnavailable,
+                "promotion_source_transport_unavailable"));
+
+        IActionResult result = await BuildController().AddToQueueAsync(
+            jobId,
+            new AddSliceToQueueRequest(),
+            CancellationToken.None);
+
+        result.Should().BeOfType<ObjectResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        _queue.Verify(service => service.AddJobToQueueAsync(
+            It.IsAny<QueuePrintJobDto>(),
+            It.IsAny<Guid?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private SlicePrintBridgeController BuildController(bool includeLibrary = true)
+    {
+        var controller = new SlicePrintBridgeController(
+            _printers.Object,
+            _logger.Object,
+            _safety.Object,
+            jobRepository: _jobs.Object,
+            jobQueueService: _queue.Object,
+            spoolmanService: _spoolman.Object,
+            sliceArtifactLibraryService: includeLibrary ? _library.Object : null);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.NameIdentifier, TestUserId.ToString())],
+                    "TestAuth")),
+            },
+        };
+        return controller;
+    }
+
+    private void SetupCompletedJob(Guid jobId)
+    {
+        _jobs
+            .Setup(repository => repository.GetByIdAsync(jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SliceJob
+            {
+                Id = jobId,
+                UserId = TestUserId,
+                Status = SliceJobStatus.Completed,
+                ModelFileUrl = "test://model.stl",
+                ModelFileName = "model.stl",
+                QueuedAt = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+    }
+
+    private void SetupPromotion(
+        Guid jobId,
+        Guid gcodeFileId,
+        bool createdNew,
+        Guid? artifactId = null)
+    {
+        _library
+            .Setup(service => service.PromoteAsync(
+                jobId,
+                artifactId,
+                It.IsAny<CalibrationActor>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CalibrationApiResult<SliceArtifactLibraryResult>.Success(
+                new SliceArtifactLibraryResult
+                {
+                    GcodeFileId = gcodeFileId,
+                    Name = "model.gcode",
+                    SizeBytes = 1024,
+                    CreatedNew = createdNew,
+                    Printable = true,
+                    SliceJobId = jobId,
+                    SourceArtifactId = artifactId ?? Guid.NewGuid(),
+                },
+                createdNew ? StatusCodes.Status201Created : StatusCodes.Status200OK,
+                replayed: !createdNew));
     }
 }

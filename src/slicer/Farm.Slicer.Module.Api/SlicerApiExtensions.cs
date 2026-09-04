@@ -88,6 +88,8 @@ public static class SlicerApiExtensions
         // Artifact services
         _ = services.Configure<Farm.Infrastructure.Settings.ArtifactStorageSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ArtifactStorageSettings.SectionName));
         _ = services.AddScoped<IArtifactsService, ArtifactsService>();
+        _ = services.AddScoped<IPromotionArtifactContentSource, LocalPromotionArtifactContentSource>();
+        _ = services.AddSingleton<SlicerPromotionServiceAuthenticator>();
         _ = services.AddScoped<IArtifactCleanupService, ArtifactCleanupService>();
         _ = services.AddHostedService<ArtifactCleanupHostedService>();
 

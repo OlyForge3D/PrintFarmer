@@ -124,6 +124,10 @@ public class PrinterHubTests : IDisposable
             "test-connection-id",
             AuthorizedHubGroups.QueueReaders,
             It.IsAny<CancellationToken>()), Times.Once);
+        _groupsMock.Verify(group => group.AddToGroupAsync(
+            "test-connection-id",
+            AuthorizedHubGroups.AuthenticatedUsers,
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

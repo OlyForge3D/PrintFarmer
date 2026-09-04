@@ -34,7 +34,7 @@ export const getApiBaseUrl = (): string => {
  * // Without token
  * getAuthHeaders() // => {}
  */
-export const getAuthHeaders = (): HeadersInit => {
+export const getAuthHeaders = (): Record<string, string> => {
   const token = localStorage.getItem('auth-token');
   if (!token) return {};
   return { Authorization: `Bearer ${token}` };

@@ -52,15 +52,6 @@ public class GcodeFilesController(
     private IReadOnlyCollection<string> AllowedExtensions => uploadSettings.GetAllowedExtensions();
 
     /// <summary>
-    /// Resolves a GCode file path to an absolute path.
-    /// </summary>
-    private string ResolveGcodePath(string? relativePath)
-    {
-        string gcodeRoot = storagePathService.GetGcodeStorageDirectory();
-        return storedFileOperationsService.ResolveStoragePath(relativePath, gcodeRoot);
-    }
-
-    /// <summary>
     /// Computes a hash for an existing G-code file for deduplication/comparison (sha256 default; supports sha1).
     /// </summary>
     /// <param name="path">Virtual path to the G-code file.</param>
@@ -666,11 +657,10 @@ public class GcodeFilesController(
                 return NotFound(new { message = "File not found in database", fileId = id });
             }
 
-            string filePath = fileInfo.Value.FilePath;
+            string fullPath = fileInfo.Value.FilePath;
             string originalFileName = fileInfo.Value.OriginalFileName;
 
             string gcodeRoot = storagePathService.GetGcodeStorageDirectory();
-            string fullPath = ResolveGcodePath(filePath);
 
             logger.LogInformation("GCode file {Id} resolved path: {FullPath}", id, fullPath);
 
@@ -718,7 +708,7 @@ public class GcodeFilesController(
                 return NotFound("Thumbnail not available");
             }
 
-            string absolutePath = ResolveGcodePath(thumbnailPath);
+            string absolutePath = thumbnailPath;
             string gcodeRoot = storagePathService.GetGcodeStorageDirectory();
 
             logger.LogInformation("[Thumbnail] Resolved absolute path: {AbsolutePath}", absolutePath);

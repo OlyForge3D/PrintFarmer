@@ -83,8 +83,9 @@ describe('GcodePreviewService.parseGCodeDetailed (no Worker — main-thread fall
   });
 
   it('fetches the given URL itself rather than accepting raw text (#1788)', async () => {
-    await service.parseGCodeDetailed('/models/print.gcode');
+    await service.parseGCodeDetailed('/models/print.gcode', { Authorization: 'Bearer test-token' });
     expect(global.fetch).toHaveBeenCalledWith('/models/print.gcode', expect.objectContaining({
+      headers: { Authorization: 'Bearer test-token' },
       signal: expect.any(AbortSignal),
     }));
   });
@@ -162,7 +163,7 @@ describe('GcodePreviewService.parseGCodeDetailed (no Worker — main-thread fall
     // resolved: the caller's own AbortController — not disposal — must
     // cancel the superseded request (#1808 review finding).
     const controller = new AbortController();
-    const parsePromise = service.parseGCodeDetailed('/stale.gcode', controller.signal);
+    const parsePromise = service.parseGCodeDetailed('/stale.gcode', {}, controller.signal);
     controller.abort();
 
     await expect(parsePromise).rejects.toThrow();
@@ -174,6 +175,7 @@ describe('GcodePreviewService.parseGCodeDetailed (Worker path)', () => {
   interface FakeWorkerMessage {
     requestId: number;
     gcodeUrl: string;
+    requestHeaders: Record<string, string>;
   }
 
   class FakeWorker {
@@ -210,11 +212,16 @@ describe('GcodePreviewService.parseGCodeDetailed (Worker path)', () => {
   it('routes parseGCodeDetailed through the Worker and reconstructs the point-object shape', async () => {
     const service = createGcodePreviewService();
 
-    const result = await service.parseGCodeDetailed('/print.gcode');
+    const result = await service.parseGCodeDetailed('/print.gcode', {
+      Authorization: 'Bearer worker-token',
+    });
 
     expect(FakeWorker.instances).toHaveLength(1);
     expect(FakeWorker.instances[0].postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ gcodeUrl: '/print.gcode' }),
+      expect.objectContaining({
+        gcodeUrl: '/print.gcode',
+        requestHeaders: { Authorization: 'Bearer worker-token' },
+      }),
     );
     expect(result.layerCount).toBe(3);
     // Layer 0 begins with the Z-lift move (no E), then extrusion moves.
@@ -253,7 +260,7 @@ describe('GcodePreviewService.parseGCodeDetailed (Worker path)', () => {
     const controller = new AbortController();
     controller.abort();
 
-    await expect(service.parseGCodeDetailed('/print.gcode', controller.signal)).rejects.toThrow(/abort/i);
+    await expect(service.parseGCodeDetailed('/print.gcode', {}, controller.signal)).rejects.toThrow(/abort/i);
     expect(FakeWorker.instances).toHaveLength(0);
 
     service.dispose();
@@ -270,7 +277,7 @@ describe('GcodePreviewService.parseGCodeDetailed (Worker path)', () => {
     const service = createGcodePreviewService();
     const controller = new AbortController();
 
-    const stalePromise = service.parseGCodeDetailed('/huge-stale.gcode', controller.signal);
+    const stalePromise = service.parseGCodeDetailed('/huge-stale.gcode', {}, controller.signal);
     expect(FakeWorker.instances).toHaveLength(1);
 
     controller.abort();

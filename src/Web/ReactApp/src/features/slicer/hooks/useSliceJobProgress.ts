@@ -8,7 +8,7 @@ export interface SliceJobProgressState {
   status: string | null;
   estimatedPrintTimeSeconds: number | null;
   filamentUsedGrams: number | null;
-  resultFileUrl: string | null;
+  artifactsRoute: string | null;
   error: string | null;
   isConnected: boolean;
 }
@@ -19,7 +19,7 @@ const INITIAL_STATE: SliceJobProgressState = {
   status: null,
   estimatedPrintTimeSeconds: null,
   filamentUsedGrams: null,
-  resultFileUrl: null,
+  artifactsRoute: null,
   error: null,
   isConnected: false,
 };
@@ -66,7 +66,7 @@ export function useSliceJobProgress(jobId: string | null): SliceJobProgressState
       progressMessage: event.progressMessage ?? prev.progressMessage,
       estimatedPrintTimeSeconds: event.estimatedPrintTimeSeconds ?? prev.estimatedPrintTimeSeconds,
       filamentUsedGrams: event.filamentUsedGrams ?? prev.filamentUsedGrams,
-      resultFileUrl: event.resultFileUrl ?? prev.resultFileUrl,
+      artifactsRoute: event.artifactsRoute ?? prev.artifactsRoute,
       error: event.errorMessage ?? prev.error,
     }));
   }, []);
@@ -103,7 +103,7 @@ export function useSliceJobProgress(jobId: string | null): SliceJobProgressState
             progressMessage: current.progressMessage ?? prev.progressMessage,
             estimatedPrintTimeSeconds: current.estimatedPrintTimeSeconds ?? prev.estimatedPrintTimeSeconds,
             filamentUsedGrams: current.filamentUsedGrams ?? prev.filamentUsedGrams,
-            resultFileUrl: current.resultFileUrl ?? prev.resultFileUrl,
+            artifactsRoute: current.artifactsRoute ?? prev.artifactsRoute,
             error: current.errorMessage ?? prev.error,
           };
         });

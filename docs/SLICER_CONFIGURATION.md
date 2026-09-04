@@ -6,6 +6,16 @@ This guide explains how to configure popular slicers (PrusaSlicer, OrcaSlicer) t
 
 PrintFarmer implements OctoPrint-compatible API endpoints that allow slicers to upload files directly to the print farm management system. Files uploaded through slicers are automatically added to the print queue and require approval before printing begins.
 
+### Internal artifact promotion credential
+
+Split deployments use a separate `SlicerPromotion:SharedKey` on the API and
+slicer-host for private staged-artifact content transfer. Compose supplies the
+same value to both services through `PROMOTION_SHARED_API_KEY`; the deployment
+script generates and preserves it without logging the value. Do not reuse
+`WorkerAuth:SharedKey`, because worker processes do not require promotion
+access. Rotate the key by updating both services together; mismatches fail
+closed and remain retryable.
+
 ## Supported Slicers
 
 - **PrusaSlicer** (2.0+)

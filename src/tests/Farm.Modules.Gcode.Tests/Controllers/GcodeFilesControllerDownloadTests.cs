@@ -20,15 +20,19 @@ namespace Farm.Modules.Gcode.Tests.Controllers;
 /// </summary>
 public class GcodeFilesControllerDownloadTests
 {
-    private static GcodeFilesController CreateController(Mock<IGcodeFilesService> gcodeFilesServiceMock)
+    private static GcodeFilesController CreateController(
+        Mock<IGcodeFilesService> gcodeFilesServiceMock,
+        Mock<IFileManagementService>? fileManagementService = null,
+        Mock<IStoragePathService>? storagePathService = null,
+        Mock<IStoredFileOperationsService>? storedFileOperationsService = null)
     {
         var logger = new Mock<ILogger<GcodeFilesController>>();
         var uploadSettings = new Mock<IGcodeUploadSettings>();
         var quotaService = new Mock<IGcodeUploadQuotaService>();
         var chunkedUploadService = new Mock<IChunkedUploadService>();
-        var fileManagementService = new Mock<IFileManagementService>();
-        var storagePathService = new Mock<IStoragePathService>();
-        var storedFileOperationsService = new Mock<IStoredFileOperationsService>();
+        fileManagementService ??= new Mock<IFileManagementService>();
+        storagePathService ??= new Mock<IStoragePathService>();
+        storedFileOperationsService ??= new Mock<IStoredFileOperationsService>();
 
         var controller = new GcodeFilesController(
             logger.Object,
@@ -135,5 +139,113 @@ public class GcodeFilesControllerDownloadTests
 
         // Assert
         Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Theory]
+    [InlineData("/var/lib/printfarmer/gcode/model.gcode")]
+    [InlineData("/var/lib/printfarmer/gcode/slice-results/nested/model.gcode")]
+    public async Task GetGcodeFileAsync_UsesContainedPhysicalPathWithoutResolvingTwice(
+        string physicalPath)
+    {
+        const string storageRoot = "/var/lib/printfarmer/gcode";
+        Guid fileId = Guid.NewGuid();
+        var gcodeFiles = new Mock<IGcodeFilesService>(MockBehavior.Strict);
+        gcodeFiles.Setup(service => service.GetFilePathAndNameAsync(
+                fileId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((physicalPath, "model.gcode"));
+        var storagePaths = new Mock<IStoragePathService>(MockBehavior.Strict);
+        storagePaths.Setup(service => service.GetGcodeStorageDirectory()).Returns(storageRoot);
+        var storedFileOperations = new Mock<IStoredFileOperationsService>(MockBehavior.Strict);
+        storedFileOperations.Setup(service => service.FileExistsAndIsSafe(physicalPath, storageRoot))
+            .Returns(true);
+        storedFileOperations.Setup(service => service.GetContentTypeForFile(".gcode"))
+            .Returns("application/octet-stream");
+        GcodeFilesController controller = CreateController(
+            gcodeFiles,
+            storagePathService: storagePaths,
+            storedFileOperationsService: storedFileOperations);
+
+        IActionResult result = await controller.GetGcodeFileAsync(fileId);
+
+        PhysicalFileResult physicalFile = Assert.IsType<PhysicalFileResult>(result);
+        Assert.Equal(physicalPath, physicalFile.FileName);
+        Assert.Equal("model.gcode", physicalFile.FileDownloadName);
+        Assert.Equal("application/octet-stream", physicalFile.ContentType);
+        storedFileOperations.Verify(
+            service => service.ResolveStoragePath(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("nested/thumbnails")]
+    public async Task GetGcodeThumbnailAsync_UsesContainedPhysicalPathWithoutResolvingTwice(
+        string relativeDirectory)
+    {
+        string storageRoot = Path.Join(
+            Path.GetTempPath(),
+            "pfarm-thumbnail-controller-tests",
+            Guid.NewGuid().ToString());
+        string directory = Path.Join(storageRoot, relativeDirectory);
+        Directory.CreateDirectory(directory);
+        string thumbnailPath = Path.Join(directory, "preview.png");
+        await File.WriteAllBytesAsync(thumbnailPath, [1, 2, 3]);
+
+        try
+        {
+            Guid fileId = Guid.NewGuid();
+            var gcodeFiles = new Mock<IGcodeFilesService>(MockBehavior.Strict);
+            gcodeFiles.Setup(service => service.GetThumbnailPathAsync(
+                    fileId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(thumbnailPath);
+            var fileManagement = new Mock<IFileManagementService>(MockBehavior.Strict);
+            fileManagement.Setup(service => service.IsSafePath(thumbnailPath, storageRoot))
+                .Returns(true);
+            var storagePaths = new Mock<IStoragePathService>(MockBehavior.Strict);
+            storagePaths.Setup(service => service.GetGcodeStorageDirectory()).Returns(storageRoot);
+            var storedFileOperations = new Mock<IStoredFileOperationsService>(MockBehavior.Strict);
+            GcodeFilesController controller = CreateController(
+                gcodeFiles,
+                fileManagement,
+                storagePaths,
+                storedFileOperations);
+
+            IActionResult result = await controller.GetGcodeThumbnailAsync(fileId);
+
+            PhysicalFileResult physicalFile = Assert.IsType<PhysicalFileResult>(result);
+            Assert.Equal(thumbnailPath, physicalFile.FileName);
+            Assert.Equal("image/png", physicalFile.ContentType);
+            storedFileOperations.Verify(
+                service => service.ResolveStoragePath(It.IsAny<string>(), It.IsAny<string>()),
+                Times.Never);
+        }
+        finally
+        {
+            Directory.Delete(storageRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetGcodeThumbnailAsync_WhenServiceRejectsUnsafePath_ReturnsNotFound()
+    {
+        Guid fileId = Guid.NewGuid();
+        var gcodeFiles = new Mock<IGcodeFilesService>(MockBehavior.Strict);
+        gcodeFiles.Setup(service => service.GetThumbnailPathAsync(
+                fileId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string?)null);
+        var storedFileOperations = new Mock<IStoredFileOperationsService>(MockBehavior.Strict);
+        GcodeFilesController controller = CreateController(
+            gcodeFiles,
+            storedFileOperationsService: storedFileOperations);
+
+        IActionResult result = await controller.GetGcodeThumbnailAsync(fileId);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+        storedFileOperations.Verify(
+            service => service.ResolveStoragePath(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never);
     }
 }
