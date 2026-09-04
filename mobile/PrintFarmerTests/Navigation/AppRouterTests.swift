@@ -838,7 +838,7 @@ final class AppRouterTests: XCTestCase {
             router.reportsPath.count
         case .attention, .farm, .tasks, .scan, .inventory:
             XCTFail("Expected an adaptive tab")
-            return -1
+            -1
         }
     }
 }
