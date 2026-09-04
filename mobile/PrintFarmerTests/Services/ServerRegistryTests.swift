@@ -148,6 +148,53 @@ final class ServerRegistryTests: XCTestCase {
         XCTAssertEqual(registry.activeServer?.id, first.id)
     }
 
+    func testNavigationLayoutPreferencePersistsPerServer() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let first = try registry.add(
+            displayName: "One",
+            baseURL: URL(string: "https://one.example.com")!
+        )
+        let second = try registry.add(
+            displayName: "Two",
+            baseURL: URL(string: "https://two.example.com")!
+        )
+
+        try registry.setActive(id: first.id)
+        XCTAssertEqual(registry.navigationLayoutPreference, .automatic)
+        registry.setNavigationLayoutPreference(.twoModes)
+
+        try registry.setActive(id: second.id)
+        XCTAssertEqual(registry.navigationLayoutPreference, .automatic)
+        registry.setNavigationLayoutPreference(.simple)
+
+        try registry.setActive(id: first.id)
+        XCTAssertEqual(registry.navigationLayoutPreference, .twoModes)
+
+        let reloaded = ServerRegistry(
+            userDefaults: userDefaults,
+            migrateLegacyServerURL: false
+        )
+        XCTAssertEqual(reloaded.activeServerID, first.id)
+        XCTAssertEqual(reloaded.navigationLayoutPreference, .twoModes)
+
+        try reloaded.setActive(id: second.id)
+        XCTAssertEqual(reloaded.navigationLayoutPreference, .simple)
+    }
+
+    func testChangingServerEndpointClearsNavigationLayoutPreference() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        var server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://old.example.com")!
+        )
+        registry.setNavigationLayoutPreference(.twoModes)
+
+        server.baseURL = URL(string: "https://new.example.com")!
+        try registry.update(server)
+
+        XCTAssertEqual(registry.navigationLayoutPreference, .automatic)
+    }
+
     func testNormalizationAddsHTTPSLowercasesHostAndStripsTrailingSlash() throws {
         let normalized = try ServerRegistry.normalizedURLString(for: "  PRINT.example.COM/  ")
 

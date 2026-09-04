@@ -38,6 +38,64 @@ final class AppRouterTests: XCTestCase {
         )
     }
 
+    func testAutomaticDerivationUsesSimpleWhenShapeIsUnknown() {
+        let result = NavigationShellDerivation.automatic(
+            farmShape: nil,
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        )
+
+        XCTAssertEqual(result.shell, .simple)
+        XCTAssertEqual(
+            result.explanation,
+            "This server doesn't report its size. Using the simple layout."
+        )
+    }
+
+    func testAutomaticDerivationUsesShiftPlanningAsNegativeEvidenceOnly() {
+        let shiftDisabled = NavigationShellDerivation.automatic(
+            farmShape: FarmShape(accountCount: 4, locationCount: 3, printerCount: 40),
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        )
+        let shiftEnabledAlone = NavigationShellDerivation.automatic(
+            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 40),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        )
+
+        XCTAssertEqual(shiftDisabled.shell, .simple)
+        XCTAssertEqual(shiftEnabledAlone.shell, .simple)
+        XCTAssertTrue(shiftEnabledAlone.explanation.contains("printer count does not change"))
+    }
+
+    func testAutomaticDerivationUsesAccountAndLocationThresholds() {
+        let multipleAccounts = NavigationShellDerivation.automatic(
+            farmShape: FarmShape(accountCount: 2, locationCount: 1, printerCount: 1),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        )
+        let multipleLocations = NavigationShellDerivation.automatic(
+            farmShape: FarmShape(accountCount: 1, locationCount: 2, printerCount: 1),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        )
+
+        XCTAssertEqual(multipleAccounts.shell, .twoModes)
+        XCTAssertEqual(multipleLocations.shell, .twoModes)
+    }
+
+    func testAutomaticDerivationUsesSimpleForNonAdmin() {
+        let result = NavigationShellDerivation.automatic(
+            farmShape: FarmShape(accountCount: 4, locationCount: 3, printerCount: 40),
+            shiftPlanEnabled: true,
+            isFarmAdmin: false
+        )
+
+        XCTAssertEqual(result.shell, .simple)
+        XCTAssertTrue(result.explanation.contains("not a farm administrator"))
+    }
+
     func testCurrentTabPresentationMatchesShippingUI() {
         let tabs = ContentView.shippingTabs(for: capabilities)
 
@@ -66,6 +124,25 @@ final class AppRouterTests: XCTestCase {
             ]
         )
         XCTAssertEqual(ContentView.sidebarRowMinimumHeight, 44)
+        XCTAssertEqual(ContentView.modeControlMinimumHeight, 44)
+    }
+
+    func testAdaptiveTabAccessibilityIdentifiersMatchSharedContract() {
+        XCTAssertEqual(
+            AppTab.tabs(for: .simple, mode: .floor).map(\.tabAccessibilityIdentifier),
+            ["tab.attention", "tab.farm", "tab.inventory", "tab.oversight"]
+        )
+        XCTAssertEqual(
+            AppTab.tabs(for: .twoModes, mode: .oversight)
+                .map(\.tabAccessibilityIdentifier),
+            [
+                "tab.overview",
+                "tab.fleet",
+                "tab.jobs",
+                "tab.upkeep",
+                "tab.reports"
+            ]
+        )
     }
 
     func testVisibleTabsRemoveDisabledAttentionAndTasks() {
@@ -108,6 +185,32 @@ final class AppRouterTests: XCTestCase {
         )
     }
 
+    func testOversightAvailabilityOmitsEmptyHubAndFiltersModeTabs() {
+        let availability = OversightNavigationAvailability(
+            hasVisibleHubDestinations: false,
+            visibleTabs: [.fleet, .reports]
+        )
+
+        XCTAssertEqual(
+            AppTab.visibleTabs(
+                for: .simple,
+                mode: .floor,
+                capabilities: capabilities,
+                oversightAvailability: availability
+            ),
+            [.attention, .farm, .inventory]
+        )
+        XCTAssertEqual(
+            AppTab.visibleTabs(
+                for: .twoModes,
+                mode: .oversight,
+                capabilities: capabilities,
+                oversightAvailability: availability
+            ),
+            [.fleet, .reports]
+        )
+    }
+
     func testAttentionAndTasksGatesApplyIndependently() {
         var attentionDisabled = capabilities
         attentionDisabled.attentionEnabled = false
@@ -147,6 +250,153 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(router.selectedTab, .overview)
     }
 
+    func testAutomaticShellDoesNotChangeWhenShapeChangesDuringSession() {
+        let router = AppRouter()
+        let serverID = UUID()
+        let userID = UUID()
+
+        XCTAssertFalse(
+            router.hasAdaptiveShellConfiguration(
+                serverID: serverID,
+                userID: userID
+            )
+        )
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .automatic,
+            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 4),
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .automatic,
+            farmShape: FarmShape(accountCount: 3, locationCount: 2, printerCount: 40),
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.requestedShell, .simple)
+        XCTAssertEqual(router.activeShell, .simple)
+        XCTAssertTrue(
+            router.hasAdaptiveShellConfiguration(
+                serverID: serverID,
+                userID: userID
+            )
+        )
+    }
+
+    func testAutomaticShellDoesNotChangeWhenShiftCapabilityChangesDuringSession() {
+        let router = AppRouter()
+        let serverID = UUID()
+        let userID = UUID()
+        let staffedShape = FarmShape(accountCount: 3, locationCount: 2, printerCount: 40)
+        var shiftsDisabled = capabilities
+        shiftsDisabled.shiftPlanEnabled = false
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .automatic,
+            farmShape: staffedShape,
+            isFarmAdmin: true,
+            capabilities: shiftsDisabled,
+            oversightAvailability: .fullyAvailable
+        )
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .automatic,
+            farmShape: staffedShape,
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.requestedShell, .simple)
+        XCTAssertEqual(router.activeShell, .simple)
+    }
+
+    func testExplicitPreferenceChangeUpdatesShellImmediately() {
+        let router = AppRouter()
+        let serverID = UUID()
+        let userID = UUID()
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .automatic,
+            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 4),
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .twoModes,
+            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 4),
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.requestedShell, .twoModes)
+        XCTAssertEqual(router.activeShell, .twoModes)
+        XCTAssertEqual(router.activeMode, .floor)
+    }
+
+    func testTwoModesCollapsesWhenOversightHasFewerThanTwoTabs() {
+        let router = AppRouter()
+        let availability = OversightNavigationAvailability(
+            hasVisibleHubDestinations: true,
+            visibleTabs: [.fleet]
+        )
+
+        router.configureAdaptiveShell(
+            serverID: UUID(),
+            userID: UUID(),
+            preference: .twoModes,
+            farmShape: nil,
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: availability
+        )
+
+        XCTAssertEqual(router.requestedShell, .twoModes)
+        XCTAssertEqual(router.activeShell, .simple)
+        XCTAssertFalse(router.shouldShowModeControl(for: .farm))
+        XCTAssertFalse(router.visibleTabs(for: capabilities).isEmpty)
+    }
+
+    func testCapabilityCollapseResetsDisappearingOversightPaths() {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+        router.overviewPath.append(AppDestination.dispatchDashboard)
+        router.fleetPath.append(AppDestination.printerDetail(id: printerId))
+
+        router.reconcileCapabilities(
+            capabilities,
+            oversightAvailability: OversightNavigationAvailability(
+                hasVisibleHubDestinations: true,
+                visibleTabs: [.fleet]
+            )
+        )
+
+        XCTAssertEqual(router.activeShell, .simple)
+        XCTAssertTrue(router.overviewPath.isEmpty)
+        XCTAssertTrue(router.fleetPath.isEmpty)
+        XCTAssertTrue(router.visibleTabs(for: capabilities).contains(.oversight))
+    }
+
     func testShellTransitionsPreserveValidSelectionAndFallbackBidirectionally() {
         let router = AppRouter()
         router.selectedTab = .inventory
@@ -179,6 +429,52 @@ final class AppRouterTests: XCTestCase {
             capabilities: capabilities
         )
         XCTAssertEqual(router.selectedTab, .attention)
+    }
+
+    func testShellTransitionResetsPathForDisappearingTab() {
+        let router = AppRouter()
+        router.setNavigationShell(.simple, capabilities: capabilities)
+        router.selectedTab = .oversight
+        router.oversightPath.append(AppDestination.jobHistory)
+
+        router.setNavigationShell(
+            .twoModes,
+            mode: .floor,
+            capabilities: capabilities
+        )
+
+        XCTAssertTrue(router.oversightPath.isEmpty)
+        XCTAssertEqual(router.selectedTab, .attention)
+    }
+
+    func testModeTransitionResetsPathsForPreviousMode() {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+        router.overviewPath.append(AppDestination.dispatchDashboard)
+        router.fleetPath.append(AppDestination.printerDetail(id: printerId))
+
+        router.setNavigationMode(.floor, capabilities: capabilities)
+
+        XCTAssertTrue(router.overviewPath.isEmpty)
+        XCTAssertTrue(router.fleetPath.isEmpty)
+        XCTAssertEqual(router.selectedTab, .attention)
+    }
+
+    func testModeControlIsOnlyAvailableAtTabRoot() {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+
+        XCTAssertTrue(router.shouldShowModeControl(for: .fleet))
+        router.fleetPath.append(AppDestination.printerDetail(id: printerId))
+        XCTAssertFalse(router.shouldShowModeControl(for: .fleet))
     }
 
     func testInvalidSelectionFallsBackWithinActiveShell() {

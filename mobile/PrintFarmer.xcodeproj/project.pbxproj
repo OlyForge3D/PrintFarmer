@@ -80,6 +80,7 @@
 		3F2B3B9AEAE8DF4B91541072 /* SpoolInventoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2510EA192FD0D4DA2159C88 /* SpoolInventoryViewModel.swift */; };
 		3F2C3545841C1FABF8086E77 /* JobListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2FA2A4FEFE32F898CA6799D /* JobListView.swift */; };
 		402AAB63DEEBDF2F1A5E2C2F /* DemoPrinterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F053BC6DCA19E797485E4F0 /* DemoPrinterService.swift */; };
+		241600000000000000000002 /* AdaptiveNavigationShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241600000000000000000001 /* AdaptiveNavigationShell.swift */; };
 		4097E554D29B3551A59C943D /* AppDestination.swift in Sources */ = {isa = PBXBuildFile; fileRef = E83CE3867D23C7CA26C423AB /* AppDestination.swift */; };
 		409EF64C07EA20EFFAD52B2B /* HarvestSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F6608F46256F5914589FD48 /* HarvestSheetView.swift */; };
 		4286F2527CFAD89E261980F6 /* DemoAuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 851A07AC635F0B71E4EAD648 /* DemoAuthService.swift */; };
@@ -138,6 +139,7 @@
 		8BF25372E6C0C5D86559801C /* MockSignalRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C12D0C96BEDCD759DF8A6F1 /* MockSignalRService.swift */; };
 		8D2EDA47F2053E4ECD46CC15 /* MockPartsInventoryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEF704D6157DB730DA925AD5 /* MockPartsInventoryService.swift */; };
 		8DB374A80F52F95C2FD9C301 /* DispatchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41071C4C16F36811B173CFA6 /* DispatchViewModel.swift */; };
+		241600000000000000000004 /* NavigationSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241600000000000000000003 /* NavigationSettingsView.swift */; };
 		8E016F38A846594333A70CEB /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA0262E35EBDB310533C010A /* SettingsView.swift */; };
 		8ED9E2039EB36A33F0B9850D /* Formatting+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C9719B51C89BBC3E717E76E /* Formatting+Extensions.swift */; };
 		8F2654878B838B7E5AA35AAC /* PrinterListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E94D9CC41318FFA43B8B260 /* PrinterListView.swift */; };
@@ -746,6 +748,7 @@
 		B7D1020247C4116936C828DD /* AutoDispatchModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoDispatchModels.swift; sourceTree = "<group>"; };
 		B7F71C63D5F55C65B1826BCF /* JobAnalyticsServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobAnalyticsServiceProtocol.swift; sourceTree = "<group>"; };
 		B8D7C5C4CE62E9F3684E5B1F /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		241600000000000000000003 /* NavigationSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationSettingsView.swift; sourceTree = "<group>"; };
 		BA0262E35EBDB310533C010A /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		BBCA4460CCEAE8000D68EC31 /* JobHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobHistoryView.swift; sourceTree = "<group>"; };
 		BC2000000000000000000001 /* BarcodeScannerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarcodeScannerProtocol.swift; sourceTree = "<group>"; };
@@ -827,6 +830,7 @@
 		E5F6A7B8C9D0E1F2A3B4C5D6 /* NFCService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NFCService.swift; sourceTree = "<group>"; };
 		E60AC155142282A961B64B91 /* PartsInventoryServiceProtocol.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PartsInventoryServiceProtocol.swift; sourceTree = "<group>"; };
 		E61A5AAA3D1E4BAD9CA3FE7D /* PendingReadyMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingReadyMonitor.swift; sourceTree = "<group>"; };
+		241600000000000000000001 /* AdaptiveNavigationShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveNavigationShell.swift; sourceTree = "<group>"; };
 		E83CE3867D23C7CA26C423AB /* AppDestination.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDestination.swift; sourceTree = "<group>"; };
 		E8899CF6F69FA4326C4DD166 /* PredictiveServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PredictiveServiceProtocol.swift; sourceTree = "<group>"; };
 		E9B65E6EDFEDC96108A9812E /* ScanViewModel.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScanViewModel.swift; sourceTree = "<group>"; };
@@ -1257,6 +1261,7 @@
 		8AF644FAF32A52C4D65E8316 /* Navigation */ = {
 			isa = PBXGroup;
 			children = (
+				241600000000000000000001 /* AdaptiveNavigationShell.swift */,
 				E83CE3867D23C7CA26C423AB /* AppDestination.swift */,
 				F24120010000000000000001 /* AppDestinationView.swift */,
 				AF81383E489642A1A80EE943 /* DeepLinkHandler.swift */,
@@ -1410,6 +1415,7 @@
 		CBAC88193AFA3F2403893113 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				241600000000000000000003 /* NavigationSettingsView.swift */,
 				BA0262E35EBDB310533C010A /* SettingsView.swift */,
 				D610P4000000000000000003 /* ServerManagementViews.swift */,
 			);
@@ -1961,6 +1967,7 @@
 				F711A0002000000000000002 /* ToolheadModels.swift in Sources */,
 				AC275E3BCF7CF6F70474DA5A /* RequestModels.swift in Sources */,
 				4D9D08DD59DF23C812B2963C /* SignalRModels.swift in Sources */,
+				241600000000000000000002 /* AdaptiveNavigationShell.swift in Sources */,
 				4097E554D29B3551A59C943D /* AppDestination.swift in Sources */,
 				F24120020000000000000002 /* AppDestinationView.swift in Sources */,
 				14D1CA5B7AC14F03A2C76A77 /* DeepLinkHandler.swift in Sources */,
@@ -2028,6 +2035,7 @@
 				D71037FADE952266CE7F84B8 /* NotificationsView.swift in Sources */,
 				D3B43552C5380F3A3AFD1F77 /* PrinterDetailView.swift in Sources */,
 				8F2654878B838B7E5AA35AAC /* PrinterListView.swift in Sources */,
+				241600000000000000000004 /* NavigationSettingsView.swift in Sources */,
 				8E016F38A846594333A70CEB /* SettingsView.swift in Sources */,
 				D610P4000000000000000004 /* ServerManagementViews.swift in Sources */,
 				BCB617F9B1642391E9805237 /* Color+Hex.swift in Sources */,
