@@ -92,6 +92,9 @@ private final class LocationListViewModel {
         self.locationService = locationService
         isActive = true
         loadGeneration &+= 1
+        locations = []
+        errorMessage = nil
+        isLoading = true
     }
 
     func deactivate() {
