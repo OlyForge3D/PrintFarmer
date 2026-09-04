@@ -18,6 +18,7 @@ install.sh text eol=lf
 # Embedded slicer assets must not be modified by line-ending conversion
 *.png binary
 *.stl binary
+*.hdr binary
 
 # OrcaSlicer profile fixtures mirror upstream JSON byte formatting
 /sample_profiles/orcaslicer/**/*.json text eol=lf

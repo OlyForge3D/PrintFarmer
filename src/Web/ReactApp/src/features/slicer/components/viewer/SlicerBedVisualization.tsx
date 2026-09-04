@@ -13,6 +13,7 @@ import { FacePaintOverlay } from './FacePaintOverlay';
 import { ColorPaintOverlay } from './ColorPaintOverlay';
 import { CutPlaneOverlay } from './CutPlaneOverlay';
 import { PlateBedOverlay } from './PlateBedOverlay';
+import { STUDIO_HDRI_URL } from '../../../../common/constants/environmentAssets';
 import { ModelViewerErrorBoundary, ModelLoadFailedAlert } from './ModelViewerErrorBoundary';
 import { ThreeMFViewer } from '@/features/slicer/components/ThreeMFViewer';
 import { AuthenticatedModelSource } from '@/common/components/AuthenticatedModelSource';
@@ -2433,8 +2434,9 @@ function BedScene({
         />
       )}
 
-      {/* Environment for reflections */}
-      <Environment preset="studio" />
+      {/* Environment for reflections. Served locally (see public/assets/hdri) so the
+          slicer workspace does not depend on any third-party runtime host. */}
+      <Environment files={STUDIO_HDRI_URL} />
     </>
   );
 }
