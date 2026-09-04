@@ -823,22 +823,22 @@ final class AppRouterTests: XCTestCase {
         for tab: AppTab,
         router: AppRouter
     ) -> Int {
-        return switch tab {
+        switch tab {
         case .oversight:
-            router.oversightPath.count
+            return router.oversightPath.count
         case .overview:
-            router.overviewPath.count
+            return router.overviewPath.count
         case .fleet:
-            router.fleetPath.count
+            return router.fleetPath.count
         case .jobs:
-            router.oversightJobsPath.count
+            return router.oversightJobsPath.count
         case .upkeep:
-            router.upkeepPath.count
+            return router.upkeepPath.count
         case .reports:
-            router.reportsPath.count
+            return router.reportsPath.count
         case .attention, .farm, .tasks, .scan, .inventory:
             XCTFail("Expected an adaptive tab")
-            -1
+            return -1
         }
     }
 }
