@@ -34,6 +34,8 @@ func destinationView(for destination: AppDestination) -> some View {
         MaintenanceAnalyticsView()
     case .uptimeReliability:
         UptimeView()
+    case .filamentCoverage:
+        FilamentCoverageView()
     case .predictiveInsights(let printerId):
         PredictiveInsightsView(printerId: printerId)
     case .jobHistory:
