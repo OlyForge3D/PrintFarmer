@@ -125,10 +125,10 @@ struct ContentView: View {
                     tabContentView(for: tab)
                         .tabItem {
                             Label(tab.title, systemImage: tab.systemImage)
+                                .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
                         }
                         .tag(tab)
                         .badge(badgeCount(for: tab))
-                        .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
                 }
             }
         }
@@ -163,25 +163,31 @@ struct ContentView: View {
 
     private func iPadLayout(capabilities: ResolvedSystemCapabilities) -> some View {
         @Bindable var router = router
-        let tabs = Self.shippingTabs(for: capabilities)
+        let tabs = router.visibleTabs(for: capabilities)
+        let resolvedTab = resolvedShippingTab(for: capabilities)
 
         return NavigationSplitView(columnVisibility: $router.sidebarVisibility) {
-            List {
-                Section {
-                    ForEach(tabs, id: \.self) { tab in
-                        sidebarButton(
-                            tab: tab,
-                            capabilities: capabilities
-                        )
-                    }
-                } header: {
-                    Text("Operator")
+            VStack(spacing: 0) {
+                if router.shouldShowModeControl(for: resolvedTab) {
+                    modeControl(capabilities: capabilities)
                 }
+                List {
+                    Section {
+                        ForEach(tabs, id: \.self) { tab in
+                            sidebarButton(
+                                tab: tab,
+                                capabilities: capabilities
+                            )
+                        }
+                    } header: {
+                        Text("Operator")
+                    }
+                }
+                .listStyle(.sidebar)
             }
-            .listStyle(.sidebar)
             .navigationTitle("PrintFarmer")
         } detail: {
-            tabContentView(for: resolvedShippingTab(for: capabilities))
+            tabContentView(for: resolvedTab)
         }
         .navigationSplitViewStyle(.balanced)
     }
@@ -222,28 +228,14 @@ struct ContentView: View {
     private func resolvedShippingTab(
         for capabilities: ResolvedSystemCapabilities
     ) -> AppTab {
-        let tabs = Self.shippingTabs(for: capabilities)
-        return tabs.contains(router.selectedTab)
-            ? router.selectedTab
-            : AppTab.fallbackTab(
-                for: .current,
-                mode: .floor,
-                capabilities: capabilities
-            )
+        router.resolvedTab(for: capabilities)
     }
 
     private func selectShippingTab(
         _ tab: AppTab,
         capabilities: ResolvedSystemCapabilities
     ) {
-        let tabs = Self.shippingTabs(for: capabilities)
-        router.selectedTab = tabs.contains(tab)
-            ? tab
-            : AppTab.fallbackTab(
-                for: .current,
-                mode: .floor,
-                capabilities: capabilities
-            )
+        router.selectTab(tab, capabilities: capabilities)
     }
 
     private func badgeCount(for tab: AppTab) -> Int {
@@ -277,11 +269,6 @@ struct ContentView: View {
         oversightAvailability: OversightNavigationAvailability,
         preserveNavigationOnIdentityUpgrade: Bool = false
     ) {
-        if sizeClass == .regular {
-            router.presentShippingShell(capabilities: capabilities)
-            return
-        }
-
         guard let activeServer = serverRegistry.activeServer,
               let navigationIdentity,
               navigationIdentity.serverID == activeServer.id,
