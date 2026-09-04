@@ -84,6 +84,11 @@ final class DeepLinkHandlerTests: XCTestCase {
         XCTAssertNil(DeepLinkHandler.parse(url: url))
     }
 
+    func testAdvancedControlsURLCannotBypassSafetyGatedEntry() {
+        let url = URL(string: "printfarmer://printer/\(testId.uuidString)/advanced")!
+        XCTAssertNil(DeepLinkHandler.parse(url: url))
+    }
+
     // MARK: - Edge Cases
 
     func testParseReadyCaseInsensitive() {

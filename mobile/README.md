@@ -61,6 +61,17 @@ keeps its own Keychain-stored credentials.
 - Switching servers rebuilds the app's API, authentication, and SignalR services
   for the newly active server.
 
+### Advanced Printer Controls
+
+Advanced printer controls are off by default for every server. To use jog,
+preheat, home, z-offset, or disable motors, open **Settings** → **Printer
+Safety** and enable **Advanced Printer Controls** for the active server.
+Enabling the controls on one server does not enable them on another. Turning
+the setting off removes access immediately, including an open advanced-controls
+screen. Changing a registered server's URL also resets the setting to off so an
+opt-in cannot carry over to a different endpoint. Misuse may damage a printer or
+ruin a print.
+
 ### Post-Login Connection Check
 
 After sign-in or session restoration, the app checks each enabled mobile backend
