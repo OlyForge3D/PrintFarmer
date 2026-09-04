@@ -174,10 +174,17 @@ final class AppRouter {
     func revokeAdvancedPrinterControlsAccess() {
         navigationEpoch &+= 1
         printersPath = NavigationPath()
+        tasksPath = NavigationPath()
         jobsPath = NavigationPath()
         notificationsPath = NavigationPath()
         inventoryPath = NavigationPath()
         scanPath = NavigationPath()
+        oversightPath = NavigationPath()
+        overviewPath = NavigationPath()
+        fleetPath = NavigationPath()
+        oversightJobsPath = NavigationPath()
+        upkeepPath = NavigationPath()
+        reportsPath = NavigationPath()
         dashboardSheetPath = NavigationPath()
         maintenanceSheetPath = NavigationPath()
         notificationsSheetPath = NavigationPath()
