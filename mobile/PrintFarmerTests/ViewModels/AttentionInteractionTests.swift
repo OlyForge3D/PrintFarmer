@@ -2542,6 +2542,56 @@ final class AttentionInteractionTests: XCTestCase {
                 "attention.item.\(item.id).action.refreshRetry",
             ]
         )
+
+        let harvest = AttentionAction(
+            kind: .harvest,
+            label: "Harvest",
+            requiresConfirmation: true
+        )
+        let harvestItem = makeAttentionItem(
+            id: "harvest:scan-bin",
+            kind: .harvest,
+            severity: .warning,
+            printerID: printerA,
+            actions: [harvest],
+            jobID: jobA
+        )
+        let harvestIdentifiers = AttentionAccessibility.orderedIdentifiers(
+            item: harvestItem,
+            mediaState: nil,
+            actions: [harvest],
+            actionState: .idle
+        )
+        XCTAssertTrue(
+            harvestIdentifiers.contains(
+                "attention.item.\(harvestItem.id).action.scanBin"
+            )
+        )
+        XCTAssertFalse(
+            harvestIdentifiers.contains(
+                "attention.item.\(harvestItem.id).action.harvest"
+            )
+        )
+
+        let fallbackHarvestItem = makeAttentionItem(
+            id: "harvest:server-fallback",
+            kind: .harvest,
+            severity: .warning,
+            printerID: printerA,
+            actions: [harvest],
+            jobID: nil
+        )
+        XCTAssertTrue(
+            AttentionAccessibility.orderedIdentifiers(
+                item: fallbackHarvestItem,
+                mediaState: nil,
+                actions: [harvest],
+                actionState: .idle
+            ).contains(
+                "attention.item.\(fallbackHarvestItem.id).action.harvest"
+            ),
+            "A harvest item without job identity must keep its server action fallback"
+        )
     }
 
     private func assertEventDuringActionRefresh(

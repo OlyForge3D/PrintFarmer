@@ -27,7 +27,7 @@ enum AppDestination: Hashable {
 
 /// Navigation shells supported by the tab model.
 ///
-/// `current` keeps the shipping five-tab operator UI unchanged while the
+/// `current` keeps the shipping operator UI unchanged while the
 /// adaptive shells are introduced incrementally by the IOS navigation epic.
 enum NavigationShell: Hashable, CaseIterable {
     case current
@@ -51,7 +51,6 @@ enum AppTab: String, Hashable, CaseIterable {
     case attention
     case farm
     case tasks
-    case scan
     case inventory
     case oversight
     case overview
@@ -66,7 +65,7 @@ enum AppTab: String, Hashable, CaseIterable {
     ) -> [AppTab] {
         switch shell {
         case .current:
-            [.attention, .farm, .tasks, .scan, .inventory]
+            [.attention, .farm, .tasks, .inventory]
         case .simple:
             [.attention, .farm, .inventory, .oversight]
         case .twoModes:
@@ -85,7 +84,7 @@ enum AppTab: String, Hashable, CaseIterable {
             capabilities.attentionEnabled
         case .tasks:
             capabilities.shiftPlanEnabled
-        case .farm, .scan, .inventory, .oversight,
+        case .farm, .inventory, .oversight,
              .overview, .fleet, .jobs, .upkeep, .reports:
             true
         }
@@ -112,7 +111,7 @@ enum AppTab: String, Hashable, CaseIterable {
     }
 
     /// Compatibility helpers for callers that intentionally target today's
-    /// five-tab operator shell.
+    /// operator shell.
     static func visibleTabs(
         for capabilities: ResolvedSystemCapabilities
     ) -> [AppTab] {
@@ -141,8 +140,6 @@ enum AppTab: String, Hashable, CaseIterable {
             "Farm"
         case .tasks:
             "Tasks"
-        case .scan:
-            "Scan"
         case .inventory:
             "Inventory"
         case .oversight:
@@ -168,8 +165,6 @@ enum AppTab: String, Hashable, CaseIterable {
             "printer"
         case .tasks:
             "checklist"
-        case .scan:
-            "barcode.viewfinder"
         case .inventory:
             "cylinder.fill"
         case .oversight:
@@ -193,7 +188,7 @@ enum AppTab: String, Hashable, CaseIterable {
             .notifications
         case .farm:
             .pendingReady
-        case .tasks, .scan, .inventory, .oversight,
+        case .tasks, .inventory, .oversight,
              .overview, .fleet, .jobs, .upkeep, .reports:
             .none
         }

@@ -448,7 +448,7 @@
 		F465B934343F94CAEDAF586F /* HarvestViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87B9A481D27DFAD0954FDBB7 /* HarvestViewModel.swift */; };
 		F6E5D4C3B2A1F2E1D0C9B8A7 /* MockNFCService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B8C9D0E1F2A3B4C5D6E7F8 /* MockNFCService.swift */; };
 		F7060001000000000000A002 /* AttentionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A001 /* AttentionView.swift */; };
-		F7060001000000000000A012 /* ScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A011 /* ScanView.swift */; };
+		F7060001000000000000A012 /* ScanFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A011 /* ScanFlowView.swift */; };
 		F7060001000000000000A022 /* AdvancedPrinterControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A021 /* AdvancedPrinterControlsView.swift */; };
 		F7060001000000000000A032 /* SystemCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A031 /* SystemCapabilities.swift */; };
 		F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A041 /* SystemCapabilitiesService.swift */; };
@@ -842,7 +842,7 @@
 		F4A621DD81EC9966336CD261 /* MaintenanceServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceServiceProtocol.swift; sourceTree = "<group>"; };
 		F6A7B8C9D0E1F2A3B4C5D6E7 /* MockQRSpoolScannerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockQRSpoolScannerService.swift; sourceTree = "<group>"; };
 		F7060001000000000000A001 /* AttentionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionView.swift; sourceTree = "<group>"; };
-		F7060001000000000000A011 /* ScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanView.swift; sourceTree = "<group>"; };
+		F7060001000000000000A011 /* ScanFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanFlowView.swift; sourceTree = "<group>"; };
 		F7060001000000000000A021 /* AdvancedPrinterControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedPrinterControlsView.swift; sourceTree = "<group>"; };
 		F7060001000000000000A031 /* SystemCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilities.swift; sourceTree = "<group>"; };
 		F7060001000000000000A041 /* SystemCapabilitiesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesService.swift; sourceTree = "<group>"; };
@@ -1601,7 +1601,7 @@
 		F7060001000000000000A013 /* Scan */ = {
 			isa = PBXGroup;
 			children = (
-				F7060001000000000000A011 /* ScanView.swift */,
+				F7060001000000000000A011 /* ScanFlowView.swift */,
 				6F6608F46256F5914589FD48 /* HarvestSheetView.swift */,
 				40AE68126C0013F4366194BF /* BinScanResultView.swift */,
 				07D94FCFA57014B2932689A3 /* PartScanResultView.swift */,
@@ -2090,7 +2090,7 @@
 				A2B6286100000000000000A2 /* JogSubgroup.swift in Sources */,
 				A4C8D9E0123456789ABCD002 /* DisabledControlStyle.swift in Sources */,
 				F7060001000000000000A002 /* AttentionView.swift in Sources */,
-				F7060001000000000000A012 /* ScanView.swift in Sources */,
+				F7060001000000000000A012 /* ScanFlowView.swift in Sources */,
 				F7060001000000000000A022 /* AdvancedPrinterControlsView.swift in Sources */,
 				F7060001000000000000A032 /* SystemCapabilities.swift in Sources */,
 				F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */,

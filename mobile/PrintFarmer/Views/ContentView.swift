@@ -2,10 +2,10 @@ import SwiftUI
 
 /// Operator-shell content view. F1 (#706) replaces the seven-tab layout
 /// (dashboard, printers, jobs, notifications, inventory, maintenance,
-/// settings) with the five operator-first destinations: Attention, Farm,
-/// Tasks, Scan, Inventory. Settings and server switching move to the
-/// Attention overflow menu; jog/preheat/z-offset controls live behind
-/// Printer Detail → Advanced.
+/// settings) with four operator-first destinations: Attention, Farm, Tasks,
+/// and Inventory. Scan flows live with their owning task surfaces. Settings
+/// and server switching remain reachable from the account/compatibility
+/// surfaces while the adaptive navigation epic lands.
 struct ContentView: View {
     static let sidebarRowMinimumHeight: CGFloat = 44
     static func shippingTabs(
@@ -185,8 +185,6 @@ struct ContentView: View {
             PrinterListView()
         case .tasks:
             ShiftTasksView()
-        case .scan:
-            ScanView()
         case .inventory:
             InventoryView()
         case .oversight, .overview, .fleet, .jobs, .upkeep, .reports:
