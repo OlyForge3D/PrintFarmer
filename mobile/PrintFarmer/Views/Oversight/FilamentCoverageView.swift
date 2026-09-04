@@ -75,6 +75,7 @@ struct FilamentCoverageView: View {
                 for: UIApplication.willEnterForegroundNotification
             )
         ) { _ in
+            retryTask?.cancel()
             retryTask = Task { await reload() }
         }
         .accessibilityIdentifier("oversight.filamentCoverage")
