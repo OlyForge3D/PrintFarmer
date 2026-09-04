@@ -458,6 +458,7 @@ GET /api/system-logs -> Farm.Web.Api::Farm.Web.Api.Controllers.SystemLogsControl
 GET /api/system-logs/export -> Farm.Web.Api::Farm.Web.Api.Controllers.SystemLogsController.ExportLogsAsync
 GET /api/system-logs/stats -> Farm.Web.Api::Farm.Web.Api.Controllers.SystemLogsController.GetStatsAsync
 GET /api/system/capabilities -> Farm.Web.Api::Farm.Web.Api.Controllers.SystemCapabilitiesController.GetCapabilitiesAsync
+GET /api/system/farm-shape -> Farm.Web.Api::Farm.Web.Api.Controllers.FarmShapeController.GetFarmShapeAsync
 GET /api/system/feature-flags -> Farm.Web.Api::Farm.Web.Api.Controllers.SystemCapabilitiesController.GetFeatureFlags
 GET /api/system/info -> Farm.Web.Api::Farm.Web.Api.Controllers.SystemInfoController.GetInfoAsync
 GET /api/system/source -> Farm.Web.Api::Farm.Web.Api.Controllers.SystemSourceController.GetSource

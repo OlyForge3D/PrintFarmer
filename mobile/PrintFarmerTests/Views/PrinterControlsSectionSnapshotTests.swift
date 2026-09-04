@@ -3,8 +3,8 @@ import SwiftUI
 import SnapshotTesting
 @testable import PrintFarmer
 
-/// Snapshot tests for `PrinterControlsSection` across the three backend
-/// capability profiles plus loading and disabled states.
+/// Snapshot tests for printer controls across backend capability profiles,
+/// loading and disabled states, and shared detail-screen control styles.
 ///
 /// Closes OlyForge3D/PrintFarmer#289.
 ///
@@ -128,5 +128,25 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let svc = makeService(caps: Self.moonrakerCaps)
         let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13))
+    }
+
+    func test_snapshot_printerDetailBorderedDestructiveControls_darkMode() {
+        let controls = HStack(spacing: 12) {
+            PrinterDetailBorderedDestructiveButton(kind: .eject, action: {})
+            PrinterDetailBorderedDestructiveButton(kind: .cancel, action: {})
+        }
+        .padding()
+        .frame(maxWidth: .infinity)
+
+        let rootView = VStack {
+            controls
+            Spacer()
+        }
+        .background(Color.pfBackground)
+        .preferredColorScheme(.dark)
+
+        let hostingController = host(rootView)
+        hostingController.overrideUserInterfaceStyle = .dark
+        assertSnapshot(of: hostingController, as: .image(on: .iPhone13))
     }
 }

@@ -64,6 +64,20 @@ public interface IQueueResourceAuthorizationService
         IReadOnlyCollection<Guid> printerIds,
         PrinterGroupAccessLevel minimumAccess,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Counts the printers the principal may access at the given
+    /// <see cref="PrinterGroupAccessLevel"/>, applying the same enabled-only visibility and
+    /// PrinterGroup ACL rules as <see cref="FilterAccessiblePrinterIdsAsync"/> and the default
+    /// (non-admin) view of <c>GET /api/printers</c>. Resolved with a single repository-level
+    /// <c>COUNT(*)</c> rather than materializing the printer list (issue #2411). Farm admins are
+    /// counted against every printer (enabled or not), matching their unfiltered default view of
+    /// that same endpoint.
+    /// </summary>
+    Task<int> CountAccessiblePrintersAsync(
+        ClaimsPrincipal principal,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -370,6 +384,42 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
         }
 
         return allowed;
+    }
+
+    public async Task<int> CountAccessiblePrintersAsync(
+        ClaimsPrincipal principal,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        if (PrintFarmerPermissions.IsFarmAdmin(principal))
+        {
+            return await _db.Printers.CountAsync(ct);
+        }
+
+        if (!PrintFarmerPermissions.TryGetUserId(principal, out Guid userId))
+        {
+            return 0;
+        }
+
+        HashSet<Guid> userRoles = (await _db.UserRoles
+                .AsNoTracking()
+                .Where(role => role.UserId == userId && role.IsActive)
+                .Select(role => role.RoleId)
+                .ToListAsync(ct))
+            .ToHashSet();
+
+        return await _db.Printers
+            .AsNoTracking()
+            .Where(printer => printer.IsEnabled)
+            .Where(printer =>
+                !printer.PrinterGroupId.HasValue ||
+                !_db.PrinterGroupAccesses.Any(rule => rule.PrinterGroupId == printer.PrinterGroupId.Value) ||
+                _db.PrinterGroupAccesses.Any(rule =>
+                    rule.PrinterGroupId == printer.PrinterGroupId.Value &&
+                    userRoles.Contains(rule.RoleId) &&
+                    rule.AccessLevel >= minimumAccess))
+            .CountAsync(ct);
     }
 
     private async Task<bool> CanUserAccessPrinterAsync(
