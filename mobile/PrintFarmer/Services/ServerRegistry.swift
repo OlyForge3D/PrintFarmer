@@ -437,8 +437,16 @@ final class ServerRegistry {
     }
 
     @discardableResult
-    func acceptOversightUpgradeOffer(for serverID: UUID) -> Bool {
-        guard let activeServerID, activeServerID == serverID else { return false }
+    func acceptOversightUpgradeOffer(
+        for serverID: UUID,
+        isFarmAdmin: Bool
+    ) -> Bool {
+        guard let activeServerID,
+              activeServerID == serverID,
+              navigationLayoutPreference == .automatic,
+              isFarmAdmin else {
+            return false
+        }
         var state = oversightUpgradeOfferState(for: activeServerID)
         guard !state.pendingThresholds.isEmpty else { return false }
         state.hasAccepted = true

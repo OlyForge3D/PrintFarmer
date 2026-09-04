@@ -285,7 +285,10 @@ final class ServerRegistryTests: XCTestCase {
             isFarmAdmin: true
         ))
 
-        registry.acceptOversightUpgradeOffer(for: registry.activeServerID!)
+        registry.acceptOversightUpgradeOffer(
+            for: registry.activeServerID!,
+            isFarmAdmin: true
+        )
         XCTAssertEqual(registry.navigationLayoutPreference, .twoModes)
         registry.setNavigationLayoutPreference(.automatic)
         XCTAssertFalse(registry.observeOversightUpgradeOffer(
@@ -321,7 +324,7 @@ final class ServerRegistryTests: XCTestCase {
         ))
 
         try registry.setActive(id: second.id)
-        registry.acceptOversightUpgradeOffer(for: first.id)
+        registry.acceptOversightUpgradeOffer(for: first.id, isFarmAdmin: true)
         registry.dismissOversightUpgradeOffer(for: first.id)
 
         XCTAssertEqual(registry.navigationLayoutPreference, .automatic)
@@ -357,7 +360,9 @@ final class ServerRegistryTests: XCTestCase {
             shiftPlanEnabled: false,
             isFarmAdmin: true
         ))
-        XCTAssertFalse(registry.acceptOversightUpgradeOffer(for: server.id))
+        XCTAssertFalse(
+            registry.acceptOversightUpgradeOffer(for: server.id, isFarmAdmin: true)
+        )
         XCTAssertTrue(registry.observeOversightUpgradeOffer(
             farmShape: grownFarm,
             shiftPlanEnabled: false,

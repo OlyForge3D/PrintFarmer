@@ -105,7 +105,10 @@ struct OversightHubView: View {
     private func acceptUpgradeOffer() {
         guard let offerServerID,
               router.configuredIsFarmAdmin,
-              serverRegistry.acceptOversightUpgradeOffer(for: offerServerID) else {
+              serverRegistry.acceptOversightUpgradeOffer(
+                  for: offerServerID,
+                  isFarmAdmin: router.configuredIsFarmAdmin
+              ) else {
             refreshUpgradeOffer()
             return
         }

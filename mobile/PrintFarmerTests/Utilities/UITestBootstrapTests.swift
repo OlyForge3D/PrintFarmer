@@ -397,6 +397,19 @@ final class UITestBootstrapTests: XCTestCase {
         // (Verified indirectly by the second restoreSession call being a no-op below.)
     }
 
+    func test_makeBundle_oversightUpgradeOffer_authenticatesAndPinsOfferInputs() throws {
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(
+            mode: .authenticatedOversightUpgradeOffer,
+            defaults: defaults
+        )
+
+        XCTAssertTrue(bundle.authViewModel.isAuthenticated)
+        XCTAssertEqual(bundle.authViewModel.currentUser?.roles, ["farm_admin"])
+        XCTAssertTrue(bundle.services.capabilitiesService.resolved.shiftPlanEnabled)
+        XCTAssertTrue(bundle.services.farmShapeService is StubFarmShapeService)
+    }
+
     func test_makeBundle_usesDemoServices() throws {
         let defaults = try makeEphemeralDefaults()
         let bundle = UITestBootstrap.makeBundle(defaults: defaults)

@@ -294,6 +294,9 @@ enum UITestBootstrap {
             services.farmShapeService = StubFarmShapeService(
                 shape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1)
             )
+            var capabilities = ResolvedSystemCapabilities.defaults
+            capabilities.shiftPlanEnabled = true
+            services.capabilitiesService = StubSystemCapabilitiesService(resolved: capabilities)
         }
 
         // #1353: `ResolvedSystemCapabilities.defaults.printedPartsInventoryEnabled`
@@ -393,7 +396,7 @@ enum UITestBootstrap {
         let auth = AuthViewModel(services: services)
         switch mode {
         case .authenticated, .authenticatedOperatorFeaturesDisabled,
-             .authenticatedAttentionActions:
+             .authenticatedAttentionActions, .authenticatedOversightUpgradeOffer:
             auth.markAuthenticatedForUITesting(user: testUser)
         case .unauthenticated:
             break

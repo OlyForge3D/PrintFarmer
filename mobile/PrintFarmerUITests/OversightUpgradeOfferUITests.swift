@@ -6,8 +6,8 @@ final class OversightUpgradeOfferUITests: PrintFarmerUITestCase {
         ["--uitesting-oversight-upgrade-offer"]
     }
 
-    func testOfferAppearsInlineAndCanBeDismissed() throws {
-        try requireCompactOversight()
+    func testOfferAppearsInlineAndCanBeDismissed() {
+        requireCompactOversight()
 
         let turnOn = app.buttons["oversight.upgradeOffer.turnOn"]
         XCTAssertTrue(turnOn.waitForExistence(timeout: 8))
@@ -18,8 +18,8 @@ final class OversightUpgradeOfferUITests: PrintFarmerUITestCase {
         XCTAssertTrue(turnOn.waitForNonExistence(timeout: 2))
     }
 
-    func testTurningOnOfferSwitchesToTwoModes() throws {
-        try requireCompactOversight()
+    func testTurningOnOfferSwitchesToTwoModes() {
+        requireCompactOversight()
 
         let turnOn = app.buttons["oversight.upgradeOffer.turnOn"]
         XCTAssertTrue(turnOn.waitForExistence(timeout: 8))
@@ -28,13 +28,9 @@ final class OversightUpgradeOfferUITests: PrintFarmerUITestCase {
         XCTAssertTrue(app.segmentedControls["navigation.modeControl"].waitForExistence(timeout: 5))
     }
 
-    private func requireCompactOversight() throws {
+    private func requireCompactOversight() {
         let oversight = app.tabBars.buttons["Oversight"]
-        guard oversight.waitForExistence(timeout: 8) else {
-            throw XCTSkip(
-                "Inline Oversight upgrade offer is available only in the compact simple shell."
-            )
-        }
+        XCTAssertTrue(oversight.waitForExistence(timeout: 8))
         oversight.tap()
     }
 }
