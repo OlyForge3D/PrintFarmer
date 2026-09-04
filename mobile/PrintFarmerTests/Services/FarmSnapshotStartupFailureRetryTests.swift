@@ -71,6 +71,34 @@ final class FarmSnapshotStartupFailureRetryTests: XCTestCase {
         return root
     }
 
+    /// Builds every container-owned `APIClient` on `mock`'s `MockURLProtocol`
+    /// session. Authenticated startup now issues `/api/system/capabilities` and
+    /// `/api/system/farm-shape` through the CONTAINER's client (not the
+    /// AuthService's), so a container left on the default factory would reach
+    /// the real network — and hang — on any `AuthViewModel.login`/`restoreSession`
+    /// path. Every VM-driven case below must pass this factory.
+    private func mockedAPIClientFactory(
+        _ mock: MockAPIClient
+    ) -> ServiceContainer.APIClientFactory {
+        { baseURL, generation, accessToken, authSessionToken, serverID in
+            let identity = accessToken.flatMap { token in
+                serverID.map {
+                    AuthenticatedIdentity(
+                        accessToken: token,
+                        serverID: $0,
+                        authSessionToken: authSessionToken
+                    )
+                }
+            }
+            return APIClient(
+                baseURL: baseURL,
+                session: mock.urlSession,
+                serverGeneration: generation,
+                authenticated: identity
+            )
+        }
+    }
+
     // MARK: - D1: container returns .preparationFailed on failed prep, then binds on retry
 
     /// Fail-prep → typed `.preparationFailed` with NO published session → retry
@@ -161,23 +189,7 @@ final class FarmSnapshotStartupFailureRetryTests: XCTestCase {
             farmSnapshotStore: failing,
             farmSnapshotOwnerStore: owners,
             synchronizeOfflineQueueOnStartup: false,
-            apiClientFactory: { baseURL, generation, accessToken, authSessionToken, serverID in
-                let identity = accessToken.flatMap { token in
-                    serverID.map {
-                        AuthenticatedIdentity(
-                            accessToken: token,
-                            serverID: $0,
-                            authSessionToken: authSessionToken
-                        )
-                    }
-                }
-                return APIClient(
-                    baseURL: baseURL,
-                    session: mockAPIClient.urlSession,
-                    serverGeneration: generation,
-                    authenticated: identity
-                )
-            })
+            apiClientFactory: mockedAPIClientFactory(mockAPIClient))
         // Replace the container's default AuthService with one bound to the mock.
         services.authService = AuthService(
             apiClient: mockAPIClient.apiClient,
@@ -214,6 +226,20 @@ final class FarmSnapshotStartupFailureRetryTests: XCTestCase {
         XCTAssertEqual(session?.serverID, serverA.id, "must bind the same authenticated server")
         XCTAssertGreaterThanOrEqual(failing.prepareCallCount, 2,
                                     "retry must re-invoke prepareStartup at least once more")
+
+        // 3) Freshness: drive the actual capability-readiness consumer and prove
+        //    it observes a NEW probe. `discardPreparedCapabilities()` ran when
+        //    activation failed, so the prepared startup outcome can no longer be
+        //    replayed and the next readiness consumption must go to the network.
+        //    Calling `refreshForReadiness()` here is what makes the proof causal:
+        //    it does not depend on the outbox sync path being eligible, which is
+        //    gated on credential-store/keychain state this test does not control.
+        //    The baseline stays the pre-retry count because either consumer may
+        //    land the fresh request first (`syncOfflineWriteQueue` calls
+        //    `prepareForReadiness()` when it IS eligible). Without the discard,
+        //    the stale prepared result would satisfy BOTH consumers and the count
+        //    would not move at all.
+        await services.capabilitiesService.refreshForReadiness()
         XCTAssertGreaterThan(
             mockAPIClient.capturedRequests.filter {
                 $0.url?.path == "/api/system/capabilities"
@@ -318,7 +344,9 @@ final class FarmSnapshotStartupFailureRetryTests: XCTestCase {
             observeRegistry: false,
             farmSnapshotAuthority: authority,
             farmSnapshotStore: failing,
-            farmSnapshotOwnerStore: owners)
+            farmSnapshotOwnerStore: owners,
+            synchronizeOfflineQueueOnStartup: false,
+            apiClientFactory: mockedAPIClientFactory(mockAPIClient))
         services.authService = AuthService(
             apiClient: mockAPIClient.apiClient,
             userDefaultsBox: AuthServiceUserDefaultsBox(UserDefaults(suiteName: trackedSuiteName("authsvc"))!),
@@ -381,7 +409,9 @@ final class FarmSnapshotStartupFailureRetryTests: XCTestCase {
             observeRegistry: false,
             farmSnapshotAuthority: authority,
             farmSnapshotStore: failing,
-            farmSnapshotOwnerStore: owners)
+            farmSnapshotOwnerStore: owners,
+            synchronizeOfflineQueueOnStartup: false,
+            apiClientFactory: mockedAPIClientFactory(mockAPIClient))
         services.authService = AuthService(
             apiClient: mockAPIClient.apiClient,
             userDefaultsBox: AuthServiceUserDefaultsBox(UserDefaults(suiteName: trackedSuiteName("authsvc"))!),
