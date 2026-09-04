@@ -448,6 +448,45 @@ final class AppRouterTests: XCTestCase {
         XCTAssertNil(router.pendingFilamentSwap)
     }
 
+    func testDisablingAdvancedControlsClearsEveryDestinationStack() {
+        let router = AppRouter()
+        router.printersPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
+        router.jobsPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
+        router.notificationsPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
+        router.inventoryPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
+        router.scanPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
+        router.dashboardSheetPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
+        router.maintenanceSheetPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
+        router.notificationsSheetPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
+
+        router.revokeAdvancedPrinterControlsAccess()
+
+        XCTAssertTrue(router.printersPath.isEmpty)
+        XCTAssertTrue(router.jobsPath.isEmpty)
+        XCTAssertTrue(router.notificationsPath.isEmpty)
+        XCTAssertTrue(router.inventoryPath.isEmpty)
+        XCTAssertTrue(router.scanPath.isEmpty)
+        XCTAssertTrue(router.dashboardSheetPath.isEmpty)
+        XCTAssertTrue(router.maintenanceSheetPath.isEmpty)
+        XCTAssertTrue(router.notificationsSheetPath.isEmpty)
+    }
+
+    func testAdvancedControlsAccessRequiresOptInAndOnlinePrinter() throws {
+        var printer = try TestData.decodePrinter()
+
+        XCTAssertFalse(
+            AdvancedPrinterControlsAccess.isEntryVisible(isEnabled: false, for: printer)
+        )
+        XCTAssertTrue(
+            AdvancedPrinterControlsAccess.isEntryVisible(isEnabled: true, for: printer)
+        )
+
+        printer.isOnline = false
+        XCTAssertFalse(
+            AdvancedPrinterControlsAccess.isEntryVisible(isEnabled: true, for: printer)
+        )
+    }
+
     func testPendingPrinterNavigationIsInvalidatedWhenServerChanges() async {
         let router = AppRouter()
 
