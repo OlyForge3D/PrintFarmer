@@ -318,7 +318,7 @@ struct JobListView: View {
                 } label: {
                     Label("Cancel", systemImage: "xmark.circle")
                 }
-                .tint(Color.pfError)
+                .tint(Color.pfErrorFill)
             }
         }
         .swipeActions(edge: .leading) {

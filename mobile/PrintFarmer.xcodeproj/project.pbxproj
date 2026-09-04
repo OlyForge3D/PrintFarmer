@@ -467,6 +467,7 @@
 		F78010000000000000000002 /* AttentionActionsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78000000000000000000002 /* AttentionActionsUITests.swift */; };
 		F7060003000000000000A002 /* UITestBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060003000000000000A001 /* UITestBootstrap.swift */; };
 		F7060003000000000000B002 /* UITestBootstrapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060003000000000000B001 /* UITestBootstrapTests.swift */; };
+		F82413000000000000000002 /* ThemeColorsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82413000000000000000001 /* ThemeColorsTests.swift */; };
 		F7A48E9C1C18B76092C052AE /* LocationServiceProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF16548F3F1D5C3EAB3E4E14 /* LocationServiceProtocol.swift */; };
 		F7A8B2C3D4E5F6A7B8C9D0E1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E2F3A4B5C6D7E8F9A0B1C2D3 /* Assets.xcassets */; };
 		FA1B2C3D4E5F6A7B8C9D0E1F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = FA2B3C4D5E6F7A8B9C0D1E2F /* LaunchScreen.storyboard */; };
@@ -865,6 +866,7 @@
 		F7060002000000000000C0F1 /* PrintFarmerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrintFarmerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F7060003000000000000A001 /* UITestBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestBootstrap.swift; sourceTree = "<group>"; };
 		F7060003000000000000B001 /* UITestBootstrapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestBootstrapTests.swift; sourceTree = "<group>"; };
+		F82413000000000000000001 /* ThemeColorsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThemeColorsTests.swift; sourceTree = "<group>"; };
 		F8C434327E249041DEB43A8E /* PredictiveViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PredictiveViewModel.swift; sourceTree = "<group>"; };
 		F9121CFE5C6DFAB79CD12B21 /* JobDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobDetailViewModel.swift; sourceTree = "<group>"; };
 		F9613964BDF412E866655E27 /* UptimeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UptimeView.swift; sourceTree = "<group>"; };
@@ -1091,6 +1093,7 @@
 				A2D4EF0123456789ABCD0006 /* Views */,
 				A1C5DEF1234567890ABC0022 /* Views */,
 				CA22CAC2DD8479E1B2EE791A /* ModelsTests.swift */,
+				F82413000000000000000001 /* ThemeColorsTests.swift */,
 			);
 			path = PrintFarmerTests;
 			sourceTree = "<group>";
@@ -1867,6 +1870,7 @@
 				F1A1B2C3D4E5F6A7B8C9D0E1 /* QRCodeParserTests.swift in Sources */,
 				F1C3D4E5F6A7B8C9D0E1F2A3 /* NFCTagParserTests.swift in Sources */,
 				F7060003000000000000B002 /* UITestBootstrapTests.swift in Sources */,
+				F82413000000000000000002 /* ThemeColorsTests.swift in Sources */,
 				F1E5F6A7B8C9D0E1F2A3B4C5 /* MockScannerService.swift in Sources */,
 				F1A7B8C9D0E1F2A3B4C5D6E7 /* SpoolPickerViewModelScanTests.swift in Sources */,
 				F1C9D0E1F2A3B4C5D6E7F8A9 /* MockSpoolService.swift in Sources */,

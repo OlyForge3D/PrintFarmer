@@ -162,7 +162,7 @@ struct ContentView: View {
     }
 
     private func sidebarBadgeColor(for tab: AppTab) -> Color {
-        tab.badgeKind == .pendingReady ? Color.pfWarning : Color.red
+        tab.badgeKind == .pendingReady ? Color.pfWarningFill : Color.pfErrorFill
     }
 
     private func sidebarAccessibilityLabel(for tab: AppTab) -> String {

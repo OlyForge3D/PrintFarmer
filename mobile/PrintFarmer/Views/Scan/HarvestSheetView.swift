@@ -380,7 +380,7 @@ struct HarvestSheetView: View {
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Color.pfError)
+                    .tint(Color.pfErrorFill)
                     .disabled(!viewModel.canConfirmOverride || viewModel.isSubmitting)
                     .frame(minHeight: 44)
                     .accessibilityIdentifier("harvest.confirmOverride")
