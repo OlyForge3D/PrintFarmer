@@ -256,7 +256,7 @@ enum UITestBootstrap {
         // parts and bins, so the harvest flow is a real, reachable surface
         // here. Explicitly enable the flag for the demo-shell modes that render
         // the harvest UI (JobDetailView's "Harvest to Inventory" button, the
-        // ScanView shortcut, and the ShiftTasks harvest destination) so the
+        // Inventory scanner, and the ShiftTasks/Attention harvest destinations) so the
         // production default flip does not silently strand those surfaces
         // in the UI-test bundle.
         //

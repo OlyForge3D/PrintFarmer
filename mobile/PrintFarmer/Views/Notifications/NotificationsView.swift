@@ -3,56 +3,24 @@ import SwiftUI
 struct NotificationsView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
+    private let ownsNavigationStack: Bool
     @State private var viewModel = NotificationsViewModel()
     @State private var activeTasks: [Task<Void, Never>] = []
+
+    init(ownsNavigationStack: Bool = true) {
+        self.ownsNavigationStack = ownsNavigationStack
+    }
 
     var body: some View {
         @Bindable var router = router
 
-        NavigationStack(path: $router.notificationsSheetPath) {
-            Group {
-                if viewModel.isLoading && viewModel.notifications.isEmpty {
-                    ProgressView("Loading notifications…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let error = viewModel.errorMessage, viewModel.notifications.isEmpty {
-                    ContentUnavailableView {
-                        Label("Error", systemImage: "exclamationmark.triangle")
-                    } description: {
-                        Text(error)
-                    } actions: {
-                        Button("Retry") {
-                            let task = Task { await viewModel.loadNotifications() }
-                            activeTasks.append(task)
-                        }
-                    }
-                } else if viewModel.notifications.isEmpty {
-                    EmptyStateView(
-                        icon: "bell.slash",
-                        title: "No Notifications",
-                        message: "You're all caught up! Notifications about print completions, failures, and alerts will appear here."
-                    )
-                } else {
-                    notificationList
+        Group {
+            if ownsNavigationStack {
+                NavigationStack(path: $router.notificationsSheetPath) {
+                    screenContent
                 }
-            }
-            .navigationTitle("Notifications")
-            .toolbar {
-                ToolbarItem(placement: .automatic) {
-                    if !viewModel.notifications.isEmpty {
-                        Button("Mark All Read") {
-                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                            let task = Task { await viewModel.markAllRead() }
-                            activeTasks.append(task)
-                        }
-                        .disabled(viewModel.unreadCount == 0)
-                    }
-                }
-            }
-            .refreshable {
-                await viewModel.loadNotifications()
-            }
-            .navigationDestination(for: AppDestination.self) { destination in
-                destinationView(for: destination)
+            } else {
+                screenContent
             }
         }
         .task {
@@ -69,12 +37,60 @@ struct NotificationsView: View {
         }
     }
 
+    @ViewBuilder
+    private var screenContent: some View {
+        Group {
+            if viewModel.isLoading && viewModel.notifications.isEmpty {
+                ProgressView("Loading notifications…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = viewModel.errorMessage, viewModel.notifications.isEmpty {
+                ContentUnavailableView {
+                    Label("Error", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Retry") {
+                        let task = Task { await viewModel.loadNotifications() }
+                        activeTasks.append(task)
+                    }
+                }
+            } else if viewModel.notifications.isEmpty {
+                EmptyStateView(
+                    icon: "bell.slash",
+                    title: "No Notifications",
+                    message: "You're all caught up! Notifications about print completions, failures, and alerts will appear here."
+                )
+            } else {
+                notificationList
+            }
+        }
+        .navigationTitle("Notifications")
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                if !viewModel.notifications.isEmpty {
+                    Button("Mark All Read") {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        let task = Task { await viewModel.markAllRead() }
+                        activeTasks.append(task)
+                    }
+                    .disabled(viewModel.unreadCount == 0)
+                }
+            }
+        }
+        .refreshable {
+            await viewModel.loadNotifications()
+        }
+        .navigationDestination(for: AppDestination.self) { destination in
+            destinationView(for: destination)
+        }
+    }
+
     // MARK: - Notification List
 
     private var notificationList: some View {
         List {
             ForEach(viewModel.notifications) { notification in
-                NotificationRow(notification: notification)
+                notificationDestination(notification)
                     .swipeActions(edge: .leading) {
                         if !notification.isRead {
                             Button {
@@ -96,26 +112,36 @@ struct NotificationsView: View {
                             Label("Delete", systemImage: "trash")
                         }
                     }
-                    .onTapGesture {
-                        handleTap(notification)
-                    }
                     .accessibilityIdentifier("notifications.row.\(notification.id)")
             }
         }
         .listStyle(.plain)
     }
 
-    private func handleTap(_ notification: AppNotification) {
-        // Mark as read on tap
-        if !notification.isRead {
-            let task = Task { await viewModel.markRead(id: notification.id) }
-            activeTasks.append(task)
-        }
-
-        // Navigate to related resource if job is associated
+    @ViewBuilder
+    private func notificationDestination(_ notification: AppNotification) -> some View {
         if let jobId = notification.jobId {
-            router.notificationsSheetPath.append(AppDestination.jobDetail(id: jobId))
+            NavigationLink(value: AppDestination.jobDetail(id: jobId)) {
+                NotificationRow(notification: notification)
+            }
+            .simultaneousGesture(TapGesture().onEnded {
+                markReadIfNeeded(notification)
+            })
+        } else {
+            NotificationRow(notification: notification)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    markReadIfNeeded(notification)
+                }
         }
+    }
+
+    private func markReadIfNeeded(_ notification: AppNotification) {
+        guard !notification.isRead else { return }
+        let task = Task {
+            await viewModel.markRead(id: notification.id)
+        }
+        activeTasks.append(task)
     }
 }
 

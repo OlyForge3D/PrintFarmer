@@ -98,7 +98,7 @@ final class PredictiveViewModel {
         isLoading = false
     }
 
-    func loadAlerts(printerId: UUID) async {
+    func loadAlerts(printerId: UUID?) async {
         guard let predictiveService, isViewActive else { return }
         do {
             let result = try await predictiveService.getActiveAlerts(printerId: printerId)
@@ -109,7 +109,7 @@ final class PredictiveViewModel {
         }
     }
 
-    func loadForecasts(printerId: UUID) async {
+    func loadForecasts(printerId: UUID?) async {
         guard let predictiveService, isViewActive else { return }
         do {
             let result = try await predictiveService.getMaintenanceForecast(days: 30, printerId: printerId)

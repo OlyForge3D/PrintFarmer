@@ -3,15 +3,23 @@ import Foundation
 enum AppDestination: Hashable {
     case printerDetail(id: UUID)
     case jobDetail(id: UUID)
-    case locationDetail(id: UUID)
     case createJob
     case createPrinter
+    case dashboard
+    case maintenance
+    case notifications
+    case settings
+    case navigationSettings
     case maintenanceAnalytics
     case uptimeReliability
-    case predictiveInsights(printerId: UUID)
+    case filamentCoverage
+    case predictiveInsights(printerId: UUID?)
     case jobHistory
     case jobTimeline
     case dispatchDashboard
+    case locations
+    case offlineQueue
+    case manageServers
     /// Advanced printer controls (jog, preheat, z-offset, disable motors).
     /// F1 (#706) moves these off the printer detail scroll and gates them
     /// behind an "Advanced" navigation destination inside Printer Detail.
@@ -20,21 +28,21 @@ enum AppDestination: Hashable {
 
 /// Navigation shells supported by the tab model.
 ///
-/// `current` keeps the shipping five-tab operator UI unchanged while the
+/// `current` keeps the shipping operator UI unchanged while the
 /// adaptive shells are introduced incrementally by the IOS navigation epic.
-enum NavigationShell: Hashable, CaseIterable {
+enum NavigationShell: Hashable, CaseIterable, Sendable {
     case current
     case simple
     case twoModes
 }
 
-enum OversightMode: Hashable, CaseIterable {
+enum OversightMode: Hashable, CaseIterable, Sendable {
     case floor
     case oversight
 }
 
 /// Every tab addressable by the current and adaptive navigation shells.
-enum AppTab: String, Hashable, CaseIterable {
+enum AppTab: String, Hashable, CaseIterable, Sendable {
     enum BadgeKind: Hashable {
         case none
         case notifications
@@ -44,7 +52,6 @@ enum AppTab: String, Hashable, CaseIterable {
     case attention
     case farm
     case tasks
-    case scan
     case inventory
     case oversight
     case overview
@@ -59,7 +66,7 @@ enum AppTab: String, Hashable, CaseIterable {
     ) -> [AppTab] {
         switch shell {
         case .current:
-            [.attention, .farm, .tasks, .scan, .inventory]
+            [.attention, .farm, .tasks, .inventory]
         case .simple:
             [.attention, .farm, .inventory, .oversight]
         case .twoModes:
@@ -78,8 +85,19 @@ enum AppTab: String, Hashable, CaseIterable {
             capabilities.attentionEnabled
         case .tasks:
             capabilities.shiftPlanEnabled
-        case .farm, .scan, .inventory, .oversight,
-             .overview, .fleet, .jobs, .upkeep, .reports:
+        case .oversight:
+            OversightCatalog.hasVisibleDestinations(capabilities: capabilities)
+        case .overview:
+            OversightCatalog.isRootVisible(.overview, capabilities: capabilities)
+        case .fleet:
+            OversightCatalog.isRootVisible(.fleet, capabilities: capabilities)
+        case .jobs:
+            OversightCatalog.isRootVisible(.jobs, capabilities: capabilities)
+        case .upkeep:
+            OversightCatalog.isRootVisible(.upkeep, capabilities: capabilities)
+        case .reports:
+            OversightCatalog.isRootVisible(.reports, capabilities: capabilities)
+        case .farm, .inventory:
             true
         }
     }
@@ -87,25 +105,39 @@ enum AppTab: String, Hashable, CaseIterable {
     static func visibleTabs(
         for shell: NavigationShell,
         mode: OversightMode,
-        capabilities: ResolvedSystemCapabilities
+        capabilities: ResolvedSystemCapabilities,
+        oversightAvailability: OversightNavigationAvailability = .fullyAvailable
     ) -> [AppTab] {
-        tabs(for: shell, mode: mode).filter { $0.isEnabled(in: capabilities) }
+        tabs(for: shell, mode: mode).filter { tab in
+            guard tab.isEnabled(in: capabilities) else { return false }
+
+            switch tab {
+            case .oversight:
+                return oversightAvailability.hasVisibleHubDestinations
+            case .overview, .fleet, .jobs, .upkeep, .reports:
+                return oversightAvailability.visibleTabs.contains(tab)
+            case .attention, .farm, .tasks, .inventory:
+                return true
+            }
+        }
     }
 
     static func fallbackTab(
         for shell: NavigationShell,
         mode: OversightMode,
-        capabilities: ResolvedSystemCapabilities
+        capabilities: ResolvedSystemCapabilities,
+        oversightAvailability: OversightNavigationAvailability = .fullyAvailable
     ) -> AppTab {
         visibleTabs(
             for: shell,
             mode: mode,
-            capabilities: capabilities
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
         ).first ?? tabs(for: shell, mode: mode).first ?? .farm
     }
 
     /// Compatibility helpers for callers that intentionally target today's
-    /// five-tab operator shell.
+    /// operator shell.
     static func visibleTabs(
         for capabilities: ResolvedSystemCapabilities
     ) -> [AppTab] {
@@ -134,8 +166,6 @@ enum AppTab: String, Hashable, CaseIterable {
             "Farm"
         case .tasks:
             "Tasks"
-        case .scan:
-            "Scan"
         case .inventory:
             "Inventory"
         case .oversight:
@@ -161,8 +191,6 @@ enum AppTab: String, Hashable, CaseIterable {
             "printer"
         case .tasks:
             "checklist"
-        case .scan:
-            "barcode.viewfinder"
         case .inventory:
             "cylinder.fill"
         case .oversight:
@@ -186,7 +214,7 @@ enum AppTab: String, Hashable, CaseIterable {
             .notifications
         case .farm:
             .pendingReady
-        case .tasks, .scan, .inventory, .oversight,
+        case .tasks, .inventory, .oversight,
              .overview, .fleet, .jobs, .upkeep, .reports:
             .none
         }

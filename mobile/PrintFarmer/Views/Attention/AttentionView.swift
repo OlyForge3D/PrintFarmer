@@ -15,6 +15,13 @@ struct AttentionPendingAction: Identifiable, Equatable {
     var id: String { "\(itemID):\(action.kind.rawValue)" }
 }
 
+private struct AttentionHarvestPresentation: Identifiable {
+    let itemID: String
+    let job: PrintJob
+
+    var id: String { itemID }
+}
+
 struct AttentionNavigationTargets: Equatable {
     let printer: AppDestination
     let job: AppDestination?
@@ -145,6 +152,14 @@ enum AttentionAccessibility {
         )
     }
 
+    static func scanBin(_ item: AttentionItem) -> AttentionAccessibilityDescriptor {
+        AttentionAccessibilityDescriptor(
+            identifier: "attention.item.\(item.id).action.scanBin",
+            label: "Scan bin",
+            hint: "Scans the destination bin, records the harvest, and returns to this task."
+        )
+    }
+
     static func actionProgress(
         item: AttentionItem,
         actionKind: AttentionActionKind
@@ -205,7 +220,18 @@ enum AttentionAccessibility {
         if let jobID = item.jobId {
             identifiers.append(navigation(item: item, destination: .jobDetail(id: jobID)).identifier)
         }
-        identifiers.append(contentsOf: actions.map { action(item: item, action: $0).identifier })
+        if item.kind == .harvest, item.jobId != nil {
+            identifiers.append(scanBin(item).identifier)
+        }
+        identifiers.append(
+            contentsOf: actions
+                .filter {
+                    item.kind != .harvest
+                        || item.jobId == nil
+                        || $0.kind != .harvest
+                }
+                .map { action(item: item, action: $0).identifier }
+        )
         switch actionState {
         case .idle:
             break
@@ -276,6 +302,10 @@ struct AttentionView: View {
     @State private var showingNotifications = false
     @State private var pendingAction: AttentionPendingAction?
     @State private var resolvingAttentionItemId: String?
+    @State private var loadingHarvestItemID: String?
+    @State private var harvestPresentation: AttentionHarvestPresentation?
+    @State private var harvestLoadError: String?
+    @State private var isViewActive = false
     /// Locally observed feature-disabled flag. Populated from the shared
     /// operator feature gate (#725) via `SystemCapabilitiesService` and
     /// also flipped locally when `/api/attention` returns ProblemDetails
@@ -334,6 +364,19 @@ struct AttentionView: View {
                 destinationView(for: destination)
             }
         }
+        .sheet(item: $harvestPresentation) { presentation in
+            HarvestSheetView(job: presentation.job, autoStartBinScan: true) {
+                harvestPresentation = nil
+                Task { await feedViewModel.refresh() }
+            }
+        }
+        .alert("Unable to Open Harvest", isPresented: .constant(harvestLoadError != nil)) {
+            Button("OK") { harvestLoadError = nil }
+        } message: {
+            if let harvestLoadError {
+                Text(harvestLoadError)
+            }
+        }
         .task(id: services.activeServerGeneration) {
             // #779 blocker 1: capture the VM's lifecycle token BEFORE
             // any pre-bootstrap `await`. If the view disappears
@@ -378,7 +421,17 @@ struct AttentionView: View {
             // reflects the total number of items needing attention.
             router.notificationBadgeCount = attentionEnabled ? newValue : 0
         }
+        .onChange(of: services.activeServerGeneration) { _, _ in
+            loadingHarvestItemID = nil
+            harvestPresentation = nil
+            harvestLoadError = nil
+        }
+        .onAppear {
+            isViewActive = true
+        }
         .onDisappear {
+            isViewActive = false
+            loadingHarvestItemID = nil
             feedViewModel.deactivate()
         }
         .sheet(isPresented: $showingSettings) {
@@ -523,6 +576,39 @@ struct AttentionView: View {
             pendingAction = pending
         } else {
             triggerAction(pending)
+        }
+    }
+
+    private func openHarvestScanner(for item: AttentionItem) {
+        guard let jobID = item.jobId, loadingHarvestItemID == nil else { return }
+        let capturedGeneration = services.activeServerGeneration
+        loadingHarvestItemID = item.id
+        harvestLoadError = nil
+
+        Task {
+            do {
+                let job = try await services.jobService.get(id: jobID)
+                guard capturedGeneration == services.activeServerGeneration, isViewActive else {
+                    if loadingHarvestItemID == item.id {
+                        loadingHarvestItemID = nil
+                    }
+                    return
+                }
+                loadingHarvestItemID = nil
+                harvestPresentation = AttentionHarvestPresentation(
+                    itemID: item.id,
+                    job: job
+                )
+            } catch {
+                guard capturedGeneration == services.activeServerGeneration, isViewActive else {
+                    if loadingHarvestItemID == item.id {
+                        loadingHarvestItemID = nil
+                    }
+                    return
+                }
+                loadingHarvestItemID = nil
+                harvestLoadError = error.localizedDescription
+            }
         }
     }
 
@@ -699,6 +785,10 @@ struct AttentionView: View {
                             onAction: { action in
                                 handleActionTap(item: item, action: action)
                             },
+                            onScanBin: {
+                                openHarvestScanner(for: item)
+                            },
+                            isScanBinLoading: loadingHarvestItemID == item.id,
                             onRetryAction: retryAction,
                             onRetryActionRefresh: retryActionRefresh,
                             onLoadMedia: {
@@ -1167,13 +1257,23 @@ struct AttentionItemRow: View {
     let mediaState: AttentionMediaState?
     let mediaRequestID: AttentionMediaRequestID
     let onAction: (AttentionAction) -> Void
+    let onScanBin: () -> Void
+    let isScanBinLoading: Bool
     let onRetryAction: (AttentionActionFailure) -> Void
     let onRetryActionRefresh: (AttentionActionRefreshPending) -> Void
     let onLoadMedia: () async -> Bool
     let onRetryMedia: () -> Void
 
     private var supportedActions: [AttentionAction] {
-        AttentionFeedViewModel.supportedActions(in: item)
+        AttentionFeedViewModel.supportedActions(in: item).filter {
+            item.kind != .harvest
+                || item.jobId == nil
+                || $0.kind != .harvest
+        }
+    }
+
+    private var showsScanBinAction: Bool {
+        item.kind == .harvest && item.jobId != nil
     }
 
     private var navigationTargets: AttentionNavigationTargets {
@@ -1193,7 +1293,7 @@ struct AttentionItemRow: View {
                 mediaView(state: mediaState)
             }
             navigationLinks
-            if !supportedActions.isEmpty || actionState != .idle {
+            if showsScanBinAction || !supportedActions.isEmpty || actionState != .idle {
                 Divider()
                 actionControls
             }
@@ -1434,6 +1534,31 @@ struct AttentionItemRow: View {
     @ViewBuilder
     private var actionControls: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if showsScanBinAction {
+                let accessibility = AttentionAccessibility.scanBin(item)
+                Button {
+                    onScanBin()
+                } label: {
+                    HStack {
+                        if isScanBinLoading {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "barcode.viewfinder")
+                        }
+                        Text(isScanBinLoading ? "Opening scanner…" : "Scan bin")
+                        Spacer(minLength: 8)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isScanBinLoading)
+                .accessibilityLabel(
+                    isScanBinLoading ? "Opening bin scanner" : accessibility.label
+                )
+                .accessibilityHint(accessibility.hint)
+                .accessibilityIdentifier(accessibility.identifier)
+            }
+
             ForEach(Array(supportedActions.enumerated()), id: \.offset) { _, action in
                 actionButton(action)
             }

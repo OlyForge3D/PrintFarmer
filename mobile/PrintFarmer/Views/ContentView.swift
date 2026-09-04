@@ -1,13 +1,11 @@
 import SwiftUI
 
-/// Operator-shell content view. F1 (#706) replaces the seven-tab layout
-/// (dashboard, printers, jobs, notifications, inventory, maintenance,
-/// settings) with the five operator-first destinations: Attention, Farm,
-/// Tasks, Scan, Inventory. Settings and server switching move to the
-/// Attention overflow menu; jog/preheat/z-offset controls live behind
-/// Printer Detail → Advanced.
+/// Adaptive operator shell for compact devices, with Scan flows hosted by
+/// their owning task surfaces instead of a dedicated tab.
 struct ContentView: View {
     static let sidebarRowMinimumHeight: CGFloat = 44
+    static let modeControlMinimumHeight: CGFloat = 44
+
     static func shippingTabs(
         for capabilities: ResolvedSystemCapabilities
     ) -> [AppTab] {
@@ -18,6 +16,7 @@ struct ContentView: View {
         )
     }
 
+    @Environment(AuthViewModel.self) private var authViewModel
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(ServerRegistry.self) private var serverRegistry
@@ -25,34 +24,92 @@ struct ContentView: View {
 
     var body: some View {
         let capabilities = services.capabilitiesService.resolved
+        let oversightAvailability = currentOversightAvailability(
+            capabilities: capabilities
+        )
 
         Group {
             if sizeClass == .regular {
                 iPadLayout(capabilities: capabilities)
-            } else {
+            } else if isCompactShellReady {
                 compactLayout(capabilities: capabilities)
+            } else {
+                ProgressView()
+                    .accessibilityLabel("Preparing navigation")
+                    .accessibilityIdentifier("navigation.shellLoading")
             }
         }
         .onAppear {
-            router.reconcileCapabilities(capabilities)
+            synchronizeAdaptiveShell(
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            )
         }
         .onChange(of: capabilities) { _, newCapabilities in
-            router.reconcileCapabilities(newCapabilities)
+            synchronizeAdaptiveShell(
+                capabilities: newCapabilities,
+                oversightAvailability: currentOversightAvailability(
+                    capabilities: newCapabilities
+                )
+            )
+        }
+        .onChange(of: services.farmShapeService.sessionShape) {
+            synchronizeAdaptiveShell(
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            )
+        }
+        .onChange(of: authViewModel.currentUser?.id) {
+            synchronizeAdaptiveShell(
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            )
+        }
+        .onChange(of: authViewModel.currentUser?.roles) {
+            synchronizeAdaptiveShell(
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            )
+        }
+        .onChange(of: serverRegistry.activeServerID) {
+            synchronizeAdaptiveShell(
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            )
+        }
+        .onChange(of: serverRegistry.navigationLayoutPreference) {
+            synchronizeAdaptiveShell(
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            )
+        }
+        .onChange(of: sizeClass) {
+            synchronizeAdaptiveShell(
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            )
         }
     }
 
     // MARK: - Compact (iPhone)
 
-    private func compactLayout(capabilities: ResolvedSystemCapabilities) -> some View {
+    private func compactLayout(
+        capabilities: ResolvedSystemCapabilities
+    ) -> some View {
         let selection = Binding(
-            get: { resolvedShippingTab(for: capabilities) },
-            set: { selectShippingTab($0, capabilities: capabilities) }
+            get: { router.resolvedTab(for: capabilities) },
+            set: { router.selectTab($0, capabilities: capabilities) }
         )
-        let tabs = Self.shippingTabs(for: capabilities)
+        let tabs = router.visibleTabs(for: capabilities)
 
         return TabView(selection: selection) {
             ForEach(tabs, id: \.self) { tab in
                 tabContentView(for: tab)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if router.shouldShowModeControl(for: tab) {
+                            modeControl(capabilities: capabilities)
+                        }
+                    }
                     .tabItem {
                         Label(tab.title, systemImage: tab.systemImage)
                     }
@@ -61,6 +118,31 @@ struct ContentView: View {
                     .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
             }
         }
+    }
+
+    private func modeControl(
+        capabilities: ResolvedSystemCapabilities
+    ) -> some View {
+        Picker(
+            "Navigation mode",
+            selection: Binding(
+                get: { router.activeMode },
+                set: { router.setNavigationMode($0, capabilities: capabilities) }
+            )
+        ) {
+            Text("Floor").tag(OversightMode.floor)
+            Text("Oversight").tag(OversightMode.oversight)
+        }
+        .pickerStyle(.segmented)
+        .frame(minHeight: Self.modeControlMinimumHeight)
+        .padding(.horizontal)
+        .background(.bar)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+        .accessibilityLabel("Navigation mode")
+        .accessibilityHint("Switches between Floor work and Oversight.")
+        .accessibilityIdentifier("navigation.modeControl")
     }
 
     // MARK: - Regular (iPad)
@@ -176,6 +258,55 @@ struct ContentView: View {
         }
     }
 
+    private func synchronizeAdaptiveShell(
+        capabilities: ResolvedSystemCapabilities,
+        oversightAvailability: OversightNavigationAvailability
+    ) {
+        guard sizeClass != .regular,
+              let serverID = serverRegistry.activeServerID,
+              let currentUser = authViewModel.currentUser else {
+            router.reconcileCapabilities(
+                capabilities,
+                oversightAvailability: oversightAvailability
+            )
+            return
+        }
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: currentUser.id,
+            preference: serverRegistry.navigationLayoutPreference,
+            farmShape: services.farmShapeService.sessionShape,
+            isFarmAdmin: currentUser.roles.contains("farm_admin"),
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
+        )
+    }
+
+    private var isCompactShellReady: Bool {
+        guard let serverID = serverRegistry.activeServerID,
+              let userID = authViewModel.currentUser?.id else {
+            return false
+        }
+        return router.hasAdaptiveShellConfiguration(
+            serverID: serverID,
+            userID: userID
+        )
+    }
+
+    private func currentOversightAvailability(
+        capabilities: ResolvedSystemCapabilities
+    ) -> OversightNavigationAvailability {
+        OversightNavigationAvailability(
+            hasVisibleHubDestinations: OversightCatalog.hasVisibleDestinations(
+                capabilities: capabilities
+            ),
+            visibleTabs: OversightCatalog.visibleTabs(
+                capabilities: capabilities
+            )
+        )
+    }
+
     @ViewBuilder
     private func tabContentView(for tab: AppTab) -> some View {
         switch tab {
@@ -185,12 +316,10 @@ struct ContentView: View {
             PrinterListView()
         case .tasks:
             ShiftTasksView()
-        case .scan:
-            ScanView()
         case .inventory:
             InventoryView()
         case .oversight, .overview, .fleet, .jobs, .upkeep, .reports:
-            EmptyView()
+            oversightTabContentView(for: tab)
         }
     }
 }

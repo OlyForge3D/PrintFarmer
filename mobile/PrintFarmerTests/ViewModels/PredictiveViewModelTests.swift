@@ -5340,6 +5340,13 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(mockPredictiveService.getActiveAlertsCalledWithPrinterId, testPrinterId)
     }
 
+    func testLoadAlertsSupportsFarmWideScope() async {
+        await viewModel.loadAlerts(printerId: nil)
+
+        XCTAssertTrue(mockPredictiveService.getActiveAlertsCalled)
+        XCTAssertNil(mockPredictiveService.getActiveAlertsCalledWithPrinterId)
+    }
+
     func testLoadAlertsHandlesError() async {
         viewModel.alerts = [
             PredictiveAlert(
@@ -5393,6 +5400,13 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.error)
         XCTAssertEqual(mockPredictiveService.getMaintenanceForecastCalledWith, 30)
         XCTAssertEqual(mockPredictiveService.getMaintenanceForecastCalledWithPrinterId, testPrinterId)
+    }
+
+    func testLoadForecastsSupportsFarmWideScope() async {
+        await viewModel.loadForecasts(printerId: nil)
+
+        XCTAssertEqual(mockPredictiveService.getMaintenanceForecastCalledWith, 30)
+        XCTAssertNil(mockPredictiveService.getMaintenanceForecastCalledWithPrinterId)
     }
 
     func testLoadForecastsHandlesError() async {

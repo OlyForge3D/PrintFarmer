@@ -5,13 +5,18 @@ struct PFarmApp: App {
     #if canImport(UIKit)
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     #endif
-    @State private var router = AppRouter()
+    @State private var router: AppRouter
     @State private var authViewModel: AuthViewModel
     @State private var serverRegistry: ServerRegistry
     @State private var services: ServiceContainer
     @State private var themeManager = ThemeManager()
 
     init() {
+        _router = State(
+            initialValue: AppRouter(
+                userDefaults: UITestBootstrap.isEnabled ? nil : .standard
+            )
+        )
         if UITestBootstrap.isEnabled {
             // Deterministic UI-test bootstrap (#706): seed an ephemeral
             // registry with an active server and wire demo services. The

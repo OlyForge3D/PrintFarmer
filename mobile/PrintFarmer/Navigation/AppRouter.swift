@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// App router owning shell-aware tab selection, per-tab navigation stacks,
@@ -8,7 +9,6 @@ import SwiftUI
 /// * `tasksPath` — Tasks tab root (ShiftTasksView)
 /// * `jobsPath` — Print queue nested under Tasks (JobListView)
 /// * `notificationsPath` — Attention tab (AttentionView / NotificationsViewModel)
-/// * `scanPath` — Scan tab (ScanView)
 /// * `inventoryPath` — Inventory tab (SpoolInventoryView)
 /// * `oversightPath` — Simple-shell Oversight tab
 /// * `overviewPath` — Oversight-mode Overview tab
@@ -31,6 +31,8 @@ import SwiftUI
 /// the migration and hardening rationale.
 @MainActor @Observable
 final class AppRouter {
+    static let selectedTabDefaultsKey = "app.selectedTab"
+
     struct FilamentSwapDeepLink: Equatable {
         let printerId: UUID
         let toolheadIndex: Int
@@ -39,13 +41,21 @@ final class AppRouter {
 
     private(set) var activeShell: NavigationShell = .current
     private(set) var activeMode: OversightMode = .floor
-    var selectedTab: AppTab = .attention
+    private(set) var requestedShell: NavigationShell = .current
+    private(set) var configuredServerID: UUID?
+    private(set) var configuredUserID: UUID?
+    private(set) var appliedNavigationPreference: NavigationLayoutPreference?
+    private(set) var oversightAvailability = OversightNavigationAvailability.fullyAvailable
+    var selectedTab: AppTab {
+        didSet {
+            userDefaults?.set(selectedTab.rawValue, forKey: Self.selectedTabDefaultsKey)
+        }
+    }
     var printersPath = NavigationPath()
     var tasksPath = NavigationPath()
     var jobsPath = NavigationPath()
     var notificationsPath = NavigationPath()
     var inventoryPath = NavigationPath()
-    var scanPath = NavigationPath()
     var oversightPath = NavigationPath()
     var overviewPath = NavigationPath()
     var fleetPath = NavigationPath()
@@ -68,6 +78,22 @@ final class AppRouter {
     var pendingFilamentSwap: FilamentSwapDeepLink?
     var notificationRoutingError: String?
     private var navigationEpoch = 0
+    @ObservationIgnored private let userDefaults: UserDefaults?
+
+    init(userDefaults: UserDefaults? = nil) {
+        self.userDefaults = userDefaults
+        selectedTab = Self.restoredTab(
+            from: userDefaults?.string(forKey: Self.selectedTabDefaultsKey)
+        )
+    }
+
+    static func restoredTab(from persistedRawValue: String?) -> AppTab {
+        guard let persistedRawValue else { return .attention }
+        if persistedRawValue == "scan" {
+            return .inventory
+        }
+        return AppTab(rawValue: persistedRawValue) ?? .attention
+    }
 
     /// Monotonic token observed by legacy/operator sheet presenters to close
     /// any active sheet before a task-action destination is applied (#726).
@@ -152,7 +178,6 @@ final class AppRouter {
         jobsPath = NavigationPath()
         notificationsPath = NavigationPath()
         inventoryPath = NavigationPath()
-        scanPath = NavigationPath()
         oversightPath = NavigationPath()
         overviewPath = NavigationPath()
         fleetPath = NavigationPath()
@@ -178,7 +203,6 @@ final class AppRouter {
         jobsPath = NavigationPath()
         notificationsPath = NavigationPath()
         inventoryPath = NavigationPath()
-        scanPath = NavigationPath()
         oversightPath = NavigationPath()
         overviewPath = NavigationPath()
         fleetPath = NavigationPath()
@@ -213,7 +237,8 @@ final class AppRouter {
         AppTab.visibleTabs(
             for: activeShell,
             mode: activeMode,
-            capabilities: capabilities
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
         )
     }
 
@@ -223,7 +248,8 @@ final class AppRouter {
         AppTab.fallbackTab(
             for: activeShell,
             mode: activeMode,
-            capabilities: capabilities
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
         )
     }
 
@@ -239,28 +265,86 @@ final class AppRouter {
             : fallbackTab(for: capabilities)
     }
 
+    func configureAdaptiveShell(
+        serverID: UUID,
+        userID: UUID,
+        preference: NavigationLayoutPreference,
+        farmShape: FarmShape?,
+        isFarmAdmin: Bool,
+        capabilities: ResolvedSystemCapabilities,
+        oversightAvailability: OversightNavigationAvailability
+    ) {
+        let contextChanged = configuredServerID != serverID || configuredUserID != userID
+        let preferenceChanged = appliedNavigationPreference != preference
+
+        if contextChanged {
+            invalidatePendingNavigation()
+        }
+
+        if contextChanged || preferenceChanged || appliedNavigationPreference == nil {
+            let automaticDerivation = NavigationShellDerivation.automatic(
+                farmShape: farmShape,
+                shiftPlanEnabled: capabilities.shiftPlanEnabled,
+                isFarmAdmin: isFarmAdmin
+            )
+            configuredServerID = serverID
+            configuredUserID = userID
+            appliedNavigationPreference = preference
+            requestedShell = AdaptiveNavigationShell.requestedShell(
+                preference: preference,
+                automaticDerivation: automaticDerivation
+            )
+            activeMode = .floor
+        }
+
+        reconcileCapabilities(
+            capabilities,
+            oversightAvailability: oversightAvailability
+        )
+    }
+
     func setNavigationShell(
         _ shell: NavigationShell,
         mode: OversightMode? = nil,
-        capabilities: ResolvedSystemCapabilities
+        capabilities: ResolvedSystemCapabilities,
+        oversightAvailability: OversightNavigationAvailability = .fullyAvailable
     ) {
         let nextMode = mode ?? activeMode
-        guard shell != activeShell || nextMode != activeMode else {
-            selectedTab = resolvedTab(for: capabilities)
+        requestedShell = shell
+        transition(
+            to: AdaptiveNavigationShell.effectiveShell(
+                requestedShell: shell,
+                oversightAvailability: oversightAvailability
+            ),
+            mode: nextMode,
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
+        )
+    }
+
+    func setNavigationMode(
+        _ mode: OversightMode,
+        capabilities: ResolvedSystemCapabilities
+    ) {
+        guard requestedShell == .twoModes,
+              oversightAvailability.supportsTwoModes else {
             return
         }
 
-        navigationEpoch &+= 1
-        pendingNFCReadyPrinterId = nil
-        pendingSpoolHighlightId = nil
-        pendingAttentionItemId = nil
-        pendingFilamentSwap = nil
-        activeShell = shell
-        activeMode = nextMode
-        selectedTab = resolvedTab(for: capabilities)
+        transition(
+            to: .twoModes,
+            mode: mode,
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
+        )
     }
 
-    func reconcileCapabilities(_ capabilities: ResolvedSystemCapabilities) {
+    func reconcileCapabilities(
+        _ capabilities: ResolvedSystemCapabilities,
+        oversightAvailability: OversightNavigationAvailability? = nil
+    ) {
+        let nextOversightAvailability = oversightAvailability ?? self.oversightAvailability
+
         if !capabilities.attentionEnabled {
             notificationsPath = NavigationPath()
             pendingAttentionItemId = nil
@@ -273,7 +357,63 @@ final class AppRouter {
         if !capabilities.guidedSwapEnabled {
             pendingFilamentSwap = nil
         }
-        selectedTab = resolvedTab(for: capabilities)
+
+        transition(
+            to: AdaptiveNavigationShell.effectiveShell(
+                requestedShell: requestedShell,
+                oversightAvailability: nextOversightAvailability
+            ),
+            mode: activeMode,
+            capabilities: capabilities,
+            oversightAvailability: nextOversightAvailability
+        )
+    }
+
+    func isAtRoot(_ tab: AppTab) -> Bool {
+        switch tab {
+        case .attention:
+            notificationsPath.isEmpty
+        case .farm:
+            printersPath.isEmpty
+        case .tasks:
+            tasksPath.isEmpty && jobsPath.isEmpty
+        case .inventory:
+            inventoryPath.isEmpty
+        case .oversight:
+            oversightPath.isEmpty
+        case .overview:
+            overviewPath.isEmpty
+        case .fleet:
+            fleetPath.isEmpty
+        case .jobs:
+            oversightJobsPath.isEmpty
+        case .upkeep:
+            upkeepPath.isEmpty
+        case .reports:
+            reportsPath.isEmpty
+        }
+    }
+
+    func shouldShowModeControl(for tab: AppTab) -> Bool {
+        activeShell == .twoModes
+            && oversightAvailability.supportsTwoModes
+            && isAtRoot(tab)
+    }
+
+    func hasAdaptiveShellConfiguration(serverID: UUID, userID: UUID) -> Bool {
+        configuredServerID == serverID && configuredUserID == userID
+    }
+
+    func resetAdaptiveShellSession() {
+        invalidatePendingNavigation()
+        activeShell = .current
+        activeMode = .floor
+        requestedShell = .current
+        configuredServerID = nil
+        configuredUserID = nil
+        appliedNavigationPreference = nil
+        oversightAvailability = .fullyAvailable
+        selectedTab = .attention
     }
 
     /// Requests that any active legacy/operator sheet be dismissed. Task-action
@@ -305,8 +445,6 @@ final class AppRouter {
         case .tasks:
             tasksPath = NavigationPath()
             jobsPath = NavigationPath()
-        case .scan:
-            scanPath = NavigationPath()
         case .inventory:
             inventoryPath = NavigationPath()
         case .oversight:
@@ -376,6 +514,37 @@ final class AppRouter {
         default:
             printersPath.append(destination)
         }
+    }
+
+    private func transition(
+        to shell: NavigationShell,
+        mode: OversightMode,
+        capabilities: ResolvedSystemCapabilities,
+        oversightAvailability: OversightNavigationAvailability
+    ) {
+        let previousTabs = Set(visibleTabs(for: capabilities))
+        let shellChanged = shell != activeShell || mode != activeMode
+
+        self.oversightAvailability = oversightAvailability
+        activeShell = shell
+        activeMode = mode
+
+        let nextTabs = Set(visibleTabs(for: capabilities))
+        if shellChanged || previousTabs != nextTabs {
+            navigationEpoch &+= 1
+            pendingNFCReadyPrinterId = nil
+            pendingSpoolHighlightId = nil
+            pendingAttentionItemId = nil
+            pendingFilamentSwap = nil
+        }
+
+        for tab in AppTab.allCases where !nextTabs.contains(tab) {
+            resetToRoot(tab: tab)
+        }
+
+        selectedTab = nextTabs.contains(selectedTab)
+            ? selectedTab
+            : fallbackTab(for: capabilities)
     }
 }
 

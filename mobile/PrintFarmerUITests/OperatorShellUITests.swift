@@ -36,7 +36,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         )
     }
 
-    func testTabBarShowsFiveOperatorDestinations() {
+    func testTabBarShowsFourOperatorDestinations() {
         // Operator shell must present a navigation container: iPhone
         // TabView bottom bar OR iPad NavigationSplitView sidebar.
         let tabBar = app.tabBars.firstMatch
@@ -55,7 +55,6 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
             ("Attention", "sidebar.attention"),
             ("Farm", "sidebar.farm"),
             ("Tasks", "sidebar.tasks"),
-            ("Scan", "sidebar.scan"),
             ("Inventory", "sidebar.inventory")
         ]
         for destination in expectedDestinations {
@@ -72,13 +71,14 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
     }
 
     func testRetiredTabsAreNotVisible() {
-        // The old shell exposed dedicated Notifications and Settings tabs.
-        // F1 collapses them into the Attention tab / overflow menu.
-        for retired in ["Notifications", "Settings"] {
+        // The old shell exposed dedicated Notifications, Settings, and Scan tabs.
+        // Their flows now live under Attention, Farm, and Inventory.
+        for retired in ["Notifications", "Settings", "Scan"] {
             let tab = app.tabBars.buttons[retired]
             XCTAssertFalse(tab.exists,
                            "Retired top-level tab '\(retired)' must not appear in F1 shell")
         }
+        XCTAssertFalse(app.buttons["sidebar.scan"].exists)
     }
 
     // MARK: - Attention overflow reachability (two-tap gate)
@@ -538,16 +538,20 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
     }
 
     func testPrintedPartsScanActionIsAbsentWhileSpoolActionRemainsVisible() {
-        let scan = operatorDestinationButton(
-            tabTitle: "Scan",
-            sidebarIdentifier: "sidebar.scan",
+        let inventory = operatorDestinationButton(
+            tabTitle: "Inventory",
+            sidebarIdentifier: "sidebar.inventory",
             timeout: 8
         )
-        XCTAssertTrue(scan.exists)
-        scan.tap()
+        XCTAssertTrue(inventory.exists)
+        inventory.tap()
 
-        XCTAssertTrue(app.buttons["scan.quickAction.spool"].waitForExistence(timeout: 8))
-        XCTAssertFalse(app.buttons["scan.quickAction.parts"].exists)
+        let scanMenu = app.buttons["inventory.scan"]
+        XCTAssertTrue(scanMenu.waitForExistence(timeout: 8))
+        scanMenu.tap()
+
+        XCTAssertTrue(app.buttons["Log new spools"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Look up printed part"].exists)
     }
 
     func testFilamentCoverageIsAbsentFromFarmAndPrinterDetail() {
