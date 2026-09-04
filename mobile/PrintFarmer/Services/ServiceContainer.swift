@@ -747,40 +747,23 @@ final class ServiceContainer: @unchecked Sendable {
     /// Starts the shape and capability reads together while authentication is
     /// still holding the root loading gate. Shape waits only for its bounded
     /// startup race while capability refresh completes under the existing gate.
-    /// Returns true only while the captured server, services, and auth operation
-    /// remain current so callers can safely consume the prepared capability result.
-    @discardableResult
-    func prepareAuthenticatedStartup(authToken: Int? = nil) async -> Bool {
+    func prepareAuthenticatedStartup(authToken: Int) async {
         await activeServerSwitchTask?.value
         guard let serverID = serverRegistry?.activeServerID,
-              activeServerID == serverID else {
-            return false
-        }
-        if let authToken, !authOperationEpoch.isCurrent(authToken) {
-            return false
+              activeServerID == serverID,
+              authOperationEpoch.isCurrent(authToken) else {
+            return
         }
 
         let expectedCapabilities = capabilitiesService
         let expectedShape = farmShapeService
-        if let authToken {
-            expectedShape.beginSession(authToken: authToken)
-        }
+        expectedShape.beginSession(authToken: authToken)
         async let capabilitiesRefresh = expectedCapabilities.prepareForReadiness()
         await expectedShape.resolveForAuthenticatedSession(
             serverID: serverID,
             timeout: FarmShapeService.startupTimeout
         )
         _ = await capabilitiesRefresh
-        guard serverRegistry?.activeServerID == serverID,
-              activeServerID == serverID,
-              capabilitiesService === expectedCapabilities,
-              farmShapeService === expectedShape else {
-            return false
-        }
-        if let authToken, !authOperationEpoch.isCurrent(authToken) {
-            return false
-        }
-        return true
     }
 
     func beginAuthenticatedStartup(authToken: Int) {
@@ -1010,12 +993,18 @@ final class ServiceContainer: @unchecked Sendable {
         guard transitionEpoch.isCurrent(epoch) else { return } // superseded during the awaits
         if accessToken != nil {
             let shapeService = farmShapeService
+            let expectedCapabilities = capabilitiesService
             shapeService.beginSession(authToken: authOperationEpoch.current)
+            async let capabilitiesPreparation = expectedCapabilities.prepareForReadiness()
             await shapeService.resolveForAuthenticatedSession(
                 serverID: server.id,
                 timeout: FarmShapeService.startupTimeout
             )
-            guard transitionEpoch.isCurrent(epoch) else { return }
+            _ = await capabilitiesPreparation
+            guard transitionEpoch.isCurrent(epoch),
+                  capabilitiesService === expectedCapabilities else {
+                return
+            }
         }
 
         // Bind the snapshot to the SAME captured server + generation the services

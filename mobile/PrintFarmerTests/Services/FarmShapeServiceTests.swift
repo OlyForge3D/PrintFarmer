@@ -321,28 +321,35 @@ final class FarmShapeServiceTests: XCTestCase {
             rootURL: snapshotRoot
         )
         let mock = MockAPIClient()
-        mock.stubResponses([
-            "/api/system/farm-shape": (
-                200,
-                """
-                {
-                    "accountCount": 4,
-                    "locationCount": 5,
-                    "printerCount": 6
-                }
-                """
-            ),
-            "/api/system/capabilities": (
-                200,
-                """
-                {
-                    "operatorFeatures": {
-                        "attentionEnabled": true
-                    }
-                }
-                """
-            ),
-        ])
+        let shapeRequest = AsyncBarrier()
+        let capabilitiesRequest = AsyncBarrier()
+        defer {
+            shapeRequest.close()
+            capabilitiesRequest.close()
+        }
+        mock.asyncRequestHandler = { request in
+            switch request.url?.path {
+            case "/api/system/farm-shape":
+                await shapeRequest.arriveAndWait()
+                return (
+                    TestData.httpResponse(url: request.url, statusCode: 200),
+                    Data(
+                        #"{"accountCount":4,"locationCount":5,"printerCount":6}"#.utf8
+                    )
+                )
+            case "/api/system/capabilities":
+                await capabilitiesRequest.arriveAndWait()
+                return (
+                    TestData.httpResponse(url: request.url, statusCode: 200),
+                    Data(#"{"operatorFeatures":{"attentionEnabled":true}}"#.utf8)
+                )
+            default:
+                return (
+                    TestData.httpResponse(url: request.url, statusCode: 404),
+                    Data("{}".utf8)
+                )
+            }
+        }
         let container = ServiceContainer(
             serverRegistry: registry,
             credentialsStore: credentials,
@@ -374,7 +381,14 @@ final class FarmShapeServiceTests: XCTestCase {
         )
         let authToken = container.authOperationEpoch.advance()
 
-        await container.switchToServer(serverB)
+        let switchTask = Task {
+            await container.switchToServer(serverB)
+        }
+        await shapeRequest.waitUntilArrived()
+        await capabilitiesRequest.waitUntilArrived()
+        shapeRequest.release()
+        capabilitiesRequest.release()
+        await switchTask.value
         XCTAssertEqual(
             container.currentOfflineWriteReplayIdentity,
             OfflineWriteReplayIdentity(serverID: serverB.id, userID: ownerID)
@@ -387,6 +401,18 @@ final class FarmShapeServiceTests: XCTestCase {
         )
 
         await container.prepareAuthenticatedStartup(authToken: authToken)
+        container.authorizeOfflineWriteReplayBinding()
+        await container.syncOfflineWriteQueue()
+        XCTAssertEqual(
+            mock.capturedRequests.filter {
+                $0.url?.path == "/api/system/capabilities"
+            }.count,
+            1
+        )
+
+        container.capabilitiesService = SystemCapabilitiesService(apiClient: mock.apiClient)
+        container.authorizeOfflineWriteReplayBinding()
+        await container.syncOfflineWriteQueue()
         let readiness = BackendReadinessChecker(timeout: .seconds(1))
         _ = await readiness.check(
             plan: BackendReadinessPlan(
@@ -409,7 +435,7 @@ final class FarmShapeServiceTests: XCTestCase {
             mock.capturedRequests.filter {
                 $0.url?.path == "/api/system/capabilities"
             }.count,
-            1
+            2
         )
     }
 
@@ -476,9 +502,10 @@ final class FarmShapeServiceTests: XCTestCase {
         }
         container.farmShapeService = shape
         container.capabilitiesService = capabilities
+        let authToken = container.authOperationEpoch.advance()
 
         let preparation = Task {
-            await container.prepareAuthenticatedStartup()
+            await container.prepareAuthenticatedStartup(authToken: authToken)
         }
         await shape.gate.waitUntilArrived()
         await capabilities.gate.waitUntilArrived()
@@ -487,55 +514,9 @@ final class FarmShapeServiceTests: XCTestCase {
         XCTAssertFalse(capabilities.completed)
 
         capabilities.gate.release()
-        let didPrepare = await preparation.value
-        XCTAssertTrue(didPrepare)
+        await preparation.value
         XCTAssertTrue(capabilities.completed)
         XCTAssertEqual(shape.serverID, server.id)
-    }
-
-    func testAuthenticatedStartupReportsStaleWhenCompositionChanges() async throws {
-        let registrySuiteName = "FarmShapeServiceTests.Registry.\(UUID().uuidString)"
-        let registryDefaults = UserDefaults(suiteName: registrySuiteName)!
-        defer {
-            registryDefaults.removePersistentDomain(forName: registrySuiteName)
-        }
-        let registry = ServerRegistry(
-            userDefaults: registryDefaults,
-            migrateLegacyServerURL: false
-        )
-        _ = try registry.add(
-            displayName: "Test",
-            baseURL: URL(string: "https://print.example.com")!
-        )
-        let container = ServiceContainer(
-            serverRegistry: registry,
-            observeRegistry: false,
-            synchronizeOfflineQueueOnStartup: false
-        )
-        let shape = BlockingFarmShapeService()
-        let capabilities = BlockingCapabilitiesService()
-        defer {
-            shape.gate.close()
-            capabilities.gate.close()
-        }
-        container.farmShapeService = shape
-        container.capabilitiesService = capabilities
-
-        let preparation = Task {
-            await container.prepareAuthenticatedStartup()
-        }
-        await shape.gate.waitUntilArrived()
-        await capabilities.gate.waitUntilArrived()
-
-        container.farmShapeService = StubFarmShapeService()
-        container.capabilitiesService = SystemCapabilitiesService(
-            apiClient: MockAPIClient().apiClient
-        )
-        shape.gate.release()
-        capabilities.gate.release()
-
-        let didPrepare = await preparation.value
-        XCTAssertFalse(didPrepare)
     }
 
     private func assertFailureResolvesUnknown(statusCode: Int) async {
