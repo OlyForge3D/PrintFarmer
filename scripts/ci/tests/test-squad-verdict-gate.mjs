@@ -1243,6 +1243,19 @@ test('the scoping workflow wiring stays intact', async () => {
   // place a PR in scope, which is what the review gate exists to prevent.
   const permittedLabelWriters = new Set([
     'close-linked-issues.yml',
+    // epic-dependency-gate.yml holds `issues: write` only to read epic issues,
+    // their sub_issues, and their blocked_by/blocking dependency edges, and to
+    // create/update/delete its own status comment on the epic issue thread. It
+    // triggers solely on `issues:` events (opened/edited/labeled/unlabeled/
+    // reopened/closed), `schedule`, and `workflow_dispatch` — never on any
+    // `pull_request*` event, and GitHub's `issues` webhook event never fires
+    // for pull requests. Its script calls only issues.get, the sub_issues and
+    // dependencies paginated reads, issues.listComments, issues.createComment,
+    // issues.updateComment, and issues.deleteComment — no issues.addLabels, no
+    // issues.update with a labels param, no GraphQL label mutation, no `gh pr
+    // edit --add-label`, and no actions/labeler. It cannot apply the bare
+    // `squad` scope label to a PR, confirmed by reading the file (see #2439).
+    'epic-dependency-gate.yml',
     'squad-blocked-label-sync.yml',
     'squad-heartbeat.yml',
     'squad-issue-assign.yml',
