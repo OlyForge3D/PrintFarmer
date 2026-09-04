@@ -487,9 +487,55 @@ final class FarmShapeServiceTests: XCTestCase {
         XCTAssertFalse(capabilities.completed)
 
         capabilities.gate.release()
-        await preparation.value
+        let didPrepare = await preparation.value
+        XCTAssertTrue(didPrepare)
         XCTAssertTrue(capabilities.completed)
         XCTAssertEqual(shape.serverID, server.id)
+    }
+
+    func testAuthenticatedStartupReportsStaleWhenCompositionChanges() async throws {
+        let registrySuiteName = "FarmShapeServiceTests.Registry.\(UUID().uuidString)"
+        let registryDefaults = UserDefaults(suiteName: registrySuiteName)!
+        defer {
+            registryDefaults.removePersistentDomain(forName: registrySuiteName)
+        }
+        let registry = ServerRegistry(
+            userDefaults: registryDefaults,
+            migrateLegacyServerURL: false
+        )
+        _ = try registry.add(
+            displayName: "Test",
+            baseURL: URL(string: "https://print.example.com")!
+        )
+        let container = ServiceContainer(
+            serverRegistry: registry,
+            observeRegistry: false,
+            synchronizeOfflineQueueOnStartup: false
+        )
+        let shape = BlockingFarmShapeService()
+        let capabilities = BlockingCapabilitiesService()
+        defer {
+            shape.gate.close()
+            capabilities.gate.close()
+        }
+        container.farmShapeService = shape
+        container.capabilitiesService = capabilities
+
+        let preparation = Task {
+            await container.prepareAuthenticatedStartup()
+        }
+        await shape.gate.waitUntilArrived()
+        await capabilities.gate.waitUntilArrived()
+
+        container.farmShapeService = StubFarmShapeService()
+        container.capabilitiesService = SystemCapabilitiesService(
+            apiClient: MockAPIClient().apiClient
+        )
+        shape.gate.release()
+        capabilities.gate.release()
+
+        let didPrepare = await preparation.value
+        XCTAssertFalse(didPrepare)
     }
 
     private func assertFailureResolvesUnknown(statusCode: Int) async {

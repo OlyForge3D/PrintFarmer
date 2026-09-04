@@ -191,18 +191,18 @@ final class AuthViewModel {
             }
             currentUser = user
             isAuthenticated = true
-            async let startupPreparation: Void = services.prepareAuthenticatedStartup(
+            async let startupPreparation = services.prepareAuthenticatedStartup(
                 authToken: token.value
             )
             let activation = await services.activateFarmSnapshotForActiveServer(authToken: token.value)
-            await startupPreparation
+            let startupPrepared = await startupPreparation
             guard services.authOperationEpoch.isCurrent(token.value) else {
                 return
             }
             recordActivationOutcome(activation, authToken: token.value)
             if activation == .activated {
                 services.authorizeOfflineWriteReplayBinding()
-                await services.syncOfflineWriteQueue(refreshCapabilities: false)
+                await services.syncOfflineWriteQueue(refreshCapabilities: !startupPrepared)
                 guard services.authOperationEpoch.isCurrent(token.value) else { return }
             }
         } else {
@@ -268,11 +268,11 @@ final class AuthViewModel {
             case .applied(let response):
                 currentUser = response.user // VERIFIED user
                 isAuthenticated = true
-                async let startupPreparation: Void = services.prepareAuthenticatedStartup(
+                async let startupPreparation = services.prepareAuthenticatedStartup(
                     authToken: token.value
                 )
                 let activation = await services.activateFarmSnapshotForActiveServer(authToken: token.value)
-                await startupPreparation
+                let startupPrepared = await startupPreparation
                 // Logout / newer login may have landed during the activation awaits.
                 guard services.authOperationEpoch.isCurrent(token.value) else { return }
                 // D: if startup preparation failed, the session is authenticated but the
@@ -281,7 +281,7 @@ final class AuthViewModel {
                 recordActivationOutcome(activation, authToken: token.value)
                 if activation == .activated {
                     services.authorizeOfflineWriteReplayBinding()
-                    await services.syncOfflineWriteQueue(refreshCapabilities: false)
+                    await services.syncOfflineWriteQueue(refreshCapabilities: !startupPrepared)
                     guard services.authOperationEpoch.isCurrent(token.value) else { return }
                 }
                 isLoading = false

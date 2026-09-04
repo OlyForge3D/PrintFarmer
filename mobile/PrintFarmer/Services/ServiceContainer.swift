@@ -747,14 +747,17 @@ final class ServiceContainer: @unchecked Sendable {
     /// Starts the shape and capability reads together while authentication is
     /// still holding the root loading gate. Shape waits only for its bounded
     /// startup race while capability refresh completes under the existing gate.
-    func prepareAuthenticatedStartup(authToken: Int? = nil) async {
+    /// Returns true only while the captured server, services, and auth operation
+    /// remain current so callers can safely consume the prepared capability result.
+    @discardableResult
+    func prepareAuthenticatedStartup(authToken: Int? = nil) async -> Bool {
         await activeServerSwitchTask?.value
         guard let serverID = serverRegistry?.activeServerID,
               activeServerID == serverID else {
-            return
+            return false
         }
         if let authToken, !authOperationEpoch.isCurrent(authToken) {
-            return
+            return false
         }
 
         let expectedCapabilities = capabilitiesService
@@ -768,6 +771,16 @@ final class ServiceContainer: @unchecked Sendable {
             timeout: FarmShapeService.startupTimeout
         )
         _ = await capabilitiesRefresh
+        guard serverRegistry?.activeServerID == serverID,
+              activeServerID == serverID,
+              capabilitiesService === expectedCapabilities,
+              farmShapeService === expectedShape else {
+            return false
+        }
+        if let authToken, !authOperationEpoch.isCurrent(authToken) {
+            return false
+        }
+        return true
     }
 
     func beginAuthenticatedStartup(authToken: Int) {
