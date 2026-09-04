@@ -110,6 +110,31 @@ public sealed class PromotionArtifactContentSourceTests
     }
 
     [Fact]
+    public async Task HttpSource_OpenReadAsync_TransfersResponseLifetimeToReturnedContent()
+    {
+        byte[] bytes = [5, 6, 7];
+        var responseStream = new TrackingMemoryStream(bytes);
+        var inner = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StreamContent(responseStream),
+        });
+        using HttpClient client = BuildAuthenticatedClient(inner);
+        var source = new SlicerHostPromotionArtifactContentSource(
+            client,
+            new SlicerHostPromotionOptions(client.BaseAddress!, TimeSpan.FromSeconds(10)));
+
+        PromotionArtifactContent content = (await source.OpenReadAsync(
+            Guid.NewGuid(),
+            "scoped-operation-key",
+            bytes.LongLength,
+            CancellationToken.None))!;
+
+        responseStream.WasDisposed.Should().BeFalse();
+        await content.DisposeAsync();
+        responseStream.WasDisposed.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task HttpSource_WhenBodyIsTruncated_ThrowsRetryableTransportError()
     {
         var inner = new RecordingHandler(_ =>
@@ -140,7 +165,11 @@ public sealed class PromotionArtifactContentSourceTests
     [Fact]
     public async Task HttpSource_WhenArtifactIsMissing_ReturnsMissingContent()
     {
-        var inner = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        var responseStream = new TrackingMemoryStream([]);
+        var inner = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        {
+            Content = new StreamContent(responseStream),
+        });
         using HttpClient client = BuildAuthenticatedClient(inner);
         var source = new SlicerHostPromotionArtifactContentSource(
             client,
@@ -153,6 +182,7 @@ public sealed class PromotionArtifactContentSourceTests
             CancellationToken.None);
 
         content.Should().BeNull();
+        responseStream.WasDisposed.Should().BeTrue();
     }
 
     [Fact]

@@ -29,6 +29,7 @@ import {
   detailedParseBuffersTransferList,
   type DetailedParseBuffers,
 } from './gcodeParserCore';
+import { resolveTrustedGcodeArtifactUrl } from './gcode-artifact-url';
 
 export interface ParsedLayer {
   index: number;
@@ -237,6 +238,8 @@ export function createGcodePreviewService(): IGcodePreviewService {
         throw new DOMException('Parse aborted', 'AbortError');
       }
 
+      const trustedGcodeUrl = resolveTrustedGcodeArtifactUrl(gcodeUrl);
+
       if (isWorkerSupported()) {
         const w = ensureWorker();
         const requestId = ++requestSeq;
@@ -264,7 +267,7 @@ export function createGcodePreviewService(): IGcodePreviewService {
           });
           signal?.addEventListener('abort', onAbort, { once: true });
 
-          w.postMessage({ requestId, gcodeUrl, requestHeaders });
+          w.postMessage({ requestId, gcodeUrl: trustedGcodeUrl, requestHeaders });
         });
 
         return buffersToDetailedParsedGCode(buffers);
@@ -281,7 +284,7 @@ export function createGcodePreviewService(): IGcodePreviewService {
       const onAbort = () => controller.abort();
       signal?.addEventListener('abort', onAbort, { once: true });
       try {
-        const gcodeText = await fetchGCodeText(gcodeUrl, requestHeaders, controller.signal);
+        const gcodeText = await fetchGCodeText(trustedGcodeUrl, requestHeaders, controller.signal);
         const buffers = parseDetailedLayersCore(gcodeText);
         return buffersToDetailedParsedGCode(buffers);
       } finally {
