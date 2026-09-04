@@ -1,5 +1,6 @@
 import SwiftUI
 
+/// Canonical view resolver shared by every `AppDestination` stack.
 @MainActor @ViewBuilder
 func destinationView(for destination: AppDestination) -> some View {
     switch destination {

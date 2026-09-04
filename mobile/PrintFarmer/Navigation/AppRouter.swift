@@ -5,7 +5,8 @@ import SwiftUI
 ///
 /// Tab-owned `NavigationPath` properties back each tab's stack:
 /// * `printersPath` — Farm tab (PrinterListView)
-/// * `jobsPath` — Tasks tab (JobListView)
+/// * `tasksPath` — Tasks tab root (ShiftTasksView)
+/// * `jobsPath` — Print queue nested under Tasks (JobListView)
 /// * `notificationsPath` — Attention tab (AttentionView / NotificationsViewModel)
 /// * `scanPath` — Scan tab (ScanView)
 /// * `inventoryPath` — Inventory tab (SpoolInventoryView)
@@ -40,6 +41,7 @@ final class AppRouter {
     private(set) var activeMode: OversightMode = .floor
     var selectedTab: AppTab = .attention
     var printersPath = NavigationPath()
+    var tasksPath = NavigationPath()
     var jobsPath = NavigationPath()
     var notificationsPath = NavigationPath()
     var inventoryPath = NavigationPath()
@@ -146,6 +148,7 @@ final class AppRouter {
     func invalidatePendingNavigation() {
         navigationEpoch &+= 1
         printersPath = NavigationPath()
+        tasksPath = NavigationPath()
         jobsPath = NavigationPath()
         notificationsPath = NavigationPath()
         inventoryPath = NavigationPath()
@@ -234,10 +237,19 @@ final class AppRouter {
         mode: OversightMode? = nil,
         capabilities: ResolvedSystemCapabilities
     ) {
-        activeShell = shell
-        if let mode {
-            activeMode = mode
+        let nextMode = mode ?? activeMode
+        guard shell != activeShell || nextMode != activeMode else {
+            selectedTab = resolvedTab(for: capabilities)
+            return
         }
+
+        navigationEpoch &+= 1
+        pendingNFCReadyPrinterId = nil
+        pendingSpoolHighlightId = nil
+        pendingAttentionItemId = nil
+        pendingFilamentSwap = nil
+        activeShell = shell
+        activeMode = nextMode
         selectedTab = resolvedTab(for: capabilities)
     }
 
@@ -248,6 +260,7 @@ final class AppRouter {
             notificationBadgeCount = 0
         }
         if !capabilities.shiftPlanEnabled {
+            tasksPath = NavigationPath()
             jobsPath = NavigationPath()
         }
         if !capabilities.guidedSwapEnabled {
@@ -283,6 +296,7 @@ final class AppRouter {
         case .farm:
             printersPath = NavigationPath()
         case .tasks:
+            tasksPath = NavigationPath()
             jobsPath = NavigationPath()
         case .scan:
             scanPath = NavigationPath()

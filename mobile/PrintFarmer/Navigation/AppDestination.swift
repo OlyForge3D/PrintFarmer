@@ -35,6 +35,12 @@ enum OversightMode: Hashable, CaseIterable {
 
 /// Every tab addressable by the current and adaptive navigation shells.
 enum AppTab: String, Hashable, CaseIterable {
+    enum BadgeKind: Hashable {
+        case none
+        case notifications
+        case pendingReady
+    }
+
     case attention
     case farm
     case tasks
@@ -172,5 +178,25 @@ enum AppTab: String, Hashable, CaseIterable {
         case .reports:
             "chart.bar.doc.horizontal"
         }
+    }
+
+    var badgeKind: BadgeKind {
+        switch self {
+        case .attention:
+            .notifications
+        case .farm:
+            .pendingReady
+        case .tasks, .scan, .inventory, .oversight,
+             .overview, .fleet, .jobs, .upkeep, .reports:
+            .none
+        }
+    }
+
+    var tabAccessibilityIdentifier: String {
+        "tab.\(rawValue)"
+    }
+
+    var sidebarAccessibilityIdentifier: String {
+        "sidebar.\(rawValue)"
     }
 }

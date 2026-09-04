@@ -7,6 +7,8 @@ import SwiftUI
 /// Attention overflow menu; jog/preheat/z-offset controls live behind
 /// Printer Detail → Advanced.
 struct ContentView: View {
+    static let sidebarRowMinimumHeight: CGFloat = 44
+
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(ServerRegistry.self) private var serverRegistry
@@ -47,7 +49,7 @@ struct ContentView: View {
                     }
                     .tag(tab)
                     .badge(badgeCount(for: tab))
-                    .accessibilityIdentifier("tab.\(tab.rawValue)")
+                    .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
             }
         }
     }
@@ -102,39 +104,38 @@ struct ContentView: View {
                         .accessibilityHidden(true)
                 }
             }
-            .frame(minHeight: 44)
+            .frame(minHeight: Self.sidebarRowMinimumHeight)
         }
         .listRowBackground(isSelected ? Color.accentColor.opacity(0.15) : nil)
         .foregroundStyle(isSelected ? Color.accentColor : .primary)
         .accessibilityLabel(sidebarAccessibilityLabel(for: tab))
         .accessibilityHint("Opens the \(tab.title) destination.")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityIdentifier("sidebar.\(tab.rawValue)")
+        .accessibilityIdentifier(tab.sidebarAccessibilityIdentifier)
     }
 
     private func badgeCount(for tab: AppTab) -> Int {
-        switch tab {
-        case .attention:
+        switch tab.badgeKind {
+        case .notifications:
             router.notificationBadgeCount
-        case .farm:
+        case .pendingReady:
             router.pendingReadyCount
-        case .tasks, .scan, .inventory, .oversight,
-             .overview, .fleet, .jobs, .upkeep, .reports:
+        case .none:
             0
         }
     }
 
     private func sidebarBadgeColor(for tab: AppTab) -> Color {
-        tab == .farm ? Color.pfWarning : Color.red
+        tab.badgeKind == .pendingReady ? Color.pfWarning : Color.red
     }
 
     private func sidebarAccessibilityLabel(for tab: AppTab) -> String {
-        switch tab {
-        case .attention where router.notificationBadgeCount > 0:
+        switch tab.badgeKind {
+        case .notifications where router.notificationBadgeCount > 0:
             "Attention, \(router.notificationBadgeCount) unread"
-        case .farm where router.pendingReadyCount > 0:
+        case .pendingReady where router.pendingReadyCount > 0:
             "Farm, \(router.pendingReadyCount) ready"
-        default:
+        case .none, .notifications, .pendingReady:
             tab.title
         }
     }
