@@ -248,15 +248,15 @@ describe('SlicerToolbar compact mobile layout (issue #2406)', () => {
     expect(screen.getByRole('menu', { name: 'More tools' })).toBeInTheDocument();
   });
 
-  it('marks an active tool with aria-pressed inside the menu', () => {
+  it('marks an active tool with aria-checked (menuitemcheckbox) inside the menu', () => {
     mockCompactViewport(true);
     render(<SlicerToolbar onAddModel={noop()} onMove={noop()} moveActive />);
 
     fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
     const menu = screen.getByRole('menu', { name: 'More tools' });
 
-    expect(within(menu).getByRole('menuitem', { name: 'Move' })).toHaveAttribute('aria-pressed', 'true');
-    expect(within(menu).getByRole('menuitem', { name: 'Rotate' })).toHaveAttribute('aria-pressed', 'false');
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Move' })).toHaveAttribute('aria-checked', 'true');
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Rotate' })).toHaveAttribute('aria-checked', 'false');
   });
 
   it('hides Advanced-only tools from the menu in Simple mode but keeps them when not simple', () => {
@@ -268,8 +268,8 @@ describe('SlicerToolbar compact mobile layout (issue #2406)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
     let menu = screen.getByRole('menu', { name: 'More tools' });
     expect(within(menu).queryByRole('menuitem', { name: 'Split Model' })).not.toBeInTheDocument();
-    // Simple-mode-visible tool stays present.
-    expect(within(menu).getByRole('menuitem', { name: /Color Painting/ })).toBeInTheDocument();
+    // Simple-mode-visible tool stays present (a toggle tool, so menuitemcheckbox).
+    expect(within(menu).getByRole('menuitemcheckbox', { name: /Color Painting/ })).toBeInTheDocument();
     // Close before switching props so the next click re-opens rather than closes.
     fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
 
@@ -295,5 +295,133 @@ describe('SlicerToolbar compact mobile layout (issue #2406)', () => {
 
     fireEvent.keyDown(menu, { key: 'ArrowUp' });
     expect(orientItem).toHaveFocus();
+  });
+
+  it('focuses the first enabled menu item automatically when the menu opens', async () => {
+    mockCompactViewport(true);
+    // With no hasModels/hasSelection, only the always-enabled transform tools
+    // (Move/Rotate/Scale) are enabled; simpleMode trims the rest of the list
+    // so "Move" is unambiguously the first enabled item.
+    render(<SlicerToolbar onAddModel={noop()} onMove={noop()} simpleMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
+    const menu = screen.getByRole('menu', { name: 'More tools' });
+    const moveItem = within(menu).getByRole('menuitemcheckbox', { name: 'Move' });
+
+    await waitFor(() => {
+      expect(moveItem).toHaveFocus();
+    });
+  });
+
+  it('jumps to the first/last enabled item with Home/End', () => {
+    mockCompactViewport(true);
+    // simpleMode plus no hasModels/hasSelection leaves exactly Move, Rotate,
+    // and Scale enabled (the only tools with no disabled condition), so
+    // "Move" and "Scale" are the deterministic first/last enabled items.
+    render(
+      <SlicerToolbar
+        onAddModel={noop()}
+        onMove={noop()}
+        onRotate={noop()}
+        onScale={noop()}
+        simpleMode
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
+    const menu = screen.getByRole('menu', { name: 'More tools' });
+    const moveItem = within(menu).getByRole('menuitemcheckbox', { name: 'Move' });
+    const scaleItem = within(menu).getByRole('menuitemcheckbox', { name: 'Scale' });
+
+    scaleItem.focus();
+    fireEvent.keyDown(menu, { key: 'Home' });
+    expect(moveItem).toHaveFocus();
+
+    fireEvent.keyDown(menu, { key: 'End' });
+    expect(scaleItem).toHaveFocus();
+  });
+
+  it('stops the slicer\'s single-letter global hotkeys from firing while the menu has keyboard focus', () => {
+    mockCompactViewport(true);
+    const onRotate = vi.fn();
+    render(<SlicerToolbar onAddModel={noop()} onOrient={noop()} onRotate={onRotate} hasSelection />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
+    const menu = screen.getByRole('menu', { name: 'More tools' });
+
+    // "R" is the global hotkey for Rotate elsewhere in the workspace; while
+    // the menu panel has focus, keydowns must not bubble to a document/window
+    // listener that could otherwise trigger it a second time.
+    const event = new KeyboardEvent('keydown', { key: 'r', bubbles: true, cancelable: true });
+    const stopPropagationSpy = vi.spyOn(event, 'stopPropagation');
+    menu.dispatchEvent(event);
+
+    expect(stopPropagationSpy).toHaveBeenCalled();
+    expect(onRotate).not.toHaveBeenCalled();
+  });
+
+  it('lists every desktop tool from all three groups in the compact menu (tool parity)', () => {
+    mockCompactViewport(true);
+    render(
+      <SlicerToolbar
+        onAddModel={noop()}
+        onArrange={noop()}
+        onOrient={noop()}
+        onLayFlat={noop()}
+        onMove={noop()}
+        onRotate={noop()}
+        onScale={noop()}
+        onSplit={noop()}
+        onCut={noop()}
+        onMeshBoolean={noop()}
+        onVariableLayerHeight={noop()}
+        onColorPaint={noop()}
+        onSupportPaint={noop()}
+        onSeamPaint={noop()}
+        onFuzzySkinPaint={noop()}
+        onTextTool={noop()}
+        onMeasure={noop()}
+        onAssemblyView={noop()}
+        onSequentialToggle={noop()}
+        hasModels
+        hasSelection
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
+    const menu = screen.getByRole('menu', { name: 'More tools' });
+
+    // Object Operations group.
+    expect(within(menu).getByRole('menuitem', { name: /Auto Arrange/ })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Auto-Orient' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: /Lay Flat/ })).toBeInTheDocument();
+    // Transform & Tools group.
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Move' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Rotate' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Scale' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Split Model' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitemcheckbox', { name: /Cut Model/ })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: /Mesh Boolean/ })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: /Variable Layer Height/ })).toBeInTheDocument();
+    // Paint & Inspection group.
+    expect(within(menu).getByRole('menuitemcheckbox', { name: /Color Painting/ })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Support Painting' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Seam Painting' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Fuzzy Skin Painting' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Text Tool' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitemcheckbox', { name: /Measure/ })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Assembly View' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitemcheckbox', { name: /Sequential Printing/ })).toBeInTheDocument();
+  });
+
+  it('reflects an active tool on the "More tools" trigger itself', () => {
+    mockCompactViewport(true);
+    const { rerender } = render(<SlicerToolbar onAddModel={noop()} onMove={noop()} />);
+
+    const trigger = screen.getByRole('button', { name: 'More tools' });
+    expect(trigger.className).not.toMatch(/bg-pf-accent\/20/);
+
+    rerender(<SlicerToolbar onAddModel={noop()} onMove={noop()} moveActive />);
+    expect(trigger.className).toMatch(/bg-pf-accent\/20/);
   });
 });

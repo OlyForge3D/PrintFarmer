@@ -315,7 +315,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
     // land somewhere usable instead of a menu with the page focus outside it.
     const focusFrame = window.requestAnimationFrame(() => {
       const firstItem = moreToolsPanelRef.current?.querySelector<HTMLButtonElement>(
-        '[role="menuitem"]:not(:disabled)',
+        '[role="menuitem"]:not(:disabled),[role="menuitemcheckbox"]:not(:disabled)',
       );
       firstItem?.focus();
     });
@@ -366,7 +366,9 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
     event.preventDefault();
 
     const items = Array.from(
-      moreToolsPanelRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [],
+      moreToolsPanelRef.current?.querySelectorAll<HTMLButtonElement>(
+        '[role="menuitem"]:not(:disabled),[role="menuitemcheckbox"]:not(:disabled)',
+      ) ?? [],
     );
     if (items.length === 0) {
       return;
@@ -651,6 +653,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
             ariaExpanded={moreToolsOpen}
             ariaControls={moreToolsOpen ? moreToolsPanelId : undefined}
             ariaHaspopup="menu"
+            active={moreToolsOpen || compactToolGroups.some((group) => group.items.some((item) => item.active))}
             onClick={() => setMoreToolsOpen((open) => !open)}
           />
           {moreToolsOpen && (
@@ -670,8 +673,8 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
                       key={item.key}
                       type="button"
                       variant="unstyled"
-                      role="menuitem"
-                      aria-pressed={item.active}
+                      role={item.active === undefined ? 'menuitem' : 'menuitemcheckbox'}
+                      aria-checked={item.active === undefined ? undefined : item.active}
                       disabled={item.disabled}
                       onClick={() => handleCompactToolClick(item)}
                       iconLeft={<span className="w-6 h-6 shrink-0 [&>*]:w-6 [&>*]:h-6">{item.icon}</span>}
