@@ -330,18 +330,18 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
     }
 
-    func testReadinessPreparationTimeoutDoesNotWaitForUncooperativeRequestAndRetriesFresh() async {
+    func testReadinessPreparationTimeoutBoundsJoinedRefreshAndRetriesFresh() async {
         let firstRequest = AsyncBarrier()
         let secondRequest = AsyncBarrier()
-        let firstTimeout = AsyncBarrier()
-        let secondTimeout = AsyncBarrier()
+        let blockedTimeouts = AsyncBarrier()
+        let retryTimeout = AsyncBarrier()
         let requestOrdinal = SystemCapabilitiesRequestOrdinal()
         let timeoutOrdinal = SystemCapabilitiesRequestOrdinal()
         addTeardownBlock {
             firstRequest.close()
             secondRequest.close()
-            firstTimeout.close()
-            secondTimeout.close()
+            blockedTimeouts.close()
+            retryTimeout.close()
         }
         mockAPIClient.asyncRequestHandler = { urlRequest in
             let ordinal = await requestOrdinal.next()
@@ -359,10 +359,10 @@ final class SystemCapabilitiesTests: XCTestCase {
             apiClient: apiClient,
             preparationTimeout: .seconds(1),
             preparationTimeoutSleep: { _ in
-                if await timeoutOrdinal.next() == 1 {
-                    await firstTimeout.arriveAndWait()
+                if await timeoutOrdinal.next() <= 2 {
+                    await blockedTimeouts.arriveAndWait()
                 } else {
-                    await secondTimeout.arriveAndWait()
+                    await retryTimeout.arriveAndWait()
                 }
             }
         )
@@ -371,18 +371,25 @@ final class SystemCapabilitiesTests: XCTestCase {
             await service.prepareForReadiness()
         }
         await firstRequest.waitUntilArrived()
-        await firstTimeout.waitUntilArrived()
-        firstTimeout.release()
+        let joinedReadiness = Task {
+            await service.refreshForReadiness()
+        }
+        await blockedTimeouts.waitUntilReleaseWaiterCount(2)
+        blockedTimeouts.release()
 
-        let outcome = await preparation.value
-        XCTAssertEqual(outcome, .failed)
+        let preparationOutcome = await preparation.value
+        let readinessOutcome = await joinedReadiness.value
+        XCTAssertNotEqual(preparationOutcome, .loaded)
+        XCTAssertNotEqual(preparationOutcome, .legacyDefaults)
+        XCTAssertNotEqual(readinessOutcome, .loaded)
+        XCTAssertNotEqual(readinessOutcome, .legacyDefaults)
         XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
 
         let retry = Task {
             await service.prepareForReadiness()
         }
         await secondRequest.waitUntilArrived()
-        await secondTimeout.waitUntilArrived()
+        await retryTimeout.waitUntilArrived()
         secondRequest.release()
 
         let retryOutcome = await retry.value

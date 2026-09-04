@@ -137,7 +137,7 @@ final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unche
             return preparedReadinessOutcome
         }
         if let readinessPreparation {
-            let outcome = await readinessPreparation.task.value
+            let outcome = await awaitPreparation(readinessPreparation)
             if let preparedReadinessOutcome {
                 self.preparedReadinessOutcome = nil
                 preparedReadinessGeneration = nil
