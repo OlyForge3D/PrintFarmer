@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct PredictiveInsightsView: View {
-    let printerId: UUID
+    let printerId: UUID?
     @Environment(ServiceContainer.self) private var services
     @State private var viewModel = PredictiveViewModel()
 
@@ -21,11 +21,13 @@ struct PredictiveInsightsView: View {
         .task {
             viewModel.isViewActive = true
             viewModel.configure(predictiveService: services.predictiveService)
-            await viewModel.predictFailure(
-                printerId: printerId,
-                material: nil,
-                duration: nil
-            )
+            if let printerId {
+                await viewModel.predictFailure(
+                    printerId: printerId,
+                    material: nil,
+                    duration: nil
+                )
+            }
             await viewModel.loadAlerts(printerId: printerId)
             await viewModel.loadForecasts(printerId: printerId)
         }
@@ -39,20 +41,22 @@ struct PredictiveInsightsView: View {
     private var insightsContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                if case .failed(let message) = viewModel.predictionStatus {
-                    if viewModel.prediction != nil {
-                        stalePredictionBanner(message: message)
+                if printerId != nil {
+                    if case .failed(let message) = viewModel.predictionStatus {
+                        if viewModel.prediction != nil {
+                            stalePredictionBanner(message: message)
+                            riskDisplay
+                            riskFactorsSection
+                        } else {
+                            predictionUnavailable(message: message)
+                        }
+                    } else {
+                        if viewModel.isRefreshingStalePrediction {
+                            refreshingStaleBanner
+                        }
                         riskDisplay
                         riskFactorsSection
-                    } else {
-                        predictionUnavailable(message: message)
                     }
-                } else {
-                    if viewModel.isRefreshingStalePrediction {
-                        refreshingStaleBanner
-                    }
-                    riskDisplay
-                    riskFactorsSection
                 }
                 alertsSection
                 forecastsSection
