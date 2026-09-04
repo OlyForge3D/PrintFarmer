@@ -46,6 +46,18 @@ package manager cache and identified in the release SBOM. New fonts, icons,
 screenshots, models, fixtures, or generated assets require an explicit source
 and license review before distribution.
 
+## 3D viewer environment assets
+
+| Component | Distributed form | License | Upstream |
+|---|---|---|---|
+| `studio_small_03_1k.hdr` | HDR environment map bundled at `src/Web/ReactApp/public/assets/hdri/studio_small_03_1k.hdr`, served by the web client for the slicer bed and model viewers | CC0 1.0 (public domain) | Authored by [Poly Haven](https://polyhaven.com/a/studio_small_03), redistributed at this resolution by [`pmndrs/drei-assets`](https://github.com/pmndrs/drei-assets/blob/master/hdri/studio_small_03_1k.hdr) |
+
+This asset was previously fetched at runtime from `drei-assets`' `raw.githack.com`
+mirror by `@react-three/drei`'s `Environment` `preset` helper; it is now bundled
+locally so the slicer workspace has no third-party runtime host dependency
+(issue #2405). CC0 requires no attribution, but it is recorded here per the
+distributed-asset review requirement below.
+
 ## Frameworks, libraries, and base images
 
 Release SBOMs enumerate the exact NuGet, npm, operating-system, and container

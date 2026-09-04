@@ -32,6 +32,7 @@ using Farm.Web.Api.Startup;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -516,8 +517,17 @@ if (isMonolithMode)
         app.Logger.LogInformation("[Startup] Running in monolith mode — serving frontend from wwwroot/");
 
         // Serve static files from wwwroot (JS, CSS, images, etc.)
-        // This comes before authentication so static assets are publicly accessible
-        _ = app.UseStaticFiles();
+        // This comes before authentication so static assets are publicly accessible.
+        // ServeUnknownFileTypes stays false; instead we explicitly register the
+        // extensions our bundled assets use (e.g. the slicer/model viewer's local
+        // .hdr environment map, see #2405) so they are served instead of falling
+        // through to the SPA's index.html fallback.
+        FileExtensionContentTypeProvider staticFileContentTypes = new();
+        staticFileContentTypes.Mappings[".hdr"] = "image/vnd.radiance";
+        _ = app.UseStaticFiles(new StaticFileOptions
+        {
+            ContentTypeProvider = staticFileContentTypes,
+        });
 
         if (app.Environment.IsDevelopment())
         {
