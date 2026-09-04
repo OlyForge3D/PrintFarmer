@@ -122,4 +122,80 @@ final class ServerSwitcherViewModelTests: XCTestCase {
         XCTAssertEqual(loginViewModel.usernameOrEmail, "")
         XCTAssertFalse(loginViewModel.isServerURLExpanded)
     }
+
+    func testAdvancedPrinterControlsDefaultOffForFreshAndExistingRegistries() throws {
+        let registry = ServerRegistry(
+            userDefaults: userDefaults,
+            migrateLegacyServerURL: false
+        )
+        _ = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://print.example.com")!
+        )
+
+        XCTAssertFalse(registry.advancedPrinterControlsEnabled)
+
+        let upgradedRegistry = ServerRegistry(
+            userDefaults: userDefaults,
+            migrateLegacyServerURL: false
+        )
+        XCTAssertFalse(upgradedRegistry.advancedPrinterControlsEnabled)
+    }
+
+    func testAdvancedPrinterControlsPreferencePersistsPerServer() throws {
+        let registry = ServerRegistry(
+            userDefaults: userDefaults,
+            migrateLegacyServerURL: false
+        )
+        let home = try registry.add(
+            displayName: "Home",
+            baseURL: URL(string: "https://home.example.com")!
+        )
+        let client = try registry.add(
+            displayName: "Client",
+            baseURL: URL(string: "https://client.example.com")!,
+            makeActiveIfNeeded: false
+        )
+
+        registry.setAdvancedPrinterControlsEnabled(true)
+        XCTAssertTrue(registry.advancedPrinterControlsEnabled)
+
+        try registry.setActive(id: client.id)
+        XCTAssertFalse(registry.advancedPrinterControlsEnabled)
+
+        try registry.setActive(id: home.id)
+        XCTAssertTrue(registry.advancedPrinterControlsEnabled)
+
+        let reloaded = ServerRegistry(
+            userDefaults: userDefaults,
+            migrateLegacyServerURL: false
+        )
+        XCTAssertTrue(reloaded.advancedPrinterControlsEnabled)
+        try reloaded.setActive(id: client.id)
+        XCTAssertFalse(reloaded.advancedPrinterControlsEnabled)
+    }
+
+    func testChangingServerURLClearsAdvancedPrinterControlsPreference() throws {
+        let registry = ServerRegistry(
+            userDefaults: userDefaults,
+            migrateLegacyServerURL: false
+        )
+        var server = try registry.add(
+            displayName: "Personal",
+            baseURL: URL(string: "https://personal.example.com")!
+        )
+        registry.setAdvancedPrinterControlsEnabled(true)
+
+        server.baseURL = URL(string: "https://client.example.com")!
+        try registry.update(server)
+
+        XCTAssertFalse(registry.advancedPrinterControlsEnabled)
+
+        let reloaded = ServerRegistry(
+            userDefaults: userDefaults,
+            migrateLegacyServerURL: false
+        )
+        XCTAssertFalse(reloaded.advancedPrinterControlsEnabled)
+        XCTAssertEqual(reloaded.activeServer?.normalizedURLString, "https://client.example.com")
+    }
 }
