@@ -222,6 +222,33 @@ final class FarmShapeServiceTests: XCTestCase {
         )
     }
 
+    func testResetDiscardsInFlightLatestRefresh() async {
+        let persisted = FarmShape(accountCount: 1, locationCount: 1, printerCount: 2)
+        let changed = FarmShape(accountCount: 2, locationCount: 3, printerCount: 9)
+        store.setShape(persisted, serverID: serverID)
+        let request = AsyncBarrier()
+        defer { request.close() }
+        let service = FarmShapeService(
+            serverID: serverID,
+            store: store,
+            fetchShape: {
+                await request.arriveAndWait()
+                return changed
+            }
+        )
+
+        let refresh = Task {
+            await service.refreshLatest(serverID: serverID)
+        }
+        await request.waitUntilArrived()
+        service.resetSession()
+        request.release()
+        await refresh.value
+
+        XCTAssertNil(service.latestShape)
+        XCTAssertEqual(store.shape(serverID: serverID), persisted)
+    }
+
     func testSwitchingActiveServerSelectsThatServersPersistedShape() throws {
         let registry = ServerRegistry(
             userDefaults: userDefaults,
@@ -278,6 +305,19 @@ final class FarmShapeServiceTests: XCTestCase {
             ),
             serverId: serverB.id
         )
+        let ownerStore = FarmSnapshotOwnerStore(userDefaults: userDefaults)
+        ownerStore.setOwner(userID: UUID(), serverID: serverB.id)
+        let snapshotRoot = FarmSnapshotFixtures.tempRoot()
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: snapshotRoot)
+        }
+        let snapshotAuthority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: userDefaults
+        )
+        let snapshotStore = FarmSnapshotStore(
+            authority: snapshotAuthority,
+            rootURL: snapshotRoot
+        )
         let mock = MockAPIClient()
         mock.stubResponses([
             "/api/system/farm-shape": (
@@ -306,6 +346,9 @@ final class FarmShapeServiceTests: XCTestCase {
             credentialsStore: credentials,
             userDefaultsBox: AuthServiceUserDefaultsBox(userDefaults),
             observeRegistry: false,
+            farmSnapshotAuthority: snapshotAuthority,
+            farmSnapshotStore: snapshotStore,
+            farmSnapshotOwnerStore: ownerStore,
             farmShapeStore: store,
             synchronizeOfflineQueueOnStartup: false,
             apiClientFactory: { baseURL, generation, accessToken, authSessionToken, serverID in

@@ -280,6 +280,27 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertEqual(mockAPIClient.capturedRequests.count, 2)
     }
 
+    func testConcurrentReadinessPreparationsShareOneRequest() async {
+        let request = AsyncBarrier()
+        addTeardownBlock { request.close() }
+        mockAPIClient.asyncRequestHandler = { urlRequest in
+            await request.arriveAndWait()
+            return (
+                TestData.httpResponse(url: urlRequest.url, statusCode: 200),
+                Data(#"{"operatorFeatures":{"attentionEnabled":true}}"#.utf8)
+            )
+        }
+        let service = SystemCapabilitiesService(apiClient: apiClient)
+
+        async let first = service.prepareForReadiness()
+        await request.waitUntilArrived()
+        async let second = service.prepareForReadiness()
+        request.release()
+        _ = await (first, second)
+
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+    }
+
     func testRefreshFailsOpenOnTransportError() async {
         // Transient network failure must not disable any feature —
         // documented contract in #725 is fail-open on unavailability.

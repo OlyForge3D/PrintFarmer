@@ -194,7 +194,7 @@ final class ServiceContainer: @unchecked Sendable {
         }
         let expectedCapabilitiesService = capabilitiesService
         if refreshCapabilities {
-            await expectedCapabilitiesService.refresh()
+            await expectedCapabilitiesService.prepareForReadiness()
         }
         guard serverRegistry.activeServerID == active.id,
               activeServerID == active.id,

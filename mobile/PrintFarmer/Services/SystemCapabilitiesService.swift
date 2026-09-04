@@ -79,6 +79,9 @@ final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unche
     @ObservationIgnored private var issuedRefreshGeneration: UInt64 = 0
     @ObservationIgnored private var appliedRefreshGeneration: UInt64 = 0
     @ObservationIgnored private var preparedReadinessOutcome: SystemCapabilitiesRefreshOutcome?
+    @ObservationIgnored private var readinessPreparationGeneration: UInt64 = 0
+    @ObservationIgnored private var readinessPreparation:
+        (generation: UInt64, task: Task<SystemCapabilitiesRefreshOutcome, Never>)?
     private(set) var resolved: ResolvedSystemCapabilities = .defaults
 
     init(apiClient: APIClient) {
@@ -92,8 +95,30 @@ final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unche
 
     @discardableResult
     func prepareForReadiness() async -> SystemCapabilitiesRefreshOutcome {
-        let outcome = await performRefresh()
-        preparedReadinessOutcome = outcome
+        if let preparedReadinessOutcome {
+            return preparedReadinessOutcome
+        }
+        if let readinessPreparation {
+            let outcome = await readinessPreparation.task.value
+            if self.readinessPreparation?.generation == readinessPreparation.generation {
+                self.readinessPreparation = nil
+                preparedReadinessOutcome = outcome
+            }
+            return outcome
+        }
+
+        readinessPreparationGeneration &+= 1
+        let generation = readinessPreparationGeneration
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return SystemCapabilitiesRefreshOutcome.failed }
+            return await self.performRefresh()
+        }
+        readinessPreparation = (generation, task)
+        let outcome = await task.value
+        if readinessPreparation?.generation == generation {
+            readinessPreparation = nil
+            preparedReadinessOutcome = outcome
+        }
         return outcome
     }
 
@@ -103,11 +128,26 @@ final class SystemCapabilitiesService: SystemCapabilitiesServiceProtocol, @unche
             self.preparedReadinessOutcome = nil
             return preparedReadinessOutcome
         }
+        if let readinessPreparation {
+            let outcome = await readinessPreparation.task.value
+            if let preparedReadinessOutcome {
+                self.preparedReadinessOutcome = nil
+                return preparedReadinessOutcome
+            }
+            if self.readinessPreparation?.generation == readinessPreparation.generation {
+                self.readinessPreparation = nil
+                readinessPreparationGeneration &+= 1
+            }
+            return outcome
+        }
         return await performRefresh()
     }
 
     func discardPreparedReadiness() {
         preparedReadinessOutcome = nil
+        readinessPreparation?.task.cancel()
+        readinessPreparation = nil
+        readinessPreparationGeneration &+= 1
     }
 
     private func performRefresh() async -> SystemCapabilitiesRefreshOutcome {

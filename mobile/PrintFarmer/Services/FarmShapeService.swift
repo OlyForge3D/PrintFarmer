@@ -154,7 +154,9 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
     }
 
     func refreshLatest(serverID: UUID) async {
+        let generation = sessionGeneration
         guard let shape = await fetchShapeOrUnknown() else { return }
+        guard generation == sessionGeneration else { return }
         store.setShape(shape, serverID: serverID)
         latestShape = shape
     }
