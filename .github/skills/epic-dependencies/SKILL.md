@@ -39,7 +39,8 @@ string and GitHub returns HTTP 422.
 ```bash
 id=$(gh api repos/OWNER/REPO/issues/<BLOCKER> --jq .id)
 gh api -X POST repos/OWNER/REPO/issues/<BLOCKED>/dependencies/blocked_by -F issue_id="$id"
-gh api repos/OWNER/REPO/issues/<BLOCKED>/dependencies/blocked_by --jq '.[] | "\(.number) \(.title)"'
+gh api --paginate 'repos/OWNER/REPO/issues/<BLOCKED>/dependencies/blocked_by?per_page=100' \
+  --jq '.[] | "\(.number) \(.title)"'
 ```
 
 Repeat the read-back command after every write and confirm the expected blocker

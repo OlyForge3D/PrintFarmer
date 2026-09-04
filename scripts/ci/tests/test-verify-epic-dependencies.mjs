@@ -119,6 +119,22 @@ test('malformed and unknown first-wave declarations fail closed', () => {
   assert.match(unknown.reason, /not linked sub-issues: #99/);
 });
 
+test('marker-like declaration typos and unterminated comments fail closed', () => {
+  for (const body of [
+    '<!-- epic-first-wave #11 -->',
+    '<!-- epic-dependencies: flatt -->',
+    '<!-- epic-first-wave: #11',
+  ]) {
+    const result = evaluateEpicDependencies({
+      issue: epic({ body }),
+      children: children(11, 12),
+      edges: [{ blocker: 11, blocked: 12 }],
+    });
+    assert.equal(result.classification, 'FAIL', body);
+    assert.match(result.reason, /malformed/, body);
+  }
+});
+
 test('the workflow comment is marker-bound and reports graph counts', () => {
   const result = evaluateEpicDependencies({
     issue: epic(),

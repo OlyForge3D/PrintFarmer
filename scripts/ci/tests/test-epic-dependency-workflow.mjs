@@ -40,6 +40,7 @@ test('workflow uses least privilege and serializes each epic', async () => {
     contents: 'read',
     issues: 'write',
   });
+  assert.equal(workflow.concurrency.group, 'epic-dependency-gate');
   assert.equal(workflow.concurrency['cancel-in-progress'], false);
 });
 

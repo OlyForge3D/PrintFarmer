@@ -20,9 +20,9 @@ permissions:
   issues: write
 
 concurrency:
-  group: >-
-    epic-dependency-gate-${{ github.event.issue.number
-    || inputs.issue_number || 'open-epics' }}
+  # A scheduled sweep and an issue event can touch the same marker comment.
+  # Serialize repo-wide so their list-then-update operations cannot race.
+  group: epic-dependency-gate
   cancel-in-progress: false
 
 jobs:
@@ -108,24 +108,30 @@ jobs:
                 github.rest.issues.listComments,
                 { owner, repo, issue_number: number, per_page: 100 },
               );
-              const existing = comments.find((comment) =>
+              const existing = comments.filter((comment) =>
                 comment.user?.login === 'github-actions[bot]' &&
                 comment.body?.includes(gate.gateCommentMarker)
               );
               if (
                 result.classification === 'NOT_APPLICABLE' &&
-                existing === undefined
+                existing.length === 0
               ) {
                 return;
               }
               const body = gate.formatGateComment(result, number, runUrl);
-              if (existing) {
+              const canonical = existing.at(-1);
+              if (canonical) {
                 await github.rest.issues.updateComment({
-                  owner, repo, comment_id: existing.id, body,
+                  owner, repo, comment_id: canonical.id, body,
                 });
               } else {
                 await github.rest.issues.createComment({
                   owner, repo, issue_number: number, body,
+                });
+              }
+              for (const duplicate of existing.slice(0, -1)) {
+                await github.rest.issues.deleteComment({
+                  owner, repo, comment_id: duplicate.id,
                 });
               }
             }

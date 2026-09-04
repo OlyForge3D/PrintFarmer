@@ -32,32 +32,38 @@ export function hasEpicLabel(labels = []) {
 
 export function parseEpicDeclarations(body = '') {
   const errors = [];
-  const flatMatches = body.match(
-    /<!--\s*epic-dependencies:\s*flat\s*-->/gi,
-  ) ?? [];
-  if (flatMatches.length > 1) {
+  const declarationComments = [
+    ...body.matchAll(/<!--[\s\S]*?(?:-->|$)/g),
+  ].map((match) => match[0].trim());
+  const flatDeclarations = declarationComments.filter((comment) =>
+    /epic-dependencies/i.test(comment));
+  const validFlatDeclarations = flatDeclarations.filter((comment) =>
+    comment === flatGraphMarker);
+  if (flatDeclarations.length > 1) {
     errors.push('The flat-graph opt-out marker appears more than once.');
   }
+  if (flatDeclarations.length !== validFlatDeclarations.length) {
+    errors.push(
+      `The flat-graph declaration is malformed; use ${flatGraphMarker}.`,
+    );
+  }
 
-  const firstWaveMatches = [
-    ...body.matchAll(/<!--\s*epic-first-wave:\s*([\s\S]*?)-->/gi),
-  ];
-  if (firstWaveMatches.length > 1) {
+  const firstWaveDeclarations = declarationComments.filter((comment) =>
+    /epic-first-wave/i.test(comment));
+  if (firstWaveDeclarations.length > 1) {
     errors.push('The first-wave declaration appears more than once.');
   }
 
   const firstWave = [];
-  if (firstWaveMatches.length === 1) {
-    const declaration = firstWaveMatches[0][1];
-    const references = [...declaration.matchAll(/#([1-9]\d*)/g)];
-    const remainder = declaration
-      .replace(/#([1-9]\d*)/g, '')
-      .replace(/[\s,]/g, '');
-    if (references.length === 0 || remainder !== '') {
+  if (firstWaveDeclarations.length === 1) {
+    const match = /^<!-- epic-first-wave: (#[1-9]\d*(?:[\s,]+#[1-9]\d*)*) -->$/
+      .exec(firstWaveDeclarations[0]);
+    if (!match) {
       errors.push(
         `The first-wave declaration is malformed; use ${firstWaveExample}.`,
       );
     } else {
+      const references = [...match[1].matchAll(/#([1-9]\d*)/g)];
       for (const reference of references) {
         const number = Number.parseInt(reference[1], 10);
         if (firstWave.includes(number)) {
@@ -70,7 +76,8 @@ export function parseEpicDeclarations(body = '') {
   }
 
   return {
-    flatGraph: flatMatches.length === 1,
+    flatGraph: validFlatDeclarations.length === 1 &&
+      flatDeclarations.length === 1,
     firstWave,
     errors,
   };
