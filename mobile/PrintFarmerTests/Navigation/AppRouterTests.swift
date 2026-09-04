@@ -39,8 +39,9 @@ final class AppRouterTests: XCTestCase {
     }
 
     func testCurrentTabPresentationMatchesShippingUI() {
-        let tabs = AppTab.tabs(for: .current, mode: .floor)
+        let tabs = ContentView.shippingTabs(for: capabilities)
 
+        XCTAssertEqual(tabs, [.attention, .farm, .tasks, .scan, .inventory])
         XCTAssertEqual(tabs.map(\.title), ["Attention", "Farm", "Tasks", "Scan", "Inventory"])
         XCTAssertEqual(
             tabs.map(\.systemImage),

@@ -8,6 +8,15 @@ import SwiftUI
 /// Printer Detail → Advanced.
 struct ContentView: View {
     static let sidebarRowMinimumHeight: CGFloat = 44
+    static func shippingTabs(
+        for capabilities: ResolvedSystemCapabilities
+    ) -> [AppTab] {
+        AppTab.visibleTabs(
+            for: .current,
+            mode: .floor,
+            capabilities: capabilities
+        )
+    }
 
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
@@ -36,10 +45,10 @@ struct ContentView: View {
 
     private func compactLayout(capabilities: ResolvedSystemCapabilities) -> some View {
         let selection = Binding(
-            get: { router.resolvedTab(for: capabilities) },
-            set: { router.selectTab($0, capabilities: capabilities) }
+            get: { resolvedShippingTab(for: capabilities) },
+            set: { selectShippingTab($0, capabilities: capabilities) }
         )
-        let tabs = router.visibleTabs(for: capabilities)
+        let tabs = Self.shippingTabs(for: capabilities)
 
         return TabView(selection: selection) {
             ForEach(tabs, id: \.self) { tab in
@@ -58,7 +67,7 @@ struct ContentView: View {
 
     private func iPadLayout(capabilities: ResolvedSystemCapabilities) -> some View {
         @Bindable var router = router
-        let tabs = router.visibleTabs(for: capabilities)
+        let tabs = Self.shippingTabs(for: capabilities)
 
         return NavigationSplitView(columnVisibility: $router.sidebarVisibility) {
             List {
@@ -76,7 +85,7 @@ struct ContentView: View {
             .listStyle(.sidebar)
             .navigationTitle("PrintFarmer")
         } detail: {
-            tabContentView(for: router.resolvedTab(for: capabilities))
+            tabContentView(for: resolvedShippingTab(for: capabilities))
         }
         .navigationSplitViewStyle(.balanced)
     }
@@ -85,11 +94,11 @@ struct ContentView: View {
         tab: AppTab,
         capabilities: ResolvedSystemCapabilities
     ) -> some View {
-        let isSelected = router.resolvedTab(for: capabilities) == tab
+        let isSelected = resolvedShippingTab(for: capabilities) == tab
         let badgeCount = badgeCount(for: tab)
 
         Button {
-            router.selectTab(tab, capabilities: capabilities)
+            selectShippingTab(tab, capabilities: capabilities)
         } label: {
             HStack {
                 Label(tab.title, systemImage: tab.systemImage)
@@ -112,6 +121,33 @@ struct ContentView: View {
         .accessibilityHint("Opens the \(tab.title) destination.")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier(tab.sidebarAccessibilityIdentifier)
+    }
+
+    private func resolvedShippingTab(
+        for capabilities: ResolvedSystemCapabilities
+    ) -> AppTab {
+        let tabs = Self.shippingTabs(for: capabilities)
+        return tabs.contains(router.selectedTab)
+            ? router.selectedTab
+            : AppTab.fallbackTab(
+                for: .current,
+                mode: .floor,
+                capabilities: capabilities
+            )
+    }
+
+    private func selectShippingTab(
+        _ tab: AppTab,
+        capabilities: ResolvedSystemCapabilities
+    ) {
+        let tabs = Self.shippingTabs(for: capabilities)
+        router.selectedTab = tabs.contains(tab)
+            ? tab
+            : AppTab.fallbackTab(
+                for: .current,
+                mode: .floor,
+                capabilities: capabilities
+            )
     }
 
     private func badgeCount(for tab: AppTab) -> Int {
