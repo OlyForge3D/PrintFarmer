@@ -65,7 +65,7 @@ export function useIsLgBreakpoint(): boolean {
  * existing non-compact layout unless a test explicitly opts into the narrow
  * viewport. See issue #2406.
  */
-export const MOBILE_BREAKPOINT_QUERY = '(max-width: 639px)';
+export const MOBILE_BREAKPOINT_QUERY = '(max-width: 639.98px)';
 
 /** Convenience wrapper for `useMediaQuery(MOBILE_BREAKPOINT_QUERY)`. */
 export function useIsMobileBreakpoint(): boolean {

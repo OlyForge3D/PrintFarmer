@@ -180,7 +180,7 @@ interface CompactToolItem {
   active?: boolean;
 }
 
-/** A labeled group of {@link CompactToolItem}s, rendered with a divider between groups. */
+/** A group of {@link CompactToolItem}s, rendered with a divider between groups. */
 interface CompactToolGroup {
   key: string;
   items: CompactToolItem[];
@@ -290,10 +290,35 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
     setMoreToolsOpen(false);
   }, []);
 
+  // If the viewport widens back past the mobile breakpoint while the menu is
+  // open (e.g. rotating a tablet, or a desktop window resize during a demo),
+  // close it — otherwise it would spontaneously reappear already-open if the
+  // viewport later narrows again, since its open/close state is otherwise
+  // independent of `isCompact`. Adjusted during render (not in an effect) per
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes.
+  const [prevIsCompact, setPrevIsCompact] = useState(isCompact);
+  if (isCompact !== prevIsCompact) {
+    setPrevIsCompact(isCompact);
+    if (!isCompact) {
+      setMoreToolsOpen(false);
+    }
+  }
+
   useEffect(() => {
     if (!moreToolsOpen) {
       return undefined;
     }
+
+    // role="menu" implies arrow-key roving and an initial focus move onto
+    // the menu (mirrors the pattern established below for the ArrowDown/
+    // ArrowUp handling); focus the first enabled item so keyboard users
+    // land somewhere usable instead of a menu with the page focus outside it.
+    const focusFrame = window.requestAnimationFrame(() => {
+      const firstItem = moreToolsPanelRef.current?.querySelector<HTMLButtonElement>(
+        '[role="menuitem"]:not(:disabled)',
+      );
+      firstItem?.focus();
+    });
 
     const handleMouseDown = (event: MouseEvent) => {
       const target = event.target as Node | null;
@@ -317,10 +342,49 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
     document.addEventListener('mousedown', handleMouseDown);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       document.removeEventListener('mousedown', handleMouseDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [dismissMoreTools, moreToolsOpen]);
+
+  // Arrow-key roving focus within the "More tools" menu (ARIA menu pattern):
+  // Up/Down move between enabled items, Home/End jump to the first/last.
+  // Any other key (besides Escape, handled above) is stopped from bubbling
+  // so the slicer's single-letter global hotkeys (A/R/S/P/C/M/X, mirrored in
+  // `SHORTCUTS` above) don't fire while the menu has focus — the same
+  // protection the keyboard-shortcuts flyout already applies at :665-669.
+  const handleMoreToolsPanelKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      return;
+    }
+    event.stopPropagation();
+
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Home' && event.key !== 'End') {
+      return;
+    }
+    event.preventDefault();
+
+    const items = Array.from(
+      moreToolsPanelRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [],
+    );
+    if (items.length === 0) {
+      return;
+    }
+
+    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+    let nextIndex: number;
+    if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = items.length - 1;
+    } else if (event.key === 'ArrowDown') {
+      nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % items.length;
+    } else {
+      nextIndex = currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length;
+    }
+    items[nextIndex]?.focus();
+  }, []);
 
   // Same tool set as the desktop toolbar's three inline groups (Object
   // Operations / Transform & Tools / Paint & Inspection), collected here so
@@ -595,6 +659,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
               id={moreToolsPanelId}
               role="menu"
               aria-label="More tools"
+              onKeyDown={handleMoreToolsPanelKeyDown}
               className="absolute left-0 top-full z-50 mt-2 max-h-[70vh] w-64 overflow-y-auto rounded-lg border border-pf-border bg-pf-card p-1 shadow-xl"
             >
               {compactToolGroups.map((group, groupIndex) => (
@@ -606,6 +671,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
                       type="button"
                       variant="unstyled"
                       role="menuitem"
+                      aria-pressed={item.active}
                       disabled={item.disabled}
                       onClick={() => handleCompactToolClick(item)}
                       iconLeft={<span className="w-6 h-6 shrink-0 [&>*]:w-6 [&>*]:h-6">{item.icon}</span>}

@@ -230,4 +230,70 @@ describe('SlicerToolbar compact mobile layout (issue #2406)', () => {
       expect(screen.queryByRole('menu', { name: 'More tools' })).not.toBeInTheDocument();
     });
   });
+
+  it('does not invoke the handler or close the menu when clicking a disabled item (defense in depth)', () => {
+    mockCompactViewport(true);
+    const onArrange = vi.fn();
+    // hasModels defaults to false, so Auto Arrange stays disabled.
+    render(<SlicerToolbar onAddModel={noop()} onArrange={onArrange} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
+    const menu = screen.getByRole('menu', { name: 'More tools' });
+    const arrangeItem = within(menu).getByRole('menuitem', { name: /Auto Arrange/ });
+
+    expect(arrangeItem).toBeDisabled();
+    fireEvent.click(arrangeItem);
+
+    expect(onArrange).not.toHaveBeenCalled();
+    expect(screen.getByRole('menu', { name: 'More tools' })).toBeInTheDocument();
+  });
+
+  it('marks an active tool with aria-pressed inside the menu', () => {
+    mockCompactViewport(true);
+    render(<SlicerToolbar onAddModel={noop()} onMove={noop()} moveActive />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
+    const menu = screen.getByRole('menu', { name: 'More tools' });
+
+    expect(within(menu).getByRole('menuitem', { name: 'Move' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(menu).getByRole('menuitem', { name: 'Rotate' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('hides Advanced-only tools from the menu in Simple mode but keeps them when not simple', () => {
+    mockCompactViewport(true);
+    const { rerender } = render(
+      <SlicerToolbar onAddModel={noop()} onSplit={noop()} hasSelection simpleMode />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
+    let menu = screen.getByRole('menu', { name: 'More tools' });
+    expect(within(menu).queryByRole('menuitem', { name: 'Split Model' })).not.toBeInTheDocument();
+    // Simple-mode-visible tool stays present.
+    expect(within(menu).getByRole('menuitem', { name: /Color Painting/ })).toBeInTheDocument();
+    // Close before switching props so the next click re-opens rather than closes.
+    fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
+
+    rerender(<SlicerToolbar onAddModel={noop()} onSplit={noop()} hasSelection simpleMode={false} />);
+    fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
+    menu = screen.getByRole('menu', { name: 'More tools' });
+    expect(within(menu).getByRole('menuitem', { name: 'Split Model' })).toBeInTheDocument();
+  });
+
+  it('moves focus between enabled menu items with ArrowDown/ArrowUp, skipping disabled ones', () => {
+    mockCompactViewport(true);
+    // Auto Arrange (disabled, hasModels=false) should be skipped by roving focus.
+    render(<SlicerToolbar onAddModel={noop()} onOrient={noop()} onLayFlat={noop()} hasSelection />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
+    const menu = screen.getByRole('menu', { name: 'More tools' });
+    const orientItem = within(menu).getByRole('menuitem', { name: 'Auto-Orient' });
+    const layFlatItem = within(menu).getByRole('menuitem', { name: /Lay Flat/ });
+
+    orientItem.focus();
+    fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(layFlatItem).toHaveFocus();
+
+    fireEvent.keyDown(menu, { key: 'ArrowUp' });
+    expect(orientItem).toHaveFocus();
+  });
 });
