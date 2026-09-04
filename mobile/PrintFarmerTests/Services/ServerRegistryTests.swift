@@ -241,10 +241,7 @@ final class ServerRegistryTests: XCTestCase {
             shiftPlanEnabled: false,
             isFarmAdmin: true
         ))
-        registry.dismissOversightUpgradeOffer(
-            farmShape: FarmShape(accountCount: 2, locationCount: 1, printerCount: 1),
-            shiftPlanEnabled: false
-        )
+        registry.dismissOversightUpgradeOffer(for: first.id)
         XCTAssertFalse(registry.observeOversightUpgradeOffer(
             farmShape: FarmShape(accountCount: 3, locationCount: 1, printerCount: 1),
             shiftPlanEnabled: false,
@@ -288,7 +285,7 @@ final class ServerRegistryTests: XCTestCase {
             isFarmAdmin: true
         ))
 
-        registry.acceptOversightUpgradeOffer()
+        registry.acceptOversightUpgradeOffer(for: registry.activeServerID!)
         XCTAssertEqual(registry.navigationLayoutPreference, .twoModes)
         registry.setNavigationLayoutPreference(.automatic)
         XCTAssertFalse(registry.observeOversightUpgradeOffer(

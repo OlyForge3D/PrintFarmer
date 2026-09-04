@@ -264,14 +264,39 @@ enum UITestBootstrap {
         } else {
             injectedSnapshotStore = nil
         }
+        let testUser = arguments.contains(oversightUpgradeOfferLaunchArgument)
+            ? UserDTO(
+                id: DemoData.demoUser.id,
+                username: DemoData.demoUser.username,
+                email: DemoData.demoUser.email,
+                firstName: DemoData.demoUser.firstName,
+                lastName: DemoData.demoUser.lastName,
+                isActive: DemoData.demoUser.isActive,
+                emailConfirmed: DemoData.demoUser.emailConfirmed,
+                lastLogin: DemoData.demoUser.lastLogin,
+                createdAt: DemoData.demoUser.createdAt,
+                roles: ["farm_admin"],
+                permissions: DemoData.demoUser.permissions
+            )
+            : DemoData.demoUser
         let services = ServiceContainer.demo(
             serverRegistry: registry,
             farmSnapshotStore: injectedSnapshotStore
         )
         if arguments.contains(oversightUpgradeOfferLaunchArgument) {
-            services.farmShapeService = StubFarmShapeService(
-                shape: FarmShape(accountCount: 2, locationCount: 1, printerCount: 1)
+            services.authService = DemoAuthService(user: testUser)
+        }
+        if arguments.contains(oversightUpgradeOfferLaunchArgument) {
+            let upgradeOfferShapeService = StubFarmShapeService(
+                shape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1)
             )
+            services.farmShapeService = upgradeOfferShapeService
+            Task {
+                try? await Task.sleep(for: .seconds(3))
+                upgradeOfferShapeService.setShape(
+                    FarmShape(accountCount: 2, locationCount: 1, printerCount: 1)
+                )
+            }
         }
 
         // #1353: `ResolvedSystemCapabilities.defaults.printedPartsInventoryEnabled`
@@ -372,7 +397,7 @@ enum UITestBootstrap {
         switch mode {
         case .authenticated, .authenticatedOperatorFeaturesDisabled,
              .authenticatedAttentionActions:
-            auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
+            auth.markAuthenticatedForUITesting(user: testUser)
         case .unauthenticated:
             break
         #if DEBUG

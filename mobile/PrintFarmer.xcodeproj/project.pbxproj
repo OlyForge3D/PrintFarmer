@@ -471,6 +471,7 @@
 		F7060002000000000000C022 /* LoginFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060002000000000000C021 /* LoginFlowUITests.swift */; };
 		F7060002000000000000C032 /* PrinterListUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060002000000000000C031 /* PrinterListUITests.swift */; };
 		F7060002000000000000C042 /* OperatorShellUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060002000000000000C041 /* OperatorShellUITests.swift */; };
+		F24170130000000000000013 /* OversightUpgradeOfferUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170120000000000000012 /* OversightUpgradeOfferUITests.swift */; };
 		F78010000000000000000002 /* AttentionActionsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78000000000000000000002 /* AttentionActionsUITests.swift */; };
 		F7060003000000000000A002 /* UITestBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060003000000000000A001 /* UITestBootstrap.swift */; };
 		F7060003000000000000B002 /* UITestBootstrapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060003000000000000B001 /* UITestBootstrapTests.swift */; };
@@ -876,6 +877,7 @@
 		F7060002000000000000C021 /* LoginFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginFlowUITests.swift; sourceTree = "<group>"; };
 		F7060002000000000000C031 /* PrinterListUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterListUITests.swift; sourceTree = "<group>"; };
 		F7060002000000000000C041 /* OperatorShellUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperatorShellUITests.swift; sourceTree = "<group>"; };
+		F24170120000000000000012 /* OversightUpgradeOfferUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightUpgradeOfferUITests.swift; sourceTree = "<group>"; };
 		F78000000000000000000002 /* AttentionActionsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionActionsUITests.swift; sourceTree = "<group>"; };
 		F7060002000000000000C0F1 /* PrintFarmerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrintFarmerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F7060003000000000000A001 /* UITestBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestBootstrap.swift; sourceTree = "<group>"; };
@@ -1667,6 +1669,7 @@
 				F7060002000000000000C021 /* LoginFlowUITests.swift */,
 				F7060002000000000000C031 /* PrinterListUITests.swift */,
 				F7060002000000000000C041 /* OperatorShellUITests.swift */,
+				F24170120000000000000012 /* OversightUpgradeOfferUITests.swift */,
 				BFA5D2196733D3B1FD478041 /* ScanStationUITests.swift */,
 				879D8719F73BF287A889F44F /* PartsInventoryUITests.swift */,
 				E4CEAA262B2FBAD6A10FFE98 /* HarvestUITests.swift */,
@@ -2181,6 +2184,7 @@
 				F7060002000000000000C022 /* LoginFlowUITests.swift in Sources */,
 				F7060002000000000000C032 /* PrinterListUITests.swift in Sources */,
 				F7060002000000000000C042 /* OperatorShellUITests.swift in Sources */,
+				F24170130000000000000013 /* OversightUpgradeOfferUITests.swift in Sources */,
 				7C577362C4221D29A187CCD3 /* ScanStationUITests.swift in Sources */,
 				5DDB3BDDE5ED51B9B30AC9FC /* PartsInventoryUITests.swift in Sources */,
 				57BE3B9845FCAC77AC338A43 /* HarvestUITests.swift in Sources */,

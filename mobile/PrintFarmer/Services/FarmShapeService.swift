@@ -348,6 +348,11 @@ final class StubFarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable 
 
     func refreshLatest(serverID: UUID) async {}
 
+    func setShape(_ shape: FarmShape?) {
+        sessionShape = shape
+        latestShape = shape
+    }
+
     func resetSession() {
         sessionShape = nil
         latestShape = nil

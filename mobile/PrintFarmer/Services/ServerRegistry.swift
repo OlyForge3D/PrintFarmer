@@ -40,6 +40,7 @@ final class ServerRegistry {
     private struct OversightUpgradeOfferState: Codable {
         var lastObserved: OversightUpgradeOfferSignature?
         var dismissedThresholds: Set<OversightUpgradeThreshold> = []
+        var pendingThresholds: Set<OversightUpgradeThreshold> = []
         var hasAccepted = false
     }
 
@@ -398,7 +399,13 @@ final class ServerRegistry {
             setOversightUpgradeOfferState(state, for: activeServerID)
         }
 
-        guard !state.hasAccepted, let previous = state.lastObserved else {
+        guard !state.hasAccepted else {
+            return false
+        }
+        if !state.pendingThresholds.isEmpty {
+            return true
+        }
+        guard let previous = state.lastObserved else {
             return false
         }
 
@@ -413,32 +420,23 @@ final class ServerRegistry {
             newlyCrossed.insert(.shiftPlan)
         }
 
-        return !newlyCrossed.subtracting(state.dismissedThresholds).isEmpty
+        state.pendingThresholds = newlyCrossed.subtracting(state.dismissedThresholds)
+        return !state.pendingThresholds.isEmpty
     }
 
-    func dismissOversightUpgradeOffer(
-        farmShape: FarmShape,
-        shiftPlanEnabled: Bool
-    ) {
-        guard let activeServerID else { return }
+    func dismissOversightUpgradeOffer(for serverID: UUID) {
+        guard let activeServerID, activeServerID == serverID else { return }
         var state = oversightUpgradeOfferState(for: activeServerID)
-        state.dismissedThresholds.formUnion(
-            OversightUpgradeOfferSignature(
-                farmShape: farmShape,
-                shiftPlanEnabled: shiftPlanEnabled
-            ).activeThresholds
-        )
-        state.lastObserved = OversightUpgradeOfferSignature(
-            farmShape: farmShape,
-            shiftPlanEnabled: shiftPlanEnabled
-        )
+        state.dismissedThresholds.formUnion(state.pendingThresholds)
+        state.pendingThresholds = []
         setOversightUpgradeOfferState(state, for: activeServerID)
     }
 
-    func acceptOversightUpgradeOffer() {
-        guard let activeServerID else { return }
+    func acceptOversightUpgradeOffer(for serverID: UUID) {
+        guard let activeServerID, activeServerID == serverID else { return }
         var state = oversightUpgradeOfferState(for: activeServerID)
         state.hasAccepted = true
+        state.pendingThresholds = []
         setOversightUpgradeOfferState(state, for: activeServerID)
         setNavigationLayoutPreference(.twoModes)
     }

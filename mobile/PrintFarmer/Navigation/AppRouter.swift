@@ -42,6 +42,7 @@ final class AppRouter {
     private(set) var requestedShell: NavigationShell = .current
     private(set) var configuredServerID: UUID?
     private(set) var configuredUserID: UUID?
+    private(set) var configuredIsFarmAdmin = false
     private(set) var appliedNavigationPreference: NavigationLayoutPreference?
     private(set) var establishedAutomaticDerivation: NavigationShellDerivation?
     private(set) var oversightAvailability = OversightNavigationAvailability.fullyAvailable
@@ -276,6 +277,7 @@ final class AppRouter {
     ) {
         let contextChanged = configuredServerID != serverID || configuredUserID != userID
         let preferenceChanged = appliedNavigationPreference != preference
+        configuredIsFarmAdmin = isFarmAdmin
 
         if contextChanged && !preserveNavigationOnContextChange {
             invalidatePendingNavigation()
