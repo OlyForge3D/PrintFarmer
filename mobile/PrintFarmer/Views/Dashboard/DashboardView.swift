@@ -4,83 +4,27 @@ struct DashboardView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(\.horizontalSizeClass) private var sizeClass
+    private let ownsNavigationStack: Bool
     @State private var viewModel = DashboardViewModel()
     @State private var dispatchViewModel = DispatchViewModel()
     @State private var dispatchRetryTask: Task<Void, Never>?
     @State private var retryTask: Task<Void, Never>?
     @State private var currentPage = 0
 
+    init(ownsNavigationStack: Bool = true) {
+        self.ownsNavigationStack = ownsNavigationStack
+    }
+
     var body: some View {
         @Bindable var router = router
 
-        NavigationStack(path: $router.dashboardSheetPath) {
-            Group {
-                if viewModel.isReadOnly {
-                    // Cold-offline / degraded: render the active exact-owner cached
-                    // snapshot as a read-only farm shell. No mutation or command
-                    // affordances are mounted while stale.
-                    coldOfflineShell
-                } else if viewModel.isAbsentFleetReportable {
-                    // Authoritative session but a snapshot was never written while
-                    // online — distinct from a present-but-empty fleet.
-                    absentFleetState
-                } else if viewModel.isLoading && viewModel.printers.isEmpty {
-                    loadingState
-                } else if let error = viewModel.errorMessage, viewModel.printers.isEmpty {
-                    errorState(error)
-                } else if viewModel.printers.isEmpty {
-                    // Present-but-empty fleet state (confirmed online, zero printers).
-                    EmptyStateView(
-                        icon: "printer",
-                        title: "No Printers",
-                        message: "No printers are registered. Add printers in PrintFarmer to see your fleet here."
-                    )
-                    .accessibilityIdentifier("farm-empty-state")
-                } else {
-                    // iPhone: swipeable pages
-                    if sizeClass == .compact {
-                        VStack(spacing: 0) {
-                            // Maintenance alerts banner (pinned)
-                            if viewModel.hasMaintenanceAlerts {
-                                maintenanceAlert
-                                    .padding(.horizontal)
-                                    .padding(.top, 16)
-                            }
-                            
-                            TabView(selection: $currentPage) {
-                                OverviewPage()
-                                    .tag(0)
-                                ActivePage()
-                                    .tag(1)
-                                QueuePage()
-                                    .tag(2)
-                                DispatchPage()
-                                    .tag(3)
-                            }
-                            .tabViewStyle(.page(indexDisplayMode: .never))
-                            
-                            PageIndicator(currentPage: $currentPage, pageCount: 4, labels: ["Overview", "Active", "Queue", "Dispatch"])
-                                .padding(.bottom, 8)
-                        }
-                    } else {
-                        // iPad: keep existing ScrollView layout
-                        iPadContent
-                    }
+        Group {
+            if ownsNavigationStack {
+                NavigationStack(path: $router.dashboardSheetPath) {
+                    screenContent
                 }
-            }
-            .navigationTitle("Dashboard")
-            .toolbar {
-                if sizeClass == .compact {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        ServerSwitcherMenu(style: .toolbar)
-                    }
-                }
-            }
-            .refreshable {
-                await viewModel.loadDashboard()
-            }
-            .navigationDestination(for: AppDestination.self) { destination in
-                destinationView(for: destination)
+            } else {
+                screenContent
             }
         }
         .task {
@@ -107,6 +51,77 @@ struct DashboardView: View {
             viewModel.isViewActive = false
             dispatchRetryTask?.cancel()
             retryTask?.cancel()
+        }
+    }
+
+    @ViewBuilder
+    private var screenContent: some View {
+        Group {
+            if viewModel.isReadOnly {
+                // Cold-offline / degraded: render the active exact-owner cached
+                // snapshot as a read-only farm shell. No mutation or command
+                // affordances are mounted while stale.
+                coldOfflineShell
+            } else if viewModel.isAbsentFleetReportable {
+                // Authoritative session but a snapshot was never written while
+                // online — distinct from a present-but-empty fleet.
+                absentFleetState
+            } else if viewModel.isLoading && viewModel.printers.isEmpty {
+                loadingState
+            } else if let error = viewModel.errorMessage, viewModel.printers.isEmpty {
+                errorState(error)
+            } else if viewModel.printers.isEmpty {
+                // Present-but-empty fleet state (confirmed online, zero printers).
+                EmptyStateView(
+                    icon: "printer",
+                    title: "No Printers",
+                    message: "No printers are registered. Add printers in PrintFarmer to see your fleet here."
+                )
+                .accessibilityIdentifier("farm-empty-state")
+            } else if sizeClass == .compact {
+                VStack(spacing: 0) {
+                    if viewModel.hasMaintenanceAlerts {
+                        maintenanceAlert
+                            .padding(.horizontal)
+                            .padding(.top, 16)
+                    }
+
+                    TabView(selection: $currentPage) {
+                        OverviewPage()
+                            .tag(0)
+                        ActivePage()
+                            .tag(1)
+                        QueuePage()
+                            .tag(2)
+                        DispatchPage()
+                            .tag(3)
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+
+                    PageIndicator(
+                        currentPage: $currentPage,
+                        pageCount: 4,
+                        labels: ["Overview", "Active", "Queue", "Dispatch"]
+                    )
+                    .padding(.bottom, 8)
+                }
+            } else {
+                iPadContent
+            }
+        }
+        .navigationTitle("Dashboard")
+        .toolbar {
+            if sizeClass == .compact {
+                ToolbarItem(placement: .topBarTrailing) {
+                    ServerSwitcherMenu(style: .toolbar)
+                }
+            }
+        }
+        .refreshable {
+            await viewModel.loadDashboard()
+        }
+        .navigationDestination(for: AppDestination.self) { destination in
+            destinationView(for: destination)
         }
     }
 
