@@ -63,6 +63,7 @@ public class AuthorizationFallbackPolicyTests : IClassFixture<AuthorizationFallb
     [InlineData("/api/gcode-files/file/00000000-0000-0000-0000-000000000000")]
     [InlineData("/api/3d-models/file/00000000-0000-0000-0000-000000000000")]
     [InlineData("/api/3d-models/download-for-viewer?path=missing.stl")]
+    [InlineData("/api/system/farm-shape")]
     public async Task ProtectedEndpoint_Unauthenticated_Returns401(string path)
     {
         using HttpClient anon = _factory.CreateClient();
