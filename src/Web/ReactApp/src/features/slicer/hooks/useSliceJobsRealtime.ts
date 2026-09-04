@@ -36,6 +36,9 @@ function applyEventToJob(
     workerId: event.workerId ?? existing.workerId,
     failureReason: stillFailed ? existing.failureReason : null,
     failureHint: stillFailed ? existing.failureHint : null,
+    // Same staleness concern applies to the admin-only errorDetail (issue #1811 follow-up): a
+    // requeued/retried job must not keep showing the previous attempt's worker diagnostic.
+    errorDetail: stillFailed ? existing.errorDetail : null,
   };
 }
 

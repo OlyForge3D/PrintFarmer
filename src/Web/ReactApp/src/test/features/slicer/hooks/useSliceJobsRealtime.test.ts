@@ -185,6 +185,42 @@ describe('useSliceJobsRealtime', () => {
     expect(mockState.leaveUserGroup).toHaveBeenCalledWith('user-123');
   });
 
+  it('clears stale failure diagnostics (including errorDetail) once a job is no longer failed', async () => {
+    // Regression coverage: a job's admin-only errorDetail must not linger from a previous failed
+    // attempt once the job has been retried/requeued and is reported as non-failed again.
+    const { queryClient, wrapper } = createWrapper();
+    queryClient.setQueryData(['slice-jobs'], [
+      makeJobResponse({
+        id: 'job-1',
+        status: 'Failed',
+        failureReason: 'SlicingEngineRejectedModel',
+        failureHint: 'Try Auto-Orient.',
+        errorDetail: "OrcaSlicer exited with code 1: failed to resolve profile '/data/x.json'",
+      }),
+    ]);
+
+    renderHook(() => useSliceJobsRealtime(), { wrapper });
+
+    await waitFor(() => {
+      expect(mockState.userJobHandler).toBeTruthy();
+    });
+
+    act(() => {
+      mockState.userJobHandler!(makeEvent({
+        eventType: 'JobProgress',
+        jobId: 'job-1',
+        status: 'Processing',
+        progressPercent: 5,
+      }));
+    });
+
+    const cached = queryClient.getQueryData<SliceJobStatusResponse[]>(['slice-jobs']);
+    expect(cached![0].status).toBe('Processing');
+    expect(cached![0].failureReason).toBeNull();
+    expect(cached![0].failureHint).toBeNull();
+    expect(cached![0].errorDetail).toBeNull();
+  });
+
   it('does not connect when disabled', () => {
     const { wrapper } = createWrapper();
 

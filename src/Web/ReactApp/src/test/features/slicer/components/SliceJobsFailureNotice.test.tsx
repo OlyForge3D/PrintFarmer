@@ -43,6 +43,15 @@ vi.mock('@/features/slicer/hooks/useSliceJobsRealtime', () => ({
   useSliceJobsRealtime: () => ({ isConnected: false }),
 }));
 
+const authState = vi.hoisted(() => ({ isFarmAdmin: false }));
+
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({
+    user: { id: 'user-1' },
+    hasRole: (role: string) => role === 'farm_admin' && authState.isFarmAdmin,
+  }),
+}));
+
 vi.mock('@/features/slicer/components/SendToPrinterModal', () => ({
   SendToPrinterModal: () => null,
 }));
@@ -85,6 +94,7 @@ function renderPanel() {
 describe('SliceJobsPanel slice failure notice (#1811)', () => {
   beforeEach(() => {
     mockGetMyJobs.mockReset();
+    authState.isFarmAdmin = false;
   });
 
   it('tells a normal operator why a failed job failed and what to try', async () => {
@@ -168,5 +178,82 @@ describe('SliceJobsPanel slice failure notice (#1811)', () => {
 
     await screen.findByText(/job-ok/);
     expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('hides the real worker diagnostic (errorDetail) from a non-admin operator', async () => {
+    // The backend only ever populates errorDetail for a farm admin (SliceJobController's
+    // MapToPublicStatusResponse, issues #1768/#1811), but a mock server or future regression
+    // could leak it in the payload anyway — the frontend must not render it for anyone but an
+    // authenticated farm admin.
+    authState.isFarmAdmin = false;
+    mockGetMyJobs.mockResolvedValue([
+      {
+        id: 'job-failed-detail-1',
+        status: 'Failed',
+        progressPercent: 49,
+        queuedAt: '2026-08-21T14:24:18Z',
+        startedAt: '2026-08-21T14:24:22Z',
+        completedAt: '2026-08-21T14:24:28Z',
+        errorMessage: 'Slicing failed.',
+        errorDetail: "OrcaSlicer exited with code 1: failed to resolve profile '/data/worker/profiles/FilAr PLA Bronce.json'",
+        failureReason: 'SlicingEngineRejectedModel',
+        failureHint: ENGINE_REJECTED_HINT,
+      },
+    ]);
+
+    renderPanel();
+
+    await screen.findByRole('status');
+    expect(screen.queryByText(/OrcaSlicer exited with code 1/)).toBeNull();
+    expect(screen.queryByText('Diagnostic:')).toBeNull();
+  });
+
+  it('shows the real worker diagnostic (errorDetail) to a farm admin', async () => {
+    authState.isFarmAdmin = true;
+    const rawDetail =
+      "OrcaSlicer exited with code 1: failed to resolve profile '/data/worker/profiles/FilAr PLA Bronce.json'";
+    mockGetMyJobs.mockResolvedValue([
+      {
+        id: 'job-failed-detail-2',
+        status: 'Failed',
+        progressPercent: 49,
+        queuedAt: '2026-08-21T14:24:18Z',
+        startedAt: '2026-08-21T14:24:22Z',
+        completedAt: '2026-08-21T14:24:28Z',
+        errorMessage: 'Slicing failed.',
+        errorDetail: rawDetail,
+        failureReason: 'SlicingEngineRejectedModel',
+        failureHint: ENGINE_REJECTED_HINT,
+      },
+    ]);
+
+    renderPanel();
+
+    await screen.findByText(rawDetail);
+    expect(screen.getByText('Diagnostic:')).toBeInTheDocument();
+  });
+
+  it('shows the diagnostic to a farm admin even when the worker could not classify the failure', async () => {
+    // A job can fail with a real errorDetail but no failureReason/failureHint (the worker
+    // reported a message the classifier didn't recognize). An admin must still see the raw
+    // diagnostic in that case — it's the only lead they have.
+    authState.isFarmAdmin = true;
+    const rawDetail = 'Unhandled exception in worker process: NullReferenceException';
+    mockGetMyJobs.mockResolvedValue([
+      {
+        id: 'job-failed-detail-3',
+        status: 'Failed',
+        progressPercent: 30,
+        queuedAt: '2026-08-21T14:24:18Z',
+        startedAt: '2026-08-21T14:24:22Z',
+        completedAt: '2026-08-21T14:24:28Z',
+        errorMessage: 'Slicing failed.',
+        errorDetail: rawDetail,
+      },
+    ]);
+
+    renderPanel();
+
+    await screen.findByText(rawDetail);
   });
 });
