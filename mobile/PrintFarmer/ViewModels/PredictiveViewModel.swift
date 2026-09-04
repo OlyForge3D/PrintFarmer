@@ -19,6 +19,8 @@ final class PredictiveViewModel {
     /// Kept as a static constant so tests can assert exactly what the view
     /// presents.
     static let failureMessage = "We couldn't load predictive data. Tap Retry to try again."
+    static let farmWideFailureMessage =
+        "We couldn't load farm-wide predictive alerts and forecasts. Tap Retry to try again."
 
     var prediction: JobFailurePrediction?
     var alerts: [PredictiveAlert] = []
@@ -29,6 +31,7 @@ final class PredictiveViewModel {
 
     /// Status of the most recent primary prediction request.
     var predictionStatus: PredictiveLoadState = .idle
+    var farmWideStatus: PredictiveLoadState = .idle
 
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "Predictive")
     private var predictiveService: (any PredictiveServiceProtocol)?
@@ -40,6 +43,7 @@ final class PredictiveViewModel {
     /// Monotonic counter guarding against a slow prior request writing
     /// results back after a retry has superseded it.
     private var predictionGeneration: UInt64 = 0
+    private var farmWideGeneration: UInt64 = 0
 
     func configure(predictiveService: any PredictiveServiceProtocol) {
         self.predictiveService = predictiveService
@@ -72,6 +76,11 @@ final class PredictiveViewModel {
         isLoading = true
         error = nil
         predictionStatus = .loading
+        defer {
+            if generation == predictionGeneration {
+                isLoading = false
+            }
+        }
 
         do {
             let result = try await predictiveService.predictJobFailure(request: request)
@@ -94,8 +103,6 @@ final class PredictiveViewModel {
             predictionStatus = .failed(Self.failureMessage)
         }
 
-        guard isViewActive, generation == predictionGeneration else { return }
-        isLoading = false
     }
 
     func loadAlerts(printerId: UUID?) async {
@@ -118,6 +125,44 @@ final class PredictiveViewModel {
         } catch {
             logger.warning("Failed to load forecasts: \(error.localizedDescription)")
         }
+    }
+
+    func loadFarmWideInsights() async {
+        guard let predictiveService, isViewActive else { return }
+
+        farmWideGeneration &+= 1
+        let generation = farmWideGeneration
+        farmWideStatus = .loading
+
+        do {
+            let loadedAlerts = try await predictiveService.getActiveAlerts(printerId: nil)
+            let loadedForecasts = try await predictiveService.getMaintenanceForecast(
+                days: 30,
+                printerId: nil
+            )
+            guard isViewActive, generation == farmWideGeneration else { return }
+            alerts = loadedAlerts
+            forecasts = loadedForecasts
+            farmWideStatus = .success
+        } catch {
+            guard isViewActive, generation == farmWideGeneration else { return }
+            logger.warning(
+                "Failed to load farm-wide predictive insights: \(error.localizedDescription)"
+            )
+            farmWideStatus = .failed(Self.farmWideFailureMessage)
+        }
+    }
+
+    func retryFarmWideInsights() async {
+        await loadFarmWideInsights()
+    }
+
+    var hasFarmWideData: Bool {
+        !alerts.isEmpty || !forecasts.isEmpty
+    }
+
+    var isRefreshingFarmWideInsights: Bool {
+        farmWideStatus == .loading && hasFarmWideData
     }
 
     // MARK: - Computed

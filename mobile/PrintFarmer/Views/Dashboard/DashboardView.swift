@@ -108,6 +108,13 @@ struct DashboardView: View {
             }
         }
         .navigationTitle("Dashboard")
+        .toolbar {
+            if sizeClass == .compact {
+                ToolbarItem(placement: .topBarTrailing) {
+                    ServerSwitcherMenu(style: .toolbar)
+                }
+            }
+        }
         .refreshable {
             await viewModel.loadDashboard()
         }

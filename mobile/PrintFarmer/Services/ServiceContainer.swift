@@ -1,11 +1,29 @@
 import Foundation
 import Observation
+import OSLog
+
+struct NavigationUserIdentity: Equatable, Sendable {
+    let userID: UUID
+    let roles: [String]
+}
+
+enum NavigationIdentityResolution: Equatable, Sendable {
+    case verified(NavigationUserIdentity)
+    case notSettled
+    case offline
+    case failed(String)
+}
 
 /// Dependency container providing access to all services.
 /// Created once at app startup and passed via SwiftUI environment.
 @MainActor
 @Observable
 final class ServiceContainer: @unchecked Sendable {
+    private static let logger = Logger(
+        subsystem: "com.printfarmer.ios",
+        category: "ServiceContainer"
+    )
+
     typealias APIClientFactory = @MainActor (URL, ActiveServerGeneration, String?, Int?, UUID?) -> APIClient
     typealias SignalRServiceFactory = @MainActor (URL, APIClient) -> any SignalRServiceProtocol
 
@@ -491,6 +509,9 @@ final class ServiceContainer: @unchecked Sendable {
         let store = farmSnapshotStore
         let shapeStore = farmShapeStore
         let startupPrefetchStore = startupPrefetchStore
+        serverRegistry.farmShapeResetHandler = { serverID in
+            shapeStore.invalidateShape(serverID: serverID)
+        }
         serverRegistry.snapshotPurgeHandler = { serverID in
             startupPrefetchStore.removeAll()
             let result = await store.purge(serverID: serverID)
@@ -743,6 +764,103 @@ final class ServiceContainer: @unchecked Sendable {
     /// pending-activation state to the failed server and invalidate the pending record
     /// when the user switches servers.
     var currentActiveServerID: UUID? { serverRegistry?.activeServerID }
+
+    /// Resolves the authenticated identity from the destination server only
+    /// after its service composition has settled. Navigation uses this instead
+    /// of carrying the previous server's roles across a switch.
+    func currentUserForNavigation(
+        serverID: UUID,
+        generation: Int,
+        expectedEndpoint: String
+    ) async -> NavigationIdentityResolution {
+        guard let registeredServer = serverRegistry?.activeServer,
+              registeredServer.id == serverID,
+              registeredServer.normalizedURLString == expectedEndpoint else {
+            return .notSettled
+        }
+
+        if apiClient == nil, authService is DemoAuthService {
+            do {
+                let user = try await authService.currentUser()
+                return .verified(
+                    NavigationUserIdentity(userID: user.id, roles: user.roles)
+                )
+            } catch {
+                return .failed(error.localizedDescription)
+            }
+        }
+
+        guard await isNavigationTargetSettled(
+            serverID: serverID,
+            generation: generation,
+            expectedEndpoint: expectedEndpoint
+        ) else {
+            return .notSettled
+        }
+
+        do {
+            let user = try await authService.currentUser()
+            guard await isNavigationTargetSettled(
+                serverID: serverID,
+                generation: generation,
+                expectedEndpoint: expectedEndpoint
+            ) else {
+                return .notSettled
+            }
+            return .verified(
+                NavigationUserIdentity(userID: user.id, roles: user.roles)
+            )
+        } catch {
+            Self.logger.warning(
+                "Could not verify navigation identity for server \(serverID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            guard await isNavigationTargetSettled(
+                serverID: serverID,
+                generation: generation,
+                expectedEndpoint: expectedEndpoint
+            ) else {
+                return .notSettled
+            }
+            return Self.allowsOfflineNavigationFallback(error)
+                ? .offline
+                : .failed(error.localizedDescription)
+        }
+    }
+
+    private func isNavigationTargetSettled(
+        serverID: UUID,
+        generation: Int,
+        expectedEndpoint: String
+    ) async -> Bool {
+        guard activeServerSwitchTask == nil,
+              activeServerGeneration == generation,
+              activeGeneration.isCurrent(generation),
+              activeServerID == serverID,
+              let registeredServer = serverRegistry?.activeServer,
+              registeredServer.id == serverID,
+              registeredServer.normalizedURLString == expectedEndpoint,
+              let apiClient else {
+            return false
+        }
+        return await apiClient.currentBaseURL() == registeredServer.baseURL
+    }
+
+    private static func allowsOfflineNavigationFallback(_ error: Error) -> Bool {
+        guard let networkError = error as? NetworkError else { return false }
+        switch networkError {
+        case .noConnection,
+             .timeout,
+             .serverUnreachable,
+             .invalidResponse,
+             .serverError,
+             .transportError,
+             .decodingFailed,
+             .staleServerResponse:
+            return true
+        default:
+            return false
+        }
+    }
 
     /// Starts the shape and capability reads together while authentication is
     /// still holding the root loading gate. Shape waits only for its bounded

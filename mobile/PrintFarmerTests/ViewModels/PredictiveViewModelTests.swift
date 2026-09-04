@@ -519,6 +519,39 @@ final class PredictiveViewModelTests: XCTestCase {
         }
     }
 
+    func testDeactivationClearsLoadingWhenPredictionCompletes() async {
+        let gate = AsyncGate()
+        let vm = viewModel!
+        let service = mockPredictiveService!
+        await service.callState.enqueue(.success(JobFailurePrediction(
+            printerId: testPrinterId,
+            material: "PLA",
+            estimatedDurationMinutes: 60,
+            predictedFailureLikelihood: 15,
+            riskLevel: "low",
+            factors: []
+        )))
+        service.beforeReturnHook = { [gate] in
+            await gate.wait()
+        }
+
+        let printerId = testPrinterId
+        async let prediction: Void = vm.predictFailure(
+            printerId: printerId,
+            material: "PLA",
+            duration: 3_600
+        )
+        await gate.waitForEntry()
+        XCTAssertTrue(vm.isLoading)
+
+        vm.isViewActive = false
+        await gate.open()
+        await prediction
+
+        XCTAssertFalse(vm.isLoading)
+        XCTAssertNil(vm.prediction)
+    }
+
     func testFirstOutcomeWouldWriteWithoutInterleave() async {
         // Companion to `testLateCompletingRequestDoesNotOverwriteNewerResult`.
         // Establishes non-vacuity by showing that when there is no newer
@@ -5432,6 +5465,79 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.forecasts.first?.printerName, "Previous Printer")
         XCTAssertEqual(viewModel.error, "prior-predictive-forecasts-error-sentinel")
         XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testFarmWideInsightsPopulateBothSectionsBeforeReportingSuccess() async {
+        mockPredictiveService.alertsToReturn = [
+            PredictiveAlert(
+                alertType: "maintenance_due",
+                severity: "warning",
+                message: "Maintenance is due",
+                recommendedAction: "Schedule maintenance"
+            )
+        ]
+        mockPredictiveService.forecastsToReturn = [
+            MaintenanceForecast(
+                printerId: testPrinterId,
+                printerName: "Prusa MK3",
+                upcomingTasks: []
+            )
+        ]
+
+        await viewModel.loadFarmWideInsights()
+
+        XCTAssertEqual(viewModel.farmWideStatus, .success)
+        XCTAssertTrue(viewModel.hasFarmWideData)
+        XCTAssertEqual(viewModel.alerts.count, 1)
+        XCTAssertEqual(viewModel.forecasts.count, 1)
+        XCTAssertNil(mockPredictiveService.getActiveAlertsCalledWithPrinterId)
+        XCTAssertNil(mockPredictiveService.getMaintenanceForecastCalledWithPrinterId)
+    }
+
+    func testFarmWideInsightsFailurePreservesStaleDataAndSupportsRetry() async {
+        viewModel.alerts = [
+            PredictiveAlert(
+                alertType: "previous_alert",
+                severity: "info",
+                message: "Previously loaded alert",
+                recommendedAction: "Keep monitoring"
+            )
+        ]
+        mockPredictiveService.errorToThrow = NetworkError.timeout
+
+        await viewModel.loadFarmWideInsights()
+
+        XCTAssertEqual(
+            viewModel.farmWideStatus,
+            .failed(PredictiveViewModel.farmWideFailureMessage)
+        )
+        XCTAssertEqual(viewModel.alerts.first?.alertType, "previous_alert")
+        XCTAssertTrue(viewModel.hasFarmWideData)
+
+        mockPredictiveService.errorToThrow = nil
+        mockPredictiveService.alertsToReturn = []
+        mockPredictiveService.forecastsToReturn = []
+        await viewModel.retryFarmWideInsights()
+
+        XCTAssertEqual(viewModel.farmWideStatus, .success)
+        XCTAssertFalse(viewModel.hasFarmWideData)
+    }
+
+    func testFarmWideLoadingWithExistingDataReportsRefreshingState() {
+        viewModel.alerts = [
+            PredictiveAlert(
+                alertType: "previous_alert",
+                severity: "info",
+                message: "Previously loaded alert",
+                recommendedAction: "Keep monitoring"
+            )
+        ]
+        viewModel.farmWideStatus = .loading
+
+        XCTAssertTrue(viewModel.isRefreshingFarmWideInsights)
+
+        viewModel.alerts = []
+        XCTAssertFalse(viewModel.isRefreshingFarmWideInsights)
     }
 
     // MARK: - Computed Properties

@@ -33,6 +33,7 @@ final class AppRouter {
     private(set) var configuredServerID: UUID?
     private(set) var configuredUserID: UUID?
     private(set) var appliedNavigationPreference: NavigationLayoutPreference?
+    private(set) var establishedAutomaticDerivation: NavigationShellDerivation?
     private(set) var oversightAvailability = OversightNavigationAvailability.fullyAvailable
     var selectedTab: AppTab {
         didSet {
@@ -86,6 +87,11 @@ final class AppRouter {
         switch destination {
         case .printerDetail(let id):
             let tab = printerDestinationTab
+            guard visibleTabs(for: capabilities).contains(tab) else {
+                resetPrinterPath(for: tab)
+                selectedTab = fallbackTab(for: capabilities)
+                return
+            }
             selectedTab = tab
             resetPrinterPath(for: tab)
             Task { @MainActor in
@@ -95,6 +101,12 @@ final class AppRouter {
             }
         case .printerReady(let id):
             let tab = printerDestinationTab
+            guard visibleTabs(for: capabilities).contains(tab) else {
+                resetPrinterPath(for: tab)
+                pendingNFCReadyPrinterId = nil
+                selectedTab = fallbackTab(for: capabilities)
+                return
+            }
             selectedTab = tab
             resetPrinterPath(for: tab)
             pendingNFCReadyPrinterId = id
@@ -104,7 +116,7 @@ final class AppRouter {
                 appendPrinterDestination(.printerDetail(id: id), to: tab)
             }
         case .spoolDetail(let id):
-            guard visibleTabs(for: capabilities).contains(.inventory) else {
+            guard makeTabVisibleIfPossible(.inventory, capabilities: capabilities) else {
                 selectedTab = fallbackTab(for: capabilities)
                 inventoryPath = NavigationPath()
                 pendingSpoolHighlightId = nil
@@ -114,7 +126,7 @@ final class AppRouter {
             inventoryPath = NavigationPath()
             pendingSpoolHighlightId = id
         case .attentionItem(let id):
-            guard visibleTabs(for: capabilities).contains(.attention) else {
+            guard makeTabVisibleIfPossible(.attention, capabilities: capabilities) else {
                 selectedTab = fallbackTab(for: capabilities)
                 notificationsPath = NavigationPath()
                 pendingAttentionItemId = nil
@@ -125,6 +137,12 @@ final class AppRouter {
             pendingAttentionItemId = id
         case .filamentSwap(let printerId, let toolheadIndex, let jobId):
             let tab = printerDestinationTab
+            guard visibleTabs(for: capabilities).contains(tab) else {
+                resetPrinterPath(for: tab)
+                pendingFilamentSwap = nil
+                selectedTab = fallbackTab(for: capabilities)
+                return
+            }
             selectedTab = tab
             resetPrinterPath(for: tab)
             pendingFilamentSwap = capabilities.guidedSwapEnabled
@@ -240,21 +258,34 @@ final class AppRouter {
         farmShape: FarmShape?,
         isFarmAdmin: Bool,
         capabilities: ResolvedSystemCapabilities,
-        oversightAvailability: OversightNavigationAvailability
+        oversightAvailability: OversightNavigationAvailability,
+        preserveNavigationOnContextChange: Bool = false
     ) {
         let contextChanged = configuredServerID != serverID || configuredUserID != userID
         let preferenceChanged = appliedNavigationPreference != preference
 
-        if contextChanged {
+        if contextChanged && !preserveNavigationOnContextChange {
             invalidatePendingNavigation()
         }
 
-        if contextChanged || preferenceChanged || appliedNavigationPreference == nil {
-            let automaticDerivation = NavigationShellDerivation.automatic(
+        let automaticDerivation: NavigationShellDerivation
+        if contextChanged || establishedAutomaticDerivation == nil {
+            automaticDerivation = NavigationShellDerivation.automatic(
                 farmShape: farmShape,
                 shiftPlanEnabled: capabilities.shiftPlanEnabled,
                 isFarmAdmin: isFarmAdmin
             )
+            establishedAutomaticDerivation = automaticDerivation
+        } else {
+            automaticDerivation = establishedAutomaticDerivation
+                ?? NavigationShellDerivation.automatic(
+                    farmShape: farmShape,
+                    shiftPlanEnabled: capabilities.shiftPlanEnabled,
+                    isFarmAdmin: isFarmAdmin
+                )
+        }
+
+        if contextChanged || preferenceChanged || appliedNavigationPreference == nil {
             configuredServerID = serverID
             configuredUserID = userID
             appliedNavigationPreference = preference
@@ -307,24 +338,23 @@ final class AppRouter {
         )
     }
 
+    func presentShippingShell(capabilities: ResolvedSystemCapabilities) {
+        clearDisabledFeatureState(capabilities)
+        transition(
+            to: .current,
+            mode: activeMode,
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
+        )
+    }
+
     func reconcileCapabilities(
         _ capabilities: ResolvedSystemCapabilities,
         oversightAvailability: OversightNavigationAvailability? = nil
     ) {
         let nextOversightAvailability = oversightAvailability ?? self.oversightAvailability
 
-        if !capabilities.attentionEnabled {
-            notificationsPath = NavigationPath()
-            pendingAttentionItemId = nil
-            notificationBadgeCount = 0
-        }
-        if !capabilities.shiftPlanEnabled {
-            tasksPath = NavigationPath()
-            jobsPath = NavigationPath()
-        }
-        if !capabilities.guidedSwapEnabled {
-            pendingFilamentSwap = nil
-        }
+        clearDisabledFeatureState(capabilities)
 
         transition(
             to: AdaptiveNavigationShell.effectiveShell(
@@ -380,6 +410,7 @@ final class AppRouter {
         configuredServerID = nil
         configuredUserID = nil
         appliedNavigationPreference = nil
+        establishedAutomaticDerivation = nil
         oversightAvailability = .fullyAvailable
         selectedTab = .attention
     }
@@ -424,8 +455,6 @@ final class AppRouter {
     }
 
     private var printerDestinationTab: AppTab {
-        // IOS-1 must bind `fleetPath` to the Fleet NavigationStack before it
-        // enables the Oversight shell in production.
         activeShell == .twoModes && activeMode == .oversight
             ? .fleet
             : .farm
@@ -449,6 +478,53 @@ final class AppRouter {
             fleetPath.append(destination)
         default:
             printersPath.append(destination)
+        }
+    }
+
+    private func makeTabVisibleIfPossible(
+        _ tab: AppTab,
+        capabilities: ResolvedSystemCapabilities
+    ) -> Bool {
+        if visibleTabs(for: capabilities).contains(tab) {
+            return true
+        }
+
+        guard activeShell == .twoModes, activeMode == .oversight else {
+            return false
+        }
+
+        let floorTabs = AppTab.visibleTabs(
+            for: .twoModes,
+            mode: .floor,
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
+        )
+        guard floorTabs.contains(tab) else { return false }
+
+        transition(
+            to: .twoModes,
+            mode: .floor,
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
+        )
+        return visibleTabs(for: capabilities).contains(tab)
+    }
+
+    private func clearDisabledFeatureState(
+        _ capabilities: ResolvedSystemCapabilities
+    ) {
+        if !capabilities.attentionEnabled {
+            notificationsPath = NavigationPath()
+            pendingAttentionItemId = nil
+            notificationBadgeCount = 0
+        }
+        if !capabilities.shiftPlanEnabled {
+            tasksPath = NavigationPath()
+            jobsPath = NavigationPath()
+            pendingReadyCount = 0
+        }
+        if !capabilities.guidedSwapEnabled {
+            pendingFilamentSwap = nil
         }
     }
 

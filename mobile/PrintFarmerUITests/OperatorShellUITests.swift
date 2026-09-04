@@ -68,6 +68,11 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
                 "Destination '\(destination.tabTitle)' should be present in the operator shell — tab bar '\(destination.tabTitle)' or sidebar '\(destination.sidebarIdentifier)'"
             )
         }
+
+        if hasTabBar {
+            XCTAssertFalse(app.tabBars.buttons["Tasks"].exists)
+            XCTAssertFalse(app.tabBars.buttons["Scan"].exists)
+        }
     }
 
     func testRetiredTabsAreNotVisible() {
@@ -408,5 +413,26 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
 
         let cancel = app.buttons["printer.detail.dispatch.cancel"]
         if cancel.exists { cancel.tap() }
+    }
+}
+
+@MainActor
+final class TwoModesOperatorShellUITests: PrintFarmerUITestCase {
+    override var additionalLaunchArguments: [String] {
+        ["--uitesting-two-modes"]
+    }
+
+    func testFloorModeShowsRequiredCompactDestinations() {
+        let tabBar = app.tabBars.firstMatch
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 5))
+
+        for destination in ["Attention", "Farm", "Tasks", "Inventory"] {
+            XCTAssertTrue(
+                tabBar.buttons[destination].exists,
+                "Two-modes Floor must expose \(destination)"
+            )
+        }
+        XCTAssertFalse(tabBar.buttons["Scan"].exists)
+        XCTAssertFalse(tabBar.buttons["Oversight"].exists)
     }
 }

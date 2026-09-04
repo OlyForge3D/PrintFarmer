@@ -37,6 +37,13 @@ final class UITestBootstrapTests: XCTestCase {
         XCTAssertEqual(UITestBootstrap.unauthenticatedLaunchArgument, "--uitesting-unauthenticated")
     }
 
+    func test_twoModesNavigationLaunchArgument_matchesUITestsHarness() {
+        XCTAssertEqual(
+            UITestBootstrap.twoModesNavigationLaunchArgument,
+            "--uitesting-two-modes"
+        )
+    }
+
     // MARK: - Launch mode
 
     func test_mode_defaultsToAuthenticated() {
@@ -350,6 +357,16 @@ final class UITestBootstrapTests: XCTestCase {
                        bundle.serverRegistry.servers.first?.id)
     }
 
+    func test_makeBundle_twoModesArgument_setsNavigationPreference() throws {
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(
+            defaults: defaults,
+            arguments: ["--uitesting", "--uitesting-two-modes"]
+        )
+
+        XCTAssertEqual(bundle.serverRegistry.navigationLayoutPreference, .twoModes)
+    }
+
     func test_makeBundle_marksAuthenticated_withDemoUser() throws {
         let defaults = try makeEphemeralDefaults()
         let bundle = UITestBootstrap.makeBundle(defaults: defaults)
@@ -458,6 +475,28 @@ final class UITestBootstrapTests: XCTestCase {
         // Registry writes on `add(...)`, so the seeded server must be
         // present in the injected suite.
         XCTAssertNotNil(defaults.data(forKey: ServerRegistry.storageKey))
+    }
+
+    func test_makeBundle_resolvesNavigationIdentityForActiveDemoServer() async throws {
+        let defaults = try makeEphemeralDefaults()
+        let environment = UITestBootstrap.makeBundle(defaults: defaults)
+        let activeServer = try XCTUnwrap(environment.serverRegistry.activeServer)
+
+        let resolution = await environment.services.currentUserForNavigation(
+            serverID: activeServer.id,
+            generation: environment.services.activeServerGeneration,
+            expectedEndpoint: activeServer.normalizedURLString
+        )
+
+        XCTAssertEqual(
+            resolution,
+            .verified(
+                NavigationUserIdentity(
+                    userID: DemoData.demoUser.id,
+                    roles: DemoData.demoUser.roles
+                )
+            )
+        )
     }
 
     // MARK: - Helpers

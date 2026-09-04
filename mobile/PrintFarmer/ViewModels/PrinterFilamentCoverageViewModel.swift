@@ -370,6 +370,7 @@ final class PrinterFilamentCoverageViewModel {
 
     private func commitError(_ error: Error, generation: UInt64) {
         if generation < lastCommittedGeneration { return }
+        if isCancellationError(error) { return }
         lastLoadError = error.localizedDescription
         lastCommittedGeneration = generation
         #if DEBUG

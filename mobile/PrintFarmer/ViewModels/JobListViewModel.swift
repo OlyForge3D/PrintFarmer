@@ -17,6 +17,7 @@ final class JobListViewModel {
     func loadJobs() async {
         guard let jobService, isViewActive else { return }
         isLoading = true
+        defer { isLoading = false }
         errorMessage = nil
 
         do {
@@ -27,9 +28,6 @@ final class JobListViewModel {
             guard isViewActive else { return }
             errorMessage = error.localizedDescription
         }
-
-        guard isViewActive else { return }
-        isLoading = false
     }
 
     func cancelJob(id: UUID) async {

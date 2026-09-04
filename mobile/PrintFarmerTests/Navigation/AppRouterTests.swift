@@ -316,6 +316,7 @@ final class AppRouterTests: XCTestCase {
             capabilities: capabilities,
             oversightAvailability: .fullyAvailable
         )
+        let establishedExplanation = router.establishedAutomaticDerivation?.explanation
         router.configureAdaptiveShell(
             serverID: serverID,
             userID: userID,
@@ -328,6 +329,10 @@ final class AppRouterTests: XCTestCase {
 
         XCTAssertEqual(router.requestedShell, .simple)
         XCTAssertEqual(router.activeShell, .simple)
+        XCTAssertEqual(
+            router.establishedAutomaticDerivation?.explanation,
+            establishedExplanation
+        )
         XCTAssertTrue(
             router.hasAdaptiveShellConfiguration(
                 serverID: serverID,
@@ -394,6 +399,181 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(router.requestedShell, .twoModes)
         XCTAssertEqual(router.activeShell, .twoModes)
         XCTAssertEqual(router.activeMode, .floor)
+    }
+
+    func testReturningToAutomaticRestoresTheSessionEstablishedDerivation() {
+        let router = AppRouter()
+        let serverID = UUID()
+        let userID = UUID()
+        let initialShape = FarmShape(accountCount: 1, locationCount: 1, printerCount: 4)
+        let changedShape = FarmShape(accountCount: 3, locationCount: 2, printerCount: 40)
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .automatic,
+            farmShape: initialShape,
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        let establishedDerivation = router.establishedAutomaticDerivation
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .twoModes,
+            farmShape: changedShape,
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .automatic,
+            farmShape: changedShape,
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.establishedAutomaticDerivation, establishedDerivation)
+        XCTAssertEqual(router.requestedShell, .simple)
+        XCTAssertEqual(router.activeShell, .simple)
+    }
+
+    func testServerChangeReplacesAutomaticDerivationWithVerifiedDestinationIdentity() {
+        let router = AppRouter()
+        let firstServerID = UUID()
+        let secondServerID = UUID()
+
+        router.configureAdaptiveShell(
+            serverID: firstServerID,
+            userID: UUID(),
+            preference: .automatic,
+            farmShape: FarmShape(accountCount: 3, locationCount: 2, printerCount: 40),
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        XCTAssertEqual(router.establishedAutomaticDerivation?.shell, .twoModes)
+
+        router.configureAdaptiveShell(
+            serverID: secondServerID,
+            userID: UUID(),
+            preference: .automatic,
+            farmShape: FarmShape(accountCount: 3, locationCount: 2, printerCount: 40),
+            isFarmAdmin: false,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.configuredServerID, secondServerID)
+        XCTAssertEqual(router.establishedAutomaticDerivation?.shell, .simple)
+        XCTAssertEqual(router.requestedShell, .simple)
+        XCTAssertTrue(
+            router.establishedAutomaticDerivation?.explanation.contains("not a farm administrator") == true
+        )
+    }
+
+    func testVerifiedIdentityUpgradeCanPreserveCurrentNavigationStack() {
+        let router = AppRouter()
+        let serverID = UUID()
+        let provisionalUserID = UUID()
+        let verifiedUserID = UUID()
+        let printerID = UUID()
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: provisionalUserID,
+            preference: .simple,
+            farmShape: nil,
+            isFarmAdmin: false,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.printersPath.append(AppDestination.printerDetail(id: printerID))
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: verifiedUserID,
+            preference: .automatic,
+            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 4),
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable,
+            preserveNavigationOnContextChange: true
+        )
+
+        XCTAssertEqual(router.configuredUserID, verifiedUserID)
+        XCTAssertEqual(router.printersPath.count, 1)
+    }
+
+    func testShippingPresentationPreservesAdaptiveSelectionForCompactReturn() {
+        let router = AppRouter()
+        let serverID = UUID()
+        let userID = UUID()
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .twoModes,
+            farmShape: nil,
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.setNavigationMode(.oversight, capabilities: capabilities)
+
+        router.presentShippingShell(capabilities: capabilities)
+
+        XCTAssertEqual(router.activeShell, .current)
+        XCTAssertEqual(router.activeMode, .oversight)
+        XCTAssertEqual(router.requestedShell, .twoModes)
+        XCTAssertEqual(
+            router.visibleTabs(for: capabilities),
+            [.attention, .farm, .tasks, .inventory]
+        )
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .twoModes,
+            farmShape: nil,
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.activeShell, .twoModes)
+        XCTAssertEqual(router.activeMode, .oversight)
+        XCTAssertEqual(
+            router.visibleTabs(for: capabilities),
+            [.overview, .fleet, .jobs, .upkeep, .reports]
+        )
+    }
+
+    func testShippingPresentationClearsDisabledCapabilityState() {
+        var disabled = capabilities
+        disabled.attentionEnabled = false
+        disabled.shiftPlanEnabled = false
+        let router = AppRouter()
+        router.notificationBadgeCount = 3
+        router.pendingReadyCount = 2
+        router.pendingAttentionItemId = "attention-1"
+        router.notificationsPath.append(AppDestination.jobDetail(id: printerId))
+        router.tasksPath.append(AppDestination.jobDetail(id: printerId))
+
+        router.presentShippingShell(capabilities: disabled)
+
+        XCTAssertEqual(router.activeShell, .current)
+        XCTAssertEqual(router.selectedTab, .farm)
+        XCTAssertEqual(router.notificationBadgeCount, 0)
+        XCTAssertEqual(router.pendingReadyCount, 0)
+        XCTAssertNil(router.pendingAttentionItemId)
+        XCTAssertTrue(router.notificationsPath.isEmpty)
+        XCTAssertTrue(router.tasksPath.isEmpty)
     }
 
     func testTwoModesCollapsesWhenOversightHasFewerThanTwoTabs() {
@@ -683,7 +863,31 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(router.fleetPath.count, 1)
     }
 
-    func testAttentionDeepLinkFallsBackWhenActiveSetOmitsAttention() {
+    func testPrinterDeepLinkFallsBackWhenFleetIsUnavailable() async {
+        let router = AppRouter()
+        let availability = OversightNavigationAvailability(
+            hasVisibleHubDestinations: true,
+            visibleTabs: [.overview, .reports]
+        )
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities,
+            oversightAvailability: availability
+        )
+
+        router.navigate(
+            to: .printerDetail(id: printerId),
+            capabilities: capabilities
+        )
+
+        XCTAssertEqual(router.selectedTab, .overview)
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertTrue(router.printersPath.isEmpty)
+        XCTAssertTrue(router.fleetPath.isEmpty)
+    }
+
+    func testAttentionDeepLinkSwitchesToFloorModeAndPreservesItem() {
         let router = AppRouter()
         router.setNavigationShell(
             .twoModes,
@@ -696,12 +900,13 @@ final class AppRouterTests: XCTestCase {
             capabilities: capabilities
         )
 
-        XCTAssertEqual(router.selectedTab, .overview)
-        XCTAssertNil(router.pendingAttentionItemId)
+        XCTAssertEqual(router.activeMode, .floor)
+        XCTAssertEqual(router.selectedTab, .attention)
+        XCTAssertEqual(router.pendingAttentionItemId, "failure-123")
         XCTAssertTrue(router.notificationsPath.isEmpty)
     }
 
-    func testSpoolDeepLinkFallsBackWhenActiveSetOmitsInventory() {
+    func testSpoolDeepLinkSwitchesToFloorModeAndPreservesHighlight() {
         let router = AppRouter()
         router.setNavigationShell(
             .twoModes,
@@ -714,8 +919,9 @@ final class AppRouterTests: XCTestCase {
             capabilities: capabilities
         )
 
-        XCTAssertEqual(router.selectedTab, .overview)
-        XCTAssertNil(router.pendingSpoolHighlightId)
+        XCTAssertEqual(router.activeMode, .floor)
+        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertEqual(router.pendingSpoolHighlightId, spoolId)
         XCTAssertTrue(router.inventoryPath.isEmpty)
     }
 
@@ -843,6 +1049,7 @@ final class AppRouterTests: XCTestCase {
         router.navigate(to: .printerDetail(id: printerId), capabilities: capabilities)
         router.navigate(to: .attentionItem(id: "attention-1"), capabilities: capabilities)
         router.navigate(to: .spoolDetail(id: 42), capabilities: capabilities)
+        router.tasksPath.append(AppDestination.jobHistory)
         router.jobsPath.append(AppDestination.jobDetail(id: printerId))
         router.oversightPath.append(AppDestination.jobHistory)
         router.overviewPath.append(AppDestination.dispatchDashboard)
@@ -858,6 +1065,7 @@ final class AppRouterTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(120))
 
         XCTAssertTrue(router.printersPath.isEmpty)
+        XCTAssertTrue(router.tasksPath.isEmpty)
         XCTAssertTrue(router.jobsPath.isEmpty)
         XCTAssertTrue(router.notificationsPath.isEmpty)
         XCTAssertTrue(router.inventoryPath.isEmpty)

@@ -184,21 +184,14 @@ final class FarmShapeServiceTests: XCTestCase {
         registry.certificatePinPurgeHandler = { _, _ in true }
         _ = container
 
-        await service.resolveForAuthenticatedSession(
-            serverID: server.id,
-            timeout: .milliseconds(1)
-        )
+        let refreshTask = Task {
+            await service.refreshLatest(serverID: server.id)
+        }
         await request.waitUntilArrived()
         try await registry.purgeAndRemove(id: server.id)
 
-        let lateResponseApplied = expectation(description: "late response completed")
-        withObservationTracking {
-            _ = service.latestShape
-        } onChange: {
-            lateResponseApplied.fulfill()
-        }
         request.release()
-        await fulfillment(of: [lateResponseApplied], timeout: 2)
+        await refreshTask.value
 
         XCTAssertTrue(registry.servers.isEmpty)
         XCTAssertNil(store.shape(serverID: server.id))
@@ -206,6 +199,100 @@ final class FarmShapeServiceTests: XCTestCase {
             FarmShapeStore(userDefaults: userDefaults).shape(serverID: server.id),
             "a fresh store must not find persistence recreated by the late response"
         )
+    }
+
+    func testEndpointChangePurgesShapeAndRejectsLateOldEndpointWrite() async throws {
+        let registry = ServerRegistry(
+            userDefaults: userDefaults,
+            migrateLegacyServerURL: false
+        )
+        var server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://old.example.com")!
+        )
+        let initialShape = FarmShape(accountCount: 3, locationCount: 2, printerCount: 12)
+        let staleShape = FarmShape(accountCount: 7, locationCount: 4, printerCount: 40)
+        let replacementShape = FarmShape(accountCount: 1, locationCount: 1, printerCount: 2)
+        store.setShape(initialShape, serverID: server.id)
+
+        let request = AsyncBarrier()
+        defer { request.close() }
+        let staleService = FarmShapeService(
+            serverID: server.id,
+            store: store,
+            fetchShape: {
+                await request.arriveAndWait()
+                return staleShape
+            }
+        )
+        let container = ServiceContainer(
+            serverRegistry: registry,
+            observeRegistry: false,
+            farmShapeStore: store,
+            synchronizeOfflineQueueOnStartup: false
+        )
+        _ = container
+
+        let refresh = Task {
+            await staleService.refreshLatest(serverID: server.id)
+        }
+        await request.waitUntilArrived()
+
+        server.baseURL = URL(string: "https://new.example.com")!
+        try registry.update(server)
+        XCTAssertNil(store.shape(serverID: server.id))
+
+        request.release()
+        await refresh.value
+        XCTAssertNil(
+            store.shape(serverID: server.id),
+            "the old endpoint must not repopulate the invalidated server identity"
+        )
+        XCTAssertEqual(
+            staleService.latestShape,
+            initialShape,
+            "an authority-fenced write must not publish stale endpoint data in memory"
+        )
+
+        let replacementService = FarmShapeService(
+            serverID: server.id,
+            store: store,
+            fetchShape: { replacementShape }
+        )
+        await replacementService.refreshLatest(serverID: server.id)
+        XCTAssertEqual(store.shape(serverID: server.id), replacementShape)
+    }
+
+    func testAuthorityRejectedStartupFetchStillResolvesSession() async {
+        let initialShape = FarmShape(accountCount: 1, locationCount: 1, printerCount: 3)
+        let staleShape = FarmShape(accountCount: 4, locationCount: 3, printerCount: 30)
+        store.setShape(initialShape, serverID: serverID)
+        let request = AsyncBarrier()
+        defer { request.close() }
+        let service = FarmShapeService(
+            serverID: serverID,
+            store: store,
+            fetchShape: {
+                await request.arriveAndWait()
+                return staleShape
+            }
+        )
+        service.beginSession(authToken: 1)
+
+        let resolution = Task {
+            await service.resolveForAuthenticatedSession(
+                serverID: serverID,
+                timeout: .seconds(1)
+            )
+        }
+        await request.waitUntilArrived()
+        store.invalidateShape(serverID: serverID)
+        request.release()
+        await resolution.value
+
+        XCTAssertTrue(service.isSessionResolved)
+        XCTAssertEqual(service.latestShape, initialShape)
+        XCTAssertNil(store.shape(serverID: serverID))
     }
 
     func testUnknownDiffersFromKnownShapeOfOne() {
@@ -446,6 +533,7 @@ final class FarmShapeServiceTests: XCTestCase {
             signalRServiceFactory: { _, _ in MockSignalRService() }
         )
         let authToken = container.authOperationEpoch.advance()
+        try registry.setActive(id: serverB.id)
 
         let switchTask = Task {
             await container.switchToServer(serverB)

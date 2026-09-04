@@ -472,6 +472,7 @@ final class FarmFilamentCoverageViewModel {
 
     private func commitError(_ error: Error, generation: UInt64) {
         if generation < lastCommittedGeneration { return }
+        if isCancellationError(error) { return }
         // Errors don't erase cached coverage; the last-good fleet
         // remains visible. They also don't flip the disabled
         // tombstone.
