@@ -40,8 +40,18 @@ test('workflow uses least privilege and serializes each epic', async () => {
     contents: 'read',
     issues: 'write',
   });
-  assert.equal(workflow.concurrency.group, 'epic-dependency-gate');
-  assert.equal(workflow.concurrency['cancel-in-progress'], false);
+  assert.equal(
+    workflow.jobs.verify.concurrency.group,
+    'epic-dependency-gate-${{ matrix.issue }}',
+  );
+  assert.equal(
+    workflow.jobs.verify.concurrency['cancel-in-progress'],
+    false,
+  );
+  assert.deepEqual(
+    workflow.jobs.verify.strategy.matrix.issue,
+    '${{ fromJSON(needs.targets.outputs.issues) }}',
+  );
 });
 
 test('workflow loads default-branch logic and fails graph violations', async () => {
@@ -55,4 +65,5 @@ test('workflow loads default-branch logic and fails graph violations', async () 
   assert.match(script, /verify-epic-dependencies\.mjs/);
   assert.match(script, /core\.setFailed/);
   assert.match(script, /formatGateComment/);
+  assert.match(script, /if \(!gate\.hasEpicLabel\(issue\.labels\)\)/);
 });

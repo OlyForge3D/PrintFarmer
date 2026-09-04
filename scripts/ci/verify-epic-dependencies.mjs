@@ -32,9 +32,20 @@ export function hasEpicLabel(labels = []) {
 
 export function parseEpicDeclarations(body = '') {
   const errors = [];
+  const fencedBlock = /^[ \t]*(?:```|~~~)[^\n]*\n[\s\S]*?^[ \t]*(?:```|~~~)[ \t]*$/gm;
+  const unterminatedFence = /^[ \t]*(?:```|~~~)[^\n]*\n[\s\S]*$/m;
+  const declarationBody = body
+    .replace(fencedBlock, '')
+    .replace(unterminatedFence, '');
   const declarationComments = [
-    ...body.matchAll(/<!--[\s\S]*?(?:-->|$)/g),
+    ...declarationBody.matchAll(/<!--[\s\S]*?(?:-->|$)/g),
   ].map((match) => match[0].trim());
+  const outsideComments = declarationBody.replace(/<!--[\s\S]*?(?:-->|$)/g, '');
+  if (/\bepic-(?:dependencies|first-wave)\b/i.test(outsideComments)) {
+    errors.push(
+      'Epic dependency declarations must use the documented HTML comment markers.',
+    );
+  }
   const flatDeclarations = declarationComments.filter((comment) =>
     /epic-dependencies/i.test(comment));
   const validFlatDeclarations = flatDeclarations.filter((comment) =>

@@ -124,6 +124,8 @@ test('marker-like declaration typos and unterminated comments fail closed', () =
     '<!-- epic-first-wave #11 -->',
     '<!-- epic-dependencies: flatt -->',
     '<!-- epic-first-wave: #11',
+    'epic-first-wave: #11 -->',
+    'epic-dependencies: flat',
   ]) {
     const result = evaluateEpicDependencies({
       issue: epic({ body }),
@@ -131,8 +133,25 @@ test('marker-like declaration typos and unterminated comments fail closed', () =
       edges: [{ blocker: 11, blocked: 12 }],
     });
     assert.equal(result.classification, 'FAIL', body);
-    assert.match(result.reason, /malformed/, body);
+    assert.match(result.reason, /malformed|must use/, body);
   }
+});
+
+test('declaration examples inside fenced code blocks are not binding', () => {
+  const result = evaluateEpicDependencies({
+    issue: epic({
+      body: [
+        'Example only:',
+        '```text',
+        '<!-- epic-dependencies: flat -->',
+        '```',
+      ].join('\n'),
+    }),
+    children: children(11, 12),
+    edges: [{ blocker: 11, blocked: 12 }],
+  });
+  assert.equal(result.classification, 'PASS');
+  assert.equal(result.flatGraph, false);
 });
 
 test('the workflow comment is marker-bound and reports graph counts', () => {
