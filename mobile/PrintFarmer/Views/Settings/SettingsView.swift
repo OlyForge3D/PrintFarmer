@@ -8,15 +8,31 @@ struct SettingsView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(ThemeManager.self) private var themeManager
+    private let ownsNavigationStack: Bool
     @AppStorage("nfcTagFormat") private var nfcTagFormat: NFCTagFormat = .openPrintTag
     @State private var showLogoutConfirmation = false
     @State private var logoutTask: Task<Void, Never>?
 
+    init(ownsNavigationStack: Bool = true) {
+        self.ownsNavigationStack = ownsNavigationStack
+    }
+
     var body: some View {
+        Group {
+            if ownsNavigationStack {
+                NavigationStack {
+                    screenContent
+                }
+            } else {
+                screenContent
+            }
+        }
+    }
+
+    private var screenContent: some View {
         @Bindable var themeManager = themeManager
 
-        NavigationStack {
-            List {
+        return List {
                 Section("Appearance") {
                     Picker("Theme", selection: $themeManager.themeMode) {
                         ForEach(ThemeMode.allCases) { mode in
@@ -134,17 +150,16 @@ struct SettingsView: View {
                         Text("Return to login and connect with real credentials.")
                     }
                 }
-            }
-            .navigationTitle("Settings")
-            .confirmationDialog("Sign Out?", isPresented: $showLogoutConfirmation, titleVisibility: .visible) {
-                Button("Sign Out", role: .destructive) {
-                    logoutTask = Task { await authViewModel.logout() }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("You will need to sign in again to access your print farm.")
-            }
-            .onDisappear { logoutTask?.cancel() }
         }
+        .navigationTitle("Settings")
+        .confirmationDialog("Sign Out?", isPresented: $showLogoutConfirmation, titleVisibility: .visible) {
+            Button("Sign Out", role: .destructive) {
+                logoutTask = Task { await authViewModel.logout() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You will need to sign in again to access your print farm.")
+        }
+        .onDisappear { logoutTask?.cancel() }
     }
 }

@@ -666,6 +666,46 @@ final class AppRouterTests: XCTestCase {
         }
     }
 
+    func testRehomedDestinationsHaveDistinctCanonicalCases() {
+        let destinations: [AppDestination] = [
+            .dashboard,
+            .maintenance,
+            .notifications,
+            .settings,
+            .dispatchDashboard,
+            .jobHistory,
+            .jobTimeline,
+            .uptimeReliability,
+            .maintenanceAnalytics,
+            .locations,
+            .predictiveInsights(printerId: nil),
+            .advancedPrinterControls(printerId: printerId),
+            .offlineQueue,
+            .manageServers
+        ]
+
+        XCTAssertEqual(destinations.count, 14)
+        XCTAssertEqual(Set(destinations).count, destinations.count)
+        XCTAssertNotEqual(AppDestination.settings, .navigationSettings)
+    }
+
+    func testPredictiveInsightsDestinationPreservesFarmAndPrinterScopes() {
+        let farmWide = AppDestination.predictiveInsights(printerId: nil)
+        let printer = AppDestination.predictiveInsights(printerId: printerId)
+
+        if case .predictiveInsights(let id) = farmWide {
+            XCTAssertNil(id)
+        } else {
+            XCTFail("Expected farm-wide predictiveInsights case")
+        }
+
+        if case .predictiveInsights(let id) = printer {
+            XCTAssertEqual(id, printerId)
+        } else {
+            XCTFail("Expected printer-scoped predictiveInsights case")
+        }
+    }
+
     // MARK: - Legacy sheet reset (#727)
 
     func testResetLegacySheetDashboardClearsDashboardSheetPath() {
