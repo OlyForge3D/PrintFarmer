@@ -158,6 +158,14 @@ the current `?scope`, `?tab`, and `?sub` search params. See
   or attention item, register the probe with the existing `comprehensive` health check
   and update `AdminOverviewService`.
 
+## Epic Dependency Definition Of Done
+
+Any agent creating or revising a `type:epic` issue must link every child as a GitHub
+sub-issue and create every blocking relationship as a machine-readable dependency API
+edge, then read both back. Prose lists do not satisfy this requirement. Use
+`.github/skills/epic-dependencies/SKILL.md` for the exact commands, flat-graph opt-out,
+first-wave declaration, and verifier.
+
 ## Pre-PR Review Gate
 
 **All code MUST pass 3-way adversarial review before any PR is opened.** Bishop, Hicks, and Vasquez review the branch together, debate thoroughly, and deliver a single consensus verdict. Do not open a PR until they APPROVE.
