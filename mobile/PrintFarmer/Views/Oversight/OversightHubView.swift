@@ -15,8 +15,6 @@ struct OversightHubView: View {
     }
 
     var body: some View {
-        @Bindable var router = router
-
         List {
             ForEach(sections) { sectionModel in
                 Section(sectionModel.section.title) {
