@@ -83,9 +83,16 @@ struct InventoryView: View {
 /// tab's parts segment behaves like the spools segment (its own root nav
 /// container, own title/toolbar).
 private struct PartsInventoryListNavView: View {
+    @Environment(AppRouter.self) private var router
+
     var body: some View {
-        NavigationStack {
+        @Bindable var router = router
+
+        NavigationStack(path: $router.inventoryPath) {
             PartsInventoryListView()
+                .navigationDestination(for: AppDestination.self) { destination in
+                    destinationView(for: destination)
+                }
         }
     }
 }

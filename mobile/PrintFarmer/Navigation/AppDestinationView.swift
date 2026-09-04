@@ -20,6 +20,8 @@ func destinationView(for destination: AppDestination) -> some View {
         } description: {
             Text("Printer setup will be available in a future update.")
         }
+    case .account:
+        AccountView()
     case .dashboard:
         DashboardView(ownsNavigationStack: false)
     case .maintenance:

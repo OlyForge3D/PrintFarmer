@@ -5,6 +5,7 @@ enum AppDestination: Hashable {
     case jobDetail(id: UUID)
     case createJob
     case createPrinter
+    case account
     case dashboard
     case maintenance
     case notifications

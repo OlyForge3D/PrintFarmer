@@ -104,15 +104,6 @@ struct SettingsView: View {
                         }
                     }
 
-                    if services.capabilitiesService.resolved.offlineWriteReplayEnabled {
-                        NavigationLink(value: AppDestination.offlineQueue) {
-                            Label("Offline Queue", systemImage: "tray.full")
-                        }
-                        .accessibilityLabel("Offline Queue")
-                        .accessibilityHint("Reviews and retries writes waiting to sync.")
-                        .accessibilityIdentifier("account.destination.offlineQueue")
-                    }
-
                     Button("Sign Out", role: .destructive) {
                         showLogoutConfirmation = true
                     }
@@ -126,12 +117,6 @@ struct SettingsView: View {
                         LabeledContent("API URL", value: "Not configured")
                     }
 
-                    NavigationLink {
-                        ServersView()
-                    } label: {
-                        Label("Manage Servers", systemImage: "server.rack")
-                    }
-                    .accessibilityIdentifier("settings.manageServers")
                 }
 
                 Section {

@@ -28,6 +28,7 @@ struct OversightHubView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Oversight")
+        .rootNavigationChrome(for: .oversight)
         .navigationDestination(for: AppDestination.self) { destination in
             destinationView(for: destination)
         }
@@ -129,6 +130,7 @@ private struct OversightDestinationListRoot: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle(root.title)
+            .rootNavigationChrome(for: root.appTab)
             .navigationDestination(for: AppDestination.self) { destination in
                 destinationView(for: destination)
             }
