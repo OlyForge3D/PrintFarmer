@@ -58,6 +58,12 @@ struct OversightHubView: View {
         .onChange(of: serverRegistry.activeServerID) {
             refreshUpgradeOffer()
         }
+        .onChange(of: serverRegistry.navigationLayoutPreference) {
+            refreshUpgradeOffer()
+        }
+        .onChange(of: router.activeShell) {
+            refreshUpgradeOffer()
+        }
         .accessibilityIdentifier("oversight.hub")
     }
 
@@ -71,13 +77,15 @@ struct OversightHubView: View {
             showsUpgradeOffer = false
             offerServerID = nil
         }
-        guard !showsUpgradeOffer,
-              router.activeShell == .simple,
+        guard router.activeShell == .simple,
               router.configuredServerID == activeServerID,
               router.configuredIsFarmAdmin,
               router.oversightAvailability.supportsTwoModes else {
+            showsUpgradeOffer = false
+            offerServerID = nil
             return
         }
+        guard !showsUpgradeOffer else { return }
         showsUpgradeOffer = serverRegistry.observeOversightUpgradeOffer(
             farmShape: services.farmShapeService.sessionShape,
             shiftPlanEnabled: capabilities.shiftPlanEnabled,

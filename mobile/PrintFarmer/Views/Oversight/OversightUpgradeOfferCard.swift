@@ -33,6 +33,7 @@ struct OversightUpgradeOfferCard: View {
     private var turnOnButton: some View {
         Button("Turn on Oversight mode", action: turnOn)
             .frame(minHeight: Self.minimumTapTargetHeight)
+            .buttonStyle(.borderless)
             .accessibilityHint("Separates Floor and Oversight into their own tabs.")
             .accessibilityIdentifier("oversight.upgradeOffer.turnOn")
     }
@@ -40,6 +41,7 @@ struct OversightUpgradeOfferCard: View {
     private var notNowButton: some View {
         Button("Not now", action: notNow)
             .frame(minHeight: Self.minimumTapTargetHeight)
+            .buttonStyle(.borderless)
             .accessibilityHint("Dismisses this offer until the farm reaches a new threshold.")
             .accessibilityIdentifier("oversight.upgradeOffer.notNow")
     }

@@ -403,7 +403,7 @@ final class ServerRegistry {
             return false
         }
         if !state.pendingThresholds.isEmpty {
-            return true
+            state.pendingThresholds.formIntersection(signature.activeThresholds)
         }
         guard let previous = state.lastObserved else {
             return false
@@ -420,7 +420,9 @@ final class ServerRegistry {
             newlyCrossed.insert(.shiftPlan)
         }
 
-        state.pendingThresholds = newlyCrossed.subtracting(state.dismissedThresholds)
+        state.pendingThresholds.formUnion(
+            newlyCrossed.subtracting(state.dismissedThresholds)
+        )
         return !state.pendingThresholds.isEmpty
     }
 

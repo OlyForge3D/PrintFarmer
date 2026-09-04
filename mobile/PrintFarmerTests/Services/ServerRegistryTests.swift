@@ -295,6 +295,44 @@ final class ServerRegistryTests: XCTestCase {
         ))
     }
 
+    func testOversightUpgradeOfferActionsCannotMutateAnotherActiveServer() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let first = try registry.add(
+            displayName: "One",
+            baseURL: URL(string: "https://one.example.com")!
+        )
+        let second = try registry.add(
+            displayName: "Two",
+            baseURL: URL(string: "https://two.example.com")!
+        )
+        let smallFarm = FarmShape(accountCount: 1, locationCount: 1, printerCount: 1)
+        let grownFarm = FarmShape(accountCount: 2, locationCount: 1, printerCount: 1)
+
+        try registry.setActive(id: first.id)
+        _ = registry.observeOversightUpgradeOffer(
+            farmShape: smallFarm,
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        )
+        XCTAssertTrue(registry.observeOversightUpgradeOffer(
+            farmShape: grownFarm,
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        ))
+
+        try registry.setActive(id: second.id)
+        registry.acceptOversightUpgradeOffer(for: first.id)
+        registry.dismissOversightUpgradeOffer(for: first.id)
+
+        XCTAssertEqual(registry.navigationLayoutPreference, .automatic)
+        try registry.setActive(id: first.id)
+        XCTAssertTrue(registry.observeOversightUpgradeOffer(
+            farmShape: grownFarm,
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        ))
+    }
+
     func testNormalizationAddsHTTPSLowercasesHostAndStripsTrailingSlash() throws {
         let normalized = try ServerRegistry.normalizedURLString(for: "  PRINT.example.COM/  ")
 
