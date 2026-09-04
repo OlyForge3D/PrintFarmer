@@ -1095,6 +1095,8 @@ func destinationView(for destination: AppDestination) -> some View {
 private struct AdvancedPrinterControlsDestination: View {
     let printerId: UUID
     @Environment(ServiceContainer.self) private var services
+    @Environment(ServerRegistry.self) private var serverRegistry
+    @Environment(\.dismiss) private var dismiss
     @State private var viewModel: PrinterDetailViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
 
@@ -1105,7 +1107,10 @@ private struct AdvancedPrinterControlsDestination: View {
 
     var body: some View {
         Group {
-            if let printer = viewModel.printer {
+            if !serverRegistry.advancedPrinterControlsEnabled {
+                Color.clear
+                    .accessibilityHidden(true)
+            } else if let printer = viewModel.printer {
                 AdvancedPrinterControlsView(printer: printer)
             } else if let error = viewModel.errorMessage {
                 ContentUnavailableView {
@@ -1123,7 +1128,11 @@ private struct AdvancedPrinterControlsDestination: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task {
+        .task(id: serverRegistry.advancedPrinterControlsEnabled) {
+            guard serverRegistry.advancedPrinterControlsEnabled else {
+                dismiss()
+                return
+            }
             viewModel.isViewActive = true
             viewModel.configure(printerService: services.printerService)
             // F1 (#706) — reviewer fix: without a SignalR subscription
@@ -1137,6 +1146,12 @@ private struct AdvancedPrinterControlsDestination: View {
             // live while the operator is on Advanced.
             viewModel.configureSignalR(services.signalRService)
             await viewModel.loadPrinter()
+        }
+        .onChange(of: serverRegistry.advancedPrinterControlsEnabled) { _, isEnabled in
+            guard !isEnabled else { return }
+            viewModel.isViewActive = false
+            activeTasks.forEach { $0.cancel() }
+            dismiss()
         }
         .onDisappear {
             viewModel.isViewActive = false
