@@ -105,7 +105,7 @@ struct OversightTabRootView: View {
                 ),
                 path: $router.reportsPath
             )
-        case .attention, .farm, .tasks, .scan, .inventory:
+        case .attention, .farm, .tasks, .inventory:
             Color.clear
                 .accessibilityHidden(true)
         }

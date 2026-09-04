@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum PrinterListNavigationContext {
+enum PrinterListNavigationContext: Equatable {
     case farm
     case fleet
 
@@ -41,6 +41,7 @@ struct PrinterListView: View {
     @State private var viewModel = PrinterListViewModel()
     @State private var coverageViewModel = FarmFilamentCoverageViewModel()
     @State private var retryTask: Task<Void, Never>?
+    @State private var showingPrinterLookup = false
 
     private var filamentCoverageEnabled: Bool {
         services.capabilitiesService.resolved.filamentCoverageEnabled
@@ -63,6 +64,12 @@ struct PrinterListView: View {
                 navigationStack(path: $router.printersPath)
             case .fleet:
                 navigationStack(path: $router.fleetPath)
+            }
+        }
+        .sheet(isPresented: $showingPrinterLookup) {
+            PrinterLookupView(printerService: services.printerService) { printer in
+                showingPrinterLookup = false
+                router.printersPath.append(AppDestination.printerDetail(id: printer.id))
             }
         }
         .task {
@@ -166,6 +173,19 @@ struct PrinterListView: View {
 
                 ToolbarItem(placement: .automatic) {
                     statusFilterMenu
+                }
+
+                if navigationContext == .farm {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showingPrinterLookup = true
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                        }
+                        .accessibilityLabel("Find printer")
+                        .accessibilityHint("Looks up a printer by name, model, or network address.")
+                        .accessibilityIdentifier("farm.printerLookup")
+                    }
                 }
             }
             .navigationDestination(for: AppDestination.self) { destination in
@@ -312,6 +332,84 @@ struct PrinterListView: View {
             "farm-card-\(printer.id.uuidString)"
         case .fleet:
             "oversight.fleet.printer.\(printer.id.uuidString)"
+        }
+    }
+}
+
+/// Direct printer lookup re-homed from the retired Scan tab.
+struct PrinterLookupView: View {
+    let printerService: any PrinterServiceProtocol
+    let onSelect: (Printer) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var printers: [Printer] = []
+    @State private var isLoading = false
+    @State private var errorMessage: String?
+    @State private var searchText = ""
+
+    private var filteredPrinters: [Printer] {
+        guard !searchText.isEmpty else { return printers }
+        return printers.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("Loading printers…")
+                } else if let errorMessage {
+                    ContentUnavailableView {
+                        Label("Unable to Load Printers", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(errorMessage)
+                    }
+                } else if printers.isEmpty {
+                    ContentUnavailableView {
+                        Label("No Printers", systemImage: "printer")
+                    } description: {
+                        Text("Add a printer before using direct lookup.")
+                    }
+                } else {
+                    List(filteredPrinters) { printer in
+                        Button {
+                            onSelect(printer)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(printer.name)
+                                    .font(.subheadline.weight(.medium))
+                                if let notes = printer.notes, !notes.isEmpty {
+                                    Text(notes)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier(
+                            "farm.printerLookup.row.\(printer.id.uuidString)"
+                        )
+                    }
+                    .searchable(text: $searchText, prompt: "Search printers")
+                }
+            }
+            .navigationTitle("Find Printer")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .task {
+                isLoading = true
+                do {
+                    printers = try await printerService.list(includeDisabled: false)
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+                isLoading = false
+            }
         }
     }
 }

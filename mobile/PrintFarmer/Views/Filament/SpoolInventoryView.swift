@@ -12,6 +12,7 @@ struct SpoolInventoryView: View {
     @Environment(AppRouter.self) private var router
     @State private var viewModel = SpoolInventoryViewModel()
     @State private var showAddSpool = false
+    @State private var showScanFlow = false
     @State private var showBarcodeIntake = false
     @State private var nfcWriteTarget: NFCWriteTarget?
     @State private var activeTasks: [Task<Void, Never>] = []
@@ -80,19 +81,32 @@ struct SpoolInventoryView: View {
                 #if os(iOS)
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
-                        Button {
-                            showBarcodeIntake = true
+                        Menu {
+                            Button {
+                                showScanFlow = true
+                            } label: {
+                                Label("Scan code", systemImage: "barcode.viewfinder")
+                            }
+
+                            Button {
+                                viewModel.handleNFCScan()
+                            } label: {
+                                Label("Scan NFC tag", systemImage: "wave.3.right")
+                            }
+                            .accessibilityIdentifier("inventory.scan.nfc")
+
+                            Button {
+                                showBarcodeIntake = true
+                            } label: {
+                                Label("Log new spools", systemImage: "cylinder")
+                            }
+                            .accessibilityIdentifier("inventory.scan.barcodeIntake")
                         } label: {
                             Image(systemName: "barcode.viewfinder")
                         }
-                        .accessibilityLabel("Barcode intake")
-
-                        Button {
-                            viewModel.handleNFCScan()
-                        } label: {
-                            Image(systemName: "wave.3.right")
-                        }
-                        .accessibilityLabel("Scan NFC tag")
+                        .accessibilityLabel("Scan inventory")
+                        .accessibilityHint("Opens camera, NFC, and continuous spool intake actions.")
+                        .accessibilityIdentifier("inventory.scan")
 
                         Button {
                             showAddSpool = true
@@ -131,6 +145,9 @@ struct SpoolInventoryView: View {
                         let task = Task { await viewModel.loadSpools() }
                         activeTasks.append(task)
                     }
+            }
+            .sheet(isPresented: $showScanFlow) {
+                ScanFlowView()
             }
             .sheet(isPresented: $showBarcodeIntake) {
                 BarcodeIntakeView()

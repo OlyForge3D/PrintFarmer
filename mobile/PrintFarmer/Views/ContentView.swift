@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Adaptive operator shell for compact devices, with the existing split view
-/// retained until the dedicated iPad navigation work lands.
+/// Adaptive operator shell for compact devices, with Scan flows hosted by
+/// their owning task surfaces instead of a dedicated tab.
 struct ContentView: View {
     static let sidebarRowMinimumHeight: CGFloat = 44
     static let modeControlMinimumHeight: CGFloat = 44
@@ -316,8 +316,6 @@ struct ContentView: View {
             PrinterListView()
         case .tasks:
             ShiftTasksView()
-        case .scan:
-            ScanView()
         case .inventory:
             InventoryView()
         case .oversight, .overview, .fleet, .jobs, .upkeep, .reports:

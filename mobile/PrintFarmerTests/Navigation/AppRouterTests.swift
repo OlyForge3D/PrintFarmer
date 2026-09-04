@@ -19,10 +19,30 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(router.activeMode, .floor)
     }
 
+    func testLegacyPersistedScanSelectionRestoresInventory() {
+        XCTAssertEqual(AppRouter.restoredTab(from: "scan"), .inventory)
+    }
+
+    func testPersistedSelectionRoundTripsWithoutAffectingDefaultRouterTests() throws {
+        let suiteName = "AppRouterTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("scan", forKey: AppRouter.selectedTabDefaultsKey)
+
+        let router = AppRouter(userDefaults: defaults)
+
+        XCTAssertEqual(router.selectedTab, .inventory)
+        router.selectedTab = .farm
+        XCTAssertEqual(
+            defaults.string(forKey: AppRouter.selectedTabDefaultsKey),
+            AppTab.farm.rawValue
+        )
+    }
+
     func testTabModelEnumeratesCurrentAndAdaptiveSets() {
         XCTAssertEqual(
             AppTab.tabs(for: .current, mode: .floor),
-            [.attention, .farm, .tasks, .scan, .inventory]
+            [.attention, .farm, .tasks, .inventory]
         )
         XCTAssertEqual(
             AppTab.tabs(for: .simple, mode: .floor),
@@ -99,19 +119,19 @@ final class AppRouterTests: XCTestCase {
     func testCurrentTabPresentationMatchesShippingUI() {
         let tabs = ContentView.shippingTabs(for: capabilities)
 
-        XCTAssertEqual(tabs, [.attention, .farm, .tasks, .scan, .inventory])
-        XCTAssertEqual(tabs.map(\.title), ["Attention", "Farm", "Tasks", "Scan", "Inventory"])
+        XCTAssertEqual(tabs, [.attention, .farm, .tasks, .inventory])
+        XCTAssertEqual(tabs.map(\.title), ["Attention", "Farm", "Tasks", "Inventory"])
         XCTAssertEqual(
             tabs.map(\.systemImage),
-            ["bell.badge", "printer", "checklist", "barcode.viewfinder", "cylinder.fill"]
+            ["bell.badge", "printer", "checklist", "cylinder.fill"]
         )
         XCTAssertEqual(
             tabs.map(\.badgeKind),
-            [.notifications, .pendingReady, .none, .none, .none]
+            [.notifications, .pendingReady, .none, .none]
         )
         XCTAssertEqual(
             tabs.map(\.tabAccessibilityIdentifier),
-            ["tab.attention", "tab.farm", "tab.tasks", "tab.scan", "tab.inventory"]
+            ["tab.attention", "tab.farm", "tab.tasks", "tab.inventory"]
         )
         XCTAssertEqual(
             tabs.map(\.sidebarAccessibilityIdentifier),
@@ -119,7 +139,6 @@ final class AppRouterTests: XCTestCase {
                 "sidebar.attention",
                 "sidebar.farm",
                 "sidebar.tasks",
-                "sidebar.scan",
                 "sidebar.inventory"
             ]
         )
@@ -150,7 +169,7 @@ final class AppRouterTests: XCTestCase {
         disabled.attentionEnabled = false
         disabled.shiftPlanEnabled = false
 
-        XCTAssertEqual(AppTab.visibleTabs(for: disabled), [.farm, .scan, .inventory])
+        XCTAssertEqual(AppTab.visibleTabs(for: disabled), [.farm, .inventory])
         XCTAssertEqual(AppTab.fallbackTab(for: disabled), .farm)
     }
 
@@ -751,7 +770,6 @@ final class AppRouterTests: XCTestCase {
         router.jobsPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
         router.notificationsPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
         router.inventoryPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-        router.scanPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
         router.oversightPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
         router.overviewPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
         router.fleetPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
@@ -771,7 +789,6 @@ final class AppRouterTests: XCTestCase {
         XCTAssertTrue(router.jobsPath.isEmpty)
         XCTAssertTrue(router.notificationsPath.isEmpty)
         XCTAssertTrue(router.inventoryPath.isEmpty)
-        XCTAssertTrue(router.scanPath.isEmpty)
         XCTAssertTrue(router.oversightPath.isEmpty)
         XCTAssertTrue(router.overviewPath.isEmpty)
         XCTAssertTrue(router.fleetPath.isEmpty)
@@ -809,7 +826,6 @@ final class AppRouterTests: XCTestCase {
         router.navigate(to: .attentionItem(id: "attention-1"), capabilities: capabilities)
         router.navigate(to: .spoolDetail(id: 42), capabilities: capabilities)
         router.jobsPath.append(AppDestination.jobDetail(id: printerId))
-        router.scanPath.append(AppDestination.jobDetail(id: printerId))
         router.oversightPath.append(AppDestination.jobHistory)
         router.overviewPath.append(AppDestination.dispatchDashboard)
         router.fleetPath.append(AppDestination.printerDetail(id: printerId))
@@ -827,7 +843,6 @@ final class AppRouterTests: XCTestCase {
         XCTAssertTrue(router.jobsPath.isEmpty)
         XCTAssertTrue(router.notificationsPath.isEmpty)
         XCTAssertTrue(router.inventoryPath.isEmpty)
-        XCTAssertTrue(router.scanPath.isEmpty)
         XCTAssertTrue(router.oversightPath.isEmpty)
         XCTAssertTrue(router.overviewPath.isEmpty)
         XCTAssertTrue(router.fleetPath.isEmpty)
@@ -903,15 +918,6 @@ final class AppRouterTests: XCTestCase {
         router.resetToRoot(tab: .tasks)
         XCTAssertTrue(router.tasksPath.isEmpty)
         XCTAssertTrue(router.jobsPath.isEmpty)
-    }
-
-    func testResetToRootClearsScanPath() {
-        let router = AppRouter()
-        router.scanPath.append(AppDestination.jobDetail(id: printerId))
-        XCTAssertFalse(router.scanPath.isEmpty)
-
-        router.resetToRoot(tab: .scan)
-        XCTAssertTrue(router.scanPath.isEmpty)
     }
 
     func testResetToRootClearsInventoryPath() {
@@ -1070,11 +1076,10 @@ final class AppRouterTests: XCTestCase {
 
     func testResetLegacySheetLeavesOtherTabStacksIntact() {
         // Dismissing a legacy sheet must never disturb any other tab's
-        // stack — Farm, Tasks, Scan, or Inventory.
+        // stack — Farm, Tasks, or Inventory.
         let router = AppRouter()
         router.printersPath.append(AppDestination.printerDetail(id: printerId))
         router.jobsPath.append(AppDestination.jobDetail(id: printerId))
-        router.scanPath.append(AppDestination.jobDetail(id: printerId))
         router.inventoryPath.append(AppDestination.jobDetail(id: printerId))
 
         for sheet in LegacySheet.allCases {
@@ -1083,7 +1088,6 @@ final class AppRouterTests: XCTestCase {
 
         XCTAssertEqual(router.printersPath.count, 1, "Farm tab stack must be intact")
         XCTAssertEqual(router.jobsPath.count, 1, "Tasks tab stack must be intact")
-        XCTAssertEqual(router.scanPath.count, 1, "Scan tab stack must be intact")
         XCTAssertEqual(router.inventoryPath.count, 1, "Inventory tab stack must be intact")
     }
 
@@ -1172,7 +1176,7 @@ final class AppRouterTests: XCTestCase {
             return router.upkeepPath.count
         case .reports:
             return router.reportsPath.count
-        case .attention, .farm, .tasks, .scan, .inventory:
+        case .attention, .farm, .tasks, .inventory:
             XCTFail("Expected an adaptive tab")
             return -1
         }

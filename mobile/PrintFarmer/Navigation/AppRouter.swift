@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// App router owning shell-aware tab selection, per-tab navigation stacks,
@@ -8,7 +9,6 @@ import SwiftUI
 /// * `tasksPath` — Tasks tab root (ShiftTasksView)
 /// * `jobsPath` — Print queue nested under Tasks (JobListView)
 /// * `notificationsPath` — Attention tab (AttentionView / NotificationsViewModel)
-/// * `scanPath` — Scan tab (ScanView)
 /// * `inventoryPath` — Inventory tab (SpoolInventoryView)
 /// * `oversightPath` — Simple-shell Oversight tab
 /// * `overviewPath` — Oversight-mode Overview tab
@@ -31,6 +31,8 @@ import SwiftUI
 /// the migration and hardening rationale.
 @MainActor @Observable
 final class AppRouter {
+    static let selectedTabDefaultsKey = "app.selectedTab"
+
     struct FilamentSwapDeepLink: Equatable {
         let printerId: UUID
         let toolheadIndex: Int
@@ -44,13 +46,16 @@ final class AppRouter {
     private(set) var configuredUserID: UUID?
     private(set) var appliedNavigationPreference: NavigationLayoutPreference?
     private(set) var oversightAvailability = OversightNavigationAvailability.fullyAvailable
-    var selectedTab: AppTab = .attention
+    var selectedTab: AppTab {
+        didSet {
+            userDefaults?.set(selectedTab.rawValue, forKey: Self.selectedTabDefaultsKey)
+        }
+    }
     var printersPath = NavigationPath()
     var tasksPath = NavigationPath()
     var jobsPath = NavigationPath()
     var notificationsPath = NavigationPath()
     var inventoryPath = NavigationPath()
-    var scanPath = NavigationPath()
     var oversightPath = NavigationPath()
     var overviewPath = NavigationPath()
     var fleetPath = NavigationPath()
@@ -73,6 +78,22 @@ final class AppRouter {
     var pendingFilamentSwap: FilamentSwapDeepLink?
     var notificationRoutingError: String?
     private var navigationEpoch = 0
+    @ObservationIgnored private let userDefaults: UserDefaults?
+
+    init(userDefaults: UserDefaults? = nil) {
+        self.userDefaults = userDefaults
+        selectedTab = Self.restoredTab(
+            from: userDefaults?.string(forKey: Self.selectedTabDefaultsKey)
+        )
+    }
+
+    static func restoredTab(from persistedRawValue: String?) -> AppTab {
+        guard let persistedRawValue else { return .attention }
+        if persistedRawValue == "scan" {
+            return .inventory
+        }
+        return AppTab(rawValue: persistedRawValue) ?? .attention
+    }
 
     /// Monotonic token observed by legacy/operator sheet presenters to close
     /// any active sheet before a task-action destination is applied (#726).
@@ -157,7 +178,6 @@ final class AppRouter {
         jobsPath = NavigationPath()
         notificationsPath = NavigationPath()
         inventoryPath = NavigationPath()
-        scanPath = NavigationPath()
         oversightPath = NavigationPath()
         overviewPath = NavigationPath()
         fleetPath = NavigationPath()
@@ -183,7 +203,6 @@ final class AppRouter {
         jobsPath = NavigationPath()
         notificationsPath = NavigationPath()
         inventoryPath = NavigationPath()
-        scanPath = NavigationPath()
         oversightPath = NavigationPath()
         overviewPath = NavigationPath()
         fleetPath = NavigationPath()
@@ -358,8 +377,6 @@ final class AppRouter {
             printersPath.isEmpty
         case .tasks:
             tasksPath.isEmpty && jobsPath.isEmpty
-        case .scan:
-            scanPath.isEmpty
         case .inventory:
             inventoryPath.isEmpty
         case .oversight:
@@ -428,8 +445,6 @@ final class AppRouter {
         case .tasks:
             tasksPath = NavigationPath()
             jobsPath = NavigationPath()
-        case .scan:
-            scanPath = NavigationPath()
         case .inventory:
             inventoryPath = NavigationPath()
         case .oversight:
