@@ -38,6 +38,35 @@ final class AppRouterTests: XCTestCase {
         )
     }
 
+    func testCurrentTabPresentationMatchesShippingUI() {
+        let tabs = AppTab.tabs(for: .current, mode: .floor)
+
+        XCTAssertEqual(tabs.map(\.title), ["Attention", "Farm", "Tasks", "Scan", "Inventory"])
+        XCTAssertEqual(
+            tabs.map(\.systemImage),
+            ["bell.badge", "printer", "checklist", "barcode.viewfinder", "cylinder.fill"]
+        )
+        XCTAssertEqual(
+            tabs.map(\.badgeKind),
+            [.notifications, .pendingReady, .none, .none, .none]
+        )
+        XCTAssertEqual(
+            tabs.map(\.tabAccessibilityIdentifier),
+            ["tab.attention", "tab.farm", "tab.tasks", "tab.scan", "tab.inventory"]
+        )
+        XCTAssertEqual(
+            tabs.map(\.sidebarAccessibilityIdentifier),
+            [
+                "sidebar.attention",
+                "sidebar.farm",
+                "sidebar.tasks",
+                "sidebar.scan",
+                "sidebar.inventory"
+            ]
+        )
+        XCTAssertEqual(ContentView.sidebarRowMinimumHeight, 44)
+    }
+
     func testVisibleTabsRemoveDisabledAttentionAndTasks() {
         var disabled = capabilities
         disabled.attentionEnabled = false
@@ -78,6 +107,30 @@ final class AppRouterTests: XCTestCase {
         )
     }
 
+    func testAttentionAndTasksGatesApplyIndependently() {
+        var attentionDisabled = capabilities
+        attentionDisabled.attentionEnabled = false
+        XCTAssertEqual(
+            AppTab.visibleTabs(
+                for: .twoModes,
+                mode: .floor,
+                capabilities: attentionDisabled
+            ),
+            [.farm, .tasks, .inventory]
+        )
+
+        var tasksDisabled = capabilities
+        tasksDisabled.shiftPlanEnabled = false
+        XCTAssertEqual(
+            AppTab.visibleTabs(
+                for: .twoModes,
+                mode: .floor,
+                capabilities: tasksDisabled
+            ),
+            [.attention, .farm, .inventory]
+        )
+    }
+
     func testChangingShellFallsBackWithinTheNewActiveSet() {
         let router = AppRouter()
         router.selectedTab = .farm
@@ -90,6 +143,85 @@ final class AppRouterTests: XCTestCase {
 
         XCTAssertEqual(router.activeShell, .twoModes)
         XCTAssertEqual(router.activeMode, .oversight)
+        XCTAssertEqual(router.selectedTab, .overview)
+    }
+
+    func testShellTransitionsPreserveValidSelectionAndFallbackBidirectionally() {
+        let router = AppRouter()
+        router.selectedTab = .inventory
+
+        router.setNavigationShell(
+            .simple,
+            capabilities: capabilities
+        )
+        XCTAssertEqual(router.selectedTab, .inventory)
+
+        router.selectTab(.oversight, capabilities: capabilities)
+        router.setNavigationShell(
+            .twoModes,
+            mode: .floor,
+            capabilities: capabilities
+        )
+        XCTAssertEqual(router.selectedTab, .attention)
+
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+        XCTAssertEqual(router.selectedTab, .overview)
+
+        router.selectTab(.reports, capabilities: capabilities)
+        router.setNavigationShell(
+            .twoModes,
+            mode: .floor,
+            capabilities: capabilities
+        )
+        XCTAssertEqual(router.selectedTab, .attention)
+    }
+
+    func testInvalidSelectionFallsBackWithinActiveShell() {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+
+        router.selectTab(.tasks, capabilities: capabilities)
+
+        XCTAssertEqual(router.selectedTab, .overview)
+        XCTAssertEqual(router.resolvedTab(for: capabilities), .overview)
+        XCTAssertEqual(router.fallbackTab(for: capabilities), .overview)
+    }
+
+    func testShellTransitionCancelsPendingDelayedNavigation() async {
+        let router = AppRouter()
+        router.navigate(
+            to: .printerReady(id: printerId),
+            capabilities: capabilities
+        )
+        router.pendingSpoolHighlightId = spoolId
+        router.pendingAttentionItemId = "attention-1"
+        router.pendingFilamentSwap = .init(
+            printerId: printerId,
+            toolheadIndex: 1,
+            jobId: nil
+        )
+
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+        try? await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertTrue(router.printersPath.isEmpty)
+        XCTAssertTrue(router.fleetPath.isEmpty)
+        XCTAssertNil(router.pendingNFCReadyPrinterId)
+        XCTAssertNil(router.pendingSpoolHighlightId)
+        XCTAssertNil(router.pendingAttentionItemId)
+        XCTAssertNil(router.pendingFilamentSwap)
         XCTAssertEqual(router.selectedTab, .overview)
     }
 
@@ -224,6 +356,48 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(router.selectedTab, .overview)
         XCTAssertNil(router.pendingAttentionItemId)
         XCTAssertTrue(router.notificationsPath.isEmpty)
+    }
+
+    func testSpoolDeepLinkFallsBackWhenActiveSetOmitsInventory() {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+
+        router.navigate(
+            to: .spoolDetail(id: spoolId),
+            capabilities: capabilities
+        )
+
+        XCTAssertEqual(router.selectedTab, .overview)
+        XCTAssertNil(router.pendingSpoolHighlightId)
+        XCTAssertTrue(router.inventoryPath.isEmpty)
+    }
+
+    func testFilamentSwapUsesDistinctFleetPathInOversightMode() async {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+
+        router.navigate(
+            to: .filamentSwap(
+                printerId: printerId,
+                toolheadIndex: 2,
+                jobId: nil
+            ),
+            capabilities: capabilities
+        )
+
+        XCTAssertEqual(router.selectedTab, .fleet)
+        XCTAssertNotNil(router.pendingFilamentSwap)
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertTrue(router.printersPath.isEmpty)
+        XCTAssertEqual(router.fleetPath.count, 1)
     }
 
     func testDisabledAttentionDeepLinkRoutesToFarmWithoutPendingItem() {
@@ -369,10 +543,13 @@ final class AppRouterTests: XCTestCase {
 
     func testResetToRootClearsTasksPath() {
         let router = AppRouter()
+        router.tasksPath.append("printQueue")
         router.jobsPath.append(AppDestination.jobDetail(id: printerId))
+        XCTAssertFalse(router.tasksPath.isEmpty)
         XCTAssertFalse(router.jobsPath.isEmpty)
 
         router.resetToRoot(tab: .tasks)
+        XCTAssertTrue(router.tasksPath.isEmpty)
         XCTAssertTrue(router.jobsPath.isEmpty)
     }
 
@@ -394,23 +571,30 @@ final class AppRouterTests: XCTestCase {
         XCTAssertTrue(router.inventoryPath.isEmpty)
     }
 
-    func testAdaptiveTabPathsRemainDistinct() {
-        let router = AppRouter()
-        router.oversightPath.append(AppDestination.jobHistory)
-        router.overviewPath.append(AppDestination.dispatchDashboard)
-        router.fleetPath.append(AppDestination.printerDetail(id: printerId))
-        router.oversightJobsPath.append(AppDestination.jobTimeline)
-        router.upkeepPath.append(AppDestination.maintenanceAnalytics)
-        router.reportsPath.append(AppDestination.uptimeReliability)
+    func testEveryAdaptiveTabResetClearsOnlyItsOwnPath() {
+        let tabs: [AppTab] = [
+            .oversight,
+            .overview,
+            .fleet,
+            .jobs,
+            .upkeep,
+            .reports
+        ]
 
-        router.resetToRoot(tab: .overview)
+        for tab in tabs {
+            let router = AppRouter()
+            seedAdaptivePaths(router)
 
-        XCTAssertEqual(router.oversightPath.count, 1)
-        XCTAssertTrue(router.overviewPath.isEmpty)
-        XCTAssertEqual(router.fleetPath.count, 1)
-        XCTAssertEqual(router.oversightJobsPath.count, 1)
-        XCTAssertEqual(router.upkeepPath.count, 1)
-        XCTAssertEqual(router.reportsPath.count, 1)
+            router.resetToRoot(tab: tab)
+
+            for candidate in tabs {
+                XCTAssertEqual(
+                    adaptivePathCount(for: candidate, router: router),
+                    candidate == tab ? 0 : 1,
+                    "Resetting \(tab) must not alter \(candidate)"
+                )
+            }
+        }
     }
 
     // MARK: - AppDestination migrations
@@ -568,5 +752,37 @@ final class AppRouterTests: XCTestCase {
             ),
             .parts
         )
+    }
+
+    private func seedAdaptivePaths(_ router: AppRouter) {
+        router.oversightPath.append(AppDestination.jobHistory)
+        router.overviewPath.append(AppDestination.dispatchDashboard)
+        router.fleetPath.append(AppDestination.printerDetail(id: printerId))
+        router.oversightJobsPath.append(AppDestination.jobTimeline)
+        router.upkeepPath.append(AppDestination.maintenanceAnalytics)
+        router.reportsPath.append(AppDestination.uptimeReliability)
+    }
+
+    private func adaptivePathCount(
+        for tab: AppTab,
+        router: AppRouter
+    ) -> Int {
+        switch tab {
+        case .oversight:
+            router.oversightPath.count
+        case .overview:
+            router.overviewPath.count
+        case .fleet:
+            router.fleetPath.count
+        case .jobs:
+            router.oversightJobsPath.count
+        case .upkeep:
+            router.upkeepPath.count
+        case .reports:
+            router.reportsPath.count
+        case .attention, .farm, .tasks, .scan, .inventory:
+            XCTFail("Expected an adaptive tab")
+            return -1
+        }
     }
 }
