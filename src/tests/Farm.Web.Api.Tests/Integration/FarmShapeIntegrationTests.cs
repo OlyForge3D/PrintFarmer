@@ -108,6 +108,26 @@ public class FarmShapeIntegrationTests : IClassFixture<FarmShapeIntegrationTests
     }
 
     [Fact]
+    public async Task GetFarmShapeAsync_LocationCount_ExcludesSoftDeletedLocations()
+    {
+        // GET /api/locations (LocationService.GetAllDtosAsync -> EfLocationRepository.GetAllAsync)
+        // filters Where(l => l.IsActive), excluding soft-deleted rows. farm-shape's locationCount
+        // must agree, or it would over-count relative to what the caller's own list actually shows.
+        await SeedLocationAsync();
+        await SeedLocationAsync(isActive: false);
+
+        HttpResponseMessage listResponse = await _adminClient.GetAsync("/api/locations");
+        List<FarmShapeLocationSummary>? locations =
+            await listResponse.Content.ReadFromJsonAsync<List<FarmShapeLocationSummary>>();
+
+        FarmShapeDto shape = await GetFarmShapeAsync(_adminClient);
+
+        shape.LocationCount.Should().Be(locations!.Count,
+            "farm-shape locationCount must agree with what GET /api/locations actually returns, " +
+            "which excludes soft-deleted (IsActive == false) locations");
+    }
+
+    [Fact]
     public async Task GetFarmShapeAsync_PrinterCount_Admin_MatchesUnfilteredPrinterList()
     {
         (Guid enabledPrinterId, _) = await SeedPrinterAsync(isEnabled: true);
@@ -155,7 +175,7 @@ public class FarmShapeIntegrationTests : IClassFixture<FarmShapeIntegrationTests
         return dto!;
     }
 
-    private async Task SeedLocationAsync()
+    private async Task SeedLocationAsync(bool isActive = true)
     {
         using IServiceScope scope = _factory.Services.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -165,7 +185,8 @@ public class FarmShapeIntegrationTests : IClassFixture<FarmShapeIntegrationTests
             Id = Guid.NewGuid(),
             Name = $"FarmShape Test Location {Guid.NewGuid():N}",
             Depth = 0,
-            Path = "/FarmShape Test Location"
+            Path = "/FarmShape Test Location",
+            IsActive = isActive
         });
         await db.SaveChangesAsync();
     }

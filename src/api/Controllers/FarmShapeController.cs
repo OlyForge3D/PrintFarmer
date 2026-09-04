@@ -32,8 +32,8 @@ public sealed class FarmShapeController(
     /// Returns bare account, location, and printer counts for the caller. Account count is
     /// intentionally not admin-gated: it is a plain integer with no identities, emails, or
     /// roles attached. Printer count reflects the same enabled/PrinterGroup ACL scoping the
-    /// caller's own <c>GET /api/printers</c> view applies; location count is unscoped, matching
-    /// <c>GET /api/locations</c>.
+    /// caller's own <c>GET /api/printers</c> view applies; location count only includes active
+    /// (non soft-deleted) locations, matching <c>GET /api/locations</c>.
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>The farm's shape as bare counts.</returns>
@@ -47,7 +47,9 @@ public sealed class FarmShapeController(
         };
 
         int accountCount = await _dbContext.Users.CountAsync(ct);
-        int locationCount = await _dbContext.Locations.CountAsync(ct);
+        int locationCount = await _dbContext.Locations
+            .Where(location => location.IsActive)
+            .CountAsync(ct);
         int printerCount = await _queueResourceAuthorizationService.CountAccessiblePrintersAsync(
             User,
             PrinterGroupAccessLevel.View,
