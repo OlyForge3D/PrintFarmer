@@ -403,6 +403,43 @@ export interface CustomProfilesListResponse {
   filamentProfileCount: number;
 }
 
+/**
+ * The kind of slicer profile being resolved via `resolve-for-model` (#2443).
+ * Matches the backend's `ProfileResolutionType` enum member names exactly
+ * (serialized via `JsonStringEnumConverter`, e.g. "Process").
+ */
+export type ProfileResolutionType = 'Machine' | 'Process' | 'Filament';
+
+/**
+ * Request to resolve a catalog (library/default) profile's canonical database GUID
+ * for a printer model, auto-importing it from the OrcaSlicer worker catalog if it has
+ * never been imported before. Library profiles surface only a display name (no GUID) -
+ * see `.github/skills/orcaslicer-profiles/SKILL.md` - so this must be called before an
+ * endpoint that requires a GUID (e.g. `cloneProfile`) is used against a library profile.
+ */
+export interface ResolveProfileForModelRequest {
+  profileType: ProfileResolutionType;
+  /**
+   * The profile name as reported by the catalog read endpoints (e.g.
+   * `getProcessProfilesForMachines`), which carries no GUID for profiles that have
+   * never been imported.
+   */
+  profileName: string;
+}
+
+/**
+ * Result of resolving (and, if needed, auto-importing) a catalog profile's identity.
+ */
+export interface ResolveProfileForModelResult {
+  printerModelId: string;
+  profileType: ProfileResolutionType;
+  profileName: string;
+  /** The resolved profile's database identity. Null when resolution failed; see `error`. */
+  profileId: string | null;
+  imported: boolean;
+  error?: string | null;
+}
+
 export interface CloneProfileFamilyRequest {
   familyName: string;
   targetPrinterModelId: string;
@@ -563,6 +600,24 @@ export const slicerProfilesService = {
    */
   async cloneProfile(request: CloneSingleProfileRequest): Promise<CloneSingleProfileResponse> {
     const res = await apiClient.post<CloneSingleProfileResponse>('/slicer/profiles/clone', request);
+    return res.data;
+  },
+
+  /**
+   * Resolve a library/default profile's canonical database GUID for a printer model,
+   * auto-importing it from the OrcaSlicer worker catalog if it has never been imported
+   * before (#2443). Required before calling `cloneProfile` for a profile whose only
+   * client-known identifier is its display name (e.g. a default OrcaSlicer process
+   * profile), since `cloneProfile`'s `sourceProfileId` must be a database GUID.
+   */
+  async resolveProfileForModel(
+    modelId: string,
+    request: ResolveProfileForModelRequest
+  ): Promise<ResolveProfileForModelResult> {
+    const res = await apiClient.post<ResolveProfileForModelResult>(
+      `/slicer/profiles/resolve-for-model/${modelId}`,
+      request
+    );
     return res.data;
   },
 

@@ -475,40 +475,6 @@ export const NewSliceJobPage: React.FC = () => {
     setAdvancedProcessSettings({});
   }, []);
 
-  const handleCopyProcess = useCallback(() => {
-    if (!selectedProcessPresetId) return;
-    setProfileMenuOpen(false);
-    // Derive a display name from the preset ID for the default copy name
-    const displayName = selectedProcessPresetId.startsWith('system:')
-      ? selectedProcessPresetId.slice('system:'.length)
-      : selectedProcessPresetId.startsWith('custom:')
-      ? selectedProcessPresetId.slice('custom:'.length)
-      : selectedProcessPresetId;
-    setSaveProfileState({ open: true, name: `${displayName} (Copy)` });
-  }, [selectedProcessPresetId]);
-
-  const handleConfirmSaveProfile = useCallback(async () => {
-    if (!saveProfileState.name.trim() || !selectedProcessPresetId) return;
-    const sourceId = selectedProcessPresetId.startsWith('system:')
-      ? selectedProcessPresetId.slice('system:'.length)
-      : selectedProcessPresetId.startsWith('custom:')
-      ? selectedProcessPresetId.slice('custom:'.length)
-      : selectedProcessPresetId;
-    try {
-      await slicerProfilesService.cloneProfile({
-        sourceProfileId: sourceId,
-        profileType: 'process',
-        name: saveProfileState.name.trim(),
-      });
-      toast.success(`Profile "${saveProfileState.name.trim()}" saved`);
-      qc.invalidateQueries({ queryKey: ['customProfiles'] });
-      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
-      setSaveProfileState({ open: false, name: '' });
-    } catch {
-      toast.error('Failed to save profile');
-    }
-  }, [saveProfileState.name, selectedProcessPresetId, qc]);
-
   const handleImportProcess = useCallback(() => {
     setProfileMenuOpen(false);
     importFileRef.current?.click();
@@ -989,6 +955,53 @@ export const NewSliceJobPage: React.FC = () => {
     return selectedPrinterDetails?.modelId || null;
   }, [selectedPrinterDetails]);
 
+  const handleConfirmSaveProfile = useCallback(async () => {
+    const trimmedName = saveProfileState.name.trim();
+    if (!trimmedName || !selectedProcessPresetId) return;
+
+    const isSystemPreset = selectedProcessPresetId.startsWith('system:');
+    const isCustomPreset = selectedProcessPresetId.startsWith('custom:');
+    const sourceId = isSystemPreset
+      ? selectedProcessPresetId.slice('system:'.length)
+      : isCustomPreset
+      ? selectedProcessPresetId.slice('custom:'.length)
+      : selectedProcessPresetId;
+
+    try {
+      let cloneSourceId = sourceId;
+
+      if (isSystemPreset) {
+        // Default/library OrcaSlicer process profiles are identified on the client only
+        // by their display name (e.g. "0.05mm Fine 0.15 nozzle @Voron"), not a database
+        // GUID - `POST /slicer/profiles/clone` requires the latter (#2443). Resolve (and
+        // auto-import if needed) the profile's canonical GUID before cloning.
+        if (!selectedPrinterModelId) {
+          throw new Error('Select a printer before saving a default process profile as custom.');
+        }
+        const resolved = await slicerProfilesService.resolveProfileForModel(selectedPrinterModelId, {
+          profileType: 'Process',
+          profileName: sourceId,
+        });
+        if (!resolved.profileId) {
+          throw new Error(resolved.error || `Could not resolve process profile "${sourceId}"`);
+        }
+        cloneSourceId = resolved.profileId;
+      }
+
+      await slicerProfilesService.cloneProfile({
+        sourceProfileId: cloneSourceId,
+        profileType: 'process',
+        name: trimmedName,
+      });
+      toast.success(`Profile "${trimmedName}" saved`);
+      qc.invalidateQueries({ queryKey: ['customProfiles'] });
+      qc.invalidateQueries({ queryKey: ['slicerProfilesExtended'] });
+      setSaveProfileState({ open: false, name: '' });
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Failed to save profile'));
+    }
+  }, [saveProfileState.name, selectedProcessPresetId, selectedPrinterModelId, qc]);
+
   // Fetch machine profiles for the selected printer's model
   const {
     data: machineProfilesData = [],
@@ -1010,6 +1023,24 @@ export const NewSliceJobPage: React.FC = () => {
     queryFn: () => slicerProfilesService.listCustomProfiles(),
     staleTime: 30_000
   });
+
+  const handleCopyProcess = useCallback(() => {
+    if (!selectedProcessPresetId) return;
+    setProfileMenuOpen(false);
+    // Derive a display name from the preset ID for the default copy name. A
+    // `custom:` preset is identified by GUID, so its human-readable name has
+    // to be looked up from the fetched custom profiles rather than sliced
+    // out of the preset ID itself (see #2443 - never show a raw GUID here).
+    let displayName = selectedProcessPresetId;
+    if (selectedProcessPresetId.startsWith('system:')) {
+      displayName = selectedProcessPresetId.slice('system:'.length);
+    } else if (selectedProcessPresetId.startsWith('custom:')) {
+      const customId = selectedProcessPresetId.slice('custom:'.length);
+      const customProfile = customProfilesData?.profiles?.find(p => p.id === customId);
+      displayName = customProfile?.name ?? customId;
+    }
+    setSaveProfileState({ open: true, name: `${displayName} (Copy)` });
+  }, [selectedProcessPresetId, customProfilesData]);
 
   // Get the selected machine profile object (system or custom/imported)
   const selectedMachineProfile = useMemo(() => {

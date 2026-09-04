@@ -277,6 +277,10 @@ vi.mock('@/services/slicerProfilesService', () => ({
     listCustomProfiles: vi.fn(() => Promise.resolve({ profiles: [], totalCount: 0 })),
     getWorkerHierarchy: vi.fn(() => Promise.resolve(mockWorkerHierarchy)),
     cloneFamily: vi.fn(),
+    // #2443: resolves a library/default profile's display name to a database GUID,
+    // and clones a profile (by GUID) into the user's custom profiles.
+    resolveProfileForModel: vi.fn(),
+    cloneProfile: vi.fn(),
   }
 }));
 
@@ -2832,6 +2836,172 @@ describe('NewSliceJobPage', () => {
       await waitFor(() => {
         expect(sliceJobService.submitJob).toHaveBeenCalledTimes(2);
       });
+    });
+  });
+
+  describe('Save process profile as custom (issue #2443)', () => {
+    const clickSaveAsCustomProfile = async () => {
+      const saveButton = await screen.findByRole('button', { name: 'Save as custom profile' });
+      await waitFor(() => expect(saveButton).toBeEnabled());
+      fireEvent.click(saveButton);
+      return screen.findByRole('button', { name: 'Save' });
+    };
+
+    const selectPrinterAndWaitForDefaultProcessProfile = async () => {
+      renderWithProviders(<NewSliceJobPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      await waitFor(() => {
+        const processSelect = Array.from(document.querySelectorAll('select'))
+          .find((s) => s.value.startsWith('system:'));
+        expect(processSelect?.value).toBe('system:0.10mm Fine @MK4');
+      });
+    };
+
+    it('resolves a default/library process profile to its database GUID before cloning it', async () => {
+      vi.mocked(slicerProfilesService.resolveProfileForModel).mockResolvedValue({
+        printerModelId: 'model-1',
+        profileType: 'Process',
+        profileName: '0.10mm Fine @MK4',
+        profileId: 'resolved-guid-1234',
+        imported: true,
+        error: null,
+      });
+      vi.mocked(slicerProfilesService.cloneProfile).mockResolvedValue({
+        id: 'custom-guid-9999',
+        name: '0.10mm Fine @MK4 (Copy)',
+      } as never);
+
+      await selectPrinterAndWaitForDefaultProcessProfile();
+      const confirmSaveButton = await clickSaveAsCustomProfile();
+
+      await act(async () => { fireEvent.click(confirmSaveButton); });
+
+      // The request MUST carry the resolved database GUID, never the raw
+      // OrcaSlicer catalog display name — that string is what triggered the
+      // 400 "could not be converted to System.Guid" failure in #2443.
+      await waitFor(() => {
+        expect(slicerProfilesService.resolveProfileForModel).toHaveBeenCalledWith('model-1', {
+          profileType: 'Process',
+          profileName: '0.10mm Fine @MK4',
+        });
+      });
+      await waitFor(() => {
+        expect(slicerProfilesService.cloneProfile).toHaveBeenCalledWith({
+          sourceProfileId: 'resolved-guid-1234',
+          profileType: 'process',
+          name: '0.10mm Fine @MK4 (Copy)',
+        });
+      });
+      expect(toast.success).toHaveBeenCalledWith('Profile "0.10mm Fine @MK4 (Copy)" saved');
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it('surfaces an actionable error instead of failing silently when resolution cannot find a GUID', async () => {
+      vi.mocked(slicerProfilesService.resolveProfileForModel).mockResolvedValue({
+        printerModelId: 'model-1',
+        profileType: 'Process',
+        profileName: '0.10mm Fine @MK4',
+        profileId: null,
+        imported: false,
+        error: 'Profile "0.10mm Fine @MK4" was not found in the OrcaSlicer worker catalog.',
+      });
+
+      await selectPrinterAndWaitForDefaultProcessProfile();
+      const confirmSaveButton = await clickSaveAsCustomProfile();
+
+      await act(async () => { fireEvent.click(confirmSaveButton); });
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith(
+          'Profile "0.10mm Fine @MK4" was not found in the OrcaSlicer worker catalog.'
+        );
+      });
+      // A failed resolution must never fall through to clone with a bogus id.
+      expect(slicerProfilesService.cloneProfile).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
+    });
+
+    it('surfaces an actionable error instead of failing silently when the clone request itself fails', async () => {
+      vi.mocked(slicerProfilesService.resolveProfileForModel).mockResolvedValue({
+        printerModelId: 'model-1',
+        profileType: 'Process',
+        profileName: '0.10mm Fine @MK4',
+        profileId: 'resolved-guid-1234',
+        imported: true,
+        error: null,
+      });
+      vi.mocked(slicerProfilesService.cloneProfile).mockRejectedValue(
+        new Error('A profile named "0.10mm Fine @MK4 (Copy)" already exists.')
+      );
+
+      await selectPrinterAndWaitForDefaultProcessProfile();
+      const confirmSaveButton = await clickSaveAsCustomProfile();
+
+      await act(async () => { fireEvent.click(confirmSaveButton); });
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('A profile named "0.10mm Fine @MK4 (Copy)" already exists.');
+      });
+    });
+
+    it('clones an already-custom process profile directly by its existing GUID, without a resolve round-trip (no regression)', async () => {
+      vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+        profiles: [
+          {
+            id: 'existing-custom-guid-5678',
+            name: 'My Tuned Profile',
+            profileType: 'process',
+            isSystem: false,
+            createdAt: '2026-01-01T00:00:00Z',
+            printerModelId: 'model-1',
+          },
+        ],
+        totalCount: 1,
+        machineProfileCount: 0,
+        processProfileCount: 1,
+        filamentProfileCount: 0,
+      });
+      vi.mocked(slicerProfilesService.cloneProfile).mockResolvedValue({
+        id: 'custom-guid-0000',
+        name: 'My Tuned Profile (Copy)',
+      } as never);
+
+      renderWithProviders(<NewSliceJobPage />);
+      await waitFor(() => {
+        expect(screen.getByText('My Prusa MK4')).toBeInTheDocument();
+      });
+      fireEvent.change(screen.getByTestId('printer-select'), { target: { value: 'printer-1' } });
+
+      await waitFor(() => {
+        const processSelect = Array.from(document.querySelectorAll('select'))
+          .find((s) => Array.from(s.options).some((o) => o.value === 'custom:existing-custom-guid-5678'));
+        expect(processSelect).toBeDefined();
+      });
+      const processSelect = Array.from(document.querySelectorAll('select'))
+        .find((s) => Array.from(s.options).some((o) => o.value === 'custom:existing-custom-guid-5678'))!;
+      fireEvent.change(processSelect, { target: { value: 'custom:existing-custom-guid-5678' } });
+      expect(processSelect.value).toBe('custom:existing-custom-guid-5678');
+
+      const confirmSaveButton = await clickSaveAsCustomProfile();
+      await act(async () => { fireEvent.click(confirmSaveButton); });
+
+      await waitFor(() => {
+        expect(slicerProfilesService.cloneProfile).toHaveBeenCalledWith({
+          sourceProfileId: 'existing-custom-guid-5678',
+          profileType: 'process',
+          name: 'My Tuned Profile (Copy)',
+        });
+      });
+      // A profile that already carries a real GUID must never be routed through
+      // the resolve-for-model round-trip — that step exists only to bridge the
+      // OrcaSlicer catalog's string-name space to the database's GUID space.
+      expect(slicerProfilesService.resolveProfileForModel).not.toHaveBeenCalled();
+      expect(toast.error).not.toHaveBeenCalled();
     });
   });
 
