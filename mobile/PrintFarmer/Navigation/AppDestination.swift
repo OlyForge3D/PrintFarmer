@@ -29,19 +29,19 @@ enum AppDestination: Hashable {
 ///
 /// `current` keeps the shipping five-tab operator UI unchanged while the
 /// adaptive shells are introduced incrementally by the IOS navigation epic.
-enum NavigationShell: Hashable, CaseIterable {
+enum NavigationShell: Hashable, CaseIterable, Sendable {
     case current
     case simple
     case twoModes
 }
 
-enum OversightMode: Hashable, CaseIterable {
+enum OversightMode: Hashable, CaseIterable, Sendable {
     case floor
     case oversight
 }
 
 /// Every tab addressable by the current and adaptive navigation shells.
-enum AppTab: String, Hashable, CaseIterable {
+enum AppTab: String, Hashable, CaseIterable, Sendable {
     enum BadgeKind: Hashable {
         case none
         case notifications
@@ -94,20 +94,34 @@ enum AppTab: String, Hashable, CaseIterable {
     static func visibleTabs(
         for shell: NavigationShell,
         mode: OversightMode,
-        capabilities: ResolvedSystemCapabilities
+        capabilities: ResolvedSystemCapabilities,
+        oversightAvailability: OversightNavigationAvailability = .fullyAvailable
     ) -> [AppTab] {
-        tabs(for: shell, mode: mode).filter { $0.isEnabled(in: capabilities) }
+        tabs(for: shell, mode: mode).filter { tab in
+            guard tab.isEnabled(in: capabilities) else { return false }
+
+            switch tab {
+            case .oversight:
+                return oversightAvailability.hasVisibleHubDestinations
+            case .overview, .fleet, .jobs, .upkeep, .reports:
+                return oversightAvailability.visibleTabs.contains(tab)
+            case .attention, .farm, .tasks, .scan, .inventory:
+                return true
+            }
+        }
     }
 
     static func fallbackTab(
         for shell: NavigationShell,
         mode: OversightMode,
-        capabilities: ResolvedSystemCapabilities
+        capabilities: ResolvedSystemCapabilities,
+        oversightAvailability: OversightNavigationAvailability = .fullyAvailable
     ) -> AppTab {
         visibleTabs(
             for: shell,
             mode: mode,
-            capabilities: capabilities
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
         ).first ?? tabs(for: shell, mode: mode).first ?? .farm
     }
 

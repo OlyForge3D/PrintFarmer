@@ -42,6 +42,18 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Navigation") {
+                    NavigationLink {
+                        NavigationSettingsView()
+                    } label: {
+                        Label("Navigation", systemImage: "rectangle.3.group")
+                            .frame(minHeight: 44)
+                    }
+                    .accessibilityLabel("Navigation")
+                    .accessibilityHint("Choose the layout for the active server.")
+                    .accessibilityIdentifier("settings.navigation")
+                }
+
                 #if canImport(UIKit)
                 Section("Notifications") {
                     let pushManager = PushNotificationManager.shared

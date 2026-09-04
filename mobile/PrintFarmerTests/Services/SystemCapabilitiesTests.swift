@@ -242,6 +242,163 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertEqual(service.resolved, ResolvedSystemCapabilities.defaults)
     }
 
+    func testPreparedRefreshIsConsumedByReadinessWithoutSecondRequest() async {
+        mockAPIClient.stubResponse(json: """
+        {
+            "operatorFeatures": {
+                "attentionEnabled": false
+            }
+        }
+        """)
+        let service = SystemCapabilitiesService(apiClient: apiClient)
+
+        let prepared = await service.prepareForReadiness()
+        let consumed = await service.refreshForReadiness()
+
+        XCTAssertEqual(prepared, .loaded)
+        XCTAssertEqual(consumed, .loaded)
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+
+        _ = await service.refreshForReadiness()
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 2)
+    }
+
+    func testDiscardedPreparedRefreshForcesReadinessRequest() async {
+        mockAPIClient.stubResponse(json: """
+        {
+            "operatorFeatures": {
+                "attentionEnabled": true
+            }
+        }
+        """)
+        let service = SystemCapabilitiesService(apiClient: apiClient)
+
+        _ = await service.prepareForReadiness()
+        service.discardPreparedReadiness()
+        _ = await service.refreshForReadiness()
+
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 2)
+    }
+
+    func testAuthenticatedStartupResetDiscardsPreparedCapabilities() async {
+        mockAPIClient.stubResponse(json: """
+        {
+            "operatorFeatures": {
+                "attentionEnabled": true
+            }
+        }
+        """)
+        let service = SystemCapabilitiesService(apiClient: apiClient)
+        let container = ServiceContainer(
+            observeRegistry: false,
+            synchronizeOfflineQueueOnStartup: false
+        )
+        container.capabilitiesService = service
+
+        _ = await service.prepareForReadiness()
+        container.resetAuthenticatedStartupState()
+        _ = await service.refreshForReadiness()
+
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 2)
+    }
+
+    func testConcurrentReadinessPreparationsShareOneRequest() async {
+        let request = AsyncBarrier()
+        addTeardownBlock { request.close() }
+        let joined = expectation(description: "second preparation joined in-flight request")
+        mockAPIClient.asyncRequestHandler = { urlRequest in
+            await request.arriveAndWait()
+            return (
+                TestData.httpResponse(url: urlRequest.url, statusCode: 200),
+                Data(#"{"operatorFeatures":{"attentionEnabled":true}}"#.utf8)
+            )
+        }
+        let service = SystemCapabilitiesService(
+            apiClient: apiClient,
+            readinessPreparationJoinHook: {
+                joined.fulfill()
+            }
+        )
+
+        async let first = service.prepareForReadiness()
+        await request.waitUntilArrived()
+        async let second = service.prepareForReadiness()
+        await fulfillment(of: [joined], timeout: 2)
+        request.release()
+        _ = await (first, second)
+
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+    }
+
+    func testReadinessPreparationTimeoutBoundsJoinedRefreshAndRetriesFresh() async {
+        let firstRequest = AsyncBarrier()
+        let secondRequest = AsyncBarrier()
+        let blockedTimeouts = AsyncBarrier()
+        let retryTimeout = AsyncBarrier()
+        let requestOrdinal = SystemCapabilitiesRequestOrdinal()
+        let timeoutOrdinal = SystemCapabilitiesRequestOrdinal()
+        addTeardownBlock {
+            firstRequest.close()
+            secondRequest.close()
+            blockedTimeouts.close()
+            retryTimeout.close()
+        }
+        mockAPIClient.asyncRequestHandler = { urlRequest in
+            let ordinal = await requestOrdinal.next()
+            if ordinal == 1 {
+                await firstRequest.arriveAndWait()
+            } else {
+                await secondRequest.arriveAndWait()
+            }
+            return (
+                TestData.httpResponse(url: urlRequest.url, statusCode: 200),
+                Data(#"{"operatorFeatures":{"attentionEnabled":false}}"#.utf8)
+            )
+        }
+        let service = SystemCapabilitiesService(
+            apiClient: apiClient,
+            preparationTimeout: .seconds(1),
+            preparationTimeoutSleep: { _ in
+                if await timeoutOrdinal.next() <= 2 {
+                    await blockedTimeouts.arriveAndWait()
+                } else {
+                    await retryTimeout.arriveAndWait()
+                }
+            }
+        )
+
+        let preparation = Task {
+            await service.prepareForReadiness()
+        }
+        await firstRequest.waitUntilArrived()
+        let joinedReadiness = Task {
+            await service.refreshForReadiness()
+        }
+        await blockedTimeouts.waitUntilReleaseWaiterCount(2)
+        blockedTimeouts.release()
+
+        let preparationOutcome = await preparation.value
+        let readinessOutcome = await joinedReadiness.value
+        XCTAssertNotEqual(preparationOutcome, .loaded)
+        XCTAssertNotEqual(preparationOutcome, .legacyDefaults)
+        XCTAssertNotEqual(readinessOutcome, .loaded)
+        XCTAssertNotEqual(readinessOutcome, .legacyDefaults)
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+
+        let retry = Task {
+            await service.prepareForReadiness()
+        }
+        await secondRequest.waitUntilArrived()
+        await retryTimeout.waitUntilArrived()
+        secondRequest.release()
+
+        let retryOutcome = await retry.value
+        XCTAssertEqual(retryOutcome, .loaded)
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 2)
+        XCTAssertFalse(service.resolved.attentionEnabled)
+        firstRequest.release()
+    }
+
     func testRefreshFailsOpenOnTransportError() async {
         // Transient network failure must not disable any feature —
         // documented contract in #725 is fail-open on unavailability.
