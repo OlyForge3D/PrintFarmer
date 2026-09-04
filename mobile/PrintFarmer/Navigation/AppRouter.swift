@@ -43,6 +43,7 @@ final class AppRouter {
     private(set) var configuredServerID: UUID?
     private(set) var configuredUserID: UUID?
     private(set) var appliedNavigationPreference: NavigationLayoutPreference?
+    private(set) var establishedAutomaticDerivation: NavigationShellDerivation?
     private(set) var oversightAvailability = OversightNavigationAvailability.fullyAvailable
     var selectedTab: AppTab = .attention
     var printersPath = NavigationPath()
@@ -271,6 +272,9 @@ final class AppRouter {
             configuredServerID = serverID
             configuredUserID = userID
             appliedNavigationPreference = preference
+            establishedAutomaticDerivation = preference == .automatic
+                ? automaticDerivation
+                : nil
             requestedShell = AdaptiveNavigationShell.requestedShell(
                 preference: preference,
                 automaticDerivation: automaticDerivation
@@ -315,6 +319,15 @@ final class AppRouter {
         transition(
             to: .twoModes,
             mode: mode,
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
+        )
+    }
+
+    func presentShippingShell(capabilities: ResolvedSystemCapabilities) {
+        transition(
+            to: .current,
+            mode: activeMode,
             capabilities: capabilities,
             oversightAvailability: oversightAvailability
         )
@@ -395,6 +408,7 @@ final class AppRouter {
         configuredServerID = nil
         configuredUserID = nil
         appliedNavigationPreference = nil
+        establishedAutomaticDerivation = nil
         oversightAvailability = .fullyAvailable
         selectedTab = .attention
     }
@@ -473,8 +487,6 @@ final class AppRouter {
     }
 
     private var printerDestinationTab: AppTab {
-        // IOS-1 must bind `fleetPath` to the Fleet NavigationStack before it
-        // enables the Oversight shell in production.
         activeShell == .twoModes && activeMode == .oversight
             ? .fleet
             : .farm

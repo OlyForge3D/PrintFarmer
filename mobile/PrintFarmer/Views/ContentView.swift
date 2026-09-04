@@ -262,8 +262,12 @@ struct ContentView: View {
         capabilities: ResolvedSystemCapabilities,
         oversightAvailability: OversightNavigationAvailability
     ) {
-        guard sizeClass != .regular,
-              let serverID = serverRegistry.activeServerID,
+        if sizeClass == .regular {
+            router.presentShippingShell(capabilities: capabilities)
+            return
+        }
+
+        guard let serverID = serverRegistry.activeServerID,
               let currentUser = authViewModel.currentUser else {
             router.reconcileCapabilities(
                 capabilities,

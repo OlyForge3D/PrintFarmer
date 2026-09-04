@@ -270,6 +270,7 @@ final class AppRouterTests: XCTestCase {
             capabilities: capabilities,
             oversightAvailability: .fullyAvailable
         )
+        let establishedExplanation = router.establishedAutomaticDerivation?.explanation
         router.configureAdaptiveShell(
             serverID: serverID,
             userID: userID,
@@ -282,6 +283,10 @@ final class AppRouterTests: XCTestCase {
 
         XCTAssertEqual(router.requestedShell, .simple)
         XCTAssertEqual(router.activeShell, .simple)
+        XCTAssertEqual(
+            router.establishedAutomaticDerivation?.explanation,
+            establishedExplanation
+        )
         XCTAssertTrue(
             router.hasAdaptiveShellConfiguration(
                 serverID: serverID,
@@ -348,6 +353,50 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(router.requestedShell, .twoModes)
         XCTAssertEqual(router.activeShell, .twoModes)
         XCTAssertEqual(router.activeMode, .floor)
+    }
+
+    func testShippingPresentationPreservesAdaptiveSelectionForCompactReturn() {
+        let router = AppRouter()
+        let serverID = UUID()
+        let userID = UUID()
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .twoModes,
+            farmShape: nil,
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.setNavigationMode(.oversight, capabilities: capabilities)
+
+        router.presentShippingShell(capabilities: capabilities)
+
+        XCTAssertEqual(router.activeShell, .current)
+        XCTAssertEqual(router.activeMode, .oversight)
+        XCTAssertEqual(router.requestedShell, .twoModes)
+        XCTAssertEqual(
+            router.visibleTabs(for: capabilities),
+            [.attention, .farm, .tasks, .scan, .inventory]
+        )
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .twoModes,
+            farmShape: nil,
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.activeShell, .twoModes)
+        XCTAssertEqual(router.activeMode, .oversight)
+        XCTAssertEqual(
+            router.visibleTabs(for: capabilities),
+            [.overview, .fleet, .jobs, .upkeep, .reports]
+        )
     }
 
     func testTwoModesCollapsesWhenOversightHasFewerThanTwoTabs() {

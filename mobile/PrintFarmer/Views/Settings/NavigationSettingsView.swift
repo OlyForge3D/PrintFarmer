@@ -2,6 +2,7 @@ import SwiftUI
 
 struct NavigationSettingsView: View {
     @Environment(AuthViewModel.self) private var authViewModel
+    @Environment(AppRouter.self) private var router
     @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(ServiceContainer.self) private var services
 
@@ -23,11 +24,23 @@ struct NavigationSettingsView: View {
     }
 
     private var automaticDerivation: NavigationShellDerivation {
-        NavigationShellDerivation.automatic(
+        let currentDerivation = NavigationShellDerivation.automatic(
             farmShape: services.farmShapeService.sessionShape,
             shiftPlanEnabled: services.capabilitiesService.resolved.shiftPlanEnabled,
             isFarmAdmin: authViewModel.currentUser?.roles.contains("farm_admin") == true
         )
+
+        guard serverRegistry.navigationLayoutPreference == .automatic,
+              let serverID = serverRegistry.activeServerID,
+              let userID = authViewModel.currentUser?.id,
+              router.hasAdaptiveShellConfiguration(
+                  serverID: serverID,
+                  userID: userID
+              ) else {
+            return currentDerivation
+        }
+
+        return router.establishedAutomaticDerivation ?? currentDerivation
     }
 
     private func preferenceButton(
