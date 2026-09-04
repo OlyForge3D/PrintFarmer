@@ -29,7 +29,7 @@ func destinationView(for destination: AppDestination) -> some View {
     case .settings:
         SettingsView(ownsNavigationStack: false)
     case .navigationSettings:
-        SettingsView(ownsNavigationStack: false)
+        NavigationSettingsView()
     case .maintenanceAnalytics:
         MaintenanceAnalyticsView()
     case .uptimeReliability:
