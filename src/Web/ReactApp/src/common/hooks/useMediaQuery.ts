@@ -55,3 +55,19 @@ export const LG_BREAKPOINT_QUERY = '(min-width: 1024px)';
 export function useIsLgBreakpoint(): boolean {
   return useMediaQuery(LG_BREAKPOINT_QUERY);
 }
+
+/**
+ * Below Tailwind's `sm` breakpoint (640px) — narrow/mobile viewports (e.g. 375px)
+ * where dense toolbar-style UI should collapse into a compact/overflow form
+ * instead of wrapping into multiple rows. Phrased as a `max-width` query (rather
+ * than the inverse of a `min-width` query) so the global test-suite `matchMedia`
+ * polyfill, which always reports `matches: false`, defaults callers to the
+ * existing non-compact layout unless a test explicitly opts into the narrow
+ * viewport. See issue #2406.
+ */
+export const MOBILE_BREAKPOINT_QUERY = '(max-width: 639.98px)';
+
+/** Convenience wrapper for `useMediaQuery(MOBILE_BREAKPOINT_QUERY)`. */
+export function useIsMobileBreakpoint(): boolean {
+  return useMediaQuery(MOBILE_BREAKPOINT_QUERY);
+}
