@@ -1014,6 +1014,7 @@ final class AppRouterTests: XCTestCase {
         router.navigate(to: .printerDetail(id: printerId), capabilities: capabilities)
         router.navigate(to: .attentionItem(id: "attention-1"), capabilities: capabilities)
         router.navigate(to: .spoolDetail(id: 42), capabilities: capabilities)
+        router.tasksPath.append(AppDestination.jobHistory)
         router.jobsPath.append(AppDestination.jobDetail(id: printerId))
         router.scanPath.append(AppDestination.jobDetail(id: printerId))
         router.oversightPath.append(AppDestination.jobHistory)
@@ -1030,6 +1031,7 @@ final class AppRouterTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(120))
 
         XCTAssertTrue(router.printersPath.isEmpty)
+        XCTAssertTrue(router.tasksPath.isEmpty)
         XCTAssertTrue(router.jobsPath.isEmpty)
         XCTAssertTrue(router.notificationsPath.isEmpty)
         XCTAssertTrue(router.inventoryPath.isEmpty)

@@ -49,6 +49,7 @@ struct JobListView: View {
                     Text(error)
                 } actions: {
                     Button("Retry") {
+                        retryTask?.cancel()
                         retryTask = Task { await viewModel.loadJobs() }
                     }
                 }
@@ -218,11 +219,7 @@ struct JobListView: View {
     // MARK: - Active Job Row
 
     private func activeJobRow(_ item: QueuedPrintJobResponse) -> some View {
-        Button {
-            if let uuid = item.job.jobUUID {
-                router.jobsPath.append(AppDestination.jobDetail(id: uuid))
-            }
-        } label: {
+        jobDetailLink(for: item) {
             HStack(spacing: 12) {
                 jobThumbnail(for: item, size: 48)
                 VStack(alignment: .leading, spacing: 6) {
@@ -271,11 +268,7 @@ struct JobListView: View {
     // MARK: - Queued Job Row
 
     private func queuedJobRow(_ item: QueuedPrintJobResponse) -> some View {
-        Button {
-            if let uuid = item.job.jobUUID {
-                router.jobsPath.append(AppDestination.jobDetail(id: uuid))
-            }
-        } label: {
+        jobDetailLink(for: item) {
             HStack(spacing: 12) {
                 jobThumbnail(for: item, size: 44)
                 VStack(alignment: .leading, spacing: 6) {
@@ -328,6 +321,7 @@ struct JobListView: View {
             if let uuid = item.job.jobUUID {
                 Button {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    retryTask?.cancel()
                     retryTask = Task { await viewModel.cancelJob(id: uuid) }
                 } label: {
                     Label("Cancel", systemImage: "xmark.circle")
@@ -339,6 +333,7 @@ struct JobListView: View {
             if let uuid = item.job.jobUUID {
                 Button {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    retryTask?.cancel()
                     retryTask = Task { await viewModel.dispatchJob(id: uuid) }
                 } label: {
                     Label("Start", systemImage: "play.circle.fill")
@@ -351,11 +346,7 @@ struct JobListView: View {
     // MARK: - Recent Job Row
 
     private func recentJobRow(_ item: QueuedPrintJobResponse) -> some View {
-        Button {
-            if let uuid = item.job.jobUUID {
-                router.jobsPath.append(AppDestination.jobDetail(id: uuid))
-            }
-        } label: {
+        jobDetailLink(for: item) {
             HStack(spacing: 12) {
                 jobThumbnail(for: item, size: 36)
                 VStack(alignment: .leading, spacing: 4) {
@@ -394,6 +385,20 @@ struct JobListView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(recentJobAccessibilityLabel(item))
         .accessibilityIdentifier("job.row.\(item.job.jobUUID?.uuidString ?? "unknown")")
+    }
+
+    @ViewBuilder
+    private func jobDetailLink<Content: View>(
+        for item: QueuedPrintJobResponse,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if let uuid = item.job.jobUUID {
+            NavigationLink(value: AppDestination.jobDetail(id: uuid)) {
+                content()
+            }
+        } else {
+            content()
+        }
     }
 
     private func recentJobAccessibilityLabel(_ item: QueuedPrintJobResponse) -> String {
