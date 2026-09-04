@@ -311,7 +311,7 @@ private final class RoutingProbe {
 
     func environment() -> TaskActionRoutingEnvironment {
         TaskActionRoutingEnvironment(
-            dismissActiveSheets: { [weak self] in await self?.handleDismiss() },
+            awaitPresentationDismissal: { [weak self] in await self?.handleDismiss() },
             navigateToSwap: { [weak self] printerID, toolheadID in
                 self?.swapCalls.append((printerID, toolheadID))
             },

@@ -2,6 +2,46 @@ import XCTest
 @testable import PrintFarmer
 
 final class HarvestViewModelTests: XCTestCase {
+    func testBinScannerReturnsUnavailableWithoutRequestingPermission() async {
+        let service = MockPartsInventoryService()
+
+        let result = await HarvestBinScanner.scan(
+            scanner: nil,
+            partsInventoryService: service
+        )
+
+        XCTAssertEqual(result, .unavailable)
+        XCTAssertTrue(service.resolveBinCodes.isEmpty)
+    }
+
+    func testBinScannerSurfacesPermissionDenialInPlace() async {
+        let scanner = MockScannerService()
+        scanner.barcodeScanResultToReturn = .error(.permissionDenied)
+
+        let result = await HarvestBinScanner.scan(
+            scanner: scanner,
+            partsInventoryService: MockPartsInventoryService()
+        )
+
+        XCTAssertEqual(result, .error("Permission denied. Check Settings."))
+        XCTAssertEqual(scanner.barcodeScanCallCount, 1)
+    }
+
+    func testBinScannerResolvesCanonicalBinCode() async {
+        let scanner = MockScannerService()
+        scanner.barcodeScanResultToReturn = .barcode("scanned-alias")
+        let service = MockPartsInventoryService()
+        service.binToResolve = makeBin(code: "BIN-42", name: "Finished goods")
+
+        let result = await HarvestBinScanner.scan(
+            scanner: scanner,
+            partsInventoryService: service
+        )
+
+        XCTAssertEqual(result, .code("BIN-42"))
+        XCTAssertEqual(service.resolveBinCodes, ["scanned-alias"])
+    }
+
     @MainActor
     func testLoadContextPrefillsOutputsFromGcodeMapping() async {
         let job = makeJob(gcodeFileId: gcodeFileId)

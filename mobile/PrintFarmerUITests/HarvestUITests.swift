@@ -112,7 +112,14 @@ final class HarvestUITests: ShiftTasksUITestBase {
     ) {
         let row = app.buttons[identifier]
         if !row.exists {
-            let combinedList = app.collectionViews["jobList.combined.list"]
+            // #2445 wrapped `JobListView.screenContent` in an outer
+            // `.accessibilityIdentifier("jobList.root")`, which collapses
+            // onto the same underlying collection view as the inner
+            // `jobList` list's own `"jobList.combined.list"` identifier —
+            // only the outer identifier survives at runtime on iPad. Swipe
+            // by the identifier that is actually present so the off-screen
+            // cancelled job row becomes reachable.
+            let combinedList = app.collectionViews["jobList.root"]
             if combinedList.exists {
                 combinedList.swipeUp()
             }

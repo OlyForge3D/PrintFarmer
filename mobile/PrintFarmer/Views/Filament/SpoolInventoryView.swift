@@ -12,12 +12,15 @@ struct SpoolInventoryView: View {
     @Environment(AppRouter.self) private var router
     @State private var viewModel = SpoolInventoryViewModel()
     @State private var showAddSpool = false
+    @State private var showScanFlow = false
     @State private var showBarcodeIntake = false
     @State private var nfcWriteTarget: NFCWriteTarget?
     @State private var activeTasks: [Task<Void, Never>] = []
 
     var body: some View {
-        NavigationStack {
+        @Bindable var router = router
+
+        NavigationStack(path: $router.inventoryPath) {
             Group {
                 if let error = viewModel.errorMessage, viewModel.spools.isEmpty {
                     ContentUnavailableView {
@@ -76,37 +79,57 @@ struct SpoolInventoryView: View {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.large)
             #endif
-            .toolbar {
-                #if os(iOS)
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        Button {
-                            showBarcodeIntake = true
-                        } label: {
-                            Image(systemName: "barcode.viewfinder")
-                        }
-                        .accessibilityLabel("Barcode intake")
-
-                        Button {
-                            viewModel.handleNFCScan()
-                        } label: {
-                            Image(systemName: "wave.3.right")
-                        }
-                        .accessibilityLabel("Scan NFC tag")
-
-                        Button {
-                            showAddSpool = true
-                        } label: {
-                            Image(systemName: "plus")
-                        }
-                        .accessibilityLabel("Add spool")
+            .rootNavigationChrome(for: .inventory) {
+                Menu {
+                    Button {
+                        showScanFlow = true
+                    } label: {
+                        Label("Scan code", systemImage: "barcode.viewfinder")
                     }
+
+                    Button {
+                        viewModel.handleNFCScan()
+                    } label: {
+                        Label("Scan NFC tag", systemImage: "wave.3.right")
+                    }
+                    .accessibilityIdentifier("inventory.scan.nfc")
+
+                    Button {
+                        showBarcodeIntake = true
+                    } label: {
+                        Label("Log new spools", systemImage: "cylinder")
+                    }
+                    .accessibilityIdentifier("inventory.scan.barcodeIntake")
+                } label: {
+                    Image(systemName: "barcode.viewfinder")
+                        .frame(
+                            minWidth: RootNavigationChrome.minimumTouchTarget,
+                            minHeight: RootNavigationChrome.minimumTouchTarget
+                        )
                 }
-                #endif
+                .accessibilityLabel("Scan inventory")
+                .accessibilityHint("Opens camera, NFC, and continuous spool intake actions.")
+                .accessibilityIdentifier("inventory.scan")
+
+                Button {
+                    showAddSpool = true
+                } label: {
+                    Image(systemName: "plus")
+                        .frame(
+                            minWidth: RootNavigationChrome.minimumTouchTarget,
+                            minHeight: RootNavigationChrome.minimumTouchTarget
+                        )
+                }
+                .accessibilityLabel("Add spool")
+                .accessibilityHint("Opens the form to register a filament spool.")
+                .accessibilityIdentifier("inventory.addSpool")
             }
             .searchable(text: $viewModel.searchText, prompt: "Search by name, material, color…")
             .refreshable {
                 await viewModel.loadSpools()
+            }
+            .navigationDestination(for: AppDestination.self) { destination in
+                destinationView(for: destination)
             }
             .overlay {
                 if viewModel.isLoading && viewModel.spools.isEmpty {
@@ -131,6 +154,9 @@ struct SpoolInventoryView: View {
                         let task = Task { await viewModel.loadSpools() }
                         activeTasks.append(task)
                     }
+            }
+            .sheet(isPresented: $showScanFlow) {
+                ScanFlowView()
             }
             .sheet(isPresented: $showBarcodeIntake) {
                 BarcodeIntakeView()

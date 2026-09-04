@@ -19,10 +19,30 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(router.activeMode, .floor)
     }
 
+    func testLegacyPersistedScanSelectionRestoresInventory() {
+        XCTAssertEqual(AppRouter.restoredTab(from: "scan"), .inventory)
+    }
+
+    func testPersistedSelectionRoundTripsWithoutAffectingDefaultRouterTests() throws {
+        let suiteName = "AppRouterTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("scan", forKey: AppRouter.selectedTabDefaultsKey)
+
+        let router = AppRouter(userDefaults: defaults)
+
+        XCTAssertEqual(router.selectedTab, .inventory)
+        router.selectedTab = .farm
+        XCTAssertEqual(
+            defaults.string(forKey: AppRouter.selectedTabDefaultsKey),
+            AppTab.farm.rawValue
+        )
+    }
+
     func testTabModelEnumeratesCurrentAndAdaptiveSets() {
         XCTAssertEqual(
             AppTab.tabs(for: .current, mode: .floor),
-            [.attention, .farm, .tasks, .scan, .inventory]
+            [.attention, .farm, .tasks, .inventory]
         )
         XCTAssertEqual(
             AppTab.tabs(for: .simple, mode: .floor),
@@ -99,19 +119,19 @@ final class AppRouterTests: XCTestCase {
     func testCurrentTabPresentationMatchesShippingUI() {
         let tabs = ContentView.shippingTabs(for: capabilities)
 
-        XCTAssertEqual(tabs, [.attention, .farm, .tasks, .scan, .inventory])
-        XCTAssertEqual(tabs.map(\.title), ["Attention", "Farm", "Tasks", "Scan", "Inventory"])
+        XCTAssertEqual(tabs, [.attention, .farm, .tasks, .inventory])
+        XCTAssertEqual(tabs.map(\.title), ["Attention", "Farm", "Tasks", "Inventory"])
         XCTAssertEqual(
             tabs.map(\.systemImage),
-            ["bell.badge", "printer", "checklist", "barcode.viewfinder", "cylinder.fill"]
+            ["bell.badge", "printer", "checklist", "cylinder.fill"]
         )
         XCTAssertEqual(
             tabs.map(\.badgeKind),
-            [.notifications, .pendingReady, .none, .none, .none]
+            [.notifications, .pendingReady, .none, .none]
         )
         XCTAssertEqual(
             tabs.map(\.tabAccessibilityIdentifier),
-            ["tab.attention", "tab.farm", "tab.tasks", "tab.scan", "tab.inventory"]
+            ["tab.attention", "tab.farm", "tab.tasks", "tab.inventory"]
         )
         XCTAssertEqual(
             tabs.map(\.sidebarAccessibilityIdentifier),
@@ -119,12 +139,38 @@ final class AppRouterTests: XCTestCase {
                 "sidebar.attention",
                 "sidebar.farm",
                 "sidebar.tasks",
-                "sidebar.scan",
                 "sidebar.inventory"
             ]
         )
         XCTAssertEqual(ContentView.sidebarRowMinimumHeight, 44)
         XCTAssertEqual(ContentView.modeControlMinimumHeight, 44)
+        XCTAssertEqual(RootNavigationChrome.minimumTouchTarget, 44)
+        XCTAssertEqual(RootNavigationChrome.serverSwitcherIdentifier, "navigation.serverSwitcher")
+        XCTAssertEqual(RootNavigationChrome.modeControlIdentifier, "navigation.modeControl")
+        XCTAssertEqual(RootNavigationChrome.accountButtonIdentifier, "navigation.account")
+        XCTAssertEqual(RootNavigationChrome.accountContainerIdentifier, "account.root")
+    }
+
+    func testAccountDestinationRowsPreserveCanonicalIdentifiersAndCapabilityGate() {
+        let enabledRows = AccountDestinationRow.available(offlineQueueEnabled: true)
+
+        XCTAssertEqual(
+            enabledRows.map(\.destination),
+            [.notifications, .settings, .manageServers, .offlineQueue]
+        )
+        XCTAssertEqual(
+            enabledRows.map(\.accessibilityIdentifier),
+            [
+                "account.destination.notifications",
+                "account.destination.settings",
+                "account.destination.manageServers",
+                "account.destination.offlineQueue"
+            ]
+        )
+        XCTAssertEqual(
+            AccountDestinationRow.available(offlineQueueEnabled: false).map(\.destination),
+            [.notifications, .settings, .manageServers]
+        )
     }
 
     func testAdaptiveTabAccessibilityIdentifiersMatchSharedContract() {
@@ -150,7 +196,7 @@ final class AppRouterTests: XCTestCase {
         disabled.attentionEnabled = false
         disabled.shiftPlanEnabled = false
 
-        XCTAssertEqual(AppTab.visibleTabs(for: disabled), [.farm, .scan, .inventory])
+        XCTAssertEqual(AppTab.visibleTabs(for: disabled), [.farm, .inventory])
         XCTAssertEqual(AppTab.fallbackTab(for: disabled), .farm)
     }
 
@@ -487,7 +533,7 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(router.requestedShell, .twoModes)
         XCTAssertEqual(
             router.visibleTabs(for: capabilities),
-            [.attention, .farm, .tasks, .scan, .inventory]
+            [.attention, .farm, .tasks, .inventory]
         )
 
         router.configureAdaptiveShell(
@@ -957,7 +1003,6 @@ final class AppRouterTests: XCTestCase {
         router.jobsPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
         router.notificationsPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
         router.inventoryPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-        router.scanPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
         router.oversightPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
         router.overviewPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
         router.fleetPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
@@ -966,9 +1011,6 @@ final class AppRouterTests: XCTestCase {
         )
         router.upkeepPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
         router.reportsPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-        router.dashboardSheetPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-        router.maintenanceSheetPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
-        router.notificationsSheetPath.append(AppDestination.advancedPrinterControls(printerId: printerId))
 
         router.revokeAdvancedPrinterControlsAccess()
 
@@ -977,16 +1019,12 @@ final class AppRouterTests: XCTestCase {
         XCTAssertTrue(router.jobsPath.isEmpty)
         XCTAssertTrue(router.notificationsPath.isEmpty)
         XCTAssertTrue(router.inventoryPath.isEmpty)
-        XCTAssertTrue(router.scanPath.isEmpty)
         XCTAssertTrue(router.oversightPath.isEmpty)
         XCTAssertTrue(router.overviewPath.isEmpty)
         XCTAssertTrue(router.fleetPath.isEmpty)
         XCTAssertTrue(router.oversightJobsPath.isEmpty)
         XCTAssertTrue(router.upkeepPath.isEmpty)
         XCTAssertTrue(router.reportsPath.isEmpty)
-        XCTAssertTrue(router.dashboardSheetPath.isEmpty)
-        XCTAssertTrue(router.maintenanceSheetPath.isEmpty)
-        XCTAssertTrue(router.notificationsSheetPath.isEmpty)
     }
 
     func testAdvancedControlsAccessRequiresOptInAndOnlinePrinter() throws {
@@ -1008,15 +1046,11 @@ final class AppRouterTests: XCTestCase {
     func testPendingPrinterNavigationIsInvalidatedWhenServerChanges() async {
         let router = AppRouter()
 
-        router.dashboardSheetPath.append(AppDestination.printerDetail(id: printerId))
-        router.maintenanceSheetPath.append(AppDestination.maintenanceAnalytics)
-        router.notificationsSheetPath.append(AppDestination.jobDetail(id: printerId))
         router.navigate(to: .printerDetail(id: printerId), capabilities: capabilities)
         router.navigate(to: .attentionItem(id: "attention-1"), capabilities: capabilities)
         router.navigate(to: .spoolDetail(id: 42), capabilities: capabilities)
         router.tasksPath.append(AppDestination.jobHistory)
         router.jobsPath.append(AppDestination.jobDetail(id: printerId))
-        router.scanPath.append(AppDestination.jobDetail(id: printerId))
         router.oversightPath.append(AppDestination.jobHistory)
         router.overviewPath.append(AppDestination.dispatchDashboard)
         router.fleetPath.append(AppDestination.printerDetail(id: printerId))
@@ -1035,16 +1069,12 @@ final class AppRouterTests: XCTestCase {
         XCTAssertTrue(router.jobsPath.isEmpty)
         XCTAssertTrue(router.notificationsPath.isEmpty)
         XCTAssertTrue(router.inventoryPath.isEmpty)
-        XCTAssertTrue(router.scanPath.isEmpty)
         XCTAssertTrue(router.oversightPath.isEmpty)
         XCTAssertTrue(router.overviewPath.isEmpty)
         XCTAssertTrue(router.fleetPath.isEmpty)
         XCTAssertTrue(router.oversightJobsPath.isEmpty)
         XCTAssertTrue(router.upkeepPath.isEmpty)
         XCTAssertTrue(router.reportsPath.isEmpty)
-        XCTAssertTrue(router.dashboardSheetPath.isEmpty)
-        XCTAssertTrue(router.maintenanceSheetPath.isEmpty)
-        XCTAssertTrue(router.notificationsSheetPath.isEmpty)
         XCTAssertNil(router.pendingAttentionItemId)
         XCTAssertNil(router.pendingSpoolHighlightId)
         XCTAssertNil(router.pendingFilamentSwap)
@@ -1111,15 +1141,6 @@ final class AppRouterTests: XCTestCase {
         router.resetToRoot(tab: .tasks)
         XCTAssertTrue(router.tasksPath.isEmpty)
         XCTAssertTrue(router.jobsPath.isEmpty)
-    }
-
-    func testResetToRootClearsScanPath() {
-        let router = AppRouter()
-        router.scanPath.append(AppDestination.jobDetail(id: printerId))
-        XCTAssertFalse(router.scanPath.isEmpty)
-
-        router.resetToRoot(tab: .scan)
-        XCTAssertTrue(router.scanPath.isEmpty)
     }
 
     func testResetToRootClearsInventoryPath() {
@@ -1210,120 +1231,6 @@ final class AppRouterTests: XCTestCase {
         }
     }
 
-    // MARK: - Legacy sheet reset (#727)
-
-    func testResetLegacySheetDashboardClearsDashboardSheetPath() {
-        let router = AppRouter()
-        router.dashboardSheetPath.append(AppDestination.printerDetail(id: printerId))
-        XCTAssertFalse(router.dashboardSheetPath.isEmpty)
-
-        router.resetLegacySheet(.dashboard)
-        XCTAssertTrue(router.dashboardSheetPath.isEmpty,
-                      "Dismissing the Dashboard sheet must clear its owned path")
-    }
-
-    func testResetLegacySheetMaintenanceClearsMaintenanceSheetPath() {
-        let router = AppRouter()
-        router.maintenanceSheetPath.append(AppDestination.maintenanceAnalytics)
-        XCTAssertFalse(router.maintenanceSheetPath.isEmpty)
-
-        router.resetLegacySheet(.maintenance)
-        XCTAssertTrue(router.maintenanceSheetPath.isEmpty,
-                      "Dismissing the Maintenance sheet must clear its owned path")
-    }
-
-    func testResetLegacySheetNotificationsClearsNotificationsSheetPath() {
-        let router = AppRouter()
-        router.notificationsSheetPath.append(AppDestination.jobDetail(id: printerId))
-        XCTAssertFalse(router.notificationsSheetPath.isEmpty)
-
-        router.resetLegacySheet(.notifications)
-        XCTAssertTrue(router.notificationsSheetPath.isEmpty,
-                      "Dismissing the legacy Notifications sheet must clear its owned path")
-    }
-
-    func testResetLegacySheetSettingsIsNoOp() {
-        // SettingsView owns a local NavigationStack, so the router has no
-        // path to reset. The case must exist so callers can wire every
-        // legacy sheet through the same entry point, but the router state
-        // must be untouched.
-        let router = AppRouter()
-        router.notificationsPath.append(AppDestination.jobDetail(id: printerId))
-        router.dashboardSheetPath.append(AppDestination.printerDetail(id: printerId))
-        router.maintenanceSheetPath.append(AppDestination.maintenanceAnalytics)
-        router.notificationsSheetPath.append(AppDestination.jobDetail(id: printerId))
-
-        router.resetLegacySheet(.settings)
-
-        XCTAssertFalse(router.notificationsPath.isEmpty)
-        XCTAssertFalse(router.dashboardSheetPath.isEmpty)
-        XCTAssertFalse(router.maintenanceSheetPath.isEmpty)
-        XCTAssertFalse(router.notificationsSheetPath.isEmpty)
-    }
-
-    func testResetLegacySheetLeavesAttentionTabStackIntact() {
-        // The Attention tab's `notificationsPath` MUST NOT be touched when
-        // a legacy sheet is dismissed. This is the whole point of keeping
-        // sheet-owned paths separate from tab-owned paths (#727).
-        let router = AppRouter()
-        router.notificationsPath.append(AppDestination.jobDetail(id: printerId))
-        let attentionDepthBefore = router.notificationsPath.count
-
-        for sheet in LegacySheet.allCases {
-            router.resetLegacySheet(sheet)
-            XCTAssertEqual(router.notificationsPath.count, attentionDepthBefore,
-                           "Dismissing \(sheet) must not touch the Attention tab stack")
-        }
-    }
-
-    func testResetLegacySheetLeavesOtherTabStacksIntact() {
-        // Dismissing a legacy sheet must never disturb any other tab's
-        // stack — Farm, Tasks, Scan, or Inventory.
-        let router = AppRouter()
-        router.printersPath.append(AppDestination.printerDetail(id: printerId))
-        router.jobsPath.append(AppDestination.jobDetail(id: printerId))
-        router.scanPath.append(AppDestination.jobDetail(id: printerId))
-        router.inventoryPath.append(AppDestination.jobDetail(id: printerId))
-
-        for sheet in LegacySheet.allCases {
-            router.resetLegacySheet(sheet)
-        }
-
-        XCTAssertEqual(router.printersPath.count, 1, "Farm tab stack must be intact")
-        XCTAssertEqual(router.jobsPath.count, 1, "Tasks tab stack must be intact")
-        XCTAssertEqual(router.scanPath.count, 1, "Scan tab stack must be intact")
-        XCTAssertEqual(router.inventoryPath.count, 1, "Inventory tab stack must be intact")
-    }
-
-    func testResetLegacySheetOnlyClearsTargetedSheet() {
-        // Resetting one sheet's path must not clear any other sheet's path.
-        let router = AppRouter()
-        router.dashboardSheetPath.append(AppDestination.printerDetail(id: printerId))
-        router.maintenanceSheetPath.append(AppDestination.maintenanceAnalytics)
-        router.notificationsSheetPath.append(AppDestination.jobDetail(id: printerId))
-
-        router.resetLegacySheet(.dashboard)
-        XCTAssertTrue(router.dashboardSheetPath.isEmpty)
-        XCTAssertEqual(router.maintenanceSheetPath.count, 1)
-        XCTAssertEqual(router.notificationsSheetPath.count, 1)
-
-        router.resetLegacySheet(.maintenance)
-        XCTAssertTrue(router.maintenanceSheetPath.isEmpty)
-        XCTAssertEqual(router.notificationsSheetPath.count, 1)
-
-        router.resetLegacySheet(.notifications)
-        XCTAssertTrue(router.notificationsSheetPath.isEmpty)
-    }
-
-    func testLegacySheetPathsDefaultEmpty() {
-        // A freshly constructed router must have empty sheet stacks so
-        // that opening a legacy sheet always starts at its root.
-        let router = AppRouter()
-        XCTAssertTrue(router.dashboardSheetPath.isEmpty)
-        XCTAssertTrue(router.maintenanceSheetPath.isEmpty)
-        XCTAssertTrue(router.notificationsSheetPath.isEmpty)
-    }
-
     // MARK: - Inventory feature visibility
 
     func testInventorySegmentsKeepSpoolsWhenPrintedPartsAreDisabled() {
@@ -1380,7 +1287,7 @@ final class AppRouterTests: XCTestCase {
             return router.upkeepPath.count
         case .reports:
             return router.reportsPath.count
-        case .attention, .farm, .tasks, .scan, .inventory:
+        case .attention, .farm, .tasks, .inventory:
             XCTFail("Expected an adaptive tab")
             return -1
         }

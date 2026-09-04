@@ -8,10 +8,9 @@ import Observation
 ///
 /// All members are invoked from the `@MainActor`-isolated router.
 struct TaskActionRoutingEnvironment {
-    /// Dismisses any active operator/legacy sheet and returns only once the
-    /// dismissal has been acknowledged. Must complete BEFORE the router
-    /// mutates the destination so an action never opens behind a sheet.
-    var dismissActiveSheets: @MainActor () async -> Void
+    /// Waits for an outgoing task-action presentation to dismiss before the
+    /// router applies its replacement destination.
+    var awaitPresentationDismissal: @MainActor () async -> Void
     /// Applies the guided-swap destination (tab + navigation path) via the
     /// shared router.
     var navigateToSwap: @MainActor (_ printerID: UUID, _ toolheadID: String?) -> Void
@@ -26,13 +25,13 @@ struct TaskActionRoutingEnvironment {
     var refreshTasks: @MainActor () async -> Void
 
     init(
-        dismissActiveSheets: @escaping @MainActor () async -> Void,
+        awaitPresentationDismissal: @escaping @MainActor () async -> Void,
         navigateToSwap: @escaping @MainActor (_ printerID: UUID, _ toolheadID: String?) -> Void,
         authoritySnapshot: @escaping @MainActor () -> Int,
         loadHarvestJob: @escaping @MainActor (_ jobID: UUID) async -> Result<PrintJob, TaskActionRouteError>,
         refreshTasks: @escaping @MainActor () async -> Void
     ) {
-        self.dismissActiveSheets = dismissActiveSheets
+        self.awaitPresentationDismissal = awaitPresentationDismissal
         self.navigateToSwap = navigateToSwap
         self.authoritySnapshot = authoritySnapshot
         self.loadHarvestJob = loadHarvestJob
@@ -45,8 +44,8 @@ struct TaskActionRoutingEnvironment {
 ///
 /// Guarantees:
 /// * **No title parsing** — destinations come only from `TaskActionRouteResolver`.
-/// * **Dismiss-before-destination** — the active sheet is dismissed before any
-///   tab/path/sheet mutation (#726).
+/// * **Dismiss-before-destination** — an outgoing task-action presentation is
+///   dismissed before its replacement destination is applied (#726).
 /// * **Idempotent, newest-wins** — a monotonic generation supersedes any
 ///   in-flight handoff, so repeated taps or a newer action present exactly one
 ///   destination.
@@ -135,10 +134,9 @@ final class TaskActionRouter {
         harvestPresentation = nil
         maintenancePresentation = nil
 
-        // Dismiss the active operator/legacy sheet BEFORE mutating the
-        // destination (#726). The router applies the destination only after
-        // this acknowledged dismissal.
-        await environment.dismissActiveSheets()
+        // Allow SwiftUI to observe the cleared task-action presentation before
+        // applying its replacement destination (#726).
+        await environment.awaitPresentationDismissal()
         guard isCurrent(gen: gen, authority: authority, environment: environment) else { return }
 
         switch destination {

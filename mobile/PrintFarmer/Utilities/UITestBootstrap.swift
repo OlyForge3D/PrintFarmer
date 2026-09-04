@@ -307,7 +307,7 @@ enum UITestBootstrap {
         // parts and bins, so the harvest flow is a real, reachable surface
         // here. Explicitly enable the flag for the demo-shell modes that render
         // the harvest UI (JobDetailView's "Harvest to Inventory" button, the
-        // ScanView shortcut, and the ShiftTasks harvest destination) so the
+        // Inventory scanner, and the ShiftTasks/Attention harvest destinations) so the
         // production default flip does not silently strand those surfaces
         // in the UI-test bundle.
         //
@@ -384,8 +384,8 @@ enum UITestBootstrap {
         #endif
         // #817: make the canonical fleet load fail offline, so the pre-seeded
         // cached snapshot is preserved as the read-only stale shell instead of
-        // being replaced by live data. Dashboard remains reachable from the
-        // enabled Attention overflow.
+        // being replaced by live data. Dashboard remains reachable from its
+        // stable Oversight destination.
         if mode == .authenticatedColdOfflineShell {
             services.capabilitiesService = StubSystemCapabilitiesService(
                 resolved: .defaults

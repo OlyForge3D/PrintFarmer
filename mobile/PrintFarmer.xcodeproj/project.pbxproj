@@ -288,6 +288,8 @@
 		D610P4000000000000000006 /* ServerManagementViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P4000000000000000005 /* ServerManagementViewModelTests.swift */; };
 		D610P5000000000000000002 /* ServerSwitcherViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P5000000000000000001 /* ServerSwitcherViewModel.swift */; };
 		D610P5000000000000000004 /* ServerSwitcherMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P5000000000000000003 /* ServerSwitcherMenu.swift */; };
+		F24210000000000000000002 /* RootNavigationChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24210000000000000000001 /* RootNavigationChrome.swift */; };
+		F24210000000000000000004 /* AccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24210000000000000000003 /* AccountView.swift */; };
 		D610P5000000000000000006 /* ServerSwitcherViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P5000000000000000005 /* ServerSwitcherViewModelTests.swift */; };
 		D610F2000000000000000002 /* ServerCredentialsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610F2000000000000000001 /* ServerCredentialsStore.swift */; };
 		D610F2000000000000000004 /* ServerCredentialsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610F2000000000000000003 /* ServerCredentialsStoreTests.swift */; };
@@ -455,7 +457,7 @@
 		F465B934343F94CAEDAF586F /* HarvestViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87B9A481D27DFAD0954FDBB7 /* HarvestViewModel.swift */; };
 		F6E5D4C3B2A1F2E1D0C9B8A7 /* MockNFCService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B8C9D0E1F2A3B4C5D6E7F8 /* MockNFCService.swift */; };
 		F7060001000000000000A002 /* AttentionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A001 /* AttentionView.swift */; };
-		F7060001000000000000A012 /* ScanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A011 /* ScanView.swift */; };
+		F7060001000000000000A012 /* ScanFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A011 /* ScanFlowView.swift */; };
 		F7060001000000000000A022 /* AdvancedPrinterControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A021 /* AdvancedPrinterControlsView.swift */; };
 		F7060001000000000000A032 /* SystemCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A031 /* SystemCapabilities.swift */; };
 		F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A041 /* SystemCapabilitiesService.swift */; };
@@ -823,6 +825,8 @@
 		D610P4000000000000000005 /* ServerManagementViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerManagementViewModelTests.swift; sourceTree = "<group>"; };
 		D610P5000000000000000001 /* ServerSwitcherViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSwitcherViewModel.swift; sourceTree = "<group>"; };
 		D610P5000000000000000003 /* ServerSwitcherMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSwitcherMenu.swift; sourceTree = "<group>"; };
+		F24210000000000000000001 /* RootNavigationChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootNavigationChrome.swift; sourceTree = "<group>"; };
+		F24210000000000000000003 /* AccountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountView.swift; sourceTree = "<group>"; };
 		D610P5000000000000000005 /* ServerSwitcherViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSwitcherViewModelTests.swift; sourceTree = "<group>"; };
 		D6121AF27098BBC7AC438846 /* LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationService.swift; sourceTree = "<group>"; };
 		D6F328EBCA1FFAB87F2E1347 /* PrinterService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterService.swift; sourceTree = "<group>"; };
@@ -861,7 +865,7 @@
 		F4A621DD81EC9966336CD261 /* MaintenanceServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceServiceProtocol.swift; sourceTree = "<group>"; };
 		F6A7B8C9D0E1F2A3B4C5D6E7 /* MockQRSpoolScannerService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockQRSpoolScannerService.swift; sourceTree = "<group>"; };
 		F7060001000000000000A001 /* AttentionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionView.swift; sourceTree = "<group>"; };
-		F7060001000000000000A011 /* ScanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanView.swift; sourceTree = "<group>"; };
+		F7060001000000000000A011 /* ScanFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanFlowView.swift; sourceTree = "<group>"; };
 		F7060001000000000000A021 /* AdvancedPrinterControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedPrinterControlsView.swift; sourceTree = "<group>"; };
 		F7060001000000000000A031 /* SystemCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilities.swift; sourceTree = "<group>"; };
 		F7060001000000000000A041 /* SystemCapabilitiesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesService.swift; sourceTree = "<group>"; };
@@ -1432,6 +1436,7 @@
 		CBAC88193AFA3F2403893113 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				F24210000000000000000003 /* AccountView.swift */,
 				241600000000000000000003 /* NavigationSettingsView.swift */,
 				BA0262E35EBDB310533C010A /* SettingsView.swift */,
 				D610P4000000000000000003 /* ServerManagementViews.swift */,
@@ -1463,6 +1468,7 @@
 				B076B098F30F1506B8E1C983 /* iPadPrinterCardView.swift */,
 				4E45A19848758E2DB8543C2A /* StatusBadge.swift */,
 				D610P5000000000000000003 /* ServerSwitcherMenu.swift */,
+				F24210000000000000000001 /* RootNavigationChrome.swift */,
 				3F15146257C59F44A210F002 /* CustomIcons.swift */,
 				97DEEFD9852661DAA2637C25 /* TemperatureView.swift */,
 				DAFD389576B18CC0E5ADBB63 /* MJPEGStreamView.swift */,
@@ -1633,7 +1639,7 @@
 		F7060001000000000000A013 /* Scan */ = {
 			isa = PBXGroup;
 			children = (
-				F7060001000000000000A011 /* ScanView.swift */,
+				F7060001000000000000A011 /* ScanFlowView.swift */,
 				6F6608F46256F5914589FD48 /* HarvestSheetView.swift */,
 				40AE68126C0013F4366194BF /* BinScanResultView.swift */,
 				07D94FCFA57014B2932689A3 /* PartScanResultView.swift */,
@@ -2060,6 +2066,7 @@
 				2B0A1CAE11FC88565FA288EA /* iPadPrinterCardView.swift in Sources */,
 				57E23E107ED77369284AF9D4 /* StatusBadge.swift in Sources */,
 				D610P5000000000000000004 /* ServerSwitcherMenu.swift in Sources */,
+				F24210000000000000000002 /* RootNavigationChrome.swift in Sources */,
 				2C6155264C934670F2278DC9 /* CustomIcons.swift in Sources */,
 				C46CED04E8CBA839846568BC /* TemperatureView.swift in Sources */,
 				77F7448C2D183C8F140C41CB /* MJPEGStreamView.swift in Sources */,
@@ -2071,6 +2078,7 @@
 				D3B43552C5380F3A3AFD1F77 /* PrinterDetailView.swift in Sources */,
 				8F2654878B838B7E5AA35AAC /* PrinterListView.swift in Sources */,
 				241600000000000000000004 /* NavigationSettingsView.swift in Sources */,
+				F24210000000000000000004 /* AccountView.swift in Sources */,
 				8E016F38A846594333A70CEB /* SettingsView.swift in Sources */,
 				D610P4000000000000000004 /* ServerManagementViews.swift in Sources */,
 				BCB617F9B1642391E9805237 /* Color+Hex.swift in Sources */,
@@ -2143,7 +2151,7 @@
 				A2B6286100000000000000A2 /* JogSubgroup.swift in Sources */,
 				A4C8D9E0123456789ABCD002 /* DisabledControlStyle.swift in Sources */,
 				F7060001000000000000A002 /* AttentionView.swift in Sources */,
-				F7060001000000000000A012 /* ScanView.swift in Sources */,
+				F7060001000000000000A012 /* ScanFlowView.swift in Sources */,
 				F7060001000000000000A022 /* AdvancedPrinterControlsView.swift in Sources */,
 				F7060001000000000000A032 /* SystemCapabilities.swift in Sources */,
 				F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */,

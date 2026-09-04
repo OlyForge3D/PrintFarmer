@@ -17,15 +17,17 @@ struct ShiftTasksView: View {
         NavigationStack(path: $router.tasksPath) {
             content
                 .navigationTitle("Tasks")
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        NavigationLink(value: ShiftTasksDestination.printQueue) {
-                            Label("Print queue", systemImage: "tray.full")
-                        }
-                        .accessibilityLabel("Print queue")
-                        .accessibilityHint("Opens the existing print job queue.")
-                        .accessibilityIdentifier("shiftTasks.printQueue")
+                .rootNavigationChrome(for: .tasks) {
+                    NavigationLink(value: ShiftTasksDestination.printQueue) {
+                        Image(systemName: "tray.full")
+                            .frame(
+                                minWidth: RootNavigationChrome.minimumTouchTarget,
+                                minHeight: RootNavigationChrome.minimumTouchTarget
+                            )
                     }
+                    .accessibilityLabel("Print queue")
+                    .accessibilityHint("Opens the existing print job queue.")
+                    .accessibilityIdentifier("shiftTasks.printQueue")
                 }
                 .refreshable {
                     await reloadCapabilitiesAndTasks()
@@ -45,6 +47,9 @@ struct ShiftTasksView: View {
                     case .printQueue:
                         JobListView(ownsNavigationStack: false)
                     }
+                }
+                .navigationDestination(for: AppDestination.self) { destination in
+                    destinationView(for: destination)
                 }
         }
         .task(id: services.activeServerGeneration) {
@@ -271,11 +276,9 @@ struct ShiftTasksView: View {
         let viewModel = viewModel
         actionRouter.configure(
             environment: TaskActionRoutingEnvironment(
-                dismissActiveSheets: {
-                    // Dismiss any active operator/legacy sheet and yield one
-                    // runloop turn so SwiftUI applies the dismissal before the
-                    // destination mutates (#726 dismiss-before-destination).
-                    router.requestTransientSheetDismissal()
+                awaitPresentationDismissal: {
+                    // Yield one runloop turn so SwiftUI applies the cleared
+                    // task-action presentation before its replacement.
                     await Task { @MainActor in }.value
                 },
                 navigateToSwap: { printerID, toolheadID in

@@ -17,11 +17,12 @@ private struct ResolvedNavigationIdentity: Equatable {
     let isProvisional: Bool
 }
 
-/// Adaptive operator shell for compact devices, with the existing split view
-/// retained until the dedicated iPad navigation work lands.
+/// Adaptive operator shell for compact devices, with Scan flows hosted by
+/// their owning task surfaces instead of a dedicated tab, and endpoint-fenced
+/// navigation identity resolution guarding the adaptive shell configuration.
 struct ContentView: View {
     static let sidebarRowMinimumHeight: CGFloat = 44
-    static let modeControlMinimumHeight: CGFloat = 44
+    static let modeControlMinimumHeight = RootNavigationChrome.minimumTouchTarget
 
     static func shippingTabs(
         for capabilities: ResolvedSystemCapabilities
@@ -130,10 +131,10 @@ struct ContentView: View {
                     tabContentView(for: tab)
                         .tabItem {
                             Label(tab.title, systemImage: tab.systemImage)
+                                .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
                         }
                         .tag(tab)
                         .badge(badgeCount(for: tab))
-                        .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
                 }
             }
         }
@@ -168,25 +169,31 @@ struct ContentView: View {
 
     private func iPadLayout(capabilities: ResolvedSystemCapabilities) -> some View {
         @Bindable var router = router
-        let tabs = Self.shippingTabs(for: capabilities)
+        let tabs = router.visibleTabs(for: capabilities)
+        let resolvedTab = resolvedShippingTab(for: capabilities)
 
         return NavigationSplitView(columnVisibility: $router.sidebarVisibility) {
-            List {
-                Section {
-                    ForEach(tabs, id: \.self) { tab in
-                        sidebarButton(
-                            tab: tab,
-                            capabilities: capabilities
-                        )
-                    }
-                } header: {
-                    Text("Operator")
+            VStack(spacing: 0) {
+                if router.shouldShowModeControl(for: resolvedTab) {
+                    modeControl(capabilities: capabilities)
                 }
+                List {
+                    Section {
+                        ForEach(tabs, id: \.self) { tab in
+                            sidebarButton(
+                                tab: tab,
+                                capabilities: capabilities
+                            )
+                        }
+                    } header: {
+                        Text("Operator")
+                    }
+                }
+                .listStyle(.sidebar)
             }
-            .listStyle(.sidebar)
             .navigationTitle("PrintFarmer")
         } detail: {
-            tabContentView(for: resolvedShippingTab(for: capabilities))
+            tabContentView(for: resolvedTab)
         }
         .navigationSplitViewStyle(.balanced)
     }
@@ -227,28 +234,14 @@ struct ContentView: View {
     private func resolvedShippingTab(
         for capabilities: ResolvedSystemCapabilities
     ) -> AppTab {
-        let tabs = Self.shippingTabs(for: capabilities)
-        return tabs.contains(router.selectedTab)
-            ? router.selectedTab
-            : AppTab.fallbackTab(
-                for: .current,
-                mode: .floor,
-                capabilities: capabilities
-            )
+        router.resolvedTab(for: capabilities)
     }
 
     private func selectShippingTab(
         _ tab: AppTab,
         capabilities: ResolvedSystemCapabilities
     ) {
-        let tabs = Self.shippingTabs(for: capabilities)
-        router.selectedTab = tabs.contains(tab)
-            ? tab
-            : AppTab.fallbackTab(
-                for: .current,
-                mode: .floor,
-                capabilities: capabilities
-            )
+        router.selectTab(tab, capabilities: capabilities)
     }
 
     private func badgeCount(for tab: AppTab) -> Int {
@@ -468,8 +461,6 @@ struct ContentView: View {
             PrinterListView()
         case .tasks:
             ShiftTasksView()
-        case .scan:
-            ScanView()
         case .inventory:
             InventoryView()
         case .oversight, .overview, .fleet, .jobs, .upkeep, .reports:

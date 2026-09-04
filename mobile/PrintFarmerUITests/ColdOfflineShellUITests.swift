@@ -7,7 +7,7 @@ import XCTest
 /// The `--uitesting-cold-offline-shell` bootstrap seeds a present cached
 /// snapshot of the demo fleet (fixed last-confirmed timestamp) into a stub
 /// `FarmSnapshotStoring` and forces the printer service offline. Dashboard is
-/// opened from the enabled Attention overflow; it hydrates the cached fleet,
+/// opened from its Oversight destination; it hydrates the cached fleet,
 /// the canonical load then fails offline, and the cache is preserved as the
 /// read-only stale shell.
 ///
@@ -20,27 +20,20 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
         ["--uitesting-cold-offline-shell"]
     }
 
-    /// Opens the read-only `DashboardView` cold-offline shell through the
-    /// Attention overflow. Returns the stale connection banner, which the
+    /// Opens the read-only `DashboardView` cold-offline shell through
+    /// Oversight. Returns the stale connection banner, which the
     /// read-only shell always mounts.
     @discardableResult
     private func openColdOfflineShell() -> XCUIElement {
-        let attention = operatorDestinationButton(
-            tabTitle: "Attention",
-            sidebarIdentifier: "sidebar.attention",
+        let oversight = operatorDestinationButton(
+            tabTitle: "Oversight",
+            sidebarIdentifier: "sidebar.oversight",
             timeout: 8
         )
-        XCTAssertTrue(attention.exists)
-        attention.tap()
+        XCTAssertTrue(oversight.exists)
+        oversight.tap()
 
-        let overflow = app.buttons["attention.overflow"]
-        XCTAssertTrue(
-            overflow.waitForExistence(timeout: 10),
-            "Enabled Attention must expose its overflow menu"
-        )
-        overflow.tap()
-
-        let dashboardButton = app.buttons["attention.overflow.dashboard"]
+        let dashboardButton = app.buttons["oversight.destination.dashboard"]
         XCTAssertTrue(dashboardButton.waitForExistence(timeout: 5))
         dashboardButton.tap()
 
@@ -138,5 +131,28 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
             firstElement(idPrefix: "dashboard.activeJob.").exists,
             "Read-only cold-offline shell must not mount live active-job command affordances"
         )
+    }
+
+    func testOfflineQueueRemainsReachableFromAccountWhileOffline() {
+        let attention = operatorDestinationButton(
+            tabTitle: "Attention",
+            sidebarIdentifier: "sidebar.attention",
+            timeout: 8
+        )
+        XCTAssertTrue(attention.exists)
+        attention.tap()
+
+        let account = app.buttons["navigation.account"]
+        XCTAssertTrue(account.waitForExistence(timeout: 10))
+        account.tap()
+
+        let offlineQueue = app.buttons["account.destination.offlineQueue"]
+        XCTAssertTrue(
+            offlineQueue.waitForExistence(timeout: 8),
+            "Offline Queue must remain reachable from the account area while offline"
+        )
+        offlineQueue.tap()
+
+        XCTAssertTrue(app.navigationBars["Offline Queue"].waitForExistence(timeout: 8))
     }
 }

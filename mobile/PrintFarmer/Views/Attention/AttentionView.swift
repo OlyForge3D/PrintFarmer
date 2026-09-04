@@ -15,6 +15,13 @@ struct AttentionPendingAction: Identifiable, Equatable {
     var id: String { "\(itemID):\(action.kind.rawValue)" }
 }
 
+private struct AttentionHarvestPresentation: Identifiable {
+    let itemID: String
+    let job: PrintJob
+
+    var id: String { itemID }
+}
+
 struct AttentionNavigationTargets: Equatable {
     let printer: AppDestination
     let job: AppDestination?
@@ -145,6 +152,14 @@ enum AttentionAccessibility {
         )
     }
 
+    static func scanBin(_ item: AttentionItem) -> AttentionAccessibilityDescriptor {
+        AttentionAccessibilityDescriptor(
+            identifier: "attention.item.\(item.id).action.scanBin",
+            label: "Scan bin",
+            hint: "Scans the destination bin, records the harvest, and returns to this task."
+        )
+    }
+
     static func actionProgress(
         item: AttentionItem,
         actionKind: AttentionActionKind
@@ -205,7 +220,18 @@ enum AttentionAccessibility {
         if let jobID = item.jobId {
             identifiers.append(navigation(item: item, destination: .jobDetail(id: jobID)).identifier)
         }
-        identifiers.append(contentsOf: actions.map { action(item: item, action: $0).identifier })
+        if item.kind == .harvest, item.jobId != nil {
+            identifiers.append(scanBin(item).identifier)
+        }
+        identifiers.append(
+            contentsOf: actions
+                .filter {
+                    item.kind != .harvest
+                        || item.jobId == nil
+                        || $0.kind != .harvest
+                }
+                .map { action(item: item, action: $0).identifier }
+        )
         switch actionState {
         case .idle:
             break
@@ -268,14 +294,13 @@ enum AttentionAccessibility {
 struct AttentionView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
-    @Environment(ServerRegistry.self) private var serverRegistry
     @State private var feedViewModel = AttentionFeedViewModel()
-    @State private var showingSettings = false
-    @State private var showingDashboard = false
-    @State private var showingMaintenance = false
-    @State private var showingNotifications = false
     @State private var pendingAction: AttentionPendingAction?
     @State private var resolvingAttentionItemId: String?
+    @State private var loadingHarvestItemID: String?
+    @State private var harvestPresentation: AttentionHarvestPresentation?
+    @State private var harvestLoadError: String?
+    @State private var isViewActive = false
     /// Locally observed feature-disabled flag. Populated from the shared
     /// operator feature gate (#725) via `SystemCapabilitiesService` and
     /// also flipped locally when `/api/attention` returns ProblemDetails
@@ -316,7 +341,7 @@ struct AttentionView: View {
                 reconcilePendingAction()
             }
             .navigationTitle("Attention")
-            .toolbar { toolbarContent }
+            .rootNavigationChrome(for: .attention)
             .refreshable {
                 // Cycle-8 blocker B fix: capture owner provenance
                 // synchronously at .refreshable closure entry (before
@@ -332,6 +357,19 @@ struct AttentionView: View {
             }
             .navigationDestination(for: AppDestination.self) { destination in
                 destinationView(for: destination)
+            }
+        }
+        .sheet(item: $harvestPresentation) { presentation in
+            HarvestSheetView(job: presentation.job, autoStartBinScan: true) {
+                harvestPresentation = nil
+                Task { await feedViewModel.refresh() }
+            }
+        }
+        .alert("Unable to Open Harvest", isPresented: .constant(harvestLoadError != nil)) {
+            Button("OK") { harvestLoadError = nil }
+        } message: {
+            if let harvestLoadError {
+                Text(harvestLoadError)
             }
         }
         .task(id: services.activeServerGeneration) {
@@ -378,20 +416,18 @@ struct AttentionView: View {
             // reflects the total number of items needing attention.
             router.notificationBadgeCount = attentionEnabled ? newValue : 0
         }
+        .onChange(of: services.activeServerGeneration) { _, _ in
+            loadingHarvestItemID = nil
+            harvestPresentation = nil
+            harvestLoadError = nil
+        }
+        .onAppear {
+            isViewActive = true
+        }
         .onDisappear {
+            isViewActive = false
+            loadingHarvestItemID = nil
             feedViewModel.deactivate()
-        }
-        .sheet(isPresented: $showingSettings) {
-            SettingsView()
-        }
-        .sheet(isPresented: $showingDashboard) {
-            DashboardView()
-        }
-        .sheet(isPresented: $showingMaintenance) {
-            MaintenanceView()
-        }
-        .sheet(isPresented: $showingNotifications) {
-            NotificationsView()
         }
         .confirmationDialog(
             pendingAction.map { "Confirm \($0.action.label)" } ?? "Confirm action",
@@ -414,28 +450,6 @@ struct AttentionView: View {
             }
         } message: { pending in
             Text("This sends \(pending.action.label) for this item to the PrintFarmer server.")
-        }
-        .onChange(of: showingDashboard) { _, isPresented in
-            if !isPresented { router.resetLegacySheet(.dashboard) }
-        }
-        .onChange(of: showingMaintenance) { _, isPresented in
-            if !isPresented { router.resetLegacySheet(.maintenance) }
-        }
-        .onChange(of: showingNotifications) { _, isPresented in
-            if !isPresented { router.resetLegacySheet(.notifications) }
-        }
-        .onChange(of: showingSettings) { _, isPresented in
-            if !isPresented { router.resetLegacySheet(.settings) }
-        }
-        .onChange(of: router.sheetDismissalNonce) { _, _ in
-            // #726 sheet-safe routing: a task-action handoff requested that any
-            // active operator/legacy sheet be dismissed before the destination
-            // is applied. Close every legacy sheet; the per-sheet `.onChange`
-            // handlers above reset their stacks as they transition to false.
-            showingSettings = false
-            showingDashboard = false
-            showingMaintenance = false
-            showingNotifications = false
         }
     }
 
@@ -523,6 +537,39 @@ struct AttentionView: View {
             pendingAction = pending
         } else {
             triggerAction(pending)
+        }
+    }
+
+    private func openHarvestScanner(for item: AttentionItem) {
+        guard let jobID = item.jobId, loadingHarvestItemID == nil else { return }
+        let capturedGeneration = services.activeServerGeneration
+        loadingHarvestItemID = item.id
+        harvestLoadError = nil
+
+        Task {
+            do {
+                let job = try await services.jobService.get(id: jobID)
+                guard capturedGeneration == services.activeServerGeneration, isViewActive else {
+                    if loadingHarvestItemID == item.id {
+                        loadingHarvestItemID = nil
+                    }
+                    return
+                }
+                loadingHarvestItemID = nil
+                harvestPresentation = AttentionHarvestPresentation(
+                    itemID: item.id,
+                    job: job
+                )
+            } catch {
+                guard capturedGeneration == services.activeServerGeneration, isViewActive else {
+                    if loadingHarvestItemID == item.id {
+                        loadingHarvestItemID = nil
+                    }
+                    return
+                }
+                loadingHarvestItemID = nil
+                harvestLoadError = error.localizedDescription
+            }
         }
     }
 
@@ -699,6 +746,10 @@ struct AttentionView: View {
                             onAction: { action in
                                 handleActionTap(item: item, action: action)
                             },
+                            onScanBin: {
+                                openHarvestScanner(for: item)
+                            },
+                            isScanBinLoading: loadingHarvestItemID == item.id,
                             onRetryAction: retryAction,
                             onRetryActionRefresh: retryActionRefresh,
                             onLoadMedia: {
@@ -1004,7 +1055,7 @@ struct AttentionView: View {
                         .font(.title3.weight(.semibold))
                         .multilineTextAlignment(.center)
 
-                    Text("The operator attention feed is turned off on this server. Use the legacy screens below while it's disabled, or check for a re-enable with Try again.")
+                    Text("The operator attention feed is turned off on this server. Use the other navigation destinations for farm work, or check for a re-enable with Try again.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -1025,134 +1076,12 @@ struct AttentionView: View {
                 .controlSize(.large)
                 .accessibilityIdentifier("attention.disabled.retry")
 
-                VStack(spacing: 12) {
-                    fallbackButton(
-                        title: "Notifications",
-                        systemImage: "bell",
-                        hint: "Opens the classic notifications list.",
-                        identifier: "attention.fallback.notifications"
-                    ) {
-                        showingNotifications = true
-                    }
-                    fallbackButton(
-                        title: "Dashboard",
-                        systemImage: "square.grid.2x2",
-                        hint: "Opens the printer dashboard summary.",
-                        identifier: "attention.fallback.dashboard"
-                    ) {
-                        showingDashboard = true
-                    }
-                    fallbackButton(
-                        title: "Maintenance",
-                        systemImage: "wrench.adjustable",
-                        hint: "Opens the maintenance tasks screen.",
-                        identifier: "attention.fallback.maintenance"
-                    ) {
-                        showingMaintenance = true
-                    }
-                }
-                .padding(.horizontal, 24)
-
                 Spacer(minLength: 40)
             }
             .frame(maxWidth: .infinity)
         }
         .scrollBounceBehavior(.always)
         .accessibilityIdentifier("attention.disabled.fallback")
-    }
-
-    @ViewBuilder
-    private func fallbackButton(
-        title: String,
-        systemImage: String,
-        hint: String,
-        identifier: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: systemImage)
-                    .font(.headline)
-                    .frame(width: 28)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .font(.body.weight(.semibold))
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frame(minHeight: 44)
-            .frame(maxWidth: .infinity)
-            .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.pfBorder, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityHint(hint)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier(identifier)
-    }
-
-    // MARK: - Toolbar
-
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            if ServerSwitcherViewModel(
-                servers: serverRegistry.servers,
-                activeServerID: serverRegistry.activeServerID
-            ).isVisible {
-                ServerSwitcherMenu(style: .toolbar)
-            }
-        }
-
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Button {
-                    showingNotifications = true
-                } label: {
-                    Label("Notifications", systemImage: "bell")
-                }
-                .accessibilityIdentifier("attention.overflow.notifications")
-
-                Button {
-                    showingDashboard = true
-                } label: {
-                    Label("Dashboard", systemImage: "square.grid.2x2")
-                }
-                .accessibilityIdentifier("attention.overflow.dashboard")
-
-                Button {
-                    showingMaintenance = true
-                } label: {
-                    Label("Maintenance", systemImage: "wrench.adjustable")
-                }
-                .accessibilityIdentifier("attention.overflow.maintenance")
-
-                Divider()
-
-                Button {
-                    showingSettings = true
-                } label: {
-                    Label("Settings", systemImage: "gear")
-                }
-                .accessibilityIdentifier("attention.overflow.settings")
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .imageScale(.large)
-                    .frame(minWidth: 44, minHeight: 44)
-            }
-            .accessibilityLabel("More")
-            .accessibilityHint("Opens dashboard, maintenance, and settings.")
-            .accessibilityIdentifier("attention.overflow")
-        }
     }
 }
 
@@ -1167,13 +1096,23 @@ struct AttentionItemRow: View {
     let mediaState: AttentionMediaState?
     let mediaRequestID: AttentionMediaRequestID
     let onAction: (AttentionAction) -> Void
+    let onScanBin: () -> Void
+    let isScanBinLoading: Bool
     let onRetryAction: (AttentionActionFailure) -> Void
     let onRetryActionRefresh: (AttentionActionRefreshPending) -> Void
     let onLoadMedia: () async -> Bool
     let onRetryMedia: () -> Void
 
     private var supportedActions: [AttentionAction] {
-        AttentionFeedViewModel.supportedActions(in: item)
+        AttentionFeedViewModel.supportedActions(in: item).filter {
+            item.kind != .harvest
+                || item.jobId == nil
+                || $0.kind != .harvest
+        }
+    }
+
+    private var showsScanBinAction: Bool {
+        item.kind == .harvest && item.jobId != nil
     }
 
     private var navigationTargets: AttentionNavigationTargets {
@@ -1193,7 +1132,7 @@ struct AttentionItemRow: View {
                 mediaView(state: mediaState)
             }
             navigationLinks
-            if !supportedActions.isEmpty || actionState != .idle {
+            if showsScanBinAction || !supportedActions.isEmpty || actionState != .idle {
                 Divider()
                 actionControls
             }
@@ -1434,6 +1373,31 @@ struct AttentionItemRow: View {
     @ViewBuilder
     private var actionControls: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if showsScanBinAction {
+                let accessibility = AttentionAccessibility.scanBin(item)
+                Button {
+                    onScanBin()
+                } label: {
+                    HStack {
+                        if isScanBinLoading {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "barcode.viewfinder")
+                        }
+                        Text(isScanBinLoading ? "Opening scanner…" : "Scan bin")
+                        Spacer(minLength: 8)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isScanBinLoading)
+                .accessibilityLabel(
+                    isScanBinLoading ? "Opening bin scanner" : accessibility.label
+                )
+                .accessibilityHint(accessibility.hint)
+                .accessibilityIdentifier(accessibility.identifier)
+            }
+
             ForEach(Array(supportedActions.enumerated()), id: \.offset) { _, action in
                 actionButton(action)
             }

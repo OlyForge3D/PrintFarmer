@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct MaintenanceView: View {
-    @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(\.horizontalSizeClass) private var sizeClass
     private let ownsNavigationStack: Bool
@@ -14,11 +13,9 @@ struct MaintenanceView: View {
     }
 
     var body: some View {
-        @Bindable var router = router
-
         Group {
             if ownsNavigationStack {
-                NavigationStack(path: $router.maintenanceSheetPath) {
+                NavigationStack {
                     screenContent
                 }
             } else {

@@ -8,6 +8,8 @@ struct PartsInventoryListView: View {
     @Environment(ServiceContainer.self) private var services
     @State private var viewModel = PartsInventoryViewModel()
     @State private var selectedPart: PartInventoryResponse?
+    @State private var showScanFlow = false
+    @State private var showPartLookup = false
     @State private var activeTasks: [Task<Void, Never>] = []
 
     var body: some View {
@@ -56,6 +58,31 @@ struct PartsInventoryListView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
         #endif
+        .rootNavigationChrome(for: .inventory) {
+            Menu {
+                Button {
+                    showScanFlow = true
+                } label: {
+                    Label("Scan code", systemImage: "barcode.viewfinder")
+                }
+
+                Button {
+                    showPartLookup = true
+                } label: {
+                    Label("Look up printed part", systemImage: "cube.box")
+                }
+                .accessibilityIdentifier("inventory.partLookup")
+            } label: {
+                Image(systemName: "barcode.viewfinder")
+                    .frame(
+                        minWidth: RootNavigationChrome.minimumTouchTarget,
+                        minHeight: RootNavigationChrome.minimumTouchTarget
+                    )
+            }
+            .accessibilityLabel("Scan inventory")
+            .accessibilityHint("Opens camera scanning or printed-part lookup.")
+            .accessibilityIdentifier("inventory.scan")
+        }
         .refreshable {
             await viewModel.loadParts()
         }
@@ -72,6 +99,15 @@ struct PartsInventoryListView: View {
                 activeTasks.append(task)
             }
         }
+        .sheet(isPresented: $showScanFlow) {
+            ScanFlowView()
+        }
+        .sheet(isPresented: $showPartLookup) {
+            PartLookupView(partsInventoryService: services.partsInventoryService) { part in
+                selectedPart = part
+                showPartLookup = false
+            }
+        }
         .task {
             viewModel.isViewActive = true
             viewModel.configure(partsInventoryService: services.partsInventoryService)
@@ -81,6 +117,83 @@ struct PartsInventoryListView: View {
             activeTasks.forEach { $0.cancel() }
             activeTasks.removeAll()
             viewModel.isViewActive = false
+        }
+    }
+
+    /// Direct printed-part lookup re-homed from the retired Scan tab.
+    struct PartLookupView: View {
+        let partsInventoryService: any PartsInventoryServiceProtocol
+        let onSelect: (PartInventoryResponse) -> Void
+
+        @Environment(\.dismiss) private var dismiss
+        @State private var parts: [PartInventoryResponse] = []
+        @State private var isLoading = false
+        @State private var errorMessage: String?
+        @State private var searchText = ""
+
+        private var filteredParts: [PartInventoryResponse] {
+            guard !searchText.isEmpty else { return parts }
+            return parts.filter {
+                $0.name.localizedCaseInsensitiveContains(searchText)
+                    || $0.sku.localizedCaseInsensitiveContains(searchText)
+            }
+        }
+
+        var body: some View {
+            NavigationStack {
+                Group {
+                    if isLoading {
+                        ProgressView("Loading parts…")
+                    } else if let errorMessage {
+                        ContentUnavailableView {
+                            Label("Unable to Load Parts", systemImage: "exclamationmark.triangle")
+                        } description: {
+                            Text(errorMessage)
+                        }
+                    } else if parts.isEmpty {
+                        ContentUnavailableView {
+                            Label("No Printed Parts", systemImage: "cube.box")
+                        } description: {
+                            Text("No printed-part SKUs are configured yet.")
+                        }
+                    } else {
+                        List(filteredParts) { part in
+                            Button {
+                                onSelect(part)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(part.name)
+                                        .font(.subheadline.weight(.medium))
+                                    Text("SKU \(part.sku) • On hand \(part.onHand)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("inventory.partLookup.row.\(part.sku)")
+                        }
+                        .searchable(text: $searchText, prompt: "Search SKU or name")
+                    }
+                }
+                .navigationTitle("Printed Parts")
+                #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+                #endif
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { dismiss() }
+                    }
+                }
+                .task {
+                    isLoading = true
+                    do {
+                        parts = try await partsInventoryService.listParts()
+                    } catch {
+                        errorMessage = error.localizedDescription
+                    }
+                    isLoading = false
+                }
+            }
         }
     }
 

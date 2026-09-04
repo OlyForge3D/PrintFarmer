@@ -41,6 +41,8 @@ struct ServerSwitcherMenu: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(viewModel.switcherAccessibilityLabel)
+            .accessibilityHint("Switches the active PrintFarmer server.")
+            .accessibilityIdentifier(RootNavigationChrome.serverSwitcherIdentifier)
             .sheet(isPresented: $showingServers) {
                 NavigationStack {
                     ServersView()
@@ -64,7 +66,10 @@ struct ServerSwitcherMenu: View {
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, 10)
-            .frame(minHeight: 44)
+            .frame(
+                minWidth: RootNavigationChrome.minimumTouchTarget,
+                minHeight: RootNavigationChrome.minimumTouchTarget
+            )
             .contentShape(Rectangle())
 
         case .sidebar:

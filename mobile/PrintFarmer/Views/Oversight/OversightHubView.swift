@@ -18,6 +18,8 @@ struct OversightHubView: View {
     }
 
     var body: some View {
+        @Bindable var router = router
+
         List {
             if showsUpgradeOffer {
                 Section {
@@ -37,6 +39,7 @@ struct OversightHubView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Oversight")
+        .rootNavigationChrome(for: .oversight)
         .navigationDestination(for: AppDestination.self) { destination in
             destinationView(for: destination)
         }
@@ -189,7 +192,7 @@ struct OversightTabRootView: View {
                 ),
                 path: $router.reportsPath
             )
-        case .attention, .farm, .tasks, .scan, .inventory:
+        case .attention, .farm, .tasks, .inventory:
             Color.clear
                 .accessibilityHidden(true)
         }
@@ -213,6 +216,7 @@ private struct OversightDestinationListRoot: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle(root.title)
+            .rootNavigationChrome(for: root.appTab)
             .navigationDestination(for: AppDestination.self) { destination in
                 destinationView(for: destination)
             }

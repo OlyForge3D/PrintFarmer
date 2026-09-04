@@ -12,11 +12,9 @@ struct NotificationsView: View {
     }
 
     var body: some View {
-        @Bindable var router = router
-
         Group {
             if ownsNavigationStack {
-                NavigationStack(path: $router.notificationsSheetPath) {
+                NavigationStack {
                     screenContent
                 }
             } else {

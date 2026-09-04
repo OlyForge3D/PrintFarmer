@@ -1,5 +1,35 @@
 import SwiftUI
 
+enum HarvestBinScanResolution: Equatable {
+    case code(String)
+    case cancelled
+    case unavailable
+    case error(String)
+}
+
+enum HarvestBinScanner {
+    static func scan(
+        scanner: (any BarcodeScannerProtocol)?,
+        partsInventoryService: any PartsInventoryServiceProtocol
+    ) async -> HarvestBinScanResolution {
+        guard let scanner, scanner.isAvailable else {
+            return .unavailable
+        }
+
+        switch await scanner.scanBarcode() {
+        case .barcode(let code):
+            if let bin = try? await partsInventoryService.resolveBinByBarcode(code) {
+                return .code(bin.code)
+            }
+            return .code(code)
+        case .cancelled:
+            return .cancelled
+        case .error(let error):
+            return .error(error.localizedDescription)
+        }
+    }
+}
+
 /// Harvest sheet (#714, F9): confirm quantity (prefilled from the job's
 /// output mapping), scan/select a destination bin, and submit the harvest.
 /// Reachable from `JobDetailView` (completed jobs) and from
@@ -11,6 +41,7 @@ struct HarvestSheetView: View {
     @State private var activeTasks: [Task<Void, Never>] = []
     @State private var showOverrideSheet = false
     @State private var showBinPicker = false
+    @State private var shouldAutoStartBinScan: Bool
 
     /// Called after a successful (or already-harvested) result so the
     /// presenter can refresh job/bin/inventory state. Delivery ("exactly
@@ -20,10 +51,16 @@ struct HarvestSheetView: View {
     /// effect, so the once-per-sheet contract is provable from a unit test.
     var onHarvested: (() -> Void)?
 
-    init(job: PrintJob, presetBinCode: String? = nil, onHarvested: (() -> Void)? = nil) {
+    init(
+        job: PrintJob,
+        presetBinCode: String? = nil,
+        autoStartBinScan: Bool = false,
+        onHarvested: (() -> Void)? = nil
+    ) {
         let model = HarvestViewModel(job: job, presetBinCode: presetBinCode)
         model.onHarvested = onHarvested
         _viewModel = State(initialValue: model)
+        _shouldAutoStartBinScan = State(initialValue: autoStartBinScan)
         self.onHarvested = onHarvested
     }
 
@@ -64,6 +101,9 @@ struct HarvestSheetView: View {
             }
             .task {
                 await viewModel.loadContext(partsInventoryService: services.partsInventoryService)
+                guard shouldAutoStartBinScan else { return }
+                shouldAutoStartBinScan = false
+                await scanBin()
             }
             .onChange(of: viewModel.hasWrongBinConflict) { _, hasConflict in
                 showOverrideSheet = hasConflict
@@ -265,16 +305,18 @@ struct HarvestSheetView: View {
     /// destination bin. Preserves the existing `presetBinCode` scan-first
     /// shortcut flow unchanged — this affordance is additive.
     private func scanBin() async {
-        guard let scanner = services.barcodeScannerService, scanner.isAvailable else {
-            showBinPicker = true
-            return
-        }
-        let result = await scanner.scanBarcode()
-        guard case .barcode(let code) = result else { return }
-        if let bin = try? await services.partsInventoryService.resolveBinByBarcode(code) {
-            viewModel.sharedBinCode = bin.code
-        } else {
+        switch await HarvestBinScanner.scan(
+            scanner: services.barcodeScannerService,
+            partsInventoryService: services.partsInventoryService
+        ) {
+        case .code(let code):
             viewModel.sharedBinCode = code
+        case .unavailable:
+            showBinPicker = true
+        case .cancelled:
+            return
+        case .error(let message):
+            viewModel.errorMessage = message
         }
     }
 
