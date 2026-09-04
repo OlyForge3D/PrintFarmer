@@ -1,0 +1,163 @@
+name: Verify epic dependency graph
+
+# GitHub exposes dependency/sub-issue webhooks but does not expose them as
+# Actions triggers. Issue lifecycle events catch authoring and closure, while
+# the daily sweep closes the graph-mutation blind spot for open epics.
+on:
+  issues:
+    types: [opened, edited, labeled, unlabeled, reopened, closed]
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Epic issue number; omit to sweep all open epics
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: >-
+    epic-dependency-gate-${{ github.event.issue.number
+    || inputs.issue_number || 'open-epics' }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify machine-readable epic graph
+    runs-on: ubuntu-latest
+    steps:
+      # Always execute the verifier from the default branch. An issue body must
+      # never be able to supply or replace the logic that judges it.
+      - name: Check out verifier from the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+
+      - name: Verify epic dependency graphs
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9
+        env:
+          ISSUE_NUMBER: >-
+            ${{ github.event.issue.number || inputs.issue_number }}
+        with:
+          script: |
+            const gate = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/ci/verify-epic-dependencies.mjs`
+            );
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const repository = `${owner}/${repo}`;
+            const runUrl =
+              `${context.serverUrl}/${repository}/actions/runs/${context.runId}`;
+
+            async function targetIssueNumbers() {
+              const input = String(process.env.ISSUE_NUMBER ?? '').trim();
+              if (input !== '') {
+                if (!/^[1-9]\d*$/.test(input)) {
+                  throw new Error('issue_number must be a positive integer.');
+                }
+                return [Number.parseInt(input, 10)];
+              }
+              const issues = await github.paginate(github.rest.issues.listForRepo, {
+                owner,
+                repo,
+                labels: gate.epicLabel,
+                state: 'open',
+                per_page: 100,
+              });
+              return issues
+                .filter((issue) => issue.pull_request === undefined)
+                .map((issue) => issue.number);
+            }
+
+            async function loadGraph(number) {
+              const { data: issue } = await github.rest.issues.get({
+                owner, repo, issue_number: number,
+              });
+              const children = await github.paginate(
+                'GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues',
+                { owner, repo, issue_number: number, per_page: 100 },
+              );
+              const edges = [];
+              for (const child of children) {
+                const blockers = await github.paginate(
+                  'GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by',
+                  { owner, repo, issue_number: child.number, per_page: 100 },
+                );
+                for (const blocker of blockers) {
+                  edges.push({ blocker: blocker.number, blocked: child.number });
+                }
+                const dependents = await github.paginate(
+                  'GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking',
+                  { owner, repo, issue_number: child.number, per_page: 100 },
+                );
+                for (const dependent of dependents) {
+                  edges.push({ blocker: child.number, blocked: dependent.number });
+                }
+              }
+              return { issue, children, edges };
+            }
+
+            async function upsertComment(number, result) {
+              const comments = await github.paginate(
+                github.rest.issues.listComments,
+                { owner, repo, issue_number: number, per_page: 100 },
+              );
+              const existing = comments.find((comment) =>
+                comment.user?.login === 'github-actions[bot]' &&
+                comment.body?.includes(gate.gateCommentMarker)
+              );
+              if (
+                result.classification === 'NOT_APPLICABLE' &&
+                existing === undefined
+              ) {
+                return;
+              }
+              const body = gate.formatGateComment(result, number, runUrl);
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner, repo, comment_id: existing.id, body,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: number, body,
+                });
+              }
+            }
+
+            const failures = [];
+            for (const number of await targetIssueNumbers()) {
+              let result;
+              try {
+                result = gate.evaluateEpicDependencies(await loadGraph(number));
+              } catch (error) {
+                result = {
+                  classification: 'FAIL',
+                  passed: false,
+                  reason:
+                    `Could not read the complete epic graph: ${error.message}`,
+                  childCount: 0,
+                  edgeCount: 0,
+                  flatGraph: false,
+                  firstWave: [],
+                  isolatedChildren: [],
+                  errors: [error.message],
+                };
+              }
+              await upsertComment(number, result);
+              core.notice(`#${number}: ${result.classification} — ${result.reason}`);
+              if (result.classification === 'FAIL') {
+                failures.push(`#${number}: ${result.reason}`);
+              }
+            }
+
+            if (failures.length > 0) {
+              core.setFailed(
+                `Epic dependency verification failed:\n${failures.join('\n')}`
+              );
+            }
