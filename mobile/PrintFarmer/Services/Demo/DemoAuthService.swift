@@ -4,10 +4,23 @@ import Foundation
 
 final class DemoAuthService: AuthServiceProtocol, @unchecked Sendable {
     private var _isAuthenticated = false
+    private let user: UserDTO
+
+    init(user: UserDTO = DemoData.demoUser) {
+        self.user = user
+    }
 
     func login(serverURL: String, username: String, password: String, operation: AuthOperationToken) async throws -> AuthLoginOutcome {
         _isAuthenticated = true
-        return .applied(DemoData.demoAuthResponse)
+        return .applied(
+            AuthResponse(
+                success: DemoData.demoAuthResponse.success,
+                token: DemoData.demoAuthResponse.token,
+                expiresAt: DemoData.demoAuthResponse.expiresAt,
+                user: user,
+                error: DemoData.demoAuthResponse.error
+            )
+        )
     }
 
     func logout(operation: AuthOperationToken) async {
@@ -18,13 +31,13 @@ final class DemoAuthService: AuthServiceProtocol, @unchecked Sendable {
         let isActive = await MainActor.run { DemoMode.shared.isActive }
         if isActive {
             _isAuthenticated = true
-            return .restored(DemoData.demoUser)
+            return .restored(user)
         }
         return .noSession
     }
 
     func currentUser() async throws -> UserDTO {
-        DemoData.demoUser
+        user
     }
 
     var isAuthenticated: Bool { _isAuthenticated }

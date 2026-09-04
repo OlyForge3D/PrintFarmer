@@ -82,6 +82,12 @@ struct ContentView: View {
                 oversightAvailability: oversightAvailability
             )
         }
+        .onChange(of: services.farmShapeService.latestShape) {
+            synchronizeAdaptiveShell(
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            )
+        }
         .onChange(of: serverRegistry.navigationLayoutPreference) {
             synchronizeAdaptiveShell(
                 capabilities: capabilities,
@@ -276,11 +282,6 @@ struct ContentView: View {
         oversightAvailability: OversightNavigationAvailability,
         preserveNavigationOnIdentityUpgrade: Bool = false
     ) {
-        if sizeClass == .regular {
-            router.presentShippingShell(capabilities: capabilities)
-            return
-        }
-
         guard let activeServer = serverRegistry.activeServer,
               let navigationIdentity,
               navigationIdentity.serverID == activeServer.id,
@@ -289,6 +290,17 @@ struct ContentView: View {
                 capabilities,
                 oversightAvailability: oversightAvailability
             )
+            return
+        }
+
+        _ = serverRegistry.observeOversightUpgradeOffer(
+            farmShape: services.farmShapeService.latestShape,
+            shiftPlanEnabled: capabilities.shiftPlanEnabled,
+            isFarmAdmin: navigationIdentity.isFarmAdmin
+        )
+
+        if sizeClass == .regular {
+            router.presentShippingShell(capabilities: capabilities)
             return
         }
 

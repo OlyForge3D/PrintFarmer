@@ -330,6 +330,7 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
 }
 
 @MainActor
+@Observable
 final class StubFarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
     private(set) var sessionShape: FarmShape?
     private(set) var latestShape: FarmShape?
@@ -347,6 +348,11 @@ final class StubFarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable 
     }
 
     func refreshLatest(serverID: UUID) async {}
+
+    func setShape(_ shape: FarmShape?) {
+        sessionShape = shape
+        latestShape = shape
+    }
 
     func resetSession() {
         sessionShape = nil

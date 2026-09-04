@@ -53,6 +53,7 @@ enum UITestBootstrap {
         "--uitesting-operator-features-disabled"
     static let attentionActionsLaunchArgument = "--uitesting-attention-actions"
     static let twoModesNavigationLaunchArgument = "--uitesting-two-modes"
+    static let oversightUpgradeOfferLaunchArgument = "--uitesting-oversight-upgrade-offer"
     #if DEBUG
     static let shiftTaskMutationErrorLaunchArgument =
         "--uitesting-shift-task-mutation-error"
@@ -112,6 +113,9 @@ enum UITestBootstrap {
         /// F2-U2 feed with failure media, stable-ID destinations, and
         /// server-backed failure + maintenance actions.
         case authenticatedAttentionActions
+        /// Authenticated compact shell with a persisted pre-shift-plan baseline
+        /// that deterministically produces the inline Oversight upgrade offer.
+        case authenticatedOversightUpgradeOffer
         #if DEBUG
         case authenticatedShiftTaskMutationError
         case authenticatedShiftTaskInitialLoadFailure
@@ -169,6 +173,9 @@ enum UITestBootstrap {
         }
         if arguments.contains(attentionActionsLaunchArgument) {
             return .authenticatedAttentionActions
+        }
+        if arguments.contains(oversightUpgradeOfferLaunchArgument) {
+            return .authenticatedOversightUpgradeOffer
         }
         if arguments.contains(filamentCoverageScenarioLaunchArgument) {
             return .authenticatedFilamentCoverageScenario
@@ -240,6 +247,13 @@ enum UITestBootstrap {
         if arguments.contains(twoModesNavigationLaunchArgument) {
             registry.setNavigationLayoutPreference(.twoModes)
         }
+        if mode == .authenticatedOversightUpgradeOffer {
+            _ = registry.observeOversightUpgradeOffer(
+                farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1),
+                shiftPlanEnabled: false,
+                isFarmAdmin: true
+            )
+        }
 
         // Demo services are already sufficient: they satisfy every
         // protocol the operator shell needs without hitting the network.
@@ -256,10 +270,34 @@ enum UITestBootstrap {
         } else {
             injectedSnapshotStore = nil
         }
+        let testUser = mode == .authenticatedOversightUpgradeOffer
+            ? UserDTO(
+                id: DemoData.demoUser.id,
+                username: DemoData.demoUser.username,
+                email: DemoData.demoUser.email,
+                firstName: DemoData.demoUser.firstName,
+                lastName: DemoData.demoUser.lastName,
+                isActive: DemoData.demoUser.isActive,
+                emailConfirmed: DemoData.demoUser.emailConfirmed,
+                lastLogin: DemoData.demoUser.lastLogin,
+                createdAt: DemoData.demoUser.createdAt,
+                roles: ["farm_admin"],
+                permissions: DemoData.demoUser.permissions
+            )
+            : DemoData.demoUser
         let services = ServiceContainer.demo(
             serverRegistry: registry,
             farmSnapshotStore: injectedSnapshotStore
         )
+        if mode == .authenticatedOversightUpgradeOffer {
+            services.authService = DemoAuthService(user: testUser)
+            services.farmShapeService = StubFarmShapeService(
+                shape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1)
+            )
+            var capabilities = ResolvedSystemCapabilities.defaults
+            capabilities.shiftPlanEnabled = true
+            services.capabilitiesService = StubSystemCapabilitiesService(resolved: capabilities)
+        }
 
         // #1353: `ResolvedSystemCapabilities.defaults.printedPartsInventoryEnabled`
         // is `false` in production so a freshly-provisioned server without any
@@ -358,8 +396,8 @@ enum UITestBootstrap {
         let auth = AuthViewModel(services: services)
         switch mode {
         case .authenticated, .authenticatedOperatorFeaturesDisabled,
-             .authenticatedAttentionActions:
-            auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
+             .authenticatedAttentionActions, .authenticatedOversightUpgradeOffer:
+            auth.markAuthenticatedForUITesting(user: testUser)
         case .unauthenticated:
             break
         #if DEBUG
