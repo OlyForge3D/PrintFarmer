@@ -27,6 +27,9 @@ T1
 G1 X20 Y20 E2
 `;
 
+const ARTIFACT_URL = '/api/artifacts/f47ac10b-58cc-4372-a567-0e02b2c3d479';
+const SECOND_ARTIFACT_URL = '/api/artifacts/550e8400-e29b-41d4-a716-446655440000';
+
 describe('GcodePreviewService', () => {
   const service = createGcodePreviewService();
 
@@ -83,15 +86,27 @@ describe('GcodePreviewService.parseGCodeDetailed (no Worker — main-thread fall
   });
 
   it('fetches the given URL itself rather than accepting raw text (#1788)', async () => {
-    await service.parseGCodeDetailed('/models/print.gcode', { Authorization: 'Bearer test-token' });
-    expect(global.fetch).toHaveBeenCalledWith('/models/print.gcode', expect.objectContaining({
+    await service.parseGCodeDetailed(ARTIFACT_URL, { Authorization: 'Bearer test-token' });
+    expect(global.fetch).toHaveBeenCalledWith(ARTIFACT_URL, expect.objectContaining({
       headers: { Authorization: 'Bearer test-token' },
       signal: expect.any(AbortSignal),
     }));
   });
 
+  it.each([
+    `http://localhost:3000${ARTIFACT_URL}`,
+    `https://evil.example${ARTIFACT_URL}`,
+    `//evil.example${ARTIFACT_URL}`,
+    '/api/printers/f47ac10b-58cc-4372-a567-0e02b2c3d479',
+  ])('rejects untrusted URL %s before fallback network I/O', async (url) => {
+    await expect(service.parseGCodeDetailed(url)).rejects.toThrow(
+      'Invalid G-code artifact URL.',
+    );
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   it('returns a detailed parse matching the pure parsing core', async () => {
-    const result = await service.parseGCodeDetailed('/print.gcode');
+    const result = await service.parseGCodeDetailed(ARTIFACT_URL);
     const expectedBuffers = parseDetailedLayersCore(THREE_LAYER_GCODE);
 
     expect(result.layerCount).toBe(expectedBuffers.layerCount);
@@ -117,7 +132,7 @@ describe('GcodePreviewService.parseGCodeDetailed (no Worker — main-thread fall
       text: () => Promise.resolve(MULTI_TOOL_GCODE),
     });
 
-    const result = await service.parseGCodeDetailed('/multi-tool.gcode');
+    const result = await service.parseGCodeDetailed(ARTIFACT_URL);
 
     expect(result.tools).toEqual([0, 1]);
     const hasTool1 = result.layers.some(l => Array.from(l.tool).includes(1));
@@ -131,7 +146,7 @@ describe('GcodePreviewService.parseGCodeDetailed (no Worker — main-thread fall
       text: () => Promise.resolve(''),
     });
 
-    await expect(service.parseGCodeDetailed('/missing.gcode')).rejects.toThrow(/404/);
+    await expect(service.parseGCodeDetailed(ARTIFACT_URL)).rejects.toThrow(/404/);
   });
 
   it('aborts an in-flight fallback fetch when dispose() is called before it resolves', async () => {
@@ -143,7 +158,7 @@ describe('GcodePreviewService.parseGCodeDetailed (no Worker — main-thread fall
       });
     });
 
-    const parsePromise = service.parseGCodeDetailed('/slow.gcode');
+    const parsePromise = service.parseGCodeDetailed(ARTIFACT_URL);
     service.dispose();
 
     await expect(parsePromise).rejects.toThrow();
@@ -163,7 +178,7 @@ describe('GcodePreviewService.parseGCodeDetailed (no Worker — main-thread fall
     // resolved: the caller's own AbortController — not disposal — must
     // cancel the superseded request (#1808 review finding).
     const controller = new AbortController();
-    const parsePromise = service.parseGCodeDetailed('/stale.gcode', {}, controller.signal);
+    const parsePromise = service.parseGCodeDetailed(ARTIFACT_URL, {}, controller.signal);
     controller.abort();
 
     await expect(parsePromise).rejects.toThrow();
@@ -212,14 +227,14 @@ describe('GcodePreviewService.parseGCodeDetailed (Worker path)', () => {
   it('routes parseGCodeDetailed through the Worker and reconstructs the point-object shape', async () => {
     const service = createGcodePreviewService();
 
-    const result = await service.parseGCodeDetailed('/print.gcode', {
+    const result = await service.parseGCodeDetailed(ARTIFACT_URL, {
       Authorization: 'Bearer worker-token',
     });
 
     expect(FakeWorker.instances).toHaveLength(1);
     expect(FakeWorker.instances[0].postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        gcodeUrl: '/print.gcode',
+        gcodeUrl: ARTIFACT_URL,
         requestHeaders: { Authorization: 'Bearer worker-token' },
       }),
     );
@@ -231,9 +246,25 @@ describe('GcodePreviewService.parseGCodeDetailed (Worker path)', () => {
     service.dispose();
   });
 
+  it.each([
+    `http://localhost:3000${ARTIFACT_URL}`,
+    `https://evil.example${ARTIFACT_URL}`,
+    `//evil.example${ARTIFACT_URL}`,
+    '/api/artifacts/not-a-guid',
+  ])('rejects untrusted URL %s before creating or contacting a Worker', async (url) => {
+    const service = createGcodePreviewService();
+
+    await expect(service.parseGCodeDetailed(url)).rejects.toThrow(
+      'Invalid G-code artifact URL.',
+    );
+    expect(FakeWorker.instances).toHaveLength(0);
+
+    service.dispose();
+  });
+
   it('terminates the Worker on dispose', async () => {
     const service = createGcodePreviewService();
-    await service.parseGCodeDetailed('/print.gcode');
+    await service.parseGCodeDetailed(ARTIFACT_URL);
 
     service.dispose();
 
@@ -251,7 +282,7 @@ describe('GcodePreviewService.parseGCodeDetailed (Worker path)', () => {
     (globalThis as unknown as { Worker: unknown }).Worker = FailingFakeWorker;
 
     const service = createGcodePreviewService();
-    await expect(service.parseGCodeDetailed('/print.gcode')).rejects.toThrow('boom');
+    await expect(service.parseGCodeDetailed(ARTIFACT_URL)).rejects.toThrow('boom');
     service.dispose();
   });
 
@@ -260,7 +291,7 @@ describe('GcodePreviewService.parseGCodeDetailed (Worker path)', () => {
     const controller = new AbortController();
     controller.abort();
 
-    await expect(service.parseGCodeDetailed('/print.gcode', {}, controller.signal)).rejects.toThrow(/abort/i);
+    await expect(service.parseGCodeDetailed(ARTIFACT_URL, {}, controller.signal)).rejects.toThrow(/abort/i);
     expect(FakeWorker.instances).toHaveLength(0);
 
     service.dispose();
@@ -277,7 +308,7 @@ describe('GcodePreviewService.parseGCodeDetailed (Worker path)', () => {
     const service = createGcodePreviewService();
     const controller = new AbortController();
 
-    const stalePromise = service.parseGCodeDetailed('/huge-stale.gcode', {}, controller.signal);
+    const stalePromise = service.parseGCodeDetailed(ARTIFACT_URL, {}, controller.signal);
     expect(FakeWorker.instances).toHaveLength(1);
 
     controller.abort();
@@ -291,7 +322,7 @@ describe('GcodePreviewService.parseGCodeDetailed (Worker path)', () => {
     // A newer request isn't queued behind the terminated worker: a fresh
     // one is created lazily and resolves independently.
     (globalThis as unknown as { Worker: unknown }).Worker = FakeWorker;
-    const freshResult = await service.parseGCodeDetailed('/new.gcode');
+    const freshResult = await service.parseGCodeDetailed(SECOND_ARTIFACT_URL);
     expect(FakeWorker.instances).toHaveLength(2);
     expect(freshResult.layerCount).toBe(3);
 
