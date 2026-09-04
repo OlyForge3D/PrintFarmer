@@ -4,68 +4,25 @@ struct JobListView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(\.horizontalSizeClass) private var sizeClass
+    private let ownsNavigationStack: Bool
     @State private var viewModel = JobListViewModel()
     @State private var currentPage = 0
     @State private var retryTask: Task<Void, Never>?
 
+    init(ownsNavigationStack: Bool = true) {
+        self.ownsNavigationStack = ownsNavigationStack
+    }
+
     var body: some View {
         @Bindable var router = router
 
-        NavigationStack(path: $router.jobsPath) {
-            Group {
-                if viewModel.isLoading && viewModel.jobs.isEmpty {
-                    ProgressView("Loading jobs…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let error = viewModel.errorMessage, viewModel.jobs.isEmpty {
-                    ContentUnavailableView {
-                        Label("Error", systemImage: "exclamationmark.triangle")
-                    } description: {
-                        Text(error)
-                    } actions: {
-                        Button("Retry") {
-                            retryTask = Task { await viewModel.loadJobs() }
-                        }
-                    }
-                } else if !viewModel.hasAnyJobs {
-                    EmptyStateView(
-                        icon: "tray",
-                        title: "No Print Jobs",
-                        message: "No jobs in the queue. Jobs will appear here when queued."
-                    )
-                } else {
-                    // iPhone: swipeable pages
-                    if sizeClass == .compact {
-                        VStack(spacing: 0) {
-                            TabView(selection: $currentPage) {
-                                QueuePage()
-                                    .tag(0)
-                                PrintingPage()
-                                    .tag(1)
-                                RecentPage()
-                                    .tag(2)
-                            }
-                            .tabViewStyle(.page(indexDisplayMode: .never))
-                            
-                            PageIndicator(
-                                currentPage: $currentPage,
-                                pageCount: 3,
-                                labels: ["Queue", "Printing", "Recent"],
-                                accessibilityIdentifierPrefix: "jobList.page"
-                            )
-                                .padding(.bottom, 8)
-                        }
-                    } else {
-                        // iPad: keep existing List layout
-                        jobList
-                    }
+        Group {
+            if ownsNavigationStack {
+                NavigationStack(path: $router.jobsPath) {
+                    screenContent
                 }
-            }
-            .navigationTitle("Tasks")
-            .refreshable {
-                await viewModel.loadJobs()
-            }
-            .navigationDestination(for: AppDestination.self) { destination in
-                destinationView(for: destination)
+            } else {
+                screenContent
             }
         }
         .task {
@@ -74,9 +31,66 @@ struct JobListView: View {
             await viewModel.loadJobs()
         }
         .onDisappear {
-        retryTask?.cancel()
-        viewModel.isViewActive = false
+            retryTask?.cancel()
+            viewModel.isViewActive = false
+        }
     }
+
+    @ViewBuilder
+    private var screenContent: some View {
+        Group {
+            if viewModel.isLoading && viewModel.jobs.isEmpty {
+                ProgressView("Loading jobs…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = viewModel.errorMessage, viewModel.jobs.isEmpty {
+                ContentUnavailableView {
+                    Label("Error", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Retry") {
+                        retryTask = Task { await viewModel.loadJobs() }
+                    }
+                }
+            } else if !viewModel.hasAnyJobs {
+                EmptyStateView(
+                    icon: "tray",
+                    title: "No Print Jobs",
+                    message: "No jobs in the queue. Jobs will appear here when queued."
+                )
+            } else if sizeClass == .compact {
+                VStack(spacing: 0) {
+                    TabView(selection: $currentPage) {
+                        QueuePage()
+                            .tag(0)
+                        PrintingPage()
+                            .tag(1)
+                        RecentPage()
+                            .tag(2)
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+
+                    PageIndicator(
+                        currentPage: $currentPage,
+                        pageCount: 3,
+                        labels: ["Queue", "Printing", "Recent"],
+                        accessibilityIdentifierPrefix: "jobList.page"
+                    )
+                    .padding(.bottom, 8)
+                }
+            } else {
+                jobList
+            }
+        }
+        .navigationTitle("Print Queue")
+        .refreshable {
+            await viewModel.loadJobs()
+        }
+        .navigationDestination(for: AppDestination.self) { destination in
+            destinationView(for: destination)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("jobList.root")
     }
     
     // MARK: - iPhone Pages

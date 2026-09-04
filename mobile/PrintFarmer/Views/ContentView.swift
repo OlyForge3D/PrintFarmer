@@ -114,20 +114,21 @@ struct ContentView: View {
         )
         let tabs = router.visibleTabs(for: capabilities)
 
-        return TabView(selection: selection) {
-            ForEach(tabs, id: \.self) { tab in
-                tabContentView(for: tab)
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        if router.shouldShowModeControl(for: tab) {
-                            modeControl(capabilities: capabilities)
+        return VStack(spacing: 0) {
+            if router.shouldShowModeControl(for: router.resolvedTab(for: capabilities)) {
+                modeControl(capabilities: capabilities)
+            }
+
+            TabView(selection: selection) {
+                ForEach(tabs, id: \.self) { tab in
+                    tabContentView(for: tab)
+                        .tabItem {
+                            Label(tab.title, systemImage: tab.systemImage)
                         }
-                    }
-                    .tabItem {
-                        Label(tab.title, systemImage: tab.systemImage)
-                    }
-                    .tag(tab)
-                    .badge(badgeCount(for: tab))
-                    .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
+                        .tag(tab)
+                        .badge(badgeCount(for: tab))
+                        .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
+                }
             }
         }
     }

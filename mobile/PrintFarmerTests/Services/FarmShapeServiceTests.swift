@@ -184,21 +184,14 @@ final class FarmShapeServiceTests: XCTestCase {
         registry.certificatePinPurgeHandler = { _, _ in true }
         _ = container
 
-        await service.resolveForAuthenticatedSession(
-            serverID: server.id,
-            timeout: .milliseconds(1)
-        )
+        let refreshTask = Task {
+            await service.refreshLatest(serverID: server.id)
+        }
         await request.waitUntilArrived()
         try await registry.purgeAndRemove(id: server.id)
 
-        let lateResponseApplied = expectation(description: "late response completed")
-        withObservationTracking {
-            _ = service.latestShape
-        } onChange: {
-            lateResponseApplied.fulfill()
-        }
         request.release()
-        await fulfillment(of: [lateResponseApplied], timeout: 2)
+        await refreshTask.value
 
         XCTAssertTrue(registry.servers.isEmpty)
         XCTAssertNil(store.shape(serverID: server.id))
@@ -540,6 +533,7 @@ final class FarmShapeServiceTests: XCTestCase {
             signalRServiceFactory: { _, _ in MockSignalRService() }
         )
         let authToken = container.authOperationEpoch.advance()
+        try registry.setActive(id: serverB.id)
 
         let switchTask = Task {
             await container.switchToServer(serverB)

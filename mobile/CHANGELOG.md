@@ -6,6 +6,10 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Added
 
+- **Adaptive compact navigation** — iPhone operators can use a focused Simple
+  shell or a Floor/Oversight two-mode shell, with stable destination identities,
+  per-server preference persistence, and a real farm-wide Filament Coverage
+  report. The regular-width iPad sidebar remains unchanged.
 - **Per-server advanced-controls safety interlock** — Jog, preheat, home,
   z-offset, and disable-motors controls are now hidden by default until enabled
   from **Settings** → **Printer Safety** for the active server. Turning the

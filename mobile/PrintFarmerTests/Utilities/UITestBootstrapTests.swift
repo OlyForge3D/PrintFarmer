@@ -37,6 +37,13 @@ final class UITestBootstrapTests: XCTestCase {
         XCTAssertEqual(UITestBootstrap.unauthenticatedLaunchArgument, "--uitesting-unauthenticated")
     }
 
+    func test_twoModesNavigationLaunchArgument_matchesUITestsHarness() {
+        XCTAssertEqual(
+            UITestBootstrap.twoModesNavigationLaunchArgument,
+            "--uitesting-two-modes"
+        )
+    }
+
     // MARK: - Launch mode
 
     func test_mode_defaultsToAuthenticated() {
@@ -348,6 +355,16 @@ final class UITestBootstrapTests: XCTestCase {
                         "Bootstrap must select an active server")
         XCTAssertEqual(bundle.serverRegistry.activeServer?.id,
                        bundle.serverRegistry.servers.first?.id)
+    }
+
+    func test_makeBundle_twoModesArgument_setsNavigationPreference() throws {
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(
+            defaults: defaults,
+            arguments: ["--uitesting", "--uitesting-two-modes"]
+        )
+
+        XCTAssertEqual(bundle.serverRegistry.navigationLayoutPreference, .twoModes)
     }
 
     func test_makeBundle_marksAuthenticated_withDemoUser() throws {

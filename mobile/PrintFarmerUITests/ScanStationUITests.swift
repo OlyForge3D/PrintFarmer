@@ -15,11 +15,17 @@ final class ScanStationUITests: PrintFarmerUITestCase {
 
     private let printerID = "10000000-0001-0000-0000-000000000001"
 
-    private func openScanTab() {
-        let scanTab = app.tabBars.buttons["Scan"]
-        if scanTab.waitForExistence(timeout: 5) {
-            scanTab.tap()
-            return
+    private func openScanDestination() throws {
+        let tabBar = app.tabBars.firstMatch
+        if tabBar.waitForExistence(timeout: 5) {
+            let scanTab = tabBar.buttons["Scan"]
+            if scanTab.exists {
+                scanTab.tap()
+                return
+            }
+            throw XCTSkip(
+                "Compact Scan re-homing is tracked by #2419; #2416 intentionally removes the legacy top-level tab"
+            )
         }
 
         let sidebarScan = app.buttons["sidebar.scan"]
@@ -39,11 +45,11 @@ final class ScanStationUITests: PrintFarmerUITestCase {
             }
         }
 
-        XCTFail("Scan destination should be reachable from the operator shell")
+        XCTFail("Scan destination should remain reachable from the regular-width sidebar")
     }
 
-    func testScanTabRendersPrimaryScanControl() {
-        openScanTab()
+    func testScanTabRendersPrimaryScanControl() throws {
+        try openScanDestination()
 
         let scanButton = app.buttons["scan.primary"]
         XCTAssertTrue(scanButton.waitForExistence(timeout: 5),
@@ -55,16 +61,16 @@ final class ScanStationUITests: PrintFarmerUITestCase {
                        "Scan control should be disabled when no scanner is available")
     }
 
-    func testScanTabRendersNFCHint() {
-        openScanTab()
+    func testScanTabRendersNFCHint() throws {
+        try openScanDestination()
 
         let nfcHint = app.staticTexts["scan.nfc.hint"]
         XCTAssertTrue(nfcHint.waitForExistence(timeout: 5),
                       "NFC hint should explain that printer tags are handled automatically")
     }
 
-    func testLogNewSpoolQuickActionOpensBarcodeIntake() {
-        openScanTab()
+    func testLogNewSpoolQuickActionOpensBarcodeIntake() throws {
+        try openScanDestination()
 
         let quickAction = app.buttons["scan.quickAction.spool"]
         XCTAssertTrue(quickAction.waitForExistence(timeout: 5),
@@ -76,10 +82,10 @@ final class ScanStationUITests: PrintFarmerUITestCase {
                       "Log New Spool should present the existing Barcode Intake flow")
     }
 
-    func testMaintenancePartQuickActionIsNotPresent() {
+    func testMaintenancePartQuickActionIsNotPresent() throws {
         // #714's mobile scope explicitly excludes maintenance/replacement
         // parts (Dallas's adjudication assigns that domain to #721/#722).
-        openScanTab()
+        try openScanDestination()
         XCTAssertTrue(app.buttons["scan.primary"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Log Maintenance Part"].exists,
                        "Maintenance-part quick action is out of #714's mobile scope and must not appear")
@@ -88,8 +94,8 @@ final class ScanStationUITests: PrintFarmerUITestCase {
     /// H6 (remediation): "Log Printed Parts" must be a real quick action
     /// that opens a lookup list of printed-part SKUs and forwards a
     /// selection into the existing part-adjustment flow.
-    func testLogPrintedPartsQuickActionOpensPartLookup() {
-        openScanTab()
+    func testLogPrintedPartsQuickActionOpensPartLookup() throws {
+        try openScanDestination()
 
         let quickAction = app.buttons["scan.quickAction.parts"]
         XCTAssertTrue(quickAction.waitForExistence(timeout: 5),
@@ -105,8 +111,8 @@ final class ScanStationUITests: PrintFarmerUITestCase {
     /// opens a lookup list of registered printers and, on selection,
     /// navigates to that printer's detail view. Uses the seeded demo
     /// printer "Prusa MK4 #1" for a deterministic assertion.
-    func testPrinterLookupQuickActionOpensPrinterLookupAndNavigatesToDetail() {
-        openScanTab()
+    func testPrinterLookupQuickActionOpensPrinterLookupAndNavigatesToDetail() throws {
+        try openScanDestination()
 
         let quickAction = app.buttons["scan.quickAction.printerLookup"]
         XCTAssertTrue(quickAction.waitForExistence(timeout: 5),

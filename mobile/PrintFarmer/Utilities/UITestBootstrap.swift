@@ -52,6 +52,7 @@ enum UITestBootstrap {
     static let operatorFeaturesDisabledLaunchArgument =
         "--uitesting-operator-features-disabled"
     static let attentionActionsLaunchArgument = "--uitesting-attention-actions"
+    static let twoModesNavigationLaunchArgument = "--uitesting-two-modes"
     #if DEBUG
     static let shiftTaskMutationErrorLaunchArgument =
         "--uitesting-shift-task-mutation-error"
@@ -204,8 +205,14 @@ enum UITestBootstrap {
     ///     shared test suite is used (wiped on every launch). Unit tests
     ///     supply an ephemeral `UserDefaults(suiteName:)` to keep runs
     ///     hermetic.
+    ///   - arguments: launch arguments that select deterministic UI-test
+    ///     preferences without changing production defaults.
     @discardableResult
-    static func makeBundle(mode: Mode = .authenticated, defaults: UserDefaults? = nil) -> Environment {
+    static func makeBundle(
+        mode: Mode = .authenticated,
+        defaults: UserDefaults? = nil,
+        arguments: [String] = CommandLine.arguments
+    ) -> Environment {
         if defaults == nil {
             clearSystemNotificationState()
         }
@@ -229,6 +236,9 @@ enum UITestBootstrap {
             } catch {
                 assertionFailure("UITestBootstrap failed to seed registry: \(error)")
             }
+        }
+        if arguments.contains(twoModesNavigationLaunchArgument) {
+            registry.setNavigationLayoutPreference(.twoModes)
         }
 
         // Demo services are already sufficient: they satisfy every
