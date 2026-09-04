@@ -346,7 +346,9 @@ struct AttentionView: View {
                 reconcilePendingAction()
             }
             .navigationTitle("Attention")
-            .toolbar { toolbarContent }
+            .rootNavigationChrome(for: .attention) {
+                attentionOverflowMenu
+            }
             .refreshable {
                 // Cycle-8 blocker B fix: capture owner provenance
                 // synchronously at .refreshable closure entry (before
@@ -1192,57 +1194,48 @@ struct AttentionView: View {
 
     // MARK: - Toolbar
 
-    @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            if ServerSwitcherViewModel(
-                servers: serverRegistry.servers,
-                activeServerID: serverRegistry.activeServerID
-            ).isVisible {
-                ServerSwitcherMenu(style: .toolbar)
-            }
-        }
-
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Button {
-                    showingNotifications = true
-                } label: {
-                    Label("Notifications", systemImage: "bell")
-                }
-                .accessibilityIdentifier("attention.overflow.notifications")
-
-                Button {
-                    showingDashboard = true
-                } label: {
-                    Label("Dashboard", systemImage: "square.grid.2x2")
-                }
-                .accessibilityIdentifier("attention.overflow.dashboard")
-
-                Button {
-                    showingMaintenance = true
-                } label: {
-                    Label("Maintenance", systemImage: "wrench.adjustable")
-                }
-                .accessibilityIdentifier("attention.overflow.maintenance")
-
-                Divider()
-
-                Button {
-                    showingSettings = true
-                } label: {
-                    Label("Settings", systemImage: "gear")
-                }
-                .accessibilityIdentifier("attention.overflow.settings")
+    private var attentionOverflowMenu: some View {
+        Menu {
+            Button {
+                showingNotifications = true
             } label: {
-                Image(systemName: "ellipsis.circle")
-                    .imageScale(.large)
-                    .frame(minWidth: 44, minHeight: 44)
+                Label("Notifications", systemImage: "bell")
             }
-            .accessibilityLabel("More")
-            .accessibilityHint("Opens dashboard, maintenance, and settings.")
-            .accessibilityIdentifier("attention.overflow")
+            .accessibilityIdentifier("attention.overflow.notifications")
+
+            Button {
+                showingDashboard = true
+            } label: {
+                Label("Dashboard", systemImage: "square.grid.2x2")
+            }
+            .accessibilityIdentifier("attention.overflow.dashboard")
+
+            Button {
+                showingMaintenance = true
+            } label: {
+                Label("Maintenance", systemImage: "wrench.adjustable")
+            }
+            .accessibilityIdentifier("attention.overflow.maintenance")
+
+            Divider()
+
+            Button {
+                showingSettings = true
+            } label: {
+                Label("Settings", systemImage: "gear")
+            }
+            .accessibilityIdentifier("attention.overflow.settings")
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .imageScale(.large)
+                .frame(
+                    minWidth: RootNavigationChrome.minimumTouchTarget,
+                    minHeight: RootNavigationChrome.minimumTouchTarget
+                )
         }
+        .accessibilityLabel("More")
+        .accessibilityHint("Opens dashboard, maintenance, and settings.")
+        .accessibilityIdentifier("attention.overflow")
     }
 }
 

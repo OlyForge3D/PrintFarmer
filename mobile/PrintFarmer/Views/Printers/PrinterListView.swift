@@ -30,6 +30,15 @@ enum PrinterListNavigationContext: Equatable {
             "oversight.fleet"
         }
     }
+
+    var appTab: AppTab {
+        switch self {
+        case .farm:
+            .farm
+        case .fleet:
+            .fleet
+        }
+    }
 }
 
 struct PrinterListView: View {
@@ -164,28 +173,21 @@ struct PrinterListView: View {
                     refreshCoverage: filamentCoverageEnabled
                 )
             }
-            .toolbar {
-                if sizeClass == .compact {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        ServerSwitcherMenu(style: .toolbar)
-                    }
-                }
-
-                ToolbarItem(placement: .automatic) {
-                    statusFilterMenu
-                }
-
+            .rootNavigationChrome(for: navigationContext.appTab) {
+                statusFilterMenu
                 if navigationContext == .farm {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showingPrinterLookup = true
-                        } label: {
-                            Image(systemName: "magnifyingglass")
-                        }
-                        .accessibilityLabel("Find printer")
-                        .accessibilityHint("Looks up a printer by name, model, or network address.")
-                        .accessibilityIdentifier("farm.printerLookup")
+                    Button {
+                        showingPrinterLookup = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .frame(
+                                minWidth: RootNavigationChrome.minimumTouchTarget,
+                                minHeight: RootNavigationChrome.minimumTouchTarget
+                            )
                     }
+                    .accessibilityLabel("Find printer")
+                    .accessibilityHint("Looks up a printer by name, model, or network address.")
+                    .accessibilityIdentifier("farm.printerLookup")
                 }
             }
             .navigationDestination(for: AppDestination.self) { destination in

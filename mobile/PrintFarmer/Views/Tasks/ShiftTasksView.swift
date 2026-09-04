@@ -17,15 +17,17 @@ struct ShiftTasksView: View {
         NavigationStack(path: $router.tasksPath) {
             content
                 .navigationTitle("Tasks")
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        NavigationLink(value: ShiftTasksDestination.printQueue) {
-                            Label("Print queue", systemImage: "tray.full")
-                        }
-                        .accessibilityLabel("Print queue")
-                        .accessibilityHint("Opens the existing print job queue.")
-                        .accessibilityIdentifier("shiftTasks.printQueue")
+                .rootNavigationChrome(for: .tasks) {
+                    NavigationLink(value: ShiftTasksDestination.printQueue) {
+                        Image(systemName: "tray.full")
+                            .frame(
+                                minWidth: RootNavigationChrome.minimumTouchTarget,
+                                minHeight: RootNavigationChrome.minimumTouchTarget
+                            )
                     }
+                    .accessibilityLabel("Print queue")
+                    .accessibilityHint("Opens the existing print job queue.")
+                    .accessibilityIdentifier("shiftTasks.printQueue")
                 }
                 .refreshable {
                     await reloadCapabilitiesAndTasks()
@@ -45,6 +47,9 @@ struct ShiftTasksView: View {
                     case .printQueue:
                         JobListView()
                     }
+                }
+                .navigationDestination(for: AppDestination.self) { destination in
+                    destinationView(for: destination)
                 }
         }
         .task(id: services.activeServerGeneration) {

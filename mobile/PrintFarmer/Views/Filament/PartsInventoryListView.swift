@@ -58,30 +58,30 @@ struct PartsInventoryListView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.large)
         #endif
-        .toolbar {
-            #if os(iOS)
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button {
-                        showScanFlow = true
-                    } label: {
-                        Label("Scan code", systemImage: "barcode.viewfinder")
-                    }
-
-                    Button {
-                        showPartLookup = true
-                    } label: {
-                        Label("Look up printed part", systemImage: "cube.box")
-                    }
-                    .accessibilityIdentifier("inventory.partLookup")
+        .rootNavigationChrome(for: .inventory) {
+            Menu {
+                Button {
+                    showScanFlow = true
                 } label: {
-                    Image(systemName: "barcode.viewfinder")
+                    Label("Scan code", systemImage: "barcode.viewfinder")
                 }
-                .accessibilityLabel("Scan inventory")
-                .accessibilityHint("Opens camera scanning or printed-part lookup.")
-                .accessibilityIdentifier("inventory.scan")
+
+                Button {
+                    showPartLookup = true
+                } label: {
+                    Label("Look up printed part", systemImage: "cube.box")
+                }
+                .accessibilityIdentifier("inventory.partLookup")
+            } label: {
+                Image(systemName: "barcode.viewfinder")
+                    .frame(
+                        minWidth: RootNavigationChrome.minimumTouchTarget,
+                        minHeight: RootNavigationChrome.minimumTouchTarget
+                    )
             }
-            #endif
+            .accessibilityLabel("Scan inventory")
+            .accessibilityHint("Opens camera scanning or printed-part lookup.")
+            .accessibilityIdentifier("inventory.scan")
         }
         .refreshable {
             await viewModel.loadParts()

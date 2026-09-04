@@ -287,6 +287,8 @@
 		D610P4000000000000000006 /* ServerManagementViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P4000000000000000005 /* ServerManagementViewModelTests.swift */; };
 		D610P5000000000000000002 /* ServerSwitcherViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P5000000000000000001 /* ServerSwitcherViewModel.swift */; };
 		D610P5000000000000000004 /* ServerSwitcherMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P5000000000000000003 /* ServerSwitcherMenu.swift */; };
+		F24210000000000000000002 /* RootNavigationChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24210000000000000000001 /* RootNavigationChrome.swift */; };
+		F24210000000000000000004 /* AccountView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24210000000000000000003 /* AccountView.swift */; };
 		D610P5000000000000000006 /* ServerSwitcherViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610P5000000000000000005 /* ServerSwitcherViewModelTests.swift */; };
 		D610F2000000000000000002 /* ServerCredentialsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610F2000000000000000001 /* ServerCredentialsStore.swift */; };
 		D610F2000000000000000004 /* ServerCredentialsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D610F2000000000000000003 /* ServerCredentialsStoreTests.swift */; };
@@ -819,6 +821,8 @@
 		D610P4000000000000000005 /* ServerManagementViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerManagementViewModelTests.swift; sourceTree = "<group>"; };
 		D610P5000000000000000001 /* ServerSwitcherViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSwitcherViewModel.swift; sourceTree = "<group>"; };
 		D610P5000000000000000003 /* ServerSwitcherMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSwitcherMenu.swift; sourceTree = "<group>"; };
+		F24210000000000000000001 /* RootNavigationChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootNavigationChrome.swift; sourceTree = "<group>"; };
+		F24210000000000000000003 /* AccountView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountView.swift; sourceTree = "<group>"; };
 		D610P5000000000000000005 /* ServerSwitcherViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSwitcherViewModelTests.swift; sourceTree = "<group>"; };
 		D6121AF27098BBC7AC438846 /* LocationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationService.swift; sourceTree = "<group>"; };
 		D6F328EBCA1FFAB87F2E1347 /* PrinterService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterService.swift; sourceTree = "<group>"; };
@@ -1425,6 +1429,7 @@
 		CBAC88193AFA3F2403893113 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				F24210000000000000000003 /* AccountView.swift */,
 				241600000000000000000003 /* NavigationSettingsView.swift */,
 				BA0262E35EBDB310533C010A /* SettingsView.swift */,
 				D610P4000000000000000003 /* ServerManagementViews.swift */,
@@ -1456,6 +1461,7 @@
 				B076B098F30F1506B8E1C983 /* iPadPrinterCardView.swift */,
 				4E45A19848758E2DB8543C2A /* StatusBadge.swift */,
 				D610P5000000000000000003 /* ServerSwitcherMenu.swift */,
+				F24210000000000000000001 /* RootNavigationChrome.swift */,
 				3F15146257C59F44A210F002 /* CustomIcons.swift */,
 				97DEEFD9852661DAA2637C25 /* TemperatureView.swift */,
 				DAFD389576B18CC0E5ADBB63 /* MJPEGStreamView.swift */,
@@ -2049,6 +2055,7 @@
 				2B0A1CAE11FC88565FA288EA /* iPadPrinterCardView.swift in Sources */,
 				57E23E107ED77369284AF9D4 /* StatusBadge.swift in Sources */,
 				D610P5000000000000000004 /* ServerSwitcherMenu.swift in Sources */,
+				F24210000000000000000002 /* RootNavigationChrome.swift in Sources */,
 				2C6155264C934670F2278DC9 /* CustomIcons.swift in Sources */,
 				C46CED04E8CBA839846568BC /* TemperatureView.swift in Sources */,
 				77F7448C2D183C8F140C41CB /* MJPEGStreamView.swift in Sources */,
@@ -2060,6 +2067,7 @@
 				D3B43552C5380F3A3AFD1F77 /* PrinterDetailView.swift in Sources */,
 				8F2654878B838B7E5AA35AAC /* PrinterListView.swift in Sources */,
 				241600000000000000000004 /* NavigationSettingsView.swift in Sources */,
+				F24210000000000000000004 /* AccountView.swift in Sources */,
 				8E016F38A846594333A70CEB /* SettingsView.swift in Sources */,
 				D610P4000000000000000004 /* ServerManagementViews.swift in Sources */,
 				BCB617F9B1642391E9805237 /* Color+Hex.swift in Sources */,

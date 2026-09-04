@@ -4,7 +4,7 @@ import SwiftUI
 /// their owning task surfaces instead of a dedicated tab.
 struct ContentView: View {
     static let sidebarRowMinimumHeight: CGFloat = 44
-    static let modeControlMinimumHeight: CGFloat = 44
+    static let modeControlMinimumHeight = RootNavigationChrome.minimumTouchTarget
 
     static func shippingTabs(
         for capabilities: ResolvedSystemCapabilities
@@ -105,11 +105,6 @@ struct ContentView: View {
         return TabView(selection: selection) {
             ForEach(tabs, id: \.self) { tab in
                 tabContentView(for: tab)
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        if router.shouldShowModeControl(for: tab) {
-                            modeControl(capabilities: capabilities)
-                        }
-                    }
                     .tabItem {
                         Label(tab.title, systemImage: tab.systemImage)
                     }
@@ -118,31 +113,6 @@ struct ContentView: View {
                     .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
             }
         }
-    }
-
-    private func modeControl(
-        capabilities: ResolvedSystemCapabilities
-    ) -> some View {
-        Picker(
-            "Navigation mode",
-            selection: Binding(
-                get: { router.activeMode },
-                set: { router.setNavigationMode($0, capabilities: capabilities) }
-            )
-        ) {
-            Text("Floor").tag(OversightMode.floor)
-            Text("Oversight").tag(OversightMode.oversight)
-        }
-        .pickerStyle(.segmented)
-        .frame(minHeight: Self.modeControlMinimumHeight)
-        .padding(.horizontal)
-        .background(.bar)
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
-        .accessibilityLabel("Navigation mode")
-        .accessibilityHint("Switches between Floor work and Oversight.")
-        .accessibilityIdentifier("navigation.modeControl")
     }
 
     // MARK: - Regular (iPad)

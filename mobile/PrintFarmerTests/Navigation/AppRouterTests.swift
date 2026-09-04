@@ -144,6 +144,33 @@ final class AppRouterTests: XCTestCase {
         )
         XCTAssertEqual(ContentView.sidebarRowMinimumHeight, 44)
         XCTAssertEqual(ContentView.modeControlMinimumHeight, 44)
+        XCTAssertEqual(RootNavigationChrome.minimumTouchTarget, 44)
+        XCTAssertEqual(RootNavigationChrome.serverSwitcherIdentifier, "navigation.serverSwitcher")
+        XCTAssertEqual(RootNavigationChrome.modeControlIdentifier, "navigation.modeControl")
+        XCTAssertEqual(RootNavigationChrome.accountButtonIdentifier, "navigation.account")
+        XCTAssertEqual(RootNavigationChrome.accountContainerIdentifier, "account.root")
+    }
+
+    func testAccountDestinationRowsPreserveCanonicalIdentifiersAndCapabilityGate() {
+        let enabledRows = AccountDestinationRow.available(offlineQueueEnabled: true)
+
+        XCTAssertEqual(
+            enabledRows.map(\.destination),
+            [.notifications, .settings, .manageServers, .offlineQueue]
+        )
+        XCTAssertEqual(
+            enabledRows.map(\.accessibilityIdentifier),
+            [
+                "account.destination.notifications",
+                "account.destination.settings",
+                "account.destination.manageServers",
+                "account.destination.offlineQueue"
+            ]
+        )
+        XCTAssertEqual(
+            AccountDestinationRow.available(offlineQueueEnabled: false).map(\.destination),
+            [.notifications, .settings, .manageServers]
+        )
     }
 
     func testAdaptiveTabAccessibilityIdentifiersMatchSharedContract() {

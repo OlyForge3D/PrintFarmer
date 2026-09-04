@@ -167,6 +167,21 @@ enum OversightRoot: String, CaseIterable, Hashable, Identifiable {
 
     var id: String { rawValue }
 
+    var appTab: AppTab {
+        switch self {
+        case .overview:
+            .overview
+        case .fleet:
+            .fleet
+        case .jobs:
+            .jobs
+        case .upkeep:
+            .upkeep
+        case .reports:
+            .reports
+        }
+    }
+
     var title: String {
         switch self {
         case .overview:
