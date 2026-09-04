@@ -135,6 +135,20 @@ final class AppRouter {
         notificationRoutingError = nil
     }
 
+    /// Every stack resolves `AppDestination` and can reach Printer Detail, so
+    /// reset them all when the safety interlock is disabled.
+    func revokeAdvancedPrinterControlsAccess() {
+        navigationEpoch &+= 1
+        printersPath = NavigationPath()
+        jobsPath = NavigationPath()
+        notificationsPath = NavigationPath()
+        inventoryPath = NavigationPath()
+        scanPath = NavigationPath()
+        dashboardSheetPath = NavigationPath()
+        maintenanceSheetPath = NavigationPath()
+        notificationsSheetPath = NavigationPath()
+    }
+
     func routeNotification(
         userInfo: [AnyHashable: Any],
         activeOriginServerId: UUID? = nil,

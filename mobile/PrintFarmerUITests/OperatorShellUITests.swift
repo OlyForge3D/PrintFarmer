@@ -97,6 +97,22 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         let settingsItem = app.buttons["Settings"]
         XCTAssertTrue(settingsItem.waitForExistence(timeout: 3),
                       "Settings must be reachable within two taps via Attention overflow")
+        settingsItem.tap()
+
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+        let advancedControlsToggle = app.switches["settings.advancedPrinterControls"]
+        if !advancedControlsToggle.waitForExistence(timeout: 3) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(
+            advancedControlsToggle.waitForExistence(timeout: 3),
+            "The Advanced Printer Controls safety toggle must be discoverable in Settings"
+        )
+        XCTAssertEqual(
+            advancedControlsToggle.value as? String,
+            "0",
+            "Advanced Printer Controls must default off for the active server"
+        )
     }
 
     func testDashboardReachableFromAttentionOverflow() {
@@ -137,23 +153,29 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         XCTAssertFalse(app.buttons["printer.detail.advanced"].exists,
                        "Advanced controls entry must not appear on the Farm tab root")
 
-        let firstPrinter = app.collectionViews.cells.firstMatch
+        let farmCard = app.buttons
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "farm-card-"))
+            .firstMatch
+        let firstPrinter = farmCard.waitForExistence(timeout: 5)
+            ? farmCard
+            : app.collectionViews.cells.firstMatch
         guard firstPrinter.waitForExistence(timeout: 5) else {
-            // Mock data may not include an online printer; skip gracefully.
+            // Demo data may not have rendered yet; skip gracefully.
             return
         }
         firstPrinter.tap()
 
-        // Advanced entry may be hidden for offline printers; both outcomes
-        // are acceptable — we assert only that if visible it opens a new
-        // destination.
-        let advanced = app.buttons["printer.detail.advanced"]
-        if advanced.waitForExistence(timeout: 5) {
-            advanced.tap()
-            let backButton = app.navigationBars.buttons.firstMatch
-            XCTAssertTrue(backButton.waitForExistence(timeout: 3),
-                          "Advanced controls should push a new navigation destination")
+        let disclosure = app.buttons["printer.detail.advanced.disclosure"]
+        if !disclosure.waitForExistence(timeout: 3) {
+            app.swipeUp()
         }
+        guard disclosure.waitForExistence(timeout: 3) else { return }
+        disclosure.tap()
+
+        XCTAssertFalse(
+            app.buttons["printer.detail.advanced"].exists,
+            "Advanced controls entry must be omitted while the per-server safety toggle is off"
+        )
     }
 
     // MARK: - Legacy sheet dismiss → reopen (#727)
@@ -614,11 +636,14 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
                           "Camera tap-to-live must stay within the detail view")
         }
 
-        // Expanding the disclosure surfaces the demoted advanced entry.
+        // Advanced printer controls are a safety interlock and default off.
+        // Expanding the disclosure must not reveal an entry until Settings
+        // explicitly enables it for the active server.
         disclosure.tap()
-        let advanced = app.buttons["printer.detail.advanced"]
-        XCTAssertTrue(advanced.waitForExistence(timeout: 5),
-                      "Expanding the Advanced disclosure must reveal the advanced controls entry")
+        XCTAssertFalse(
+            app.buttons["printer.detail.advanced"].exists,
+            "Advanced controls entry must be omitted while the per-server safety toggle is off"
+        )
     }
 
     func testPrinterDetailV2DispatchOpensSheet() {
