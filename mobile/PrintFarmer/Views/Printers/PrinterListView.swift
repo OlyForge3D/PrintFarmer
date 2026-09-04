@@ -1,5 +1,16 @@
 import SwiftUI
 
+private struct PrinterLookupRequest: Identifiable {
+    let serverGeneration: Int
+
+    var id: Int { serverGeneration }
+}
+
+private struct PendingPrinterSelection {
+    let printerID: UUID
+    let serverGeneration: Int
+}
+
 struct PrinterListView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
@@ -7,7 +18,8 @@ struct PrinterListView: View {
     @State private var viewModel = PrinterListViewModel()
     @State private var coverageViewModel = FarmFilamentCoverageViewModel()
     @State private var retryTask: Task<Void, Never>?
-    @State private var showingPrinterLookup = false
+    @State private var printerLookupRequest: PrinterLookupRequest?
+    @State private var pendingPrinterSelection: PendingPrinterSelection?
 
     private var filamentCoverageEnabled: Bool {
         services.capabilitiesService.resolved.filamentCoverageEnabled
@@ -77,7 +89,9 @@ struct PrinterListView: View {
 
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        showingPrinterLookup = true
+                        printerLookupRequest = PrinterLookupRequest(
+                            serverGeneration: services.activeServerGeneration
+                        )
                     } label: {
                         Image(systemName: "magnifyingglass")
                     }
@@ -90,10 +104,16 @@ struct PrinterListView: View {
                 destinationView(for: destination)
             }
         }
-        .sheet(isPresented: $showingPrinterLookup) {
-            PrinterLookupView(printerService: services.printerService) { printer in
-                showingPrinterLookup = false
-                router.printersPath.append(AppDestination.printerDetail(id: printer.id))
+        .sheet(item: $printerLookupRequest, onDismiss: presentPendingPrinterSelection) { request in
+            PrinterLookupView(
+                printerService: services.printerService,
+                expectedServerGeneration: request.serverGeneration
+            ) { printer in
+                pendingPrinterSelection = PendingPrinterSelection(
+                    printerID: printer.id,
+                    serverGeneration: request.serverGeneration
+                )
+                printerLookupRequest = nil
             }
         }
         .task {
@@ -138,6 +158,21 @@ struct PrinterListView: View {
                 Task { await viewModel.loadAutoDispatchStatuses() }
             }
         }
+        .onChange(of: services.activeServerGeneration) { _, _ in
+            pendingPrinterSelection = nil
+            printerLookupRequest = nil
+        }
+    }
+
+    private func presentPendingPrinterSelection() {
+        guard let pendingPrinterSelection else { return }
+        self.pendingPrinterSelection = nil
+        guard pendingPrinterSelection.serverGeneration == services.activeServerGeneration else {
+            return
+        }
+        router.printersPath.append(
+            AppDestination.printerDetail(id: pendingPrinterSelection.printerID)
+        )
     }
 
     // MARK: - Printer List
@@ -248,8 +283,10 @@ struct PrinterListView: View {
 /// Direct printer lookup re-homed from the retired Scan tab.
 struct PrinterLookupView: View {
     let printerService: any PrinterServiceProtocol
+    let expectedServerGeneration: Int
     let onSelect: (Printer) -> Void
 
+    @Environment(ServiceContainer.self) private var services
     @Environment(\.dismiss) private var dismiss
     @State private var printers: [Printer] = []
     @State private var isLoading = false
@@ -281,6 +318,10 @@ struct PrinterLookupView: View {
                 } else {
                     List(filteredPrinters) { printer in
                         Button {
+                            guard expectedServerGeneration == services.activeServerGeneration else {
+                                dismiss()
+                                return
+                            }
                             onSelect(printer)
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
@@ -311,11 +352,27 @@ struct PrinterLookupView: View {
                 }
             }
             .task {
+                guard expectedServerGeneration == services.activeServerGeneration else {
+                    dismiss()
+                    return
+                }
                 isLoading = true
                 do {
-                    printers = try await printerService.list(includeDisabled: false)
+                    let loadedPrinters = try await printerService.list(includeDisabled: false)
+                    guard !Task.isCancelled,
+                          expectedServerGeneration == services.activeServerGeneration else {
+                        return
+                    }
+                    printers = loadedPrinters
                 } catch {
+                    guard !Task.isCancelled,
+                          expectedServerGeneration == services.activeServerGeneration else {
+                        return
+                    }
                     errorMessage = error.localizedDescription
+                }
+                guard expectedServerGeneration == services.activeServerGeneration else {
+                    return
                 }
                 isLoading = false
             }

@@ -95,7 +95,9 @@ struct ScanFlowView: View {
                 viewModel.pendingDeepLinkDestination = nil
                 dismiss()
             }
-            .task {
+            .task(id: services.activeServerGeneration) {
+                let serverGeneration = services.activeServerGeneration
+                viewModel.isViewActive = true
                 viewModel.configure(
                     scanner: services.barcodeScannerService,
                     partsInventoryService: services.partsInventoryService,
@@ -104,11 +106,15 @@ struct ScanFlowView: View {
                     printedPartsInventoryEnabled: partsInventoryEnabled
                 )
                 await services.capabilitiesService.refresh()
+                guard !Task.isCancelled,
+                      serverGeneration == services.activeServerGeneration else {
+                    return
+                }
+                viewModel.setPrintedPartsInventoryEnabled(partsInventoryEnabled)
             }
             .onChange(of: partsInventoryEnabled) { _, isEnabled in
                 viewModel.setPrintedPartsInventoryEnabled(isEnabled)
             }
-            .onAppear { viewModel.isViewActive = true }
             .onDisappear { viewModel.isViewActive = false }
         }
     }

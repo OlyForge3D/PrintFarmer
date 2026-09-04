@@ -18,6 +18,7 @@ struct AttentionPendingAction: Identifiable, Equatable {
 private struct AttentionHarvestPresentation: Identifiable {
     let itemID: String
     let job: PrintJob
+    let serverGeneration: Int
 
     var id: String { itemID }
 }
@@ -364,10 +365,11 @@ struct AttentionView: View {
                 destinationView(for: destination)
             }
         }
-        .sheet(item: $harvestPresentation) { presentation in
+        .sheet(item: $harvestPresentation, onDismiss: {
+            harvestPresentation = nil
+        }) { presentation in
             HarvestSheetView(job: presentation.job, autoStartBinScan: true) {
-                harvestPresentation = nil
-                Task { await feedViewModel.refresh() }
+                refreshAfterHarvest(serverGeneration: presentation.serverGeneration)
             }
         }
         .alert("Unable to Open Harvest", isPresented: .constant(harvestLoadError != nil)) {
@@ -597,7 +599,8 @@ struct AttentionView: View {
                 loadingHarvestItemID = nil
                 harvestPresentation = AttentionHarvestPresentation(
                     itemID: item.id,
-                    job: job
+                    job: job,
+                    serverGeneration: capturedGeneration
                 )
             } catch {
                 guard capturedGeneration == services.activeServerGeneration, isViewActive else {
@@ -609,6 +612,18 @@ struct AttentionView: View {
                 loadingHarvestItemID = nil
                 harvestLoadError = error.localizedDescription
             }
+        }
+    }
+
+    private func refreshAfterHarvest(serverGeneration: Int) {
+        let lifecycleToken = feedViewModel.currentLifecycleToken()
+        Task {
+            guard isViewActive,
+                  serverGeneration == services.activeServerGeneration,
+                  lifecycleToken == feedViewModel.currentLifecycleToken() else {
+                return
+            }
+            await feedViewModel.refresh()
         }
     }
 

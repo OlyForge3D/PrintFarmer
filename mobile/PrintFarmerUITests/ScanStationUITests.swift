@@ -90,6 +90,16 @@ final class ScanStationUITests: PrintFarmerUITestCase {
             app.buttons["Cancel"].waitForExistence(timeout: 5),
             "Printed-part lookup should present from Inventory"
         )
+
+        let partRow = app.buttons["inventory.partLookup.row.BRKT-01"]
+        XCTAssertTrue(partRow.waitForExistence(timeout: 5))
+        partRow.tap()
+
+        XCTAssertTrue(
+            app.navigationBars["Mounting Bracket"].waitForExistence(timeout: 5),
+            "Selecting a lookup result must present the printed-part detail"
+        )
+        XCTAssertTrue(app.steppers["partScan.deltaStepper"].exists)
     }
 
     func testFarmPrinterLookupNavigatesToPrinterDetail() {

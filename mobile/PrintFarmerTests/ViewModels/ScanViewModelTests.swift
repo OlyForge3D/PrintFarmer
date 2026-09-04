@@ -438,8 +438,8 @@ final class ScanViewModelTests: XCTestCase {
         partsService.binToResolve = bin
         scanner.barcodeScanResultToReturn = .barcode("BIN-77")
 
-        viewModel.scan()
-        try await Task.sleep(nanoseconds: 80_000_000)
+        let scanTask = try XCTUnwrap(viewModel.scan())
+        await scanTask.value
 
         XCTAssertFalse(viewModel.isScanning)
         XCTAssertEqual(viewModel.recentScans.first?.title, "Shelf A")
@@ -474,13 +474,76 @@ final class ScanViewModelTests: XCTestCase {
         scanner.barcodeScanResultToReturn = .barcode("BIN-01")
         scanner.barcodeScanDelayNanoseconds = 40_000_000
 
-        viewModel.scan()
+        let scanTask = try XCTUnwrap(viewModel.scan())
         viewModel.isViewActive = false
-
-        try await Task.sleep(nanoseconds: 90_000_000)
+        await scanTask.value
 
         XCTAssertNil(viewModel.pendingOutcome)
         XCTAssertTrue(partsService.resolveBinCodes.isEmpty)
+    }
+
+    @MainActor
+    func testReconfigureDuringCameraScanDropsOldServerResult() async throws {
+        let (viewModel, oldPartsService, scanner) = makeSubjectWithScanner()
+        let gate = CallOrderGate()
+        let scannerEntered = expectation(description: "scanner entered")
+        scanner.barcodeScanGate = {
+            scannerEntered.fulfill()
+            await gate.wait(1)
+        }
+        scanner.barcodeScanResultToReturn = .barcode("BIN-OLD")
+
+        let scanTask = try XCTUnwrap(viewModel.scan())
+        await fulfillment(of: [scannerEntered], timeout: 1)
+
+        let newPartsService = MockPartsInventoryService()
+        viewModel.configure(
+            scanner: nil,
+            partsInventoryService: newPartsService,
+            barcodeIntakeService: MockBarcodeIntakeService(),
+            spoolService: MockSpoolService()
+        )
+
+        await gate.release(1)
+        await scanTask.value
+
+        XCTAssertFalse(viewModel.isScanning)
+        XCTAssertTrue(oldPartsService.resolveBinCodes.isEmpty)
+        XCTAssertTrue(newPartsService.resolveBinCodes.isEmpty)
+        XCTAssertNil(viewModel.pendingOutcome)
+        XCTAssertNil(viewModel.pendingDeepLinkDestination)
+    }
+
+    @MainActor
+    func testReconfigureDuringResolverDropsOldServerOutcome() async {
+        let (viewModel, oldPartsService, _, _) = makeSubject()
+        let gate = CallOrderGate()
+        let resolverEntered = expectation(description: "old server resolver entered")
+        oldPartsService.resolveBinGate = {
+            resolverEntered.fulfill()
+            await gate.wait(1)
+        }
+        oldPartsService.binToResolve = makeBin(code: "BIN-OLD")
+
+        let dispatchTask = Task { await viewModel.dispatch("BIN-OLD") }
+        await fulfillment(of: [resolverEntered], timeout: 1)
+
+        let newPartsService = MockPartsInventoryService()
+        viewModel.configure(
+            scanner: nil,
+            partsInventoryService: newPartsService,
+            barcodeIntakeService: MockBarcodeIntakeService(),
+            spoolService: MockSpoolService()
+        )
+
+        await gate.release(1)
+        await dispatchTask.value
+
+        XCTAssertEqual(oldPartsService.resolveBinCodes, ["BIN-OLD"])
+        XCTAssertTrue(newPartsService.resolveBinCodes.isEmpty)
+        XCTAssertNil(viewModel.pendingOutcome)
+        XCTAssertNil(viewModel.pendingDeepLinkDestination)
+        XCTAssertTrue(viewModel.recentScans.isEmpty)
     }
 
     @MainActor

@@ -158,9 +158,16 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
         settings.tap()
 
         let offlineQueue = app.buttons["account.destination.offlineQueue"]
+        for _ in 0..<6 where !offlineQueue.exists || !offlineQueue.isHittable {
+            app.swipeUp()
+        }
         XCTAssertTrue(
             offlineQueue.waitForExistence(timeout: 8),
             "Offline Queue must remain reachable from the account area while offline"
+        )
+        XCTAssertTrue(
+            offlineQueue.isHittable,
+            "Offline Queue must be visible and tappable in the account area while offline"
         )
         offlineQueue.tap()
 

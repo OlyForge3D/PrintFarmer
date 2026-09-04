@@ -70,7 +70,12 @@ final class ScanViewModel {
     /// spool import here.
     var pendingSpoolBarcode: String?
     var recentScans: [RecentScan] = []
-    var isViewActive = true
+    var isViewActive = true {
+        didSet {
+            guard oldValue && !isViewActive else { return }
+            invalidateOperations(clearRecentScans: false)
+        }
+    }
 
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "ScanStation")
     private var scanner: (any BarcodeScannerProtocol)?
@@ -79,6 +84,7 @@ final class ScanViewModel {
     private var spoolService: (any SpoolServiceProtocol)?
     private var printedPartsInventoryEnabled = true
     private var printedPartsCapabilityGeneration = 0
+    private var operationGeneration = 0
 
     func configure(
         scanner: (any BarcodeScannerProtocol)?,
@@ -87,6 +93,7 @@ final class ScanViewModel {
         spoolService: any SpoolServiceProtocol,
         printedPartsInventoryEnabled: Bool = true
     ) {
+        invalidateOperations(clearRecentScans: true)
         self.scanner = scanner
         self.partsInventoryService = partsInventoryService
         self.barcodeIntakeService = barcodeIntakeService
@@ -114,27 +121,31 @@ final class ScanViewModel {
         scanner?.isAvailable ?? false
     }
 
-    func scan() {
+    @discardableResult
+    func scan() -> Task<Void, Never>? {
+        guard !isScanning else { return nil }
         guard let scanner, scanner.isAvailable else {
             errorMessage = "Scanning is not available on this device."
-            return
+            return nil
         }
 
+        let generation = operationGeneration
         isScanning = true
         errorMessage = nil
 
-        Task {
-            defer { isScanning = false }
+        return Task {
             let result = await scanner.scanBarcode()
-            guard isViewActive else { return }
+            guard isOperationCurrent(generation) else { return }
             switch result {
             case .barcode(let code):
-                await dispatch(code)
+                await dispatch(code, operationGeneration: generation)
             case .cancelled:
                 break
             case .error(let error):
                 errorMessage = error.localizedDescription
             }
+            guard isOperationCurrent(generation) else { return }
+            isScanning = false
         }
     }
 
@@ -142,6 +153,14 @@ final class ScanViewModel {
     /// to `scan()`) so tests and previews can drive dispatch without a real
     /// camera session.
     func dispatch(_ rawCode: String) async {
+        await dispatch(rawCode, operationGeneration: operationGeneration)
+    }
+
+    private func dispatch(
+        _ rawCode: String,
+        operationGeneration generation: Int
+    ) async {
+        guard isOperationCurrent(generation) else { return }
         let trimmed = rawCode.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         errorMessage = nil
@@ -169,7 +188,7 @@ final class ScanViewModel {
         }
 
         if printedPartsInventoryEnabled {
-            switch await dispatchPrintedParts(trimmed) {
+            switch await dispatchPrintedParts(trimmed, operationGeneration: generation) {
             case .stop:
                 return
             case .continueToSpool:
@@ -177,14 +196,18 @@ final class ScanViewModel {
             }
         }
 
-        guard isViewActive else { return }
+        guard isOperationCurrent(generation) else { return }
 
         // A spool deep link (captured above) reaches this stage only
         // after enabled bin/part resolution missed — an unambiguous format,
         // so it takes priority over re-parsing the same code as a
         // structured URL/JSON payload below.
         if let deferredSpoolId {
-            await routeToSpoolIfExists(id: deferredSpoolId, subtitle: "Spool #\(deferredSpoolId)")
+            await routeToSpoolIfExists(
+                id: deferredSpoolId,
+                subtitle: "Spool #\(deferredSpoolId)",
+                operationGeneration: generation
+            )
             return
         }
 
@@ -197,40 +220,53 @@ final class ScanViewModel {
         // are also numeric — those get first crack via Barcode Intake
         // below, falling back to a spool ID only on a definitive miss.
         if let spoolId = QRCodeParser.parseStructured(trimmed) {
-            await routeToSpoolIfExists(id: spoolId, subtitle: "Spool #\(spoolId)")
+            await routeToSpoolIfExists(
+                id: spoolId,
+                subtitle: "Spool #\(spoolId)",
+                operationGeneration: generation
+            )
             return
         }
 
         guard let barcodeIntakeService else {
+            guard isOperationCurrent(generation) else { return }
             pendingOutcome = .unknownCode(trimmed)
             return
         }
 
         do {
             if let filament = try await barcodeIntakeService.resolveFilament(barcode: trimmed) {
-                guard isViewActive else { return }
+                guard isOperationCurrent(generation) else { return }
                 recordRecentScan(icon: "cylinder", title: filament.name ?? filament.material ?? "Spool", subtitle: "Spool barcode")
                 pendingSpoolBarcode = trimmed
             } else {
-                guard isViewActive else { return }
+                guard isOperationCurrent(generation) else { return }
                 // Known raw barcodes retain Barcode Intake (handled above);
                 // an unresolved bare positive-integer code that Barcode
                 // Intake doesn't recognize falls back to being treated as
                 // an (unresolved) spool ID rather than an unknown code.
                 if let spoolId = QRCodeParser.parse(trimmed) {
-                    await routeToSpoolIfExists(id: spoolId, subtitle: "Spool #\(spoolId)")
+                    await routeToSpoolIfExists(
+                        id: spoolId,
+                        subtitle: "Spool #\(spoolId)",
+                        operationGeneration: generation
+                    )
                 } else {
                     recordRecentScan(icon: "questionmark.circle", title: "Unrecognized", subtitle: trimmed)
                     pendingOutcome = .unknownCode(trimmed)
                 }
             }
         } catch {
+            guard isOperationCurrent(generation) else { return }
             logger.warning("Spool resolution failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
         }
     }
 
-    private func dispatchPrintedParts(_ code: String) async -> PrintedPartsDispatchResult {
+    private func dispatchPrintedParts(
+        _ code: String,
+        operationGeneration: Int
+    ) async -> PrintedPartsDispatchResult {
         guard let partsInventoryService else {
             errorMessage = "Parts inventory service not available"
             return .stop
@@ -239,7 +275,10 @@ final class ScanViewModel {
 
         do {
             let bin = try await partsInventoryService.resolveBinByBarcode(code)
-            if let interrupted = interruptedPrintedPartsResult(for: generation) {
+            if let interrupted = interruptedPrintedPartsResult(
+                for: generation,
+                operationGeneration: operationGeneration
+            ) {
                 return interrupted
             }
             recordRecentScan(
@@ -251,11 +290,17 @@ final class ScanViewModel {
             pendingOutcome = .bin(bin)
             return .stop
         } catch NetworkError.notFound, NetworkError.featureDisabled {
-            if let interrupted = interruptedPrintedPartsResult(for: generation) {
+            if let interrupted = interruptedPrintedPartsResult(
+                for: generation,
+                operationGeneration: operationGeneration
+            ) {
                 return interrupted
             }
         } catch {
-            if let interrupted = interruptedPrintedPartsResult(for: generation) {
+            if let interrupted = interruptedPrintedPartsResult(
+                for: generation,
+                operationGeneration: operationGeneration
+            ) {
                 return interrupted
             }
             logger.warning("Bin resolution failed: \(error.localizedDescription)")
@@ -265,7 +310,10 @@ final class ScanViewModel {
 
         do {
             let part = try await partsInventoryService.resolvePartByBarcode(code)
-            if let interrupted = interruptedPrintedPartsResult(for: generation) {
+            if let interrupted = interruptedPrintedPartsResult(
+                for: generation,
+                operationGeneration: operationGeneration
+            ) {
                 return interrupted
             }
             recordRecentScan(
@@ -277,12 +325,18 @@ final class ScanViewModel {
             pendingOutcome = .part(part)
             return .stop
         } catch NetworkError.notFound, NetworkError.featureDisabled {
-            if let interrupted = interruptedPrintedPartsResult(for: generation) {
+            if let interrupted = interruptedPrintedPartsResult(
+                for: generation,
+                operationGeneration: operationGeneration
+            ) {
                 return interrupted
             }
             return .continueToSpool
         } catch {
-            if let interrupted = interruptedPrintedPartsResult(for: generation) {
+            if let interrupted = interruptedPrintedPartsResult(
+                for: generation,
+                operationGeneration: operationGeneration
+            ) {
                 return interrupted
             }
             logger.warning("Part resolution failed: \(error.localizedDescription)")
@@ -292,9 +346,10 @@ final class ScanViewModel {
     }
 
     private func interruptedPrintedPartsResult(
-        for generation: Int
+        for generation: Int,
+        operationGeneration: Int
     ) -> PrintedPartsDispatchResult? {
-        guard isViewActive else { return .stop }
+        guard isOperationCurrent(operationGeneration) else { return .stop }
         guard generation != printedPartsCapabilityGeneration || !printedPartsInventoryEnabled else {
             return nil
         }
@@ -308,7 +363,11 @@ final class ScanViewModel {
     /// payload NEVER falls back to raw barcode registration regardless of
     /// the lookup's outcome; it either routes or surfaces an explicit
     /// error.
-    private func routeToSpoolIfExists(id: Int, subtitle: String) async {
+    private func routeToSpoolIfExists(
+        id: Int,
+        subtitle: String,
+        operationGeneration: Int
+    ) async {
         guard let spoolService else {
             errorMessage = "Spool service not available"
             return
@@ -316,7 +375,7 @@ final class ScanViewModel {
 
         do {
             let exists = try await spoolService.spoolExists(id: id)
-            guard isViewActive else { return }
+            guard isOperationCurrent(operationGeneration) else { return }
             if exists {
                 recordRecentScan(icon: "cylinder", title: "Spool", subtitle: subtitle)
                 pendingDeepLinkDestination = .spoolDetail(id: id)
@@ -324,7 +383,7 @@ final class ScanViewModel {
                 errorMessage = "Spool #\(id) was not found on this server."
             }
         } catch {
-            guard isViewActive else { return }
+            guard isOperationCurrent(operationGeneration) else { return }
             logger.warning("Spool existence lookup failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
         }
@@ -332,6 +391,22 @@ final class ScanViewModel {
 
     func clearError() {
         errorMessage = nil
+    }
+
+    private func isOperationCurrent(_ generation: Int) -> Bool {
+        isViewActive && generation == operationGeneration
+    }
+
+    private func invalidateOperations(clearRecentScans: Bool) {
+        operationGeneration &+= 1
+        isScanning = false
+        errorMessage = nil
+        pendingOutcome = nil
+        pendingDeepLinkDestination = nil
+        pendingSpoolBarcode = nil
+        if clearRecentScans {
+            recentScans.removeAll()
+        }
     }
 
     private func recordRecentScan(

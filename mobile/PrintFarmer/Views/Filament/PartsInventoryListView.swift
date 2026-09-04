@@ -1,5 +1,27 @@
 import SwiftUI
 
+private enum PartsInventorySheet: Identifiable {
+    case scan
+    case partLookup(serverGeneration: Int)
+    case part(PartInventoryResponse)
+
+    var id: String {
+        switch self {
+        case .scan:
+            "scan"
+        case .partLookup(let serverGeneration):
+            "lookup-\(serverGeneration)"
+        case .part(let part):
+            "part-\(part.id.uuidString)"
+        }
+    }
+}
+
+private struct PendingPartSelection {
+    let part: PartInventoryResponse
+    let serverGeneration: Int
+}
+
 /// Printed-parts inventory list (#714, F9): on-hand/reorder state for every
 /// active SKU, with unified scan history feeding recognition. Distinct from
 /// `SpoolInventoryView` (filament spools) — see `InventoryView` for the
@@ -7,9 +29,8 @@ import SwiftUI
 struct PartsInventoryListView: View {
     @Environment(ServiceContainer.self) private var services
     @State private var viewModel = PartsInventoryViewModel()
-    @State private var selectedPart: PartInventoryResponse?
-    @State private var showScanFlow = false
-    @State private var showPartLookup = false
+    @State private var presentedSheet: PartsInventorySheet?
+    @State private var pendingPartSelection: PendingPartSelection?
     @State private var activeTasks: [Task<Void, Never>] = []
 
     var body: some View {
@@ -41,7 +62,7 @@ struct PartsInventoryListView: View {
                     Section {
                         ForEach(viewModel.filteredParts) { part in
                             Button {
-                                selectedPart = part
+                                presentedSheet = .part(part)
                             } label: {
                                 partRow(part)
                             }
@@ -63,13 +84,15 @@ struct PartsInventoryListView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button {
-                        showScanFlow = true
+                        presentedSheet = .scan
                     } label: {
                         Label("Scan code", systemImage: "barcode.viewfinder")
                     }
 
                     Button {
-                        showPartLookup = true
+                        presentedSheet = .partLookup(
+                            serverGeneration: services.activeServerGeneration
+                        )
                     } label: {
                         Label("Look up printed part", systemImage: "cube.box")
                     }
@@ -93,25 +116,38 @@ struct PartsInventoryListView: View {
                 Text(error)
             }
         }
-        .sheet(item: $selectedPart) { part in
-            PartScanResultView(part: part, navigationTitle: part.name) { _ in
-                let task = Task { await viewModel.loadParts() }
-                activeTasks.append(task)
-            }
-        }
-        .sheet(isPresented: $showScanFlow) {
-            ScanFlowView()
-        }
-        .sheet(isPresented: $showPartLookup) {
-            PartLookupView(partsInventoryService: services.partsInventoryService) { part in
-                selectedPart = part
-                showPartLookup = false
+        .sheet(item: $presentedSheet, onDismiss: presentPendingPartSelection) { sheet in
+            switch sheet {
+            case .scan:
+                ScanFlowView()
+            case .partLookup(let serverGeneration):
+                PartLookupView(
+                    partsInventoryService: services.partsInventoryService,
+                    expectedServerGeneration: serverGeneration
+                ) { part in
+                    pendingPartSelection = PendingPartSelection(
+                        part: part,
+                        serverGeneration: serverGeneration
+                    )
+                    presentedSheet = nil
+                }
+            case .part(let part):
+                PartScanResultView(part: part, navigationTitle: part.name) { _ in
+                    let task = Task { await viewModel.loadParts() }
+                    activeTasks.append(task)
+                }
             }
         }
         .task {
             viewModel.isViewActive = true
             viewModel.configure(partsInventoryService: services.partsInventoryService)
             await viewModel.loadParts()
+        }
+        .onChange(of: services.activeServerGeneration) { _, _ in
+            pendingPartSelection = nil
+            presentedSheet = nil
+            activeTasks.forEach { $0.cancel() }
+            activeTasks.removeAll()
         }
         .onDisappear {
             activeTasks.forEach { $0.cancel() }
@@ -120,11 +156,22 @@ struct PartsInventoryListView: View {
         }
     }
 
+    private func presentPendingPartSelection() {
+        guard let pendingPartSelection else { return }
+        self.pendingPartSelection = nil
+        guard pendingPartSelection.serverGeneration == services.activeServerGeneration else {
+            return
+        }
+        presentedSheet = .part(pendingPartSelection.part)
+    }
+
     /// Direct printed-part lookup re-homed from the retired Scan tab.
     struct PartLookupView: View {
         let partsInventoryService: any PartsInventoryServiceProtocol
+        let expectedServerGeneration: Int
         let onSelect: (PartInventoryResponse) -> Void
 
+        @Environment(ServiceContainer.self) private var services
         @Environment(\.dismiss) private var dismiss
         @State private var parts: [PartInventoryResponse] = []
         @State private var isLoading = false
@@ -159,6 +206,10 @@ struct PartsInventoryListView: View {
                     } else {
                         List(filteredParts) { part in
                             Button {
+                                guard expectedServerGeneration == services.activeServerGeneration else {
+                                    dismiss()
+                                    return
+                                }
                                 onSelect(part)
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -185,11 +236,27 @@ struct PartsInventoryListView: View {
                     }
                 }
                 .task {
+                    guard expectedServerGeneration == services.activeServerGeneration else {
+                        dismiss()
+                        return
+                    }
                     isLoading = true
                     do {
-                        parts = try await partsInventoryService.listParts()
+                        let loadedParts = try await partsInventoryService.listParts()
+                        guard !Task.isCancelled,
+                              expectedServerGeneration == services.activeServerGeneration else {
+                            return
+                        }
+                        parts = loadedParts
                     } catch {
+                        guard !Task.isCancelled,
+                              expectedServerGeneration == services.activeServerGeneration else {
+                            return
+                        }
                         errorMessage = error.localizedDescription
+                    }
+                    guard expectedServerGeneration == services.activeServerGeneration else {
+                        return
                     }
                     isLoading = false
                 }
