@@ -8,14 +8,6 @@ func destinationView(for destination: AppDestination) -> some View {
         PrinterDetailView(printerId: id)
     case .jobDetail(let id):
         JobDetailView(jobId: id)
-    case .locationDetail:
-        // LocationListView exists, but location-detail routing intentionally
-        // remains unchanged until the navigation epic wires that destination.
-        ContentUnavailableView {
-            Label("Coming Soon", systemImage: "map")
-        } description: {
-            Text("Location details will be available in a future update.")
-        }
     case .createJob:
         ContentUnavailableView {
             Label("Coming Soon", systemImage: "plus.circle")
@@ -28,10 +20,22 @@ func destinationView(for destination: AppDestination) -> some View {
         } description: {
             Text("Printer setup will be available in a future update.")
         }
+    case .dashboard:
+        DashboardView(ownsNavigationStack: false)
+    case .maintenance:
+        MaintenanceView(ownsNavigationStack: false)
+    case .notifications:
+        NotificationsView(ownsNavigationStack: false)
+    case .settings:
+        SettingsView(ownsNavigationStack: false)
+    case .navigationSettings:
+        NavigationSettingsView()
     case .maintenanceAnalytics:
         MaintenanceAnalyticsView()
     case .uptimeReliability:
         UptimeView()
+    case .filamentCoverage:
+        FilamentCoverageView()
     case .predictiveInsights(let printerId):
         PredictiveInsightsView(printerId: printerId)
     case .jobHistory:
@@ -40,6 +44,12 @@ func destinationView(for destination: AppDestination) -> some View {
         JobTimelineView()
     case .dispatchDashboard:
         DispatchDashboardView()
+    case .locations:
+        LocationListView()
+    case .offlineQueue:
+        OfflineQueueStatusView()
+    case .manageServers:
+        ServersView()
     case .advancedPrinterControls(let printerId):
         AdvancedPrinterControlsDestination(printerId: printerId)
     }

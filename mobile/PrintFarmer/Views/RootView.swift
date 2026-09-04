@@ -81,6 +81,7 @@ struct RootView: View {
                 connectionMonitor.stop()
                 connectionGate.reset()
                 router.pendingReadyCount = 0
+                router.resetAdaptiveShellSession()
                 disconnectTask = Task { await services.signalRService.disconnect() }
             }
         }
@@ -91,6 +92,7 @@ struct RootView: View {
             connectionMonitor.stop()
             connectionGate.reset()
             router.pendingReadyCount = 0
+            router.invalidatePendingNavigation()
         }
         .onChange(of: DemoMode.shared.isActive) {
             connectionGate.reset()

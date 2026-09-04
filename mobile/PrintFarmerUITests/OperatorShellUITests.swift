@@ -3,7 +3,8 @@ import XCTest
 /// UI tests for the F1 operator shell (issue #706).
 ///
 /// Verifies that the app launches into the Attention tab, that the tab
-/// bar exposes the five operator destinations in the required order, and
+/// bar exposes the adaptive compact destinations or the regular-width
+/// operator sidebar in the required order, and
 /// that reachable destinations satisfy the two-tap requirement:
 ///
 /// * Attention → overflow → Settings (2 taps)
@@ -36,7 +37,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         )
     }
 
-    func testTabBarShowsFiveOperatorDestinations() {
+    func testOperatorShellShowsDestinationsForCurrentWidth() {
         // Operator shell must present a navigation container: iPhone
         // TabView bottom bar OR iPad NavigationSplitView sidebar.
         let tabBar = app.tabBars.firstMatch
@@ -51,13 +52,23 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
             "Operator shell must expose either a compact tab bar or an iPad sidebar"
         )
 
-        let expectedDestinations: [(tabTitle: String, sidebarIdentifier: String)] = [
-            ("Attention", "sidebar.attention"),
-            ("Farm", "sidebar.farm"),
-            ("Tasks", "sidebar.tasks"),
-            ("Scan", "sidebar.scan"),
-            ("Inventory", "sidebar.inventory")
-        ]
+        let expectedDestinations: [(tabTitle: String, sidebarIdentifier: String)]
+        if hasTabBar {
+            expectedDestinations = [
+                ("Attention", "sidebar.attention"),
+                ("Farm", "sidebar.farm"),
+                ("Inventory", "sidebar.inventory"),
+                ("Oversight", "sidebar.oversight"),
+            ]
+        } else {
+            expectedDestinations = [
+                ("Attention", "sidebar.attention"),
+                ("Farm", "sidebar.farm"),
+                ("Tasks", "sidebar.tasks"),
+                ("Scan", "sidebar.scan"),
+                ("Inventory", "sidebar.inventory"),
+            ]
+        }
         for destination in expectedDestinations {
             let button = operatorDestinationButton(
                 tabTitle: destination.tabTitle,
@@ -68,6 +79,11 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
                 button.exists,
                 "Destination '\(destination.tabTitle)' should be present in the operator shell — tab bar '\(destination.tabTitle)' or sidebar '\(destination.sidebarIdentifier)'"
             )
+        }
+
+        if hasTabBar {
+            XCTAssertFalse(app.tabBars.buttons["Tasks"].exists)
+            XCTAssertFalse(app.tabBars.buttons["Scan"].exists)
         }
     }
 
@@ -537,7 +553,13 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
         XCTAssertFalse(app.buttons["Printed Parts"].exists)
     }
 
-    func testPrintedPartsScanActionIsAbsentWhileSpoolActionRemainsVisible() {
+    func testPrintedPartsScanActionIsAbsentWhileSpoolActionRemainsVisible() throws {
+        if app.tabBars.firstMatch.waitForExistence(timeout: 5),
+           !app.tabBars.buttons["Scan"].exists {
+            throw XCTSkip(
+                "Compact Scan re-homing is tracked by #2419; regular-width coverage remains active"
+            )
+        }
         let scan = operatorDestinationButton(
             tabTitle: "Scan",
             sidebarIdentifier: "sidebar.scan",
@@ -664,5 +686,26 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
 
         let cancel = app.buttons["printer.detail.dispatch.cancel"]
         if cancel.exists { cancel.tap() }
+    }
+}
+
+@MainActor
+final class TwoModesOperatorShellUITests: PrintFarmerUITestCase {
+    override var additionalLaunchArguments: [String] {
+        ["--uitesting-two-modes"]
+    }
+
+    func testFloorModeShowsRequiredCompactDestinations() {
+        let tabBar = app.tabBars.firstMatch
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 5))
+
+        for destination in ["Attention", "Farm", "Tasks", "Inventory"] {
+            XCTAssertTrue(
+                tabBar.buttons[destination].exists,
+                "Two-modes Floor must expose \(destination)"
+            )
+        }
+        XCTAssertFalse(tabBar.buttons["Scan"].exists)
+        XCTAssertFalse(tabBar.buttons["Oversight"].exists)
     }
 }

@@ -74,15 +74,16 @@ struct iPadPrinterCardView: View {
                 Text(printer.name)
                     .font(.headline)
                     .foregroundStyle(.white)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 if let location = printer.location {
                     Label(location.name, systemImage: "building.2")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.8))
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .layoutPriority(1)
 
             Spacer()
 
@@ -93,6 +94,7 @@ struct iPadPrinterCardView: View {
                 .padding(.vertical, 3)
                 .background(.black.opacity(0.3), in: Capsule())
                 .foregroundStyle(.white)
+                .fixedSize()
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

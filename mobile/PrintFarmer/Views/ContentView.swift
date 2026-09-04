@@ -1,13 +1,28 @@
 import SwiftUI
 
-/// Operator-shell content view. F1 (#706) replaces the seven-tab layout
-/// (dashboard, printers, jobs, notifications, inventory, maintenance,
-/// settings) with the five operator-first destinations: Attention, Farm,
-/// Tasks, Scan, Inventory. Settings and server switching move to the
-/// Attention overflow menu; jog/preheat/z-offset controls live behind
-/// Printer Detail → Advanced.
+private struct NavigationIdentityRequest: Hashable {
+    let serverID: UUID
+    let generation: Int
+    let endpoint: String
+    let observedUserID: UUID?
+    let observedRoles: [String]
+    let retryRevision: Int
+}
+
+private struct ResolvedNavigationIdentity: Equatable {
+    let serverID: UUID
+    let endpoint: String
+    let userID: UUID
+    let isFarmAdmin: Bool
+    let isProvisional: Bool
+}
+
+/// Adaptive operator shell for compact devices, with the existing split view
+/// retained until the dedicated iPad navigation work lands.
 struct ContentView: View {
     static let sidebarRowMinimumHeight: CGFloat = 44
+    static let modeControlMinimumHeight: CGFloat = 44
+
     static func shippingTabs(
         for capabilities: ResolvedSystemCapabilities
     ) -> [AppTab] {
@@ -18,49 +33,129 @@ struct ContentView: View {
         )
     }
 
+    @Environment(AuthViewModel.self) private var authViewModel
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var navigationIdentity: ResolvedNavigationIdentity?
+    @State private var navigationIdentityError: String?
+    @State private var navigationIdentityRetryRevision = 0
 
     var body: some View {
         let capabilities = services.capabilitiesService.resolved
+        let oversightAvailability = currentOversightAvailability(
+            capabilities: capabilities
+        )
 
         Group {
             if sizeClass == .regular {
                 iPadLayout(capabilities: capabilities)
-            } else {
+            } else if isCompactShellReady {
                 compactLayout(capabilities: capabilities)
+            } else if let navigationIdentityError {
+                navigationIdentityFailure(navigationIdentityError)
+            } else {
+                ProgressView()
+                    .accessibilityLabel("Preparing navigation")
+                    .accessibilityIdentifier("navigation.shellLoading")
+                    .accessibilityAddTraits(.updatesFrequently)
             }
         }
         .onAppear {
-            router.reconcileCapabilities(capabilities)
+            synchronizeAdaptiveShell(
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            )
         }
         .onChange(of: capabilities) { _, newCapabilities in
-            router.reconcileCapabilities(newCapabilities)
+            synchronizeAdaptiveShell(
+                capabilities: newCapabilities,
+                oversightAvailability: currentOversightAvailability(
+                    capabilities: newCapabilities
+                )
+            )
+        }
+        .onChange(of: services.farmShapeService.sessionShape) {
+            synchronizeAdaptiveShell(
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            )
+        }
+        .onChange(of: serverRegistry.navigationLayoutPreference) {
+            synchronizeAdaptiveShell(
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            )
+        }
+        .task(id: navigationIdentityRequest) {
+            guard let request = navigationIdentityRequest else {
+                navigationIdentity = nil
+                return
+            }
+            await resolveNavigationIdentity(request)
+        }
+        .onChange(of: sizeClass) {
+            synchronizeAdaptiveShell(
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            )
         }
     }
 
     // MARK: - Compact (iPhone)
 
-    private func compactLayout(capabilities: ResolvedSystemCapabilities) -> some View {
+    private func compactLayout(
+        capabilities: ResolvedSystemCapabilities
+    ) -> some View {
         let selection = Binding(
-            get: { resolvedShippingTab(for: capabilities) },
-            set: { selectShippingTab($0, capabilities: capabilities) }
+            get: { router.resolvedTab(for: capabilities) },
+            set: { router.selectTab($0, capabilities: capabilities) }
         )
-        let tabs = Self.shippingTabs(for: capabilities)
+        let tabs = router.visibleTabs(for: capabilities)
 
-        return TabView(selection: selection) {
-            ForEach(tabs, id: \.self) { tab in
-                tabContentView(for: tab)
-                    .tabItem {
-                        Label(tab.title, systemImage: tab.systemImage)
-                    }
-                    .tag(tab)
-                    .badge(badgeCount(for: tab))
-                    .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
+        return VStack(spacing: 0) {
+            if router.shouldShowModeControl(for: router.resolvedTab(for: capabilities)) {
+                modeControl(capabilities: capabilities)
+            }
+
+            TabView(selection: selection) {
+                ForEach(tabs, id: \.self) { tab in
+                    tabContentView(for: tab)
+                        .tabItem {
+                            Label(tab.title, systemImage: tab.systemImage)
+                        }
+                        .tag(tab)
+                        .badge(badgeCount(for: tab))
+                        .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
+                }
             }
         }
+    }
+
+    private func modeControl(
+        capabilities: ResolvedSystemCapabilities
+    ) -> some View {
+        Picker(
+            "Navigation mode",
+            selection: Binding(
+                get: { router.activeMode },
+                set: { router.setNavigationMode($0, capabilities: capabilities) }
+            )
+        ) {
+            Text("Floor").tag(OversightMode.floor)
+            Text("Oversight").tag(OversightMode.oversight)
+        }
+        .pickerStyle(.segmented)
+        .frame(minHeight: Self.modeControlMinimumHeight)
+        .padding(.horizontal)
+        .background(.bar)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+        .accessibilityLabel("Navigation mode")
+        .accessibilityHint("Switches between Floor work and Oversight.")
+        .accessibilityIdentifier("navigation.modeControl")
     }
 
     // MARK: - Regular (iPad)
@@ -176,6 +271,182 @@ struct ContentView: View {
         }
     }
 
+    private func synchronizeAdaptiveShell(
+        capabilities: ResolvedSystemCapabilities,
+        oversightAvailability: OversightNavigationAvailability,
+        preserveNavigationOnIdentityUpgrade: Bool = false
+    ) {
+        if sizeClass == .regular {
+            router.presentShippingShell(capabilities: capabilities)
+            return
+        }
+
+        guard let activeServer = serverRegistry.activeServer,
+              let navigationIdentity,
+              navigationIdentity.serverID == activeServer.id,
+              navigationIdentity.endpoint == activeServer.normalizedURLString else {
+            router.reconcileCapabilities(
+                capabilities,
+                oversightAvailability: oversightAvailability
+            )
+            return
+        }
+
+        router.configureAdaptiveShell(
+            serverID: activeServer.id,
+            userID: navigationIdentity.userID,
+            preference: navigationIdentity.isProvisional
+                ? .simple
+                : serverRegistry.navigationLayoutPreference,
+            farmShape: services.farmShapeService.sessionShape,
+            isFarmAdmin: navigationIdentity.isFarmAdmin,
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability,
+            preserveNavigationOnContextChange: preserveNavigationOnIdentityUpgrade
+        )
+    }
+
+    private var navigationIdentityRequest: NavigationIdentityRequest? {
+        guard let activeServer = serverRegistry.activeServer else { return nil }
+        return NavigationIdentityRequest(
+            serverID: activeServer.id,
+            generation: services.activeServerGeneration,
+            endpoint: activeServer.normalizedURLString,
+            observedUserID: authViewModel.currentUser?.id,
+            observedRoles: authViewModel.currentUser?.roles ?? [],
+            retryRevision: navigationIdentityRetryRevision
+        )
+    }
+
+    private func resolveNavigationIdentity(_ request: NavigationIdentityRequest) async {
+        navigationIdentity = nil
+        navigationIdentityError = nil
+        let provisionalUserID = UUID()
+        var retryDelayMilliseconds = 250
+        var unsettledMilliseconds = 0
+
+        while !Task.isCancelled, navigationIdentityRequest == request {
+            let resolution = await services.currentUserForNavigation(
+                serverID: request.serverID,
+                generation: request.generation,
+                expectedEndpoint: request.endpoint
+            )
+            guard !Task.isCancelled,
+                  navigationIdentityRequest == request else {
+                return
+            }
+
+            switch resolution {
+            case .verified(let identity):
+                let preservesProvisionalNavigation =
+                    navigationIdentity?.serverID == request.serverID
+                    && navigationIdentity?.endpoint == request.endpoint
+                    && navigationIdentity?.isProvisional == true
+                navigationIdentityError = nil
+                navigationIdentity = ResolvedNavigationIdentity(
+                    serverID: request.serverID,
+                    endpoint: request.endpoint,
+                    userID: identity.userID,
+                    isFarmAdmin: identity.roles.contains("farm_admin"),
+                    isProvisional: false
+                )
+                synchronizeAdaptiveShell(
+                    capabilities: services.capabilitiesService.resolved,
+                    oversightAvailability: currentOversightAvailability(
+                        capabilities: services.capabilitiesService.resolved
+                    ),
+                    preserveNavigationOnIdentityUpgrade: preservesProvisionalNavigation
+                )
+                return
+            case .offline:
+                unsettledMilliseconds = 0
+                navigationIdentityError = nil
+                if navigationIdentity == nil {
+                    navigationIdentity = ResolvedNavigationIdentity(
+                        serverID: request.serverID,
+                        endpoint: request.endpoint,
+                        userID: provisionalUserID,
+                        isFarmAdmin: false,
+                        isProvisional: true
+                    )
+                    synchronizeAdaptiveShell(
+                        capabilities: services.capabilitiesService.resolved,
+                        oversightAvailability: currentOversightAvailability(
+                            capabilities: services.capabilitiesService.resolved
+                        )
+                    )
+                }
+            case .notSettled:
+                navigationIdentity = nil
+                unsettledMilliseconds += retryDelayMilliseconds
+                if unsettledMilliseconds >= 8_000 {
+                    navigationIdentityError = "The selected server is still switching. Try again or sign out."
+                }
+            case .failed(let message):
+                navigationIdentity = nil
+                navigationIdentityError = message
+            }
+
+            do {
+                try await Task.sleep(for: .milliseconds(retryDelayMilliseconds))
+            } catch {
+                return
+            }
+            retryDelayMilliseconds = min(retryDelayMilliseconds * 2, 8_000)
+        }
+    }
+
+    private var isCompactShellReady: Bool {
+        guard let activeServer = serverRegistry.activeServer,
+              let navigationIdentity,
+              navigationIdentity.serverID == activeServer.id,
+              navigationIdentity.endpoint == activeServer.normalizedURLString else {
+            return false
+        }
+        return router.hasAdaptiveShellConfiguration(
+            serverID: activeServer.id,
+            userID: navigationIdentity.userID
+        )
+    }
+
+    private func navigationIdentityFailure(_ message: String) -> some View {
+        ContentUnavailableView {
+            Label("Navigation Unavailable", systemImage: "person.crop.circle.badge.exclamationmark")
+        } description: {
+            Text(message)
+        } actions: {
+            Button("Try Again") {
+                navigationIdentityRetryRevision &+= 1
+            }
+            .frame(minHeight: Self.modeControlMinimumHeight)
+            .accessibilityIdentifier("navigation.identityRetry")
+
+            Button("Sign Out", role: .destructive) {
+                Task {
+                    await authViewModel.logout()
+                }
+            }
+            .frame(minHeight: Self.modeControlMinimumHeight)
+            .accessibilityIdentifier("navigation.identitySignOut")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.updatesFrequently)
+        .accessibilityIdentifier("navigation.identityUnavailable")
+    }
+
+    private func currentOversightAvailability(
+        capabilities: ResolvedSystemCapabilities
+    ) -> OversightNavigationAvailability {
+        OversightNavigationAvailability(
+            hasVisibleHubDestinations: OversightCatalog.hasVisibleDestinations(
+                capabilities: capabilities
+            ),
+            visibleTabs: OversightCatalog.visibleTabs(
+                capabilities: capabilities
+            )
+        )
+    }
+
     @ViewBuilder
     private func tabContentView(for tab: AppTab) -> some View {
         switch tab {
@@ -190,7 +461,7 @@ struct ContentView: View {
         case .inventory:
             InventoryView()
         case .oversight, .overview, .fleet, .jobs, .upkeep, .reports:
-            EmptyView()
+            oversightTabContentView(for: tab)
         }
     }
 }

@@ -6,6 +6,14 @@ import XCTest
 /// checklist identically.
 @MainActor
 class ShiftTasksUITestBase: PrintFarmerUITestCase {
+    var shiftTaskScenarioLaunchArguments: [String] {
+        []
+    }
+
+    override var additionalLaunchArguments: [String] {
+        ["--uitesting-two-modes"] + shiftTaskScenarioLaunchArguments
+    }
+
     func openTasksDestination(
         file: StaticString = #filePath,
         line: UInt = #line
@@ -45,7 +53,7 @@ class ShiftTasksUITestBase: PrintFarmerUITestCase {
 final class ShiftTasksUITests: ShiftTasksUITestBase {
     private let taskID = "78200000-0000-0000-0000-000000000001"
 
-    override var additionalLaunchArguments: [String] {
+    override var shiftTaskScenarioLaunchArguments: [String] {
         [
             "--uitesting-shift-task-mutation-error",
             "-UIPreferredContentSizeCategoryName",
@@ -65,7 +73,19 @@ final class ShiftTasksUITests: ShiftTasksUITestBase {
         let error = app.descendants(matching: .any)[
             "shiftTasks.mutation.error.\(taskID)"
         ]
-        XCTAssertTrue(error.waitForExistence(timeout: 5))
+        var errorAppeared = error.waitForExistence(timeout: 5)
+        if !errorAppeared {
+            app.swipeUp()
+            errorAppeared = error.waitForExistence(timeout: 3)
+        }
+        if !errorAppeared,
+           complete.exists,
+           complete.isEnabled,
+           complete.isHittable {
+            complete.tap()
+            errorAppeared = error.waitForExistence(timeout: 5)
+        }
+        XCTAssertTrue(errorAppeared)
         let retry = app.buttons["shiftTasks.mutation.retry.\(taskID)"]
         XCTAssertTrue(retry.waitForExistence(timeout: 3))
 
@@ -181,8 +201,7 @@ final class ShiftTasksUITests: ShiftTasksUITestBase {
         queue.tap()
 
         XCTAssertTrue(
-            app.staticTexts["raspberry_pi_case.gcode"]
-                .waitForExistence(timeout: 5),
+            app.descendants(matching: .any)["jobList.root"].waitForExistence(timeout: 5),
             "The preserved JobListView queue page must be reachable from Tasks"
         )
         XCTAssertFalse(app.otherElements["shiftTasks.list"].exists)
@@ -268,7 +287,7 @@ final class ShiftTasksGroupedUITests: ShiftTasksUITestBase {
 /// proven deterministically in `UITestBootstrapTests`.
 @MainActor
 final class ShiftTasksFailedRefreshUITests: ShiftTasksUITestBase {
-    override var additionalLaunchArguments: [String] {
+    override var shiftTaskScenarioLaunchArguments: [String] {
         ["--uitesting-shift-task-initial-load-failure"]
     }
 

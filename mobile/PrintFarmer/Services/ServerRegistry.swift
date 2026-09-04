@@ -34,6 +34,7 @@ final class ServerRegistry {
     static let corruptBackupKey = "pf_server_registry_corrupt_backup"
     static let legacyMigrationCompletedKey = "pf_server_registry_legacy_migration_completed"
     private static let advancedPrinterControlsPreferenceKeyPrefix = "pf_advanced_printer_controls_enabled"
+    private static let navigationLayoutPreferenceKeyPrefix = "pf_navigation_layout"
 
     private struct PersistedRegistry: Codable {
         var servers: [RegisteredServer]
@@ -45,9 +46,11 @@ final class ServerRegistry {
         didSet {
             guard activeServerID != oldValue else { return }
             reloadAdvancedPrinterControlsPreference()
+            reloadNavigationLayoutPreference()
         }
     }
     private(set) var advancedPrinterControlsEnabled = false
+    private(set) var navigationLayoutPreference: NavigationLayoutPreference = .automatic
 
     /// Awaited snapshot purge authority, wired by `ServiceContainer`. Server
     /// removal is gated on this: a successful purge must complete before the
@@ -56,6 +59,7 @@ final class ServerRegistry {
     /// not view state.
     @ObservationIgnored var snapshotPurgeHandler: (@Sendable (UUID) async -> FarmSnapshotPurgeResult)?
     @ObservationIgnored var certificatePinPurgeHandler: (@Sendable (RegisteredServer, [RegisteredServer]) async -> Bool)?
+    @ObservationIgnored var farmShapeResetHandler: (@Sendable (UUID) -> Void)?
 
     @ObservationIgnored private let userDefaults: UserDefaults
     @ObservationIgnored private let now: () -> Date
@@ -144,6 +148,7 @@ final class ServerRegistry {
         }
         sanitizeActiveSelection()
         reloadAdvancedPrinterControlsPreference()
+        reloadNavigationLayoutPreference()
     }
 
     var activeServer: RegisteredServer? {
@@ -184,6 +189,7 @@ final class ServerRegistry {
         let endpointChanged = servers[index].normalizedURLString != normalized
         var updated = server
         if endpointChanged {
+            farmShapeResetHandler?(server.id)
             updated.originServerId = nil
         }
         updated.displayName = normalizedDisplayName(updated.displayName, fallbackURL: updated.baseURL)
@@ -194,6 +200,7 @@ final class ServerRegistry {
         servers[index] = updated
         if endpointChanged {
             clearAdvancedPrinterControlsPreference(for: server.id)
+            clearNavigationLayoutPreference(for: server.id)
         }
         persist()
     }
@@ -211,6 +218,7 @@ final class ServerRegistry {
             activeServerID = servers.first?.id
         }
         clearAdvancedPrinterControlsPreference(for: id)
+        clearNavigationLayoutPreference(for: id)
         persist()
     }
 
@@ -251,6 +259,7 @@ final class ServerRegistry {
         guard Self.consumeAddRevision(candidate.id, expected: expectedRevision) else { return false }
         servers.remove(at: index)
         clearAdvancedPrinterControlsPreference(for: candidate.id)
+        clearNavigationLayoutPreference(for: candidate.id)
         persist()
         return true
     }
@@ -307,6 +316,19 @@ final class ServerRegistry {
             forKey: Self.advancedPrinterControlsPreferenceKey(for: activeServerID)
         )
         advancedPrinterControlsEnabled = enabled
+    }
+
+    func setNavigationLayoutPreference(_ preference: NavigationLayoutPreference) {
+        guard let activeServerID else {
+            navigationLayoutPreference = .automatic
+            return
+        }
+
+        userDefaults.set(
+            preference.rawValue,
+            forKey: Self.navigationLayoutPreferenceKey(for: activeServerID)
+        )
+        navigationLayoutPreference = preference
     }
 
     func associateOriginServerId(_ originServerId: UUID, with serverID: UUID) throws {
@@ -428,6 +450,10 @@ final class ServerRegistry {
         "\(advancedPrinterControlsPreferenceKeyPrefix).\(serverID.uuidString.lowercased())"
     }
 
+    private static func navigationLayoutPreferenceKey(for serverID: UUID) -> String {
+        "\(navigationLayoutPreferenceKeyPrefix).\(serverID.uuidString.lowercased())"
+    }
+
     private func reloadAdvancedPrinterControlsPreference() {
         guard let activeServerID else {
             advancedPrinterControlsEnabled = false
@@ -439,12 +465,34 @@ final class ServerRegistry {
         )
     }
 
+    private func reloadNavigationLayoutPreference() {
+        guard let activeServerID,
+              let rawPreference = userDefaults.string(
+                  forKey: Self.navigationLayoutPreferenceKey(for: activeServerID)
+              ),
+              let preference = NavigationLayoutPreference(rawValue: rawPreference) else {
+            navigationLayoutPreference = .automatic
+            return
+        }
+
+        navigationLayoutPreference = preference
+    }
+
     private func clearAdvancedPrinterControlsPreference(for serverID: UUID) {
         userDefaults.removeObject(
             forKey: Self.advancedPrinterControlsPreferenceKey(for: serverID)
         )
         if activeServerID == serverID {
             advancedPrinterControlsEnabled = false
+        }
+    }
+
+    private func clearNavigationLayoutPreference(for serverID: UUID) {
+        userDefaults.removeObject(
+            forKey: Self.navigationLayoutPreferenceKey(for: serverID)
+        )
+        if activeServerID == serverID {
+            navigationLayoutPreference = .automatic
         }
     }
 

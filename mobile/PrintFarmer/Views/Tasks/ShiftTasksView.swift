@@ -43,7 +43,7 @@ struct ShiftTasksView: View {
                 .navigationDestination(for: ShiftTasksDestination.self) { destination in
                     switch destination {
                     case .printQueue:
-                        JobListView()
+                        JobListView(ownsNavigationStack: false)
                     }
                 }
         }

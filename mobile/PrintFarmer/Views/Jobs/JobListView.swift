@@ -4,68 +4,25 @@ struct JobListView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(\.horizontalSizeClass) private var sizeClass
+    private let ownsNavigationStack: Bool
     @State private var viewModel = JobListViewModel()
     @State private var currentPage = 0
     @State private var retryTask: Task<Void, Never>?
 
+    init(ownsNavigationStack: Bool = true) {
+        self.ownsNavigationStack = ownsNavigationStack
+    }
+
     var body: some View {
         @Bindable var router = router
 
-        NavigationStack(path: $router.jobsPath) {
-            Group {
-                if viewModel.isLoading && viewModel.jobs.isEmpty {
-                    ProgressView("Loading jobs…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let error = viewModel.errorMessage, viewModel.jobs.isEmpty {
-                    ContentUnavailableView {
-                        Label("Error", systemImage: "exclamationmark.triangle")
-                    } description: {
-                        Text(error)
-                    } actions: {
-                        Button("Retry") {
-                            retryTask = Task { await viewModel.loadJobs() }
-                        }
-                    }
-                } else if !viewModel.hasAnyJobs {
-                    EmptyStateView(
-                        icon: "tray",
-                        title: "No Print Jobs",
-                        message: "No jobs in the queue. Jobs will appear here when queued."
-                    )
-                } else {
-                    // iPhone: swipeable pages
-                    if sizeClass == .compact {
-                        VStack(spacing: 0) {
-                            TabView(selection: $currentPage) {
-                                QueuePage()
-                                    .tag(0)
-                                PrintingPage()
-                                    .tag(1)
-                                RecentPage()
-                                    .tag(2)
-                            }
-                            .tabViewStyle(.page(indexDisplayMode: .never))
-                            
-                            PageIndicator(
-                                currentPage: $currentPage,
-                                pageCount: 3,
-                                labels: ["Queue", "Printing", "Recent"],
-                                accessibilityIdentifierPrefix: "jobList.page"
-                            )
-                                .padding(.bottom, 8)
-                        }
-                    } else {
-                        // iPad: keep existing List layout
-                        jobList
-                    }
+        Group {
+            if ownsNavigationStack {
+                NavigationStack(path: $router.jobsPath) {
+                    screenContent
                 }
-            }
-            .navigationTitle("Tasks")
-            .refreshable {
-                await viewModel.loadJobs()
-            }
-            .navigationDestination(for: AppDestination.self) { destination in
-                destinationView(for: destination)
+            } else {
+                screenContent
             }
         }
         .task {
@@ -74,9 +31,67 @@ struct JobListView: View {
             await viewModel.loadJobs()
         }
         .onDisappear {
-        retryTask?.cancel()
-        viewModel.isViewActive = false
+            retryTask?.cancel()
+            viewModel.isViewActive = false
+        }
     }
+
+    @ViewBuilder
+    private var screenContent: some View {
+        Group {
+            if viewModel.isLoading && viewModel.jobs.isEmpty {
+                ProgressView("Loading jobs…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = viewModel.errorMessage, viewModel.jobs.isEmpty {
+                ContentUnavailableView {
+                    Label("Error", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Retry") {
+                        retryTask?.cancel()
+                        retryTask = Task { await viewModel.loadJobs() }
+                    }
+                }
+            } else if !viewModel.hasAnyJobs {
+                EmptyStateView(
+                    icon: "tray",
+                    title: "No Print Jobs",
+                    message: "No jobs in the queue. Jobs will appear here when queued."
+                )
+            } else if sizeClass == .compact {
+                VStack(spacing: 0) {
+                    TabView(selection: $currentPage) {
+                        QueuePage()
+                            .tag(0)
+                        PrintingPage()
+                            .tag(1)
+                        RecentPage()
+                            .tag(2)
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+
+                    PageIndicator(
+                        currentPage: $currentPage,
+                        pageCount: 3,
+                        labels: ["Queue", "Printing", "Recent"],
+                        accessibilityIdentifierPrefix: "jobList.page"
+                    )
+                    .padding(.bottom, 8)
+                }
+            } else {
+                jobList
+            }
+        }
+        .navigationTitle("Print Queue")
+        .refreshable {
+            await viewModel.loadJobs()
+        }
+        .navigationDestination(for: AppDestination.self) { destination in
+            destinationView(for: destination)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("jobList.root")
     }
     
     // MARK: - iPhone Pages
@@ -204,11 +219,7 @@ struct JobListView: View {
     // MARK: - Active Job Row
 
     private func activeJobRow(_ item: QueuedPrintJobResponse) -> some View {
-        Button {
-            if let uuid = item.job.jobUUID {
-                router.jobsPath.append(AppDestination.jobDetail(id: uuid))
-            }
-        } label: {
+        jobDetailLink(for: item) {
             HStack(spacing: 12) {
                 jobThumbnail(for: item, size: 48)
                 VStack(alignment: .leading, spacing: 6) {
@@ -257,11 +268,7 @@ struct JobListView: View {
     // MARK: - Queued Job Row
 
     private func queuedJobRow(_ item: QueuedPrintJobResponse) -> some View {
-        Button {
-            if let uuid = item.job.jobUUID {
-                router.jobsPath.append(AppDestination.jobDetail(id: uuid))
-            }
-        } label: {
+        jobDetailLink(for: item) {
             HStack(spacing: 12) {
                 jobThumbnail(for: item, size: 44)
                 VStack(alignment: .leading, spacing: 6) {
@@ -314,6 +321,7 @@ struct JobListView: View {
             if let uuid = item.job.jobUUID {
                 Button {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    retryTask?.cancel()
                     retryTask = Task { await viewModel.cancelJob(id: uuid) }
                 } label: {
                     Label("Cancel", systemImage: "xmark.circle")
@@ -325,6 +333,7 @@ struct JobListView: View {
             if let uuid = item.job.jobUUID {
                 Button {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    retryTask?.cancel()
                     retryTask = Task { await viewModel.dispatchJob(id: uuid) }
                 } label: {
                     Label("Start", systemImage: "play.circle.fill")
@@ -337,11 +346,7 @@ struct JobListView: View {
     // MARK: - Recent Job Row
 
     private func recentJobRow(_ item: QueuedPrintJobResponse) -> some View {
-        Button {
-            if let uuid = item.job.jobUUID {
-                router.jobsPath.append(AppDestination.jobDetail(id: uuid))
-            }
-        } label: {
+        jobDetailLink(for: item) {
             HStack(spacing: 12) {
                 jobThumbnail(for: item, size: 36)
                 VStack(alignment: .leading, spacing: 4) {
@@ -380,6 +385,20 @@ struct JobListView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(recentJobAccessibilityLabel(item))
         .accessibilityIdentifier("job.row.\(item.job.jobUUID?.uuidString ?? "unknown")")
+    }
+
+    @ViewBuilder
+    private func jobDetailLink<Content: View>(
+        for item: QueuedPrintJobResponse,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        if let uuid = item.job.jobUUID {
+            NavigationLink(value: AppDestination.jobDetail(id: uuid)) {
+                content()
+            }
+        } else {
+            content()
+        }
     }
 
     private func recentJobAccessibilityLabel(_ item: QueuedPrintJobResponse) -> String {

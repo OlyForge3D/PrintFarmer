@@ -4,55 +4,25 @@ struct MaintenanceView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(\.horizontalSizeClass) private var sizeClass
+    private let ownsNavigationStack: Bool
     @State private var viewModel = MaintenanceViewModel()
     @State private var currentPage = 0
     @State private var retryTask: Task<Void, Never>?
 
+    init(ownsNavigationStack: Bool = true) {
+        self.ownsNavigationStack = ownsNavigationStack
+    }
+
     var body: some View {
         @Bindable var router = router
 
-        NavigationStack(path: $router.maintenanceSheetPath) {
-            Group {
-                if viewModel.isLoading && viewModel.alerts.isEmpty {
-                    ProgressView("Loading maintenance…")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let error = viewModel.error, viewModel.alerts.isEmpty && viewModel.upcomingTasks.isEmpty {
-                    ContentUnavailableView {
-                        Label("Error", systemImage: "exclamationmark.triangle")
-                    } description: {
-                        Text(error)
-                    } actions: {
-                        Button("Retry") {
-                            retryTask = Task { await viewModel.loadData() }
-                        }
-                    }
-                } else {
-                    // iPhone: swipeable pages
-                    if sizeClass == .compact {
-                        VStack(spacing: 0) {
-                            TabView(selection: $currentPage) {
-                                AlertsPage()
-                                    .tag(0)
-                                TasksPage()
-                                    .tag(1)
-                            }
-                            .tabViewStyle(.page(indexDisplayMode: .never))
-                            
-                            PageIndicator(currentPage: $currentPage, pageCount: 2, labels: ["Alerts", "Tasks"])
-                                .padding(.bottom, 8)
-                        }
-                    } else {
-                        // iPad: keep existing ScrollView layout
-                        mainContent
-                    }
+        Group {
+            if ownsNavigationStack {
+                NavigationStack(path: $router.maintenanceSheetPath) {
+                    screenContent
                 }
-            }
-            .navigationTitle("Maintenance")
-            .refreshable {
-                await viewModel.loadData()
-            }
-            .navigationDestination(for: AppDestination.self) { destination in
-                destinationView(for: destination)
+            } else {
+                screenContent
             }
         }
         .task {
@@ -63,6 +33,54 @@ struct MaintenanceView: View {
         .onDisappear {
             viewModel.isViewActive = false
             retryTask?.cancel()
+        }
+    }
+
+    @ViewBuilder
+    private var screenContent: some View {
+        Group {
+            if viewModel.isLoading && viewModel.alerts.isEmpty {
+                ProgressView("Loading maintenance…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = viewModel.error,
+                      viewModel.alerts.isEmpty,
+                      viewModel.upcomingTasks.isEmpty {
+                ContentUnavailableView {
+                    Label("Error", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Retry") {
+                        retryTask = Task { await viewModel.loadData() }
+                    }
+                }
+            } else if sizeClass == .compact {
+                VStack(spacing: 0) {
+                    TabView(selection: $currentPage) {
+                        AlertsPage()
+                            .tag(0)
+                        TasksPage()
+                            .tag(1)
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+
+                    PageIndicator(
+                        currentPage: $currentPage,
+                        pageCount: 2,
+                        labels: ["Alerts", "Tasks"]
+                    )
+                    .padding(.bottom, 8)
+                }
+            } else {
+                mainContent
+            }
+        }
+        .navigationTitle("Maintenance")
+        .refreshable {
+            await viewModel.loadData()
+        }
+        .navigationDestination(for: AppDestination.self) { destination in
+            destinationView(for: destination)
         }
     }
     

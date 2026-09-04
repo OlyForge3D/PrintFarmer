@@ -21,7 +21,7 @@ final class TaskActionRoutingUITests: ShiftTasksUITestBase {
     // Stable destination entity IDs (real demo entities).
     private let swapPrinterID = "10000000-0001-0000-0000-000000000003"
 
-    override var additionalLaunchArguments: [String] {
+    override var shiftTaskScenarioLaunchArguments: [String] {
         ["--uitesting-task-action-routing"]
     }
 

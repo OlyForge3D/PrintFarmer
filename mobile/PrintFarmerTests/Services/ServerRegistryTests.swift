@@ -148,6 +148,53 @@ final class ServerRegistryTests: XCTestCase {
         XCTAssertEqual(registry.activeServer?.id, first.id)
     }
 
+    func testNavigationLayoutPreferencePersistsPerServer() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let first = try registry.add(
+            displayName: "One",
+            baseURL: URL(string: "https://one.example.com")!
+        )
+        let second = try registry.add(
+            displayName: "Two",
+            baseURL: URL(string: "https://two.example.com")!
+        )
+
+        try registry.setActive(id: first.id)
+        XCTAssertEqual(registry.navigationLayoutPreference, .automatic)
+        registry.setNavigationLayoutPreference(.twoModes)
+
+        try registry.setActive(id: second.id)
+        XCTAssertEqual(registry.navigationLayoutPreference, .automatic)
+        registry.setNavigationLayoutPreference(.simple)
+
+        try registry.setActive(id: first.id)
+        XCTAssertEqual(registry.navigationLayoutPreference, .twoModes)
+
+        let reloaded = ServerRegistry(
+            userDefaults: userDefaults,
+            migrateLegacyServerURL: false
+        )
+        XCTAssertEqual(reloaded.activeServerID, first.id)
+        XCTAssertEqual(reloaded.navigationLayoutPreference, .twoModes)
+
+        try reloaded.setActive(id: second.id)
+        XCTAssertEqual(reloaded.navigationLayoutPreference, .simple)
+    }
+
+    func testChangingServerEndpointClearsNavigationLayoutPreference() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        var server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://old.example.com")!
+        )
+        registry.setNavigationLayoutPreference(.twoModes)
+
+        server.baseURL = URL(string: "https://new.example.com")!
+        try registry.update(server)
+
+        XCTAssertEqual(registry.navigationLayoutPreference, .automatic)
+    }
+
     func testNormalizationAddsHTTPSLowercasesHostAndStripsTrailingSlash() throws {
         let normalized = try ServerRegistry.normalizedURLString(for: "  PRINT.example.COM/  ")
 
@@ -284,6 +331,238 @@ final class ServerRegistryTests: XCTestCase {
         XCTAssertEqual(currentAccessToken, "token-two")
         XCTAssertTrue(signalRRecorder.services.first?.disconnectCalled ?? false)
         XCTAssertTrue(signalRRecorder.services.last?.connectCalled ?? false)
+    }
+
+    func testNavigationIdentityIsVerifiedAgainstSettledDestinationServer() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let first = try registry.add(
+            displayName: "One",
+            baseURL: URL(string: "https://one.example.com")!
+        )
+        let second = try registry.add(
+            displayName: "Two",
+            baseURL: URL(string: "https://two.example.com")!
+        )
+        try registry.setActive(id: first.id)
+
+        let credentialsStore = isolatedCredentialsStore()
+        credentialsStore.save(
+            ServerCredentials(accessToken: "token-one", expiresAt: nil),
+            serverId: first.id
+        )
+        credentialsStore.save(
+            ServerCredentials(accessToken: "token-two", expiresAt: nil),
+            serverId: second.id
+        )
+        let container = switchingTestContainer(
+            registry: registry,
+            credentialsStore: credentialsStore,
+            signalRRecorder: SignalRRecorder()
+        )
+        mockAPIClient.requestHandler = { request in
+            if request.url?.path == "/api/auth/me" {
+                return (
+                    TestData.httpResponse(url: request.url, statusCode: 200),
+                    Data(TestJSON.userDTO.utf8)
+                )
+            }
+            return (
+                TestData.httpResponse(url: request.url, statusCode: 404),
+                Data()
+            )
+        }
+
+        try registry.setActive(id: second.id)
+        try await waitForBaseURL(second.baseURL, in: container)
+        let resolution = await container.currentUserForNavigation(
+            serverID: second.id,
+            generation: container.activeServerGeneration,
+            expectedEndpoint: second.normalizedURLString
+        )
+
+        guard case .verified(let identity) = resolution else {
+            return XCTFail("Expected verified destination identity, got \(resolution)")
+        }
+        XCTAssertEqual(
+            identity.userID,
+            UUID(uuidString: "aab2c3d4-e5f6-7890-abcd-ef1234567890")
+        )
+        XCTAssertEqual(identity.roles, ["Admin"])
+        XCTAssertEqual(
+            mockAPIClient.capturedRequests.last(where: {
+                $0.url?.path == "/api/auth/me"
+            })?.url?.host,
+            "two.example.com"
+        )
+    }
+
+    func testNavigationIdentityVerificationCanRetryAfterTransientFailure() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://farm.example.com")!
+        )
+        let credentialsStore = isolatedCredentialsStore()
+        credentialsStore.save(
+            ServerCredentials(accessToken: "token", expiresAt: nil),
+            serverId: server.id
+        )
+        let container = switchingTestContainer(
+            registry: registry,
+            credentialsStore: credentialsStore,
+            signalRRecorder: SignalRRecorder()
+        )
+        var attempts = 0
+        mockAPIClient.requestHandler = { request in
+            guard request.url?.path == "/api/auth/me" else {
+                return (
+                    TestData.httpResponse(url: request.url, statusCode: 404),
+                    Data()
+                )
+            }
+            attempts += 1
+            if attempts == 1 {
+                return (
+                    TestData.httpResponse(url: request.url, statusCode: 503),
+                    Data()
+                )
+            }
+            return (
+                TestData.httpResponse(url: request.url, statusCode: 200),
+                Data(TestJSON.userDTO.utf8)
+            )
+        }
+
+        let offlineResolution = await container.currentUserForNavigation(
+            serverID: server.id,
+            generation: container.activeServerGeneration,
+            expectedEndpoint: server.normalizedURLString
+        )
+        XCTAssertEqual(offlineResolution, .offline)
+        XCTAssertEqual(attempts, 1)
+
+        let verifiedResolution = await container.currentUserForNavigation(
+            serverID: server.id,
+            generation: container.activeServerGeneration,
+            expectedEndpoint: server.normalizedURLString
+        )
+
+        guard case .verified(let identity) = verifiedResolution else {
+            return XCTFail("Expected retry to verify identity, got \(verifiedResolution)")
+        }
+        XCTAssertEqual(
+            identity.userID,
+            UUID(uuidString: "aab2c3d4-e5f6-7890-abcd-ef1234567890")
+        )
+        XCTAssertEqual(identity.roles, ["Admin"])
+        XCTAssertEqual(attempts, 2)
+    }
+
+    func testNavigationIdentityResolvesForDemoComposition() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let server = try registry.add(
+            displayName: "Demo",
+            baseURL: URL(string: "https://demo.printfarmer.local")!
+        )
+        let container = ServiceContainer.demo(serverRegistry: registry)
+
+        let resolution = await container.currentUserForNavigation(
+            serverID: server.id,
+            generation: container.activeServerGeneration,
+            expectedEndpoint: server.normalizedURLString
+        )
+
+        XCTAssertEqual(
+            resolution,
+            .verified(
+                NavigationUserIdentity(
+                    userID: DemoData.demoUser.id,
+                    roles: DemoData.demoUser.roles
+                )
+            )
+        )
+    }
+
+    func testEndpointEditCannotVerifyAgainstOldServiceComposition() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        var server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://old.example.com")!
+        )
+        let credentialsStore = isolatedCredentialsStore()
+        credentialsStore.save(
+            ServerCredentials(accessToken: "token", expiresAt: nil),
+            serverId: server.id
+        )
+        let initialSignalRService = BlockingSignalRService()
+        var serviceIndex = 0
+        let container = switchingTestContainer(
+            registry: registry,
+            credentialsStore: credentialsStore,
+            signalRRecorder: SignalRRecorder(),
+            signalRServiceFactory: { _, _ in
+                defer { serviceIndex += 1 }
+                return serviceIndex == 0 ? initialSignalRService : MockSignalRService()
+            }
+        )
+        mockAPIClient.requestHandler = { request in
+            guard request.url?.path == "/api/auth/me" else {
+                return (
+                    TestData.httpResponse(url: request.url, statusCode: 404),
+                    Data()
+                )
+            }
+            return (
+                TestData.httpResponse(url: request.url, statusCode: 200),
+                Data(TestJSON.userDTO.utf8)
+            )
+        }
+
+        server.baseURL = URL(string: "https://new.example.com")!
+        try registry.update(server)
+        let expectedServer = try XCTUnwrap(registry.activeServer)
+        let didStartDisconnect = await waitForSemaphore(
+            initialSignalRService.disconnectStarted,
+            timeout: 5
+        )
+        XCTAssertTrue(didStartDisconnect)
+
+        let unsettled = await container.currentUserForNavigation(
+            serverID: expectedServer.id,
+            generation: container.activeServerGeneration,
+            expectedEndpoint: expectedServer.normalizedURLString
+        )
+        XCTAssertEqual(unsettled, .notSettled)
+        XCTAssertFalse(
+            mockAPIClient.capturedRequests.contains {
+                $0.url?.path == "/api/auth/me"
+            },
+            "the old endpoint must not be asked to verify the new endpoint's identity"
+        )
+
+        initialSignalRService.resumeDisconnect()
+        try await waitForBaseURL(expectedServer.baseURL, in: container)
+
+        var verified: NavigationIdentityResolution = .notSettled
+        for _ in 0..<40 {
+            verified = await container.currentUserForNavigation(
+                serverID: expectedServer.id,
+                generation: container.activeServerGeneration,
+                expectedEndpoint: expectedServer.normalizedURLString
+            )
+            if case .verified = verified { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+
+        guard case .verified = verified else {
+            return XCTFail("Expected the replacement endpoint to be verified, got \(verified)")
+        }
+        XCTAssertEqual(
+            mockAPIClient.capturedRequests.last(where: {
+                $0.url?.path == "/api/auth/me"
+            })?.url?.host,
+            "new.example.com"
+        )
     }
 
     func testServiceContainerReconcilesRapidSwitchesToLatestServer() async throws {
