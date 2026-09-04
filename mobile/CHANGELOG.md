@@ -7,9 +7,22 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 ### Added
 
 - **Adaptive compact navigation** — iPhone operators can use a focused Simple
-  shell or a Floor/Oversight two-mode shell, with stable destination identities,
-  per-server preference persistence, and a real farm-wide Filament Coverage
-  report. The regular-width iPad sidebar remains unchanged.
+  shell (Attention · Farm · Inventory · Oversight) or a Floor/Oversight
+  two-mode shell (Floor: Attention · Farm · Tasks · Inventory; Oversight:
+  Overview · Fleet · Jobs · Upkeep · Reports), with stable destination
+  identities, per-server preference persistence, and a real farm-wide
+  Filament Coverage report. The shell is derived from `GET /api/system/farm-shape`
+  (accounts, bays, printers) and the resolved `shiftPlanEnabled` capability —
+  `shiftPlanEnabled` acts only as a negative signal, and fleet size is not a
+  derivation signal. **Settings → Navigation** exposes an **Automatic / Simple
+  / Two modes** override, stored per server, with a plain-language explanation
+  of why Automatic chose what it did.
+- **In-context Oversight upgrade offer** — When a farm crosses a new threshold
+  (second account, second bay, or shift planning turned on after having been
+  off), the Oversight tab root shows a one-time, dismissible offer card to
+  switch to the two-mode shell. The card never appears at onboarding, never
+  auto-switches shells, is per-server, and is suppressed permanently when the
+  user picks an explicit override.
 - **Per-server advanced-controls safety interlock** — Jog, preheat, home,
   z-offset, and disable-motors controls are now hidden by default until enabled
   from **Settings** → **Printer Safety** for the active server. Turning the
@@ -36,8 +49,34 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   related job by stable identity with complete VoiceOver and Dynamic Type
   support on iPhone and iPad.
 
+### Changed
+
+- **BREAKING: Scan is no longer a top-level tab.** Scanning is an input method,
+  and every scan entry point has been re-homed deliberately:
+  - Harvest attention items get a full-width **Scan bin** primary action inside
+    the task itself.
+  - The Inventory tab exposes a single **Scan** icon in the nav bar (one scan
+    affordance per screen — no duplicated buttons).
+  - The **Offline Queue** now lives in the account/You area reachable from the
+    nav-bar account button.
+- **BREAKING: The Attention `⋯` overflow menu is gone.** Every destination it
+  used to hide — Dashboard, Dispatch, Filament Coverage, Maintenance,
+  Maintenance Analytics, Predictive Insights, Job History, Job Timeline,
+  Uptime & Reliability, Locations, Notifications, Advanced Printer Controls,
+  Settings, and the settings sub-screens — is now reachable from either the
+  Oversight tab (Simple shell) or the Oversight mode tabs (Two modes), with
+  no dead ends and no destinations that resolve only from inside a sheet.
+- **Nav chrome rule enforced across every tab root.** The server chip sits
+  leading; the account button sits trailing and is always the last control;
+  screen actions (filter, search, scan) sit between them; the mode control is
+  pinned to every root of both modes so no screen is a dead end.
+
 ### Fixed
 
+- **Three WCAG contrast defects in `ThemeColors`** — `pfError`, `pfWarning`, and
+  `pfButtonPrimary` fills and text-on-fill contrasts have been adjusted to meet
+  WCAG AA (`≥ 4.5:1` for body text, `≥ 3:1` for large text and UI components)
+  in both light and dark modes.
 - **Database-backed print-job timestamps** — Print-job responses whose UTC
   timestamps are serialized without an explicit zone suffix now decode
   correctly instead of failing the entire API response.
