@@ -76,6 +76,11 @@ final class PredictiveViewModel {
         isLoading = true
         error = nil
         predictionStatus = .loading
+        defer {
+            if generation == predictionGeneration {
+                isLoading = false
+            }
+        }
 
         do {
             let result = try await predictiveService.predictJobFailure(request: request)
@@ -98,8 +103,6 @@ final class PredictiveViewModel {
             predictionStatus = .failed(Self.failureMessage)
         }
 
-        guard isViewActive, generation == predictionGeneration else { return }
-        isLoading = false
     }
 
     func loadAlerts(printerId: UUID?) async {

@@ -519,6 +519,39 @@ final class PredictiveViewModelTests: XCTestCase {
         }
     }
 
+    func testDeactivationClearsLoadingWhenPredictionCompletes() async {
+        let gate = AsyncGate()
+        let vm = viewModel!
+        let service = mockPredictiveService!
+        await service.callState.enqueue(.success(JobFailurePrediction(
+            printerId: testPrinterId,
+            material: "PLA",
+            estimatedDurationMinutes: 60,
+            predictedFailureLikelihood: 15,
+            riskLevel: "low",
+            factors: []
+        )))
+        service.beforeReturnHook = { [gate] in
+            await gate.wait()
+        }
+
+        let printerId = testPrinterId
+        async let prediction: Void = vm.predictFailure(
+            printerId: printerId,
+            material: "PLA",
+            duration: 3_600
+        )
+        await gate.waitForEntry()
+        XCTAssertTrue(vm.isLoading)
+
+        vm.isViewActive = false
+        await gate.open()
+        await prediction
+
+        XCTAssertFalse(vm.isLoading)
+        XCTAssertNil(vm.prediction)
+    }
+
     func testFirstOutcomeWouldWriteWithoutInterleave() async {
         // Companion to `testLateCompletingRequestDoesNotOverwriteNewerResult`.
         // Establishes non-vacuity by showing that when there is no newer

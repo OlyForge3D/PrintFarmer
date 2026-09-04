@@ -77,15 +77,17 @@ final class FarmShapeStore: @unchecked Sendable {
         userDefaults.set(data, forKey: shapeKey(serverID: serverID))
     }
 
-    func setShape(_ shape: FarmShape, serverID: UUID, authority: Authority) {
-        guard let data = try? JSONEncoder().encode(shape) else { return }
+    @discardableResult
+    func setShape(_ shape: FarmShape, serverID: UUID, authority: Authority) -> Bool {
+        guard let data = try? JSONEncoder().encode(shape) else { return false }
         lock.lock()
         defer { lock.unlock() }
         guard !purgedServerIDs.contains(serverID),
               authority.revision == (revisions[serverID] ?? 0) else {
-            return
+            return false
         }
         userDefaults.set(data, forKey: shapeKey(serverID: serverID))
+        return true
     }
 
     func invalidateShape(serverID: UUID) {
@@ -243,7 +245,9 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
         let authority = storeAuthority(for: serverID)
         guard let shape = await fetchShapeOrUnknown() else { return }
         guard generation == sessionGeneration else { return }
-        store.setShape(shape, serverID: serverID, authority: authority)
+        guard store.setShape(shape, serverID: serverID, authority: authority) else {
+            return
+        }
         latestShape = shape
     }
 
@@ -264,7 +268,13 @@ final class FarmShapeService: FarmShapeServiceProtocol, @unchecked Sendable {
     ) {
         guard generation == sessionGeneration else { return }
         if let shape {
-            store.setShape(shape, serverID: serverID, authority: authority)
+            guard store.setShape(
+                shape,
+                serverID: serverID,
+                authority: authority
+            ) else {
+                return
+            }
             latestShape = shape
             if !isSessionResolved {
                 sessionShape = shape

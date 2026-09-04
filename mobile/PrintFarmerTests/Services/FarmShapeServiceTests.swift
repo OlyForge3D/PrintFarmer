@@ -255,6 +255,11 @@ final class FarmShapeServiceTests: XCTestCase {
             store.shape(serverID: server.id),
             "the old endpoint must not repopulate the invalidated server identity"
         )
+        XCTAssertEqual(
+            staleService.latestShape,
+            initialShape,
+            "an authority-fenced write must not publish stale endpoint data in memory"
+        )
 
         let replacementService = FarmShapeService(
             serverID: server.id,

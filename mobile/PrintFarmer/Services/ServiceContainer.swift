@@ -2,6 +2,18 @@ import Foundation
 import Observation
 import OSLog
 
+struct NavigationUserIdentity: Equatable, Sendable {
+    let userID: UUID
+    let roles: [String]
+}
+
+enum NavigationIdentityResolution: Equatable, Sendable {
+    case verified(NavigationUserIdentity)
+    case notSettled
+    case offline
+    case failed(String)
+}
+
 /// Dependency container providing access to all services.
 /// Created once at app startup and passed via SwiftUI environment.
 @MainActor
@@ -758,31 +770,95 @@ final class ServiceContainer: @unchecked Sendable {
     /// of carrying the previous server's roles across a switch.
     func currentUserForNavigation(
         serverID: UUID,
-        generation: Int
-    ) async throws -> UserDTO? {
-        await activeServerSwitchTask?.value
+        generation: Int,
+        expectedEndpoint: String
+    ) async -> NavigationIdentityResolution {
+        guard let registeredServer = serverRegistry?.activeServer,
+              registeredServer.id == serverID,
+              registeredServer.normalizedURLString == expectedEndpoint else {
+            return .notSettled
+        }
 
-        guard activeServerGeneration == generation,
-              activeGeneration.isCurrent(generation),
-              activeServerID == serverID,
-              serverRegistry?.activeServerID == serverID else {
-            return nil
+        if apiClient == nil, authService is DemoAuthService {
+            do {
+                let user = try await authService.currentUser()
+                return .verified(
+                    NavigationUserIdentity(userID: user.id, roles: user.roles)
+                )
+            } catch {
+                return .failed(error.localizedDescription)
+            }
+        }
+
+        guard await isNavigationTargetSettled(
+            serverID: serverID,
+            generation: generation,
+            expectedEndpoint: expectedEndpoint
+        ) else {
+            return .notSettled
         }
 
         do {
             let user = try await authService.currentUser()
-            guard activeServerGeneration == generation,
-                  activeGeneration.isCurrent(generation),
-                  activeServerID == serverID,
-                  serverRegistry?.activeServerID == serverID else {
-                return nil
+            guard await isNavigationTargetSettled(
+                serverID: serverID,
+                generation: generation,
+                expectedEndpoint: expectedEndpoint
+            ) else {
+                return .notSettled
             }
-            return user
+            return .verified(
+                NavigationUserIdentity(userID: user.id, roles: user.roles)
+            )
         } catch {
             Self.logger.warning(
                 "Could not verify navigation identity for server \(serverID.uuidString, privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
-            throw error
+            guard await isNavigationTargetSettled(
+                serverID: serverID,
+                generation: generation,
+                expectedEndpoint: expectedEndpoint
+            ) else {
+                return .notSettled
+            }
+            return Self.allowsOfflineNavigationFallback(error)
+                ? .offline
+                : .failed(error.localizedDescription)
+        }
+    }
+
+    private func isNavigationTargetSettled(
+        serverID: UUID,
+        generation: Int,
+        expectedEndpoint: String
+    ) async -> Bool {
+        guard activeServerSwitchTask == nil,
+              activeServerGeneration == generation,
+              activeGeneration.isCurrent(generation),
+              activeServerID == serverID,
+              let registeredServer = serverRegistry?.activeServer,
+              registeredServer.id == serverID,
+              registeredServer.normalizedURLString == expectedEndpoint,
+              let apiClient else {
+            return false
+        }
+        return await apiClient.currentBaseURL() == registeredServer.baseURL
+    }
+
+    private static func allowsOfflineNavigationFallback(_ error: Error) -> Bool {
+        guard let networkError = error as? NetworkError else { return false }
+        switch networkError {
+        case .noConnection,
+             .timeout,
+             .serverUnreachable,
+             .invalidResponse,
+             .serverError,
+             .transportError,
+             .decodingFailed,
+             .staleServerResponse:
+            return true
+        default:
+            return false
         }
     }
 

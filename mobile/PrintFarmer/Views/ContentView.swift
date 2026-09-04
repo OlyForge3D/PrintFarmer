@@ -3,12 +3,15 @@ import SwiftUI
 private struct NavigationIdentityRequest: Hashable {
     let serverID: UUID
     let generation: Int
+    let endpoint: String
     let observedUserID: UUID?
     let observedRoles: [String]
+    let retryRevision: Int
 }
 
 private struct ResolvedNavigationIdentity: Equatable {
     let serverID: UUID
+    let endpoint: String
     let userID: UUID
     let isFarmAdmin: Bool
 }
@@ -35,6 +38,8 @@ struct ContentView: View {
     @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var navigationIdentity: ResolvedNavigationIdentity?
+    @State private var navigationIdentityError: String?
+    @State private var navigationIdentityRetryRevision = 0
 
     var body: some View {
         let capabilities = services.capabilitiesService.resolved
@@ -47,10 +52,13 @@ struct ContentView: View {
                 iPadLayout(capabilities: capabilities)
             } else if isCompactShellReady {
                 compactLayout(capabilities: capabilities)
+            } else if let navigationIdentityError {
+                navigationIdentityFailure(navigationIdentityError)
             } else {
                 ProgressView()
                     .accessibilityLabel("Preparing navigation")
                     .accessibilityIdentifier("navigation.shellLoading")
+                    .accessibilityAddTraits(.updatesFrequently)
             }
         }
         .onAppear {
@@ -292,34 +300,43 @@ struct ContentView: View {
     }
 
     private var navigationIdentityRequest: NavigationIdentityRequest? {
-        guard let serverID = serverRegistry.activeServerID else { return nil }
+        guard let activeServer = serverRegistry.activeServer else { return nil }
         return NavigationIdentityRequest(
-            serverID: serverID,
+            serverID: activeServer.id,
             generation: services.activeServerGeneration,
+            endpoint: activeServer.normalizedURLString,
             observedUserID: authViewModel.currentUser?.id,
-            observedRoles: authViewModel.currentUser?.roles ?? []
+            observedRoles: authViewModel.currentUser?.roles ?? [],
+            retryRevision: navigationIdentityRetryRevision
         )
     }
 
     private func resolveNavigationIdentity(_ request: NavigationIdentityRequest) async {
         navigationIdentity = nil
-        while !Task.isCancelled, navigationIdentityRequest == request {
-            do {
-                guard let verifiedUser = try await services.currentUserForNavigation(
-                    serverID: request.serverID,
-                    generation: request.generation
-                ) else {
-                    return
-                }
-                guard !Task.isCancelled,
-                      navigationIdentityRequest == request else {
-                    return
-                }
+        navigationIdentityError = nil
+        let provisionalUserID = UUID()
+        var retryDelayMilliseconds = 250
+        var unsettledMilliseconds = 0
 
+        while !Task.isCancelled, navigationIdentityRequest == request {
+            let resolution = await services.currentUserForNavigation(
+                serverID: request.serverID,
+                generation: request.generation,
+                expectedEndpoint: request.endpoint
+            )
+            guard !Task.isCancelled,
+                  navigationIdentityRequest == request else {
+                return
+            }
+
+            switch resolution {
+            case .verified(let identity):
+                navigationIdentityError = nil
                 navigationIdentity = ResolvedNavigationIdentity(
                     serverID: request.serverID,
-                    userID: verifiedUser.id,
-                    isFarmAdmin: verifiedUser.roles.contains("farm_admin")
+                    endpoint: request.endpoint,
+                    userID: identity.userID,
+                    isFarmAdmin: identity.roles.contains("farm_admin")
                 )
                 synchronizeAdaptiveShell(
                     capabilities: services.capabilitiesService.resolved,
@@ -328,26 +345,79 @@ struct ContentView: View {
                     )
                 )
                 return
-            } catch {
-                do {
-                    try await Task.sleep(for: .seconds(1))
-                } catch {
-                    return
+            case .offline:
+                unsettledMilliseconds = 0
+                navigationIdentityError = nil
+                if navigationIdentity == nil {
+                    navigationIdentity = ResolvedNavigationIdentity(
+                        serverID: request.serverID,
+                        endpoint: request.endpoint,
+                        userID: provisionalUserID,
+                        isFarmAdmin: false
+                    )
+                    synchronizeAdaptiveShell(
+                        capabilities: services.capabilitiesService.resolved,
+                        oversightAvailability: currentOversightAvailability(
+                            capabilities: services.capabilitiesService.resolved
+                        )
+                    )
                 }
+            case .notSettled:
+                navigationIdentity = nil
+                unsettledMilliseconds += retryDelayMilliseconds
+                if unsettledMilliseconds >= 8_000 {
+                    navigationIdentityError = "The selected server is still switching. Try again or sign out."
+                }
+            case .failed(let message):
+                navigationIdentity = nil
+                navigationIdentityError = message
             }
+
+            do {
+                try await Task.sleep(for: .milliseconds(retryDelayMilliseconds))
+            } catch {
+                return
+            }
+            retryDelayMilliseconds = min(retryDelayMilliseconds * 2, 8_000)
         }
     }
 
     private var isCompactShellReady: Bool {
-        guard let serverID = serverRegistry.activeServerID,
+        guard let activeServer = serverRegistry.activeServer,
               let navigationIdentity,
-              navigationIdentity.serverID == serverID else {
+              navigationIdentity.serverID == activeServer.id,
+              navigationIdentity.endpoint == activeServer.normalizedURLString else {
             return false
         }
         return router.hasAdaptiveShellConfiguration(
-            serverID: serverID,
+            serverID: activeServer.id,
             userID: navigationIdentity.userID
         )
+    }
+
+    private func navigationIdentityFailure(_ message: String) -> some View {
+        ContentUnavailableView {
+            Label("Navigation Unavailable", systemImage: "person.crop.circle.badge.exclamationmark")
+        } description: {
+            Text(message)
+        } actions: {
+            Button("Try Again") {
+                navigationIdentityRetryRevision &+= 1
+            }
+            .frame(minHeight: Self.modeControlMinimumHeight)
+            .accessibilityIdentifier("navigation.identityRetry")
+
+            Button("Sign Out", role: .destructive) {
+                Task {
+                    await authViewModel.logout()
+                }
+            }
+            .frame(minHeight: Self.modeControlMinimumHeight)
+            .accessibilityIdentifier("navigation.identitySignOut")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.updatesFrequently)
+        .accessibilityIdentifier("navigation.identityUnavailable")
     }
 
     private func currentOversightAvailability(
