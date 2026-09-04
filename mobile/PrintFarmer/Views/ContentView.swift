@@ -297,7 +297,14 @@ struct ContentView: View {
     private func currentOversightAvailability(
         capabilities: ResolvedSystemCapabilities
     ) -> OversightNavigationAvailability {
-        .fullyAvailable
+        OversightNavigationAvailability(
+            hasVisibleHubDestinations: OversightCatalog.hasVisibleDestinations(
+                capabilities: capabilities
+            ),
+            visibleTabs: OversightCatalog.visibleTabs(
+                capabilities: capabilities
+            )
+        )
     }
 
     @ViewBuilder
@@ -314,7 +321,7 @@ struct ContentView: View {
         case .inventory:
             InventoryView()
         case .oversight, .overview, .fleet, .jobs, .upkeep, .reports:
-            EmptyView()
+            oversightTabContentView(for: tab)
         }
     }
 }
