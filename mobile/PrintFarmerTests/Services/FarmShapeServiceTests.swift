@@ -142,6 +142,72 @@ final class FarmShapeServiceTests: XCTestCase {
         XCTAssertEqual(store.shape(serverID: serverID), lateShape)
     }
 
+    func testDeletedServerRejectsLateShapePersistence() async throws {
+        let registry = ServerRegistry(
+            userDefaults: userDefaults,
+            migrateLegacyServerURL: false
+        )
+        let server = try registry.add(
+            displayName: "Deleted",
+            baseURL: URL(string: "https://deleted.example.com")!
+        )
+        let snapshotRoot = FarmSnapshotFixtures.tempRoot()
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: snapshotRoot)
+        }
+        let snapshotAuthority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: userDefaults
+        )
+        let request = AsyncBarrier()
+        defer { request.close() }
+        let lateShape = FarmShape(accountCount: 4, locationCount: 2, printerCount: 18)
+        let service = FarmShapeService(
+            serverID: server.id,
+            store: store,
+            fetchShape: {
+                await request.arriveAndWait()
+                return lateShape
+            },
+            sleep: { _ in }
+        )
+        let container = ServiceContainer(
+            serverRegistry: registry,
+            observeRegistry: false,
+            farmSnapshotAuthority: snapshotAuthority,
+            farmSnapshotStore: FarmSnapshotStore(
+                authority: snapshotAuthority,
+                rootURL: snapshotRoot
+            ),
+            farmShapeStore: store,
+            synchronizeOfflineQueueOnStartup: false
+        )
+        registry.certificatePinPurgeHandler = { _, _ in true }
+        _ = container
+
+        await service.resolveForAuthenticatedSession(
+            serverID: server.id,
+            timeout: .milliseconds(1)
+        )
+        await request.waitUntilArrived()
+        try await registry.purgeAndRemove(id: server.id)
+
+        let lateResponseApplied = expectation(description: "late response completed")
+        withObservationTracking {
+            _ = service.latestShape
+        } onChange: {
+            lateResponseApplied.fulfill()
+        }
+        request.release()
+        await fulfillment(of: [lateResponseApplied], timeout: 2)
+
+        XCTAssertTrue(registry.servers.isEmpty)
+        XCTAssertNil(store.shape(serverID: server.id))
+        XCTAssertNil(
+            FarmShapeStore(userDefaults: userDefaults).shape(serverID: server.id),
+            "a fresh store must not find persistence recreated by the late response"
+        )
+    }
+
     func testUnknownDiffersFromKnownShapeOfOne() {
         let unknown: FarmShape? = nil
         let knownOne = FarmShape(accountCount: 1, locationCount: 1, printerCount: 1)

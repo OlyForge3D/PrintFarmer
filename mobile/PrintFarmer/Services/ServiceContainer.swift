@@ -495,7 +495,7 @@ final class ServiceContainer: @unchecked Sendable {
             startupPrefetchStore.removeAll()
             let result = await store.purge(serverID: serverID)
             if result == .purged {
-                shapeStore.clearShape(serverID: serverID)
+                shapeStore.purgeShape(serverID: serverID)
             }
             return result
         }

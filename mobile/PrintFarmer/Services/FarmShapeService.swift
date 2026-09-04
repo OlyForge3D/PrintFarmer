@@ -24,6 +24,7 @@ final class FarmShapeStore: @unchecked Sendable {
 
     private let userDefaults: UserDefaults
     private let lock = NSLock()
+    private var purgedServerIDs: Set<UUID> = []
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -36,6 +37,7 @@ final class FarmShapeStore: @unchecked Sendable {
     func shape(serverID: UUID) -> FarmShape? {
         lock.lock()
         defer { lock.unlock() }
+        guard !purgedServerIDs.contains(serverID) else { return nil }
         guard let data = userDefaults.data(forKey: shapeKey(serverID: serverID)) else {
             return nil
         }
@@ -46,12 +48,14 @@ final class FarmShapeStore: @unchecked Sendable {
         guard let data = try? JSONEncoder().encode(shape) else { return }
         lock.lock()
         defer { lock.unlock() }
+        guard !purgedServerIDs.contains(serverID) else { return }
         userDefaults.set(data, forKey: shapeKey(serverID: serverID))
     }
 
-    func clearShape(serverID: UUID) {
+    func purgeShape(serverID: UUID) {
         lock.lock()
         defer { lock.unlock() }
+        purgedServerIDs.insert(serverID)
         userDefaults.removeObject(forKey: shapeKey(serverID: serverID))
     }
 }

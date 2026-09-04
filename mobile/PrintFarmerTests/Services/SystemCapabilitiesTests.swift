@@ -330,6 +330,68 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
     }
 
+    func testReadinessPreparationTimeoutDoesNotWaitForUncooperativeRequestAndRetriesFresh() async {
+        let firstRequest = AsyncBarrier()
+        let secondRequest = AsyncBarrier()
+        let firstTimeout = AsyncBarrier()
+        let secondTimeout = AsyncBarrier()
+        let requestOrdinal = SystemCapabilitiesRequestOrdinal()
+        let timeoutOrdinal = SystemCapabilitiesRequestOrdinal()
+        addTeardownBlock {
+            firstRequest.close()
+            secondRequest.close()
+            firstTimeout.close()
+            secondTimeout.close()
+        }
+        mockAPIClient.asyncRequestHandler = { urlRequest in
+            let ordinal = await requestOrdinal.next()
+            if ordinal == 1 {
+                await firstRequest.arriveAndWait()
+            } else {
+                await secondRequest.arriveAndWait()
+            }
+            return (
+                TestData.httpResponse(url: urlRequest.url, statusCode: 200),
+                Data(#"{"operatorFeatures":{"attentionEnabled":false}}"#.utf8)
+            )
+        }
+        let service = SystemCapabilitiesService(
+            apiClient: apiClient,
+            preparationTimeout: .seconds(1),
+            preparationTimeoutSleep: { _ in
+                if await timeoutOrdinal.next() == 1 {
+                    await firstTimeout.arriveAndWait()
+                } else {
+                    await secondTimeout.arriveAndWait()
+                }
+            }
+        )
+
+        let preparation = Task {
+            await service.prepareForReadiness()
+        }
+        await firstRequest.waitUntilArrived()
+        await firstTimeout.waitUntilArrived()
+        firstTimeout.release()
+
+        let outcome = await preparation.value
+        XCTAssertEqual(outcome, .failed)
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+
+        let retry = Task {
+            await service.prepareForReadiness()
+        }
+        await secondRequest.waitUntilArrived()
+        await secondTimeout.waitUntilArrived()
+        secondRequest.release()
+
+        let retryOutcome = await retry.value
+        XCTAssertEqual(retryOutcome, .loaded)
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 2)
+        XCTAssertFalse(service.resolved.attentionEnabled)
+        firstRequest.release()
+    }
+
     func testRefreshFailsOpenOnTransportError() async {
         // Transient network failure must not disable any feature —
         // documented contract in #725 is fail-open on unavailability.
