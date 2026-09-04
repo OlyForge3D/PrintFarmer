@@ -28,16 +28,13 @@ public sealed class SlicerHostPromotionArtifactContentSource(
             SlicerPromotionContract.OperationKeyHeaderName,
             operationKey);
 
-        CancellationTokenSource? timeoutSource =
-            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutSource.CancelAfter(_streamTimeout);
-        HttpResponseMessage? response = null;
+        using var ownership = new PendingResponseOwnership(_streamTimeout, cancellationToken);
         try
         {
-            response = await _httpClient.SendAsync(
+            HttpResponseMessage response = await ownership.SendAsync(
+                _httpClient,
                 request,
-                HttpCompletionOption.ResponseHeadersRead,
-                timeoutSource.Token);
+                HttpCompletionOption.ResponseHeadersRead);
 
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
@@ -46,7 +43,7 @@ public sealed class SlicerHostPromotionArtifactContentSource(
 
             if (response.StatusCode == HttpStatusCode.Forbidden &&
                 string.Equals(
-                    await ReadProblemCodeAsync(response, timeoutSource.Token),
+                    await ReadProblemCodeAsync(response, ownership.Token),
                     "promotion_pin_mismatch",
                     StringComparison.Ordinal))
             {
@@ -65,21 +62,8 @@ public sealed class SlicerHostPromotionArtifactContentSource(
                     "Slicer promotion content length did not match artifact metadata.");
             }
 
-            Stream stream = await response.Content.ReadAsStreamAsync(timeoutSource.Token);
-            HttpResponseMessage ownedResponse = response;
-            CancellationTokenSource ownedTimeoutSource = timeoutSource;
-            response = null;
-            timeoutSource = null;
-            return PromotionArtifactContent.Create(
-                stream,
-                expectedSizeBytes,
-                () =>
-                {
-                    ownedResponse.Dispose();
-                    ownedTimeoutSource.Dispose();
-                    return ValueTask.CompletedTask;
-                },
-                ownedTimeoutSource.Token);
+            Stream stream = await response.Content.ReadAsStreamAsync(ownership.Token);
+            return ownership.TransferToContent(stream, expectedSizeBytes);
         }
         catch (PromotionSourcePinMismatchException)
         {
@@ -97,11 +81,6 @@ public sealed class SlicerHostPromotionArtifactContentSource(
             exception is IOException or HttpRequestException)
         {
             throw new PromotionSourceTransportException("Slicer promotion content stream failed.", exception);
-        }
-        finally
-        {
-            response?.Dispose();
-            timeoutSource?.Dispose();
         }
     }
 
@@ -125,6 +104,59 @@ public sealed class SlicerHostPromotionArtifactContentSource(
             throw new PromotionSourceTransportException(
                 "Slicer promotion content returned an invalid problem response.",
                 exception);
+        }
+    }
+
+    private sealed class PendingResponseOwnership : IDisposable
+    {
+        private CancellationTokenSource? _timeoutSource;
+        private HttpResponseMessage? _response;
+
+        public PendingResponseOwnership(TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            _timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            _timeoutSource.CancelAfter(timeout);
+        }
+
+        public CancellationToken Token =>
+            _timeoutSource?.Token ?? throw new ObjectDisposedException(nameof(PendingResponseOwnership));
+
+        public async Task<HttpResponseMessage> SendAsync(
+            HttpClient httpClient,
+            HttpRequestMessage request,
+            HttpCompletionOption completionOption)
+        {
+            _response = await httpClient.SendAsync(request, completionOption, Token);
+            return _response;
+        }
+
+        public PromotionArtifactContent TransferToContent(Stream stream, long expectedSizeBytes)
+        {
+            HttpResponseMessage response =
+                _response ?? throw new InvalidOperationException("No response is available to transfer.");
+            CancellationTokenSource timeoutSource =
+                _timeoutSource ?? throw new ObjectDisposedException(nameof(PendingResponseOwnership));
+            PromotionArtifactContent content = PromotionArtifactContent.Create(
+                stream,
+                expectedSizeBytes,
+                () =>
+                {
+                    response.Dispose();
+                    timeoutSource.Dispose();
+                    return ValueTask.CompletedTask;
+                },
+                timeoutSource.Token);
+            _response = null;
+            _timeoutSource = null;
+            return content;
+        }
+
+        public void Dispose()
+        {
+            _response?.Dispose();
+            _timeoutSource?.Dispose();
+            _response = null;
+            _timeoutSource = null;
         }
     }
 }
