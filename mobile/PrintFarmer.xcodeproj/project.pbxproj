@@ -61,6 +61,7 @@
 		F24120020000000000000002 /* AppDestinationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24120010000000000000001 /* AppDestinationView.swift */; };
 		F24170020000000000000002 /* OversightCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170010000000000000001 /* OversightCatalog.swift */; };
 		F24170040000000000000004 /* OversightHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170030000000000000003 /* OversightHubView.swift */; };
+		F24170100000000000000010 /* OversightUpgradeOfferCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170110000000000000011 /* OversightUpgradeOfferCard.swift */; };
 		F24170060000000000000006 /* FilamentCoverageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170050000000000000005 /* FilamentCoverageView.swift */; };
 		F24170090000000000000009 /* OversightCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170080000000000000008 /* OversightCatalogTests.swift */; };
 		20C7007EC7BAF78868D23835 /* DemoMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1813AB98B7AEA3A598863F /* DemoMode.swift */; };
@@ -632,6 +633,7 @@
 		F24120010000000000000001 /* AppDestinationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDestinationView.swift; sourceTree = "<group>"; };
 		F24170010000000000000001 /* OversightCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightCatalog.swift; sourceTree = "<group>"; };
 		F24170030000000000000003 /* OversightHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightHubView.swift; sourceTree = "<group>"; };
+		F24170110000000000000011 /* OversightUpgradeOfferCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightUpgradeOfferCard.swift; sourceTree = "<group>"; };
 		F24170050000000000000005 /* FilamentCoverageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageView.swift; sourceTree = "<group>"; };
 		F24170080000000000000008 /* OversightCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightCatalogTests.swift; sourceTree = "<group>"; };
 		534568DC689B743CE69E44A4 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
@@ -1652,6 +1654,7 @@
 			isa = PBXGroup;
 			children = (
 				F24170030000000000000003 /* OversightHubView.swift */,
+				F24170110000000000000011 /* OversightUpgradeOfferCard.swift */,
 				F24170050000000000000005 /* FilamentCoverageView.swift */,
 			);
 			path = Oversight;
@@ -2037,6 +2040,7 @@
 				69BA22247633D68EB315F6C3 /* PrinterListViewModel.swift in Sources */,
 				5E141422FB3849E6169FA79E /* ContentView.swift in Sources */,
 				F24170040000000000000004 /* OversightHubView.swift in Sources */,
+				F24170100000000000000010 /* OversightUpgradeOfferCard.swift in Sources */,
 				F24170060000000000000006 /* FilamentCoverageView.swift in Sources */,
 				1DC1666AD87080FDC1140528 /* LoginView.swift in Sources */,
 				BCEF91EF40EA431F928DB79F /* OnboardingView.swift in Sources */,

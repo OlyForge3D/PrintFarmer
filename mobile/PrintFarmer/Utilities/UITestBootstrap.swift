@@ -53,6 +53,7 @@ enum UITestBootstrap {
         "--uitesting-operator-features-disabled"
     static let attentionActionsLaunchArgument = "--uitesting-attention-actions"
     static let twoModesNavigationLaunchArgument = "--uitesting-two-modes"
+    static let oversightUpgradeOfferLaunchArgument = "--uitesting-oversight-upgrade-offer"
     #if DEBUG
     static let shiftTaskMutationErrorLaunchArgument =
         "--uitesting-shift-task-mutation-error"
@@ -240,6 +241,13 @@ enum UITestBootstrap {
         if arguments.contains(twoModesNavigationLaunchArgument) {
             registry.setNavigationLayoutPreference(.twoModes)
         }
+        if arguments.contains(oversightUpgradeOfferLaunchArgument) {
+            _ = registry.observeOversightUpgradeOffer(
+                farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1),
+                shiftPlanEnabled: true,
+                isFarmAdmin: true
+            )
+        }
 
         // Demo services are already sufficient: they satisfy every
         // protocol the operator shell needs without hitting the network.
@@ -260,6 +268,11 @@ enum UITestBootstrap {
             serverRegistry: registry,
             farmSnapshotStore: injectedSnapshotStore
         )
+        if arguments.contains(oversightUpgradeOfferLaunchArgument) {
+            services.farmShapeService = StubFarmShapeService(
+                shape: FarmShape(accountCount: 2, locationCount: 1, printerCount: 1)
+            )
+        }
 
         // #1353: `ResolvedSystemCapabilities.defaults.printedPartsInventoryEnabled`
         // is `false` in production so a freshly-provisioned server without any

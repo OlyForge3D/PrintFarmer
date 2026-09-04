@@ -44,6 +44,13 @@ final class UITestBootstrapTests: XCTestCase {
         )
     }
 
+    func test_oversightUpgradeOfferLaunchArgument_matchesUITestsHarness() {
+        XCTAssertEqual(
+            UITestBootstrap.oversightUpgradeOfferLaunchArgument,
+            "--uitesting-oversight-upgrade-offer"
+        )
+    }
+
     // MARK: - Launch mode
 
     func test_mode_defaultsToAuthenticated() {

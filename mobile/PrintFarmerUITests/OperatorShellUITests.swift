@@ -37,6 +37,46 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         )
     }
 
+    @MainActor
+    final class OversightUpgradeOfferUITests: PrintFarmerUITestCase {
+        override var additionalLaunchArguments: [String] {
+            ["--uitesting-oversight-upgrade-offer"]
+        }
+
+        func testOfferAppearsInlineAndCanBeDismissed() {
+            let oversight = operatorDestinationButton(
+                tabTitle: "Oversight",
+                sidebarIdentifier: "sidebar.oversight"
+            )
+            XCTAssertTrue(oversight.waitForExistence(timeout: 5))
+            oversight.tap()
+
+            let card = app.otherElements["oversight.upgradeOffer"]
+            XCTAssertTrue(card.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["oversight.upgradeOffer.turnOn"].exists)
+
+            let notNow = app.buttons["oversight.upgradeOffer.notNow"]
+            XCTAssertTrue(notNow.exists)
+            notNow.tap()
+            XCTAssertFalse(card.waitForExistence(timeout: 2))
+        }
+
+        func testTurningOnOfferSwitchesToTwoModes() {
+            let oversight = operatorDestinationButton(
+                tabTitle: "Oversight",
+                sidebarIdentifier: "sidebar.oversight"
+            )
+            XCTAssertTrue(oversight.waitForExistence(timeout: 5))
+            oversight.tap()
+
+            let turnOn = app.buttons["oversight.upgradeOffer.turnOn"]
+            XCTAssertTrue(turnOn.waitForExistence(timeout: 5))
+            turnOn.tap()
+
+            XCTAssertTrue(app.segmentedControls["navigation.modeControl"].waitForExistence(timeout: 5))
+        }
+    }
+
     func testOperatorShellShowsDestinationsForCurrentWidth() {
         // Operator shell must present a navigation container: iPhone
         // TabView bottom bar OR iPad NavigationSplitView sidebar.

@@ -35,6 +35,45 @@ final class ServerRegistry {
     static let legacyMigrationCompletedKey = "pf_server_registry_legacy_migration_completed"
     private static let advancedPrinterControlsPreferenceKeyPrefix = "pf_advanced_printer_controls_enabled"
     private static let navigationLayoutPreferenceKeyPrefix = "pf_navigation_layout"
+    private static let oversightUpgradeOfferStateKeyPrefix = "pf_oversight_upgrade_offer"
+
+    private struct OversightUpgradeOfferState: Codable {
+        var lastObserved: OversightUpgradeOfferSignature?
+        var dismissedThresholds: Set<OversightUpgradeThreshold> = []
+        var hasAccepted = false
+    }
+
+    private struct OversightUpgradeOfferSignature: Codable {
+        let accountCount: Int
+        let locationCount: Int
+        let shiftPlanEnabled: Bool
+
+        init(farmShape: FarmShape, shiftPlanEnabled: Bool) {
+            accountCount = farmShape.accountCount
+            locationCount = farmShape.locationCount
+            self.shiftPlanEnabled = shiftPlanEnabled
+        }
+
+        var activeThresholds: Set<OversightUpgradeThreshold> {
+            var thresholds: Set<OversightUpgradeThreshold> = []
+            if accountCount >= 2 {
+                thresholds.insert(.accounts)
+            }
+            if locationCount >= 2 {
+                thresholds.insert(.locations)
+            }
+            if shiftPlanEnabled {
+                thresholds.insert(.shiftPlan)
+            }
+            return thresholds
+        }
+    }
+
+    private enum OversightUpgradeThreshold: String, Codable, Hashable {
+        case accounts
+        case locations
+        case shiftPlan
+    }
 
     private struct PersistedRegistry: Codable {
         var servers: [RegisteredServer]
@@ -201,6 +240,7 @@ final class ServerRegistry {
         if endpointChanged {
             clearAdvancedPrinterControlsPreference(for: server.id)
             clearNavigationLayoutPreference(for: server.id)
+            clearOversightUpgradeOfferState(for: server.id)
         }
         persist()
     }
@@ -219,6 +259,7 @@ final class ServerRegistry {
         }
         clearAdvancedPrinterControlsPreference(for: id)
         clearNavigationLayoutPreference(for: id)
+        clearOversightUpgradeOfferState(for: id)
         persist()
     }
 
@@ -260,6 +301,7 @@ final class ServerRegistry {
         servers.remove(at: index)
         clearAdvancedPrinterControlsPreference(for: candidate.id)
         clearNavigationLayoutPreference(for: candidate.id)
+        clearOversightUpgradeOfferState(for: candidate.id)
         persist()
         return true
     }
@@ -329,6 +371,76 @@ final class ServerRegistry {
             forKey: Self.navigationLayoutPreferenceKey(for: activeServerID)
         )
         navigationLayoutPreference = preference
+    }
+
+    /// Records an observed farm shape and returns whether it newly qualifies for
+    /// the inline Oversight-mode offer. The first observation only establishes a
+    /// baseline, so it can never prompt during first run.
+    func observeOversightUpgradeOffer(
+        farmShape: FarmShape?,
+        shiftPlanEnabled: Bool,
+        isFarmAdmin: Bool
+    ) -> Bool {
+        guard let activeServerID,
+              let farmShape,
+              navigationLayoutPreference == .automatic,
+              isFarmAdmin else {
+            return false
+        }
+
+        let signature = OversightUpgradeOfferSignature(
+            farmShape: farmShape,
+            shiftPlanEnabled: shiftPlanEnabled
+        )
+        var state = oversightUpgradeOfferState(for: activeServerID)
+        defer {
+            state.lastObserved = signature
+            setOversightUpgradeOfferState(state, for: activeServerID)
+        }
+
+        guard !state.hasAccepted, let previous = state.lastObserved else {
+            return false
+        }
+
+        var newlyCrossed: Set<OversightUpgradeThreshold> = []
+        if previous.accountCount < 2, signature.accountCount >= 2 {
+            newlyCrossed.insert(.accounts)
+        }
+        if previous.locationCount < 2, signature.locationCount >= 2 {
+            newlyCrossed.insert(.locations)
+        }
+        if !previous.shiftPlanEnabled, signature.shiftPlanEnabled {
+            newlyCrossed.insert(.shiftPlan)
+        }
+
+        return !newlyCrossed.subtracting(state.dismissedThresholds).isEmpty
+    }
+
+    func dismissOversightUpgradeOffer(
+        farmShape: FarmShape,
+        shiftPlanEnabled: Bool
+    ) {
+        guard let activeServerID else { return }
+        var state = oversightUpgradeOfferState(for: activeServerID)
+        state.dismissedThresholds.formUnion(
+            OversightUpgradeOfferSignature(
+                farmShape: farmShape,
+                shiftPlanEnabled: shiftPlanEnabled
+            ).activeThresholds
+        )
+        state.lastObserved = OversightUpgradeOfferSignature(
+            farmShape: farmShape,
+            shiftPlanEnabled: shiftPlanEnabled
+        )
+        setOversightUpgradeOfferState(state, for: activeServerID)
+    }
+
+    func acceptOversightUpgradeOffer() {
+        guard let activeServerID else { return }
+        var state = oversightUpgradeOfferState(for: activeServerID)
+        state.hasAccepted = true
+        setOversightUpgradeOfferState(state, for: activeServerID)
+        setNavigationLayoutPreference(.twoModes)
     }
 
     func associateOriginServerId(_ originServerId: UUID, with serverID: UUID) throws {
@@ -454,6 +566,28 @@ final class ServerRegistry {
         "\(navigationLayoutPreferenceKeyPrefix).\(serverID.uuidString.lowercased())"
     }
 
+    private static func oversightUpgradeOfferStateKey(for serverID: UUID) -> String {
+        "\(oversightUpgradeOfferStateKeyPrefix).\(serverID.uuidString.lowercased())"
+    }
+
+    private func oversightUpgradeOfferState(for serverID: UUID) -> OversightUpgradeOfferState {
+        guard let data = userDefaults.data(
+            forKey: Self.oversightUpgradeOfferStateKey(for: serverID)
+        ),
+        let state = try? JSONDecoder().decode(OversightUpgradeOfferState.self, from: data) else {
+            return OversightUpgradeOfferState()
+        }
+        return state
+    }
+
+    private func setOversightUpgradeOfferState(
+        _ state: OversightUpgradeOfferState,
+        for serverID: UUID
+    ) {
+        guard let data = try? JSONEncoder().encode(state) else { return }
+        userDefaults.set(data, forKey: Self.oversightUpgradeOfferStateKey(for: serverID))
+    }
+
     private func reloadAdvancedPrinterControlsPreference() {
         guard let activeServerID else {
             advancedPrinterControlsEnabled = false
@@ -494,6 +628,12 @@ final class ServerRegistry {
         if activeServerID == serverID {
             navigationLayoutPreference = .automatic
         }
+    }
+
+    private func clearOversightUpgradeOfferState(for serverID: UUID) {
+        userDefaults.removeObject(
+            forKey: Self.oversightUpgradeOfferStateKey(for: serverID)
+        )
     }
 
     private func persist() {

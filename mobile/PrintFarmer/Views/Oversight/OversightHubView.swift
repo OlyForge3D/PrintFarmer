@@ -5,6 +5,9 @@ struct OversightHubView: View {
 
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
+    @Environment(AuthViewModel.self) private var authViewModel
+    @Environment(ServerRegistry.self) private var serverRegistry
+    @State private var showsUpgradeOffer = false
 
     private var capabilities: ResolvedSystemCapabilities {
         services.capabilitiesService.resolved
@@ -16,6 +19,14 @@ struct OversightHubView: View {
 
     var body: some View {
         List {
+            if showsUpgradeOffer {
+                Section {
+                    OversightUpgradeOfferCard(
+                        turnOn: acceptUpgradeOffer,
+                        notNow: dismissUpgradeOffer
+                    )
+                }
+            }
             ForEach(sections) { sectionModel in
                 Section(sectionModel.section.title) {
                     ForEach(sectionModel.destinations) { destination in
@@ -37,7 +48,43 @@ struct OversightHubView: View {
                 capabilities: capabilities
             )
         }
+        .onAppear(perform: refreshUpgradeOffer)
+        .onChange(of: services.farmShapeService.sessionShape) {
+            refreshUpgradeOffer()
+        }
+        .onChange(of: capabilities.shiftPlanEnabled) {
+            refreshUpgradeOffer()
+        }
         .accessibilityIdentifier("oversight.hub")
+    }
+
+    private func refreshUpgradeOffer() {
+        guard !showsUpgradeOffer,
+              router.activeShell == .simple else {
+            return
+        }
+        showsUpgradeOffer = serverRegistry.observeOversightUpgradeOffer(
+            farmShape: services.farmShapeService.sessionShape,
+            shiftPlanEnabled: capabilities.shiftPlanEnabled,
+            isFarmAdmin: authViewModel.currentUser?.roles.contains("farm_admin") == true
+        )
+    }
+
+    private func acceptUpgradeOffer() {
+        serverRegistry.acceptOversightUpgradeOffer()
+        showsUpgradeOffer = false
+    }
+
+    private func dismissUpgradeOffer() {
+        guard let farmShape = services.farmShapeService.sessionShape else {
+            showsUpgradeOffer = false
+            return
+        }
+        serverRegistry.dismissOversightUpgradeOffer(
+            farmShape: farmShape,
+            shiftPlanEnabled: capabilities.shiftPlanEnabled
+        )
+        showsUpgradeOffer = false
     }
 }
 

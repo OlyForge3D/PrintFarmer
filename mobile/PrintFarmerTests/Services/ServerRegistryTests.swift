@@ -195,6 +195,109 @@ final class ServerRegistryTests: XCTestCase {
         XCTAssertEqual(registry.navigationLayoutPreference, .automatic)
     }
 
+    func testOversightUpgradeOfferRequiresAnObservedThresholdCrossing() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        _ = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://farm.example.com")!
+        )
+
+        XCTAssertFalse(registry.observeOversightUpgradeOffer(
+            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        ))
+        XCTAssertFalse(registry.observeOversightUpgradeOffer(
+            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        ))
+        XCTAssertTrue(registry.observeOversightUpgradeOffer(
+            farmShape: FarmShape(accountCount: 2, locationCount: 1, printerCount: 1),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        ))
+    }
+
+    func testOversightUpgradeOfferDismissalIsPerServerAndOnlyReoffersForNewThreshold() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let first = try registry.add(
+            displayName: "One",
+            baseURL: URL(string: "https://one.example.com")!
+        )
+        let second = try registry.add(
+            displayName: "Two",
+            baseURL: URL(string: "https://two.example.com")!
+        )
+
+        try registry.setActive(id: first.id)
+        _ = registry.observeOversightUpgradeOffer(
+            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1),
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        )
+        XCTAssertTrue(registry.observeOversightUpgradeOffer(
+            farmShape: FarmShape(accountCount: 2, locationCount: 1, printerCount: 1),
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        ))
+        registry.dismissOversightUpgradeOffer(
+            farmShape: FarmShape(accountCount: 2, locationCount: 1, printerCount: 1),
+            shiftPlanEnabled: false
+        )
+        XCTAssertFalse(registry.observeOversightUpgradeOffer(
+            farmShape: FarmShape(accountCount: 3, locationCount: 1, printerCount: 1),
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        ))
+        XCTAssertTrue(registry.observeOversightUpgradeOffer(
+            farmShape: FarmShape(accountCount: 3, locationCount: 2, printerCount: 1),
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        ))
+
+        try registry.setActive(id: second.id)
+        XCTAssertFalse(registry.observeOversightUpgradeOffer(
+            farmShape: FarmShape(accountCount: 2, locationCount: 1, printerCount: 1),
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        ))
+    }
+
+    func testOversightUpgradeOfferShiftTransitionAndSuppression() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        _ = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://farm.example.com")!
+        )
+        let smallFarm = FarmShape(accountCount: 1, locationCount: 1, printerCount: 1)
+
+        XCTAssertFalse(registry.observeOversightUpgradeOffer(
+            farmShape: smallFarm,
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        ))
+        XCTAssertFalse(registry.observeOversightUpgradeOffer(
+            farmShape: smallFarm,
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        ))
+        XCTAssertTrue(registry.observeOversightUpgradeOffer(
+            farmShape: smallFarm,
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        ))
+
+        registry.acceptOversightUpgradeOffer()
+        XCTAssertEqual(registry.navigationLayoutPreference, .twoModes)
+        registry.setNavigationLayoutPreference(.automatic)
+        XCTAssertFalse(registry.observeOversightUpgradeOffer(
+            farmShape: FarmShape(accountCount: 2, locationCount: 2, printerCount: 1),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        ))
+    }
+
     func testNormalizationAddsHTTPSLowercasesHostAndStripsTrailingSlash() throws {
         let normalized = try ServerRegistry.normalizedURLString(for: "  PRINT.example.COM/  ")
 
