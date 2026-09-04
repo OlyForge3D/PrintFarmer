@@ -1151,8 +1151,9 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
         {/* Subtle fixed fill light to prevent complete darkness from some angles */}
         <pointLight position={[0, 0, 20]} intensity={0.2} />
 
-        {/* Environment */}
-        <Environment preset="studio" />
+        {/* Environment. Served locally (see public/assets/hdri) so this viewer does not
+            depend on any third-party runtime host. */}
+        <Environment files="/assets/hdri/studio_small_03_1k.hdr" />
 
         {/* Print bed - if printer dimensions provided */}
         {bedDimensions && (

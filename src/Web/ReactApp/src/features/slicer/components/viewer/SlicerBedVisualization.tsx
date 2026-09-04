@@ -2433,8 +2433,9 @@ function BedScene({
         />
       )}
 
-      {/* Environment for reflections */}
-      <Environment preset="studio" />
+      {/* Environment for reflections. Served locally (see public/assets/hdri) so the
+          slicer workspace does not depend on any third-party runtime host. */}
+      <Environment files="/assets/hdri/studio_small_03_1k.hdr" />
     </>
   );
 }
