@@ -350,7 +350,7 @@ struct PrinterDetailView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
-            .tint(Color.pfErrorFill)
+            .tint(Color.pfError)
         }
         .disabled(viewModel.isPerformingAction)
 
@@ -440,7 +440,7 @@ struct PrinterDetailView: View {
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.bordered)
-                .tint(Color.pfErrorFill)
+                .tint(Color.pfError)
                 .disabled(viewModel.isPerformingAction)
                 .accessibilityIdentifier("printer.detail.control.cancel")
                 .accessibilityLabel("Cancel current print")

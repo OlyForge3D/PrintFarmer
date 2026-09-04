@@ -64,13 +64,13 @@ extension Color {
 
     /// Success — green (slightly different shades per mode)
     static let pfSuccess = adaptive(light: "#059669", dark: "#10b981")
-    /// Error text/icons — deep red / lighter red
+    /// Error foreground for text, icons, and bordered controls — deep red / lighter red
     static let pfError = adaptive(light: "#dc2626", dark: "#f87171")
-    /// Error fill for controls with white labels
+    /// Error fill for prominent controls with white labels
     static let pfErrorFill = Color(hex: "#dc2626")
-    /// Warning text/icons — deep amber / amber
+    /// Warning foreground for text, icons, and bordered controls — deep amber / amber
     static let pfWarning = adaptive(light: "#b45309", dark: "#d97706")
-    /// Warning fill for controls with white labels
+    /// Warning fill for prominent controls with white labels
     static let pfWarningFill = Color(hex: "#b45309")
 
     // MARK: Buttons

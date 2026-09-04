@@ -26,6 +26,13 @@ final class ThemeColorsTests: XCTestCase {
         assertContrast(.white, against: Color.pfWarningFill, style: .dark)
     }
 
+    func test_errorForegroundAndFillTokensPreserveTheirDistinctRoles() {
+        assertColor(Color.pfError, equals: "#dc2626", style: .light)
+        assertColor(Color.pfError, equals: "#f87171", style: .dark)
+        assertColor(Color.pfErrorFill, equals: "#dc2626", style: .light)
+        assertColor(Color.pfErrorFill, equals: "#dc2626", style: .dark)
+    }
+
     func test_brandSideValuesArePreserved() {
         assertColor(Color.pfError, equals: "#dc2626", style: .light)
         assertColor(Color.pfWarning, equals: "#d97706", style: .dark)
