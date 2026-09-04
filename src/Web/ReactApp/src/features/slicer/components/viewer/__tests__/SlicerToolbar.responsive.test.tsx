@@ -1,6 +1,26 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { SlicerToolbar } from '../SlicerToolbar';
+import { MOBILE_BREAKPOINT_QUERY } from '@/common/hooks/useMediaQuery';
+
+// Mocks `window.matchMedia` for the mobile breakpoint query used by
+// `useIsMobileBreakpoint()`, mirroring `PrintersPage.test.tsx`'s
+// `mockLgBreakpoint` helper. The global jsdom polyfill in `src/test/setup.ts`
+// always reports `matches: false`, so tests only need this helper when they
+// want to exercise the compact/narrow-viewport branch.
+function mockCompactViewport(matches: boolean) {
+  const mql = {
+    matches,
+    media: MOBILE_BREAKPOINT_QUERY,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  };
+  window.matchMedia = vi.fn().mockReturnValue(mql) as unknown as typeof window.matchMedia;
+}
 
 // Regression coverage for issue #1902: the slicer toolbar's pinned left
 // (hamburger/add-model/add-plate) and right (undo/redo/keyboard)
@@ -119,6 +139,95 @@ describe('SlicerToolbar narrow-width layout (issue #1902)', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument();
       expect(outsideControl).toHaveFocus();
+    });
+  });
+});
+
+// Coverage for issue #2406: below Tailwind's `sm` breakpoint (e.g. 375px),
+// the tool-button region collapses into a single "More tools" trigger
+// instead of wrapping into a multi-row strip that pushes the canvas and
+// slice controls below the fold.
+describe('SlicerToolbar compact mobile layout (issue #2406)', () => {
+  const noop = () => vi.fn();
+
+  afterEach(() => {
+    // Restore the default (non-compact) breakpoint so later tests/files
+    // aren't affected by this override.
+    mockCompactViewport(false);
+  });
+
+  it('keeps rendering individual tool buttons at the default (non-mobile) viewport', () => {
+    render(<SlicerToolbar onAddModel={noop()} onArrange={noop()} />);
+
+    expect(screen.getByTitle('Auto Arrange (A)')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'More tools' })).not.toBeInTheDocument();
+  });
+
+  it('collapses the tool region into a single "More tools" trigger at the mobile breakpoint', () => {
+    mockCompactViewport(true);
+    render(<SlicerToolbar onAddModel={noop()} onArrange={noop()} onUndo={noop()} canUndo />);
+
+    expect(screen.queryByTitle('Auto Arrange (A)')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'More tools' })).toBeInTheDocument();
+
+    // Pinned left/right groups stay visible and reachable.
+    expect(screen.getByTitle('Add Model (Ctrl+O)')).toBeInTheDocument();
+    expect(screen.getByTitle('Undo (Ctrl+Z)')).toBeInTheDocument();
+  });
+
+  it('opens the "More tools" menu showing grouped tools and invokes the handler on click', () => {
+    mockCompactViewport(true);
+    const onArrange = vi.fn();
+    render(<SlicerToolbar onAddModel={noop()} onArrange={onArrange} hasModels />);
+
+    const trigger = screen.getByRole('button', { name: 'More tools' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(trigger);
+
+    const menu = screen.getByRole('menu', { name: 'More tools' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger).toHaveAttribute('aria-controls', menu.id);
+
+    const arrangeItem = within(menu).getByRole('menuitem', { name: /Auto Arrange/ });
+    fireEvent.click(arrangeItem);
+
+    expect(onArrange).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('menu', { name: 'More tools' })).not.toBeInTheDocument();
+  });
+
+  it('dismisses the "More tools" menu with Escape and restores focus to its trigger', async () => {
+    mockCompactViewport(true);
+    render(<SlicerToolbar onAddModel={noop()} onArrange={noop()} />);
+
+    const trigger = screen.getByRole('button', { name: 'More tools' });
+    fireEvent.click(trigger);
+    const menu = screen.getByRole('menu', { name: 'More tools' });
+
+    fireEvent.keyDown(menu, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByRole('menu', { name: 'More tools' })).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
+  });
+
+  it('dismisses the "More tools" menu on an outside pointer press', async () => {
+    mockCompactViewport(true);
+    render(
+      <>
+        <SlicerToolbar onAddModel={noop()} onArrange={noop()} />
+        <button type="button">Outside control</button>
+      </>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'More tools' }));
+    const outsideControl = screen.getByRole('button', { name: 'Outside control' });
+
+    fireEvent.mouseDown(outsideControl);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('menu', { name: 'More tools' })).not.toBeInTheDocument();
     });
   });
 });
