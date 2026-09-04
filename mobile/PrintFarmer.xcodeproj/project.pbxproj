@@ -59,6 +59,10 @@
 		1FA5B5ADDBE8376D1A607E06 /* JobStatsCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43FEB78EDB93736282BDCB0B /* JobStatsCard.swift */; };
 		2007393C70EEAD89185ADC84 /* AppRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FD237969E9A136249F6351A /* AppRouter.swift */; };
 		F24120020000000000000002 /* AppDestinationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24120010000000000000001 /* AppDestinationView.swift */; };
+		F24170020000000000000002 /* OversightCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170010000000000000001 /* OversightCatalog.swift */; };
+		F24170040000000000000004 /* OversightHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170030000000000000003 /* OversightHubView.swift */; };
+		F24170060000000000000006 /* FilamentCoverageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170050000000000000005 /* FilamentCoverageView.swift */; };
+		F24170090000000000000009 /* OversightCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170080000000000000008 /* OversightCatalogTests.swift */; };
 		20C7007EC7BAF78868D23835 /* DemoMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1813AB98B7AEA3A598863F /* DemoMode.swift */; };
 		20D74DCE5420BC3260D6FF7E /* DispatchDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C82B536DAB8128A0A3905EBE /* DispatchDashboardView.swift */; };
 		2145660BC57194889CDBC78A /* JobCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93B8E20F526E7CE3E92BE781 /* JobCardView.swift */; };
@@ -625,6 +629,10 @@
 		4F5C0DDAD4063D1EA8540264 /* PrinterListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterListViewModel.swift; sourceTree = "<group>"; };
 		4FD237969E9A136249F6351A /* AppRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouter.swift; sourceTree = "<group>"; };
 		F24120010000000000000001 /* AppDestinationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDestinationView.swift; sourceTree = "<group>"; };
+		F24170010000000000000001 /* OversightCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightCatalog.swift; sourceTree = "<group>"; };
+		F24170030000000000000003 /* OversightHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightHubView.swift; sourceTree = "<group>"; };
+		F24170050000000000000005 /* FilamentCoverageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageView.swift; sourceTree = "<group>"; };
+		F24170080000000000000008 /* OversightCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightCatalogTests.swift; sourceTree = "<group>"; };
 		534568DC689B743CE69E44A4 /* EmptyStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyStateView.swift; sourceTree = "<group>"; };
 		574F629AF29665D4872351E8 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		57A3A3E21352CC6A4514221E /* PrinterCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterCardView.swift; sourceTree = "<group>"; };
@@ -1264,6 +1272,7 @@
 				241600000000000000000001 /* AdaptiveNavigationShell.swift */,
 				E83CE3867D23C7CA26C423AB /* AppDestination.swift */,
 				F24120010000000000000001 /* AppDestinationView.swift */,
+				F24170010000000000000001 /* OversightCatalog.swift */,
 				AF81383E489642A1A80EE943 /* DeepLinkHandler.swift */,
 				4FD237969E9A136249F6351A /* AppRouter.swift */,
 				F78800000000000000000001 /* TaskActionRoute.swift */,
@@ -1284,6 +1293,7 @@
 				4CDE928BC4B813AB90009605 /* Locations */,
 				0F7FA49FF64B34C211841EF0 /* Maintenance */,
 				771CDF6A20CC0E555A100EEE /* Notifications */,
+				F24170070000000000000007 /* Oversight */,
 				A2B6286100000000000000C1 /* PrinterControls */,
 				549E659961D3A9E494F5ADEF /* Printers */,
 				A2D4EF0123456789ABCD0003 /* PrinterControls */,
@@ -1630,8 +1640,18 @@
 				F7060001000000000000B001 /* AppRouterTests.swift */,
 				C7D2128F28601E1ED8FEE835 /* DeepLinkHandlerTests.swift */,
 				F78800000000000000000003 /* TaskActionRouteResolverTests.swift */,
+				F24170080000000000000008 /* OversightCatalogTests.swift */,
 			);
 			path = Navigation;
+			sourceTree = "<group>";
+		};
+		F24170070000000000000007 /* Oversight */ = {
+			isa = PBXGroup;
+			children = (
+				F24170030000000000000003 /* OversightHubView.swift */,
+				F24170050000000000000005 /* FilamentCoverageView.swift */,
+			);
+			path = Oversight;
 			sourceTree = "<group>";
 		};
 		F7060002000000000000C001 /* PrintFarmerUITests */ = {
@@ -1879,6 +1899,7 @@
 				F2A1B2C3D4E5F6A7B8C9D0E1 /* AddSpoolViewModelTests.swift in Sources */,
 				F2C1D2E3F4A5B6C7D8E9F0A1 /* SpoolInventoryViewModelTests.swift in Sources */,
 				F7060001000000000000B002 /* AppRouterTests.swift in Sources */,
+				F24170090000000000000009 /* OversightCatalogTests.swift in Sources */,
 				F7060001000000000000B012 /* SystemCapabilitiesTests.swift in Sources */,
 				241500000000000000000006 /* FarmShapeServiceTests.swift in Sources */,
 				F711A0003000000000000002 /* FilamentFallbackGroupModelsTests.swift in Sources */,
@@ -1970,6 +1991,7 @@
 				241600000000000000000002 /* AdaptiveNavigationShell.swift in Sources */,
 				4097E554D29B3551A59C943D /* AppDestination.swift in Sources */,
 				F24120020000000000000002 /* AppDestinationView.swift in Sources */,
+				F24170020000000000000002 /* OversightCatalog.swift in Sources */,
 				14D1CA5B7AC14F03A2C76A77 /* DeepLinkHandler.swift in Sources */,
 				2007393C70EEAD89185ADC84 /* AppRouter.swift in Sources */,
 				3D4D27461FC81A2D849419A4 /* JobServiceProtocol.swift in Sources */,
@@ -2010,6 +2032,8 @@
 				A3E7287000000000000000A2 /* PrinterControlsSection.swift in Sources */,
 				69BA22247633D68EB315F6C3 /* PrinterListViewModel.swift in Sources */,
 				5E141422FB3849E6169FA79E /* ContentView.swift in Sources */,
+				F24170040000000000000004 /* OversightHubView.swift in Sources */,
+				F24170060000000000000006 /* FilamentCoverageView.swift in Sources */,
 				1DC1666AD87080FDC1140528 /* LoginView.swift in Sources */,
 				BCEF91EF40EA431F928DB79F /* OnboardingView.swift in Sources */,
 				FF2EE1DD0CC9BB8AA7F6E5D4 /* LocalNetworkAuthorization.swift in Sources */,

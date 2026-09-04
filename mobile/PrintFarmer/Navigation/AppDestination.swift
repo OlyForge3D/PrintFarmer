@@ -8,6 +8,7 @@ enum AppDestination: Hashable {
     case createPrinter
     case maintenanceAnalytics
     case uptimeReliability
+    case filamentCoverage
     case predictiveInsights(printerId: UUID)
     case jobHistory
     case jobTimeline
@@ -78,8 +79,19 @@ enum AppTab: String, Hashable, CaseIterable, Sendable {
             capabilities.attentionEnabled
         case .tasks:
             capabilities.shiftPlanEnabled
-        case .farm, .scan, .inventory, .oversight,
-             .overview, .fleet, .jobs, .upkeep, .reports:
+        case .oversight:
+            OversightCatalog.hasVisibleDestinations(capabilities: capabilities)
+        case .overview:
+            OversightCatalog.isRootVisible(.overview, capabilities: capabilities)
+        case .fleet:
+            OversightCatalog.isRootVisible(.fleet, capabilities: capabilities)
+        case .jobs:
+            OversightCatalog.isRootVisible(.jobs, capabilities: capabilities)
+        case .upkeep:
+            OversightCatalog.isRootVisible(.upkeep, capabilities: capabilities)
+        case .reports:
+            OversightCatalog.isRootVisible(.reports, capabilities: capabilities)
+        case .farm, .scan, .inventory:
             true
         }
     }
