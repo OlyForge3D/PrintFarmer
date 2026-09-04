@@ -23,6 +23,7 @@ import {
   AlertCircleIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useViewModePreference } from '@/common/hooks/useViewModePreference';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
   sliceJobService,
   SliceJobStatus,
@@ -865,19 +866,41 @@ function LayoutDegradationNotice({ job }: { job: SliceJobStatusResponse }) {
  * diagnostics, so it is safe for a normal operator who can never see
  * `errorDetail`. Before this existed a failed job showed only "Slicing failed."
  * and the operator had no way to learn why or what to do next.
+ *
+ * A farm admin additionally gets `job.errorDetail` — the real worker-side
+ * diagnostic (exit code, stderr, resolved profile path, etc.) that the backend
+ * only ever populates for admins (`SliceJobController.MapToPublicStatusResponse`,
+ * issue #1768/#1811). Non-admins never receive `errorDetail` in the API
+ * response at all, so this component never needs to redact it client-side —
+ * it only needs to render it when the backend chose to include it.
  */
 function SliceFailureNotice({ job }: { job: SliceJobStatusResponse }) {
-  if (job.status !== SliceJobStatus.Failed || !job.failureHint) {
+  const { hasRole } = useAuth();
+  if (job.status !== SliceJobStatus.Failed) {
     return null;
   }
+  if (!job.failureHint && !job.errorDetail) {
+    return null;
+  }
+  const isFarmAdmin = hasRole('farm_admin');
   return (
-    <p
-      role="status"
-      className="flex items-start gap-1.5 text-xs text-pf-warning bg-pf-warning/10 rounded p-2 wrap-break-word"
-    >
-      <AlertCircleIcon className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-      <span>{job.failureHint}</span>
-    </p>
+    <div className="space-y-1.5">
+      {job.failureHint && (
+        <p
+          role="status"
+          className="flex items-start gap-1.5 text-xs text-pf-warning bg-pf-warning/10 rounded p-2 wrap-break-word"
+        >
+          <AlertCircleIcon className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span>{job.failureHint}</span>
+        </p>
+      )}
+      {isFarmAdmin && job.errorDetail && (
+        <p className="flex items-start gap-1.5 text-xs text-pf-error bg-pf-error/10 rounded p-2 wrap-break-word font-mono">
+          <span className="shrink-0 not-italic font-sans text-pf-text-tertiary">Diagnostic:</span>
+          <span>{job.errorDetail}</span>
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -939,7 +962,7 @@ function JobDetailPanel({ job }: { job: SliceJobStatusResponse }) {
           <DetailField label="Error" value={job.errorMessage} error />
         </div>
       )}
-      {job.status === SliceJobStatus.Failed && job.failureHint && (
+      {job.status === SliceJobStatus.Failed && (job.failureHint || job.errorDetail) && (
         <div className="col-span-full">
           <SliceFailureNotice job={job} />
         </div>

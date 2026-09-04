@@ -34,6 +34,10 @@ vi.mock('@/features/slicer/hooks/useSliceJobsRealtime', () => ({
   useSliceJobsRealtime: () => ({ isConnected: false }),
 }));
 
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({ user: { id: 'user-1' }, hasRole: () => false }),
+}));
+
 vi.mock('@/features/slicer/components/SendToPrinterModal', () => ({
   SendToPrinterModal: () => null,
 }));

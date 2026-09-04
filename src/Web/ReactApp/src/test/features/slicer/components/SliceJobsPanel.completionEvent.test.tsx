@@ -39,7 +39,7 @@ vi.mock('@/services/slicerHubService', () => ({
 }));
 
 vi.mock('@/features/auth/hooks/useAuth', () => ({
-  useAuth: () => ({ user: { id: 'user-1' } }),
+  useAuth: () => ({ user: { id: 'user-1' }, hasRole: () => false }),
 }));
 
 vi.mock('@/services/sliceJobService', async () => {
