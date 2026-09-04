@@ -94,6 +94,7 @@ final class AuthViewModel {
         if result == .preparationFailed,
            let serverID = services.currentActiveServerID,
            let userID = currentUser?.id {
+            services.discardPreparedCapabilities()
             snapshotActivationPending = true
             pendingActivation = PendingActivation(
                 authToken: authToken,

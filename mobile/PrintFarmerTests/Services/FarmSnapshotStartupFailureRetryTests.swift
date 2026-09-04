@@ -98,7 +98,24 @@ final class FarmSnapshotStartupFailureRetryTests: XCTestCase {
             observeRegistry: false,
             farmSnapshotAuthority: authority,
             farmSnapshotStore: failing,
-            farmSnapshotOwnerStore: owners)
+            farmSnapshotOwnerStore: owners,
+            apiClientFactory: { baseURL, generation, accessToken, authSessionToken, serverID in
+                let identity = accessToken.flatMap { token in
+                    serverID.map {
+                        AuthenticatedIdentity(
+                            accessToken: token,
+                            serverID: $0,
+                            authSessionToken: authSessionToken
+                        )
+                    }
+                }
+                return APIClient(
+                    baseURL: baseURL,
+                    session: mockAPIClient.urlSession,
+                    serverGeneration: generation,
+                    authenticated: identity
+                )
+            })
 
         // Mint a valid auth token from the epoch (0 is not "current" — never issued).
         let token = container.authOperationEpoch.advance()
@@ -182,6 +199,10 @@ final class FarmSnapshotStartupFailureRetryTests: XCTestCase {
                       "activation failed → VM must record a retryable pending activation, not silently ready")
         XCTAssertNil(authority.currentSession(),
                      "no session published because startup preparation failed")
+        let capabilityRequestsBeforeRetry = mockAPIClient.capturedRequests.filter {
+            $0.url?.path == "/api/system/capabilities"
+        }.count
+        XCTAssertEqual(capabilityRequestsBeforeRetry, 1)
 
         // 2) Retry (no new login, no new credentials): prep succeeds → bind lands.
         failing.armSuccess()
@@ -192,6 +213,13 @@ final class FarmSnapshotStartupFailureRetryTests: XCTestCase {
         XCTAssertEqual(session?.serverID, serverA.id, "must bind the same authenticated server")
         XCTAssertGreaterThanOrEqual(failing.prepareCallCount, 2,
                                     "retry must re-invoke prepareStartup at least once more")
+        XCTAssertGreaterThan(
+            mockAPIClient.capturedRequests.filter {
+                $0.url?.path == "/api/system/capabilities"
+            }.count,
+            capabilityRequestsBeforeRetry,
+            "a delayed retry must not reuse the capability result prepared before activation failed"
+        )
     }
 
     // MARK: - D3: switch-before-retry — retry pinned to failed server (ServiceContainer)
