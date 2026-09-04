@@ -23,7 +23,10 @@ namespace Farm.Web.Api.Tests.Architecture;
 /// <c>SystemLogsController</c>) are genuinely host-scoped and remain here. Per this phase's
 /// explicit non-goal ("no further module extraction — cleanup only"), the guardrail
 /// encodes today's real boundary rather than an aspirational one that would immediately
-/// fail or fail to protect anything.
+/// fail or fail to protect anything. <c>FarmShapeController</c> (issue #2411) was added
+/// later, in the same <c>Controllers.System*</c> family as <c>SystemCapabilitiesController</c>
+/// / <c>SystemInfoController</c> — a small, host-scoped system-metadata endpoint with no
+/// feature-module home of its own.
 /// </remarks>
 public sealed class HostNamespaceGuardrailArchitectureTests
 {
@@ -39,6 +42,7 @@ public sealed class HostNamespaceGuardrailArchitectureTests
         // Controllers/**
         "Farm.Web.Api.Controllers.AssetsController",
         "Farm.Web.Api.Controllers.CalibrationCapabilitiesController",
+        "Farm.Web.Api.Controllers.FarmShapeController",
         "Farm.Web.Api.Controllers.InternalSlicerHostLookupsController",
         "Farm.Web.Api.Controllers.LibrarySyncController",
         "Farm.Web.Api.Controllers.MoonrakerEmulatorControlController",
