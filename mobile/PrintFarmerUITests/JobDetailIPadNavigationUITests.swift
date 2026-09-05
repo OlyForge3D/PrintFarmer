@@ -28,18 +28,13 @@ final class JobDetailIPadNavigationUITests: ShiftTasksUITestBase {
     /// Skips on the compact (iPhone) layout so the strict assertions below
     /// only run against the iPad (regular-width) sidebar shell. Selection is
     /// by layout, not best-effort: on iPad every assertion on the core path
-    /// is required. The regular-width shell is identified by the ABSENCE of
-    /// the compact tab bar; sidebar navigation itself is exercised by
-    /// `openTasksDestination()`, which handles a collapsed iPad sidebar.
+    /// is required. The regular-width shell is identified by the absence of
+    /// the compact tab-bar surface; sidebar navigation itself is exercised
+    /// by `openTasksDestination()`, which handles a collapsed iPad sidebar.
     private func requireRegularWidthShell() throws {
-        if app.tabBars.buttons["tab.tasks"].waitForExistence(timeout: 8) {
+        if app.tabBars.firstMatch.waitForExistence(timeout: 8) {
             throw XCTSkip("iPad-only navigation coverage; compact (iPhone) shell is covered by HarvestUITests")
         }
-        revealSidebarIfCollapsed()
-        XCTAssertTrue(
-            app.buttons["sidebar.tasks"].waitForExistence(timeout: 5),
-            "The regular-width two-modes shell must expose sidebar.tasks"
-        )
     }
 
     /// #794 core path: the completed job must be reachable in the iPad

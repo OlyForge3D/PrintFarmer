@@ -158,6 +158,20 @@ class PrintFarmerUITestCase: XCTestCase {
         }
     }
 
+    /// Checks whether a compact tab is rendered without treating a
+    /// label-only SwiftUI accessibility node as a positive-navigation
+    /// compatibility fallback.
+    func compactTabExists(tabIdentifier: String) -> Bool {
+        let tabBar = app.tabBars.firstMatch
+        guard tabBar.exists else { return false }
+
+        let identifierMatch = tabBar.descendants(matching: .any)
+            .matching(identifier: tabIdentifier)
+            .firstMatch
+        return identifierMatch.exists
+            || tabBar.buttons[tabTitle(for: tabIdentifier)].exists
+    }
+
     private func tabTitle(for identifier: String) -> String {
         switch identifier {
         case "tab.attention": "Attention"
@@ -170,6 +184,9 @@ class PrintFarmerUITestCase: XCTestCase {
         case "tab.jobs": "Jobs"
         case "tab.upkeep": "Upkeep"
         case "tab.reports": "Reports"
+        case "tab.notifications": "Notifications"
+        case "tab.settings": "Settings"
+        case "tab.scan": "Scan"
         default: identifier
         }
     }

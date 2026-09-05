@@ -46,15 +46,21 @@ from the Oversight hub using `oversight.destination.<case>`.
 
 ## iPad Sidebar
 
-Regular width currently preserves the shipping Floor sidebar while the compact
-adaptive shells roll out.
+Regular width presents both Floor and Oversight sections in one sidebar. The
+section headers use `sidebar.section.floor` and
+`sidebar.section.oversight`.
 
-| Destination | iPad |
-| --- | --- |
-| Attention | `sidebar.attention` |
-| Farm | `sidebar.farm` |
-| Tasks | `sidebar.tasks` |
-| Inventory | `sidebar.inventory` |
+| Section | Destination | iPad |
+| --- | --- | --- |
+| Floor | Attention | `sidebar.attention` |
+| Floor | Farm | `sidebar.farm` |
+| Floor | Tasks | `sidebar.tasks` |
+| Floor | Inventory | `sidebar.inventory` |
+| Oversight | Overview | `sidebar.overview` |
+| Oversight | Fleet | `sidebar.fleet` |
+| Oversight | Jobs | `sidebar.jobs` |
+| Oversight | Upkeep | `sidebar.upkeep` |
+| Oversight | Reports | `sidebar.reports` |
 
 ## Two Modes Shell
 

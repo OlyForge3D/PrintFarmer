@@ -81,8 +81,8 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         }
 
         if hasTabBar {
-            XCTAssertFalse(app.tabBars.buttons["tab.tasks"].exists)
-            XCTAssertFalse(app.tabBars.buttons["tab.scan"].exists)
+            XCTAssertFalse(compactTabExists(tabIdentifier: "tab.tasks"))
+            XCTAssertFalse(compactTabExists(tabIdentifier: "tab.scan"))
         } else {
             XCTAssertTrue(app.staticTexts["sidebar.section.floor"].exists)
             XCTAssertTrue(app.staticTexts["sidebar.section.oversight"].exists)
@@ -94,7 +94,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
     func testRetiredTabsAreNotVisible() {
         for retired in ["tab.notifications", "tab.settings", "tab.scan"] {
             XCTAssertFalse(
-                app.tabBars.buttons[retired].exists,
+                compactTabExists(tabIdentifier: retired),
                 "Retired top-level tab '\(retired)' must not appear in F1 shell"
             )
         }
@@ -242,7 +242,12 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 3))
         settings.tap()
 
-        let navigation = app.buttons["settings.navigation"]
+        let navigation = app.descendants(matching: .any)
+            .matching(identifier: "settings.navigation")
+            .firstMatch
+        if !navigation.waitForExistence(timeout: 3) {
+            app.swipeUp()
+        }
         XCTAssertTrue(navigation.waitForExistence(timeout: 5))
         navigation.tap()
 
@@ -373,9 +378,9 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
         XCTAssertTrue(farm.isSelected)
 
         revealSidebarIfCollapsed()
-        XCTAssertFalse(app.tabBars.buttons["tab.attention"].exists)
+        XCTAssertFalse(compactTabExists(tabIdentifier: "tab.attention"))
         XCTAssertFalse(app.buttons["sidebar.attention"].exists)
-        XCTAssertFalse(app.tabBars.buttons["tab.tasks"].exists)
+        XCTAssertFalse(compactTabExists(tabIdentifier: "tab.tasks"))
         XCTAssertFalse(app.buttons["sidebar.tasks"].exists)
         XCTAssertFalse(app.buttons["attention.fallback.notifications"].exists)
     }
@@ -532,9 +537,9 @@ final class TwoModesOperatorShellUITests: PrintFarmerUITestCase {
         ["--uitesting-two-modes"]
     }
 
-    func testFloorModeShowsRequiredCompactDestinations() {
-        let tabBar = app.tabBars.firstMatch
-        XCTAssertTrue(tabBar.waitForExistence(timeout: 5))
+    func testFloorModeShowsRequiredCompactDestinations() throws {
+        try requireCompactAdaptiveShell()
+
         XCTAssertTrue(
             app.segmentedControls["navigation.modeControl"]
                 .waitForExistence(timeout: 8)
@@ -555,7 +560,7 @@ final class TwoModesOperatorShellUITests: PrintFarmerUITestCase {
                 "Two-modes Floor must expose \(identifier)"
             )
         }
-        XCTAssertFalse(tabBar.buttons["tab.oversight"].exists)
+        XCTAssertFalse(compactTabExists(tabIdentifier: "tab.oversight"))
     }
 }
 
@@ -568,7 +573,9 @@ final class TwoModesOversightShellUITests: PrintFarmerUITestCase {
         ]
     }
 
-    func testOversightModeShowsRequiredTabsAndMovedDestinations() {
+    func testOversightModeShowsRequiredTabsAndMovedDestinations() throws {
+        try requireCompactAdaptiveShell()
+
         XCTAssertTrue(
             app.segmentedControls["navigation.modeControl"]
                 .waitForExistence(timeout: 8)
