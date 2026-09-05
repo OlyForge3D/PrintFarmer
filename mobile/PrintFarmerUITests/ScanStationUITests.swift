@@ -5,35 +5,17 @@ import XCTest
 final class ScanStationUITests: PrintFarmerUITestCase {
     private let printerID = "10000000-0001-0000-0000-000000000001"
 
-    private func openDestination(tabTitle: String, sidebarIdentifier: String) {
-        let tab = app.tabBars.buttons[tabTitle]
-        if tab.waitForExistence(timeout: 5) {
-            tab.tap()
-            return
-        }
-
-        let sidebar = app.buttons[sidebarIdentifier]
-        if sidebar.waitForExistence(timeout: 3) {
-            sidebar.tap()
-            return
-        }
-
-        for label in ["Sidebar", "Toggle Sidebar", "Show Sidebar"] {
-            let toggle = app.navigationBars.buttons[label]
-            if toggle.exists {
-                toggle.tap()
-                if sidebar.waitForExistence(timeout: 3) {
-                    sidebar.tap()
-                    return
-                }
-            }
-        }
-
-        XCTFail("\(tabTitle) should be reachable from the operator shell")
+    private func openDestination(_ tabIdentifier: String) {
+        let destination = shellDestinationButton(
+            tabIdentifier: tabIdentifier,
+            timeout: 8
+        )
+        XCTAssertTrue(destination.exists)
+        destination.tap()
     }
 
     private func openInventoryScanMenu() {
-        openDestination(tabTitle: "Inventory", sidebarIdentifier: "sidebar.inventory")
+        openDestination("tab.inventory")
         let scanMenu = app.buttons["inventory.scan"]
         XCTAssertTrue(scanMenu.waitForExistence(timeout: 5))
         XCTAssertEqual(
@@ -71,7 +53,7 @@ final class ScanStationUITests: PrintFarmerUITestCase {
     }
 
     func testPrintedPartsSegmentOffersPartLookupBehindSingleScanMenu() {
-        openDestination(tabTitle: "Inventory", sidebarIdentifier: "sidebar.inventory")
+        openDestination("tab.inventory")
 
         let partsSegment = app.buttons["Printed Parts"]
         XCTAssertTrue(partsSegment.waitForExistence(timeout: 5))
@@ -86,14 +68,14 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         XCTAssertTrue(partLookup.waitForExistence(timeout: 5))
         partLookup.tap()
 
-        XCTAssertTrue(
-            app.buttons["Cancel"].waitForExistence(timeout: 5),
-            "Printed-part lookup should present from Inventory"
-        )
+        let partRow = app.buttons["inventory.partLookup.row.BRKT-01"]
+        XCTAssertTrue(partRow.waitForExistence(timeout: 5))
+        partRow.tap()
+        XCTAssertTrue(app.navigationBars["Mounting Bracket"].waitForExistence(timeout: 5))
     }
 
     func testFarmPrinterLookupNavigatesToPrinterDetail() {
-        openDestination(tabTitle: "Farm", sidebarIdentifier: "sidebar.farm")
+        openDestination("tab.farm")
 
         let lookup = app.buttons["farm.printerLookup"]
         XCTAssertTrue(lookup.waitForExistence(timeout: 5))
@@ -114,5 +96,36 @@ final class ScanStationUITests: PrintFarmerUITestCase {
     func testMaintenancePartActionRemainsAbsent() {
         openInventoryScanMenu()
         XCTAssertFalse(app.staticTexts["Log Maintenance Part"].exists)
+    }
+}
+
+@MainActor
+final class AttentionHarvestScanUITests: PrintFarmerUITestCase {
+    private let harvestAttentionID =
+        "harvest:78000000-0000-0000-0000-000000000004"
+
+    override var additionalLaunchArguments: [String] {
+        ["--uitesting-attention-harvest-scan"]
+    }
+
+    func testHarvestScanOpensFromAttentionItem() {
+        let attention = shellDestinationButton(
+            tabIdentifier: "tab.attention",
+            timeout: 8
+        )
+        XCTAssertTrue(attention.exists)
+        attention.tap()
+
+        let scanBin = app.buttons[
+            "attention.item.\(harvestAttentionID).action.scanBin"
+        ]
+        if !scanBin.waitForExistence(timeout: 8) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(scanBin.waitForExistence(timeout: 5))
+        scanBin.tap()
+
+        XCTAssertTrue(app.navigationBars["Harvest Plate"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["harvest.scanBin"].waitForExistence(timeout: 5))
     }
 }

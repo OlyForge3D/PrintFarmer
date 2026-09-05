@@ -32,9 +32,14 @@ final class JobDetailIPadNavigationUITests: ShiftTasksUITestBase {
     /// the compact tab bar; sidebar navigation itself is exercised by
     /// `openTasksDestination()`, which handles a collapsed iPad sidebar.
     private func requireRegularWidthShell() throws {
-        if app.tabBars.buttons["Tasks"].waitForExistence(timeout: 8) {
+        if app.tabBars.buttons["tab.tasks"].waitForExistence(timeout: 8) {
             throw XCTSkip("iPad-only navigation coverage; compact (iPhone) shell is covered by HarvestUITests")
         }
+        revealSidebarIfCollapsed()
+        XCTAssertTrue(
+            app.buttons["sidebar.tasks"].waitForExistence(timeout: 5),
+            "The regular-width two-modes shell must expose sidebar.tasks"
+        )
     }
 
     /// #794 core path: the completed job must be reachable in the iPad

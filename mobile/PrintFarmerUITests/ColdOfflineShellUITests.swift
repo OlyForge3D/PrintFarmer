@@ -25,9 +25,8 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
     /// read-only shell always mounts.
     @discardableResult
     private func openColdOfflineShell() -> XCUIElement {
-        let oversight = operatorDestinationButton(
-            tabTitle: "Oversight",
-            sidebarIdentifier: "sidebar.oversight",
+        let oversight = shellDestinationButton(
+            tabIdentifier: "tab.oversight",
             timeout: 8
         )
         XCTAssertTrue(oversight.exists)
@@ -134,9 +133,8 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
     }
 
     func testOfflineQueueRemainsReachableFromAccountWhileOffline() {
-        let attention = operatorDestinationButton(
-            tabTitle: "Attention",
-            sidebarIdentifier: "sidebar.attention",
+        let attention = shellDestinationButton(
+            tabIdentifier: "tab.attention",
             timeout: 8
         )
         XCTAssertTrue(attention.exists)

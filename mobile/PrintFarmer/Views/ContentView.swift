@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 private struct NavigationIdentityRequest: Hashable {
     let serverID: UUID
@@ -126,18 +129,49 @@ struct ContentView: View {
                 modeControl(capabilities: capabilities)
             }
 
-            TabView(selection: selection) {
-                ForEach(tabs, id: \.self) { tab in
-                    tabContentView(for: tab)
-                        .tabItem {
+            compactTabView(selection: selection, tabs: tabs)
+        }
+    }
+
+    @ViewBuilder
+    private func compactTabView(
+        selection: Binding<AppTab>,
+        tabs: [AppTab]
+    ) -> some View {
+        Group {
+            if #available(iOS 18.0, *) {
+                TabView(selection: selection) {
+                    ForEach(tabs, id: \.self) { tab in
+                        Tab(value: tab) {
+                            tabContentView(for: tab)
+                        } label: {
                             Label(tab.title, systemImage: tab.systemImage)
-                                .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
                         }
-                        .tag(tab)
                         .badge(badgeCount(for: tab))
+                        .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
+                    }
+                }
+            } else {
+                TabView(selection: selection) {
+                    ForEach(tabs, id: \.self) { tab in
+                        tabContentView(for: tab)
+                            .tabItem {
+                                Label(tab.title, systemImage: tab.systemImage)
+                            }
+                            .tag(tab)
+                            .badge(badgeCount(for: tab))
+                    }
                 }
             }
         }
+        #if canImport(UIKit)
+        .background {
+            TabBarAccessibilityIdentifierBridge(
+                identifiers: tabs.map(\.tabAccessibilityIdentifier)
+            )
+            .frame(width: 0, height: 0)
+        }
+        #endif
     }
 
     private func modeControl(
@@ -309,6 +343,13 @@ struct ContentView: View {
             oversightAvailability: oversightAvailability,
             preserveNavigationOnContextChange: preserveNavigationOnIdentityUpgrade
         )
+        if UITestBootstrap.isEnabled,
+           UITestBootstrap.startsInOversightMode {
+            router.setNavigationMode(
+                .oversight,
+                capabilities: capabilities
+            )
+        }
     }
 
     private var navigationIdentityRequest: NavigationIdentityRequest? {
@@ -468,3 +509,85 @@ struct ContentView: View {
         }
     }
 }
+
+#if canImport(UIKit)
+/// SwiftUI does not consistently propagate a tab label's identifier to the
+/// underlying `UITabBarItem`, so enforce the published UI-test contract there.
+private struct TabBarAccessibilityIdentifierBridge: UIViewControllerRepresentable {
+    let identifiers: [String]
+
+    func makeUIViewController(context: Context) -> BridgeViewController {
+        BridgeViewController(identifiers: identifiers)
+    }
+
+    func updateUIViewController(
+        _ controller: BridgeViewController,
+        context: Context
+    ) {
+        controller.updateIdentifiers(identifiers)
+    }
+
+    final class BridgeViewController: UIViewController {
+        var identifiers: [String]
+
+        init(identifiers: [String]) {
+            self.identifiers = identifiers
+            super.init(nibName: nil, bundle: nil)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            scheduleIdentifierUpdate()
+        }
+
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            applyIdentifiers()
+        }
+
+        func updateIdentifiers(_ identifiers: [String]) {
+            self.identifiers = identifiers
+            scheduleIdentifierUpdate()
+        }
+
+        private func scheduleIdentifierUpdate() {
+            applyIdentifiers()
+            DispatchQueue.main.async { [weak self] in
+                self?.applyIdentifiers()
+                DispatchQueue.main.async { [weak self] in
+                    self?.applyIdentifiers()
+                }
+            }
+        }
+
+        func applyIdentifiers() {
+            let controller = tabBarController
+                ?? findTabBarController(from: view.window?.rootViewController)
+            guard let items = controller?.tabBar.items else { return }
+            for (item, identifier) in zip(items, identifiers) {
+                item.accessibilityIdentifier = identifier
+            }
+        }
+
+        private func findTabBarController(
+            from controller: UIViewController?
+        ) -> UITabBarController? {
+            guard let controller else { return nil }
+            if let tabBarController = controller as? UITabBarController {
+                return tabBarController
+            }
+            for child in controller.children {
+                if let match = findTabBarController(from: child) {
+                    return match
+                }
+            }
+            return findTabBarController(from: controller.presentedViewController)
+        }
+    }
+}
+#endif

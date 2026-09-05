@@ -18,34 +18,17 @@ class ShiftTasksUITestBase: PrintFarmerUITestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let tab = app.tabBars.buttons["Tasks"]
-        if tab.waitForExistence(timeout: 8) {
-            tab.tap()
-            return
-        }
-
-        let sidebarTask = app.buttons["sidebar.tasks"]
-        if sidebarTask.waitForExistence(timeout: 3) {
-            sidebarTask.tap()
-            return
-        }
-
-        for label in ["Sidebar", "Toggle Sidebar", "Show Sidebar"] {
-            let toggle = app.navigationBars.buttons[label]
-            if toggle.exists {
-                toggle.tap()
-                if sidebarTask.waitForExistence(timeout: 3) {
-                    sidebarTask.tap()
-                    return
-                }
-            }
-        }
-
-        XCTFail(
+        let tasks = shellDestinationButton(
+            tabIdentifier: "tab.tasks",
+            timeout: 8
+        )
+        XCTAssertTrue(
+            tasks.exists,
             "Tasks destination is not reachable on this device",
             file: file,
             line: line
         )
+        tasks.tap()
     }
 }
 

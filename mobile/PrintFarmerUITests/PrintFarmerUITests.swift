@@ -64,9 +64,9 @@ class PrintFarmerUITestCase: XCTestCase {
         }
     }
 
-    /// Adaptive locator for an operator-shell destination. Returns the
-    /// iPhone tab-bar button when a compact tab bar is on screen, otherwise
-    /// the iPad `NavigationSplitView` sidebar button — revealing a
+    /// Adaptive locator for a shell destination using its shipped identifier.
+    /// Returns the iPhone tab-bar button when a compact tab bar is on screen,
+    /// otherwise the iPad `NavigationSplitView` sidebar button — revealing a
     /// collapsed sidebar via the system toggle if needed.
     ///
     /// Polls both surfaces at 200 ms intervals and returns whichever
@@ -75,19 +75,21 @@ class PrintFarmerUITestCase: XCTestCase {
     /// query that fails deterministically on iPad regular size class.
     ///
     /// - Parameters:
-    ///   - tabTitle: The compact tab-bar button label (e.g. "Attention").
-    ///   - sidebarIdentifier: The iPad sidebar accessibility identifier
-    ///     (e.g. "sidebar.attention").
+    ///   - tabIdentifier: The compact tab identifier (e.g. `tab.attention`).
+    ///     The matching iPad identifier is derived as `sidebar.attention`.
     ///   - timeout: Maximum time to wait for either surface.
     /// - Returns: The located `XCUIElement`. Callers should assert
     ///   `.exists` on the returned element so the failure message
     ///   describes both surfaces explicitly.
-    func operatorDestinationButton(
-        tabTitle: String,
-        sidebarIdentifier: String,
+    func shellDestinationButton(
+        tabIdentifier: String,
         timeout: TimeInterval = 5
     ) -> XCUIElement {
-        let tab = app.tabBars.buttons[tabTitle]
+        let tab = app.tabBars.buttons[tabIdentifier]
+        let sidebarIdentifier = tabIdentifier.replacingOccurrences(
+            of: "tab.",
+            with: "sidebar."
+        )
         let sidebar = app.buttons[sidebarIdentifier]
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {

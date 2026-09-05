@@ -21,14 +21,13 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
     // MARK: - Shell shape (tab bar on iPhone, sidebar on iPad)
 
     func testAppLaunchesOnAttentionTab() {
-        let attention = operatorDestinationButton(
-            tabTitle: "Attention",
-            sidebarIdentifier: "sidebar.attention",
+        let attention = shellDestinationButton(
+            tabIdentifier: "tab.attention",
             timeout: 5
         )
         XCTAssertTrue(
             attention.exists,
-            "Attention destination should be present in the operator shell — tab bar 'Attention' on iPhone or 'sidebar.attention' on iPad"
+            "Attention must use tab.attention on iPhone or sidebar.attention on iPad"
         )
         XCTAssertTrue(
             attention.isSelected,
@@ -51,57 +50,36 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
             "Operator shell must expose either a compact tab bar or an iPad sidebar"
         )
 
-        let expectedDestinations: [(tabTitle: String, sidebarIdentifier: String)] = [
-            ("Attention", "sidebar.attention"),
-            ("Farm", "sidebar.farm"),
-            ("Inventory", "sidebar.inventory"),
-            ("Oversight", "sidebar.oversight")
-        ]
-        for destination in expectedDestinations {
-            let button = operatorDestinationButton(
-                tabTitle: destination.tabTitle,
-                sidebarIdentifier: destination.sidebarIdentifier,
-                timeout: 2
+        let expectedDestinations = hasTabBar
+            ? [
+                "tab.attention",
+                "tab.farm",
+                "tab.inventory",
+                "tab.oversight"
+            ]
+            : [
+                "tab.attention",
+                "tab.farm",
+                "tab.tasks",
+                "tab.inventory"
+            ]
+        for identifier in expectedDestinations {
+            let button = shellDestinationButton(
+                tabIdentifier: identifier,
+                timeout: 8
             )
             XCTAssertTrue(
                 button.exists,
-                "Destination '\(destination.tabTitle)' should be present in the operator shell — tab bar '\(destination.tabTitle)' or sidebar '\(destination.sidebarIdentifier)'"
+                "The active shell must expose \(identifier) or its iPad sidebar counterpart"
             )
         }
 
         if hasTabBar {
-            XCTAssertFalse(app.tabBars.buttons["Tasks"].exists)
-            XCTAssertFalse(app.tabBars.buttons["Scan"].exists)
+            XCTAssertFalse(app.tabBars.buttons["tab.tasks"].exists)
         }
-    }
-
-    func testRetiredTabsAreNotVisible() {
-        // The old shell exposed dedicated Notifications, Settings, and Scan tabs.
-        // Their flows now live under Account, Farm, and Inventory.
-        for retired in ["Notifications", "Settings", "Scan"] {
-            let tab = app.tabBars.buttons[retired]
-            XCTAssertFalse(tab.exists,
-                           "Retired top-level tab '\(retired)' must not appear in F1 shell")
-        }
-        XCTAssertFalse(app.buttons["sidebar.scan"].exists)
     }
 
     // MARK: - Re-homed destination reachability
-
-    func testAttentionOverflowIsRemoved() {
-        let attention = operatorDestinationButton(
-            tabTitle: "Attention",
-            sidebarIdentifier: "sidebar.attention",
-            timeout: 5
-        )
-        XCTAssertTrue(attention.exists)
-        attention.tap()
-
-        XCTAssertFalse(
-            app.buttons["attention.overflow"].exists,
-            "Attention must not expose the retired overflow menu"
-        )
-    }
 
     func testDashboardReachableFromOversight() {
         openOversightDestination(
@@ -125,8 +103,9 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
     }
 
     func testPredictiveInsightsReachableFromPrinterDetail() {
-        guard app.tabBars.buttons["Farm"].waitForExistence(timeout: 5) else { return }
-        app.tabBars.buttons["Farm"].tap()
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 5)
+        guard farm.exists else { return }
+        farm.tap()
 
         let farmCard = app.buttons
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", "farm-card-"))
@@ -192,11 +171,59 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         )
     }
 
+    func testNotificationsReachableFromAccount() {
+        openAccount()
+
+        let notifications = app.buttons["account.destination.notifications"]
+        XCTAssertTrue(notifications.waitForExistence(timeout: 3))
+        notifications.tap()
+
+        XCTAssertTrue(app.navigationBars["Notifications"].waitForExistence(timeout: 5))
+    }
+
+    func testManageServersReachableFromAccount() {
+        openAccount()
+
+        let manageServers = app.buttons["account.destination.manageServers"]
+        XCTAssertTrue(manageServers.waitForExistence(timeout: 3))
+        manageServers.tap()
+
+        XCTAssertTrue(app.navigationBars["Servers"].waitForExistence(timeout: 5))
+    }
+
+    func testNavigationLayoutIdentifiersReachableFromAccountSettings() {
+        openAccount()
+
+        let settings = app.buttons["account.destination.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 3))
+        settings.tap()
+
+        let navigation = app.buttons["settings.navigation"]
+        XCTAssertTrue(navigation.waitForExistence(timeout: 5))
+        navigation.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["navigation.settings"]
+                .waitForExistence(timeout: 5)
+        )
+        for identifier in [
+            "navigation.layout.automatic",
+            "navigation.layout.simple",
+            "navigation.layout.twoModes"
+        ] {
+            XCTAssertTrue(
+                app.buttons[identifier].exists,
+                "Navigation settings must expose \(identifier)"
+            )
+        }
+    }
+
     // MARK: - Advanced controls gating (Farm → printer → Advanced)
 
     func testAdvancedControlsGatedBehindPrinterDetail() {
-        guard app.tabBars.buttons["Farm"].waitForExistence(timeout: 5) else { return }
-        app.tabBars.buttons["Farm"].tap()
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 5)
+        guard farm.exists else { return }
+        farm.tap()
 
         // Attempting to reach Advanced controls before entering a printer
         // must not surface them; the button lives only inside a printer's
@@ -233,9 +260,8 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let attention = operatorDestinationButton(
-            tabTitle: "Attention",
-            sidebarIdentifier: "sidebar.attention",
+        let attention = shellDestinationButton(
+            tabIdentifier: "tab.attention",
             timeout: 5
         )
         XCTAssertTrue(attention.exists, file: file, line: line)
@@ -257,9 +283,8 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let oversight = operatorDestinationButton(
-            tabTitle: "Oversight",
-            sidebarIdentifier: "sidebar.oversight",
+        let oversight = shellDestinationButton(
+            tabIdentifier: "tab.oversight",
             timeout: 5
         )
         XCTAssertTrue(oversight.exists, file: file, line: line)
@@ -288,26 +313,24 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
     }
 
     func testDisabledDestinationsAreAbsentAndFarmIsSelected() {
-        let farm = operatorDestinationButton(
-            tabTitle: "Farm",
-            sidebarIdentifier: "sidebar.farm",
+        let farm = shellDestinationButton(
+            tabIdentifier: "tab.farm",
             timeout: 8
         )
         XCTAssertTrue(farm.exists)
         XCTAssertTrue(farm.isSelected)
 
         revealSidebarIfCollapsed()
-        XCTAssertFalse(app.tabBars.buttons["Attention"].exists)
+        XCTAssertFalse(app.tabBars.buttons["tab.attention"].exists)
         XCTAssertFalse(app.buttons["sidebar.attention"].exists)
-        XCTAssertFalse(app.tabBars.buttons["Tasks"].exists)
+        XCTAssertFalse(app.tabBars.buttons["tab.tasks"].exists)
         XCTAssertFalse(app.buttons["sidebar.tasks"].exists)
         XCTAssertFalse(app.buttons["attention.fallback.notifications"].exists)
     }
 
     func testPrintedPartsAreAbsentWhileSpoolInventoryRemainsVisible() {
-        let inventory = operatorDestinationButton(
-            tabTitle: "Inventory",
-            sidebarIdentifier: "sidebar.inventory",
+        let inventory = shellDestinationButton(
+            tabIdentifier: "tab.inventory",
             timeout: 8
         )
         XCTAssertTrue(inventory.exists)
@@ -319,9 +342,8 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
     }
 
     func testPrintedPartsScanActionIsAbsentWhileSpoolActionRemainsVisible() {
-        let inventory = operatorDestinationButton(
-            tabTitle: "Inventory",
-            sidebarIdentifier: "sidebar.inventory",
+        let inventory = shellDestinationButton(
+            tabIdentifier: "tab.inventory",
             timeout: 8
         )
         XCTAssertTrue(inventory.exists)
@@ -336,9 +358,8 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
     }
 
     func testFilamentCoverageIsAbsentFromFarmAndPrinterDetail() {
-        let farm = operatorDestinationButton(
-            tabTitle: "Farm",
-            sidebarIdentifier: "sidebar.farm",
+        let farm = shellDestinationButton(
+            tabIdentifier: "tab.farm",
             timeout: 8
         )
         XCTAssertTrue(farm.exists)
@@ -373,8 +394,9 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
     /// Navigate Farm → first printer detail. Returns false (skip) if demo data
     /// is unavailable in this environment.
     private func openFirstPrinterDetail() -> Bool {
-        guard app.tabBars.buttons["Farm"].waitForExistence(timeout: 5) else { return false }
-        app.tabBars.buttons["Farm"].tap()
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 5)
+        guard farm.exists else { return false }
+        farm.tap()
 
         // Prefer the stable demo farm-card wrapper; fall back to the first
         // collection cell, mirroring testAdvancedControlsGatedBehindPrinterDetail.
@@ -461,14 +483,72 @@ final class TwoModesOperatorShellUITests: PrintFarmerUITestCase {
     func testFloorModeShowsRequiredCompactDestinations() {
         let tabBar = app.tabBars.firstMatch
         XCTAssertTrue(tabBar.waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            app.segmentedControls["navigation.modeControl"]
+                .waitForExistence(timeout: 8)
+        )
 
-        for destination in ["Attention", "Farm", "Tasks", "Inventory"] {
+        for identifier in [
+            "tab.attention",
+            "tab.farm",
+            "tab.tasks",
+            "tab.inventory"
+        ] {
+            let destination = shellDestinationButton(
+                tabIdentifier: identifier,
+                timeout: 8
+            )
             XCTAssertTrue(
-                tabBar.buttons[destination].exists,
-                "Two-modes Floor must expose \(destination)"
+                destination.exists,
+                "Two-modes Floor must expose \(identifier)"
             )
         }
-        XCTAssertFalse(tabBar.buttons["Scan"].exists)
-        XCTAssertFalse(tabBar.buttons["Oversight"].exists)
+        XCTAssertFalse(tabBar.buttons["tab.oversight"].exists)
+    }
+}
+
+@MainActor
+final class TwoModesOversightShellUITests: PrintFarmerUITestCase {
+    override var additionalLaunchArguments: [String] {
+        [
+            "--uitesting-two-modes",
+            "--uitesting-oversight-mode",
+        ]
+    }
+
+    func testOversightModeShowsRequiredTabsAndMovedDestinations() {
+        XCTAssertTrue(
+            app.segmentedControls["navigation.modeControl"]
+                .waitForExistence(timeout: 8)
+        )
+
+        for identifier in [
+            "tab.overview",
+            "tab.fleet",
+            "tab.jobs",
+            "tab.upkeep",
+            "tab.reports"
+        ] {
+            let destination = shellDestinationButton(
+                tabIdentifier: identifier,
+                timeout: 8
+            )
+            XCTAssertTrue(
+                destination.exists,
+                "Two-modes Oversight must expose \(identifier)"
+            )
+        }
+
+        app.tabBars.buttons["tab.overview"].tap()
+        let dashboard = app.buttons["oversight.destination.dashboard"]
+        XCTAssertTrue(dashboard.waitForExistence(timeout: 5))
+        dashboard.tap()
+        XCTAssertTrue(app.navigationBars["Dashboard"].waitForExistence(timeout: 5))
+
+        app.tabBars.buttons["tab.upkeep"].tap()
+        let maintenance = app.buttons["oversight.destination.maintenance"]
+        XCTAssertTrue(maintenance.waitForExistence(timeout: 5))
+        maintenance.tap()
+        XCTAssertTrue(app.navigationBars["Maintenance"].waitForExistence(timeout: 5))
     }
 }

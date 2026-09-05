@@ -37,7 +37,7 @@ import XCTest
 /// on a paired sibling's positive appearance (so "not rendered" is
 /// a real observation, not a race).
 @MainActor
-final class FilamentCoverageUITests: XCTestCase {
+final class FilamentCoverageUITests: PrintFarmerUITestCase {
 
     // Stable UUIDs shared with UITestBootstrap. UI-test targets
     // cannot `import PrintFarmer`, so we hardcode the literals —
@@ -49,22 +49,8 @@ final class FilamentCoverageUITests: XCTestCase {
     private let voron24_ID     = "10000000-0001-0000-0000-000000000005"
     private let duplicateID    = "10000000-0001-0000-0000-0000000000AA"
 
-    private var app: XCUIApplication!
-
-    override func setUp() async throws {
-        try await super.setUp()
-        continueAfterFailure = false
-        app = XCUIApplication()
-        app.launchArguments += [
-            "--uitesting",
-            "--uitesting-filament-coverage-scenario"
-        ]
-        app.launch()
-    }
-
-    override func tearDown() async throws {
-        app = nil
-        try await super.tearDown()
+    override var additionalLaunchArguments: [String] {
+        ["--uitesting-filament-coverage-scenario"]
     }
 
     // MARK: - Entry / scoping helpers
@@ -74,25 +60,15 @@ final class FilamentCoverageUITests: XCTestCase {
     /// revealing the iPad NavigationSplitView sidebar via its
     /// system toggle if collapsed.
     private func enterFarmView() {
-        let tabFarm = app.tabBars.buttons["Farm"]
-        if tabFarm.waitForExistence(timeout: 10) {
-            tabFarm.tap()
-            return
-        }
-        let sidebarFarm = app.buttons["sidebar.farm"]
-        if sidebarFarm.waitForExistence(timeout: 3) {
-            sidebarFarm.tap()
-            return
-        }
-        for label in ["Sidebar", "Toggle Sidebar", "Show Sidebar"] {
-            let toggle = app.navigationBars.buttons[label]
-            if toggle.exists { toggle.tap(); break }
-        }
-        if sidebarFarm.waitForExistence(timeout: 3) {
-            sidebarFarm.tap()
-            return
-        }
-        XCTFail("Neither compact 'Farm' tab nor iPad 'sidebar.farm' was reachable within the wait window.")
+        let farm = shellDestinationButton(
+            tabIdentifier: "tab.farm",
+            timeout: 10
+        )
+        XCTAssertTrue(
+            farm.exists,
+            "Neither tab.farm nor sidebar.farm was reachable within the wait window."
+        )
+        farm.tap()
     }
 
     /// The Farm card for a specific stable printer UUID. Cards carry

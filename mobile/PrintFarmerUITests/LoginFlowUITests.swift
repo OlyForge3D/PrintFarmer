@@ -91,14 +91,13 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
         XCTAssertTrue(loginButton.isEnabled)
         loginButton.tap()
 
-        let attention = operatorDestinationButton(
-            tabTitle: "Attention",
-            sidebarIdentifier: "sidebar.attention",
+        let attention = shellDestinationButton(
+            tabIdentifier: "tab.attention",
             timeout: 10
         )
         XCTAssertTrue(
             attention.exists,
-            "Successful authentication should present the operator shell — Attention tab on iPhone or 'sidebar.attention' on iPad"
+            "Successful authentication should present tab.attention on iPhone or sidebar.attention on iPad"
         )
     }
 

@@ -6,30 +6,12 @@ final class PrinterListUITests: PrintFarmerUITestCase {
     private let printerID = "10000000-0001-0000-0000-000000000001"
 
     private func openFarm() {
-        let farmTab = app.tabBars.buttons["Farm"]
-        if farmTab.waitForExistence(timeout: 5) {
-            farmTab.tap()
-            return
-        }
-
-        let sidebarFarm = app.buttons["sidebar.farm"]
-        if sidebarFarm.waitForExistence(timeout: 3) {
-            sidebarFarm.tap()
-            return
-        }
-
-        for label in ["Sidebar", "Toggle Sidebar", "Show Sidebar"] {
-            let toggle = app.navigationBars.buttons[label]
-            if toggle.exists {
-                toggle.tap()
-                if sidebarFarm.waitForExistence(timeout: 3) {
-                    sidebarFarm.tap()
-                    return
-                }
-            }
-        }
-
-        XCTFail("Farm destination should be reachable from the operator shell")
+        let farm = shellDestinationButton(
+            tabIdentifier: "tab.farm",
+            timeout: 8
+        )
+        XCTAssertTrue(farm.exists)
+        farm.tap()
     }
 
     func testPrinterListDisplayed() {

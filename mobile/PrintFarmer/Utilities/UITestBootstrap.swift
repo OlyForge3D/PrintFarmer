@@ -52,7 +52,11 @@ enum UITestBootstrap {
     static let operatorFeaturesDisabledLaunchArgument =
         "--uitesting-operator-features-disabled"
     static let attentionActionsLaunchArgument = "--uitesting-attention-actions"
+    static let attentionHarvestScanLaunchArgument =
+        "--uitesting-attention-harvest-scan"
     static let twoModesNavigationLaunchArgument = "--uitesting-two-modes"
+    static let oversightNavigationModeLaunchArgument =
+        "--uitesting-oversight-mode"
     static let oversightUpgradeOfferLaunchArgument = "--uitesting-oversight-upgrade-offer"
     #if DEBUG
     static let shiftTaskMutationErrorLaunchArgument =
@@ -113,6 +117,9 @@ enum UITestBootstrap {
         /// F2-U2 feed with failure media, stable-ID destinations, and
         /// server-backed failure + maintenance actions.
         case authenticatedAttentionActions
+        /// A single completed-job Attention item whose item-scoped scan action
+        /// opens the relocated harvest scanner.
+        case authenticatedAttentionHarvestScan
         /// Authenticated compact shell with a persisted pre-shift-plan baseline
         /// that deterministically produces the inline Oversight upgrade offer.
         case authenticatedOversightUpgradeOffer
@@ -160,6 +167,14 @@ enum UITestBootstrap {
         arguments.contains(launchArgument)
     }
 
+    static var startsInOversightMode: Bool {
+        startsInOversightMode(arguments: CommandLine.arguments)
+    }
+
+    static func startsInOversightMode(arguments: [String]) -> Bool {
+        arguments.contains(oversightNavigationModeLaunchArgument)
+    }
+
     /// The launch mode encoded in the current process arguments.
     static var mode: Mode {
         mode(in: CommandLine.arguments)
@@ -170,6 +185,9 @@ enum UITestBootstrap {
     static func mode(in arguments: [String]) -> Mode {
         if arguments.contains(coldOfflineShellLaunchArgument) {
             return .authenticatedColdOfflineShell
+        }
+        if arguments.contains(attentionHarvestScanLaunchArgument) {
+            return .authenticatedAttentionHarvestScan
         }
         if arguments.contains(attentionActionsLaunchArgument) {
             return .authenticatedAttentionActions
@@ -316,7 +334,10 @@ enum UITestBootstrap {
         // production defaults and then explicitly disables the affected
         // operator features below.
         let harvestEnabledDemoModes: Set<UITestBootstrap.Mode> = {
-            var set: Set<UITestBootstrap.Mode> = [.authenticated]
+            var set: Set<UITestBootstrap.Mode> = [
+                .authenticated,
+                .authenticatedAttentionHarvestScan,
+            ]
             #if DEBUG
             set.insert(.authenticatedTaskActionRouting)
             #endif
@@ -348,6 +369,11 @@ enum UITestBootstrap {
                 snapshots: [
                     duplicateNamePrinterID: attentionActionsSnapshotData(),
                 ]
+            )
+        }
+        if mode == .authenticatedAttentionHarvestScan {
+            services.attentionService = DemoAttentionService(
+                feed: attentionHarvestScanScenarioFeed()
             )
         }
         if mode == .authenticatedFilamentCoverageScenario {
@@ -396,7 +422,9 @@ enum UITestBootstrap {
         let auth = AuthViewModel(services: services)
         switch mode {
         case .authenticated, .authenticatedOperatorFeaturesDisabled,
-             .authenticatedAttentionActions, .authenticatedOversightUpgradeOffer:
+             .authenticatedAttentionActions,
+             .authenticatedAttentionHarvestScan,
+             .authenticatedOversightUpgradeOffer:
             auth.markAuthenticatedForUITesting(user: testUser)
         case .unauthenticated:
             break
@@ -495,6 +523,35 @@ enum UITestBootstrap {
 
         return AttentionFeed(
             items: [failure, maintenance, unavailableMedia],
+            nextCursor: nil,
+            healthyPrinterCount: 4
+        )
+    }
+
+    static func attentionHarvestScanScenarioFeed() -> AttentionFeed {
+        let occurredAt = ISO8601DateFormatter()
+            .date(from: "2026-07-22T14:45:00Z")!
+        let harvest = AttentionItem(
+            id: "harvest:78000000-0000-0000-0000-000000000004",
+            kind: .harvest,
+            severity: .warning,
+            printerId: DemoData.prusaMK4_2_ID,
+            printerName: "Prusa MK4 #2",
+            title: "Completed plate ready to harvest",
+            detail: "Scan the destination bin before clearing the plate.",
+            occurredAt: occurredAt.addingTimeInterval(-900),
+            actions: [
+                AttentionAction(
+                    kind: .harvest,
+                    label: "Harvest",
+                    requiresConfirmation: false
+                ),
+            ],
+            jobId: DemoData.job7ID
+        )
+
+        return AttentionFeed(
+            items: [harvest],
             nextCursor: nil,
             healthyPrinterCount: 4
         )
