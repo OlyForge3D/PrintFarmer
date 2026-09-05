@@ -61,6 +61,90 @@ keeps its own Keychain-stored credentials.
 - Switching servers rebuilds the app's API, authentication, and SignalR services
   for the newly active server.
 
+### Navigation Shell
+
+The compact (iPhone) layout picks one of two shells depending on the size and
+staffing of the connected server. Both shells reach the same destinations —
+growth expands the layout, it does not relocate features.
+
+- **Simple** (solo / owner-operator). Four tabs: **Attention · Farm · Inventory
+  · Oversight**. There is no mode control. Oversight is a single hub tab that
+  groups Dashboard, Dispatch, Filament Coverage, Maintenance, Analytics,
+  Predictive Insights, Job History, Job Timeline, Locations, Uptime & Reliability
+  and a row into the Navigation setting.
+- **Two modes** (staffed farm). A **Floor | Oversight** control is pinned at the
+  top of every tab root of both modes.
+  - Floor tabs: **Attention · Farm · Tasks · Inventory**.
+  - Oversight tabs: **Overview · Fleet · Jobs · Upkeep · Reports**.
+
+The regular-width iPad layout shows the operator destinations as a
+`NavigationSplitView` sidebar.
+
+#### How the shell is chosen
+
+The app derives the shell from server-observed farm counts returned by the
+authenticated endpoint **`GET /api/system/farm-shape`**
+(`{ accountCount, locationCount, printerCount }`, sent with `Cache-Control:
+no-store`). This is a separate endpoint from
+`GET /api/system/capabilities`, which stays anonymous and unchanged.
+
+An **absent response** — a 401, 404, timeout, or an older server that does not
+expose the endpoint — is treated as *shape unknown ⇒ Simple shell*, and the
+in-context upgrade offer is suppressed entirely: the app never offers an
+upgrade on evidence it does not have.
+
+> **⚠️ `shiftPlanEnabled` is a *negative* signal only.** The flag defaults to
+> `true`, so a stock server reads as "on" whether an admin has thought about
+> shifts or not. Only an explicit `shiftPlanEnabled == false` is used as
+> evidence — a `true` value never demonstrates a staffed farm. Fleet size
+> (`printerCount`) is deliberately not a signal either: a solo owner running a
+> 40-printer farm would otherwise read as staffed. Reading either signal
+> "positively" is the fastest way to reintroduce the bug the redesign closed.
+
+The rule the app applies in `Automatic` mode:
+
+| Condition (evaluated in order) | Result |
+|---|---|
+| Farm shape unknown (endpoint absent / error) | **Simple** — and no upgrade offer |
+| `shiftPlanEnabled == false` | **Simple** — server explicitly says no shifts |
+| Signed-in user is not `farm_admin` | **Simple** — no upgrade offer |
+| `accountCount >= 2` | **Two modes** |
+| `locationCount >= 2` | **Two modes** |
+| otherwise | **Simple** |
+
+Role gating only affects the initial shell; it does **not** remove the
+Oversight destinations. Content inside every destination remains
+permission-gated by the API, unchanged from today.
+
+The Tasks tab's visibility is a separate concern from the shell choice: Tasks
+continues to be governed purely by `shiftPlanEnabled`.
+
+#### Overriding the shell — Settings → Navigation
+
+Open **Settings → Navigation** to override the derived layout:
+
+- **Automatic** (default) — matches the layout to this server, and explains in
+  plain language which counts and flags drove the choice.
+- **Simple** — force the Simple shell.
+- **Two modes** — force the Two modes shell.
+
+The preference is stored **per server** (keyed on the server registry
+identity), because the app is multi-server by design. Choosing an explicit
+override suppresses the in-context upgrade offer permanently for that server.
+
+When a farm grows past a threshold (a second account, a second bay, or shift
+planning switched on after having been off), the Oversight tab root shows a
+one-time, dismissible **upgrade offer card**: *"Your farm grew — Oversight can
+become its own mode..."*. It is never a modal, never a toast, and never part
+of onboarding. The app never auto-switches shells; changing shells always
+requires an explicit user action.
+
+### iPad Layout
+
+On iPad, the app uses a `NavigationSplitView`. Server switching lives in the
+sidebar and the destination list is scoped to the operator set for the
+active server.
+
 ### Advanced Printer Controls
 
 Advanced printer controls are off by default for every server. To use jog,

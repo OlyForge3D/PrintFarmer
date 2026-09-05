@@ -3,15 +3,15 @@
   "defaultModel": "claude-opus-4.7",
   "agentModelOverrides": {
     "scribe": "claude-haiku-4.5",
-    "dallas": "claude-opus-5",
-    "lambert": "gpt-5.6-sol",
-    "ripley": "gpt-5.6-sol",
-    "hudson": "gpt-5.6-sol",
-    "gorman": "gpt-5.6-sol",
-    "parker": "gpt-5.6-sol",
+    "dallas": "gpt-6-astra",
+    "lambert": "gpt-6-astra",
+    "ripley": "gpt-6-astra",
+    "hudson": "gpt-6-astra",
+    "gorman": "gpt-6-astra",
+    "parker": "gpt-6-astra",
     "newt": "claude-opus-4.7-xhigh",
     "bishop": "claude-opus-5",
-    "hicks": "gpt-5.6-sol",
+    "hicks": "gpt-6-astra",
     "vasquez": "gemini-3.1-pro-preview"
   },
   "agentReasoningEffortOverrides": {
