@@ -37,6 +37,24 @@ final class JobDetailIPadNavigationUITests: ShiftTasksUITestBase {
         }
     }
 
+    func testIPadLeadingEdgeRevealKeepsVisibleSidebarOpen() throws {
+        try requireRegularWidthShell()
+
+        XCTAssertTrue(app.buttons["Show Sidebar"].waitForExistence(timeout: 8),
+                      "The portrait iPad shell must start with its sidebar collapsed")
+        XCTAssertTrue(revealSidebarFromLeadingEdge(timeout: 8),
+                      "The leading-edge gesture must reveal the collapsed iPad sidebar")
+
+        let tasks = app.buttons["sidebar.tasks"]
+        XCTAssertTrue(tasks.waitForExistence(timeout: 8))
+        XCTAssertTrue(revealSidebarIfCollapsed(),
+                      "Revealing an already-visible sidebar must succeed without closing it")
+        XCTAssertTrue(tasks.isHittable,
+                      "The existing sidebar must remain visible and interactive")
+        tasks.tap()
+        XCTAssertTrue(app.buttons["shiftTasks.printQueue"].waitForExistence(timeout: 8))
+    }
+
     /// #794 core path: the completed job must be reachable in the iPad
     /// Recent section and present `JobDetailView` with the harvest action in
     /// the foreground.
