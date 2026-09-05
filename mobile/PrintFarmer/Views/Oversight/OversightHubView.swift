@@ -36,6 +36,10 @@ struct OversightHubView: View {
             if showsUpgradeOffer {
                 Section {
                     OversightUpgradeOfferCard(
+                        context: OversightUpgradeOfferContext(
+                            farmShape: services.farmShapeService.latestShape,
+                            shiftPlanEnabled: capabilities.shiftPlanEnabled
+                        ),
                         turnOn: acceptUpgradeOffer,
                         notNow: dismissUpgradeOffer
                     )
