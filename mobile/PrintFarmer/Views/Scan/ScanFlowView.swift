@@ -14,7 +14,6 @@ struct ScanFlowView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = ScanViewModel()
-    @State private var handledExternalScanRequestID: UUID?
 
     init(externalScanRequestID: UUID? = nil) {
         self.externalScanRequestID = externalScanRequestID
@@ -125,13 +124,8 @@ struct ScanFlowView: View {
     }
 
     private func startExternalScanIfNeeded() {
-        guard let externalScanRequestID,
-              externalScanRequestID != handledExternalScanRequestID,
-              !viewModel.isScanning else {
-            return
-        }
-        handledExternalScanRequestID = externalScanRequestID
-        viewModel.scan()
+        guard let externalScanRequestID else { return }
+        viewModel.requestExternalScan(externalScanRequestID)
     }
 
     private var scanSection: some View {

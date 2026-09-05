@@ -70,7 +70,11 @@ final class ScanViewModel {
     /// spool import here.
     var pendingSpoolBarcode: String?
     var recentScans: [RecentScan] = []
-    var isViewActive = true
+    var isViewActive = true {
+        didSet {
+            if isViewActive { startQueuedExternalScanIfNeeded() }
+        }
+    }
 
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "ScanStation")
     private var scanner: (any BarcodeScannerProtocol)?
@@ -79,6 +83,9 @@ final class ScanViewModel {
     private var spoolService: (any SpoolServiceProtocol)?
     private var printedPartsInventoryEnabled = true
     private var printedPartsCapabilityGeneration = 0
+    private var handledExternalScanRequestID: UUID?
+    // Overlapping requests coalesce into one retry through the existing scanner pipeline.
+    private var queuedExternalScanRequestID: UUID?
 
     func configure(
         scanner: (any BarcodeScannerProtocol)?,
@@ -115,6 +122,7 @@ final class ScanViewModel {
     }
 
     func scan() {
+        guard isViewActive, !isScanning else { return }
         guard let scanner, scanner.isAvailable else {
             errorMessage = "Scanning is not available on this device."
             return
@@ -124,7 +132,10 @@ final class ScanViewModel {
         errorMessage = nil
 
         Task {
-            defer { isScanning = false }
+            defer {
+                isScanning = false
+                startQueuedExternalScanIfNeeded()
+            }
             let result = await scanner.scanBarcode()
             guard isViewActive else { return }
             switch result {
@@ -136,6 +147,20 @@ final class ScanViewModel {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    func requestExternalScan(_ requestID: UUID) {
+        guard requestID != handledExternalScanRequestID,
+              requestID != queuedExternalScanRequestID else { return }
+        queuedExternalScanRequestID = requestID
+        startQueuedExternalScanIfNeeded()
+    }
+
+    private func startQueuedExternalScanIfNeeded() {
+        guard isViewActive, !isScanning, let queuedExternalScanRequestID else { return }
+        handledExternalScanRequestID = queuedExternalScanRequestID
+        self.queuedExternalScanRequestID = nil
+        scan()
     }
 
     /// Type-dispatches a single scanned code. Exposed directly (in addition
