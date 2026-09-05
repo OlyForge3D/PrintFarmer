@@ -518,6 +518,9 @@
 		FA5A00000000000000000013 /* FarmSnapshotContainerAuthorityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000014 /* FarmSnapshotContainerAuthorityTests.swift */; };
 		FB6B00000000000000000001 /* FarmSnapshotRemediationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB6B00000000000000000002 /* FarmSnapshotRemediationTests.swift */; };
 		FB6B00000000000000000003 /* AuthSnapshotIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB6B00000000000000000004 /* AuthSnapshotIdentityTests.swift */; };
+242700000000000000000101 /* OpenScannerIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 242700000000000000000001 /* OpenScannerIntent.swift */; };
+64E9C525FAE0D03216013F56 /* ScanWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */; };
+93AC246D901CA86E42EB214D /* PrintFarmerScanWidgets.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 3DE83CDE75BC1AAF3EC3AE86 /* PrintFarmerScanWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -535,7 +538,28 @@
 			remoteGlobalIDString = DA9CB9901F607FAA5F633728;
 			remoteInfo = PrintFarmer;
 		};
+67CD5B0E0D5117721C0F0228 /* PBXContainerItemProxy */ = {
+	isa = PBXContainerItemProxy;
+	containerPortal = C6D0A32F942F8C6A3D5F22BE /* Project object */;
+	proxyType = 1;
+	remoteGlobalIDString = 667E8FD747202964B4410746;
+	remoteInfo = PrintFarmerScanWidgets;
+};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		7A8A4597154EFF79D2B71D4C /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				93AC246D901CA86E42EB214D /* PrintFarmerScanWidgets.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		1667A0000000000000000001 /* NetworkHostClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkHostClassifier.swift; sourceTree = "<group>"; };
@@ -932,6 +956,10 @@
 		FA5A00000000000000000014 /* FarmSnapshotContainerAuthorityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotContainerAuthorityTests.swift; sourceTree = "<group>"; };
 		FB6B00000000000000000002 /* FarmSnapshotRemediationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotRemediationTests.swift; sourceTree = "<group>"; };
 		FB6B00000000000000000004 /* AuthSnapshotIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthSnapshotIdentityTests.swift; sourceTree = "<group>"; };
+242700000000000000000001 /* OpenScannerIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenScannerIntent.swift; sourceTree = "<group>"; };
+3DE83CDE75BC1AAF3EC3AE86 /* PrintFarmerScanWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PrintFarmerScanWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+AA60E6B959E0E195BBAA1D22 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScanWidgets.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -958,6 +986,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+8C1B85AAA4AA0088A8C7B36F /* Frameworks */ = {
+	isa = PBXFrameworksBuildPhase;
+	buildActionMask = 2147483647;
+	files = (
+	);
+	runOnlyForDeploymentPostprocessing = 0;
+};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -1244,6 +1279,7 @@
 				B979E1FF0D2B4792DE5025A3 /* PrintFarmer */,
 				1DB4E3FFFEF4C001E8972F09 /* PrintFarmerTests */,
 				F7060002000000000000C001 /* PrintFarmerUITests */,
+				FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */,
 				6D159F361021D92BC3E10E55 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -1254,6 +1290,7 @@
 				AD5B287E56228618B9E1A0C4 /* PrintFarmer.app */,
 				DBF8A7CD5FCE695B24F4AD00 /* PrintFarmerTests.xctest */,
 				F7060002000000000000C0F1 /* PrintFarmerUITests.xctest */,
+				3DE83CDE75BC1AAF3EC3AE86 /* PrintFarmerScanWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -1546,6 +1583,7 @@
 			isa = PBXGroup;
 			children = (
 				A1B2C3D4E5F6A7B8C9D0E1F2 /* AppDelegate.swift */,
+				242700000000000000000001 /* OpenScannerIntent.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -1689,6 +1727,15 @@
 			path = PrintFarmerUITests;
 			sourceTree = "<group>";
 		};
+FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
+	isa = PBXGroup;
+	children = (
+		B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */,
+		AA60E6B959E0E195BBAA1D22 /* Info.plist */,
+	);
+	path = PrintFarmerScanWidgets;
+	sourceTree = "<group>";
+};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -1719,10 +1766,12 @@
 				B2F14515601A3C4CAB95B1A4 /* Sources */,
 				2C2C1156559FFF38F31379AF /* Frameworks */,
 				70C8A555C51B03B00761E2F2 /* Resources */,
+				7A8A4597154EFF79D2B71D4C /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				BE384FCBA3134F794D3F8802 /* PBXTargetDependency */,
 			);
 			name = PrintFarmer;
 			packageProductDependencies = (
@@ -1749,6 +1798,23 @@
 			productReference = F7060002000000000000C0F1 /* PrintFarmerUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+667E8FD747202964B4410746 /* PrintFarmerScanWidgets */ = {
+	isa = PBXNativeTarget;
+	buildConfigurationList = B7AFF51AD2C4C9109998A9CA /* Build configuration list for PBXNativeTarget "PrintFarmerScanWidgets" */;
+	buildPhases = (
+		5F1A9D66DD5967B6BB213456 /* Sources */,
+		8C1B85AAA4AA0088A8C7B36F /* Frameworks */,
+		0FA36420336716848408A71A /* Resources */,
+	);
+	buildRules = (
+	);
+	dependencies = (
+	);
+	name = PrintFarmerScanWidgets;
+	productName = PrintFarmerScanWidgets;
+	productReference = 3DE83CDE75BC1AAF3EC3AE86 /* PrintFarmerScanWidgets.appex */;
+	productType = "com.apple.product-type.app-extension";
+};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -1779,6 +1845,7 @@
 				DA9CB9901F607FAA5F633728 /* PrintFarmer */,
 				AFC2BA1C050C049765D60160 /* PrintFarmerTests */,
 				F7060002000000000000D001 /* PrintFarmerUITests */,
+				667E8FD747202964B4410746 /* PrintFarmerScanWidgets */,
 			);
 		};
 /* End PBXProject section */
@@ -1793,6 +1860,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+0FA36420336716848408A71A /* Resources */ = {
+	isa = PBXResourcesBuildPhase;
+	buildActionMask = 2147483647;
+	files = (
+	);
+	runOnlyForDeploymentPostprocessing = 0;
+};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -1941,6 +2015,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				242700000000000000000101 /* OpenScannerIntent.swift in Sources */,
 				CF11AA0000000000000E0001 /* LaunchSplashView.swift in Sources */,
 				1667A0000000000000000101 /* NetworkHostClassifier.swift in Sources */,
 				1667A0000000000000000102 /* CertificatePinStore.swift in Sources */,
@@ -2204,6 +2279,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+5F1A9D66DD5967B6BB213456 /* Sources */ = {
+	isa = PBXSourcesBuildPhase;
+	buildActionMask = 2147483647;
+	files = (
+		64E9C525FAE0D03216013F56 /* ScanWidgets.swift in Sources */,
+	);
+	runOnlyForDeploymentPostprocessing = 0;
+};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -2217,6 +2300,12 @@
 			target = DA9CB9901F607FAA5F633728 /* PrintFarmer */;
 			targetProxy = F7060002000000000000D031 /* PBXContainerItemProxy */;
 		};
+BE384FCBA3134F794D3F8802 /* PBXTargetDependency */ = {
+	isa = PBXTargetDependency;
+	name = PrintFarmerScanWidgets;
+	target = 667E8FD747202964B4410746 /* PrintFarmerScanWidgets */;
+	targetProxy = 67CD5B0E0D5117721C0F0228 /* PBXContainerItemProxy */;
+};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -2473,6 +2562,57 @@
 			};
 			name = Release;
 		};
+5A5ADA4571293E1847BB0BD9 /* Debug */ = {
+	isa = XCBuildConfiguration;
+	buildSettings = {
+		APPLICATION_EXTENSION_API_ONLY = YES;
+		CODE_SIGN_STYLE = Automatic;
+		CURRENT_PROJECT_VERSION = 2;
+		DEVELOPMENT_TEAM = ZPKA84F3TY;
+		GENERATE_INFOPLIST_FILE = YES;
+		INFOPLIST_FILE = PrintFarmerScanWidgets/Info.plist;
+		IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+		LD_RUNPATH_SEARCH_PATHS = (
+			"$(inherited)",
+			"@executable_path/Frameworks",
+			"@executable_path/../../Frameworks",
+		);
+		MARKETING_VERSION = 1.0;
+		PRODUCT_BUNDLE_IDENTIFIER = com.olyforge3d.printfarmer.ios.scan-widgets;
+		PRODUCT_NAME = "$(TARGET_NAME)";
+		SKIP_INSTALL = YES;
+		SWIFT_EMIT_LOC_STRINGS = YES;
+		SWIFT_VERSION = 6.0;
+		TARGETED_DEVICE_FAMILY = "1,2";
+	};
+	name = Debug;
+};
+9C1929C9B3CA934B5788CF90 /* Release */ = {
+	isa = XCBuildConfiguration;
+	buildSettings = {
+		APPLICATION_EXTENSION_API_ONLY = YES;
+		CODE_SIGN_STYLE = Automatic;
+		CURRENT_PROJECT_VERSION = 2;
+		DEVELOPMENT_TEAM = ZPKA84F3TY;
+		GENERATE_INFOPLIST_FILE = YES;
+		INFOPLIST_FILE = PrintFarmerScanWidgets/Info.plist;
+		IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+		LD_RUNPATH_SEARCH_PATHS = (
+			"$(inherited)",
+			"@executable_path/Frameworks",
+			"@executable_path/../../Frameworks",
+		);
+		MARKETING_VERSION = 1.0;
+		PRODUCT_BUNDLE_IDENTIFIER = com.olyforge3d.printfarmer.ios.scan-widgets;
+		PRODUCT_NAME = "$(TARGET_NAME)";
+		SKIP_INSTALL = YES;
+		SWIFT_EMIT_LOC_STRINGS = YES;
+		SWIFT_VERSION = 6.0;
+		TARGETED_DEVICE_FAMILY = "1,2";
+		VALIDATE_PRODUCT = YES;
+	};
+	name = Release;
+};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -2512,6 +2652,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+B7AFF51AD2C4C9109998A9CA /* Build configuration list for PBXNativeTarget "PrintFarmerScanWidgets" */ = {
+	isa = XCConfigurationList;
+	buildConfigurations = (
+		5A5ADA4571293E1847BB0BD9 /* Debug */,
+		9C1929C9B3CA934B5788CF90 /* Release */,
+	);
+	defaultConfigurationIsVisible = 0;
+	defaultConfigurationName = Release;
+};
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */

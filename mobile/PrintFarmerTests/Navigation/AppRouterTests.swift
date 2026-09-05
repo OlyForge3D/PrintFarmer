@@ -23,6 +23,40 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(AppRouter.restoredTab(from: "scan"), .inventory)
     }
 
+    func testScanDeepLinkSelectsInventoryAndCreatesConsumableRequest() {
+        let router = AppRouter()
+
+        router.navigate(to: .scan, capabilities: capabilities)
+
+        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertNotNil(router.pendingExternalScanRequestID)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+        XCTAssertNil(router.pendingExternalScanRequestID)
+        XCTAssertFalse(router.consumeExternalScanRequest())
+    }
+
+    func testPendingExternalScanSurvivesAuthenticationAndServerNavigationReset() {
+        let router = AppRouter()
+        router.navigate(to: .scan, capabilities: capabilities)
+
+        router.invalidatePendingNavigation()
+
+        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertNotNil(router.pendingExternalScanRequestID)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+    }
+
+    func testExternalScanRequestStoreConsumesPersistedRequestExactlyOnce() throws {
+        let suiteName = "ExternalScanRequestStoreTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        ExternalScanRequestStore.request(userDefaults: defaults)
+
+        XCTAssertTrue(ExternalScanRequestStore.consume(userDefaults: defaults))
+        XCTAssertFalse(ExternalScanRequestStore.consume(userDefaults: defaults))
+    }
+
     func testPersistedSelectionRoundTripsWithoutAffectingDefaultRouterTests() throws {
         let suiteName = "AppRouterTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

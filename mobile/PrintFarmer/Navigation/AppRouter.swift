@@ -78,6 +78,7 @@ final class AppRouter {
     var pendingSpoolHighlightId: Int?
     var pendingAttentionItemId: String?
     var pendingFilamentSwap: FilamentSwapDeepLink?
+    private(set) var pendingExternalScanRequestID: UUID?
     var notificationRoutingError: String?
     private var navigationEpoch = 0
     @ObservationIgnored private let userDefaults: UserDefaults?
@@ -104,6 +105,8 @@ final class AppRouter {
         navigationEpoch &+= 1
         let capturedEpoch = navigationEpoch
         switch destination {
+        case .scan:
+            prepareExternalScan()
         case .printerDetail(let id):
             let tab = printerDestinationTab
             guard visibleTabs(for: capabilities).contains(tab) else {
@@ -577,5 +580,19 @@ final class AppRouter {
         selectedTab = nextTabs.contains(selectedTab)
             ? selectedTab
             : fallbackTab(for: capabilities)
+    }
+}
+
+extension AppRouter {
+    private func prepareExternalScan() {
+        selectedTab = .inventory
+        inventoryPath = NavigationPath()
+        pendingExternalScanRequestID = UUID()
+    }
+
+    func consumeExternalScanRequest() -> Bool {
+        guard pendingExternalScanRequestID != nil else { return false }
+        pendingExternalScanRequestID = nil
+        return true
     }
 }

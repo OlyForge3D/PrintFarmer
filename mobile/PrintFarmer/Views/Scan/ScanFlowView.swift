@@ -8,10 +8,17 @@ import SwiftUI
 /// their owning tab; bin, part, barcode-intake, and unrecognized results remain
 /// in-place sheets.
 struct ScanFlowView: View {
+    let startsScanning: Bool
+
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = ScanViewModel()
+    @State private var didStartExternalScan = false
+
+    init(startsScanning: Bool = false) {
+        self.startsScanning = startsScanning
+    }
 
     private var partsInventoryEnabled: Bool {
         services.capabilitiesService.resolved.printedPartsInventoryEnabled
@@ -104,6 +111,9 @@ struct ScanFlowView: View {
                     printedPartsInventoryEnabled: partsInventoryEnabled
                 )
                 await services.capabilitiesService.refresh()
+                guard startsScanning, !didStartExternalScan else { return }
+                didStartExternalScan = true
+                viewModel.scan()
             }
             .onChange(of: partsInventoryEnabled) { _, isEnabled in
                 viewModel.setPrintedPartsInventoryEnabled(isEnabled)
