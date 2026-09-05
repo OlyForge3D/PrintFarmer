@@ -48,3 +48,5 @@
   - `mobile/PrintFarmer/Services/PrinterService.swift` — implementation with fallback
   - `mobile/PrintFarmerTests/Models/PrinterBackendCapabilitiesTests.swift` — 15 XCTest cases
 - **Build note**: `swiftc -typecheck` clean. Local `xcodebuild` unavailable (CoreSimulator out of date). Relying on CI. PR: https://github.com/OlyForge3D/PrintFarmerMobile/pull/2
+
+>> **Scribe Note (2026-09-04)**: Issue #2364 closed (Dallas verdict: performance not measurable, implementation not warranted).

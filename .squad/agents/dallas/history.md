@@ -45,3 +45,35 @@ Early entries (pre-2026-03-25) summarized for maintainability. See decisions-arc
 
 - PR #750 remains draft; trio review is coordinator's next step per protocol
 - Contract untouched: capabilities endpoint, nine PascalCase enum tokens, camelCase DTO properties, unknown-token → 400, nine rows materialized with the expected attention defaults
+
+## 2026-09-04 — #2364 DateFormatter spike: analysis gate closed (no implementation)
+
+Ran the analysis gate for mobile perf spike #2364 after six rounds blocked on farm
+workload. Made the call on available evidence rather than filing a seventh BLOCKED
+report — the standing gate required physically starting a print, which no analysis
+session can do.
+
+Verdict: **implementation NOT warranted.** Closed #2364 as measured/not-warranted, no
+child issue. The decisive findings were workload-independent, so a further Instruments
+run could not have changed the outcome:
+
+- `etaFormatted` has **zero call sites** in the whole iOS target — 2 of the 4 flagged
+  constructions are unreachable dead code.
+- `shortTimeFormatted` has 1 doubly-conditional call site; its symbol family logged
+  0 samples across all 192.6 s of measurement.
+- `relativeFormatted` (9 of 10 call sites, the only measured cost at 0.0101 %) **cannot
+  be hoisted as the issue proposed** — proved by compiling against Swift 6.0: a
+  nonisolated global `RelativeDateTimeFormatter` is inferred `@MainActor` and rejected
+  from `extension Date`. This corrected a prior round's answer that would have sent an
+  implementer into a wall.
+
+Set a numeric, two-sided threshold (T1 ≥ 1.0 % main-thread CPU; T2 any hitch or
+>250 ms microhang) so the decision is falsifiable and re-openable, and recorded both
+"Risk" correctness questions as decided.
+
+Lesson worth keeping: before commissioning a perf fix, check that the code is
+*reachable* and that the proposed fix *compiles*. Two greps and one `swiftc -typecheck`
+settled what six measurement rounds could not.
+
+Decision logged: `.squad/decisions/inbox/dallas-2364-dateformatter-gate.md`
+Artifact: https://github.com/OlyForge3D/PrintFarmer/issues/2364#issuecomment-5547770003

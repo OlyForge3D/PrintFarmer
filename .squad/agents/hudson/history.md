@@ -156,3 +156,7 @@ Status: Backlog item cleared. No blockers for review.
 
 - When concurrency itself closes a user-facing timeout regression, call-count assertions are insufficient: sequential code may produce the same eventual calls. Park both operations on one `AsyncBarrier` and causally await two simultaneous release waiters.
 - An XCTest expectation timeout can bound only the regression/failure path while the passing path remains deterministic and free of sleeps, yields, polling, or wall-clock ordering.
+
+>> **Scribe Note (2026-09-04)**: Issue #2364 closed as not-warranted (Dallas).  identified as dead code; verify call sites in next review.
+
+>> **Scribe (2026-09-04)**: Issue #2364 closed. etaFormatted dead code; next review should verify.

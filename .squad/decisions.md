@@ -1,136 +1,91 @@
-# Decisions
+# Recent Decisions (from inbox, merged 2026-09-04T16:56:30Z)
 
-date: 2026-07-25
-owner: Multiple
-status: closed
-issue: 931
----
+## Dallas — DateFormatter Spike #2364 Analysis Gate
 
-## Epic #931 Resolved — Admin Console & Settings Redesign (Four Gate Rounds, Six Defects Fixed)
+### 2026-09-04T16:39:53-07:00: DateFormatter spike #2364 analysis gate
 
-**Scope**: Issues #932–#941, merged to `feature/admin-console-redesign` PR #955.
+**By:** Dallas (Lead), requested by Frost via Ralph
 
-### Final Status
+**What:** Closed #2364 as *measured / not-warranted*. **No implementation issue filed**; `mobile/PrintFarmer/Extensions/Formatting+Extensions.swift` stays as written. Set the reusable acceptance threshold for this class of iOS frame-time question: fix iff **T1** (formatter-construction symbol union ≥ **1.0 %** of sampled main-thread CPU in a ≥ 20 s window with the row mounted and ≥ 1 row visible) **or T2** (that union appears in ≥ 1 hitch or ≥ 1 microhang > 250 ms). Also decided the two blocking correctness questions, one of which corrects a prior answer. Ended a six-round measurement loop that was blocked on a farm workload no analysis session can create.
 
-- **All ten child issues merged**: #932 (UI primitives), #933 (admin overview), #934 (destination registry), #935 (settings rebuild), #936 (Control Center hub), #937 (essential manifest), #938 (command palette), #939 (redirects), #940 (architecture docs), #941 (regressions).
-- **Four gate rounds conducted**: Round 1 (Bishop, Hicks, Vasquez), Round 2 (all three), Round 3 (Hicks locked out; Drake, Newt, Ripley, Lambert). Round 4 (Ripley regate).
-- **Six defects found and fixed**:
-  1. Deep links to command palette items used bare property names → collided across sections.
-  2. DOM `id` attributes from `prop.name` → duplicate IDs on multi-section pages.
-  3. Form `name` attributes in `SettingsPagelet` → duplicates across 5 input types on pages rendering multiple sections.
-  4. `SettingsPage.extractFieldErrors` pinned validation errors to first section containing field name instead of section that was edited.
-  5. Empty Slicing Defaults tab (backend group mapping mismatch).
-  6. Authorization regression: per-section save endpoint missing `farm_admin` role guard and validator invocation.
+**Why:** The decisive evidence is workload-independent, which is why another Instruments run could not have changed the verdict:
 
-### Most Important Decision for Future Work
+1. **Scope collapse (exhaustive call-graph analysis).** Of the four flagged per-call constructions: `etaFormatted` (lines 59, 63) has **zero call sites in the entire iOS target** — two of four are unreachable dead code. `shortTimeFormatted` (line 25) has **one** doubly-conditional call site (`DashboardView.swift:1114`), and its symbol family (`DateFormatter.init` / `__CreateCFDateFormatter`) logged **0 samples across all 192.6 s** of measurement. `relativeFormatted` (line 6) is **9 of 10** call sites and the only construction with any measured cost.
+2. **The one construction that matters cannot be hoisted as proposed (verified by compilation).** Under `SWIFT_VERSION = 6.0`, a nonisolated global `RelativeDateTimeFormatter` is inferred `@MainActor` (non-`Sendable`) and is rejected from the nonisolated `extension Date` — hard compile error. It requires `nonisolated(unsafe)`, an unaudited thread-safety assertion on a type Apple does not document as thread-safe, or `@MainActor`, which is source-breaking. Both are **worse on correctness** than the current code. The cited precedents do not transfer: `FilamentCoverageBadge` compiles only because `View` makes it `@MainActor`; `APIClient` covers `ISO8601DateFormatter`, a different type.
+3. **Measured baseline is 99× below T1 and clear of T2.** Heaviest exercised case (Notifications, 44.0 s): relative-formatter construction **0.7 ms = 0.0101 %** of 6,902.2 ms main-thread CPU. `DateFormatter` construction: **0 samples** everywhere. **0 hitches / 0 hangs across 192.6 s**.
 
-**`prop.name` in the settings system is the camelCase JSON wire name, not the .NET property name.** `getSettings` returns raw wire JSON with no normalization. `enabled` appears on 13 settings classes, `intervalSeconds` on 4, `baseUrl` on 3, and several render on the same page. This mismatch caused four separate defects: broken command-palette deep-links, mispaired DOM `id`/`htmlFor`, wrong form `name` attributes, mis-attributed validation errors.
+**Correctness questions — decided:**
 
-**Treat any bare-property-name lookup in this codebase as suspect until proven otherwise.** Any identifier keyed on `prop.name` alone is a bug and blocks review. Always use section-qualified identifiers: `` `${sectionKey}.${propName}` `` for DOM `id`, DOM `name`, aria relationships, error attribution, and deep-link lookups.
+- **Swift 6 concurrency (prior 2026-09-03 answer CORRECTED).** A nonisolated global `DateFormatter` **compiles** (it is `Sendable`, matching Apple's documented iOS 7+ thread safety); nonisolated global `RelativeDateTimeFormatter` **does not**.
+- **Runtime locale / time-zone (prior answer UPHELD).** Changes must stay observable; app restart is not acceptable. The per-call implementation is correct by construction.
 
-### Additional Process Lessons
-
-1. **ValidationException memberless vs. member-named throws**: A memberless throw (`throw new ValidationException("reason")`) produces an error keyed by section rather than field. **21 of 23 throw sites across settings classes are memberless.** Both backend response shape and frontend error extraction must handle this. When a failure is naturally scoped to a specific property, use member-names form for superior UX; memberless form is acceptable for whole-section errors only.
-
-2. **FieldErrors self-healing vs. sectionErrors non-healing**: `fieldErrors` self-heals via `handleFieldChange` recomputing on every keystroke. Server-sourced `sectionErrors` cannot be re-derived on the client and must be explicitly cleared. Copying the merge pattern between them caused a real bug.
-
-3. **Green test suite insufficient**: Nine implementation agents each delivered fully-passing lint/build/test runs that still contained real defects, including a privilege regression. Every finding was verified by reading the code. Tests cannot substitute for careful code review.
-
-4. **Independent reviewers more effective than any single model**: Round 1 produced three confidently-stated findings factually incorrect on inspection. Round 3 one reviewer cleared code the other correctly flagged. Multi-model review across independent agents caught what any single reviewer missed.
-
-### Decision: Admin Settings Per-Section Save Requires Auth and Validation
-
-**Date**: 2026-07-25 (Hicks)
-
-Both `POST /api/settings` (bulk) and `POST /api/settings/{keyName}` (per-key) now require `[Authorize(Roles = "farm_admin")]` and invoke `IValidatableSetting.Validate()`. Both return the same 400 shape on validation failure. This was missing on the per-key endpoint after #935 moved the settings page's primary save path onto it.
-
-**Rule for future settings work**: Any new endpoint mutating a section must include HTTP-level tests: (1) Unauthenticated → 401, (2) Authenticated but under-privileged → 403, (3) Correctly privileged + valid payload → success + persistence verified, (4) Correctly privileged + invalid `IValidatableSetting` → 400 with populated `errors` dict, (5) Blocklisted section (Telegram/HomeAssistant) → 404 even for admin.
-
-### Decision: Settings Error Attribution — Memberless vs. Member-Named ValidationException Throws
-
-**Date**: 2026-07-25 (Ripley)
-
-- **Memberless throw** (`throw new ValidationException("reason")`): Quick; error only reaches user via the section-level `message` field (alert banner + save banner). Does NOT highlight a specific field.
-- **Member-names throw** (`throw new ValidationException(new ValidationResult("reason", new[] { nameof(FooProperty) }))`): Error attached inline next to the field via FormField `error` slot. Visually superior for field-scoped errors.
-
-**Guidance for future authors**: If failure is naturally scoped to a property (bad URL, negative timeout, missing token when toggle is on), use member-names. If failure crosses properties or section-wide (required combination missing, conflict between fields), memberless is acceptable — the alert lands on the card header where whole-section errors belong.
-
-**Do NOT add more section-name-aware heuristics to `SettingsPage.extractFieldErrors`.** Current implementation recognizes exactly one convention (bare key == section key) and further magic will conceal bugs. If frontend needs nuance, backend should send it explicitly.
-
-### Related Architecture Decisions (Settled in This Epic)
-
-- **Settings navigation restructure** (#931 epic scope): Two primary destinations (Settings with User/System scopes, and Admin) with per-group save model. No Save All button in production (`saveAllSettings` is dead code).
-- **Essential/Everything toggle via client-side manifest** (#937): Not a backend attribute. Manifest keys on backend `SectionName`; hidden fields survive round-trips unchanged. Search always searches everything.
-- **Command palette global mount** (#938): Moved from `SettingsShell` (route-scoped) to `GlobalCommandPaletteProvider` wrapping `<Outlet />` in `Layout.tsx`. Ctrl+K now works on every authenticated route.
-- **Admin UI primitives frozen** (#932): `AdminLoading`, `AdminEmpty`, `AdminError`, `AdminSaveBar`, `useDirtyState`, `adminToast`. All downstream pages adopt these; do NOT fork.
-- **Admin destination registry contract** (#934): Single typed source of truth (`src/Web/ReactApp/src/features/admin/registry/`). ALL admin UI consumes registry; hardcoded lists are banned.
-- **Admin overview endpoint architectural notes** (#933): Composed from existing health checks; 8s timeout; no 500s (hub is what users hit when broken); graceful degradation on probe failure.
-- **Settings architecture documentation** (#940): `docs/SETTINGS_ARCHITECTURE.md` is canonical reference for future agents. Covers two-layer architecture, three routes/scopes, URL contract, deep-link sections, per-group save, essential manifest, global command palette, legacy redirects.
-- **Heading typography narrowed** (#941 gate finding): Global display-heading rule limited to `h1` and `h2`; `h3`-`h6` use default semantic path unless opted into display style explicitly.
-
-### Recommendation: Phase 1 Settings IA Query Model
-
-Use normalized query inside existing shell: `scope=user|system|admin`, `tab=<category>`, `sub=<sub-page>`. Resolve legacy `?tab=` links through shared helpers. Keeps existing bookmarks working while new IA rolls out.
-
-### Special Team Directive (User Input)
-
-**Date**: 2026-06-06T10:11:08-07:00
-
-Vasquez must use GPT-5.5 for all 3-way pre-PR reviews (user request from Jeff Papiez).
+**Artifact:** https://github.com/OlyForge3D/PrintFarmer/issues/2364#issuecomment-5547770003
 
 ---
-## Decision: Admin Overview Endpoint Response Contract & Aggregation (#933)
 
-**Date**: 2026-07-25
-**Agent**: Lambert
-**Status**: closed
+## Parker — Make yamllint fail closed
 
-**Route**: `GET /api/admin/overview` (auth: `farm_admin`, no caching).
-
-**Response** (camelCase, string enums): `AdminOverviewDto` with `checkedAt`, `subsystems`, `attention`.
-
-**Subsystems** (composed from health checks; aggregates `comprehensive`, `signalr`, `spoolman`):
-- `api`: Healthy by responding
-- `database`: From `comprehensive` sub-payload
-- `backends`: From `comprehensive` sub-payload; per-printer failures become individual `attention` items
-- `signalr`: Direct 1:1 mapping; non-Healthy → one `attention` item
-- `spoolman`: Direct 1:1 when configured; hidden when "not configured"
-
-**Graceful degradation**: 8s hard timeout. On timeout/exception/partial failure: `api` downgrades to `Degraded`, others become `Unknown`, `admin-overview-probe-failed` `Error` attention item emitted. **A single failing subsystem check must never 500 this endpoint.**
-
-**Attention items** (sorted Error → Warning → Info, stable by title): Database unhealthy, printer backends unreachable, registered health check non-Healthy.
-
-**Enum vocabulary** (serialized as strings): `SubsystemStatus: "Healthy" | "Degraded" | "Unhealthy" | "Unknown"`, `AttentionSeverity: "Info" | "Warning" | "Error"`.
-
-**Client routing**: `actionRoute` always client route (`/admin/system`, `/printers`), never raw API URL.
+### 2026-08-26: Make yamllint fail closed with a pragmatic workflow policy
+**By:** Parker
+**What:** Run yamllint on every pull request, preserve its real exit status through
+artifact upload, and fail explicitly afterward. Use a checked-in policy that disables
+`document-start`, excludes mapping keys from `truthy`, reports lines over 120 characters
+as warnings, and promotes comment spacing to an error. Pin workflow YAML to LF in
+`.gitattributes`.
+**Why:** The previous `main` branch filter skipped the repository's `development` PR
+flow, while `|| true` made every captured status zero. GitHub Actions expressions and
+shell commands are frequently unsafe to wrap, but structural YAML, trailing whitespace,
+bracket spacing, and comment spacing remain low-risk blocking checks. A workflow-scoped
+LF attribute prevents Windows checkouts from reintroducing tracked CRLF blobs.
 
 ---
-## Team Decision: Bare Property-Name Lookups Are Bugs (#931)
 
-**Date**: 2026-07-25
-**Agent**: Newt
-**Status**: closed
+## Ripley — Profile-family Phases 0–1 Frontend Implementation
 
-**Root cause across four defects**: Code treating bare property name as identifier when name is only unique inside its section.
+### 2026-08-25: Profile-family Phases 0–1 frontend implementation
+**By:** Ripley
+**What:** Removed the auto-opened `CloneProfilesModal` flow from `/slicer` and replaced the generic no-machine-profile line with a reason-specific, accessible card. `no_profiles_for_model` explains that OrcaSlicer has no coverage and exposes a disabled **Create profile family** action with an associated **Coming soon** explanation. `alias_matched_no_profiles` identifies likely profile-coverage/engine-version drift and deliberately does not offer family creation. Missing or unknown codes render a generic, non-prescriptive load/empty state.
+**Why:** The deleted modal cloned process profiles and could not repair a missing machine family, so auto-opening it made the user feel trapped in a loop. The new state reports the actual failure and reserves the correct remedy for the future Phase 3 wizard.
 
-**Instances**:
-1. Command-palette deep links keyed on `prop.name` collided across sections.
-2. DOM `id`s keyed on `prop.name` produced duplicate ids (connections page renders 5 sections; `enabled` declared on 13 settings classes).
-3. Form `name` attributes in `SettingsPagelet` (5 control types) emitted duplicates.
-4. `SettingsPage.extractFieldErrors` pinned errors to first section whose properties contained field name (was almost never the one being edited).
+#### Files changed
 
-Only safe global identifier: `` `${key}.${name}` ``. `SettingsPagelet.tsx:101` computes this as `fieldId` — just wasn't used consistently.
+- `src/Web/ReactApp/src/features/slicer/pages/NewSliceJobPage.tsx` — removed clone-modal import/state/effects/rendering; captured the machine-profile query error; added typed reason-code narrowing and the reason-specific card.
+- `src/Web/ReactApp/src/features/slicer/pages/__tests__/NewSliceJobPage.test.tsx` — removed the obsolete modal mock/timer assertion; added coverage for both known codes, disabled-action accessibility, and a code-less fallback.
+- `src/Web/ReactApp/src/test/features/slicer/pages/NewSliceJobPageOnboarding.test.tsx` — removed the obsolete clone-modal mock.
 
-**Team rule**: Any identifier keyed on `prop.name` alone is a bug and blocks review. Applies to DOM ids, DOM `name`, routing hrefs, deep-link params, error routing, lookups.
+#### Assumed backend contract
 
-**Concrete guidance**:
-- Metadata-driven forms: Always use section-qualified id (`` `${sectionKey}.${propName}` ``) for DOM `id`, DOM `name`, aria relationships, error attribution.
-- Backend returns bare or `section.field` error keys: Bare form is by contract tied to section just posted. Never search metadata to guess.
-- Two-sided data structures: Test guards must assert **both** directions.
+The HTTP 404 response body is assumed to be camelCase JSON:
 
-**Related lesson**: Deliberate-break proofs mandatory for every new test. Revert fix, run test, confirm fail, restore. Six agents shipped green suite with real defects; agent doing proofs shipped clean. Cost under a minute per fix.
+```json
+{
+  "code": "no_profiles_for_model | alias_matched_no_profiles",
+  "detail": "optional human-readable diagnostic"
+}
+```
 
+The existing `apiClient` interceptor exposes that wire body as:
+
+```text
+{ message?: string, statusCode?: number, data?: { code?: string, detail?: string } }
+```
+
+The page reads only `error.data.code`; `detail` is retained in the local type but not rendered. If `data`, `code`, or a recognized value is absent, the generic fallback is used.
+
+#### Phase 0 interaction
+
+Phase 1 deletes the `/slicer` `CloneProfilesModal` and its success callback entirely. Therefore the Phase 0 `['customProfiles']` addition has no surviving invalidation site in the combined end state; keeping an unused callback solely to preserve that line would be dead code. The future Phase 3 family mutation must invalidate `['customProfiles']`, `['machineProfilesForModel']`, `['slicerProfilesExtended']`, and `['slicerProfilesHierarchy']` as approved in §B6.2.
+
+#### Validation
+
+- `npm run build` — passed. Existing Vite native-loader/plugin and large-chunk warnings remain; none originate in the changed files.
+- `npm run test:run` — passed once: **463 files, 5,135 tests**. Changed suites: `NewSliceJobPage.test.tsx` **53 passed**; `NewSliceJobPageOnboarding.test.tsx` **8 passed**.
+- `npm run lint` — passed with **0 errors, 1 pre-existing warning** in untouched `SlicerWorkspace.tsx` (unused eslint-disable directive).
+- Initial build found dependencies absent (`vite` not found); `npm install --no-audit --no-fund` restored the existing lockfile dependencies without changing manifests.
+
+Implemented with accessibility in mind using semantic heading/section structure, polite announcement, and the shared explained-disabled button pattern. Manual browser/assistive-technology testing was not performed.
 ---
+
 # 2026-07-26: Reviewer-rejection author lockout — RESCINDED
 
 **By:** Jeff (repo owner) — directive, restated multiple times
