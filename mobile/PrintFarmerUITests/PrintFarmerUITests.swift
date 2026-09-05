@@ -130,7 +130,10 @@ class PrintFarmerUITestCase: XCTestCase {
         while Date() < deadline {
             if tabButton.exists { return tabButton }
             if tabElement.exists { return tabElement }
-            if tabLabel.exists { return tabLabel }
+            if tabLabel.exists {
+                recordTabIdentifierCompatibilityFallback(tabIdentifier)
+                return tabLabel
+            }
             if sidebar.exists { return sidebar }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
