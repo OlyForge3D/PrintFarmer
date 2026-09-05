@@ -58,12 +58,41 @@ struct OversightRowSubtitleContext: Equatable {
     /// settled on a preference.
     var navigationPreference: NavigationLayoutPreference? = nil
 
-    /// The automatic derivation the router last established. Used to
-    /// explain what "Automatic" resolved to. `nil` before the router has
-    /// established a derivation.
+    /// The automatic derivation the router last established. Used as a
+    /// fallback to explain what "Automatic" resolved to when we do not
+    /// yet have live inputs to recompute a fresh derivation. `nil`
+    /// before the router has established a derivation.
+    ///
+    /// Note: `AppRouter.configureAdaptiveShell` only recomputes this
+    /// stored derivation when the server/user context changes, so a
+    /// mid-session `shiftPlanEnabled` toggle or admin flip can leave it
+    /// stale (see #2449 review round 2). `automaticInputs` below is the
+    /// authoritative signal for the subtitle when present.
     var automaticDerivation: NavigationShellDerivation? = nil
 
+    /// Live inputs to `NavigationShellDerivation.automatic(...)` captured
+    /// from the environment at read time. When present, the navigation
+    /// settings subtitle recomputes the derivation from these inputs
+    /// rather than trusting `automaticDerivation`, which the router may
+    /// not have refreshed since the last capability or admin change.
+    /// `nil` means the view has not yet captured live inputs — the
+    /// derivation falls back to `automaticDerivation`.
+    var automaticInputs: AutomaticInputsSnapshot? = nil
+
     static let unknown = OversightRowSubtitleContext()
+}
+
+/// Snapshot of the three inputs `NavigationShellDerivation.automatic(...)`
+/// consumes. Kept as a single optional field on the context so the
+/// derivation can distinguish "we captured live inputs" from "we only
+/// have a stored derivation to fall back on". Fields inside the snapshot
+/// carry their own natural semantics: `farmShape == nil` here means
+/// "server did not report a shape", not "not loaded" (the outer optional
+/// carries that meaning).
+struct AutomaticInputsSnapshot: Equatable, Sendable {
+    var farmShape: FarmShape?
+    var shiftPlanEnabled: Bool
+    var isFarmAdmin: Bool
 }
 
 /// Pure derivation from `(OversightDestination, OversightRowSubtitleContext)`
@@ -250,13 +279,24 @@ enum OversightRowSubtitles {
 
     /// Explain which shell is currently selected. Automatic renders the
     /// resolved shell so operators can see what "Automatic" is picking.
+    ///
+    /// When `context.automaticInputs` is populated (live view inputs),
+    /// we recompute the derivation fresh from those inputs. This keeps
+    /// the subtitle honest across mid-session capability or admin
+    /// changes, which `AppRouter` does not use as re-derivation
+    /// triggers (see #2449 review round 2). When only the stored
+    /// `automaticDerivation` is available, we fall back to it — that
+    /// covers the transient case where the view has not yet captured
+    /// live inputs.
     private static func navigationSettingsSubtitle(
         _ context: OversightRowSubtitleContext
     ) -> String? {
         guard let preference = context.navigationPreference else { return nil }
         switch preference {
         case .automatic:
-            guard let derivation = context.automaticDerivation else {
+            let derivation = liveAutomaticDerivation(context)
+                ?? context.automaticDerivation
+            guard let derivation else {
                 // We know the preference but not what it derived to yet.
                 return "Automatic"
             }
@@ -273,6 +313,21 @@ enum OversightRowSubtitles {
         case .twoModes:
             return "Two modes"
         }
+    }
+
+    /// Recompute the automatic derivation from live view inputs. Returns
+    /// `nil` when the view has not yet captured them (transient state
+    /// on first appearance), which lets the caller fall back to the
+    /// router's stored derivation.
+    private static func liveAutomaticDerivation(
+        _ context: OversightRowSubtitleContext
+    ) -> NavigationShellDerivation? {
+        guard let inputs = context.automaticInputs else { return nil }
+        return NavigationShellDerivation.automatic(
+            farmShape: inputs.farmShape,
+            shiftPlanEnabled: inputs.shiftPlanEnabled,
+            isFarmAdmin: inputs.isFarmAdmin
+        )
     }
 }
 

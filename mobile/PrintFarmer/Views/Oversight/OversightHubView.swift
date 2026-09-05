@@ -22,10 +22,26 @@ struct OversightHubView: View {
     /// state that is already observed by SwiftUI. Reading the router
     /// fields here keeps the navigation-settings subtitle in sync
     /// without a redundant fetch.
+    ///
+    /// We also capture live inputs to `NavigationShellDerivation.automatic`
+    /// (latest farm shape, current shift-plan capability, current admin
+    /// flag) into `automaticInputs`. This lets the derivation recompute
+    /// a fresh Automatic reading here rather than trust the router's
+    /// stored `establishedAutomaticDerivation`, which
+    /// `configureAdaptiveShell` only recomputes on server/user context
+    /// change — so a mid-session shift-plan toggle or admin flip would
+    /// otherwise leave the subtitle stale (#2449 review round 2).
+    /// All three sources are `@Observable`, so SwiftUI re-renders this
+    /// view whenever they change.
     private var resolvedSubtitleContext: OversightRowSubtitleContext {
         var context = subtitleContext
         context.navigationPreference = router.appliedNavigationPreference
         context.automaticDerivation = router.establishedAutomaticDerivation
+        context.automaticInputs = AutomaticInputsSnapshot(
+            farmShape: services.farmShapeService.latestShape,
+            shiftPlanEnabled: capabilities.shiftPlanEnabled,
+            isFarmAdmin: router.configuredIsFarmAdmin
+        )
         return context
     }
 

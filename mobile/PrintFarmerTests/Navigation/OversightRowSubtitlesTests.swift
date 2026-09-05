@@ -31,6 +31,7 @@ final class OversightRowSubtitlesTests: XCTestCase {
         XCTAssertNil(context.healthyPrinterCount)
         XCTAssertNil(context.navigationPreference)
         XCTAssertNil(context.automaticDerivation)
+        XCTAssertNil(context.automaticInputs)
         XCTAssertEqual(context, .unknown)
     }
 
@@ -378,6 +379,173 @@ final class OversightRowSubtitlesTests: XCTestCase {
         XCTAssertEqual(
             OversightRowSubtitles.subtitle(for: .navigationSettings, in: context),
             "Automatic"
+        )
+    }
+
+    // MARK: - Navigation settings — live automatic recompute (#2449 round 2)
+    //
+    // AppRouter.configureAdaptiveShell only recomputes
+    // establishedAutomaticDerivation on server/user context change.
+    // A mid-session shift-plan toggle, farm-shape update, or admin
+    // flip therefore leaves the stored derivation stale — Hicks's
+    // round-2 finding. When the view captures live inputs into
+    // `automaticInputs`, the derivation must recompute a fresh
+    // Automatic reading rather than trust the stored one.
+
+    func testNavigationSettingsAutomaticPrefersLiveInputsOverStaleStoredDerivation() {
+        // Router's stored derivation still claims simple layout, but
+        // live inputs (multi-account shape, shifts on, admin) would
+        // resolve to two-modes right now. The subtitle must reflect
+        // the fresh live derivation, not the stale stored one.
+        var context = OversightRowSubtitleContext.unknown
+        context.navigationPreference = .automatic
+        context.automaticDerivation = NavigationShellDerivation(
+            shell: .simple,
+            explanation: "Stale reading from before shifts were enabled."
+        )
+        context.automaticInputs = AutomaticInputsSnapshot(
+            farmShape: FarmShape(
+                accountCount: 3,
+                locationCount: 4,
+                printerCount: 12
+            ),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        )
+
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .navigationSettings, in: context),
+            "Automatic · currently the two-modes layout"
+        )
+    }
+
+    func testNavigationSettingsAutomaticFallsBackToStoredDerivationWhenLiveInputsMissing() {
+        // Transient case: view has not yet captured live inputs. Fall
+        // back to whatever the router established so the subtitle
+        // still has a shell to name.
+        var context = OversightRowSubtitleContext.unknown
+        context.navigationPreference = .automatic
+        context.automaticDerivation = NavigationShellDerivation(
+            shell: .twoModes,
+            explanation: "Router-established."
+        )
+        XCTAssertNil(context.automaticInputs)
+
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .navigationSettings, in: context),
+            "Automatic · currently the two-modes layout"
+        )
+    }
+
+    func testNavigationSettingsAutomaticRecomputesAfterShiftPlanToggle() {
+        // Same server/user (so router would NOT recompute
+        // establishedAutomaticDerivation). Shift plan flips from off
+        // to on, promoting the automatic reading from simple to
+        // two-modes. The subtitle must reflect the toggle in real
+        // time from the live inputs, without needing a router
+        // context change.
+        let shape = FarmShape(
+            accountCount: 2,
+            locationCount: 1,
+            printerCount: 5
+        )
+        var context = OversightRowSubtitleContext.unknown
+        context.navigationPreference = .automatic
+        context.automaticDerivation = NavigationShellDerivation(
+            shell: .simple,
+            explanation: "Captured when shifts were off."
+        )
+        context.automaticInputs = AutomaticInputsSnapshot(
+            farmShape: shape,
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        )
+
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .navigationSettings, in: context),
+            "Automatic · currently the simple layout"
+        )
+
+        // Shift plan flips on — no router context change, stored
+        // derivation still says simple. Live inputs must win.
+        context.automaticInputs?.shiftPlanEnabled = true
+
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .navigationSettings, in: context),
+            "Automatic · currently the two-modes layout"
+        )
+    }
+
+    func testNavigationSettingsAutomaticRecomputesAfterAdminDemotion() {
+        // Same server/user, admin flag flips from true to false. On
+        // its own that demotion drops the automatic reading back to
+        // simple (non-admin accounts always take the simple layout).
+        // The router does not treat admin change as a context change,
+        // so the subtitle needs to see it via live inputs.
+        let shape = FarmShape(
+            accountCount: 3,
+            locationCount: 2,
+            printerCount: 8
+        )
+        var context = OversightRowSubtitleContext.unknown
+        context.navigationPreference = .automatic
+        context.automaticDerivation = NavigationShellDerivation(
+            shell: .twoModes,
+            explanation: "Captured while user was admin."
+        )
+        context.automaticInputs = AutomaticInputsSnapshot(
+            farmShape: shape,
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        )
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .navigationSettings, in: context),
+            "Automatic · currently the two-modes layout"
+        )
+
+        context.automaticInputs?.isFarmAdmin = false
+
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .navigationSettings, in: context),
+            "Automatic · currently the simple layout"
+        )
+    }
+
+    func testNavigationSettingsAutomaticRecomputesAfterFarmShapeGrowth() {
+        // Same server/user, but a live shape update lands (a second
+        // account is added). The automatic reading promotes from
+        // simple to two-modes. Router will NOT recompute — the
+        // subtitle must still track it via live inputs.
+        var context = OversightRowSubtitleContext.unknown
+        context.navigationPreference = .automatic
+        context.automaticDerivation = NavigationShellDerivation(
+            shell: .simple,
+            explanation: "Captured when there was one account."
+        )
+        context.automaticInputs = AutomaticInputsSnapshot(
+            farmShape: FarmShape(
+                accountCount: 1,
+                locationCount: 1,
+                printerCount: 4
+            ),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        )
+
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .navigationSettings, in: context),
+            "Automatic · currently the simple layout"
+        )
+
+        context.automaticInputs?.farmShape = FarmShape(
+            accountCount: 2,
+            locationCount: 1,
+            printerCount: 5
+        )
+
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .navigationSettings, in: context),
+            "Automatic · currently the two-modes layout"
         )
     }
 
