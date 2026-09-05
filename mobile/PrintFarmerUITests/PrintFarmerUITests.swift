@@ -139,7 +139,7 @@ class PrintFarmerUITestCase: XCTestCase {
             }
 
             revealSidebarIfCollapsed()
-            let sidebarButtons = app.descendants(matching: .any)
+            let sidebarButtons = app.buttons
                 .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
                 .allElementsBoundByIndex
                 .filter(\.exists)
@@ -157,7 +157,7 @@ class PrintFarmerUITestCase: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
 
-        return app.descendants(matching: .any)
+        return app.buttons
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
             .allElementsBoundByIndex
             .filter(\.exists)

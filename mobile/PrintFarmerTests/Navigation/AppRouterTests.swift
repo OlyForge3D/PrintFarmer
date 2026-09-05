@@ -1031,6 +1031,56 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(router.fleetPath.count, 1)
     }
 
+    func testExpandedSidebarPrinterDeepLinkUsesSelectedOversightSectionDespiteFloorMode() async {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .floor,
+            capabilities: capabilities
+        )
+        router.setExpandedSidebarPresentation(
+            true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.selectTab(.jobs, capabilities: capabilities)
+        router.oversightJobsPath.append(AppDestination.jobQueue)
+
+        router.navigate(
+            to: .printerDetail(id: printerId),
+            capabilities: capabilities
+        )
+
+        XCTAssertEqual(router.activeMode, .floor)
+        XCTAssertEqual(router.selectedTab, .fleet)
+        XCTAssertEqual(router.oversightJobsPath.count, 1)
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertTrue(router.printersPath.isEmpty)
+        XCTAssertEqual(router.fleetPath.count, 1)
+    }
+
+    func testExpandedSidebarFilamentSwapUsesSelectedFloorSectionDespiteOversightMode() {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+        router.setExpandedSidebarPresentation(
+            true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.selectTab(.farm, capabilities: capabilities)
+
+        router.routeToFilamentSwap(printerID: printerId, toolheadID: nil)
+
+        XCTAssertEqual(router.activeMode, .oversight)
+        XCTAssertEqual(router.selectedTab, .farm)
+        XCTAssertEqual(router.printersPath.count, 1)
+        XCTAssertTrue(router.fleetPath.isEmpty)
+    }
+
     func testPrinterDeepLinkFallsBackWhenFleetIsUnavailable() async {
         let router = AppRouter()
         let availability = OversightNavigationAvailability(

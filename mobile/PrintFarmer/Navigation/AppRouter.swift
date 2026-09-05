@@ -481,12 +481,6 @@ final class AppRouter {
         }
     }
 
-    private var printerDestinationTab: AppTab {
-        activeShell == .twoModes && activeMode == .oversight
-            ? .fleet
-            : .farm
-    }
-
     private func resetPrinterPath(for tab: AppTab) {
         switch tab {
         case .fleet:

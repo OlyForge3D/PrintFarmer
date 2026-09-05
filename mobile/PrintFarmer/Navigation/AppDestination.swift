@@ -266,6 +266,23 @@ enum AppTab: String, Hashable, CaseIterable, Sendable {
 }
 
 extension AppRouter {
+    var printerDestinationTab: AppTab {
+        if presentsExpandedSidebar {
+            switch selectedTab {
+            case .overview, .fleet, .jobs, .upkeep, .reports:
+                return .fleet
+            case .attention, .farm, .tasks, .inventory:
+                return .farm
+            case .oversight:
+                break
+            }
+        }
+
+        return activeShell == .twoModes && activeMode == .oversight
+            ? .fleet
+            : .farm
+    }
+
     func visibleTabs(
         in sidebarSection: SidebarSection,
         for capabilities: ResolvedSystemCapabilities
