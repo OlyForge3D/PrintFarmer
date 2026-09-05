@@ -465,6 +465,7 @@
 		F7060001000000000000A032 /* SystemCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A031 /* SystemCapabilities.swift */; };
 		F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A041 /* SystemCapabilitiesService.swift */; };
 		F7060001000000000000B002 /* AppRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000B001 /* AppRouterTests.swift */; };
+		F24250010000000000000002 /* AdaptiveNavigationRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24250010000000000000001 /* AdaptiveNavigationRegressionTests.swift */; };
 		F7060001000000000000B012 /* SystemCapabilitiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000B011 /* SystemCapabilitiesTests.swift */; };
 		241500000000000000000002 /* FarmShape.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241500000000000000000001 /* FarmShape.swift */; };
 		241500000000000000000004 /* FarmShapeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241500000000000000000003 /* FarmShapeService.swift */; };
@@ -876,6 +877,7 @@
 		F7060001000000000000A031 /* SystemCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilities.swift; sourceTree = "<group>"; };
 		F7060001000000000000A041 /* SystemCapabilitiesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesService.swift; sourceTree = "<group>"; };
 		F7060001000000000000B001 /* AppRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouterTests.swift; sourceTree = "<group>"; };
+		F24250010000000000000001 /* AdaptiveNavigationRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveNavigationRegressionTests.swift; sourceTree = "<group>"; };
 		F7060001000000000000B011 /* SystemCapabilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesTests.swift; sourceTree = "<group>"; };
 		241500000000000000000001 /* FarmShape.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmShape.swift; sourceTree = "<group>"; };
 		241500000000000000000003 /* FarmShapeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmShapeService.swift; sourceTree = "<group>"; };
@@ -1659,6 +1661,7 @@
 			isa = PBXGroup;
 			children = (
 				F7060001000000000000B001 /* AppRouterTests.swift */,
+				F24250010000000000000001 /* AdaptiveNavigationRegressionTests.swift */,
 				C7D2128F28601E1ED8FEE835 /* DeepLinkHandlerTests.swift */,
 				F78800000000000000000003 /* TaskActionRouteResolverTests.swift */,
 				F24170080000000000000008 /* OversightCatalogTests.swift */,
@@ -1925,6 +1928,7 @@
 				F2A1B2C3D4E5F6A7B8C9D0E1 /* AddSpoolViewModelTests.swift in Sources */,
 				F2C1D2E3F4A5B6C7D8E9F0A1 /* SpoolInventoryViewModelTests.swift in Sources */,
 				F7060001000000000000B002 /* AppRouterTests.swift in Sources */,
+				F24250010000000000000002 /* AdaptiveNavigationRegressionTests.swift in Sources */,
 				F24170090000000000000009 /* OversightCatalogTests.swift in Sources */,
 				F24170230000000000000023 /* OversightRowSubtitlesTests.swift in Sources */,
 				F7060001000000000000B012 /* SystemCapabilitiesTests.swift in Sources */,

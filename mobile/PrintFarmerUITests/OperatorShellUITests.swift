@@ -65,7 +65,8 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
             )
             XCTAssertTrue(
                 button.exists,
-                "Destination '\(destination.tabTitle)' should be present in the operator shell — tab bar '\(destination.tabTitle)' or sidebar '\(destination.sidebarIdentifier)'"
+                "Destination '\(destination.tabTitle)' should be present in the operator shell "
+                    + "as tab '\(destination.tabTitle)' or sidebar '\(destination.sidebarIdentifier)'"
             )
         }
 
@@ -470,5 +471,65 @@ final class TwoModesOperatorShellUITests: PrintFarmerUITestCase {
         }
         XCTAssertFalse(tabBar.buttons["Scan"].exists)
         XCTAssertFalse(tabBar.buttons["Oversight"].exists)
+    }
+}
+
+@MainActor
+final class SimpleShellChromeRegressionUITests: PrintFarmerUITestCase {
+    override var additionalLaunchArguments: [String] {
+        ["--uitesting-navigation-chrome"]
+    }
+
+    func testEveryRenderedSimpleRootUsesCanonicalChrome() {
+        assertEveryRenderedRootHasCanonicalChrome(expectsModeControl: false)
+    }
+}
+
+@MainActor
+final class TwoModesChromeRegressionUITests: PrintFarmerUITestCase {
+    override var additionalLaunchArguments: [String] {
+        ["--uitesting-navigation-chrome", "--uitesting-two-modes"]
+    }
+
+    func testEveryRenderedRootInBothModesUsesCanonicalChrome() throws {
+        try requireCompactAdaptiveShell()
+        assertEveryRenderedRootHasCanonicalChrome(expectsModeControl: true)
+
+        let modeControl = app.segmentedControls
+            .matching(identifier: "navigation.modeControl")
+            .firstMatch
+        XCTAssertTrue(modeControl.waitForExistence(timeout: 5))
+        modeControl.buttons["Oversight"].tap()
+
+        assertEveryRenderedRootHasCanonicalChrome(expectsModeControl: true)
+    }
+
+    func testPushedScreenCarriesNoRootChrome() throws {
+        try requireCompactAdaptiveShell()
+        let modeControl = app.segmentedControls
+            .matching(identifier: "navigation.modeControl")
+            .firstMatch
+        XCTAssertTrue(modeControl.waitForExistence(timeout: 8))
+        modeControl.buttons["Oversight"].tap()
+
+        let overview = renderedShellRoots().first
+        XCTAssertNotNil(overview)
+        if let overview {
+            selectRoot(overview)
+        }
+
+        let destination = app.buttons["oversight.destination.dashboard"]
+        XCTAssertTrue(destination.waitForExistence(timeout: 5))
+        destination.tap()
+        XCTAssertTrue(app.navigationBars["Dashboard"].waitForExistence(timeout: 5))
+
+        XCTAssertFalse(app.buttons["navigation.serverSwitcher"].isHittable)
+        XCTAssertFalse(app.buttons["navigation.account"].isHittable)
+        XCTAssertFalse(
+            app.segmentedControls
+                .matching(identifier: "navigation.modeControl")
+                .firstMatch
+                .isHittable
+        )
     }
 }

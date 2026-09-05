@@ -11,11 +11,16 @@ final class OversightUpgradeOfferUITests: PrintFarmerUITestCase {
 
         let turnOn = app.buttons["oversight.upgradeOffer.turnOn"]
         XCTAssertTrue(turnOn.waitForExistence(timeout: 8))
+        XCTAssertFalse(app.segmentedControls["navigation.modeControl"].exists)
 
         let notNow = app.buttons["oversight.upgradeOffer.notNow"]
         XCTAssertTrue(notNow.exists)
         notNow.tap()
         XCTAssertTrue(turnOn.waitForNonExistence(timeout: 2))
+        XCTAssertFalse(
+            app.segmentedControls["navigation.modeControl"].exists,
+            "Dismissing the offer must not change shells"
+        )
     }
 
     func testTurningOnOfferSwitchesToTwoModes() {
