@@ -118,7 +118,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // Additional UI state for advanced fields (if needed)
   // (Removed unused discoveryTimeout, maxConcurrentScans, scanPorts)
   const [networkErrors, setNetworkErrors] = useState<string | null>(null);
-  const [networkFieldErrors, setNetworkFieldErrors] = useState<Record<NetworkDiscoveryLimitField, string>>({});
+  const [networkFieldErrors, setNetworkFieldErrors] = useState<Partial<Record<NetworkDiscoveryLimitField, string>>>({});
   const clientTimeoutInputRef = useRef<HTMLInputElement>(null);
   const requestDelayInputRef = useRef<HTMLInputElement>(null);
   const maxConcurrentRequestsInputRef = useRef<HTMLInputElement>(null);
@@ -332,7 +332,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   const validateNetwork = () => {
     if (!networkDiscoverySettings) return false;
-    const fieldErrors: Record<NetworkDiscoveryLimitField, string> = {};
+    const fieldErrors: Partial<Record<NetworkDiscoveryLimitField, string>> = {};
     for (const field of networkFieldOrder) {
       if ((networkDiscoverySettings[field] ?? 0) <= 0) {
         fieldErrors[field] = `${networkDiscoveryLimitLabels[field]} must be greater than zero`;
