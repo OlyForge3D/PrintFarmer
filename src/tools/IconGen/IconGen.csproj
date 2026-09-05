@@ -12,6 +12,6 @@
   <ItemGroup>
     <PackageReference Include="Svg.Skia" Version="4.5.0" />
     <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.2" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Macos" Version="3.119.2" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Macos" Version="4.151.2" />
   </ItemGroup>
 </Project>
