@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F24530000000000000000006 /* ScanViewModelPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24530000000000000000005 /* ScanViewModelPresentationTests.swift */; };
+		F24530000000000000000004 /* ScanPresentationReadiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24530000000000000000003 /* ScanPresentationReadiness.swift */; };
+		F24530000000000000000002 /* AppRouter+Scanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24530000000000000000001 /* AppRouter+Scanning.swift */; };
 		1667A0000000000000000101 /* NetworkHostClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1667A0000000000000000001 /* NetworkHostClassifier.swift */; };
 		1667A0000000000000000102 /* CertificatePinStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1667A0000000000000000002 /* CertificatePinStore.swift */; };
 		1667A0000000000000000103 /* CertificateTrustCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1667A0000000000000000003 /* CertificateTrustCoordinator.swift */; };
@@ -563,6 +566,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F24530000000000000000005 /* ScanViewModelPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewModelPresentationTests.swift; sourceTree = "<group>"; };
+		F24530000000000000000003 /* ScanPresentationReadiness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanPresentationReadiness.swift; sourceTree = "<group>"; };
+		F24530000000000000000001 /* AppRouter+Scanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppRouter+Scanning.swift"; sourceTree = "<group>"; };
 		1667A0000000000000000001 /* NetworkHostClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkHostClassifier.swift; sourceTree = "<group>"; };
 		1667A0000000000000000002 /* CertificatePinStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificatePinStore.swift; sourceTree = "<group>"; };
 		1667A0000000000000000003 /* CertificateTrustCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificateTrustCoordinator.swift; sourceTree = "<group>"; };
@@ -1248,6 +1254,7 @@ B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; incl
 				G1324516876342C9A7B5305E /* DispatchViewModelTests.swift */,
 				G1EE99D3914544B496FD266B /* UptimeViewModelTests.swift */,
 				3B77A2FE86D1154248756C5A /* ScanViewModelTests.swift */,
+				F24530000000000000000005 /* ScanViewModelPresentationTests.swift */,
 				32DEA03A8035CAB7B908215E /* HarvestViewModelTests.swift */,
 				27F17A591BE794A57D83307E /* PartsInventoryViewModelTests.swift */,
 				976554965D98BFA6F917FA14 /* PartAdjustmentViewModelTests.swift */,
@@ -1325,6 +1332,7 @@ B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; incl
 				F24170010000000000000001 /* OversightCatalog.swift */,
 				AF81383E489642A1A80EE943 /* DeepLinkHandler.swift */,
 				4FD237969E9A136249F6351A /* AppRouter.swift */,
+				F24530000000000000000001 /* AppRouter+Scanning.swift */,
 				F78800000000000000000001 /* TaskActionRoute.swift */,
 			);
 			path = Navigation;
@@ -1681,6 +1689,7 @@ B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; incl
 			isa = PBXGroup;
 			children = (
 				F7060001000000000000A011 /* ScanFlowView.swift */,
+				F24530000000000000000003 /* ScanPresentationReadiness.swift */,
 				6F6608F46256F5914589FD48 /* HarvestSheetView.swift */,
 				40AE68126C0013F4366194BF /* BinScanResultView.swift */,
 				07D94FCFA57014B2932689A3 /* PartScanResultView.swift */,
@@ -2001,6 +2010,7 @@ FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
 				F711A0005000000000000002 /* PrinterServiceFallbackTests.swift in Sources */,
 				8D2EDA47F2053E4ECD46CC15 /* MockPartsInventoryService.swift in Sources */,
 				1BBE2F4594687816DAE0838A /* ScanViewModelTests.swift in Sources */,
+				F24530000000000000000006 /* ScanViewModelPresentationTests.swift in Sources */,
 				2686C148AE9D2C643157A837 /* HarvestViewModelTests.swift in Sources */,
 				E9DC782356C902A24D0D9172 /* PartsInventoryViewModelTests.swift in Sources */,
 				E6B5C07C74F94339C65677B7 /* PartsInventoryConflictTests.swift in Sources */,
@@ -2089,6 +2099,7 @@ FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
 				F24170020000000000000002 /* OversightCatalog.swift in Sources */,
 				14D1CA5B7AC14F03A2C76A77 /* DeepLinkHandler.swift in Sources */,
 				2007393C70EEAD89185ADC84 /* AppRouter.swift in Sources */,
+				F24530000000000000000002 /* AppRouter+Scanning.swift in Sources */,
 				3D4D27461FC81A2D849419A4 /* JobServiceProtocol.swift in Sources */,
 				E46139D1458EC8E0E1D8E832 /* NotificationServiceProtocol.swift in Sources */,
 				1D1B7EDF3FD6B2A17D268882 /* PrinterServiceProtocol.swift in Sources */,
@@ -2231,6 +2242,7 @@ FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
 				A4C8D9E0123456789ABCD002 /* DisabledControlStyle.swift in Sources */,
 				F7060001000000000000A002 /* AttentionView.swift in Sources */,
 				F7060001000000000000A012 /* ScanFlowView.swift in Sources */,
+				F24530000000000000000004 /* ScanPresentationReadiness.swift in Sources */,
 				F7060001000000000000A022 /* AdvancedPrinterControlsView.swift in Sources */,
 				F7060001000000000000A032 /* SystemCapabilities.swift in Sources */,
 				F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */,

@@ -70,6 +70,7 @@ final class ScanViewModel {
     /// spool import here.
     var pendingSpoolBarcode: String?
     var recentScans: [RecentScan] = []
+    private(set) var hasFinishedNavigation = false
     var isViewActive = true {
         didSet {
             if isViewActive { startQueuedExternalScanIfNeeded() }
@@ -78,12 +79,14 @@ final class ScanViewModel {
 
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "ScanStation")
     private var scanner: (any BarcodeScannerProtocol)?
+    private var waitForScannerPresentation: @MainActor () async -> Bool = { true }
     private var partsInventoryService: (any PartsInventoryServiceProtocol)?
     private var barcodeIntakeService: (any BarcodeIntakeServiceProtocol)?
     private var spoolService: (any SpoolServiceProtocol)?
     private var printedPartsInventoryEnabled = true
     private var printedPartsCapabilityGeneration = 0
     private var handledExternalScanRequestID: UUID?
+    private var isResultPresentationActive = false
     // Overlapping requests coalesce into one retry through the existing scanner pipeline.
     private var queuedExternalScanRequestID: UUID?
 
@@ -92,9 +95,11 @@ final class ScanViewModel {
         partsInventoryService: any PartsInventoryServiceProtocol,
         barcodeIntakeService: any BarcodeIntakeServiceProtocol,
         spoolService: any SpoolServiceProtocol,
-        printedPartsInventoryEnabled: Bool = true
+        printedPartsInventoryEnabled: Bool = true,
+        waitForScannerPresentation: @escaping @MainActor () async -> Bool = { true }
     ) {
         self.scanner = scanner
+        self.waitForScannerPresentation = waitForScannerPresentation
         self.partsInventoryService = partsInventoryService
         self.barcodeIntakeService = barcodeIntakeService
         self.spoolService = spoolService
@@ -115,15 +120,24 @@ final class ScanViewModel {
             break
         }
         recentScans.removeAll(where: \.requiresPrintedPartsInventory)
+        startQueuedExternalScanIfNeeded()
     }
 
     var isScannerAvailable: Bool {
         scanner?.isAvailable ?? false
     }
 
+    private var isAwaitingResultAcknowledgment: Bool {
+        pendingOutcome != nil || pendingSpoolBarcode != nil
+            || pendingDeepLinkDestination != nil || errorMessage != nil
+            || isResultPresentationActive
+    }
+
     func scan() {
-        guard isViewActive, !isScanning else { return }
+        guard isViewActive, !isScanning, !hasFinishedNavigation,
+              !isAwaitingResultAcknowledgment else { return }
         guard let scanner, scanner.isAvailable else {
+            consumeQueuedExternalScanRequest()
             errorMessage = "Scanning is not available on this device."
             return
         }
@@ -132,10 +146,15 @@ final class ScanViewModel {
         errorMessage = nil
 
         Task {
+            var presentationReady = false
             defer {
                 isScanning = false
-                startQueuedExternalScanIfNeeded()
+                if presentationReady { startQueuedExternalScanIfNeeded() }
             }
+            presentationReady = await waitForScannerPresentation()
+            guard presentationReady, isViewActive, !hasFinishedNavigation,
+                  !isAwaitingResultAcknowledgment else { return }
+            consumeQueuedExternalScanRequest()
             let result = await scanner.scanBarcode()
             guard isViewActive else { return }
             switch result {
@@ -157,10 +176,24 @@ final class ScanViewModel {
     }
 
     private func startQueuedExternalScanIfNeeded() {
-        guard isViewActive, !isScanning, let queuedExternalScanRequestID else { return }
+        guard queuedExternalScanRequestID != nil else { return }
+        scan()
+    }
+
+    private func consumeQueuedExternalScanRequest() {
+        guard let queuedExternalScanRequestID else { return }
         handledExternalScanRequestID = queuedExternalScanRequestID
         self.queuedExternalScanRequestID = nil
-        scan()
+    }
+
+    /// Retire this flow before routing, handing unstarted work back to its owner.
+    func finishNavigation() -> UUID? {
+        hasFinishedNavigation = true
+        isViewActive = false
+        pendingDeepLinkDestination = nil
+        let requestID = queuedExternalScanRequestID
+        consumeQueuedExternalScanRequest()
+        return requestID
     }
 
     /// Type-dispatches a single scanned code. Exposed directly (in addition
@@ -357,6 +390,16 @@ final class ScanViewModel {
 
     func clearError() {
         errorMessage = nil
+        startQueuedExternalScanIfNeeded()
+    }
+
+    func resultPresentationDidAppear() {
+        isResultPresentationActive = true
+    }
+
+    func resultPresentationDidDismiss() {
+        isResultPresentationActive = false
+        startQueuedExternalScanIfNeeded()
     }
 
     private func recordRecentScan(

@@ -29,6 +29,7 @@ struct InventoryView: View {
     @Environment(AppRouter.self) private var router
     @State private var segment: Segment = .spools
     @State private var showExternalScan = false
+    @State private var externalScanSessionActive = false
     @State private var externalScanRequestID: UUID?
 
     var body: some View {
@@ -75,14 +76,17 @@ struct InventoryView: View {
         .onChange(of: router.pendingExternalScanRequestID) {
             presentPendingExternalScan()
         }
-        .sheet(isPresented: $showExternalScan) {
+        .onChange(of: router.isScanFlowDismissing) {
+            presentPendingExternalScan()
+        }
+        .sheet(isPresented: $showExternalScan, onDismiss: {
+            externalScanSessionActive = false
+            externalScanRequestID = nil
+            router.completeScanFlowDismissal(capabilities: services.capabilitiesService.resolved)
+            presentPendingExternalScan()
+        }, content: {
             ScanFlowView(externalScanRequestID: externalScanRequestID)
-        }
-        .onChange(of: showExternalScan) { _, isPresented in
-            if !isPresented {
-                externalScanRequestID = nil
-            }
-        }
+        })
     }
 
     @ViewBuilder
@@ -96,10 +100,12 @@ struct InventoryView: View {
     }
 
     private func presentPendingExternalScan() {
+        guard !externalScanSessionActive || showExternalScan else { return }
         let requestID = router.pendingExternalScanRequestID
         guard router.consumeExternalScanRequest() else { return }
         segment = .spools
         externalScanRequestID = requestID
+        externalScanSessionActive = true
         showExternalScan = true
     }
 }

@@ -489,6 +489,48 @@ final class ScanViewModelTests: XCTestCase {
 extension ScanViewModelTests {
     // MARK: - External scan request overlap
     @MainActor
+    func testQueuedExternalScanTransfersAfterPrinterNavigationInsteadOfReopeningCamera() async {
+        let printerID = UUID()
+        await assertQueuedScanTransfersAfterNavigation(
+            code: "printfarmer://printer/\(printerID)",
+            destination: .printerDetail(id: printerID)
+        )
+    }
+
+    @MainActor
+    func testQueuedExternalScanTransfersAfterExistingSpoolNavigationInsteadOfReopeningCamera() async {
+        await assertQueuedScanTransfersAfterNavigation(
+            code: "printfarmer://spool/42",
+            destination: .spoolDetail(id: 42)
+        )
+    }
+
+    @MainActor
+    func testExternalScanDeactivatedBeforeTaskRunsRetainsRequestWithoutInvokingCamera() async {
+        let (viewModel, scanner) = makeControlledSubject()
+        let requestID = UUID()
+        viewModel.requestExternalScan(requestID)
+        let stopped = expectation(description: "Inactive scan task stopped")
+        withObservationTracking {
+            _ = viewModel.isScanning
+        } onChange: {
+            stopped.fulfill()
+        }
+        viewModel.isViewActive = false
+        await fulfillment(of: [stopped], timeout: 2)
+        XCTAssertFalse(viewModel.isScanning)
+        XCTAssertEqual(scanner.callCount, 0, "Activity must be checked inside the camera task")
+
+        scanner.scanStarted = expectation(description: "Retained request resumes")
+        viewModel.isViewActive = true
+        await fulfillment(of: [scanner.scanStarted], timeout: 2)
+        await completeScan(viewModel, scanner, returning: .cancelled)
+        viewModel.requestExternalScan(requestID)
+        XCTAssertFalse(viewModel.isScanning)
+        XCTAssertEqual(scanner.callCount, 1)
+    }
+
+    @MainActor
     func testExternalRequestStartsOnceDespiteRedeliveryDuringAndAfterScan() async {
         let (viewModel, scanner) = makeControlledSubject()
         let requestID = UUID()
@@ -529,7 +571,7 @@ extension ScanViewModelTests {
     }
 
     @MainActor
-    func testQueuedExternalScanStartsAfterSuccessfulBarcodeDispatch() async {
+    func testQueuedExternalScanWaitsForSuccessfulResultSheetDismissal() async {
         let partsService = MockPartsInventoryService()
         let (viewModel, scanner) = makeControlledSubject(partsService: partsService)
         partsService.binToResolve = makeBin(code: "BIN-OVERLAP", name: "Overlap shelf")
@@ -538,13 +580,21 @@ extension ScanViewModelTests {
         await fulfillment(of: [scanner.scanStarted], timeout: 2)
 
         viewModel.requestExternalScan(UUID())
-        scanner.scanStarted = expectation(description: "Retry after dispatch")
-        scanner.complete(.barcode("BIN-OVERLAP"))
-        await fulfillment(of: [scanner.scanStarted], timeout: 2)
+        await completeScan(viewModel, scanner, returning: .barcode("BIN-OVERLAP"))
 
         XCTAssertEqual(partsService.resolveBinCodes, ["BIN-OVERLAP"])
         XCTAssertEqual(viewModel.recentScans.first?.title, "Overlap shelf")
         XCTAssertNotNil(viewModel.pendingOutcome)
+        XCTAssertEqual(scanner.callCount, 1)
+        viewModel.resultPresentationDidAppear()
+        viewModel.pendingOutcome = nil
+        viewModel.scan()
+        viewModel.isViewActive = true
+        XCTAssertFalse(viewModel.isScanning, "Clearing the binding must not bypass the sheet's dismissal animation")
+
+        scanner.scanStarted = expectation(description: "Retry after dismissal")
+        viewModel.resultPresentationDidDismiss()
+        await fulfillment(of: [scanner.scanStarted], timeout: 2)
         XCTAssertEqual(scanner.callCount, 2)
         await completeScan(viewModel, scanner, returning: .cancelled)
     }
@@ -597,15 +647,21 @@ extension ScanViewModelTests {
     }
 
     @MainActor
-    func testQueuedExternalScanRetriesAfterScannerErrorAndPreservesErrorHandling() async {
+    func testQueuedExternalScanWaitsForScannerErrorAcknowledgment() async {
         let (viewModel, scanner) = makeControlledSubject()
         scanner.scanStarted = expectation(description: "Initial scan")
         viewModel.requestExternalScan(UUID())
         await fulfillment(of: [scanner.scanStarted], timeout: 2)
         viewModel.requestExternalScan(UUID())
 
-        scanner.scanStarted = expectation(description: "Retry after error")
-        scanner.complete(.error(.permissionDenied))
+        await completeScan(viewModel, scanner, returning: .error(.permissionDenied))
+        XCTAssertEqual(viewModel.errorMessage, SpoolScanError.permissionDenied.localizedDescription)
+        XCTAssertEqual(scanner.callCount, 1)
+        viewModel.scan()
+        XCTAssertFalse(viewModel.isScanning, "An unacknowledged error must not be cleared by a retry")
+
+        scanner.scanStarted = expectation(description: "Retry after error acknowledgment")
+        viewModel.clearError()
         await fulfillment(of: [scanner.scanStarted], timeout: 2)
         await completeScan(viewModel, scanner, returning: .error(.permissionDenied))
 
@@ -709,22 +765,75 @@ extension ScanViewModelTests {
     // MARK: - Helpers
 
     @MainActor
-    private func makeControlledSubject(
-        partsService: MockPartsInventoryService = MockPartsInventoryService()
+    private func assertQueuedScanTransfersAfterNavigation(
+        code: String,
+        destination: DeepLinkDestination
+    ) async {
+        let partsService = MockPartsInventoryService()
+        partsService.resolveBinError = NetworkError.notFound
+        partsService.resolvePartError = NetworkError.notFound
+        let spoolService = MockSpoolService()
+        spoolService.spoolsPageToReturn = SpoolmanPagedResult(items: [makeSpool(id: 42)], totalCount: 1)
+        let (viewModel, scanner) = makeControlledSubject(partsService: partsService, spoolService: spoolService)
+        scanner.scanStarted = expectation(description: "Initial camera")
+        viewModel.requestExternalScan(UUID())
+        await fulfillment(of: [scanner.scanStarted], timeout: 2)
+        let requestID = UUID()
+        viewModel.requestExternalScan(requestID)
+
+        await completeScan(viewModel, scanner, returning: .barcode(code))
+        XCTAssertEqual(viewModel.pendingDeepLinkDestination, destination)
+        XCTAssertEqual(scanner.callCount, 1, "Terminal dispatch must fence the retry before the view observes it")
+        viewModel.scan()
+        XCTAssertFalse(viewModel.isScanning)
+
+        let router = AppRouter()
+        router.beginScanFlowDismissal(queuedExternalRequestID: viewModel.finishNavigation())
+        router.navigate(to: destination, capabilities: .defaults)
+        XCTAssertEqual(router.pendingExternalScanRequestID, requestID)
+        XCTAssertFalse(router.consumeExternalScanRequest(), "The old sheet still owns dismissal")
+        viewModel.isViewActive = true
+        viewModel.scan()
+        XCTAssertFalse(viewModel.isScanning, "A retired flow must never reopen its camera")
+        XCTAssertNil(viewModel.pendingDeepLinkDestination)
+        viewModel.requestExternalScan(requestID)
+        XCTAssertNil(viewModel.finishNavigation(), "Redelivery must not duplicate the transferred request")
+
+        router.completeScanFlowDismissal(capabilities: .defaults)
+        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+        let (replacement, replacementScanner) = makeControlledSubject()
+        replacementScanner.scanStarted = expectation(description: "New owner starts retained request")
+        replacement.requestExternalScan(requestID)
+        await fulfillment(of: [replacementScanner.scanStarted], timeout: 2)
+        await completeScan(replacement, replacementScanner, returning: .cancelled)
+        replacement.requestExternalScan(requestID)
+        XCTAssertFalse(replacement.isScanning)
+        XCTAssertEqual(replacementScanner.callCount, 1)
+        XCTAssertEqual(scanner.callCount, 1)
+    }
+
+    @MainActor
+    func makeControlledSubject(
+        partsService: MockPartsInventoryService = MockPartsInventoryService(),
+        spoolService: MockSpoolService = MockSpoolService(),
+        barcodeService: MockBarcodeIntakeService = MockBarcodeIntakeService(),
+        waitForScannerPresentation: @escaping @MainActor () async -> Bool = { true }
     ) -> (ScanViewModel, ControlledBarcodeScanner) {
-        let (viewModel, _, barcodeService, spoolService) = makeSubject()
+        let viewModel = ScanViewModel()
         let scanner = ControlledBarcodeScanner()
         viewModel.configure(
             scanner: scanner,
             partsInventoryService: partsService,
             barcodeIntakeService: barcodeService,
-            spoolService: spoolService
+            spoolService: spoolService,
+            waitForScannerPresentation: waitForScannerPresentation
         )
         return (viewModel, scanner)
     }
 
     @MainActor
-    private func completeScan(
+    func completeScan(
         _ viewModel: ScanViewModel,
         _ scanner: ControlledBarcodeScanner,
         returning result: BarcodeScanResult
@@ -756,7 +865,7 @@ extension ScanViewModelTests {
     }
 
     @MainActor
-    private final class ControlledBarcodeScanner: BarcodeScannerProtocol {
+    final class ControlledBarcodeScanner: BarcodeScannerProtocol {
         nonisolated let isAvailable = true
         private(set) var callCount = 0
         var scanStarted = XCTestExpectation(description: "Scan started")
@@ -816,7 +925,7 @@ extension ScanViewModelTests {
         )
     }
 
-    private func makeFilament(id: Int, name: String) -> SpoolmanFilament {
+    func makeFilament(id: Int, name: String) -> SpoolmanFilament {
         SpoolmanFilament(
             id: id, name: name, material: "PLA", colorHex: "#000000", vendor: "Vendor",
             density: 1.24, diameter: 1.75, weight: 1000, spoolWeight: 200, price: 25,

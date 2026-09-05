@@ -78,7 +78,8 @@ final class AppRouter {
     var pendingSpoolHighlightId: Int?
     var pendingAttentionItemId: String?
     var pendingFilamentSwap: FilamentSwapDeepLink?
-    private(set) var pendingExternalScanRequestID: UUID?
+    var pendingExternalScanRequestID: UUID?
+    var isScanFlowDismissing = false
     var notificationRoutingError: String?
     private var navigationEpoch = 0
     @ObservationIgnored private let userDefaults: UserDefaults?
@@ -187,6 +188,7 @@ final class AppRouter {
 
     func invalidatePendingNavigation() {
         navigationEpoch &+= 1
+        isScanFlowDismissing = false
         printersPath = NavigationPath()
         tasksPath = NavigationPath()
         jobsPath = NavigationPath()
@@ -504,7 +506,7 @@ final class AppRouter {
         }
     }
 
-    private func makeTabVisibleIfPossible(
+    func makeTabVisibleIfPossible(
         _ tab: AppTab,
         capabilities: ResolvedSystemCapabilities
     ) -> Bool {
@@ -580,20 +582,5 @@ final class AppRouter {
         selectedTab = nextTabs.contains(selectedTab)
             ? selectedTab
             : fallbackTab(for: capabilities)
-    }
-}
-
-extension AppRouter {
-    private func prepareExternalScan(capabilities: ResolvedSystemCapabilities) {
-        guard makeTabVisibleIfPossible(.inventory, capabilities: capabilities) else { return }
-        selectedTab = .inventory
-        inventoryPath = NavigationPath()
-        pendingExternalScanRequestID = UUID()
-    }
-
-    func consumeExternalScanRequest() -> Bool {
-        guard pendingExternalScanRequestID != nil else { return false }
-        pendingExternalScanRequestID = nil
-        return true
     }
 }
