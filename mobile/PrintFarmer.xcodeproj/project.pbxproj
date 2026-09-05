@@ -61,6 +61,8 @@
 		F24120020000000000000002 /* AppDestinationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24120010000000000000001 /* AppDestinationView.swift */; };
 		F24170020000000000000002 /* OversightCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170010000000000000001 /* OversightCatalog.swift */; };
 		F24170040000000000000004 /* OversightHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170030000000000000003 /* OversightHubView.swift */; };
+		F24170210000000000000021 /* OversightRowSubtitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170200000000000000020 /* OversightRowSubtitles.swift */; };
+		F24170230000000000000023 /* OversightRowSubtitlesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170220000000000000022 /* OversightRowSubtitlesTests.swift */; };
 		F24170100000000000000010 /* OversightUpgradeOfferCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170110000000000000011 /* OversightUpgradeOfferCard.swift */; };
 		F24170060000000000000006 /* FilamentCoverageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170050000000000000005 /* FilamentCoverageView.swift */; };
 		F24170090000000000000009 /* OversightCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170080000000000000008 /* OversightCatalogTests.swift */; };
@@ -638,6 +640,8 @@
 		F24120010000000000000001 /* AppDestinationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDestinationView.swift; sourceTree = "<group>"; };
 		F24170010000000000000001 /* OversightCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightCatalog.swift; sourceTree = "<group>"; };
 		F24170030000000000000003 /* OversightHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightHubView.swift; sourceTree = "<group>"; };
+		F24170200000000000000020 /* OversightRowSubtitles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightRowSubtitles.swift; sourceTree = "<group>"; };
+		F24170220000000000000022 /* OversightRowSubtitlesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightRowSubtitlesTests.swift; sourceTree = "<group>"; };
 		F24170110000000000000011 /* OversightUpgradeOfferCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightUpgradeOfferCard.swift; sourceTree = "<group>"; };
 		F24170050000000000000005 /* FilamentCoverageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageView.swift; sourceTree = "<group>"; };
 		F24170080000000000000008 /* OversightCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightCatalogTests.swift; sourceTree = "<group>"; };
@@ -1288,6 +1292,7 @@
 				E83CE3867D23C7CA26C423AB /* AppDestination.swift */,
 				F24120010000000000000001 /* AppDestinationView.swift */,
 				F24170010000000000000001 /* OversightCatalog.swift */,
+				F24170200000000000000020 /* OversightRowSubtitles.swift */,
 				AF81383E489642A1A80EE943 /* DeepLinkHandler.swift */,
 				4FD237969E9A136249F6351A /* AppRouter.swift */,
 				F78800000000000000000001 /* TaskActionRoute.swift */,
@@ -1660,6 +1665,7 @@
 				C7D2128F28601E1ED8FEE835 /* DeepLinkHandlerTests.swift */,
 				F78800000000000000000003 /* TaskActionRouteResolverTests.swift */,
 				F24170080000000000000008 /* OversightCatalogTests.swift */,
+				F24170220000000000000022 /* OversightRowSubtitlesTests.swift */,
 			);
 			path = Navigation;
 			sourceTree = "<group>";
@@ -1924,6 +1930,7 @@
 				F7060001000000000000B002 /* AppRouterTests.swift in Sources */,
 				F24250010000000000000002 /* AdaptiveNavigationRegressionTests.swift in Sources */,
 				F24170090000000000000009 /* OversightCatalogTests.swift in Sources */,
+				F24170230000000000000023 /* OversightRowSubtitlesTests.swift in Sources */,
 				F7060001000000000000B012 /* SystemCapabilitiesTests.swift in Sources */,
 				241500000000000000000006 /* FarmShapeServiceTests.swift in Sources */,
 				F711A0003000000000000002 /* FilamentFallbackGroupModelsTests.swift in Sources */,
@@ -2016,6 +2023,7 @@
 				4097E554D29B3551A59C943D /* AppDestination.swift in Sources */,
 				F24120020000000000000002 /* AppDestinationView.swift in Sources */,
 				F24170020000000000000002 /* OversightCatalog.swift in Sources */,
+				F24170210000000000000021 /* OversightRowSubtitles.swift in Sources */,
 				14D1CA5B7AC14F03A2C76A77 /* DeepLinkHandler.swift in Sources */,
 				2007393C70EEAD89185ADC84 /* AppRouter.swift in Sources */,
 				3D4D27461FC81A2D849419A4 /* JobServiceProtocol.swift in Sources */,
