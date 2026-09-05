@@ -130,16 +130,15 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
             "attention.item.\(maintenanceID)",
             type: .any
         )
-        XCTAssertTrue(
-            maintenanceCard.waitForExistence(timeout: 5),
-            "A pending failure action must not wedge an unrelated card"
-        )
-
         let acknowledge = element(
             "attention.item.\(maintenanceID).action.acknowledge",
             type: .button
         )
         reveal(acknowledge)
+        XCTAssertTrue(
+            maintenanceCard.waitForExistence(timeout: 5),
+            "A pending failure action must not wedge an unrelated card"
+        )
         XCTAssertEqual(acknowledge.label, "Acknowledge")
         acknowledge.tap()
         XCTAssertTrue(
@@ -147,6 +146,11 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
             "The non-failure action must dispatch and refresh independently"
         )
 
+        let retry = element(
+            "attention.item.\(failureID).action.retry",
+            type: .button
+        )
+        reveal(retry)
         let actionError = element(
             "attention.item.\(failureID).action.error",
             type: .any
@@ -161,11 +165,6 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
             )
         )
 
-        let retry = element(
-            "attention.item.\(failureID).action.retry",
-            type: .button
-        )
-        reveal(retry)
         XCTAssertEqual(retry.label, "Retry Resume")
         retry.tap()
 
@@ -239,12 +238,28 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        for _ in 0..<8 where !element.exists || !element.isHittable {
-            if element.exists, element.frame.midY < app.frame.midY {
-                app.swipeDown()
-            } else {
-                app.swipeUp()
+        for _ in 0..<8 {
+            let visibleFrame = visibleAttentionFrame
+            // A thin strip above the tab bar can be hittable without a reliable tap target.
+            if element.exists, element.isHittable, visibleFrame.contains(element.frame) {
+                break
             }
+            let scrollDown = element.exists && element.frame.midY < visibleFrame.midY
+            let start = app.coordinate(withNormalizedOffset: .zero).withOffset(
+                CGVector(
+                    dx: visibleFrame.midX - app.frame.minX,
+                    dy: visibleFrame.midY - app.frame.minY
+                )
+            )
+            let end = start.withOffset(
+                CGVector(dx: 0, dy: visibleFrame.height * (scrollDown ? 0.35 : -0.35))
+            )
+            start.press(
+                forDuration: 0.1,
+                thenDragTo: end,
+                withVelocity: .slow,
+                thenHoldForDuration: 0.1
+            )
         }
         XCTAssertTrue(
             element.waitForExistence(timeout: 5),
@@ -258,6 +273,26 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
             file: file,
             line: line
         )
+        XCTAssertTrue(
+            visibleAttentionFrame.contains(element.frame),
+            "Required control '\(element.identifier)' must be fully clear of navigation and tab bars",
+            file: file,
+            line: line
+        )
+    }
+
+    private var visibleAttentionFrame: CGRect {
+        var frame = app.collectionViews["attention.list"].frame.intersection(app.frame)
+        let navigationBar = app.navigationBars["Attention"]
+        if navigationBar.exists {
+            let top = max(frame.minY, navigationBar.frame.maxY)
+            frame = CGRect(x: frame.minX, y: top, width: frame.width, height: frame.maxY - top)
+        }
+        let tabBar = app.tabBars.firstMatch
+        if tabBar.exists {
+            frame.size.height = min(frame.maxY, tabBar.frame.minY) - frame.minY
+        }
+        return frame.insetBy(dx: 8, dy: 8)
     }
 
     private func navigateBack(
