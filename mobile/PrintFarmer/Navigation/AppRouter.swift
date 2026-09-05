@@ -54,6 +54,7 @@ final class AppRouter {
     private(set) var appliedNavigationPreference: NavigationLayoutPreference?
     private(set) var establishedAutomaticDerivation: NavigationShellDerivation?
     private(set) var oversightAvailability = OversightNavigationAvailability.fullyAvailable
+    var presentsExpandedSidebar = false
     var selectedTab: AppTab {
         didSet {
             userDefaults?.set(selectedTab.rawValue, forKey: Self.selectedTabDefaultsKey)
@@ -239,7 +240,18 @@ final class AppRouter {
     func visibleTabs(
         for capabilities: ResolvedSystemCapabilities
     ) -> [AppTab] {
-        AppTab.visibleTabs(
+        if presentsExpandedSidebar {
+            return SidebarSection.allCases.flatMap {
+                AppTab.visibleTabs(
+                    in: $0,
+                    for: activeShell,
+                    capabilities: capabilities,
+                    oversightAvailability: oversightAvailability
+                )
+            }
+        }
+
+        return AppTab.visibleTabs(
             for: activeShell,
             mode: activeMode,
             capabilities: capabilities,
@@ -412,12 +424,6 @@ final class AppRouter {
         }
     }
 
-    func shouldShowModeControl(for tab: AppTab) -> Bool {
-        activeShell == .twoModes
-            && oversightAvailability.supportsTwoModes
-            && isAtRoot(tab)
-    }
-
     func hasAdaptiveShellConfiguration(serverID: UUID, userID: UUID) -> Bool {
         configuredServerID == serverID && configuredUserID == userID
     }
@@ -432,6 +438,7 @@ final class AppRouter {
         appliedNavigationPreference = nil
         establishedAutomaticDerivation = nil
         oversightAvailability = .fullyAvailable
+        presentsExpandedSidebar = false
         selectedTab = .attention
     }
 

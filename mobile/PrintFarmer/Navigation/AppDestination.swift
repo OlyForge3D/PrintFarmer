@@ -42,6 +42,15 @@ enum OversightMode: Hashable, CaseIterable, Sendable {
     case oversight
 }
 
+enum SidebarSection: String, CaseIterable, Sendable {
+    case floor
+    case oversight
+
+    var title: String {
+        rawValue.capitalized
+    }
+}
+
 /// Every tab addressable by the current and adaptive navigation shells.
 enum AppTab: String, Hashable, CaseIterable, Sendable {
     enum BadgeKind: Hashable {
@@ -120,6 +129,31 @@ enum AppTab: String, Hashable, CaseIterable, Sendable {
             case .attention, .farm, .tasks, .inventory:
                 return true
             }
+        }
+    }
+
+    static func visibleTabs(
+        in section: SidebarSection,
+        for shell: NavigationShell,
+        capabilities: ResolvedSystemCapabilities,
+        oversightAvailability: OversightNavigationAvailability = .fullyAvailable
+    ) -> [AppTab] {
+        switch section {
+        case .floor:
+            let floorShell = shell == .simple ? NavigationShell.simple : .twoModes
+            return visibleTabs(
+                for: floorShell,
+                mode: .floor,
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            ).filter { $0 != .oversight }
+        case .oversight:
+            return visibleTabs(
+                for: .twoModes,
+                mode: .oversight,
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            )
         }
     }
 
@@ -227,5 +261,39 @@ enum AppTab: String, Hashable, CaseIterable, Sendable {
 
     var sidebarAccessibilityIdentifier: String {
         "sidebar.\(rawValue)"
+    }
+}
+
+extension AppRouter {
+    func visibleTabs(
+        in sidebarSection: SidebarSection,
+        for capabilities: ResolvedSystemCapabilities
+    ) -> [AppTab] {
+        AppTab.visibleTabs(
+            in: sidebarSection,
+            for: activeShell,
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
+        )
+    }
+
+    func shouldShowModeControl(for tab: AppTab) -> Bool {
+        activeShell == .twoModes
+            && !presentsExpandedSidebar
+            && oversightAvailability.supportsTwoModes
+            && isAtRoot(tab)
+    }
+
+    func setExpandedSidebarPresentation(
+        _ isExpanded: Bool,
+        capabilities: ResolvedSystemCapabilities,
+        oversightAvailability: OversightNavigationAvailability
+    ) {
+        guard presentsExpandedSidebar != isExpanded else { return }
+        presentsExpandedSidebar = isExpanded
+        reconcileCapabilities(
+            capabilities,
+            oversightAvailability: oversightAvailability
+        )
     }
 }

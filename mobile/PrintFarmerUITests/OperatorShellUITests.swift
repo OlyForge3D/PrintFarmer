@@ -51,12 +51,23 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
             "Operator shell must expose either a compact tab bar or an iPad sidebar"
         )
 
-        let expectedDestinations: [(tabTitle: String, sidebarIdentifier: String)] = [
-            ("Attention", "sidebar.attention"),
-            ("Farm", "sidebar.farm"),
-            ("Inventory", "sidebar.inventory"),
-            ("Oversight", "sidebar.oversight")
-        ]
+        let expectedDestinations: [(tabTitle: String, sidebarIdentifier: String)] = hasTabBar
+            ? [
+                ("Attention", "sidebar.attention"),
+                ("Farm", "sidebar.farm"),
+                ("Inventory", "sidebar.inventory"),
+                ("Oversight", "sidebar.oversight")
+            ]
+            : [
+                ("Attention", "sidebar.attention"),
+                ("Farm", "sidebar.farm"),
+                ("Inventory", "sidebar.inventory"),
+                ("Overview", "sidebar.overview"),
+                ("Fleet", "sidebar.fleet"),
+                ("Jobs", "sidebar.jobs"),
+                ("Upkeep", "sidebar.upkeep"),
+                ("Reports", "sidebar.reports")
+            ]
         for destination in expectedDestinations {
             let button = operatorDestinationButton(
                 tabTitle: destination.tabTitle,
@@ -65,13 +76,20 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
             )
             XCTAssertTrue(
                 button.exists,
-                "Destination '\(destination.tabTitle)' should be present in the operator shell — tab bar '\(destination.tabTitle)' or sidebar '\(destination.sidebarIdentifier)'"
+                "Destination '\(destination.tabTitle)' should be present "
+                    + "in the operator shell — tab bar '\(destination.tabTitle)' "
+                    + "or sidebar '\(destination.sidebarIdentifier)'"
             )
         }
 
         if hasTabBar {
             XCTAssertFalse(app.tabBars.buttons["Tasks"].exists)
             XCTAssertFalse(app.tabBars.buttons["Scan"].exists)
+        } else {
+            XCTAssertTrue(app.staticTexts["sidebar.section.floor"].exists)
+            XCTAssertTrue(app.staticTexts["sidebar.section.oversight"].exists)
+            XCTAssertFalse(app.segmentedControls["navigation.modeControl"].exists)
+            XCTAssertFalse(app.buttons["sidebar.oversight"].exists)
         }
     }
 

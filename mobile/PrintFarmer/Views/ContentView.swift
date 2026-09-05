@@ -187,28 +187,33 @@ struct ContentView: View {
 
     private func iPadLayout(capabilities: ResolvedSystemCapabilities) -> some View {
         @Bindable var router = router
-        let tabs = router.visibleTabs(for: capabilities)
         let resolvedTab = resolvedShippingTab(for: capabilities)
 
         return NavigationSplitView(columnVisibility: $router.sidebarVisibility) {
-            VStack(spacing: 0) {
-                if router.shouldShowModeControl(for: resolvedTab) {
-                    modeControl(capabilities: capabilities)
-                }
-                List {
-                    Section {
-                        ForEach(tabs, id: \.self) { tab in
-                            sidebarButton(
-                                tab: tab,
-                                capabilities: capabilities
-                            )
+            List {
+                ForEach(SidebarSection.allCases, id: \.self) { section in
+                    let tabs = router.visibleTabs(
+                        in: section,
+                        for: capabilities
+                    )
+                    if !tabs.isEmpty {
+                        Section {
+                            ForEach(tabs, id: \.self) { tab in
+                                sidebarButton(
+                                    tab: tab,
+                                    capabilities: capabilities
+                                )
+                            }
+                        } header: {
+                            Text(section.title)
+                                .accessibilityIdentifier(
+                                    "sidebar.section.\(section.rawValue)"
+                                )
                         }
-                    } header: {
-                        Text("Operator")
                     }
                 }
-                .listStyle(.sidebar)
             }
+            .listStyle(.sidebar)
             .navigationTitle("PrintFarmer")
         } detail: {
             tabContentView(for: resolvedTab)
@@ -293,6 +298,12 @@ struct ContentView: View {
         oversightAvailability: OversightNavigationAvailability,
         preserveNavigationOnIdentityUpgrade: Bool = false
     ) {
+        router.setExpandedSidebarPresentation(
+            sizeClass == .regular,
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
+        )
+
         guard let activeServer = serverRegistry.activeServer,
               let navigationIdentity,
               navigationIdentity.serverID == activeServer.id,
@@ -309,11 +320,6 @@ struct ContentView: View {
             shiftPlanEnabled: capabilities.shiftPlanEnabled,
             isFarmAdmin: navigationIdentity.isFarmAdmin
         )
-
-        if sizeClass == .regular {
-            router.presentShippingShell(capabilities: capabilities)
-            return
-        }
 
         router.configureAdaptiveShell(
             serverID: activeServer.id,

@@ -191,6 +191,83 @@ final class AppRouterTests: XCTestCase {
         )
     }
 
+    func testExpandedSidebarUsesExistingFloorAndOversightDestinationContracts() {
+        XCTAssertEqual(
+            AppTab.visibleTabs(
+                in: .floor,
+                for: .simple,
+                capabilities: capabilities
+            ),
+            [.attention, .farm, .inventory]
+        )
+        XCTAssertEqual(
+            AppTab.visibleTabs(
+                in: .floor,
+                for: .twoModes,
+                capabilities: capabilities
+            ),
+            [.attention, .farm, .tasks, .inventory]
+        )
+        XCTAssertEqual(
+            AppTab.visibleTabs(
+                in: .oversight,
+                for: .simple,
+                capabilities: capabilities
+            ),
+            [.overview, .fleet, .jobs, .upkeep, .reports]
+        )
+    }
+
+    func testExpandedSidebarResolvesSelectionsAcrossBothSectionsWithoutModeControl() {
+        let router = AppRouter()
+        router.setNavigationShell(.simple, capabilities: capabilities)
+        router.setExpandedSidebarPresentation(
+            true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(
+            router.visibleTabs(for: capabilities),
+            [.attention, .farm, .inventory, .overview, .fleet, .jobs, .upkeep, .reports]
+        )
+        router.selectTab(.reports, capabilities: capabilities)
+        XCTAssertEqual(router.resolvedTab(for: capabilities), .reports)
+        XCTAssertFalse(router.shouldShowModeControl(for: .reports))
+
+        router.setExpandedSidebarPresentation(
+            false,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        XCTAssertEqual(router.resolvedTab(for: capabilities), .attention)
+    }
+
+    func testExpandedSidebarOmitsCapabilityGatedRowsAndEmptyOversightSection() {
+        var disabled = capabilities
+        disabled.attentionEnabled = false
+        disabled.shiftPlanEnabled = false
+        let unavailable = OversightNavigationAvailability(
+            hasVisibleHubDestinations: false,
+            visibleTabs: []
+        )
+        let router = AppRouter()
+        router.setNavigationShell(.simple, capabilities: disabled)
+        router.setExpandedSidebarPresentation(
+            true,
+            capabilities: disabled,
+            oversightAvailability: unavailable
+        )
+
+        XCTAssertEqual(
+            router.visibleTabs(in: .floor, for: disabled),
+            [.farm, .inventory]
+        )
+        XCTAssertTrue(router.visibleTabs(in: .oversight, for: disabled).isEmpty)
+        router.selectedTab = .reports
+        XCTAssertEqual(router.resolvedTab(for: disabled), .farm)
+    }
+
     func testVisibleTabsRemoveDisabledAttentionAndTasks() {
         var disabled = capabilities
         disabled.attentionEnabled = false
