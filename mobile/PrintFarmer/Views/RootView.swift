@@ -28,7 +28,7 @@ struct RootView: View {
             }
 
             if authViewModel.isAuthenticated && !DemoMode.shared.isActive && isShowingMainContent
-                && connectionMonitor.isReportable {
+                && !UITestBootstrap.isEnabled && connectionMonitor.isReportable {
                 ConnectionStatusBar(monitor: connectionMonitor)
             }
 
@@ -147,7 +147,7 @@ struct RootView: View {
     /// decides *whether* the app is in a state where resuming makes sense.
     @MainActor
     private func resumeConnectivityAfterForeground() {
-        guard isShowingMainContent, !DemoMode.shared.isActive else { return }
+        guard isShowingMainContent, !DemoMode.shared.isActive, !UITestBootstrap.isEnabled else { return }
         connectionMonitor.requestResume()
     }
 
@@ -182,11 +182,15 @@ struct RootView: View {
                     await pendingReadyMonitor.requestNotificationPermission()
                     pendingReadyMonitor.startMonitoring()
                 }
-                connectionMonitor.configure(
-                    apiClient: services.apiClient,
-                    signalRService: services.signalRService
-                )
-                connectionMonitor.start()
+                // UI-test services use a fake server; live probes would insert
+                // an Offline banner mid-interaction and move navigation targets.
+                if !UITestBootstrap.isEnabled {
+                    connectionMonitor.configure(
+                        apiClient: services.apiClient,
+                        signalRService: services.signalRService
+                    )
+                    connectionMonitor.start()
+                }
                 await services.signalRService.ensureConnected()
             }
             .onChange(of: pendingReadyMonitor.pendingReadyCount) { _, newValue in

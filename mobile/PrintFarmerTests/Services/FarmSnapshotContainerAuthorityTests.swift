@@ -549,6 +549,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let slowA = BlockingCapabilitiesService()
         defer { slowA.close() }
         container.capabilitiesService = slowA
+        container.authorizeOfflineWriteReplayBinding()
         let staleSync = Task { await container.syncOfflineWriteQueue() }
         await slowA.refreshBarrier.waitUntilArrived()
 

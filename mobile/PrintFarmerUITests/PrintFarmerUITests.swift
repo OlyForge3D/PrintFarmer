@@ -71,6 +71,12 @@ class PrintFarmerUITestCase: XCTestCase {
     /// (iPhone) or when the sidebar is already visible.
     @discardableResult
     func revealSidebarIfCollapsed(timeout: TimeInterval = 3) -> Bool {
+        let sidebar = app.buttons
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
+            .firstMatch
+        if sidebar.exists {
+            return true
+        }
         let labels = ["Sidebar", "Toggle Sidebar", "Show Sidebar"]
         let toggle = app.buttons
             .matching(NSPredicate(format: "label IN %@", labels))
@@ -79,7 +85,28 @@ class PrintFarmerUITestCase: XCTestCase {
             return false
         }
         toggle.tap()
-        return true
+        if sidebar.waitForExistence(timeout: timeout) {
+            return true
+        }
+
+        // On a cold iPad launch the native toggle can consume its first tap
+        // without opening. Only use the alternate gesture if it still says
+        // Show Sidebar; never blindly toggle again and close a visible sidebar.
+        guard app.buttons["Show Sidebar"].exists else {
+            return false
+        }
+        return revealSidebarFromLeadingEdge(timeout: timeout)
+    }
+
+    @discardableResult
+    func revealSidebarFromLeadingEdge(timeout: TimeInterval = 3) -> Bool {
+        let window = app.windows.firstMatch
+        let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+        let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        return app.buttons
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
+            .firstMatch.waitForExistence(timeout: timeout)
     }
 
     /// Adaptive locator for a shell destination using its shipped identifier.

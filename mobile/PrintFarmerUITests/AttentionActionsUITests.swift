@@ -21,6 +21,31 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
         ]
     }
 
+    func testRevealSearchesBothDirectionsAtLargeDynamicType() {
+        let severity = element(
+            "attention.item.\(failureID).severity",
+            type: .any
+        )
+        XCTAssertTrue(severity.waitForExistence(timeout: 30))
+
+        let retryMedia = element(
+            "attention.item.\(unavailableMediaID).media.retry",
+            type: .button
+        )
+        reveal(retryMedia)
+        XCTAssertEqual(retryMedia.label, "Retry camera snapshot")
+
+        reveal(severity)
+        XCTAssertEqual(severity.label, "Severity, Critical")
+
+        let acknowledge = element(
+            "attention.item.\(maintenanceID).action.acknowledge",
+            type: .button
+        )
+        reveal(acknowledge)
+        XCTAssertEqual(acknowledge.label, "Acknowledge")
+    }
+
     func testFailureMediaStableNavigationAndActionsAtLargeDynamicType() {
         let failureCard = element(
             "attention.item.\(failureID)",
@@ -130,16 +155,15 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
             "attention.item.\(maintenanceID)",
             type: .any
         )
-        XCTAssertTrue(
-            maintenanceCard.waitForExistence(timeout: 5),
-            "A pending failure action must not wedge an unrelated card"
-        )
-
         let acknowledge = element(
             "attention.item.\(maintenanceID).action.acknowledge",
             type: .button
         )
         reveal(acknowledge)
+        XCTAssertTrue(
+            maintenanceCard.waitForExistence(timeout: 5),
+            "A pending failure action must not wedge an unrelated card"
+        )
         XCTAssertEqual(acknowledge.label, "Acknowledge")
         acknowledge.tap()
         XCTAssertTrue(
@@ -147,6 +171,10 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
             "The non-failure action must dispatch and refresh independently"
         )
 
+        let retry = element(
+            "attention.item.\(failureID).action.retry",
+            type: .button
+        )
         let actionError = element(
             "attention.item.\(failureID).action.error",
             type: .any
@@ -161,10 +189,6 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
             )
         )
 
-        let retry = element(
-            "attention.item.\(failureID).action.retry",
-            type: .button
-        )
         reveal(retry)
         XCTAssertEqual(retry.label, "Retry Resume")
         retry.tap()
@@ -239,25 +263,90 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        for _ in 0..<8 where !element.exists || !element.isHittable {
-            if element.exists, element.frame.midY < app.frame.midY {
-                app.swipeDown()
-            } else {
-                app.swipeUp()
+        var searchTowardTop = false
+        var sweepLength = 4
+        var stepsRemaining = sweepLength
+        for _ in 0..<64 {
+            let visibleFrame = visibleAttentionFrame
+            let targetFrame = element.exists ? element.frame : nil
+            // A thin strip above the tab bar can be hittable without a reliable tap target.
+            if let targetFrame, !targetFrame.isEmpty,
+               visibleFrame.contains(targetFrame), element.isHittable {
+                break
             }
+
+            let scrollDown: Bool
+            let distance: CGFloat
+            if let targetFrame, !targetFrame.isEmpty {
+                scrollDown = targetFrame.midY < visibleFrame.midY
+                // Travel across tall cards, then shorten the drag to align the target.
+                distance = min(
+                    max(abs(targetFrame.midY - visibleFrame.midY), 24),
+                    visibleFrame.height * 0.7
+                )
+            } else {
+                // Lazy rows have no AX frame until scrolled into view. Expanding
+                // 4/8/16/32-drag sweeps search both sides of the starting viewport.
+                scrollDown = searchTowardTop
+                distance = visibleFrame.height * 0.7
+                stepsRemaining -= 1
+                if stepsRemaining == 0 {
+                    searchTowardTop.toggle()
+                    sweepLength *= 2
+                    stepsRemaining = sweepLength
+                }
+            }
+            let start = app.coordinate(withNormalizedOffset: .zero).withOffset(
+                CGVector(
+                    dx: visibleFrame.midX - app.frame.minX,
+                    dy: visibleFrame.minY - app.frame.minY
+                        + visibleFrame.height * (scrollDown ? 0.15 : 0.85)
+                )
+            )
+            let end = start.withOffset(
+                CGVector(dx: 0, dy: scrollDown ? distance : -distance)
+            )
+            start.press(
+                forDuration: 0.1,
+                thenDragTo: end,
+                withVelocity: .slow,
+                thenHoldForDuration: 0.1
+            )
         }
-        XCTAssertTrue(
-            element.waitForExistence(timeout: 5),
-            "Required control '\(element.identifier)' does not exist",
-            file: file,
-            line: line
-        )
+        guard element.waitForExistence(timeout: 5) else {
+            XCTFail(
+                "Required attention control did not materialize within the scroll budget",
+                file: file,
+                line: line
+            )
+            return
+        }
         XCTAssertTrue(
             element.isHittable,
             "Required control '\(element.identifier)' is hidden or overlapped at accessibility XXXL",
             file: file,
             line: line
         )
+        XCTAssertTrue(
+            visibleAttentionFrame.contains(element.frame),
+            "Required control '\(element.identifier)' must be fully clear of navigation and tab bars",
+            file: file,
+            line: line
+        )
+    }
+
+    private var visibleAttentionFrame: CGRect {
+        var frame = app.collectionViews["attention.list"].frame.intersection(app.frame)
+        let navigationBar = app.navigationBars["Attention"]
+        if navigationBar.exists {
+            let top = max(frame.minY, navigationBar.frame.maxY)
+            frame = CGRect(x: frame.minX, y: top, width: frame.width, height: frame.maxY - top)
+        }
+        let tabBar = app.tabBars.firstMatch
+        if tabBar.exists {
+            frame.size.height = min(frame.maxY, tabBar.frame.minY) - frame.minY
+        }
+        return frame.insetBy(dx: 8, dy: 8)
     }
 
     private func navigateBack(

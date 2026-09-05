@@ -22,6 +22,23 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
 
     // MARK: - Shell shape (tab bar on iPhone, sidebar on iPad)
 
+    func testMockShellDoesNotShowLiveConnectionBanner() {
+        let attention = shellDestinationButton(
+            tabIdentifier: "tab.attention",
+            timeout: 8
+        )
+        XCTAssertTrue(attention.exists)
+
+        // Cover the monitor's startup grace and subsequent reachability polls.
+        // The mock server must not cause a late banner that moves tap targets.
+        let liveBanner = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true"),
+            object: app.buttons["connection-status-bar"]
+        )
+        liveBanner.isInverted = true
+        wait(for: [liveBanner], timeout: 15)
+    }
+
     func testAppLaunchesOnAttentionTab() {
         let attention = shellDestinationButton(
             tabIdentifier: "tab.attention",
