@@ -15,6 +15,7 @@ enum AppDestination: Hashable {
     case uptimeReliability
     case filamentCoverage
     case predictiveInsights(printerId: UUID?)
+    case jobQueue
     case jobHistory
     case jobTimeline
     case dispatchDashboard
@@ -295,5 +296,25 @@ extension AppRouter {
             capabilities,
             oversightAvailability: oversightAvailability
         )
+    }
+
+    func routeToJobQueue(capabilities: ResolvedSystemCapabilities) {
+        let tabs = visibleTabs(for: capabilities)
+
+        if tabs.contains(.jobs) {
+            selectedTab = .jobs
+            resetToRoot(tab: .jobs)
+            oversightJobsPath.append(AppDestination.jobQueue)
+        } else if tabs.contains(.oversight) {
+            selectedTab = .oversight
+            resetToRoot(tab: .oversight)
+            oversightPath.append(AppDestination.jobQueue)
+        } else if tabs.contains(.tasks) {
+            selectedTab = .tasks
+            resetToRoot(tab: .tasks)
+            tasksPath.append(AppDestination.jobQueue)
+        } else {
+            selectedTab = fallbackTab(for: capabilities)
+        }
     }
 }

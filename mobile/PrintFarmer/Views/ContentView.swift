@@ -68,10 +68,12 @@ struct ContentView: View {
         )
 
         Group {
-            if sizeClass == .regular {
-                iPadLayout(capabilities: capabilities)
-            } else if isCompactShellReady {
-                compactLayout(capabilities: capabilities)
+            if isAdaptiveShellReady {
+                if sizeClass == .regular {
+                    iPadLayout(capabilities: capabilities)
+                } else {
+                    compactLayout(capabilities: capabilities)
+                }
             } else if let navigationIdentityError {
                 navigationIdentityFailure(navigationIdentityError)
             } else {
@@ -298,12 +300,6 @@ struct ContentView: View {
         oversightAvailability: OversightNavigationAvailability,
         preserveNavigationOnIdentityUpgrade: Bool = false
     ) {
-        router.setExpandedSidebarPresentation(
-            sizeClass == .regular,
-            capabilities: capabilities,
-            oversightAvailability: oversightAvailability
-        )
-
         guard let activeServer = serverRegistry.activeServer,
               let navigationIdentity,
               navigationIdentity.serverID == activeServer.id,
@@ -314,6 +310,12 @@ struct ContentView: View {
             )
             return
         }
+
+        router.setExpandedSidebarPresentation(
+            sizeClass == .regular,
+            capabilities: capabilities,
+            oversightAvailability: oversightAvailability
+        )
 
         _ = serverRegistry.observeOversightUpgradeOffer(
             farmShape: services.farmShapeService.latestShape,
@@ -425,7 +427,7 @@ struct ContentView: View {
         }
     }
 
-    private var isCompactShellReady: Bool {
+    private var isAdaptiveShellReady: Bool {
         guard let activeServer = serverRegistry.activeServer,
               let navigationIdentity,
               navigationIdentity.serverID == activeServer.id,

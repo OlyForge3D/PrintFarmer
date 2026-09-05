@@ -123,6 +123,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
 
     func testDashboardReachableFromOversight() {
         openOversightDestination(
+            sidebarRootIdentifier: "sidebar.overview",
             identifier: "oversight.destination.dashboard",
             expectedNavigationBarTitle: "Dashboard"
         )
@@ -130,6 +131,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
 
     func testMaintenanceReachableFromOversight() {
         openOversightDestination(
+            sidebarRootIdentifier: "sidebar.upkeep",
             identifier: "oversight.destination.maintenance",
             expectedNavigationBarTitle: "Maintenance"
         )
@@ -137,6 +139,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
 
     func testPredictiveInsightsReachableFromOversight() {
         openOversightDestination(
+            sidebarRootIdentifier: "sidebar.upkeep",
             identifier: "oversight.destination.predictiveInsights",
             expectedNavigationBarTitle: "Predictive Insights"
         )
@@ -270,18 +273,19 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
     }
 
     private func openOversightDestination(
+        sidebarRootIdentifier: String,
         identifier: String,
         expectedNavigationBarTitle: String,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let oversight = operatorDestinationButton(
+        let root = operatorDestinationButton(
             tabTitle: "Oversight",
-            sidebarIdentifier: "sidebar.oversight",
+            sidebarIdentifier: sidebarRootIdentifier,
             timeout: 5
         )
-        XCTAssertTrue(oversight.exists, file: file, line: line)
-        oversight.tap()
+        XCTAssertTrue(root.exists, file: file, line: line)
+        root.tap()
 
         let destination = app.buttons[identifier]
         XCTAssertTrue(destination.waitForExistence(timeout: 5), file: file, line: line)

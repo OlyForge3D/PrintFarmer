@@ -268,6 +268,39 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(router.resolvedTab(for: disabled), .farm)
     }
 
+    func testJobQueueRoutingUsesVisibleDestinationForEachShellPresentation() {
+        let router = AppRouter()
+
+        router.setNavigationShell(.simple, capabilities: capabilities)
+        router.routeToJobQueue(capabilities: capabilities)
+        XCTAssertEqual(router.selectedTab, .oversight)
+        XCTAssertEqual(router.oversightPath.count, 1)
+
+        router.setExpandedSidebarPresentation(
+            true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.routeToJobQueue(capabilities: capabilities)
+        XCTAssertEqual(router.selectedTab, .jobs)
+        XCTAssertEqual(router.oversightJobsPath.count, 1)
+        XCTAssertFalse(router.visibleTabs(in: .floor, for: capabilities).contains(.tasks))
+
+        router.setExpandedSidebarPresentation(
+            false,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+        router.routeToJobQueue(capabilities: capabilities)
+        XCTAssertEqual(router.selectedTab, .jobs)
+        XCTAssertEqual(router.oversightJobsPath.count, 1)
+    }
+
     func testVisibleTabsRemoveDisabledAttentionAndTasks() {
         var disabled = capabilities
         disabled.attentionEnabled = false

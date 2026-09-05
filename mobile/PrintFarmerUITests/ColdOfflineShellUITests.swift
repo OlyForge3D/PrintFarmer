@@ -27,7 +27,7 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
     private func openColdOfflineShell() -> XCUIElement {
         let oversight = operatorDestinationButton(
             tabTitle: "Oversight",
-            sidebarIdentifier: "sidebar.oversight",
+            sidebarIdentifier: "sidebar.overview",
             timeout: 8
         )
         XCTAssertTrue(oversight.exists)
