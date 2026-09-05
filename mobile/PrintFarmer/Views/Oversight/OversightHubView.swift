@@ -8,6 +8,7 @@ struct OversightHubView: View {
     @Environment(ServerRegistry.self) private var serverRegistry
     @State private var showsUpgradeOffer = false
     @State private var offerServerID: UUID?
+    @State private var subtitleContext = OversightRowSubtitleContext.unknown
 
     private var capabilities: ResolvedSystemCapabilities {
         services.capabilitiesService.resolved
@@ -15,6 +16,17 @@ struct OversightHubView: View {
 
     private var sections: [OversightSectionModel] {
         OversightCatalog.simpleSections(for: capabilities)
+    }
+
+    /// Combine the fetched attention/maintenance signals with router
+    /// state that is already observed by SwiftUI. Reading the router
+    /// fields here keeps the navigation-settings subtitle in sync
+    /// without a redundant fetch.
+    private var resolvedSubtitleContext: OversightRowSubtitleContext {
+        var context = subtitleContext
+        context.navigationPreference = router.appliedNavigationPreference
+        context.automaticDerivation = router.establishedAutomaticDerivation
+        return context
     }
 
     var body: some View {
@@ -32,7 +44,13 @@ struct OversightHubView: View {
             ForEach(sections) { sectionModel in
                 Section(sectionModel.section.title) {
                     ForEach(sectionModel.destinations) { destination in
-                        OversightNavigationRow(destination: destination)
+                        OversightNavigationRow(
+                            destination: destination,
+                            subtitle: OversightRowSubtitles.subtitle(
+                                for: destination,
+                                in: resolvedSubtitleContext
+                            )
+                        )
                     }
                 }
             }
@@ -50,6 +68,9 @@ struct OversightHubView: View {
                 router.fallbackTab(for: capabilities),
                 capabilities: capabilities
             )
+        }
+        .task(id: services.activeServerGeneration) {
+            await refreshSubtitleContext()
         }
         .onAppear(perform: refreshUpgradeOffer)
         .onChange(of: services.farmShapeService.latestShape) {
@@ -127,6 +148,37 @@ struct OversightHubView: View {
         serverRegistry.dismissOversightUpgradeOffer(for: offerServerID)
         showsUpgradeOffer = false
         self.offerServerID = nil
+    }
+
+    /// Fetch the honest signals feeding the hub's row subtitles. Both
+    /// fetches use `try?` — a failure keeps the previously-loaded field
+    /// (or `nil`) in place so the derivation falls back to the static
+    /// description rather than surfacing a stale count. The maintenance
+    /// endpoint is safe on any server that publishes upcoming tasks; the
+    /// attention endpoint is skipped when the capability gate is off.
+    private func refreshSubtitleContext() async {
+        var context = OversightRowSubtitleContext.unknown
+
+        if capabilities.attentionEnabled {
+            if let feed = try? await services.attentionService.getFeed(
+                cursor: nil,
+                limit: nil
+            ) {
+                context.attentionItemCount = feed.items.count
+                context.healthyPrinterCount = feed.healthyPrinterCount
+            }
+        }
+
+        if let tasks = try? await services.maintenanceService.getUpcoming(
+            lookaheadDays: 14,
+            includeOverdue: true,
+            printerId: nil
+        ) {
+            context.upcomingMaintenance = tasks
+        }
+
+        if Task.isCancelled { return }
+        subtitleContext = context
     }
 }
 
@@ -212,7 +264,15 @@ private struct OversightDestinationListRoot: View {
     var body: some View {
         NavigationStack(path: $path) {
             List(destinations) { destination in
-                OversightNavigationRow(destination: destination)
+                // Two-modes tabs keep the static descriptive subtitle.
+                // The data-driven derivation is intentionally scoped to
+                // the simple hub (issue #2449); adding it here would
+                // require the same per-appearance fetch on every tab
+                // root, which is out of scope for this pass.
+                OversightNavigationRow(
+                    destination: destination,
+                    subtitle: destination.subtitle
+                )
             }
             .listStyle(.insetGrouped)
             .navigationTitle(root.title)
@@ -227,6 +287,7 @@ private struct OversightDestinationListRoot: View {
 
 private struct OversightNavigationRow: View {
     let destination: OversightDestination
+    let subtitle: String
 
     var body: some View {
         NavigationLink(value: destination.appDestination) {
@@ -240,7 +301,7 @@ private struct OversightNavigationRow: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(destination.title)
                         .font(.body.weight(.semibold))
-                    Text(destination.subtitle)
+                    Text(subtitle)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -250,7 +311,7 @@ private struct OversightNavigationRow: View {
             .frame(minHeight: OversightHubView.minimumRowHeight)
         }
         .accessibilityLabel(destination.title)
-        .accessibilityValue(destination.subtitle)
+        .accessibilityValue(subtitle)
         .accessibilityHint(destination.accessibilityHint)
         .accessibilityIdentifier(destination.accessibilityIdentifier)
     }
