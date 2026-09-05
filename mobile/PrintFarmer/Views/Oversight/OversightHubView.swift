@@ -160,7 +160,16 @@ struct OversightHubView: View {
     /// description rather than surfacing a stale count. The maintenance
     /// endpoint is safe on any server that publishes upcoming tasks; the
     /// attention endpoint is skipped when the capability gate is off.
+    ///
+    /// This runs inside `.task(id: services.activeServerGeneration)`, so
+    /// the very first thing we do is clear the previous server's context
+    /// back to `.unknown`. That guarantees a server switch never
+    /// briefly renders the outgoing server's attention count next to the
+    /// incoming server's chrome; during the fetch the rows fall back to
+    /// their descriptive catalog subtitles, which is honest.
     private func refreshSubtitleContext() async {
+        subtitleContext = .unknown
+
         var context = OversightRowSubtitleContext.unknown
 
         if capabilities.attentionEnabled {
@@ -169,6 +178,7 @@ struct OversightHubView: View {
                 limit: nil
             ) {
                 context.attentionItemCount = feed.items.count
+                context.attentionHasMorePages = (feed.nextCursor != nil)
                 context.healthyPrinterCount = feed.healthyPrinterCount
             }
         }

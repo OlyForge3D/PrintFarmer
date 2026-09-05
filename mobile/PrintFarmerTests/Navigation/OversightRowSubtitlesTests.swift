@@ -17,6 +17,23 @@ final class OversightRowSubtitlesTests: XCTestCase {
         }
     }
 
+    func testContextInitializesAllSignalsToNil() {
+        // Guard: OversightRowSubtitleContext must be instantiable with
+        // zero arguments, and every signal must default to `nil` so a
+        // fresh context reads as "unknown" and every destination falls
+        // back to its static subtitle. Without explicit `= nil`
+        // defaults on the stored properties, `.unknown` (which calls
+        // this initializer) would not compile.
+        let context = OversightRowSubtitleContext()
+        XCTAssertNil(context.upcomingMaintenance)
+        XCTAssertNil(context.attentionItemCount)
+        XCTAssertNil(context.attentionHasMorePages)
+        XCTAssertNil(context.healthyPrinterCount)
+        XCTAssertNil(context.navigationPreference)
+        XCTAssertNil(context.automaticDerivation)
+        XCTAssertEqual(context, .unknown)
+    }
+
     // MARK: - Maintenance (Upkeep row)
 
     func testMaintenanceLoadedButEmptyReportsNoWorkDue() {
@@ -50,7 +67,7 @@ final class OversightRowSubtitlesTests: XCTestCase {
 
         XCTAssertEqual(
             OversightRowSubtitles.subtitle(for: .maintenance, in: context),
-            "Voron-02 nozzle overdue, X1C-04 belt in 3 days"
+            "Voron-02 nozzle overdue · X1C-04 belt in 3 days"
         )
     }
 
@@ -67,7 +84,7 @@ final class OversightRowSubtitlesTests: XCTestCase {
         }
 
         let subtitle = OversightRowSubtitles.subtitle(for: .maintenance, in: context)
-        XCTAssertEqual(subtitle, "P1 part1 in 1 day, P2 part2 in 2 days")
+        XCTAssertEqual(subtitle, "P1 part1 in 1 day · P2 part2 in 2 days")
         XCTAssertFalse(subtitle.contains("part3"), "Only the two most-imminent tasks should be surfaced.")
     }
 
@@ -100,7 +117,7 @@ final class OversightRowSubtitlesTests: XCTestCase {
 
         XCTAssertEqual(
             OversightRowSubtitles.subtitle(for: .maintenance, in: context),
-            "Late belt overdue, Today hotend due today"
+            "Late belt overdue · Today hotend due today"
         )
     }
 
@@ -166,6 +183,63 @@ final class OversightRowSubtitlesTests: XCTestCase {
         )
     }
 
+    func testMaintenanceNegativeDaysCountAsOverdueEvenWithoutFlag() {
+        // The rank predicate must agree with the state string: a task
+        // that renders as "overdue" (because daysUntilDue < 0) has to
+        // sort ahead of a task that renders as "in N days", even if the
+        // server did not set isOverdue.
+        var context = OversightRowSubtitleContext.unknown
+        context.upcomingMaintenance = [
+            makeTask(
+                printer: "Future",
+                task: "T",
+                component: "part",
+                daysUntilDue: 2,
+                isOverdue: false
+            ),
+            makeTask(
+                printer: "Late",
+                task: "T",
+                component: "part",
+                daysUntilDue: -3,
+                isOverdue: false
+            )
+        ]
+
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .maintenance, in: context),
+            "Late part overdue · Future part in 2 days"
+        )
+    }
+
+    func testMaintenanceZeroDaysCountAsDueTodayEvenWithoutFlag() {
+        // Symmetric: daysUntilDue == 0 with no flags set has to sort
+        // (and render) as due today, ahead of future work.
+        var context = OversightRowSubtitleContext.unknown
+        context.upcomingMaintenance = [
+            makeTask(
+                printer: "Future",
+                task: "T",
+                component: "part",
+                daysUntilDue: 3,
+                isOverdue: false
+            ),
+            makeTask(
+                printer: "Now",
+                task: "T",
+                component: "part",
+                daysUntilDue: 0,
+                isOverdue: false,
+                isDueToday: false
+            )
+        ]
+
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .maintenance, in: context),
+            "Now part due today · Future part in 3 days"
+        )
+    }
+
     // MARK: - Dashboard (Right now row)
 
     func testDashboardSurfacesPluralAttentionCount() {
@@ -208,6 +282,47 @@ final class OversightRowSubtitlesTests: XCTestCase {
         XCTAssertEqual(
             OversightRowSubtitles.subtitle(for: .dashboard, in: context),
             "Nothing needs attention right now"
+        )
+    }
+
+    func testDashboardQualifiesCountWithPlusWhenFeedIsPaginated() {
+        // The attention feed returned a nextCursor, so items.count is
+        // only the first page — the true fleet total is strictly
+        // greater. Rendering a bare "50 attention items" would
+        // misrepresent it. Must qualify with "+".
+        var context = OversightRowSubtitleContext.unknown
+        context.attentionItemCount = 50
+        context.attentionHasMorePages = true
+
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .dashboard, in: context),
+            "50+ attention items"
+        )
+    }
+
+    func testDashboardOmitsPlusWhenFeedFitInASinglePage() {
+        // Explicit false (as opposed to nil-unknown) means the fetch
+        // completed and reported no next page — the count is exact.
+        var context = OversightRowSubtitleContext.unknown
+        context.attentionItemCount = 3
+        context.attentionHasMorePages = false
+
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .dashboard, in: context),
+            "3 attention items"
+        )
+    }
+
+    func testDashboardQualifiesSingularCountWhenPaginated() {
+        // Singular case still qualifies — "1+ attention item" is still
+        // more honest than a bare "1" when there are more pages.
+        var context = OversightRowSubtitleContext.unknown
+        context.attentionItemCount = 1
+        context.attentionHasMorePages = true
+
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .dashboard, in: context),
+            "1+ attention item"
         )
     }
 
