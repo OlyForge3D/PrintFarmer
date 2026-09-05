@@ -291,6 +291,20 @@ extension AppRouter {
         oversightAvailability: OversightNavigationAvailability
     ) {
         guard presentsExpandedSidebar != isExpanded else { return }
+
+        if !isExpanded, activeShell == .twoModes {
+            let oversightTabs = AppTab.visibleTabs(
+                in: .oversight,
+                for: activeShell,
+                capabilities: capabilities,
+                oversightAvailability: oversightAvailability
+            )
+            let compactMode: OversightMode = oversightTabs.contains(selectedTab)
+                ? .oversight
+                : .floor
+            setNavigationMode(compactMode, capabilities: capabilities)
+        }
+
         presentsExpandedSidebar = isExpanded
         reconcileCapabilities(
             capabilities,

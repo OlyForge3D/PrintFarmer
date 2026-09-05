@@ -268,6 +268,64 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(router.resolvedTab(for: disabled), .farm)
     }
 
+    func testCollapsingExpandedSidebarDerivesOversightModeAndPreservesJobQueue() {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .floor,
+            capabilities: capabilities
+        )
+        router.setExpandedSidebarPresentation(
+            true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.routeToJobQueue(capabilities: capabilities)
+
+        XCTAssertEqual(router.activeMode, .floor)
+        XCTAssertEqual(router.selectedTab, .jobs)
+        XCTAssertEqual(router.oversightJobsPath.count, 1)
+
+        router.setExpandedSidebarPresentation(
+            false,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.activeMode, .oversight)
+        XCTAssertEqual(router.resolvedTab(for: capabilities), .jobs)
+        XCTAssertEqual(router.oversightJobsPath.count, 1)
+    }
+
+    func testCollapsingExpandedSidebarDerivesFloorModeAndPreservesFarmPath() {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+        router.setExpandedSidebarPresentation(
+            true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.selectTab(.farm, capabilities: capabilities)
+        router.printersPath.append(AppDestination.printerDetail(id: printerId))
+
+        XCTAssertEqual(router.activeMode, .oversight)
+        XCTAssertEqual(router.selectedTab, .farm)
+
+        router.setExpandedSidebarPresentation(
+            false,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.activeMode, .floor)
+        XCTAssertEqual(router.resolvedTab(for: capabilities), .farm)
+        XCTAssertEqual(router.printersPath.count, 1)
+    }
+
     func testJobQueueRoutingUsesVisibleDestinationForEachShellPresentation() {
         let router = AppRouter()
 
