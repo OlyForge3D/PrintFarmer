@@ -134,6 +134,7 @@ class PrintFarmerUITestCase: XCTestCase {
                 }
             }
 
+            revealSidebarIfCollapsed()
             let sidebarButtons = app.descendants(matching: .any)
                 .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
                 .allElementsBoundByIndex
@@ -214,11 +215,19 @@ class PrintFarmerUITestCase: XCTestCase {
             line: line
         )
 
+        let systemToolbarButtonLabels = Set([
+            "Search",
+            "Sidebar",
+            "Toggle Sidebar",
+            "Show Sidebar",
+            "Hide Sidebar"
+        ])
         let toolbarButtons = app.navigationBars.buttons.allElementsBoundByIndex.filter {
             $0.exists
                 && !$0.frame.isEmpty
                 && abs($0.frame.midY - account.frame.midY) < 12
                 && $0.identifier != "navigation.account"
+                && !systemToolbarButtonLabels.contains($0.label)
         }
         XCTAssertTrue(
             toolbarButtons.allSatisfy { $0.frame.midX < account.frame.midX },
@@ -255,19 +264,14 @@ class PrintFarmerUITestCase: XCTestCase {
         line: UInt = #line
     ) {
         let roots = renderedShellRoots()
-        if roots.isEmpty {
-            assertCanonicalRootChrome(
-                expectsModeControl: expectsModeControl,
-                root: RenderedShellRoot(
-                    title: "Current regular-width root",
-                    identifier: "current.regular",
-                    surface: .sidebar
-                ),
-                file: file,
-                line: line
-            )
-            return
-        }
+        XCTAssertFalse(
+            roots.isEmpty,
+            "The rendered shell definition must expose at least one root",
+            file: file,
+            line: line
+        )
+        guard !roots.isEmpty else { return }
+
         XCTAssertEqual(
             Set(roots.map(\.key)).count,
             roots.count,
