@@ -24,7 +24,8 @@ post_date: 2026-09-04
   its iPad sidebar counterpart.
 - The helper queries the canonical `tab.*` identifier first. On SwiftUI
   runtimes that expose tab-bar buttons by label only, it falls back to the
-  title mapped by this document while keeping identifier-based call sites.
+  title mapped by this document while keeping identifier-based call sites and
+  records an XCTest warning activity so identifier regressions are not silent.
 - Screen-specific identifiers remain the same in Simple and Two Modes.
 - Scanner identifiers describe the scanner flow, not its former navigation
   location.

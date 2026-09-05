@@ -118,6 +118,7 @@ class PrintFarmerUITestCase: XCTestCase {
             return tabElement
         }
         if tabLabel.exists {
+            recordTabIdentifierCompatibilityFallback(tabIdentifier)
             return tabLabel
         }
         if sidebar.exists {
@@ -139,7 +140,19 @@ class PrintFarmerUITestCase: XCTestCase {
         if tabElement.exists {
             return tabElement
         }
-        return tabLabel.exists ? tabLabel : tabButton
+        if tabLabel.exists {
+            recordTabIdentifierCompatibilityFallback(tabIdentifier)
+            return tabLabel
+        }
+        return tabButton
+    }
+
+    private func recordTabIdentifierCompatibilityFallback(_ identifier: String) {
+        let message = "SwiftUI did not expose \(identifier) on the tab-bar "
+            + "accessibility tree; using its documented title as an OS compatibility fallback."
+        XCTContext.runActivity(named: "Warning: \(message)") { _ in
+            print("warning: \(message)")
+        }
     }
 
     private func tabTitle(for identifier: String) -> String {
