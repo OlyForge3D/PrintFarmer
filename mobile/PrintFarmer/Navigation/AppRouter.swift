@@ -3,6 +3,23 @@ import SwiftUI
 
 /// App router owning shell-aware tab selection and per-tab navigation stacks.
 ///
+/// The router renders one of two compact shells (see the Navigation Shell
+/// section of `mobile/README.md` and ``AdaptiveNavigationShell``):
+///
+/// * **Simple** — Attention · Farm · Inventory · Oversight (hub).
+/// * **Two modes** — pinned Floor | Oversight control with four Floor tabs
+///   (Attention · Farm · Tasks · Inventory) and five Oversight tabs
+///   (Overview · Fleet · Jobs · Upkeep · Reports).
+///
+/// Shell selection is driven by ``NavigationLayoutPreference`` and, in
+/// `Automatic` mode, by the derivation rule that consumes `FarmShape` plus
+/// the resolved `shiftPlanEnabled` capability. **`shiftPlanEnabled` is a
+/// negative signal only** (its default is `true`, so a `true` value never
+/// implies staffing); reading it positively reintroduces the bug the
+/// A′ redesign closed. Fleet size is deliberately not a derivation signal.
+/// When the farm-shape response is absent, shape is unknown and the router
+/// derives Simple (see #2410 and `NavigationShellDerivation.automatic`).
+///
 /// Tab-owned `NavigationPath` properties back each tab's stack:
 /// * `printersPath` — Farm tab (PrinterListView)
 /// * `tasksPath` — Tasks tab root (ShiftTasksView)
@@ -16,7 +33,8 @@ import SwiftUI
 /// * `upkeepPath` — Oversight-mode Upkeep tab
 /// * `reportsPath` — Oversight-mode Reports tab
 ///
-/// See issue #706 for the operator-shell migration rationale.
+/// See issue #2410 (A′ navigation redesign) for the shell contract and
+/// #706 for the original operator-shell migration rationale.
 @MainActor @Observable
 final class AppRouter {
     static let selectedTabDefaultsKey = "app.selectedTab"

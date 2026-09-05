@@ -17,9 +17,27 @@ private struct ResolvedNavigationIdentity: Equatable {
     let isProvisional: Bool
 }
 
-/// Adaptive operator shell for compact devices, with Scan flows hosted by
-/// their owning task surfaces instead of a dedicated tab, and endpoint-fenced
-/// navigation identity resolution guarding the adaptive shell configuration.
+/// Adaptive operator shell for compact devices.
+///
+/// The compact layout renders one of two shells, chosen from farm shape and
+/// operator role (see ``AdaptiveNavigationShell`` and the Navigation Shell
+/// section of `mobile/README.md`):
+///
+/// * **Simple** — four tabs: Attention · Farm · Inventory · Oversight (hub).
+/// * **Two modes** — a pinned Floor | Oversight control with four Floor tabs
+///   (Attention · Farm · Tasks · Inventory) and five Oversight tabs
+///   (Overview · Fleet · Jobs · Upkeep · Reports).
+///
+/// Scan is not a tab. Bin scans live inside the harvest task (Attention),
+/// spool scans live on the Inventory nav bar, and the Offline Queue is
+/// reachable from the account/You area.
+///
+/// The regular-width iPad layout uses `NavigationSplitView` for the sidebar
+/// instead of a tab bar.
+///
+/// Adaptive-shell configuration is gated behind endpoint-fenced navigation
+/// identity resolution so that a server switch or a role change never
+/// races an in-flight shell derivation.
 struct ContentView: View {
     static let sidebarRowMinimumHeight: CGFloat = 44
     static let modeControlMinimumHeight = RootNavigationChrome.minimumTouchTarget

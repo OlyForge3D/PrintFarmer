@@ -168,6 +168,7 @@
 		A2B6286100000000000000B2 /* JogSubgroupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B6286100000000000000B1 /* JogSubgroupTests.swift */; };
 		A2D4EF0123456789ABCD0001 /* HomeSubgroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D4EF0123456789ABCD0002 /* HomeSubgroup.swift */; };
 		A2D4EF0123456789ABCD0004 /* HomeSubgroupTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2D4EF0123456789ABCD0005 /* HomeSubgroupTests.swift */; };
+		F24848000100000000000001 /* OversightUpgradeOfferCardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24848000100000000000002 /* OversightUpgradeOfferCardTests.swift */; };
 		A2FC4CAC97D64CC8E4D8FDED /* LocationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B23554EB41DA88AD092EB5C1 /* LocationListView.swift */; };
 		A391E9CBE39F5EAF1A94264D /* SpoolPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D305E8384A01A3EBE5866CF /* SpoolPickerView.swift */; };
 		A3C7DEF1234567890BCD0002 /* PrinterBackendCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3C7DEF1234567890BCD0001 /* PrinterBackendCapabilities.swift */; };
@@ -694,6 +695,7 @@
 		A2B6286100000000000000B1 /* JogSubgroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JogSubgroupTests.swift; sourceTree = "<group>"; };
 		A2D4EF0123456789ABCD0002 /* HomeSubgroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSubgroup.swift; sourceTree = "<group>"; };
 		A2D4EF0123456789ABCD0005 /* HomeSubgroupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSubgroupTests.swift; sourceTree = "<group>"; };
+		F24848000100000000000002 /* OversightUpgradeOfferCardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightUpgradeOfferCardTests.swift; sourceTree = "<group>"; };
 		A2FA2A4FEFE32F898CA6799D /* JobListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobListView.swift; sourceTree = "<group>"; };
 		A3C7DEF1234567890BCD0001 /* PrinterBackendCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterBackendCapabilities.swift; sourceTree = "<group>"; };
 		F711A0001000000000000001 /* FilamentFallbackGroupModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentFallbackGroupModels.swift; sourceTree = "<group>"; };
@@ -1397,6 +1399,7 @@
 			isa = PBXGroup;
 			children = (
 				A2D4EF0123456789ABCD0005 /* HomeSubgroupTests.swift */,
+				F24848000100000000000002 /* OversightUpgradeOfferCardTests.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -1899,6 +1902,7 @@
 				A1C5DEF1234567890ABC0031 /* PrinterControlsTargetCorrelationTests.swift in Sources */,
 				A2B6286100000000000000B2 /* JogSubgroupTests.swift in Sources */,
 				A2D4EF0123456789ABCD0004 /* HomeSubgroupTests.swift in Sources */,
+				F24848000100000000000001 /* OversightUpgradeOfferCardTests.swift in Sources */,
 				A1C5DEF1234567890ABC0021 /* PreheatSubgroupTests.swift in Sources */,
 				D1A6C200000000000000F002 /* PrinterControlsSectionSnapshotTests.swift in Sources */,
 				709F2758FA2B8BF406D1813C /* PrinterListViewModelTests.swift in Sources */,

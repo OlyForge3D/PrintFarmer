@@ -12,6 +12,12 @@ import Foundation
 /// parallel gate system — consult ``SystemCapabilitiesService`` (which
 /// caches this response) or read the resolved snapshot through
 /// ``AppRouter``.
+///
+/// > Farm shape (`accountCount`, `locationCount`, `printerCount`) is **not**
+/// > a field on this response and is not decoded here. It is a **separate**
+/// > model — see ``FarmShape`` — served by the authenticated endpoint
+/// > `GET /api/system/farm-shape`. `/api/system/capabilities` stays
+/// > `[AllowAnonymous]` and user-blind by design; see issue #2411.
 struct SystemCapabilities: Codable, Sendable, Equatable {
     var attentionEnabled: Bool?
     var nativePushEnabled: Bool?
