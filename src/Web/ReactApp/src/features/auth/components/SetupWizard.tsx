@@ -21,6 +21,19 @@ const passwordPolicy = {
   recommendSymbol: true 
 };
 
+type NetworkDiscoveryLimitField =
+  | 'clientTimeoutMs'
+  | 'requestDelayMs'
+  | 'maxConcurrentRequests'
+  | 'maxRetries';
+
+const networkDiscoveryLimitLabels: Record<NetworkDiscoveryLimitField, string> = {
+  clientTimeoutMs: 'Client Timeout',
+  requestDelayMs: 'Request Delay',
+  maxConcurrentRequests: 'Max Concurrent Requests',
+  maxRetries: 'Max Retries',
+};
+
 interface SetupAccountFormErrors {
   errors: {[K in keyof SetupFormData]?: string};
 }
@@ -105,6 +118,23 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // Additional UI state for advanced fields (if needed)
   // (Removed unused discoveryTimeout, maxConcurrentScans, scanPorts)
   const [networkErrors, setNetworkErrors] = useState<string | null>(null);
+  const [networkFieldErrors, setNetworkFieldErrors] = useState<Record<NetworkDiscoveryLimitField, string>>({});
+  const clientTimeoutInputRef = useRef<HTMLInputElement>(null);
+  const requestDelayInputRef = useRef<HTMLInputElement>(null);
+  const maxConcurrentRequestsInputRef = useRef<HTMLInputElement>(null);
+  const maxRetriesInputRef = useRef<HTMLInputElement>(null);
+  const networkFieldOrder: NetworkDiscoveryLimitField[] = [
+    'clientTimeoutMs',
+    'requestDelayMs',
+    'maxConcurrentRequests',
+    'maxRetries',
+  ];
+  const networkFieldRefs: Record<NetworkDiscoveryLimitField, React.RefObject<HTMLInputElement | null>> = {
+    clientTimeoutMs: clientTimeoutInputRef,
+    requestDelayMs: requestDelayInputRef,
+    maxConcurrentRequests: maxConcurrentRequestsInputRef,
+    maxRetries: maxRetriesInputRef,
+  };
 
   // Step: Spoolman
   const [spoolmanEnabled, setSpoolmanEnabled] = useState(false);
@@ -302,6 +332,21 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   const validateNetwork = () => {
     if (!networkDiscoverySettings) return false;
+    const fieldErrors: Record<NetworkDiscoveryLimitField, string> = {};
+    for (const field of networkFieldOrder) {
+      if ((networkDiscoverySettings[field] ?? 0) <= 0) {
+        fieldErrors[field] = `${networkDiscoveryLimitLabels[field]} must be greater than zero`;
+      }
+    }
+    setNetworkFieldErrors(fieldErrors);
+    if (Object.keys(fieldErrors).length > 0) {
+      const firstInvalidField = networkFieldOrder.find(field => fieldErrors[field]);
+      if (firstInvalidField) {
+        networkFieldRefs[firstInvalidField].current?.focus();
+      }
+      return false;
+    }
+
     const filtered = networkDiscoverySettings.discoverySubnets.filter((r: string) => r.trim());
     for (const cidr of filtered) {
       if (!isValidCidr(cidr.trim())) {
@@ -400,6 +445,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // Final submission orchestrating all steps
   const finalizeSetup = async () => {
     if (submitting) return;
+    if (!validateNetwork()) {
+      setStep(1);
+      return;
+    }
     setSubmitting(true);
     setGlobalError(null);
     try {
@@ -440,6 +489,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       const next = { ...prev };
       delete next[field];
       return next;
+    });
+  };
+
+  const handleNetworkLimitChange = (field: NetworkDiscoveryLimitField, value: number) => {
+    setNetworkDiscoverySettings(settings => settings ? { ...settings, [field]: value } : settings);
+    setNetworkFieldErrors(errors => {
+      if (!errors[field]) return errors;
+      const nextErrors = { ...errors };
+      delete nextErrors[field];
+      return nextErrors;
     });
   };
 
@@ -563,49 +622,65 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           <label className="block text-sm font-medium text-pf-text-primary mb-1" htmlFor="clientTimeoutMs">Client Timeout (ms)</label>
           <input
             id="clientTimeoutMs"
+            ref={clientTimeoutInputRef}
             type="number"
             className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
             value={networkDiscoverySettings?.clientTimeoutMs ?? 0}
-            onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, clientTimeoutMs: Number(e.target.value) } : s)}
-            min={100}
+            onChange={e => handleNetworkLimitChange('clientTimeoutMs', Number(e.target.value))}
+            min={1}
             max={10000}
+            aria-invalid={networkFieldErrors.clientTimeoutMs ? true : undefined}
+            aria-describedby={networkFieldErrors.clientTimeoutMs ? 'clientTimeoutMs-error' : undefined}
           />
+          {networkFieldErrors.clientTimeoutMs && <p id="clientTimeoutMs-error" className="text-xs text-pf-error" role="alert">{networkFieldErrors.clientTimeoutMs}</p>}
         </div>
         <div>
           <label className="block text-sm font-medium text-pf-text-primary mb-1" htmlFor="requestDelayMs">Request Delay (ms)</label>
           <input
             id="requestDelayMs"
+            ref={requestDelayInputRef}
             type="number"
             className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
             value={networkDiscoverySettings?.requestDelayMs ?? 0}
-            onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, requestDelayMs: Number(e.target.value) } : s)}
-            min={0}
+            onChange={e => handleNetworkLimitChange('requestDelayMs', Number(e.target.value))}
+            min={1}
             max={2000}
+            aria-invalid={networkFieldErrors.requestDelayMs ? true : undefined}
+            aria-describedby={networkFieldErrors.requestDelayMs ? 'requestDelayMs-error' : undefined}
           />
+          {networkFieldErrors.requestDelayMs && <p id="requestDelayMs-error" className="text-xs text-pf-error" role="alert">{networkFieldErrors.requestDelayMs}</p>}
         </div>
         <div>
           <label className="block text-sm font-medium text-pf-text-primary mb-1" htmlFor="maxConcurrentRequests">Max Concurrent Requests</label>
           <input
             id="maxConcurrentRequests"
+            ref={maxConcurrentRequestsInputRef}
             type="number"
             className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
             value={networkDiscoverySettings?.maxConcurrentRequests ?? 0}
-            onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, maxConcurrentRequests: Number(e.target.value) } : s)}
+            onChange={e => handleNetworkLimitChange('maxConcurrentRequests', Number(e.target.value))}
             min={1}
             max={64}
+            aria-invalid={networkFieldErrors.maxConcurrentRequests ? true : undefined}
+            aria-describedby={networkFieldErrors.maxConcurrentRequests ? 'maxConcurrentRequests-error' : undefined}
           />
+          {networkFieldErrors.maxConcurrentRequests && <p id="maxConcurrentRequests-error" className="text-xs text-pf-error" role="alert">{networkFieldErrors.maxConcurrentRequests}</p>}
         </div>
         <div>
           <label className="block text-sm font-medium text-pf-text-primary mb-1" htmlFor="maxRetries">Max Retries</label>
           <input
             id="maxRetries"
+            ref={maxRetriesInputRef}
             type="number"
             className="w-full px-3 py-2 border border-pf-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-pf-accent bg-pf-bg-2 text-pf-text-primary"
             value={networkDiscoverySettings?.maxRetries ?? 0}
-            onChange={e => setNetworkDiscoverySettings(s => s ? { ...s, maxRetries: Number(e.target.value) } : s)}
-            min={0}
+            onChange={e => handleNetworkLimitChange('maxRetries', Number(e.target.value))}
+            min={1}
             max={10}
+            aria-invalid={networkFieldErrors.maxRetries ? true : undefined}
+            aria-describedby={networkFieldErrors.maxRetries ? 'maxRetries-error' : undefined}
           />
+          {networkFieldErrors.maxRetries && <p id="maxRetries-error" className="text-xs text-pf-error" role="alert">{networkFieldErrors.maxRetries}</p>}
         </div>
       </div>
       <div className="flex justify-between">

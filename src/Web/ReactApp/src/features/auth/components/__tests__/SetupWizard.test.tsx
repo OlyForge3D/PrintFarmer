@@ -11,6 +11,7 @@ const {
   mockGetSetupStatus,
   mockLogin,
   mockNetworkScanState,
+  mockSaveSettingsValues,
   mockSaveSpoolmanConfig,
   mockScanNetwork,
   mockTestSpoolmanConnection,
@@ -22,6 +23,7 @@ const {
   mockGetSetupStatus: vi.fn(),
   mockLogin: vi.fn(),
   mockNetworkScanState: { availableInstances: [] as Array<{ url: string; version?: string }> },
+  mockSaveSettingsValues: vi.fn(),
   mockSaveSpoolmanConfig: vi.fn(),
   mockScanNetwork: vi.fn(),
   mockTestSpoolmanConnection: vi.fn(),
@@ -69,7 +71,7 @@ vi.mock('@/services/api/setupApi', () => ({
 
 vi.mock('@/services/settingsApi', () => ({
   fetchSettingsValues: (...args: unknown[]) => mockGetSettings(...args),
-  saveSettingsValues: vi.fn(),
+  saveSettingsValues: (...args: unknown[]) => mockSaveSettingsValues(...args),
 }));
 
 async function advanceToSpoolmanStep() {
@@ -356,6 +358,82 @@ describe('SetupWizard account step validation (#2365)', () => {
     expect(firstNameInput).not.toHaveAttribute('aria-invalid');
     expect(firstNameInput).not.toHaveAttribute('aria-describedby');
     expect(screen.queryByText('First name is required')).not.toBeInTheDocument();
+  });
+});
+
+describe('SetupWizard network discovery limit validation (#2458)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAuthState.isAuthenticated = false;
+    mockGetSetupStatus.mockResolvedValue({ needsSetup: true });
+    mockGetSetupBootstrap.mockResolvedValue({ baseUrl: '' });
+    mockGetSettings.mockResolvedValue({
+      enableDiscovery: true,
+      discoverySubnets: [],
+      clientTimeoutMs: 200,
+      requestDelayMs: 100,
+      maxConcurrentRequests: 20,
+      maxRetries: 2,
+      ports: [80],
+    });
+    mockCreateInitialAdmin.mockResolvedValue({ success: true, token: 'bootstrap-token' });
+    mockLogin.mockImplementation(async () => {
+      mockAuthState.isAuthenticated = true;
+      return true;
+    });
+    mockSaveSettingsValues.mockResolvedValue({});
+  });
+
+  async function advanceToNetworkStep() {
+    render(<SetupWizard onComplete={vi.fn()} />);
+    await screen.findByText('Initial configuration wizard');
+    fireEvent.change(screen.getByLabelText(/First Name/, { selector: 'input' }), { target: { value: 'Ada' } });
+    fireEvent.change(screen.getByLabelText(/Last Name/, { selector: 'input' }), { target: { value: 'Lovelace' } });
+    fireEvent.change(screen.getByLabelText(/Username/, { selector: 'input' }), { target: { value: 'admin' } });
+    fireEvent.change(screen.getByLabelText(/Email/, { selector: 'input' }), { target: { value: 'admin@example.com' } });
+    fireEvent.change(screen.getByLabelText(/^Password/, { selector: 'input' }), { target: { value: 'password123' } });
+    fireEvent.change(screen.getByLabelText(/Confirm Password/, { selector: 'input' }), { target: { value: 'password123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Admin & Continue' }));
+    await screen.findByText('Network Discovery', { selector: 'h2' });
+  }
+
+  it('shows field-level errors and blocks progression for non-positive discovery limits', async () => {
+    await advanceToNetworkStep();
+    fireEvent.change(screen.getByLabelText('Client Timeout (ms)'), { target: { value: '-1' } });
+    fireEvent.change(screen.getByLabelText('Request Delay (ms)'), { target: { value: '0' } });
+    fireEvent.change(screen.getByLabelText('Max Concurrent Requests'), { target: { value: '-1' } });
+    fireEvent.change(screen.getByLabelText('Max Retries'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    const clientTimeout = screen.getByLabelText('Client Timeout (ms)');
+    await waitFor(() => expect(clientTimeout).toHaveFocus());
+    expect(clientTimeout).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByText('Client Timeout must be greater than zero')).toBeInTheDocument();
+    expect(screen.getByText('Request Delay must be greater than zero')).toBeInTheDocument();
+    expect(screen.getByText('Max Concurrent Requests must be greater than zero')).toBeInTheDocument();
+    expect(screen.getByText('Max Retries must be greater than zero')).toBeInTheDocument();
+    expect(screen.queryByText('Spoolman Integration')).not.toBeInTheDocument();
+    expect(mockSaveSettingsValues).not.toHaveBeenCalled();
+  });
+
+  it('accepts one as the lower valid limit and persists the values on setup completion', async () => {
+    await advanceToNetworkStep();
+    fireEvent.change(screen.getByLabelText('Client Timeout (ms)'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Request Delay (ms)'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Max Concurrent Requests'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Max Retries'), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Spoolman Integration', { selector: 'h2' });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Summary', { selector: 'h2' });
+    fireEvent.click(screen.getByRole('button', { name: 'Finish Setup' }));
+
+    await waitFor(() => expect(mockSaveSettingsValues).toHaveBeenCalledWith('NetworkDiscovery', expect.objectContaining({
+      clientTimeoutMs: 1,
+      requestDelayMs: 1,
+      maxConcurrentRequests: 1,
+      maxRetries: 1,
+    })));
   });
 });
 
