@@ -181,6 +181,16 @@ struct OversightHubView: View {
     /// * `services.activeServerGeneration` — server / user context change.
     /// * `capabilities.attentionEnabled` — same-server feature toggle.
     ///
+    /// It ALSO runs from `.refreshable` on pull-to-refresh. `.refreshable`
+    /// runs in its own SwiftUI-owned task that is NOT cancelled when
+    /// `.task(id:)` fires with a new key, so two invocations can be
+    /// in-flight at the same time. That's why the commit guard below
+    /// uses the captured refresh key AND `Task.isCancelled` — either
+    /// signal is sufficient to discard a stale result. `Task.isCancelled`
+    /// alone catches the `.task(id:)` cancellation path; the captured
+    /// key catches a slow `.refreshable` pull that started under an
+    /// older capability state and races with a newer `.task(id:)` run.
+    ///
     /// The very first thing we do on every run is clear the previous
     /// snapshot back to `.unknown`. That guarantees:
     /// * A server switch never briefly renders the outgoing server's
@@ -194,6 +204,7 @@ struct OversightHubView: View {
     ///   the hub re-runs the same clear-then-fetch sequence, so
     ///   same-server data mutations refresh the visible subtitles.
     private func refreshSubtitleContext() async {
+        let requestKey = subtitleRefreshKey
         subtitleContext = .unknown
 
         var context = OversightRowSubtitleContext.unknown
@@ -217,7 +228,20 @@ struct OversightHubView: View {
             context.upcomingMaintenance = tasks
         }
 
-        if Task.isCancelled { return }
+        // Concurrency guard (issue #2449 review round 5): discard the
+        // accumulated context if either the refresh key moved under us
+        // during the awaits (a concurrent `.refreshable` racing with a
+        // capability toggle) or the task was cancelled (`.task(id:)`
+        // superseded by a newer key). Otherwise a stale in-flight
+        // request can silently overwrite the fresher snapshot after
+        // cancellation. See `OversightSubtitleRefreshKey.isStillCurrent`
+        // for the full race analysis.
+        guard requestKey.isStillCurrent(
+            comparedTo: subtitleRefreshKey,
+            taskCancelled: Task.isCancelled
+        ) else {
+            return
+        }
         subtitleContext = context
     }
 
@@ -257,6 +281,35 @@ struct OversightHubView: View {
 struct OversightSubtitleRefreshKey: Equatable {
     let serverGeneration: Int
     let attentionEnabled: Bool
+
+    /// Concurrency guard for `OversightHubView.refreshSubtitleContext`.
+    /// The fetch captures the current refresh key on entry, then does
+    /// several `await`s. Before committing the accumulated context to
+    /// `subtitleContext`, we must confirm the world hasn't moved under
+    /// us: neither the refresh key nor the enclosing task's
+    /// cancellation flag.
+    ///
+    /// Two concrete race scenarios this closes (issue #2449 review 5):
+    /// * `.task(id:)` cancelled by a key change while the previous
+    ///   fetch was suspended. `taskCancelled` is `true` for the old
+    ///   task's continuation, so it discards its stale result before
+    ///   assigning. (`Task.isCancelled` alone would already handle
+    ///   this — see the second scenario for why key comparison is
+    ///   still required.)
+    /// * `.refreshable` pull-to-refresh running concurrently with
+    ///   `.task(id:)`. The pull's task is NOT cancelled by SwiftUI
+    ///   when `.task(id:)` fires with a new key, so `Task.isCancelled`
+    ///   is `false` on both. Without the key comparison, a slow
+    ///   `.refreshable` fetch that started under key K1 could resume
+    ///   after the newer `.task(id:)` under K2 already committed a
+    ///   clean snapshot, silently overwriting it with pre-toggle
+    ///   data. The captured key catches this: K1 ≠ K2 → discard.
+    func isStillCurrent(
+        comparedTo current: OversightSubtitleRefreshKey,
+        taskCancelled: Bool
+    ) -> Bool {
+        !taskCancelled && self == current
+    }
 }
 
 struct OversightTabRootView: View {

@@ -756,6 +756,107 @@ final class OversightRowSubtitlesTests: XCTestCase {
         )
     }
 
+    // MARK: - Concurrency guard (round-5 wiring)
+
+    /// The happy path: the request key we captured on entry still
+    /// matches the current key and the enclosing task has not been
+    /// cancelled. The fetched context is safe to commit.
+    func testCommitGuardAllowsCommitWhenKeyUnchangedAndTaskLive() {
+        let key = OversightSubtitleRefreshKey(
+            serverGeneration: 3,
+            attentionEnabled: true
+        )
+        XCTAssertTrue(
+            key.isStillCurrent(comparedTo: key, taskCancelled: false),
+            "Same key + live task must permit committing the fetched context."
+        )
+    }
+
+    /// Round-1 cancellation path preserved: SwiftUI cancelled the
+    /// `.task(id:)` because the refresh key changed while we were
+    /// awaiting. Even if the underlying URLSession-style API didn't
+    /// propagate cancellation and `try?` yielded a value, we discard.
+    func testCommitGuardDiscardsWhenTaskCancelledEvenWithMatchingKey() {
+        let key = OversightSubtitleRefreshKey(
+            serverGeneration: 3,
+            attentionEnabled: true
+        )
+        XCTAssertFalse(
+            key.isStillCurrent(comparedTo: key, taskCancelled: true),
+            "A cancelled task must never commit its fetched context, even if the key still nominally matches — this preserves the round-1 protection against a stale `.task(id:)` fetch resuming after supersession."
+        )
+    }
+
+    /// Vasquez round-5 core: `.refreshable` racing with `.task(id:)`.
+    /// A pull-to-refresh started under key K1 (attention enabled) is
+    /// mid-fetch when the user disables the capability. `.task(id:)`
+    /// fires with K2 (attention disabled), completes fast (no fetch),
+    /// and commits `.unknown`. Then the slow K1 pull's fetch resumes.
+    /// Its `Task.isCancelled` is `false` because `.refreshable` owns
+    /// its own task that SwiftUI did NOT cancel — the key comparison
+    /// is the ONLY signal that this result is stale.
+    func testCommitGuardDiscardsWhenAttentionCapabilityToggledUnderConcurrentFetch() {
+        let capturedAtStart = OversightSubtitleRefreshKey(
+            serverGeneration: 3,
+            attentionEnabled: true
+        )
+        let currentAfterToggle = OversightSubtitleRefreshKey(
+            serverGeneration: 3,
+            attentionEnabled: false
+        )
+        XCTAssertFalse(
+            capturedAtStart.isStillCurrent(
+                comparedTo: currentAfterToggle,
+                taskCancelled: false
+            ),
+            "A slow `.refreshable` fetch whose captured key no longer matches the current key must be discarded even without task cancellation — otherwise it would overwrite the fresher `.task(id:)` snapshot with pre-toggle attention data."
+        )
+    }
+
+    /// The server-switch counterpart: a concurrent `.refreshable` was
+    /// mid-fetch when the user switched servers. The key comparison
+    /// catches this too, so pre-switch counts never bleed onto the
+    /// incoming server's chrome even if the pull's task somehow
+    /// escaped SwiftUI cancellation.
+    func testCommitGuardDiscardsWhenServerGenerationChangesUnderConcurrentFetch() {
+        let capturedAtStart = OversightSubtitleRefreshKey(
+            serverGeneration: 3,
+            attentionEnabled: true
+        )
+        let currentAfterServerSwitch = OversightSubtitleRefreshKey(
+            serverGeneration: 4,
+            attentionEnabled: true
+        )
+        XCTAssertFalse(
+            capturedAtStart.isStillCurrent(
+                comparedTo: currentAfterServerSwitch,
+                taskCancelled: false
+            ),
+            "A concurrent fetch whose captured key predates a server switch must be discarded — pre-switch attention counts must never bleed onto the incoming server's chrome."
+        )
+    }
+
+    /// Belt-and-braces: when BOTH signals fire, we still discard. The
+    /// two guards are independent — cancellation OR key mismatch means
+    /// stale — and neither is allowed to override the other.
+    func testCommitGuardDiscardsWhenBothKeyChangedAndTaskCancelled() {
+        let capturedAtStart = OversightSubtitleRefreshKey(
+            serverGeneration: 3,
+            attentionEnabled: true
+        )
+        let currentAfterMultipleChanges = OversightSubtitleRefreshKey(
+            serverGeneration: 4,
+            attentionEnabled: false
+        )
+        XCTAssertFalse(
+            capturedAtStart.isStillCurrent(
+                comparedTo: currentAfterMultipleChanges,
+                taskCancelled: true
+            ),
+            "When both cancellation and key mismatch fire simultaneously, the guard must still discard."
+        )
+    }
+
     // MARK: - Helpers
 
     private func makeTask(
