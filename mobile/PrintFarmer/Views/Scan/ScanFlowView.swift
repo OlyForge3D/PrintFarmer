@@ -8,10 +8,17 @@ import SwiftUI
 /// their owning tab; bin, part, barcode-intake, and unrecognized results remain
 /// in-place sheets.
 struct ScanFlowView: View {
+    let externalScanRequestID: UUID?
+
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = ScanViewModel()
+    @State private var isErrorAlertPresented = false
+
+    init(externalScanRequestID: UUID? = nil) {
+        self.externalScanRequestID = externalScanRequestID
+    }
 
     private var partsInventoryEnabled: Bool {
         services.capabilitiesService.resolved.printedPartsInventoryEnabled
@@ -54,45 +61,63 @@ struct ScanFlowView: View {
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                 }
             }
-            .alert("Scan Error", isPresented: .constant(viewModel.errorMessage != nil)) {
-                Button("OK") { viewModel.clearError() }
+            .alert("Scan Error", isPresented: $isErrorAlertPresented) {
+                Button("OK") {}
             } message: {
                 if let error = viewModel.errorMessage {
                     Text(error)
                 }
             }
-            .sheet(item: $viewModel.pendingOutcome) { outcome in
-                switch outcome {
-                case .bin(let bin):
-                    if partsInventoryEnabled {
-                        BinScanResultView(bin: bin)
-                    }
-                case .part(let part):
-                    if partsInventoryEnabled {
-                        PartScanResultView(part: part)
-                    }
-                case .unknownCode(let code):
-                    UnrecognizedScanView(
-                        code: code,
-                        printedPartsInventoryEnabled: partsInventoryEnabled
-                    )
+            .onChange(of: viewModel.errorMessage, initial: true) { _, error in
+                isErrorAlertPresented = error != nil
+            }
+            .onChange(of: isErrorAlertPresented) { _, isPresented in
+                if !isPresented {
+                    acknowledgePresentationDismissal(viewModel.clearError)
                 }
             }
+            .sheet(
+                item: $viewModel.pendingOutcome,
+                onDismiss: resultPresentationDidDismiss,
+                content: { outcome in
+                    Group {
+                        switch outcome {
+                        case .bin(let bin):
+                            if partsInventoryEnabled {
+                                BinScanResultView(bin: bin)
+                            }
+                        case .part(let part):
+                            if partsInventoryEnabled {
+                                PartScanResultView(part: part)
+                            }
+                        case .unknownCode(let code):
+                            UnrecognizedScanView(
+                                code: code,
+                                printedPartsInventoryEnabled: partsInventoryEnabled
+                            )
+                        }
+                    }
+                    .onAppear { viewModel.resultPresentationDidAppear() }
+                }
+            )
             .sheet(isPresented: Binding(
                 get: { viewModel.pendingSpoolBarcode != nil },
                 set: { if !$0 { viewModel.pendingSpoolBarcode = nil } }
-            )) {
+            ), onDismiss: resultPresentationDidDismiss, content: {
                 if let barcode = viewModel.pendingSpoolBarcode {
                     BarcodeIntakeView(initialBarcode: barcode)
+                        .onAppear { viewModel.resultPresentationDidAppear() }
                 }
-            }
+            })
             .onChange(of: viewModel.pendingDeepLinkDestination) { _, destination in
                 guard let destination else { return }
+                router.beginScanFlowDismissal(
+                    queuedExternalRequestID: viewModel.finishNavigation()
+                )
                 router.navigate(
                     to: destination,
                     capabilities: services.capabilitiesService.resolved
                 )
-                viewModel.pendingDeepLinkDestination = nil
                 dismiss()
             }
             .task {
@@ -101,15 +126,47 @@ struct ScanFlowView: View {
                     partsInventoryService: services.partsInventoryService,
                     barcodeIntakeService: services.barcodeIntakeService,
                     spoolService: services.spoolService,
-                    printedPartsInventoryEnabled: partsInventoryEnabled
+                    printedPartsInventoryEnabled: partsInventoryEnabled,
+                    waitForScannerPresentation: {
+                        #if canImport(UIKit)
+                        await ScanPresentationReadiness.waitUntilReady()
+                        #else
+                        true
+                        #endif
+                    }
                 )
+                startExternalScanIfNeeded()
                 await services.capabilitiesService.refresh()
+            }
+            .onChange(of: externalScanRequestID) {
+                startExternalScanIfNeeded()
             }
             .onChange(of: partsInventoryEnabled) { _, isEnabled in
                 viewModel.setPrintedPartsInventoryEnabled(isEnabled)
             }
             .onAppear { viewModel.isViewActive = true }
             .onDisappear { viewModel.isViewActive = false }
+        }
+    }
+
+    private func resultPresentationDidDismiss() {
+        acknowledgePresentationDismissal(viewModel.resultPresentationDidDismiss)
+    }
+
+    private func acknowledgePresentationDismissal(_ acknowledge: @escaping @MainActor () -> Void) {
+        Task { @MainActor in
+            #if canImport(UIKit)
+            guard await ScanPresentationReadiness.waitUntilReady() else { return }
+            #endif
+            acknowledge()
+        }
+    }
+
+    private func startExternalScanIfNeeded() {
+        guard let externalScanRequestID else { return }
+        viewModel.requestExternalScan(externalScanRequestID)
+        if viewModel.hasFinishedNavigation, let requestID = viewModel.finishNavigation() {
+            router.beginScanFlowDismissal(queuedExternalRequestID: requestID)
         }
     }
 

@@ -1,6 +1,7 @@
 import Foundation
 
 enum DeepLinkDestination: Equatable {
+    case scan
     case printerDetail(id: UUID)
     case printerReady(id: UUID)
     case spoolDetail(id: Int)
@@ -12,6 +13,7 @@ struct DeepLinkHandler {
     /// Parses `printfarmer://` URLs into navigation destinations.
     ///
     /// Supported routes:
+    /// - `printfarmer://scan` → scanner
     /// - `printfarmer://printer/{UUID}` → printer detail
     /// - `printfarmer://printer/{UUID}/ready` → printer detail + mark ready
     /// - `printfarmer://printer/{UUID}/swap/{index}?jobId={UUID}` → guided swap
@@ -26,6 +28,10 @@ struct DeepLinkHandler {
         let pathComponents = url.pathComponents.filter { $0 != "/" }
 
         switch url.host {
+        case "scan":
+            guard pathComponents.isEmpty else { return nil }
+            return .scan
+
         case "printer":
             guard let first = pathComponents.first,
                   let printerId = UUID(uuidString: first) else { return nil }

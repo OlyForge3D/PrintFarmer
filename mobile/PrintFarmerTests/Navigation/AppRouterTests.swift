@@ -1,4 +1,5 @@
 import XCTest
+import Observation
 @testable import PrintFarmer
 
 /// Tests for shell-aware tab selection, deep-link mapping, and path isolation.
@@ -21,6 +22,121 @@ final class AppRouterTests: XCTestCase {
 
     func testLegacyPersistedScanSelectionRestoresInventory() {
         XCTAssertEqual(AppRouter.restoredTab(from: "scan"), .inventory)
+    }
+
+    func testScanDeepLinkSelectsInventoryAndCreatesConsumableRequest() {
+        let router = AppRouter()
+
+        router.navigate(to: .scan, capabilities: capabilities)
+
+        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertNotNil(router.pendingExternalScanRequestID)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+        XCTAssertNil(router.pendingExternalScanRequestID)
+        XCTAssertFalse(router.consumeExternalScanRequest())
+    }
+
+    func testPendingExternalScanSurvivesAuthenticationAndServerNavigationReset() {
+        let router = AppRouter()
+        router.navigate(to: .scan, capabilities: capabilities)
+
+        router.invalidatePendingNavigation()
+
+        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertNotNil(router.pendingExternalScanRequestID)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+    }
+
+    func testDeferredExternalScanWaitsForDismissalWithoutCancellingPrinterNavigation() async {
+        let router = AppRouter()
+        let requestID = UUID()
+        router.beginScanFlowDismissal(queuedExternalRequestID: requestID)
+        router.navigate(to: .printerDetail(id: printerId), capabilities: capabilities)
+        XCTAssertEqual(router.selectedTab, .farm)
+        XCTAssertFalse(router.consumeExternalScanRequest())
+        let navigated = expectation(description: "Original printer destination pushed")
+        withObservationTracking {
+            _ = router.printersPath
+        } onChange: {
+            navigated.fulfill()
+        }
+
+        router.completeScanFlowDismissal(capabilities: capabilities)
+
+        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertEqual(router.pendingExternalScanRequestID, requestID)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+        XCTAssertFalse(router.consumeExternalScanRequest())
+        await fulfillment(of: [navigated], timeout: 2)
+        XCTAssertEqual(router.printersPath.count, 1)
+    }
+
+    func testDeferredExternalScanPreservesSpoolResultAfterDismissal() {
+        let router = AppRouter()
+        let requestID = UUID()
+        router.beginScanFlowDismissal(queuedExternalRequestID: requestID)
+        router.navigate(to: .spoolDetail(id: spoolId), capabilities: capabilities)
+        XCTAssertEqual(router.pendingSpoolHighlightId, spoolId)
+        XCTAssertFalse(router.consumeExternalScanRequest())
+
+        router.completeScanFlowDismissal(capabilities: capabilities)
+
+        XCTAssertEqual(router.pendingSpoolHighlightId, spoolId)
+        XCTAssertEqual(router.pendingExternalScanRequestID, requestID)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+    }
+
+    func testNewExternalRequestDuringDismissalCoalescesWithoutEarlyConsumption() {
+        let router = AppRouter()
+        router.beginScanFlowDismissal(queuedExternalRequestID: UUID())
+        router.navigate(to: .scan, capabilities: capabilities)
+        let latestRequestID = router.pendingExternalScanRequestID
+        XCTAssertNotNil(latestRequestID)
+        XCTAssertFalse(router.consumeExternalScanRequest())
+
+        router.completeScanFlowDismissal(capabilities: capabilities)
+
+        XCTAssertEqual(router.pendingExternalScanRequestID, latestRequestID)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+        XCTAssertFalse(router.consumeExternalScanRequest())
+    }
+
+    func testDeferredExternalScanSurvivesAuthenticationAndServerNavigationReset() {
+        let router = AppRouter()
+        let requestID = UUID()
+        router.beginScanFlowDismissal(queuedExternalRequestID: requestID)
+
+        router.invalidatePendingNavigation()
+
+        XCTAssertFalse(router.isScanFlowDismissing)
+        XCTAssertEqual(router.pendingExternalScanRequestID, requestID)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+    }
+
+    func testScanDeepLinkSwitchesFromOversightToFloorInventory() {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+
+        router.navigate(to: .scan, capabilities: capabilities)
+
+        XCTAssertEqual(router.activeMode, .floor)
+        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+    }
+
+    func testExternalScanRequestStoreConsumesPersistedRequestExactlyOnce() throws {
+        let suiteName = "ExternalScanRequestStoreTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        ExternalScanRequestStore.request(userDefaults: defaults)
+
+        XCTAssertTrue(ExternalScanRequestStore.consume(userDefaults: defaults))
+        XCTAssertFalse(ExternalScanRequestStore.consume(userDefaults: defaults))
     }
 
     func testPersistedSelectionRoundTripsWithoutAffectingDefaultRouterTests() throws {

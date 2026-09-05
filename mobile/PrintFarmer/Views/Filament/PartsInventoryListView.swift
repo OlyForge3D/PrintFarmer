@@ -6,6 +6,7 @@ import SwiftUI
 /// tab-level wrapper combining both.
 struct PartsInventoryListView: View {
     @Environment(ServiceContainer.self) private var services
+    @Environment(AppRouter.self) private var router
     @State private var viewModel = PartsInventoryViewModel()
     @State private var selectedPart: PartInventoryResponse?
     @State private var showScanFlow = false
@@ -99,9 +100,11 @@ struct PartsInventoryListView: View {
                 activeTasks.append(task)
             }
         }
-        .sheet(isPresented: $showScanFlow) {
+        .sheet(isPresented: $showScanFlow, onDismiss: {
+            router.completeScanFlowDismissal(capabilities: services.capabilitiesService.resolved)
+        }, content: {
             ScanFlowView()
-        }
+        })
         .sheet(isPresented: $showPartLookup) {
             PartLookupView(partsInventoryService: services.partsInventoryService) { part in
                 selectedPart = part
