@@ -21,6 +21,31 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
         ]
     }
 
+    func testRevealSearchesBothDirectionsAtLargeDynamicType() {
+        let severity = element(
+            "attention.item.\(failureID).severity",
+            type: .any
+        )
+        XCTAssertTrue(severity.waitForExistence(timeout: 30))
+
+        let retryMedia = element(
+            "attention.item.\(unavailableMediaID).media.retry",
+            type: .button
+        )
+        reveal(retryMedia)
+        XCTAssertEqual(retryMedia.label, "Retry camera snapshot")
+
+        reveal(severity)
+        XCTAssertEqual(severity.label, "Severity, Critical")
+
+        let acknowledge = element(
+            "attention.item.\(maintenanceID).action.acknowledge",
+            type: .button
+        )
+        reveal(acknowledge)
+        XCTAssertEqual(acknowledge.label, "Acknowledge")
+    }
+
     func testFailureMediaStableNavigationAndActionsAtLargeDynamicType() {
         let failureCard = element(
             "attention.item.\(failureID)",
@@ -238,26 +263,39 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        for _ in 0..<24 {
-            guard element.waitForExistence(timeout: 5) else {
-                XCTFail(
-                    "Required control '\(element.identifier)' does not exist",
-                    file: file,
-                    line: line
-                )
-                return
-            }
+        var searchTowardTop = false
+        var sweepLength = 4
+        var stepsRemaining = sweepLength
+        for _ in 0..<64 {
             let visibleFrame = visibleAttentionFrame
+            let targetFrame = element.exists ? element.frame : nil
             // A thin strip above the tab bar can be hittable without a reliable tap target.
-            if element.isHittable, visibleFrame.contains(element.frame) {
+            if let targetFrame, !targetFrame.isEmpty,
+               visibleFrame.contains(targetFrame), element.isHittable {
                 break
             }
-            let scrollDown = element.frame.midY < visibleFrame.midY
-            // Travel across tall cards, then shorten the drag to align the target.
-            let distance = min(
-                max(abs(element.frame.midY - visibleFrame.midY), 24),
-                visibleFrame.height * 0.7
-            )
+
+            let scrollDown: Bool
+            let distance: CGFloat
+            if let targetFrame, !targetFrame.isEmpty {
+                scrollDown = targetFrame.midY < visibleFrame.midY
+                // Travel across tall cards, then shorten the drag to align the target.
+                distance = min(
+                    max(abs(targetFrame.midY - visibleFrame.midY), 24),
+                    visibleFrame.height * 0.7
+                )
+            } else {
+                // Lazy rows have no AX frame until scrolled into view. Expanding
+                // 4/8/16/32-drag sweeps search both sides of the starting viewport.
+                scrollDown = searchTowardTop
+                distance = visibleFrame.height * 0.7
+                stepsRemaining -= 1
+                if stepsRemaining == 0 {
+                    searchTowardTop.toggle()
+                    sweepLength *= 2
+                    stepsRemaining = sweepLength
+                }
+            }
             let start = app.coordinate(withNormalizedOffset: .zero).withOffset(
                 CGVector(
                     dx: visibleFrame.midX - app.frame.minX,
@@ -275,12 +313,14 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
                 thenHoldForDuration: 0.1
             )
         }
-        XCTAssertTrue(
-            element.waitForExistence(timeout: 5),
-            "Required control '\(element.identifier)' does not exist",
-            file: file,
-            line: line
-        )
+        guard element.waitForExistence(timeout: 5) else {
+            XCTFail(
+                "Required attention control did not materialize within the scroll budget",
+                file: file,
+                line: line
+            )
+            return
+        }
         XCTAssertTrue(
             element.isHittable,
             "Required control '\(element.identifier)' is hidden or overlapped at accessibility XXXL",
