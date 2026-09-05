@@ -51,12 +51,23 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
             "Operator shell must expose either a compact tab bar or an iPad sidebar"
         )
 
-        let expectedDestinations: [(tabTitle: String, sidebarIdentifier: String)] = [
-            ("Attention", "sidebar.attention"),
-            ("Farm", "sidebar.farm"),
-            ("Inventory", "sidebar.inventory"),
-            ("Oversight", "sidebar.oversight")
-        ]
+        let expectedDestinations: [(tabTitle: String, sidebarIdentifier: String)] = hasTabBar
+            ? [
+                ("Attention", "sidebar.attention"),
+                ("Farm", "sidebar.farm"),
+                ("Inventory", "sidebar.inventory"),
+                ("Oversight", "sidebar.oversight")
+            ]
+            : [
+                ("Attention", "sidebar.attention"),
+                ("Farm", "sidebar.farm"),
+                ("Inventory", "sidebar.inventory"),
+                ("Overview", "sidebar.overview"),
+                ("Fleet", "sidebar.fleet"),
+                ("Jobs", "sidebar.jobs"),
+                ("Upkeep", "sidebar.upkeep"),
+                ("Reports", "sidebar.reports")
+            ]
         for destination in expectedDestinations {
             let button = operatorDestinationButton(
                 tabTitle: destination.tabTitle,
@@ -73,6 +84,11 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         if hasTabBar {
             XCTAssertFalse(app.tabBars.buttons["Tasks"].exists)
             XCTAssertFalse(app.tabBars.buttons["Scan"].exists)
+        } else {
+            XCTAssertTrue(app.staticTexts["sidebar.section.floor"].exists)
+            XCTAssertTrue(app.staticTexts["sidebar.section.oversight"].exists)
+            XCTAssertFalse(app.segmentedControls["navigation.modeControl"].exists)
+            XCTAssertFalse(app.buttons["sidebar.oversight"].exists)
         }
     }
 
@@ -106,6 +122,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
 
     func testDashboardReachableFromOversight() {
         openOversightDestination(
+            sidebarRootIdentifier: "sidebar.overview",
             identifier: "oversight.destination.dashboard",
             expectedNavigationBarTitle: "Dashboard"
         )
@@ -113,6 +130,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
 
     func testMaintenanceReachableFromOversight() {
         openOversightDestination(
+            sidebarRootIdentifier: "sidebar.upkeep",
             identifier: "oversight.destination.maintenance",
             expectedNavigationBarTitle: "Maintenance"
         )
@@ -120,6 +138,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
 
     func testPredictiveInsightsReachableFromOversight() {
         openOversightDestination(
+            sidebarRootIdentifier: "sidebar.upkeep",
             identifier: "oversight.destination.predictiveInsights",
             expectedNavigationBarTitle: "Predictive Insights"
         )
@@ -253,18 +272,19 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
     }
 
     private func openOversightDestination(
+        sidebarRootIdentifier: String,
         identifier: String,
         expectedNavigationBarTitle: String,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let oversight = operatorDestinationButton(
+        let root = operatorDestinationButton(
             tabTitle: "Oversight",
-            sidebarIdentifier: "sidebar.oversight",
+            sidebarIdentifier: sidebarRootIdentifier,
             timeout: 5
         )
-        XCTAssertTrue(oversight.exists, file: file, line: line)
-        oversight.tap()
+        XCTAssertTrue(root.exists, file: file, line: line)
+        root.tap()
 
         let destination = app.buttons[identifier]
         XCTAssertTrue(destination.waitForExistence(timeout: 5), file: file, line: line)

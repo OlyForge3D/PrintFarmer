@@ -69,14 +69,17 @@ class PrintFarmerUITestCase: XCTestCase {
     /// Reveal the iPad NavigationSplitView sidebar via the system-provided
     /// nav-bar toggle if it appears to be collapsed. No-op on compact width
     /// (iPhone) or when the sidebar is already visible.
-    func revealSidebarIfCollapsed() {
-        for label in ["Sidebar", "Toggle Sidebar", "Show Sidebar"] {
-            let toggle = app.navigationBars.buttons[label]
-            if toggle.exists {
-                toggle.tap()
-                return
-            }
+    @discardableResult
+    func revealSidebarIfCollapsed(timeout: TimeInterval = 3) -> Bool {
+        let labels = ["Sidebar", "Toggle Sidebar", "Show Sidebar"]
+        let toggle = app.buttons
+            .matching(NSPredicate(format: "label IN %@", labels))
+            .firstMatch
+        guard toggle.waitForExistence(timeout: timeout) else {
+            return false
         }
+        toggle.tap()
+        return true
     }
 
     /// Adaptive locator for an operator-shell destination. Returns the
@@ -84,10 +87,8 @@ class PrintFarmerUITestCase: XCTestCase {
     /// the iPad `NavigationSplitView` sidebar button — revealing a
     /// collapsed sidebar via the system toggle if needed.
     ///
-    /// Polls both surfaces at 200 ms intervals and returns whichever
-    /// materializes first, keeping the wait budget shared instead of
-    /// serially blocking on the non-adaptive `tabBars.buttons[...]`
-    /// query that fails deterministically on iPad regular size class.
+    /// Gives the compact tab a brief chance to appear, then proactively
+    /// reveals a collapsed iPad sidebar before polling both surfaces.
     ///
     /// - Parameters:
     ///   - tabTitle: The compact tab-bar button label (e.g. "Attention").
@@ -104,17 +105,20 @@ class PrintFarmerUITestCase: XCTestCase {
     ) -> XCUIElement {
         let tab = app.tabBars.buttons[tabTitle]
         let sidebar = app.buttons[sidebarIdentifier]
+        if tab.waitForExistence(timeout: min(1, timeout)) {
+            return tab
+        }
+        if sidebar.exists {
+            return sidebar
+        }
+
+        _ = revealSidebarIfCollapsed(timeout: min(3, timeout))
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if tab.exists { return tab }
             if sidebar.exists { return sidebar }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
-        // iPad portrait may keep the sidebar collapsed behind the system
-        // toggle. Try once to reveal it, then give the sidebar button a
-        // short window to materialize before giving up.
-        revealSidebarIfCollapsed()
-        _ = sidebar.waitForExistence(timeout: 2)
         return sidebar.exists ? sidebar : tab
     }
 
@@ -135,7 +139,7 @@ class PrintFarmerUITestCase: XCTestCase {
             }
 
             revealSidebarIfCollapsed()
-            let sidebarButtons = app.descendants(matching: .any)
+            let sidebarButtons = app.buttons
                 .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
                 .allElementsBoundByIndex
                 .filter(\.exists)
@@ -153,7 +157,7 @@ class PrintFarmerUITestCase: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
 
-        return app.descendants(matching: .any)
+        return app.buttons
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
             .allElementsBoundByIndex
             .filter(\.exists)
