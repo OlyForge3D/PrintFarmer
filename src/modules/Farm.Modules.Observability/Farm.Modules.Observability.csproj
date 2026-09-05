@@ -40,6 +40,7 @@ are not moved in this phase.</Description>
          module), so it must be referenced directly here too. Version pinned to the
          one FluentValidation.AspNetCore 11.3.1 currently resolves to solution-wide. -->
     <PackageReference Include="FluentValidation" Version="11.11.0" />
+    <PackageReference Include="Refit.HttpClientFactory" Version="15.2.0" />
   </ItemGroup>
 
 </Project>

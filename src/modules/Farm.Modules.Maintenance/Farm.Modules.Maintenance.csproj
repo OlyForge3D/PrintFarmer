@@ -25,6 +25,7 @@ completing the move-first-rename-last strategy.</Description>
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Refit.HttpClientFactory" Version="15.2.0" />
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
     <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
   </ItemGroup>
