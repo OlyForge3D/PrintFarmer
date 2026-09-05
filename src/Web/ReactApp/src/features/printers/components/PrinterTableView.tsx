@@ -351,7 +351,7 @@ export function PrinterTableView({
 
                   {/* Progress */}
                   <td className="px-4 py-4">
-                    {displayPrinter.progress !== undefined && displayPrinter.progress > 0 ? (
+                    {displayPrinter.progress != null && displayPrinter.progress >= 0 ? (
                       <div className="flex items-center space-x-2">
                         <ProgressBar
                           value={displayPrinter.progress}
