@@ -101,14 +101,24 @@ class PrintFarmerUITestCase: XCTestCase {
         tabIdentifier: String,
         timeout: TimeInterval = 5
     ) -> XCUIElement {
-        let tab = app.tabBars.buttons[tabIdentifier]
+        let tabButton = app.tabBars.buttons[tabIdentifier]
+        let tabElement = app.tabBars.descendants(matching: .any)
+            .matching(identifier: tabIdentifier)
+            .firstMatch
+        let tabLabel = app.tabBars.buttons[tabTitle(for: tabIdentifier)]
         let sidebarIdentifier = tabIdentifier.replacingOccurrences(
             of: "tab.",
             with: "sidebar."
         )
         let sidebar = app.buttons[sidebarIdentifier]
-        if tab.waitForExistence(timeout: min(1, timeout)) {
-            return tab
+        if tabButton.waitForExistence(timeout: min(1, timeout)) {
+            return tabButton
+        }
+        if tabElement.exists {
+            return tabElement
+        }
+        if tabLabel.exists {
+            return tabLabel
         }
         if sidebar.exists {
             return sidebar
@@ -117,11 +127,35 @@ class PrintFarmerUITestCase: XCTestCase {
         _ = revealSidebarIfCollapsed(timeout: min(3, timeout))
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if tab.exists { return tab }
+            if tabButton.exists { return tabButton }
+            if tabElement.exists { return tabElement }
+            if tabLabel.exists { return tabLabel }
             if sidebar.exists { return sidebar }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
-        return sidebar.exists ? sidebar : tab
+        if sidebar.exists {
+            return sidebar
+        }
+        if tabElement.exists {
+            return tabElement
+        }
+        return tabLabel.exists ? tabLabel : tabButton
+    }
+
+    private func tabTitle(for identifier: String) -> String {
+        switch identifier {
+        case "tab.attention": "Attention"
+        case "tab.farm": "Farm"
+        case "tab.tasks": "Tasks"
+        case "tab.inventory": "Inventory"
+        case "tab.oversight": "Oversight"
+        case "tab.overview": "Overview"
+        case "tab.fleet": "Fleet"
+        case "tab.jobs": "Jobs"
+        case "tab.upkeep": "Upkeep"
+        case "tab.reports": "Reports"
+        default: identifier
+        }
     }
 
     func renderedShellRoots(timeout: TimeInterval = 8) -> [RenderedShellRoot] {

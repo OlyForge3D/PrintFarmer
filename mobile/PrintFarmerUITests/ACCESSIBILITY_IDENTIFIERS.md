@@ -22,6 +22,9 @@ post_date: 2026-09-04
 - Regular-width iPad destinations use `sidebar.<case>`.
 - `shellDestinationButton(tabIdentifier:)` maps a compact tab identifier to
   its iPad sidebar counterpart.
+- The helper queries the canonical `tab.*` identifier first. On SwiftUI
+  runtimes that expose tab-bar buttons by label only, it falls back to the
+  title mapped by this document while keeping identifier-based call sites.
 - Screen-specific identifiers remain the same in Simple and Two Modes.
 - Scanner identifiers describe the scanner flow, not its former navigation
   location.

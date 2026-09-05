@@ -1,5 +1,7 @@
 import XCTest
 
+// swiftlint:disable file_length
+
 /// UI tests for the F1 operator shell (issue #706).
 ///
 /// Verifies that the app launches into the Attention tab, that the operator
@@ -589,13 +591,13 @@ final class TwoModesOversightShellUITests: PrintFarmerUITestCase {
             )
         }
 
-        app.tabBars.buttons["tab.overview"].tap()
+        shellDestinationButton(tabIdentifier: "tab.overview").tap()
         let dashboard = app.buttons["oversight.destination.dashboard"]
         XCTAssertTrue(dashboard.waitForExistence(timeout: 5))
         dashboard.tap()
         XCTAssertTrue(app.navigationBars["Dashboard"].waitForExistence(timeout: 5))
 
-        app.tabBars.buttons["tab.upkeep"].tap()
+        shellDestinationButton(tabIdentifier: "tab.upkeep").tap()
         let maintenance = app.buttons["oversight.destination.maintenance"]
         XCTAssertTrue(maintenance.waitForExistence(timeout: 5))
         maintenance.tap()

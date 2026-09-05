@@ -163,9 +163,9 @@ struct ContentView: View {
                             tabContentView(for: tab)
                         } label: {
                             Label(tab.title, systemImage: tab.systemImage)
+                                .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
                         }
                         .badge(badgeCount(for: tab))
-                        .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
                     }
                 }
             } else {
@@ -174,6 +174,7 @@ struct ContentView: View {
                         tabContentView(for: tab)
                             .tabItem {
                                 Label(tab.title, systemImage: tab.systemImage)
+                                    .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
                             }
                             .tag(tab)
                             .badge(badgeCount(for: tab))
@@ -181,14 +182,6 @@ struct ContentView: View {
                 }
             }
         }
-        #if canImport(UIKit)
-        .background {
-            TabBarAccessibilityIdentifierBridge(
-                identifiers: tabs.map(\.tabAccessibilityIdentifier)
-            )
-            .frame(width: 0, height: 0)
-        }
-        #endif
     }
 
     private func modeControl(
