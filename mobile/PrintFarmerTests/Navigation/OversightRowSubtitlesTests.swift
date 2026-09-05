@@ -577,6 +577,79 @@ final class OversightRowSubtitlesTests: XCTestCase {
         }
     }
 
+    // MARK: - Two-modes tab roots (round-3 wiring)
+
+    /// The two-modes tab roots build a context that has only
+    /// router-derived state — `attentionItemCount` and
+    /// `upcomingMaintenance` stay `nil` because those fetches don't
+    /// run in `OversightDestinationListRoot`. The helper must still
+    /// produce the live Automatic reading for `.navigationSettings`,
+    /// matching what the simple hub shows for the same destination.
+    func testTwoModesReportsTabProducesLiveNavigationSubtitle() {
+        var context = OversightRowSubtitleContext.unknown
+        context.navigationPreference = .automatic
+        context.automaticInputs = AutomaticInputsSnapshot(
+            farmShape: FarmShape(
+                accountCount: 3,
+                locationCount: 2,
+                printerCount: 25
+            ),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        )
+
+        // No fetched signals; the router-only context still yields the
+        // honest live subtitle for the navigation-settings row.
+        XCTAssertNil(context.attentionItemCount)
+        XCTAssertNil(context.upcomingMaintenance)
+
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .navigationSettings, in: context),
+            "Automatic · currently the two-modes layout"
+        )
+    }
+
+    /// Every destination the two-modes tab roots render — with a
+    /// router-only context — must fall back to `destination.subtitle`
+    /// whenever the underlying signals aren't loaded. This proves the
+    /// wiring is safe: routing every row through the helper does not
+    /// silently blank rows or fabricate counts on the two-modes surface.
+    /// Kept in sync with `OversightRoot.destinations`.
+    func testTwoModesRowsWithoutLoadedSignalsFallBackToDescriptiveSubtitles() {
+        var context = OversightRowSubtitleContext.unknown
+        context.navigationPreference = .twoModes
+        context.automaticInputs = AutomaticInputsSnapshot(
+            farmShape: nil,
+            shiftPlanEnabled: false,
+            isFarmAdmin: false
+        )
+
+        // Destinations rendered across Overview, Jobs, Upkeep, and
+        // Reports tab roots. `.navigationSettings` is excluded — it
+        // is intentionally live from router state and covered by
+        // `testTwoModesReportsTabProducesLiveNavigationSubtitle`.
+        let twoModesDestinations: [OversightDestination] = [
+            .dashboard,
+            .dispatch,
+            .jobHistory,
+            .jobTimeline,
+            .maintenance,
+            .maintenanceAnalytics,
+            .predictiveInsights,
+            .uptimeReliability,
+            .filamentCoverage,
+            .locations
+        ]
+
+        for destination in twoModesDestinations {
+            XCTAssertEqual(
+                OversightRowSubtitles.subtitle(for: destination, in: context),
+                destination.subtitle,
+                "\(destination.rawValue) has no fetched signals in the two-modes root; helper must fall back to the descriptive subtitle instead of blanking or fabricating."
+            )
+        }
+    }
+
     // MARK: - Helpers
 
     private func makeTask(

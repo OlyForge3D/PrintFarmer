@@ -34,15 +34,12 @@ struct OversightHubView: View {
     /// All three sources are `@Observable`, so SwiftUI re-renders this
     /// view whenever they change.
     private var resolvedSubtitleContext: OversightRowSubtitleContext {
-        var context = subtitleContext
-        context.navigationPreference = router.appliedNavigationPreference
-        context.automaticDerivation = router.establishedAutomaticDerivation
-        context.automaticInputs = AutomaticInputsSnapshot(
-            farmShape: services.farmShapeService.latestShape,
-            shiftPlanEnabled: capabilities.shiftPlanEnabled,
-            isFarmAdmin: router.configuredIsFarmAdmin
+        oversightRowSubtitleContext(
+            base: subtitleContext,
+            router: router,
+            capabilities: capabilities,
+            farmShape: services.farmShapeService.latestShape
         )
-        return context
     }
 
     var body: some View {
@@ -291,17 +288,43 @@ private struct OversightDestinationListRoot: View {
     let destinations: [OversightDestination]
     @Binding var path: NavigationPath
 
+    @Environment(AppRouter.self) private var router
+    @Environment(ServiceContainer.self) private var services
+
+    private var capabilities: ResolvedSystemCapabilities {
+        services.capabilitiesService.resolved
+    }
+
+    /// Two-modes tab roots do not run the attention/maintenance
+    /// fetches the simple hub does, so `upcomingMaintenance` and
+    /// `attentionItemCount` stay `nil` here — the derivation
+    /// module's honest-unknown fallback returns
+    /// `destination.subtitle` for those rows, preserving today's
+    /// visible behavior on Overview/Jobs/Upkeep. Router-derived
+    /// state (navigation preference + live automatic inputs) is
+    /// populated so the Reports > Navigation settings row shows
+    /// the same live Automatic reading it does on the simple hub.
+    /// This routes every row through
+    /// `OversightRowSubtitles.subtitle(...)`, giving one authoritative
+    /// derivation for the whole Oversight surface (#2449).
+    private var subtitleContext: OversightRowSubtitleContext {
+        oversightRowSubtitleContext(
+            base: .unknown,
+            router: router,
+            capabilities: capabilities,
+            farmShape: services.farmShapeService.latestShape
+        )
+    }
+
     var body: some View {
         NavigationStack(path: $path) {
             List(destinations) { destination in
-                // Two-modes tabs keep the static descriptive subtitle.
-                // The data-driven derivation is intentionally scoped to
-                // the simple hub (issue #2449); adding it here would
-                // require the same per-appearance fetch on every tab
-                // root, which is out of scope for this pass.
                 OversightNavigationRow(
                     destination: destination,
-                    subtitle: destination.subtitle
+                    subtitle: OversightRowSubtitles.subtitle(
+                        for: destination,
+                        in: subtitleContext
+                    )
                 )
             }
             .listStyle(.insetGrouped)
@@ -313,6 +336,33 @@ private struct OversightDestinationListRoot: View {
             .accessibilityIdentifier(root.accessibilityIdentifier)
         }
     }
+}
+
+/// Shared subtitle-context builder used by both the simple hub and the
+/// two-modes tab roots. Layers router-derived state onto whatever base
+/// context the caller has already assembled (typically the simple hub's
+/// fetched attention/maintenance snapshot, or `.unknown` for the
+/// fetch-less two-modes tab roots).
+///
+/// `AppRouter`, `ResolvedSystemCapabilities`, and `FarmShapeService` are
+/// all `@Observable`, so any view calling this rebuilds automatically
+/// when the underlying router or capability state changes.
+@MainActor
+private func oversightRowSubtitleContext(
+    base: OversightRowSubtitleContext,
+    router: AppRouter,
+    capabilities: ResolvedSystemCapabilities,
+    farmShape: FarmShape?
+) -> OversightRowSubtitleContext {
+    var context = base
+    context.navigationPreference = router.appliedNavigationPreference
+    context.automaticDerivation = router.establishedAutomaticDerivation
+    context.automaticInputs = AutomaticInputsSnapshot(
+        farmShape: farmShape,
+        shiftPlanEnabled: capabilities.shiftPlanEnabled,
+        isFarmAdmin: router.configuredIsFarmAdmin
+    )
+    return context
 }
 
 private struct OversightNavigationRow: View {
