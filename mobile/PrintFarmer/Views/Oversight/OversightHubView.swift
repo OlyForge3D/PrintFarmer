@@ -86,7 +86,10 @@ struct OversightHubView: View {
                 capabilities: capabilities
             )
         }
-        .task(id: services.activeServerGeneration) {
+        .task(id: subtitleRefreshKey) {
+            await refreshSubtitleContext()
+        }
+        .refreshable {
             await refreshSubtitleContext()
         }
         .onAppear(perform: refreshUpgradeOffer)
@@ -174,12 +177,22 @@ struct OversightHubView: View {
     /// endpoint is safe on any server that publishes upcoming tasks; the
     /// attention endpoint is skipped when the capability gate is off.
     ///
-    /// This runs inside `.task(id: services.activeServerGeneration)`, so
-    /// the very first thing we do is clear the previous server's context
-    /// back to `.unknown`. That guarantees a server switch never
-    /// briefly renders the outgoing server's attention count next to the
-    /// incoming server's chrome; during the fetch the rows fall back to
-    /// their descriptive catalog subtitles, which is honest.
+    /// This runs inside `.task(id: subtitleRefreshKey)`, which changes on:
+    /// * `services.activeServerGeneration` — server / user context change.
+    /// * `capabilities.attentionEnabled` — same-server feature toggle.
+    ///
+    /// The very first thing we do on every run is clear the previous
+    /// snapshot back to `.unknown`. That guarantees:
+    /// * A server switch never briefly renders the outgoing server's
+    ///   attention count next to the incoming server's chrome.
+    /// * When a capability transitions off mid-session, the stale
+    ///   `attentionItemCount` is immediately cleared to `nil` instead of
+    ///   being displayed for a feature that is no longer enabled — the
+    ///   derivation falls back to the descriptive subtitle, which is the
+    ///   honest unknown reading (issue #2449 review round 4).
+    /// * A user-initiated pull-to-refresh (`.refreshable`) or return to
+    ///   the hub re-runs the same clear-then-fetch sequence, so
+    ///   same-server data mutations refresh the visible subtitles.
     private func refreshSubtitleContext() async {
         subtitleContext = .unknown
 
@@ -207,6 +220,43 @@ struct OversightHubView: View {
         if Task.isCancelled { return }
         subtitleContext = context
     }
+
+    /// Composite refresh trigger for `.task(id:)`. Any change here
+    /// re-runs `refreshSubtitleContext`, which first clears
+    /// `subtitleContext` to `.unknown` and then refetches — so the
+    /// visible subtitle never lingers on a value that is no longer
+    /// authoritative for the current server + capability state.
+    private var subtitleRefreshKey: OversightSubtitleRefreshKey {
+        OversightSubtitleRefreshKey(
+            serverGeneration: services.activeServerGeneration,
+            attentionEnabled: capabilities.attentionEnabled
+        )
+    }
+}
+
+/// Composite key that gates `OversightHubView.refreshSubtitleContext`
+/// via `.task(id:)`. When any field differs from the previous value,
+/// SwiftUI cancels the current fetch and re-runs, which first clears
+/// `subtitleContext` back to `.unknown` and then refetches — so the
+/// visible subtitle can never linger on a value that is no longer
+/// authoritative for the current server + capability state.
+///
+/// Fields:
+/// * `serverGeneration` — bumps on server / user context change,
+///   the round-1 gate against cross-server bleed-through.
+/// * `attentionEnabled` — flipping this off must clear
+///   `attentionItemCount` immediately; the fetch is skipped when
+///   the capability is off, so the `.unknown` clear stands and the
+///   subtitle falls back to the descriptive catalog copy. Flipping
+///   it on re-runs the fetch and repopulates the count.
+///
+/// Exposed at file scope (not nested private) so the test target can
+/// exercise the equatable invariants that drive `.task(id:)`
+/// invalidation without needing SwiftUI view-hosting infrastructure
+/// (issue #2449 review round 4).
+struct OversightSubtitleRefreshKey: Equatable {
+    let serverGeneration: Int
+    let attentionEnabled: Bool
 }
 
 struct OversightTabRootView: View {

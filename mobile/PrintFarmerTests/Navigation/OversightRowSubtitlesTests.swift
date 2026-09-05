@@ -650,6 +650,112 @@ final class OversightRowSubtitlesTests: XCTestCase {
         }
     }
 
+    // MARK: - Same-server invalidation (round-4 wiring)
+
+    /// The round-1 fix ties `.task(id:)` to `activeServerGeneration`
+    /// so a server switch clears stale attention counts. The refresh
+    /// key must still change when the server generation bumps, since
+    /// that gate protects against cross-server bleed-through.
+    func testRefreshKeyChangesWhenServerGenerationBumps() {
+        let before = OversightSubtitleRefreshKey(
+            serverGeneration: 4,
+            attentionEnabled: true
+        )
+        let after = OversightSubtitleRefreshKey(
+            serverGeneration: 5,
+            attentionEnabled: true
+        )
+        XCTAssertNotEqual(
+            before,
+            after,
+            "Server generation bump must change the refresh key so .task(id:) cancels the stale fetch and reclears the context to .unknown."
+        )
+    }
+
+    /// Round-4 core: same-server transitions must also invalidate the
+    /// fetch. A `capabilities.attentionEnabled` toggle is the concrete
+    /// signal Hicks called out — with the round-1-only wiring
+    /// (`activeServerGeneration` alone), disabling attention mid-session
+    /// left the previous `attentionItemCount` visible on the Right now
+    /// row for a feature that no longer exists. The composite refresh
+    /// key must differ when the capability toggles so `.task(id:)`
+    /// re-fires and clears `subtitleContext` to `.unknown`.
+    func testRefreshKeyChangesWhenAttentionCapabilityToggles() {
+        let enabled = OversightSubtitleRefreshKey(
+            serverGeneration: 7,
+            attentionEnabled: true
+        )
+        let disabled = OversightSubtitleRefreshKey(
+            serverGeneration: 7,
+            attentionEnabled: false
+        )
+        XCTAssertNotEqual(
+            enabled,
+            disabled,
+            "Toggling attentionEnabled on the same server must change the refresh key so the stale attentionItemCount is cleared."
+        )
+    }
+
+    /// The refresh key must be stable when no relevant input changes.
+    /// Unrelated view-model churn (router preference flips, farm shape
+    /// updates) is routed through the observable computed subtitle
+    /// context, not through the refetch trigger — refetching on every
+    /// router tick would thrash the network.
+    func testRefreshKeyIsStableWhenServerAndCapabilityAreUnchanged() {
+        let a = OversightSubtitleRefreshKey(
+            serverGeneration: 12,
+            attentionEnabled: true
+        )
+        let b = OversightSubtitleRefreshKey(
+            serverGeneration: 12,
+            attentionEnabled: true
+        )
+        XCTAssertEqual(
+            a,
+            b,
+            "Identical inputs must produce equal refresh keys or SwiftUI will refetch on every view rebuild."
+        )
+    }
+
+    /// After a capability toggle invalidates the fetch, the very first
+    /// thing `refreshSubtitleContext` does is reset `subtitleContext`
+    /// to `.unknown`. Downstream, the derivation must fall back to the
+    /// descriptive catalog subtitle for attention-carrying destinations
+    /// — not display "0 attention items" or the pre-toggle count. This
+    /// covers the round-1 invariant against staleness AND the round-4
+    /// finding: the honest-unknown fallback must be robust to signals
+    /// that were populated by a previous same-server run.
+    func testAttentionCapabilityDisableClearsToHonestUnknownSubtitle() {
+        // First: a fully-populated context (the state that existed
+        // immediately before the capability was disabled).
+        var populated = OversightRowSubtitleContext.unknown
+        populated.attentionItemCount = 7
+        populated.attentionHasMorePages = false
+        populated.healthyPrinterCount = 12
+
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .dashboard, in: populated),
+            "7 attention items",
+            "Baseline: while attention is enabled, the dashboard row shows the live count."
+        )
+
+        // Then: the refresh key changes on disable, `.task(id:)`
+        // reclears the context to `.unknown`, and — because the fetch
+        // is skipped when the capability is off — the context stays
+        // unknown. The derivation must fall back to the descriptive
+        // subtitle instead of the pre-disable count.
+        let cleared = OversightRowSubtitleContext.unknown
+        XCTAssertNil(
+            cleared.attentionItemCount,
+            "Honest unknown: a disabled capability leaves attentionItemCount as nil, not zero."
+        )
+        XCTAssertEqual(
+            OversightRowSubtitles.subtitle(for: .dashboard, in: cleared),
+            OversightDestination.dashboard.subtitle,
+            "Disabling attention mid-session must not leave the pre-disable count visible; the row falls back to the honest descriptive subtitle."
+        )
+    }
+
     // MARK: - Helpers
 
     private func makeTask(
