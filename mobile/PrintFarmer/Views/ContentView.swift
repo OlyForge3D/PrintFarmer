@@ -146,15 +146,39 @@ struct ContentView: View {
                 modeControl(capabilities: capabilities)
             }
 
-            TabView(selection: selection) {
-                ForEach(tabs, id: \.self) { tab in
-                    tabContentView(for: tab)
-                        .tabItem {
+            compactTabView(selection: selection, tabs: tabs)
+        }
+    }
+
+    @ViewBuilder
+    private func compactTabView(
+        selection: Binding<AppTab>,
+        tabs: [AppTab]
+    ) -> some View {
+        Group {
+            if #available(iOS 18.0, *) {
+                TabView(selection: selection) {
+                    ForEach(tabs, id: \.self) { tab in
+                        Tab(value: tab) {
+                            tabContentView(for: tab)
+                        } label: {
                             Label(tab.title, systemImage: tab.systemImage)
                                 .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
                         }
-                        .tag(tab)
                         .badge(badgeCount(for: tab))
+                    }
+                }
+            } else {
+                TabView(selection: selection) {
+                    ForEach(tabs, id: \.self) { tab in
+                        tabContentView(for: tab)
+                            .tabItem {
+                                Label(tab.title, systemImage: tab.systemImage)
+                                    .accessibilityIdentifier(tab.tabAccessibilityIdentifier)
+                            }
+                            .tag(tab)
+                            .badge(badgeCount(for: tab))
+                    }
                 }
             }
         }
@@ -335,6 +359,13 @@ struct ContentView: View {
             oversightAvailability: oversightAvailability,
             preserveNavigationOnContextChange: preserveNavigationOnIdentityUpgrade
         )
+        if UITestBootstrap.isEnabled,
+           UITestBootstrap.startsInOversightMode {
+            router.setNavigationMode(
+                .oversight,
+                capabilities: capabilities
+            )
+        }
     }
 
     private var navigationIdentityRequest: NavigationIdentityRequest? {

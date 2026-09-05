@@ -38,9 +38,19 @@ final class UITestBootstrapTests: XCTestCase {
     }
 
     func test_twoModesNavigationLaunchArgument_matchesUITestsHarness() {
-        XCTAssertEqual(
-            UITestBootstrap.twoModesNavigationLaunchArgument,
-            "--uitesting-two-modes"
+        XCTAssertEqual(UITestBootstrap.twoModesNavigationLaunchArgument, "--uitesting-two-modes")
+    }
+
+    func test_oversightNavigationModeLaunchArgument_matchesUITestsHarness() {
+        XCTAssertEqual(UITestBootstrap.oversightNavigationModeLaunchArgument, "--uitesting-oversight-mode")
+    }
+
+    func test_startsInOversightMode_requiresLaunchArgument() {
+        XCTAssertFalse(UITestBootstrap.startsInOversightMode(arguments: ["--uitesting"]))
+        XCTAssertTrue(
+            UITestBootstrap.startsInOversightMode(
+                arguments: ["--uitesting", "--uitesting-oversight-mode"]
+            )
         )
     }
 
@@ -123,6 +133,13 @@ final class UITestBootstrapTests: XCTestCase {
         )
     }
 
+    func test_attentionHarvestScanLaunchArgument_matchesUITestsHarness() {
+        XCTAssertEqual(
+            UITestBootstrap.attentionHarvestScanLaunchArgument,
+            "--uitesting-attention-harvest-scan"
+        )
+    }
+
     func test_mode_isAttentionActions_whenArgumentPresent() {
         XCTAssertEqual(
             UITestBootstrap.mode(in: [
@@ -130,6 +147,16 @@ final class UITestBootstrapTests: XCTestCase {
                 "--uitesting-attention-actions",
             ]),
             .authenticatedAttentionActions
+        )
+    }
+
+    func test_mode_isAttentionHarvestScan_whenArgumentPresent() {
+        XCTAssertEqual(
+            UITestBootstrap.mode(in: [
+                "--uitesting",
+                "--uitesting-attention-harvest-scan",
+            ]),
+            .authenticatedAttentionHarvestScan
         )
     }
 
@@ -171,6 +198,32 @@ final class UITestBootstrapTests: XCTestCase {
         XCTAssertEqual(duplicatePrinter.name, "Prusa MK4 #1")
         XCTAssertFalse(snapshot.isEmpty)
         XCTAssertTrue(bundle.authViewModel.isAuthenticated)
+    }
+
+    func test_makeBundle_attentionHarvestScan_seedsCompletedJobItem() async throws {
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(
+            mode: .authenticatedAttentionHarvestScan,
+            defaults: defaults
+        )
+        let attentionService = try XCTUnwrap(
+            bundle.services.attentionService as? DemoAttentionService
+        )
+
+        let feed = try await attentionService.getFeed(cursor: nil, limit: nil)
+        let item = try XCTUnwrap(feed.items.first)
+        XCTAssertEqual(feed.items.count, 1)
+        XCTAssertEqual(
+            item.id,
+            "harvest:78000000-0000-0000-0000-000000000004"
+        )
+        XCTAssertEqual(item.kind, .harvest)
+        XCTAssertEqual(item.jobId, DemoData.job7ID)
+        XCTAssertTrue(bundle.authViewModel.isAuthenticated)
+        XCTAssertTrue(
+            bundle.services.capabilitiesService.resolved
+                .printedPartsInventoryEnabled
+        )
     }
 
     #if DEBUG

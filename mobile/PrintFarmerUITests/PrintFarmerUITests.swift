@@ -82,31 +82,44 @@ class PrintFarmerUITestCase: XCTestCase {
         return true
     }
 
-    /// Adaptive locator for an operator-shell destination. Returns the
-    /// iPhone tab-bar button when a compact tab bar is on screen, otherwise
-    /// the iPad `NavigationSplitView` sidebar button — revealing a
+    /// Adaptive locator for a shell destination using its shipped identifier.
+    /// Returns the iPhone tab-bar button when a compact tab bar is on screen,
+    /// otherwise the iPad `NavigationSplitView` sidebar button — revealing a
     /// collapsed sidebar via the system toggle if needed.
     ///
     /// Gives the compact tab a brief chance to appear, then proactively
     /// reveals a collapsed iPad sidebar before polling both surfaces.
     ///
     /// - Parameters:
-    ///   - tabTitle: The compact tab-bar button label (e.g. "Attention").
-    ///   - sidebarIdentifier: The iPad sidebar accessibility identifier
-    ///     (e.g. "sidebar.attention").
+    ///   - tabIdentifier: The compact tab identifier (e.g. `tab.attention`).
+    ///     The matching iPad identifier is derived as `sidebar.attention`.
     ///   - timeout: Maximum time to wait for either surface.
     /// - Returns: The located `XCUIElement`. Callers should assert
     ///   `.exists` on the returned element so the failure message
     ///   describes both surfaces explicitly.
-    func operatorDestinationButton(
-        tabTitle: String,
-        sidebarIdentifier: String,
+    func shellDestinationButton(
+        tabIdentifier: String,
         timeout: TimeInterval = 5
     ) -> XCUIElement {
-        let tab = app.tabBars.buttons[tabTitle]
+        let tabButton = app.tabBars.buttons[tabIdentifier]
+        let tabElement = app.tabBars.descendants(matching: .any)
+            .matching(identifier: tabIdentifier)
+            .firstMatch
+        let tabLabel = app.tabBars.buttons[tabTitle(for: tabIdentifier)]
+        let sidebarIdentifier = tabIdentifier.replacingOccurrences(
+            of: "tab.",
+            with: "sidebar."
+        )
         let sidebar = app.buttons[sidebarIdentifier]
-        if tab.waitForExistence(timeout: min(1, timeout)) {
-            return tab
+        if tabButton.waitForExistence(timeout: min(1, timeout)) {
+            return tabButton
+        }
+        if tabElement.exists {
+            return tabElement
+        }
+        if tabLabel.exists {
+            recordTabIdentifierCompatibilityFallback(tabIdentifier)
+            return tabLabel
         }
         if sidebar.exists {
             return sidebar
@@ -115,11 +128,67 @@ class PrintFarmerUITestCase: XCTestCase {
         _ = revealSidebarIfCollapsed(timeout: min(3, timeout))
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if tab.exists { return tab }
+            if tabButton.exists { return tabButton }
+            if tabElement.exists { return tabElement }
+            if tabLabel.exists {
+                recordTabIdentifierCompatibilityFallback(tabIdentifier)
+                return tabLabel
+            }
             if sidebar.exists { return sidebar }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
-        return sidebar.exists ? sidebar : tab
+        if sidebar.exists {
+            return sidebar
+        }
+        if tabElement.exists {
+            return tabElement
+        }
+        if tabLabel.exists {
+            recordTabIdentifierCompatibilityFallback(tabIdentifier)
+            return tabLabel
+        }
+        return tabButton
+    }
+
+    private func recordTabIdentifierCompatibilityFallback(_ identifier: String) {
+        let message = "SwiftUI did not expose \(identifier) on the tab-bar "
+            + "accessibility tree; using its documented title as an OS compatibility fallback."
+        XCTContext.runActivity(named: "Warning: \(message)") { _ in
+            print("warning: \(message)")
+        }
+    }
+
+    /// Checks whether a compact tab is rendered without treating a
+    /// label-only SwiftUI accessibility node as a positive-navigation
+    /// compatibility fallback.
+    func compactTabExists(tabIdentifier: String) -> Bool {
+        let tabBar = app.tabBars.firstMatch
+        guard tabBar.exists else { return false }
+
+        let identifierMatch = tabBar.descendants(matching: .any)
+            .matching(identifier: tabIdentifier)
+            .firstMatch
+        return identifierMatch.exists
+            || tabBar.buttons[tabTitle(for: tabIdentifier)].exists
+    }
+
+    private func tabTitle(for identifier: String) -> String {
+        switch identifier {
+        case "tab.attention": "Attention"
+        case "tab.farm": "Farm"
+        case "tab.tasks": "Tasks"
+        case "tab.inventory": "Inventory"
+        case "tab.oversight": "Oversight"
+        case "tab.overview": "Overview"
+        case "tab.fleet": "Fleet"
+        case "tab.jobs": "Jobs"
+        case "tab.upkeep": "Upkeep"
+        case "tab.reports": "Reports"
+        case "tab.notifications": "Notifications"
+        case "tab.settings": "Settings"
+        case "tab.scan": "Scan"
+        default: identifier
+        }
     }
 
     func renderedShellRoots(timeout: TimeInterval = 8) -> [RenderedShellRoot] {

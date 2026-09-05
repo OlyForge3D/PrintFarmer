@@ -10,30 +10,12 @@ import XCTest
 final class PartsInventoryUITests: PrintFarmerUITestCase {
 
     private func openInventory() {
-        let inventoryTab = app.tabBars.buttons["Inventory"]
-        if inventoryTab.waitForExistence(timeout: 5) {
-            inventoryTab.tap()
-            return
-        }
-
-        let sidebarInventory = app.buttons["sidebar.inventory"]
-        if sidebarInventory.waitForExistence(timeout: 3) {
-            sidebarInventory.tap()
-            return
-        }
-
-        for label in ["Sidebar", "Toggle Sidebar", "Show Sidebar"] {
-            let toggle = app.navigationBars.buttons[label]
-            if toggle.exists {
-                toggle.tap()
-                if sidebarInventory.waitForExistence(timeout: 3) {
-                    sidebarInventory.tap()
-                    return
-                }
-            }
-        }
-
-        XCTFail("Inventory destination should be reachable from the operator shell")
+        let inventory = shellDestinationButton(
+            tabIdentifier: "tab.inventory",
+            timeout: 8
+        )
+        XCTAssertTrue(inventory.exists)
+        inventory.tap()
     }
 
     private func openPrintedPartsSegment() {

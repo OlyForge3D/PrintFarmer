@@ -47,6 +47,7 @@ private struct RootNavigationChromeModifier<ScreenActions: View>: ViewModifier {
                     modeControl
                 }
             }
+
             .toolbar {
                 if router.isAtRoot(tab) {
                     ToolbarItem(placement: .topBarLeading) {
