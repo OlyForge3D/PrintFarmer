@@ -150,7 +150,6 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
             "attention.item.\(failureID).action.retry",
             type: .button
         )
-        reveal(retry)
         let actionError = element(
             "attention.item.\(failureID).action.error",
             type: .any
@@ -165,6 +164,7 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
             )
         )
 
+        reveal(retry)
         XCTAssertEqual(retry.label, "Retry Resume")
         retry.tap()
 
@@ -238,21 +238,35 @@ final class AttentionActionsUITests: PrintFarmerUITestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        for _ in 0..<8 {
+        for _ in 0..<24 {
+            guard element.waitForExistence(timeout: 5) else {
+                XCTFail(
+                    "Required control '\(element.identifier)' does not exist",
+                    file: file,
+                    line: line
+                )
+                return
+            }
             let visibleFrame = visibleAttentionFrame
             // A thin strip above the tab bar can be hittable without a reliable tap target.
-            if element.exists, element.isHittable, visibleFrame.contains(element.frame) {
+            if element.isHittable, visibleFrame.contains(element.frame) {
                 break
             }
-            let scrollDown = element.exists && element.frame.midY < visibleFrame.midY
+            let scrollDown = element.frame.midY < visibleFrame.midY
+            // Travel across tall cards, then shorten the drag to align the target.
+            let distance = min(
+                max(abs(element.frame.midY - visibleFrame.midY), 24),
+                visibleFrame.height * 0.7
+            )
             let start = app.coordinate(withNormalizedOffset: .zero).withOffset(
                 CGVector(
                     dx: visibleFrame.midX - app.frame.minX,
-                    dy: visibleFrame.midY - app.frame.minY
+                    dy: visibleFrame.minY - app.frame.minY
+                        + visibleFrame.height * (scrollDown ? 0.15 : 0.85)
                 )
             )
             let end = start.withOffset(
-                CGVector(dx: 0, dy: visibleFrame.height * (scrollDown ? 0.35 : -0.35))
+                CGVector(dx: 0, dy: scrollDown ? distance : -distance)
             )
             start.press(
                 forDuration: 0.1,
