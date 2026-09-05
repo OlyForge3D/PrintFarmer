@@ -70,7 +70,7 @@ struct MaintenanceAlert: Codable, Sendable, Identifiable {
 
 // MARK: - Upcoming Maintenance Task
 
-struct UpcomingMaintenanceTask: Codable, Sendable, Identifiable {
+struct UpcomingMaintenanceTask: Codable, Sendable, Equatable, Identifiable {
     let id: String
     let taskId: UUID
     let printerId: UUID

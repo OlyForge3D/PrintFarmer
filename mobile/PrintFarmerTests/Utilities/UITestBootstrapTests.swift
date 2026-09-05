@@ -44,6 +44,13 @@ final class UITestBootstrapTests: XCTestCase {
         )
     }
 
+    func test_navigationChromeLaunchArgument_matchesUITestsHarness() {
+        XCTAssertEqual(
+            UITestBootstrap.navigationChromeLaunchArgument,
+            "--uitesting-navigation-chrome"
+        )
+    }
+
     func test_oversightUpgradeOfferLaunchArgument_matchesUITestsHarness() {
         XCTAssertEqual(
             UITestBootstrap.oversightUpgradeOfferLaunchArgument,
@@ -382,6 +389,17 @@ final class UITestBootstrapTests: XCTestCase {
         )
 
         XCTAssertEqual(bundle.serverRegistry.navigationLayoutPreference, .twoModes)
+    }
+
+    func test_makeBundle_navigationChromeArgument_seedsVisibleServerSwitcher() throws {
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(
+            defaults: defaults,
+            arguments: ["--uitesting", "--uitesting-navigation-chrome"]
+        )
+
+        XCTAssertEqual(bundle.serverRegistry.servers.count, 2)
+        XCTAssertEqual(bundle.serverRegistry.activeServer?.displayName, "UI Test Server")
     }
 
     func test_makeBundle_marksAuthenticated_withDemoUser() throws {
