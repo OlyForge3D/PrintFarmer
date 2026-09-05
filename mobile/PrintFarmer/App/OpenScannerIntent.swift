@@ -8,6 +8,7 @@ extension Notification.Name {
 enum ExternalScanRequestStore {
     static let pendingKey = "app.pendingExternalScanRequest"
 
+    @MainActor
     static func request(userDefaults: UserDefaults = .standard) {
         userDefaults.set(true, forKey: pendingKey)
         NotificationCenter.default.post(name: .externalScanRequested, object: nil)
@@ -27,6 +28,7 @@ struct OpenScannerIntent: AppIntent {
     )
     static let openAppWhenRun = true
 
+    @MainActor
     func perform() async throws -> some IntentResult {
         ExternalScanRequestStore.request()
         return .result()

@@ -44,11 +44,10 @@ private struct ScannerLockScreenWidget: Widget {
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: ScannerTimelineProvider()) { _ in
-            Link(destination: scanURL) {
-                Image(systemName: "barcode.viewfinder")
-                    .widgetAccentable()
-                    .accessibilityLabel("Open PrintFarmer scanner")
-            }
+            Image(systemName: "barcode.viewfinder")
+                .widgetAccentable()
+                .accessibilityLabel("Open PrintFarmer scanner")
+                .widgetURL(scanURL)
         }
         .configurationDisplayName("Scan")
         .description("Open PrintFarmer directly to the scanner.")

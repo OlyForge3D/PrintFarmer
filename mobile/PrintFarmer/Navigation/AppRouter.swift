@@ -106,7 +106,7 @@ final class AppRouter {
         let capturedEpoch = navigationEpoch
         switch destination {
         case .scan:
-            prepareExternalScan()
+            prepareExternalScan(capabilities: capabilities)
         case .printerDetail(let id):
             let tab = printerDestinationTab
             guard visibleTabs(for: capabilities).contains(tab) else {
@@ -584,7 +584,8 @@ final class AppRouter {
 }
 
 extension AppRouter {
-    private func prepareExternalScan() {
+    private func prepareExternalScan(capabilities: ResolvedSystemCapabilities) {
+        guard makeTabVisibleIfPossible(.inventory, capabilities: capabilities) else { return }
         selectedTab = .inventory
         inventoryPath = NavigationPath()
         pendingExternalScanRequestID = UUID()

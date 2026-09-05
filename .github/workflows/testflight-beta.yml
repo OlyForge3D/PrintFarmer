@@ -264,20 +264,9 @@ jobs:
           fastlane match appstore \
             --readonly \
             --git_url "$MATCH_GIT_URL" \
-            --app_identifier "com.olyforge3d.printfarmer.ios" \
+            --app_identifier "com.olyforge3d.printfarmer.ios,com.olyforge3d.printfarmer.ios.scan-widgets" \
             --keychain_name "$KEYCHAIN_PATH" \
             --keychain_password "$MATCH_PASSWORD"
-
-      - name: Extract provisioning profile name
-        id: profile
-        run: |
-          PROFILE_PATH=$(ls -t "$HOME/Library/MobileDevice/Provisioning Profiles/"*.mobileprovision "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/"*.mobileprovision 2>/dev/null | head -1)
-          echo "Profile path: $PROFILE_PATH"
-          TMP_PLIST=$(mktemp).plist
-          security cms -D -i "$PROFILE_PATH" > "$TMP_PLIST"
-          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$TMP_PLIST")
-          echo "Profile name: $PROFILE_NAME"
-          echo "name=$PROFILE_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Allow codesign keychain access
         run: |
@@ -310,7 +299,6 @@ jobs:
             -archivePath "build/PrintFarmer.xcarchive" \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="iPhone Distribution" \
-            PROVISIONING_PROFILE_SPECIFIER="${{ steps.profile.outputs.name }}" \
             DEVELOPMENT_TEAM=ZPKA84F3TY \
             MARKETING_VERSION="${{ steps.version.outputs.version }}" \
             SWIFT_STRICT_CONCURRENCY=minimal \
@@ -326,8 +314,6 @@ jobs:
       - name: Export IPA
         run: |
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          # Patch ExportOptions.plist with actual profile name from match
-          /usr/libexec/PlistBuddy -c "Set :provisioningProfiles:com.olyforge3d.printfarmer.ios '${{ steps.profile.outputs.name }}'" ExportOptions.plist
           xcodebuild \
             -exportArchive \
             -archivePath "build/PrintFarmer.xcarchive" \

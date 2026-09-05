@@ -8,16 +8,16 @@ import SwiftUI
 /// their owning tab; bin, part, barcode-intake, and unrecognized results remain
 /// in-place sheets.
 struct ScanFlowView: View {
-    let startsScanning: Bool
+    let externalScanRequestID: UUID?
 
     @Environment(AppRouter.self) private var router
     @Environment(ServiceContainer.self) private var services
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel = ScanViewModel()
-    @State private var didStartExternalScan = false
+    @State private var handledExternalScanRequestID: UUID?
 
-    init(startsScanning: Bool = false) {
-        self.startsScanning = startsScanning
+    init(externalScanRequestID: UUID? = nil) {
+        self.externalScanRequestID = externalScanRequestID
     }
 
     private var partsInventoryEnabled: Bool {
@@ -110,10 +110,11 @@ struct ScanFlowView: View {
                     spoolService: services.spoolService,
                     printedPartsInventoryEnabled: partsInventoryEnabled
                 )
+                startExternalScanIfNeeded()
                 await services.capabilitiesService.refresh()
-                guard startsScanning, !didStartExternalScan else { return }
-                didStartExternalScan = true
-                viewModel.scan()
+            }
+            .onChange(of: externalScanRequestID) {
+                startExternalScanIfNeeded()
             }
             .onChange(of: partsInventoryEnabled) { _, isEnabled in
                 viewModel.setPrintedPartsInventoryEnabled(isEnabled)
@@ -121,6 +122,16 @@ struct ScanFlowView: View {
             .onAppear { viewModel.isViewActive = true }
             .onDisappear { viewModel.isViewActive = false }
         }
+    }
+
+    private func startExternalScanIfNeeded() {
+        guard let externalScanRequestID,
+              externalScanRequestID != handledExternalScanRequestID,
+              !viewModel.isScanning else {
+            return
+        }
+        handledExternalScanRequestID = externalScanRequestID
+        viewModel.scan()
     }
 
     private var scanSection: some View {

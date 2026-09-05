@@ -46,6 +46,21 @@ final class AppRouterTests: XCTestCase {
         XCTAssertTrue(router.consumeExternalScanRequest())
     }
 
+    func testScanDeepLinkSwitchesFromOversightToFloorInventory() {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+
+        router.navigate(to: .scan, capabilities: capabilities)
+
+        XCTAssertEqual(router.activeMode, .floor)
+        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+    }
+
     func testExternalScanRequestStoreConsumesPersistedRequestExactlyOnce() throws {
         let suiteName = "ExternalScanRequestStoreTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

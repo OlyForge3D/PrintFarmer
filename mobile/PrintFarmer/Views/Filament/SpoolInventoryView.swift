@@ -13,7 +13,6 @@ struct SpoolInventoryView: View {
     @State private var viewModel = SpoolInventoryViewModel()
     @State private var showAddSpool = false
     @State private var showScanFlow = false
-    @State private var startsScanAutomatically = false
     @State private var showBarcodeIntake = false
     @State private var nfcWriteTarget: NFCWriteTarget?
     @State private var activeTasks: [Task<Void, Never>] = []
@@ -157,7 +156,7 @@ struct SpoolInventoryView: View {
                     }
             }
             .sheet(isPresented: $showScanFlow) {
-                ScanFlowView(startsScanning: startsScanAutomatically)
+                ScanFlowView()
             }
             .sheet(isPresented: $showBarcodeIntake) {
                 BarcodeIntakeView()
@@ -181,7 +180,6 @@ struct SpoolInventoryView: View {
                 }
             }
             .task {
-                presentPendingExternalScan()
                 viewModel.configure(spoolService: services.spoolService)
                 #if canImport(UIKit)
                 if let nfc = services.nfcService {
@@ -194,14 +192,6 @@ struct SpoolInventoryView: View {
                     viewModel.setHighlight(spoolId: spoolId)
                 }
             }
-            .onChange(of: router.pendingExternalScanRequestID) {
-                presentPendingExternalScan()
-            }
-            .onChange(of: showScanFlow) { _, isPresented in
-                if !isPresented {
-                    startsScanAutomatically = false
-                }
-            }
             .onAppear { viewModel.isViewActive = true }
             .onDisappear {
                 viewModel.isViewActive = false
@@ -209,12 +199,6 @@ struct SpoolInventoryView: View {
                 activeTasks.forEach { $0.cancel() }
             }
         }
-    }
-
-    private func presentPendingExternalScan() {
-        guard router.consumeExternalScanRequest() else { return }
-        startsScanAutomatically = true
-        showScanFlow = true
     }
 
     private var materialFilterChips: some View {
