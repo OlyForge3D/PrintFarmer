@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { PrinterTableView } from '@/features/printers/components/PrinterTableView';
 import { PrinterBackend, type AutoDispatchStatus, type Printer } from '@/types/api';
 
@@ -41,6 +41,47 @@ describe('PrinterTableView - maintenance button', () => {
   };
 
   useAllAutoDispatchStatusesMock.mockReturnValue({ data: [] as AutoDispatchStatus[] });
+
+  it.each([0, 42.6, 100])('renders numeric progress %s with its percentage and accessible value', (progress) => {
+    render(
+      <PrinterTableView
+        printers={[{ ...basePrinter, state: 'Printing', progress }]}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onBulkSetMaintenance={vi.fn()}
+        onOpenMaintenance={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(`${Math.round(progress)}%`)).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Print progress' })).toHaveAttribute('aria-valuenow', String(Math.round(progress)));
+  });
+
+  it.each([
+    ['absent', {}],
+    ['undefined', { progress: undefined }],
+    ['null', { progress: null }],
+    ['negative', { progress: -1 }],
+    ['unknown', { progress: Number.NaN }],
+  ])('keeps the missing-progress placeholder for %s progress', (_label, overrides) => {
+    // Runtime JSON can contain null even though the API type only declares an optional number.
+    const printer = { ...basePrinter, state: 'Printing', ...overrides } as Printer;
+
+    render(
+      <PrinterTableView
+        printers={[printer]}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+        onBulkSetMaintenance={vi.fn()}
+        onOpenMaintenance={vi.fn()}
+      />
+    );
+
+    const row = screen.getByRole('row', { name: /Printer 1/ });
+    expect(within(row).getByRole('cell', { name: '—', exact: true })).toBeInTheDocument();
+    expect(within(row).queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(within(row).queryByText('0%')).not.toBeInTheDocument();
+  });
 
   it('opens maintenance actions (does not toggle maintenance mode)', () => {
     const onOpenMaintenance = vi.fn();
