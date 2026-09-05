@@ -14,6 +14,12 @@ import SnapshotTesting
 @MainActor
 final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
+    // UIKit/SwiftUI rasterization differs between iPhone and iPad test hosts,
+    // even with the same layout and an explicit display-scale override.
+    private var snapshotName: String? {
+        UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : nil
+    }
+
     // MARK: - Capability fixtures (per backend)
 
     private static let moonrakerCaps = PrinterBackendCapabilities.fallback(for: .moonraker)
@@ -79,21 +85,21 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let printer = try makePrinter(backend: .moonraker)
         let svc = makeService(caps: Self.moonrakerCaps)
         let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(section), as: .image(on: .iPhone13))
+        assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
     }
 
     func test_snapshot_flashForgeProfile() async throws {
         let printer = try makePrinter(backend: .flashForge)
         let svc = makeService(caps: Self.flashForgeCaps)
         let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(section), as: .image(on: .iPhone13))
+        assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
     }
 
     func test_snapshot_sdcpProfile() async throws {
         let printer = try makePrinter(backend: .sdcp)
         let svc = makeService(caps: Self.sdcpCaps)
         let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(section), as: .image(on: .iPhone13))
+        assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
     }
 
     // MARK: - State snapshots
@@ -107,7 +113,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         // Hold the capabilities call open by throwing — viewModel keeps caps == nil.
         svc.errorToThrow = NetworkError.notFound
         let section = PrinterControlsSection(printer: printer, printerService: svc)
-        assertSnapshot(of: host(section), as: .image(on: .iPhone13))
+        assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
     }
 
     /// The starting state keeps the section visible while `canControl` is false,
@@ -116,7 +122,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let printer = try makePrinter(backend: .moonraker, state: "starting")
         let svc = makeService(caps: Self.moonrakerCaps)
         let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(section), as: .image(on: .iPhone13))
+        assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
     }
     // MARK: - Lockout banner (spec §2.2 — visible during print with disabled controls)
 
@@ -127,7 +133,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let printer = try makePrinter(backend: .moonraker, state: "printing")
         let svc = makeService(caps: Self.moonrakerCaps)
         let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(section), as: .image(on: .iPhone13))
+        assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
     }
 
     func test_snapshot_printerDetailBorderedDestructiveControls_darkMode() {
@@ -147,6 +153,6 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
         let hostingController = host(rootView)
         hostingController.overrideUserInterfaceStyle = .dark
-        assertSnapshot(of: hostingController, as: .image(on: .iPhone13))
+        assertSnapshot(of: hostingController, as: .image(on: .iPhone13), named: snapshotName)
     }
 }
