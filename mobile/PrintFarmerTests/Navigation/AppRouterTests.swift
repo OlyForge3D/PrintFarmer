@@ -1,4 +1,5 @@
 import XCTest
+import Observation
 @testable import PrintFarmer
 
 /// Tests for shell-aware tab selection, deep-link mapping, and path isolation.
@@ -21,6 +22,121 @@ final class AppRouterTests: XCTestCase {
 
     func testLegacyPersistedScanSelectionRestoresInventory() {
         XCTAssertEqual(AppRouter.restoredTab(from: "scan"), .inventory)
+    }
+
+    func testScanDeepLinkSelectsInventoryAndCreatesConsumableRequest() {
+        let router = AppRouter()
+
+        router.navigate(to: .scan, capabilities: capabilities)
+
+        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertNotNil(router.pendingExternalScanRequestID)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+        XCTAssertNil(router.pendingExternalScanRequestID)
+        XCTAssertFalse(router.consumeExternalScanRequest())
+    }
+
+    func testPendingExternalScanSurvivesAuthenticationAndServerNavigationReset() {
+        let router = AppRouter()
+        router.navigate(to: .scan, capabilities: capabilities)
+
+        router.invalidatePendingNavigation()
+
+        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertNotNil(router.pendingExternalScanRequestID)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+    }
+
+    func testDeferredExternalScanWaitsForDismissalWithoutCancellingPrinterNavigation() async {
+        let router = AppRouter()
+        let requestID = UUID()
+        router.beginScanFlowDismissal(queuedExternalRequestID: requestID)
+        router.navigate(to: .printerDetail(id: printerId), capabilities: capabilities)
+        XCTAssertEqual(router.selectedTab, .farm)
+        XCTAssertFalse(router.consumeExternalScanRequest())
+        let navigated = expectation(description: "Original printer destination pushed")
+        withObservationTracking {
+            _ = router.printersPath
+        } onChange: {
+            navigated.fulfill()
+        }
+
+        router.completeScanFlowDismissal(capabilities: capabilities)
+
+        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertEqual(router.pendingExternalScanRequestID, requestID)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+        XCTAssertFalse(router.consumeExternalScanRequest())
+        await fulfillment(of: [navigated], timeout: 2)
+        XCTAssertEqual(router.printersPath.count, 1)
+    }
+
+    func testDeferredExternalScanPreservesSpoolResultAfterDismissal() {
+        let router = AppRouter()
+        let requestID = UUID()
+        router.beginScanFlowDismissal(queuedExternalRequestID: requestID)
+        router.navigate(to: .spoolDetail(id: spoolId), capabilities: capabilities)
+        XCTAssertEqual(router.pendingSpoolHighlightId, spoolId)
+        XCTAssertFalse(router.consumeExternalScanRequest())
+
+        router.completeScanFlowDismissal(capabilities: capabilities)
+
+        XCTAssertEqual(router.pendingSpoolHighlightId, spoolId)
+        XCTAssertEqual(router.pendingExternalScanRequestID, requestID)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+    }
+
+    func testNewExternalRequestDuringDismissalCoalescesWithoutEarlyConsumption() {
+        let router = AppRouter()
+        router.beginScanFlowDismissal(queuedExternalRequestID: UUID())
+        router.navigate(to: .scan, capabilities: capabilities)
+        let latestRequestID = router.pendingExternalScanRequestID
+        XCTAssertNotNil(latestRequestID)
+        XCTAssertFalse(router.consumeExternalScanRequest())
+
+        router.completeScanFlowDismissal(capabilities: capabilities)
+
+        XCTAssertEqual(router.pendingExternalScanRequestID, latestRequestID)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+        XCTAssertFalse(router.consumeExternalScanRequest())
+    }
+
+    func testDeferredExternalScanSurvivesAuthenticationAndServerNavigationReset() {
+        let router = AppRouter()
+        let requestID = UUID()
+        router.beginScanFlowDismissal(queuedExternalRequestID: requestID)
+
+        router.invalidatePendingNavigation()
+
+        XCTAssertFalse(router.isScanFlowDismissing)
+        XCTAssertEqual(router.pendingExternalScanRequestID, requestID)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+    }
+
+    func testScanDeepLinkSwitchesFromOversightToFloorInventory() {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+
+        router.navigate(to: .scan, capabilities: capabilities)
+
+        XCTAssertEqual(router.activeMode, .floor)
+        XCTAssertEqual(router.selectedTab, .inventory)
+        XCTAssertTrue(router.consumeExternalScanRequest())
+    }
+
+    func testExternalScanRequestStoreConsumesPersistedRequestExactlyOnce() throws {
+        let suiteName = "ExternalScanRequestStoreTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        ExternalScanRequestStore.request(userDefaults: defaults)
+
+        XCTAssertTrue(ExternalScanRequestStore.consume(userDefaults: defaults))
+        XCTAssertFalse(ExternalScanRequestStore.consume(userDefaults: defaults))
     }
 
     func testPersistedSelectionRoundTripsWithoutAffectingDefaultRouterTests() throws {
@@ -189,6 +305,174 @@ final class AppRouterTests: XCTestCase {
                 "tab.reports"
             ]
         )
+    }
+
+    func testExpandedSidebarUsesExistingFloorAndOversightDestinationContracts() {
+        XCTAssertEqual(
+            AppTab.visibleTabs(
+                in: .floor,
+                for: .simple,
+                capabilities: capabilities
+            ),
+            [.attention, .farm, .inventory]
+        )
+        XCTAssertEqual(
+            AppTab.visibleTabs(
+                in: .floor,
+                for: .twoModes,
+                capabilities: capabilities
+            ),
+            [.attention, .farm, .tasks, .inventory]
+        )
+        XCTAssertEqual(
+            AppTab.visibleTabs(
+                in: .oversight,
+                for: .simple,
+                capabilities: capabilities
+            ),
+            [.overview, .fleet, .jobs, .upkeep, .reports]
+        )
+    }
+
+    func testExpandedSidebarResolvesSelectionsAcrossBothSectionsWithoutModeControl() {
+        let router = AppRouter()
+        router.setNavigationShell(.simple, capabilities: capabilities)
+        router.setExpandedSidebarPresentation(
+            true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(
+            router.visibleTabs(for: capabilities),
+            [.attention, .farm, .inventory, .overview, .fleet, .jobs, .upkeep, .reports]
+        )
+        router.selectTab(.reports, capabilities: capabilities)
+        XCTAssertEqual(router.resolvedTab(for: capabilities), .reports)
+        XCTAssertFalse(router.shouldShowModeControl(for: .reports))
+
+        router.setExpandedSidebarPresentation(
+            false,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        XCTAssertEqual(router.resolvedTab(for: capabilities), .attention)
+    }
+
+    func testExpandedSidebarOmitsCapabilityGatedRowsAndEmptyOversightSection() {
+        var disabled = capabilities
+        disabled.attentionEnabled = false
+        disabled.shiftPlanEnabled = false
+        let unavailable = OversightNavigationAvailability(
+            hasVisibleHubDestinations: false,
+            visibleTabs: []
+        )
+        let router = AppRouter()
+        router.setNavigationShell(.simple, capabilities: disabled)
+        router.setExpandedSidebarPresentation(
+            true,
+            capabilities: disabled,
+            oversightAvailability: unavailable
+        )
+
+        XCTAssertEqual(
+            router.visibleTabs(in: .floor, for: disabled),
+            [.farm, .inventory]
+        )
+        XCTAssertTrue(router.visibleTabs(in: .oversight, for: disabled).isEmpty)
+        router.selectedTab = .reports
+        XCTAssertEqual(router.resolvedTab(for: disabled), .farm)
+    }
+
+    func testCollapsingExpandedSidebarDerivesOversightModeAndPreservesJobQueue() {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .floor,
+            capabilities: capabilities
+        )
+        router.setExpandedSidebarPresentation(
+            true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.routeToJobQueue(capabilities: capabilities)
+
+        XCTAssertEqual(router.activeMode, .floor)
+        XCTAssertEqual(router.selectedTab, .jobs)
+        XCTAssertEqual(router.oversightJobsPath.count, 1)
+
+        router.setExpandedSidebarPresentation(
+            false,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.activeMode, .oversight)
+        XCTAssertEqual(router.resolvedTab(for: capabilities), .jobs)
+        XCTAssertEqual(router.oversightJobsPath.count, 1)
+    }
+
+    func testCollapsingExpandedSidebarDerivesFloorModeAndPreservesFarmPath() {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+        router.setExpandedSidebarPresentation(
+            true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.selectTab(.farm, capabilities: capabilities)
+        router.printersPath.append(AppDestination.printerDetail(id: printerId))
+
+        XCTAssertEqual(router.activeMode, .oversight)
+        XCTAssertEqual(router.selectedTab, .farm)
+
+        router.setExpandedSidebarPresentation(
+            false,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.activeMode, .floor)
+        XCTAssertEqual(router.resolvedTab(for: capabilities), .farm)
+        XCTAssertEqual(router.printersPath.count, 1)
+    }
+
+    func testJobQueueRoutingUsesVisibleDestinationForEachShellPresentation() {
+        let router = AppRouter()
+
+        router.setNavigationShell(.simple, capabilities: capabilities)
+        router.routeToJobQueue(capabilities: capabilities)
+        XCTAssertEqual(router.selectedTab, .oversight)
+        XCTAssertEqual(router.oversightPath.count, 1)
+
+        router.setExpandedSidebarPresentation(
+            true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.routeToJobQueue(capabilities: capabilities)
+        XCTAssertEqual(router.selectedTab, .jobs)
+        XCTAssertEqual(router.oversightJobsPath.count, 1)
+        XCTAssertFalse(router.visibleTabs(in: .floor, for: capabilities).contains(.tasks))
+
+        router.setExpandedSidebarPresentation(
+            false,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+        router.routeToJobQueue(capabilities: capabilities)
+        XCTAssertEqual(router.selectedTab, .jobs)
+        XCTAssertEqual(router.oversightJobsPath.count, 1)
     }
 
     func testVisibleTabsRemoveDisabledAttentionAndTasks() {
@@ -861,6 +1145,56 @@ final class AppRouterTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(120))
         XCTAssertTrue(router.printersPath.isEmpty)
         XCTAssertEqual(router.fleetPath.count, 1)
+    }
+
+    func testExpandedSidebarPrinterDeepLinkUsesSelectedOversightSectionDespiteFloorMode() async {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .floor,
+            capabilities: capabilities
+        )
+        router.setExpandedSidebarPresentation(
+            true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.selectTab(.jobs, capabilities: capabilities)
+        router.oversightJobsPath.append(AppDestination.jobQueue)
+
+        router.navigate(
+            to: .printerDetail(id: printerId),
+            capabilities: capabilities
+        )
+
+        XCTAssertEqual(router.activeMode, .floor)
+        XCTAssertEqual(router.selectedTab, .fleet)
+        XCTAssertEqual(router.oversightJobsPath.count, 1)
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertTrue(router.printersPath.isEmpty)
+        XCTAssertEqual(router.fleetPath.count, 1)
+    }
+
+    func testExpandedSidebarFilamentSwapUsesSelectedFloorSectionDespiteOversightMode() {
+        let router = AppRouter()
+        router.setNavigationShell(
+            .twoModes,
+            mode: .oversight,
+            capabilities: capabilities
+        )
+        router.setExpandedSidebarPresentation(
+            true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        router.selectTab(.farm, capabilities: capabilities)
+
+        router.routeToFilamentSwap(printerID: printerId, toolheadID: nil)
+
+        XCTAssertEqual(router.activeMode, .oversight)
+        XCTAssertEqual(router.selectedTab, .farm)
+        XCTAssertEqual(router.printersPath.count, 1)
+        XCTAssertTrue(router.fleetPath.isEmpty)
     }
 
     func testPrinterDeepLinkFallsBackWhenFleetIsUnavailable() async {

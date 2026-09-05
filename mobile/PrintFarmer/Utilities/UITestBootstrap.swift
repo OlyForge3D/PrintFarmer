@@ -57,6 +57,7 @@ enum UITestBootstrap {
     static let twoModesNavigationLaunchArgument = "--uitesting-two-modes"
     static let oversightNavigationModeLaunchArgument =
         "--uitesting-oversight-mode"
+    static let navigationChromeLaunchArgument = "--uitesting-navigation-chrome"
     static let oversightUpgradeOfferLaunchArgument = "--uitesting-oversight-upgrade-offer"
     #if DEBUG
     static let shiftTaskMutationErrorLaunchArgument =
@@ -262,6 +263,10 @@ enum UITestBootstrap {
                 assertionFailure("UITestBootstrap failed to seed registry: \(error)")
             }
         }
+        seedNavigationChromeServerIfRequested(
+            arguments: arguments,
+            registry: registry
+        )
         if arguments.contains(twoModesNavigationLaunchArgument) {
             registry.setNavigationLayoutPreference(.twoModes)
         }
@@ -447,6 +452,26 @@ enum UITestBootstrap {
             services: services,
             authViewModel: auth
         )
+    }
+
+    private static func seedNavigationChromeServerIfRequested(
+        arguments: [String],
+        registry: ServerRegistry
+    ) {
+        guard arguments.contains(navigationChromeLaunchArgument),
+              registry.servers.count == 1 else {
+            return
+        }
+
+        do {
+            _ = try registry.add(
+                displayName: "UI Test Backup",
+                baseURL: URL(string: "http://uitest-backup.printfarmer.local")!,
+                makeActiveIfNeeded: false
+            )
+        } catch {
+            assertionFailure("UITestBootstrap failed to seed backup registry: \(error)")
+        }
     }
 
     /// Returns a UserDefaults domain isolated from `.standard`, with any

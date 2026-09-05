@@ -25,8 +25,9 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
     /// read-only shell always mounts.
     @discardableResult
     private func openColdOfflineShell() -> XCUIElement {
+        let hasTabBar = app.tabBars.firstMatch.waitForExistence(timeout: 3)
         let oversight = shellDestinationButton(
-            tabIdentifier: "tab.oversight",
+            tabIdentifier: hasTabBar ? "tab.oversight" : "tab.overview",
             timeout: 8
         )
         XCTAssertTrue(oversight.exists)

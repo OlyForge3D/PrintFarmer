@@ -14,7 +14,7 @@ fi
 
 case "$MODE" in
     source)
-        readonly EXPECTED_TARGET_CONFIGURATIONS=6
+        readonly EXPECTED_TARGET_CONFIGURATIONS=8
         total_marketing_version_count="$(grep -F -c "MARKETING_VERSION = " "$PROJECT_FILE" || true)"
         marketing_version_count="$(grep -F -c "MARKETING_VERSION = ${EXPECTED_VERSION};" "$PROJECT_FILE" || true)"
         versioning_system_count="$(grep -F -c "VERSIONING_SYSTEM = apple-generic;" "$PROJECT_FILE" || true)"

@@ -60,8 +60,12 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
             : [
                 "tab.attention",
                 "tab.farm",
-                "tab.tasks",
-                "tab.inventory"
+                "tab.inventory",
+                "tab.overview",
+                "tab.fleet",
+                "tab.jobs",
+                "tab.upkeep",
+                "tab.reports"
             ]
         for identifier in expectedDestinations {
             let button = shellDestinationButton(
@@ -76,13 +80,49 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
 
         if hasTabBar {
             XCTAssertFalse(app.tabBars.buttons["tab.tasks"].exists)
+            XCTAssertFalse(app.tabBars.buttons["tab.scan"].exists)
+        } else {
+            XCTAssertTrue(app.staticTexts["sidebar.section.floor"].exists)
+            XCTAssertTrue(app.staticTexts["sidebar.section.oversight"].exists)
+            XCTAssertFalse(app.segmentedControls["navigation.modeControl"].exists)
+            XCTAssertFalse(app.buttons["sidebar.oversight"].exists)
+        }
+    }
+
+    func testRetiredTabsAreNotVisible() {
+        for retired in ["tab.notifications", "tab.settings", "tab.scan"] {
+            XCTAssertFalse(
+                app.tabBars.buttons[retired].exists,
+                "Retired top-level tab '\(retired)' must not appear in F1 shell"
+            )
+        }
+        for retired in ["sidebar.notifications", "sidebar.settings", "sidebar.scan"] {
+            XCTAssertFalse(
+                app.buttons[retired].exists,
+                "Retired sidebar destination '\(retired)' must not appear in F1 shell"
+            )
         }
     }
 
     // MARK: - Re-homed destination reachability
 
+    func testAttentionOverflowIsRemoved() {
+        let attention = shellDestinationButton(
+            tabIdentifier: "tab.attention",
+            timeout: 5
+        )
+        XCTAssertTrue(attention.exists)
+        attention.tap()
+
+        XCTAssertFalse(
+            app.buttons["attention.overflow"].exists,
+            "Attention must not expose the retired overflow menu"
+        )
+    }
+
     func testDashboardReachableFromOversight() {
         openOversightDestination(
+            sidebarRootIdentifier: "sidebar.overview",
             identifier: "oversight.destination.dashboard",
             expectedNavigationBarTitle: "Dashboard"
         )
@@ -90,6 +130,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
 
     func testMaintenanceReachableFromOversight() {
         openOversightDestination(
+            sidebarRootIdentifier: "sidebar.upkeep",
             identifier: "oversight.destination.maintenance",
             expectedNavigationBarTitle: "Maintenance"
         )
@@ -97,6 +138,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
 
     func testPredictiveInsightsReachableFromOversight() {
         openOversightDestination(
+            sidebarRootIdentifier: "sidebar.upkeep",
             identifier: "oversight.destination.predictiveInsights",
             expectedNavigationBarTitle: "Predictive Insights"
         )
@@ -278,17 +320,25 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
     }
 
     private func openOversightDestination(
+        sidebarRootIdentifier: String,
         identifier: String,
         expectedNavigationBarTitle: String,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let oversight = shellDestinationButton(
-            tabIdentifier: "tab.oversight",
+        let hasTabBar = app.tabBars.firstMatch.waitForExistence(timeout: 3)
+        let tabIdentifier = hasTabBar
+            ? "tab.oversight"
+            : sidebarRootIdentifier.replacingOccurrences(
+                of: "sidebar.",
+                with: "tab."
+            )
+        let root = shellDestinationButton(
+            tabIdentifier: tabIdentifier,
             timeout: 5
         )
-        XCTAssertTrue(oversight.exists, file: file, line: line)
-        oversight.tap()
+        XCTAssertTrue(root.exists, file: file, line: line)
+        root.tap()
 
         let destination = app.buttons[identifier]
         XCTAssertTrue(destination.waitForExistence(timeout: 5), file: file, line: line)
@@ -550,5 +600,65 @@ final class TwoModesOversightShellUITests: PrintFarmerUITestCase {
         XCTAssertTrue(maintenance.waitForExistence(timeout: 5))
         maintenance.tap()
         XCTAssertTrue(app.navigationBars["Maintenance"].waitForExistence(timeout: 5))
+    }
+}
+
+@MainActor
+final class SimpleShellChromeRegressionUITests: PrintFarmerUITestCase {
+    override var additionalLaunchArguments: [String] {
+        ["--uitesting-navigation-chrome"]
+    }
+
+    func testEveryRenderedSimpleRootUsesCanonicalChrome() {
+        assertEveryRenderedRootHasCanonicalChrome(expectsModeControl: false)
+    }
+}
+
+@MainActor
+final class TwoModesChromeRegressionUITests: PrintFarmerUITestCase {
+    override var additionalLaunchArguments: [String] {
+        ["--uitesting-navigation-chrome", "--uitesting-two-modes"]
+    }
+
+    func testEveryRenderedRootInBothModesUsesCanonicalChrome() throws {
+        try requireCompactAdaptiveShell()
+        assertEveryRenderedRootHasCanonicalChrome(expectsModeControl: true)
+
+        let modeControl = app.segmentedControls
+            .matching(identifier: "navigation.modeControl")
+            .firstMatch
+        XCTAssertTrue(modeControl.waitForExistence(timeout: 5))
+        modeControl.buttons["Oversight"].tap()
+
+        assertEveryRenderedRootHasCanonicalChrome(expectsModeControl: true)
+    }
+
+    func testPushedScreenCarriesNoRootChrome() throws {
+        try requireCompactAdaptiveShell()
+        let modeControl = app.segmentedControls
+            .matching(identifier: "navigation.modeControl")
+            .firstMatch
+        XCTAssertTrue(modeControl.waitForExistence(timeout: 8))
+        modeControl.buttons["Oversight"].tap()
+
+        let overview = renderedShellRoots().first
+        XCTAssertNotNil(overview)
+        if let overview {
+            selectRoot(overview)
+        }
+
+        let destination = app.buttons["oversight.destination.dashboard"]
+        XCTAssertTrue(destination.waitForExistence(timeout: 5))
+        destination.tap()
+        XCTAssertTrue(app.navigationBars["Dashboard"].waitForExistence(timeout: 5))
+
+        XCTAssertFalse(app.buttons["navigation.serverSwitcher"].isHittable)
+        XCTAssertFalse(app.buttons["navigation.account"].isHittable)
+        XCTAssertFalse(
+            app.segmentedControls
+                .matching(identifier: "navigation.modeControl")
+                .firstMatch
+                .isHittable
+        )
     }
 }

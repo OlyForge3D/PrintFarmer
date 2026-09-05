@@ -54,6 +54,7 @@ final class AppRouter {
     private(set) var appliedNavigationPreference: NavigationLayoutPreference?
     private(set) var establishedAutomaticDerivation: NavigationShellDerivation?
     private(set) var oversightAvailability = OversightNavigationAvailability.fullyAvailable
+    var presentsExpandedSidebar = false
     var selectedTab: AppTab {
         didSet {
             userDefaults?.set(selectedTab.rawValue, forKey: Self.selectedTabDefaultsKey)
@@ -78,6 +79,8 @@ final class AppRouter {
     var pendingSpoolHighlightId: Int?
     var pendingAttentionItemId: String?
     var pendingFilamentSwap: FilamentSwapDeepLink?
+    var pendingExternalScanRequestID: UUID?
+    var isScanFlowDismissing = false
     var notificationRoutingError: String?
     private var navigationEpoch = 0
     @ObservationIgnored private let userDefaults: UserDefaults?
@@ -104,6 +107,8 @@ final class AppRouter {
         navigationEpoch &+= 1
         let capturedEpoch = navigationEpoch
         switch destination {
+        case .scan:
+            prepareExternalScan(capabilities: capabilities)
         case .printerDetail(let id):
             let tab = printerDestinationTab
             guard visibleTabs(for: capabilities).contains(tab) else {
@@ -184,6 +189,7 @@ final class AppRouter {
 
     func invalidatePendingNavigation() {
         navigationEpoch &+= 1
+        isScanFlowDismissing = false
         printersPath = NavigationPath()
         tasksPath = NavigationPath()
         jobsPath = NavigationPath()
@@ -239,7 +245,18 @@ final class AppRouter {
     func visibleTabs(
         for capabilities: ResolvedSystemCapabilities
     ) -> [AppTab] {
-        AppTab.visibleTabs(
+        if presentsExpandedSidebar {
+            return SidebarSection.allCases.flatMap {
+                AppTab.visibleTabs(
+                    in: $0,
+                    for: activeShell,
+                    capabilities: capabilities,
+                    oversightAvailability: oversightAvailability
+                )
+            }
+        }
+
+        return AppTab.visibleTabs(
             for: activeShell,
             mode: activeMode,
             capabilities: capabilities,
@@ -412,12 +429,6 @@ final class AppRouter {
         }
     }
 
-    func shouldShowModeControl(for tab: AppTab) -> Bool {
-        activeShell == .twoModes
-            && oversightAvailability.supportsTwoModes
-            && isAtRoot(tab)
-    }
-
     func hasAdaptiveShellConfiguration(serverID: UUID, userID: UUID) -> Bool {
         configuredServerID == serverID && configuredUserID == userID
     }
@@ -432,6 +443,7 @@ final class AppRouter {
         appliedNavigationPreference = nil
         establishedAutomaticDerivation = nil
         oversightAvailability = .fullyAvailable
+        presentsExpandedSidebar = false
         selectedTab = .attention
     }
 
@@ -474,12 +486,6 @@ final class AppRouter {
         }
     }
 
-    private var printerDestinationTab: AppTab {
-        activeShell == .twoModes && activeMode == .oversight
-            ? .fleet
-            : .farm
-    }
-
     private func resetPrinterPath(for tab: AppTab) {
         switch tab {
         case .fleet:
@@ -501,7 +507,7 @@ final class AppRouter {
         }
     }
 
-    private func makeTabVisibleIfPossible(
+    func makeTabVisibleIfPossible(
         _ tab: AppTab,
         capabilities: ResolvedSystemCapabilities
     ) -> Bool {

@@ -12,6 +12,8 @@
     <dict>
         <key>com.olyforge3d.printfarmer.ios</key>
         <string>match AppStore com.olyforge3d.printfarmer.ios</string>
+        <key>com.olyforge3d.printfarmer.ios.scan-widgets</key>
+        <string>match AppStore com.olyforge3d.printfarmer.ios.scan-widgets</string>
     </dict>
     <key>signingCertificate</key>
     <string>iPhone Distribution</string>

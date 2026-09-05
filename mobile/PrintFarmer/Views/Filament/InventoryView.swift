@@ -26,7 +26,11 @@ struct InventoryView: View {
     }
 
     @Environment(ServiceContainer.self) private var services
+    @Environment(AppRouter.self) private var router
     @State private var segment: Segment = .spools
+    @State private var showExternalScan = false
+    @State private var externalScanSessionActive = false
+    @State private var externalScanRequestID: UUID?
 
     var body: some View {
         let printedPartsInventoryEnabled =
@@ -66,6 +70,23 @@ struct InventoryView: View {
                 printedPartsInventoryEnabled: isEnabled
             )
         }
+        .task {
+            presentPendingExternalScan()
+        }
+        .onChange(of: router.pendingExternalScanRequestID) {
+            presentPendingExternalScan()
+        }
+        .onChange(of: router.isScanFlowDismissing) {
+            presentPendingExternalScan()
+        }
+        .sheet(isPresented: $showExternalScan, onDismiss: {
+            externalScanSessionActive = false
+            externalScanRequestID = nil
+            router.completeScanFlowDismissal(capabilities: services.capabilitiesService.resolved)
+            presentPendingExternalScan()
+        }, content: {
+            ScanFlowView(externalScanRequestID: externalScanRequestID)
+        })
     }
 
     @ViewBuilder
@@ -76,6 +97,16 @@ struct InventoryView: View {
         case .parts:
             PartsInventoryListNavView()
         }
+    }
+
+    private func presentPendingExternalScan() {
+        guard !externalScanSessionActive || showExternalScan else { return }
+        let requestID = router.pendingExternalScanRequestID
+        guard router.consumeExternalScanRequest() else { return }
+        segment = .spools
+        externalScanRequestID = requestID
+        externalScanSessionActive = true
+        showExternalScan = true
     }
 }
 

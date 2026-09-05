@@ -155,9 +155,11 @@ struct SpoolInventoryView: View {
                         activeTasks.append(task)
                     }
             }
-            .sheet(isPresented: $showScanFlow) {
+            .sheet(isPresented: $showScanFlow, onDismiss: {
+                router.completeScanFlowDismissal(capabilities: services.capabilitiesService.resolved)
+            }, content: {
                 ScanFlowView()
-            }
+            })
             .sheet(isPresented: $showBarcodeIntake) {
                 BarcodeIntakeView()
                     .onDisappear {

@@ -108,13 +108,6 @@ struct DashboardView: View {
             }
         }
         .navigationTitle("Dashboard")
-        .toolbar {
-            if sizeClass == .compact {
-                ToolbarItem(placement: .topBarTrailing) {
-                    ServerSwitcherMenu(style: .toolbar)
-                }
-            }
-        }
         .refreshable {
             await viewModel.loadDashboard()
         }
@@ -310,14 +303,14 @@ struct DashboardView: View {
                 if !topPrinters.isEmpty
                     && services.capabilitiesService.resolved.shiftPlanEnabled {
                     Button {
-                        router.selectTab(
-                            .tasks,
+                        router.routeToJobQueue(
                             capabilities: services.capabilitiesService.resolved
                         )
                     } label: {
                         Text("See All")
                             .font(.subheadline)
                     }
+                    .accessibilityIdentifier("dashboard.activeJobs.seeAll")
                 }
             }
 

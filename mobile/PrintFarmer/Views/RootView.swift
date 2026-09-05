@@ -73,7 +73,14 @@ struct RootView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
+            routePendingExternalScan()
             resumeConnectivityAfterForeground()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .externalScanRequested)) { _ in
+            routePendingExternalScan()
+        }
+        .task {
+            routePendingExternalScan()
         }
         .onChange(of: authViewModel.isAuthenticated) { _, isAuthenticated in
             if !isAuthenticated {
@@ -247,6 +254,14 @@ struct RootView: View {
         staleRegistrySignOutTask = Task {
             await authViewModel.logoutIfServerRegistryUnavailable(serverRegistry)
         }
+    }
+
+    private func routePendingExternalScan() {
+        guard ExternalScanRequestStore.consume() else { return }
+        router.navigate(
+            to: .scan,
+            capabilities: services.capabilitiesService.resolved
+        )
     }
 
     private struct BackendConnectionCheckView: View {

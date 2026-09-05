@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F24530000000000000000006 /* ScanViewModelPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24530000000000000000005 /* ScanViewModelPresentationTests.swift */; };
+		F24530000000000000000004 /* ScanPresentationReadiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24530000000000000000003 /* ScanPresentationReadiness.swift */; };
+		F24530000000000000000002 /* AppRouter+Scanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24530000000000000000001 /* AppRouter+Scanning.swift */; };
 		1667A0000000000000000101 /* NetworkHostClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1667A0000000000000000001 /* NetworkHostClassifier.swift */; };
 		1667A0000000000000000102 /* CertificatePinStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1667A0000000000000000002 /* CertificatePinStore.swift */; };
 		1667A0000000000000000103 /* CertificateTrustCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1667A0000000000000000003 /* CertificateTrustCoordinator.swift */; };
@@ -61,6 +64,8 @@
 		F24120020000000000000002 /* AppDestinationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24120010000000000000001 /* AppDestinationView.swift */; };
 		F24170020000000000000002 /* OversightCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170010000000000000001 /* OversightCatalog.swift */; };
 		F24170040000000000000004 /* OversightHubView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170030000000000000003 /* OversightHubView.swift */; };
+		F24170210000000000000021 /* OversightRowSubtitles.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170200000000000000020 /* OversightRowSubtitles.swift */; };
+		F24170230000000000000023 /* OversightRowSubtitlesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170220000000000000022 /* OversightRowSubtitlesTests.swift */; };
 		F24170100000000000000010 /* OversightUpgradeOfferCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170110000000000000011 /* OversightUpgradeOfferCard.swift */; };
 		F24170060000000000000006 /* FilamentCoverageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170050000000000000005 /* FilamentCoverageView.swift */; };
 		F24170090000000000000009 /* OversightCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24170080000000000000008 /* OversightCatalogTests.swift */; };
@@ -463,6 +468,7 @@
 		F7060001000000000000A032 /* SystemCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A031 /* SystemCapabilities.swift */; };
 		F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A041 /* SystemCapabilitiesService.swift */; };
 		F7060001000000000000B002 /* AppRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000B001 /* AppRouterTests.swift */; };
+		F24250010000000000000002 /* AdaptiveNavigationRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24250010000000000000001 /* AdaptiveNavigationRegressionTests.swift */; };
 		F7060001000000000000B012 /* SystemCapabilitiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000B011 /* SystemCapabilitiesTests.swift */; };
 		241500000000000000000002 /* FarmShape.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241500000000000000000001 /* FarmShape.swift */; };
 		241500000000000000000004 /* FarmShapeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 241500000000000000000003 /* FarmShapeService.swift */; };
@@ -519,6 +525,9 @@
 		FA5A00000000000000000013 /* FarmSnapshotContainerAuthorityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000014 /* FarmSnapshotContainerAuthorityTests.swift */; };
 		FB6B00000000000000000001 /* FarmSnapshotRemediationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB6B00000000000000000002 /* FarmSnapshotRemediationTests.swift */; };
 		FB6B00000000000000000003 /* AuthSnapshotIdentityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB6B00000000000000000004 /* AuthSnapshotIdentityTests.swift */; };
+242700000000000000000101 /* OpenScannerIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 242700000000000000000001 /* OpenScannerIntent.swift */; };
+64E9C525FAE0D03216013F56 /* ScanWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */; };
+93AC246D901CA86E42EB214D /* PrintFarmerScanWidgets.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 3DE83CDE75BC1AAF3EC3AE86 /* PrintFarmerScanWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -536,9 +545,33 @@
 			remoteGlobalIDString = DA9CB9901F607FAA5F633728;
 			remoteInfo = PrintFarmer;
 		};
+67CD5B0E0D5117721C0F0228 /* PBXContainerItemProxy */ = {
+	isa = PBXContainerItemProxy;
+	containerPortal = C6D0A32F942F8C6A3D5F22BE /* Project object */;
+	proxyType = 1;
+	remoteGlobalIDString = 667E8FD747202964B4410746;
+	remoteInfo = PrintFarmerScanWidgets;
+};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		7A8A4597154EFF79D2B71D4C /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				93AC246D901CA86E42EB214D /* PrintFarmerScanWidgets.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		F24530000000000000000005 /* ScanViewModelPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanViewModelPresentationTests.swift; sourceTree = "<group>"; };
+		F24530000000000000000003 /* ScanPresentationReadiness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanPresentationReadiness.swift; sourceTree = "<group>"; };
+		F24530000000000000000001 /* AppRouter+Scanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppRouter+Scanning.swift"; sourceTree = "<group>"; };
 		1667A0000000000000000001 /* NetworkHostClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkHostClassifier.swift; sourceTree = "<group>"; };
 		1667A0000000000000000002 /* CertificatePinStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificatePinStore.swift; sourceTree = "<group>"; };
 		1667A0000000000000000003 /* CertificateTrustCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificateTrustCoordinator.swift; sourceTree = "<group>"; };
@@ -637,6 +670,8 @@
 		F24120010000000000000001 /* AppDestinationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDestinationView.swift; sourceTree = "<group>"; };
 		F24170010000000000000001 /* OversightCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightCatalog.swift; sourceTree = "<group>"; };
 		F24170030000000000000003 /* OversightHubView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightHubView.swift; sourceTree = "<group>"; };
+		F24170200000000000000020 /* OversightRowSubtitles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightRowSubtitles.swift; sourceTree = "<group>"; };
+		F24170220000000000000022 /* OversightRowSubtitlesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightRowSubtitlesTests.swift; sourceTree = "<group>"; };
 		F24170110000000000000011 /* OversightUpgradeOfferCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightUpgradeOfferCard.swift; sourceTree = "<group>"; };
 		F24170050000000000000005 /* FilamentCoverageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageView.swift; sourceTree = "<group>"; };
 		F24170080000000000000008 /* OversightCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OversightCatalogTests.swift; sourceTree = "<group>"; };
@@ -872,6 +907,7 @@
 		F7060001000000000000A031 /* SystemCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilities.swift; sourceTree = "<group>"; };
 		F7060001000000000000A041 /* SystemCapabilitiesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesService.swift; sourceTree = "<group>"; };
 		F7060001000000000000B001 /* AppRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouterTests.swift; sourceTree = "<group>"; };
+		F24250010000000000000001 /* AdaptiveNavigationRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveNavigationRegressionTests.swift; sourceTree = "<group>"; };
 		F7060001000000000000B011 /* SystemCapabilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesTests.swift; sourceTree = "<group>"; };
 		241500000000000000000001 /* FarmShape.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmShape.swift; sourceTree = "<group>"; };
 		241500000000000000000003 /* FarmShapeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmShapeService.swift; sourceTree = "<group>"; };
@@ -934,6 +970,10 @@
 		FA5A00000000000000000014 /* FarmSnapshotContainerAuthorityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotContainerAuthorityTests.swift; sourceTree = "<group>"; };
 		FB6B00000000000000000002 /* FarmSnapshotRemediationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotRemediationTests.swift; sourceTree = "<group>"; };
 		FB6B00000000000000000004 /* AuthSnapshotIdentityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthSnapshotIdentityTests.swift; sourceTree = "<group>"; };
+242700000000000000000001 /* OpenScannerIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenScannerIntent.swift; sourceTree = "<group>"; };
+3DE83CDE75BC1AAF3EC3AE86 /* PrintFarmerScanWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PrintFarmerScanWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+AA60E6B959E0E195BBAA1D22 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScanWidgets.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -960,6 +1000,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+8C1B85AAA4AA0088A8C7B36F /* Frameworks */ = {
+	isa = PBXFrameworksBuildPhase;
+	buildActionMask = 2147483647;
+	files = (
+	);
+	runOnlyForDeploymentPostprocessing = 0;
+};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -1213,6 +1260,7 @@
 				G1324516876342C9A7B5305E /* DispatchViewModelTests.swift */,
 				G1EE99D3914544B496FD266B /* UptimeViewModelTests.swift */,
 				3B77A2FE86D1154248756C5A /* ScanViewModelTests.swift */,
+				F24530000000000000000005 /* ScanViewModelPresentationTests.swift */,
 				32DEA03A8035CAB7B908215E /* HarvestViewModelTests.swift */,
 				27F17A591BE794A57D83307E /* PartsInventoryViewModelTests.swift */,
 				976554965D98BFA6F917FA14 /* PartAdjustmentViewModelTests.swift */,
@@ -1246,6 +1294,7 @@
 				B979E1FF0D2B4792DE5025A3 /* PrintFarmer */,
 				1DB4E3FFFEF4C001E8972F09 /* PrintFarmerTests */,
 				F7060002000000000000C001 /* PrintFarmerUITests */,
+				FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */,
 				6D159F361021D92BC3E10E55 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -1256,6 +1305,7 @@
 				AD5B287E56228618B9E1A0C4 /* PrintFarmer.app */,
 				DBF8A7CD5FCE695B24F4AD00 /* PrintFarmerTests.xctest */,
 				F7060002000000000000C0F1 /* PrintFarmerUITests.xctest */,
+				3DE83CDE75BC1AAF3EC3AE86 /* PrintFarmerScanWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -1286,8 +1336,10 @@
 				E83CE3867D23C7CA26C423AB /* AppDestination.swift */,
 				F24120010000000000000001 /* AppDestinationView.swift */,
 				F24170010000000000000001 /* OversightCatalog.swift */,
+				F24170200000000000000020 /* OversightRowSubtitles.swift */,
 				AF81383E489642A1A80EE943 /* DeepLinkHandler.swift */,
 				4FD237969E9A136249F6351A /* AppRouter.swift */,
+				F24530000000000000000001 /* AppRouter+Scanning.swift */,
 				F78800000000000000000001 /* TaskActionRoute.swift */,
 			);
 			path = Navigation;
@@ -1549,6 +1601,7 @@
 			isa = PBXGroup;
 			children = (
 				A1B2C3D4E5F6A7B8C9D0E1F2 /* AppDelegate.swift */,
+				242700000000000000000001 /* OpenScannerIntent.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -1643,6 +1696,7 @@
 			isa = PBXGroup;
 			children = (
 				F7060001000000000000A011 /* ScanFlowView.swift */,
+				F24530000000000000000003 /* ScanPresentationReadiness.swift */,
 				6F6608F46256F5914589FD48 /* HarvestSheetView.swift */,
 				40AE68126C0013F4366194BF /* BinScanResultView.swift */,
 				07D94FCFA57014B2932689A3 /* PartScanResultView.swift */,
@@ -1654,9 +1708,11 @@
 			isa = PBXGroup;
 			children = (
 				F7060001000000000000B001 /* AppRouterTests.swift */,
+				F24250010000000000000001 /* AdaptiveNavigationRegressionTests.swift */,
 				C7D2128F28601E1ED8FEE835 /* DeepLinkHandlerTests.swift */,
 				F78800000000000000000003 /* TaskActionRouteResolverTests.swift */,
 				F24170080000000000000008 /* OversightCatalogTests.swift */,
+				F24170220000000000000022 /* OversightRowSubtitlesTests.swift */,
 			);
 			path = Navigation;
 			sourceTree = "<group>";
@@ -1692,6 +1748,15 @@
 			path = PrintFarmerUITests;
 			sourceTree = "<group>";
 		};
+FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
+	isa = PBXGroup;
+	children = (
+		B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */,
+		AA60E6B959E0E195BBAA1D22 /* Info.plist */,
+	);
+	path = PrintFarmerScanWidgets;
+	sourceTree = "<group>";
+};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -1722,10 +1787,12 @@
 				B2F14515601A3C4CAB95B1A4 /* Sources */,
 				2C2C1156559FFF38F31379AF /* Frameworks */,
 				70C8A555C51B03B00761E2F2 /* Resources */,
+				7A8A4597154EFF79D2B71D4C /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				BE384FCBA3134F794D3F8802 /* PBXTargetDependency */,
 			);
 			name = PrintFarmer;
 			packageProductDependencies = (
@@ -1752,6 +1819,23 @@
 			productReference = F7060002000000000000C0F1 /* PrintFarmerUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+667E8FD747202964B4410746 /* PrintFarmerScanWidgets */ = {
+	isa = PBXNativeTarget;
+	buildConfigurationList = B7AFF51AD2C4C9109998A9CA /* Build configuration list for PBXNativeTarget "PrintFarmerScanWidgets" */;
+	buildPhases = (
+		5F1A9D66DD5967B6BB213456 /* Sources */,
+		8C1B85AAA4AA0088A8C7B36F /* Frameworks */,
+		0FA36420336716848408A71A /* Resources */,
+	);
+	buildRules = (
+	);
+	dependencies = (
+	);
+	name = PrintFarmerScanWidgets;
+	productName = PrintFarmerScanWidgets;
+	productReference = 3DE83CDE75BC1AAF3EC3AE86 /* PrintFarmerScanWidgets.appex */;
+	productType = "com.apple.product-type.app-extension";
+};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -1782,6 +1866,7 @@
 				DA9CB9901F607FAA5F633728 /* PrintFarmer */,
 				AFC2BA1C050C049765D60160 /* PrintFarmerTests */,
 				F7060002000000000000D001 /* PrintFarmerUITests */,
+				667E8FD747202964B4410746 /* PrintFarmerScanWidgets */,
 			);
 		};
 /* End PBXProject section */
@@ -1796,6 +1881,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+0FA36420336716848408A71A /* Resources */ = {
+	isa = PBXResourcesBuildPhase;
+	buildActionMask = 2147483647;
+	files = (
+	);
+	runOnlyForDeploymentPostprocessing = 0;
+};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -1919,7 +2011,9 @@
 				F2A1B2C3D4E5F6A7B8C9D0E1 /* AddSpoolViewModelTests.swift in Sources */,
 				F2C1D2E3F4A5B6C7D8E9F0A1 /* SpoolInventoryViewModelTests.swift in Sources */,
 				F7060001000000000000B002 /* AppRouterTests.swift in Sources */,
+				F24250010000000000000002 /* AdaptiveNavigationRegressionTests.swift in Sources */,
 				F24170090000000000000009 /* OversightCatalogTests.swift in Sources */,
+				F24170230000000000000023 /* OversightRowSubtitlesTests.swift in Sources */,
 				F7060001000000000000B012 /* SystemCapabilitiesTests.swift in Sources */,
 				241500000000000000000006 /* FarmShapeServiceTests.swift in Sources */,
 				F711A0003000000000000002 /* FilamentFallbackGroupModelsTests.swift in Sources */,
@@ -1927,6 +2021,7 @@
 				F711A0005000000000000002 /* PrinterServiceFallbackTests.swift in Sources */,
 				8D2EDA47F2053E4ECD46CC15 /* MockPartsInventoryService.swift in Sources */,
 				1BBE2F4594687816DAE0838A /* ScanViewModelTests.swift in Sources */,
+				F24530000000000000000006 /* ScanViewModelPresentationTests.swift in Sources */,
 				2686C148AE9D2C643157A837 /* HarvestViewModelTests.swift in Sources */,
 				E9DC782356C902A24D0D9172 /* PartsInventoryViewModelTests.swift in Sources */,
 				E6B5C07C74F94339C65677B7 /* PartsInventoryConflictTests.swift in Sources */,
@@ -1945,6 +2040,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				242700000000000000000101 /* OpenScannerIntent.swift in Sources */,
 				CF11AA0000000000000E0001 /* LaunchSplashView.swift in Sources */,
 				1667A0000000000000000101 /* NetworkHostClassifier.swift in Sources */,
 				1667A0000000000000000102 /* CertificatePinStore.swift in Sources */,
@@ -2012,8 +2108,10 @@
 				4097E554D29B3551A59C943D /* AppDestination.swift in Sources */,
 				F24120020000000000000002 /* AppDestinationView.swift in Sources */,
 				F24170020000000000000002 /* OversightCatalog.swift in Sources */,
+				F24170210000000000000021 /* OversightRowSubtitles.swift in Sources */,
 				14D1CA5B7AC14F03A2C76A77 /* DeepLinkHandler.swift in Sources */,
 				2007393C70EEAD89185ADC84 /* AppRouter.swift in Sources */,
+				F24530000000000000000002 /* AppRouter+Scanning.swift in Sources */,
 				3D4D27461FC81A2D849419A4 /* JobServiceProtocol.swift in Sources */,
 				E46139D1458EC8E0E1D8E832 /* NotificationServiceProtocol.swift in Sources */,
 				1D1B7EDF3FD6B2A17D268882 /* PrinterServiceProtocol.swift in Sources */,
@@ -2156,6 +2254,7 @@
 				A4C8D9E0123456789ABCD002 /* DisabledControlStyle.swift in Sources */,
 				F7060001000000000000A002 /* AttentionView.swift in Sources */,
 				F7060001000000000000A012 /* ScanFlowView.swift in Sources */,
+				F24530000000000000000004 /* ScanPresentationReadiness.swift in Sources */,
 				F7060001000000000000A022 /* AdvancedPrinterControlsView.swift in Sources */,
 				F7060001000000000000A032 /* SystemCapabilities.swift in Sources */,
 				F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */,
@@ -2208,6 +2307,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+5F1A9D66DD5967B6BB213456 /* Sources */ = {
+	isa = PBXSourcesBuildPhase;
+	buildActionMask = 2147483647;
+	files = (
+		64E9C525FAE0D03216013F56 /* ScanWidgets.swift in Sources */,
+	);
+	runOnlyForDeploymentPostprocessing = 0;
+};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -2221,6 +2328,12 @@
 			target = DA9CB9901F607FAA5F633728 /* PrintFarmer */;
 			targetProxy = F7060002000000000000D031 /* PBXContainerItemProxy */;
 		};
+BE384FCBA3134F794D3F8802 /* PBXTargetDependency */ = {
+	isa = PBXTargetDependency;
+	name = PrintFarmerScanWidgets;
+	target = 667E8FD747202964B4410746 /* PrintFarmerScanWidgets */;
+	targetProxy = 67CD5B0E0D5117721C0F0228 /* PBXContainerItemProxy */;
+};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -2402,7 +2515,7 @@
 				APS_ENVIRONMENT = production;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = PrintFarmer/PrintFarmer.entitlements;
-				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = ZPKA84F3TY;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -2422,6 +2535,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.olyforge3d.printfarmer.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "match AppStore com.olyforge3d.printfarmer.ios";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -2477,6 +2591,60 @@
 			};
 			name = Release;
 		};
+5A5ADA4571293E1847BB0BD9 /* Debug */ = {
+	isa = XCBuildConfiguration;
+	buildSettings = {
+		APPLICATION_EXTENSION_API_ONLY = YES;
+		CODE_SIGN_STYLE = Automatic;
+		CURRENT_PROJECT_VERSION = 2;
+		DEVELOPMENT_TEAM = ZPKA84F3TY;
+		GENERATE_INFOPLIST_FILE = YES;
+		INFOPLIST_FILE = PrintFarmerScanWidgets/Info.plist;
+		IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+		LD_RUNPATH_SEARCH_PATHS = (
+			"$(inherited)",
+			"@executable_path/Frameworks",
+			"@executable_path/../../Frameworks",
+		);
+		MARKETING_VERSION = 1.0;
+		PRODUCT_BUNDLE_IDENTIFIER = com.olyforge3d.printfarmer.ios.scan-widgets;
+		PRODUCT_NAME = "$(TARGET_NAME)";
+		SKIP_INSTALL = YES;
+		SWIFT_EMIT_LOC_STRINGS = YES;
+		SWIFT_VERSION = 6.0;
+		TARGETED_DEVICE_FAMILY = "1,2";
+		VERSIONING_SYSTEM = apple-generic;
+	};
+	name = Debug;
+};
+9C1929C9B3CA934B5788CF90 /* Release */ = {
+	isa = XCBuildConfiguration;
+	buildSettings = {
+		APPLICATION_EXTENSION_API_ONLY = YES;
+		CODE_SIGN_STYLE = Manual;
+		CURRENT_PROJECT_VERSION = 2;
+		DEVELOPMENT_TEAM = ZPKA84F3TY;
+		GENERATE_INFOPLIST_FILE = YES;
+		INFOPLIST_FILE = PrintFarmerScanWidgets/Info.plist;
+		IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+		LD_RUNPATH_SEARCH_PATHS = (
+			"$(inherited)",
+			"@executable_path/Frameworks",
+			"@executable_path/../../Frameworks",
+		);
+		MARKETING_VERSION = 1.0;
+		PRODUCT_BUNDLE_IDENTIFIER = com.olyforge3d.printfarmer.ios.scan-widgets;
+		PRODUCT_NAME = "$(TARGET_NAME)";
+		PROVISIONING_PROFILE_SPECIFIER = "match AppStore com.olyforge3d.printfarmer.ios.scan-widgets";
+		SKIP_INSTALL = YES;
+		SWIFT_EMIT_LOC_STRINGS = YES;
+		SWIFT_VERSION = 6.0;
+		TARGETED_DEVICE_FAMILY = "1,2";
+		VALIDATE_PRODUCT = YES;
+		VERSIONING_SYSTEM = apple-generic;
+	};
+	name = Release;
+};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -2516,6 +2684,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+B7AFF51AD2C4C9109998A9CA /* Build configuration list for PBXNativeTarget "PrintFarmerScanWidgets" */ = {
+	isa = XCConfigurationList;
+	buildConfigurations = (
+		5A5ADA4571293E1847BB0BD9 /* Debug */,
+		9C1929C9B3CA934B5788CF90 /* Release */,
+	);
+	defaultConfigurationIsVisible = 0;
+	defaultConfigurationName = Release;
+};
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */

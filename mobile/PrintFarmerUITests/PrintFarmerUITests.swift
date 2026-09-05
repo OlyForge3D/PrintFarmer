@@ -1,5 +1,20 @@
 import XCTest
 
+struct RenderedShellRoot {
+    enum Surface {
+        case tabBar
+        case sidebar
+    }
+
+    let title: String
+    let identifier: String
+    let surface: Surface
+
+    var key: String {
+        identifier.isEmpty ? title : identifier
+    }
+}
+
 /// Base class for all PrintFarmer UI tests.
 ///
 /// Launches the app with `--uitesting` so the app switches to the
@@ -54,14 +69,17 @@ class PrintFarmerUITestCase: XCTestCase {
     /// Reveal the iPad NavigationSplitView sidebar via the system-provided
     /// nav-bar toggle if it appears to be collapsed. No-op on compact width
     /// (iPhone) or when the sidebar is already visible.
-    func revealSidebarIfCollapsed() {
-        for label in ["Sidebar", "Toggle Sidebar", "Show Sidebar"] {
-            let toggle = app.navigationBars.buttons[label]
-            if toggle.exists {
-                toggle.tap()
-                return
-            }
+    @discardableResult
+    func revealSidebarIfCollapsed(timeout: TimeInterval = 3) -> Bool {
+        let labels = ["Sidebar", "Toggle Sidebar", "Show Sidebar"]
+        let toggle = app.buttons
+            .matching(NSPredicate(format: "label IN %@", labels))
+            .firstMatch
+        guard toggle.waitForExistence(timeout: timeout) else {
+            return false
         }
+        toggle.tap()
+        return true
     }
 
     /// Adaptive locator for a shell destination using its shipped identifier.
@@ -69,10 +87,8 @@ class PrintFarmerUITestCase: XCTestCase {
     /// otherwise the iPad `NavigationSplitView` sidebar button — revealing a
     /// collapsed sidebar via the system toggle if needed.
     ///
-    /// Polls both surfaces at 200 ms intervals and returns whichever
-    /// materializes first, keeping the wait budget shared instead of
-    /// serially blocking on the non-adaptive `tabBars.buttons[...]`
-    /// query that fails deterministically on iPad regular size class.
+    /// Gives the compact tab a brief chance to appear, then proactively
+    /// reveals a collapsed iPad sidebar before polling both surfaces.
     ///
     /// - Parameters:
     ///   - tabIdentifier: The compact tab identifier (e.g. `tab.attention`).
@@ -91,17 +107,193 @@ class PrintFarmerUITestCase: XCTestCase {
             with: "sidebar."
         )
         let sidebar = app.buttons[sidebarIdentifier]
+        if tab.waitForExistence(timeout: min(1, timeout)) {
+            return tab
+        }
+        if sidebar.exists {
+            return sidebar
+        }
+
+        _ = revealSidebarIfCollapsed(timeout: min(3, timeout))
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if tab.exists { return tab }
             if sidebar.exists { return sidebar }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
-        // iPad portrait may keep the sidebar collapsed behind the system
-        // toggle. Try once to reveal it, then give the sidebar button a
-        // short window to materialize before giving up.
-        revealSidebarIfCollapsed()
-        _ = sidebar.waitForExistence(timeout: 2)
         return sidebar.exists ? sidebar : tab
+    }
+
+    func renderedShellRoots(timeout: TimeInterval = 8) -> [RenderedShellRoot] {
+        revealSidebarIfCollapsed()
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let tabButtons = app.tabBars.firstMatch.buttons.allElementsBoundByIndex
+                .filter(\.exists)
+            if !tabButtons.isEmpty {
+                return tabButtons.map {
+                    RenderedShellRoot(
+                        title: $0.label,
+                        identifier: $0.identifier,
+                        surface: .tabBar
+                    )
+                }
+            }
+
+            revealSidebarIfCollapsed()
+            let sidebarButtons = app.buttons
+                .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
+                .allElementsBoundByIndex
+                .filter(\.exists)
+            if !sidebarButtons.isEmpty {
+                var identifiers = Set<String>()
+                return sidebarButtons.compactMap {
+                    guard identifiers.insert($0.identifier).inserted else { return nil }
+                    return RenderedShellRoot(
+                        title: $0.label,
+                        identifier: $0.identifier,
+                        surface: .sidebar
+                    )
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+
+        return app.buttons
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
+            .allElementsBoundByIndex
+            .filter(\.exists)
+            .map {
+                RenderedShellRoot(
+                    title: $0.label,
+                    identifier: $0.identifier,
+                    surface: .sidebar
+                )
+            }
+    }
+
+    func selectRoot(_ root: RenderedShellRoot) {
+        let button: XCUIElement
+        switch root.surface {
+        case .tabBar:
+            button = root.identifier.isEmpty
+                ? app.tabBars.firstMatch.buttons[root.title]
+                : app.tabBars.firstMatch.buttons[root.identifier]
+        case .sidebar:
+            revealSidebarIfCollapsed()
+            button = app.buttons[root.identifier]
+        }
+        XCTAssertTrue(button.waitForExistence(timeout: 5), "Missing rendered root \(root.title)")
+        button.tap()
+    }
+
+    func requireCompactAdaptiveShell() throws {
+        guard app.tabBars.firstMatch.waitForExistence(timeout: 8) else {
+            throw XCTSkip("Two Modes is intentionally compact-width only")
+        }
+    }
+
+    func assertCanonicalRootChrome(
+        expectsModeControl: Bool,
+        root: RenderedShellRoot,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let server = app.buttons["navigation.serverSwitcher"]
+        let account = app.buttons["navigation.account"]
+        XCTAssertTrue(
+            server.waitForExistence(timeout: 5),
+            "\(root.title) must show the leading server chip",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(
+            account.waitForExistence(timeout: 5),
+            "\(root.title) must show the trailing account button",
+            file: file,
+            line: line
+        )
+        XCTAssertLessThan(
+            server.frame.midX,
+            account.frame.midX,
+            "\(root.title) must keep server leading and account trailing",
+            file: file,
+            line: line
+        )
+
+        let systemToolbarButtonLabels = Set([
+            "Search",
+            "Sidebar",
+            "Toggle Sidebar",
+            "Show Sidebar",
+            "Hide Sidebar"
+        ])
+        let toolbarButtons = app.navigationBars.buttons.allElementsBoundByIndex.filter {
+            $0.exists
+                && !$0.frame.isEmpty
+                && abs($0.frame.midY - account.frame.midY) < 12
+                && $0.identifier != "navigation.account"
+                && !systemToolbarButtonLabels.contains($0.label)
+        }
+        XCTAssertTrue(
+            toolbarButtons.allSatisfy { $0.frame.midX < account.frame.midX },
+            "\(root.title) must keep Account as the trailing-last toolbar action",
+            file: file,
+            line: line
+        )
+
+        let modeControl = app.segmentedControls
+            .matching(identifier: "navigation.modeControl")
+            .firstMatch
+        if expectsModeControl {
+            XCTAssertTrue(
+                modeControl.waitForExistence(timeout: 5),
+                "\(root.title) must show the Two Modes control",
+                file: file,
+                line: line
+            )
+            XCTAssertTrue(modeControl.buttons["Floor"].exists, file: file, line: line)
+            XCTAssertTrue(modeControl.buttons["Oversight"].exists, file: file, line: line)
+        } else {
+            XCTAssertFalse(
+                modeControl.exists,
+                "\(root.title) must not show a mode control in Simple",
+                file: file,
+                line: line
+            )
+        }
+    }
+
+    func assertEveryRenderedRootHasCanonicalChrome(
+        expectsModeControl: Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let roots = renderedShellRoots()
+        XCTAssertFalse(
+            roots.isEmpty,
+            "The rendered shell definition must expose at least one root",
+            file: file,
+            line: line
+        )
+        guard !roots.isEmpty else { return }
+
+        XCTAssertEqual(
+            Set(roots.map(\.key)).count,
+            roots.count,
+            "The rendered shell definition must expose unique roots",
+            file: file,
+            line: line
+        )
+
+        for root in roots {
+            selectRoot(root)
+            assertCanonicalRootChrome(
+                expectsModeControl: expectsModeControl,
+                root: root,
+                file: file,
+                line: line
+            )
+        }
     }
 }

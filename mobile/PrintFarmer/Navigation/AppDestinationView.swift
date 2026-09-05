@@ -40,6 +40,8 @@ func destinationView(for destination: AppDestination) -> some View {
         FilamentCoverageView()
     case .predictiveInsights(let printerId):
         PredictiveInsightsView(printerId: printerId)
+    case .jobQueue:
+        JobListView(ownsNavigationStack: false)
     case .jobHistory:
         JobHistoryView()
     case .jobTimeline:

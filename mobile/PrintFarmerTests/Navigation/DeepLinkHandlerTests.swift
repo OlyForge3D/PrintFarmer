@@ -10,6 +10,16 @@ final class DeepLinkHandlerTests: XCTestCase {
 
     // MARK: - Valid URLs
 
+    func testParseScannerURL() {
+        let url = URL(string: "printfarmer://scan")!
+        XCTAssertEqual(DeepLinkHandler.parse(url: url), .scan)
+    }
+
+    func testParseScannerURLRejectsExtraPath() {
+        let url = URL(string: "printfarmer://scan/extra")!
+        XCTAssertNil(DeepLinkHandler.parse(url: url))
+    }
+
     func testParseValidPrinterURL() {
         let url = URL(string: "printfarmer://printer/550E8400-E29B-41D4-A716-446655440000")!
         let result = DeepLinkHandler.parse(url: url)
