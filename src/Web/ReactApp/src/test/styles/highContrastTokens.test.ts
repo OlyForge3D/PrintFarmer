@@ -36,6 +36,7 @@ const SOURCE_ROOT = resolve(__dirname, '../..');
 const THEMES_DIR = resolve(SOURCE_ROOT, 'design-system/themes');
 const CONTRAST_CSS_PATH = resolve(SOURCE_ROOT, 'design-system/contrast.css');
 const contrastCss = readFileSync(CONTRAST_CSS_PATH, 'utf8');
+const BASE_TOKEN_SENTINEL = '#010203';
 
 /** Every theme id known to the design system, discovered from disk. */
 const ALL_THEME_IDS = readdirSync(THEMES_DIR)
@@ -241,7 +242,7 @@ describe.each(THEMES_WITH_OVERRIDES)('prefers-contrast: high — %s theme', (the
       const base = document.createElement('style');
       base.textContent = `
         [data-theme='${theme}'] {
-          ${CONTRACT_TOKENS.map((token) => `--pf-${token}: initial;`).join('\n')}
+          ${CONTRACT_TOKENS.map((token) => `--pf-${token}: ${BASE_TOKEN_SENTINEL};`).join('\n')}
         }
       `;
       const override = document.createElement('style');
@@ -257,7 +258,7 @@ describe.each(THEMES_WITH_OVERRIDES)('prefers-contrast: high — %s theme', (the
         const normalStyle = getComputedStyle(document.documentElement);
         for (const token of CONTRACT_TOKENS) {
           expect(normalStyle.getPropertyValue(`--pf-${token}`).trim(), `--pf-${token}`).toBe(
-            'initial',
+            BASE_TOKEN_SENTINEL,
           );
         }
 
@@ -268,7 +269,7 @@ describe.each(THEMES_WITH_OVERRIDES)('prefers-contrast: high — %s theme', (the
           const actual = highStyle.getPropertyValue(`--pf-${token}`).trim().toLowerCase();
           expect(actual, `--pf-${token}`).toBe(expected.get(token));
           expect(actual, `--pf-${token} should differ from the normal-mode value`).not.toBe(
-            'initial',
+            BASE_TOKEN_SENTINEL,
           );
         }
       } finally {
