@@ -244,6 +244,18 @@ describe('SettingsShell', () => {
     }
   });
 
+  it.each([true, false])('uses one Spoolman editor when metadata editing is allowed (farm administrator: %s)', (isFarmAdmin) => {
+    if (!isFarmAdmin) {
+      setAuthRoles(['farm_user']);
+      authState.permissionOverride = (resource, action) =>
+        ['system_settings', 'spoolman'].includes(resource) && action === 'admin';
+    }
+    renderSettings('/admin/settings?tab=integrations&sub=connections');
+    expect(screen.getAllByTestId('legacy-settings-page')).toHaveLength(1);
+    expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'Integrations');
+    expect(screen.queryByTestId('spoolman-settings')).not.toBeInTheDocument();
+  });
+
   it('keeps personal settings route-locked even for a farm administrator', () => {
     renderSettings('/settings?scope=system&tab=users&sub=accounts', 'user');
     expect(screen.getByTestId('theme-switcher')).toBeInTheDocument();

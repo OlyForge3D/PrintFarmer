@@ -198,6 +198,10 @@ They still appear in the UI (Telegram is rendered by `<TelegramSettingsCard />` 
 `integrations.connections` tab), but their save path is separate. Do not try to save them
 via `POST /api/settings/{keyName}` — the controller returns `404 Not Found`.
 
+Spoolman uses the generic Integrations editor for users with `system_settings:admin`.
+A dedicated Spoolman card serves `spoolman:admin` delegates without that permission;
+the two editors never mount together for the same section.
+
 ## Save Model — One Section At A Time
 
 There is **no "Save All" button** anywhere in the settings UI. The page renders a **single

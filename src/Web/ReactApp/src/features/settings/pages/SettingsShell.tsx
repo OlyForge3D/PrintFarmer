@@ -80,16 +80,17 @@ function TabLoader() {
 
 function IntegrationConnectionsPanel() {
   const { hasPermission } = useAuth();
+  const canEditMetadata = hasPermission('system_settings', 'admin');
   const serviceCards = (
     <div className="space-y-6">
-      {hasPermission('spoolman', 'admin') && <SpoolmanSettingsCard />}
+      {!canEditMetadata && hasPermission('spoolman', 'admin') && <SpoolmanSettingsCard />}
       {hasPermission('home_assistant', 'admin') && <HomeAssistantSettingsCard />}
       {hasPermission('telegram', 'admin') && <TelegramSettingsCard />}
     </div>
   );
   return (
     <SettingsSection>
-      {hasPermission('system_settings', 'admin') ? (
+      {canEditMetadata ? (
         <SettingsPage
           allowedGroups={SUB_PAGE_ALLOWED_GROUPS['integrations.connections']}
           introText="Configure third-party services, Smart Plugs, and slicer API connections."
