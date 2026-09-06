@@ -103,7 +103,13 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         } else {
             XCTAssertTrue(app.staticTexts["sidebar.section.floor"].exists)
             XCTAssertTrue(app.staticTexts["sidebar.section.oversight"].exists)
-            XCTAssertFalse(app.segmentedControls["navigation.modeControl"].exists)
+            XCTAssertEqual(
+                app.segmentedControls
+                    .matching(identifier: "navigation.modeControl")
+                    .count,
+                0,
+                "The expanded iPad sidebar must render no Floor/Oversight control"
+            )
             XCTAssertFalse(app.buttons["sidebar.oversight"].exists)
         }
     }
@@ -561,6 +567,13 @@ final class TwoModesOperatorShellUITests: PrintFarmerUITestCase {
             app.segmentedControls["navigation.modeControl"]
                 .waitForExistence(timeout: 8)
         )
+        XCTAssertEqual(
+            app.segmentedControls
+                .matching(identifier: "navigation.modeControl")
+                .count,
+            1,
+            "Two-modes Floor roots must render exactly one Floor/Oversight control"
+        )
 
         for identifier in [
             "tab.attention",
@@ -596,6 +609,13 @@ final class TwoModesOversightShellUITests: PrintFarmerUITestCase {
         XCTAssertTrue(
             app.segmentedControls["navigation.modeControl"]
                 .waitForExistence(timeout: 8)
+        )
+        XCTAssertEqual(
+            app.segmentedControls
+                .matching(identifier: "navigation.modeControl")
+                .count,
+            1,
+            "Two-modes Oversight roots must render exactly one Floor/Oversight control"
         )
 
         for identifier in [
@@ -680,11 +700,12 @@ final class TwoModesChromeRegressionUITests: PrintFarmerUITestCase {
 
         XCTAssertFalse(app.buttons["navigation.serverSwitcher"].isHittable)
         XCTAssertFalse(app.buttons["navigation.account"].isHittable)
-        XCTAssertFalse(
+        XCTAssertEqual(
             app.segmentedControls
                 .matching(identifier: "navigation.modeControl")
-                .firstMatch
-                .isHittable
+                .count,
+            0,
+            "Pushed screens must render no Floor/Oversight control"
         )
     }
 }
