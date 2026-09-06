@@ -173,6 +173,22 @@ describe('AdminControlCenterPage', () => {
     expect(within(tiles[3]).getByText('Degraded')).toBeInTheDocument();
   });
 
+  it('puts attention before health and keeps the checked timestamp visible', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention')).toBeInTheDocument();
+    });
+
+    const headings = screen.getAllByRole('heading');
+    expect(headings.findIndex((heading) => heading.textContent === 'Needs attention')).toBeLessThan(
+      headings.findIndex((heading) => heading.textContent === 'System health'),
+    );
+    expect(screen.getByText(/Checked at/i)).toBeInTheDocument();
+  });
+
   it('reflects the worst subsystem status in the overall badge (issue #2222 regression)', async () => {
     // Reproduces the exact reported scenario: printer backends degraded
     // (4/5 reachable) while every other subsystem is healthy. The overall
@@ -282,7 +298,21 @@ describe('AdminControlCenterPage', () => {
   });
 
   it('renders a single reassuring line when the attention list is empty', async () => {
-    mockedApiGet.mockResolvedValue({ data: makeOverview({ attention: [] }) });
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        overallStatus: 'Healthy',
+        attention: [],
+        subsystems: [
+          { key: 'api', name: 'API', status: 'Healthy', detail: 'Responding' },
+          {
+            key: 'database',
+            name: 'Database',
+            status: 'Healthy',
+            detail: 'PostgreSQL · seeded (8 manufacturers)',
+          },
+        ],
+      }),
+    });
 
     renderHub();
 
@@ -298,6 +328,48 @@ describe('AdminControlCenterPage', () => {
       screen.queryByRole('heading', { name: /nothing needs your attention/i }),
     ).not.toBeInTheDocument();
     expect(screen.queryByTestId('admin-hub-attention')).not.toBeInTheDocument();
+  });
+
+  it('does not claim all-clear when attention is empty but health is degraded', async () => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        overallStatus: 'Degraded',
+        attention: [],
+        subsystems: [
+          { key: 'api', name: 'API', status: 'Degraded', detail: 'Intermittent failures' },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-clear')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('admin-hub-attention-clear')).toHaveTextContent(
+      'No attention items were reported. Review system health below for the current status.',
+    );
+    expect(screen.getByTestId('admin-hub-attention-clear')).not.toHaveTextContent(
+      'every subsystem is reporting healthy',
+    );
+  });
+
+  it('does not claim all-clear when the overview reports no subsystems', async () => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({ overallStatus: 'Unknown', attention: [], subsystems: [] }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-clear')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('admin-hub-attention-clear')).toHaveTextContent(
+      'No attention items were reported. Review system health below for the current status.',
+    );
+    expect(screen.getByRole('heading', { name: 'No subsystems reported' })).toBeInTheDocument();
   });
 
   it('renders attention rows with action links when actionRoute is present', async () => {
@@ -406,6 +478,36 @@ describe('AdminControlCenterPage', () => {
     expect(actionLink).toHaveAttribute('href', '/admin/status');
   });
 
+  it('omits a stable action destination when the current user lacks its permission', async () => {
+    mockedUseAuth.mockReturnValue({
+      ...farmAdminAccess(),
+      hasPermission: () => false,
+    } as unknown as ReturnType<typeof useAuth>);
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        attention: [
+          {
+            key: 'denied',
+            severity: 'Error',
+            title: 'Denied destination',
+            detail: 'The destination is not available to this principal.',
+            actionLabel: 'Open',
+            actionDestinationId: 'ops-status',
+            actionRoute: '/printers',
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-item')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('admin-hub-attention-item').querySelector('a')).toBeNull();
+  });
+
   it('falls back to actionRoute when actionDestinationId does not resolve', async () => {
     mockedApiGet.mockResolvedValue({
       data: makeOverview({
@@ -463,6 +565,35 @@ describe('AdminControlCenterPage', () => {
     expect(within(row).queryByRole('link')).not.toBeInTheDocument();
   });
 
+  it('suppresses retired /admin/manage action routes', async () => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        attention: [
+          {
+            key: 'retired-route',
+            severity: 'Warning',
+            title: 'Retired admin route',
+            detail: 'The old dashboard route is no longer supported.',
+            actionLabel: 'Open',
+            actionRoute: '/admin/manage?tab=system',
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-item')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('admin-hub-attention-item')).not.toHaveAttribute(
+      'href',
+      '/admin/manage?tab=system',
+    );
+    expect(screen.getByTestId('admin-hub-attention-item').querySelector('a')).toBeNull();
+  });
+
   it('degrades unknown attention severities to the Info treatment without crashing', async () => {
     mockedApiGet.mockResolvedValue({
       data: makeOverview({
@@ -516,22 +647,30 @@ describe('AdminControlCenterPage', () => {
     expect(mockedApiGet).toHaveBeenCalledTimes(2);
   });
 
-  it('renders destination cards from the registry, gated by access', async () => {
+  it('renders permitted operational cards and one settings entry from the registry', async () => {
     mockedApiGet.mockResolvedValue({ data: makeOverview() });
 
     renderHub();
 
     await waitFor(() => {
-      expect(screen.getByTestId('admin-hub-domains')).toBeInTheDocument();
+      expect(screen.getByTestId('admin-hub-operations')).toBeInTheDocument();
     });
 
     const cards = screen.getAllByTestId('admin-hub-destination');
-    // The registry contains multiple hub tiles across several groups.
-    expect(cards.length).toBeGreaterThan(3);
+    expect(cards.length).toBe(8);
     // Every card links somewhere absolute.
     for (const card of cards) {
       expect(card.getAttribute('href')).toMatch(/^\//);
     }
+    expect(screen.getByRole('link', { name: /Farm & Admin Settings/i })).toHaveAttribute(
+      'href',
+      '/admin/settings?scope=system',
+    );
+    expect(screen.getByRole('link', { name: /Workers & Jobs/i })).toHaveAttribute(
+      'href',
+      '/admin/workers?workerTab=jobs',
+    );
+    expect(screen.queryByText('Everything you can manage')).not.toBeInTheDocument();
   });
 
   it('bypasses overview fetch and hides health/attention bands for non-system-settings delegates', async () => {
@@ -570,10 +709,14 @@ describe('AdminControlCenterPage', () => {
 
     // Destination cards for accessible resources are still rendered
     await waitFor(() => {
-      expect(screen.getByTestId('admin-hub-domains')).toBeInTheDocument();
+      expect(screen.getByTestId('admin-hub-operations')).toBeInTheDocument();
     });
     const cards = screen.getAllByTestId('admin-hub-destination');
-    expect(cards.length).toBeGreaterThan(0);
+    expect(cards.length).toBe(1);
+    expect(screen.getByRole('link', { name: /Farm & Admin Settings/i })).toHaveAttribute(
+      'href',
+      '/admin/settings?scope=system',
+    );
   });
 
   it('hides every admin destination for a non-admin user', async () => {
@@ -586,9 +729,47 @@ describe('AdminControlCenterPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('heading', { name: 'No admin destinations available' }),
+        screen.getByRole('heading', { name: 'No operational tools available' }),
       ).toBeInTheDocument();
     });
     expect(screen.queryByTestId('admin-hub-destination')).not.toBeInTheDocument();
+  });
+
+  it('does not show a dead-end settings card for a delegate whose only permission is a configuration destination outside /admin/settings', async () => {
+    // catalog:admin grants the `data-catalog` destination (kind: 'configuration',
+    // path `/catalog`) but does not unlock any `/admin/settings`-reachable tab.
+    // A "Farm & Admin Settings" card here would be a visible-but-denied false
+    // affordance (see PR #2510 review feedback).
+    mockedUseAuth.mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+      user: {
+        id: 'user-catalog-only',
+        email: 'catalog-delegate@test.com',
+        roles: ['operator'],
+        isActive: true,
+      },
+      hasRole: () => false,
+      hasPermission: (resource: string, action: string) =>
+        resource === 'catalog' && action === 'admin',
+      error: null,
+      login: vi.fn(),
+      loginWithPasskey: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    } as unknown as ReturnType<typeof useAuth>);
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-operations')).toBeInTheDocument();
+    });
+
+    // catalog:admin does not map to any of the curated operational
+    // destinations, so the Operations band is empty for this delegate — the
+    // key assertion is that no dead-end settings card is offered either.
+    expect(
+      screen.queryByRole('link', { name: /Farm & Admin Settings/i }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -109,6 +109,24 @@ The current workspace retains category/sub-tab presentation.
 | `/admin/workers` | Operations | dispatch-settings:manage |
 | `/admin/data-management` | Operations | data_management:admin |
 
+The `/admin` Control Center is intentionally attention-first. Authorized
+overview users see the server-ranked **Needs attention** list first, followed by
+a compact **System health** band that preserves the server's overall status,
+subsystem statuses, unknown values, and `checkedAt` timestamp. An empty
+attention list only receives the all-clear message when every reported
+subsystem is healthy; an empty or degraded/unknown overview remains explicitly
+non-reassuring. Loading and network-error states include accessible feedback and
+a retry action without hiding the dashboard's usable links.
+
+The final band contains only permission-filtered operational shortcuts:
+System Status, Workers & Jobs (opened on the Jobs tab), Login Audit, Data
+Management, Maintenance, Analytics, and Auto-Dispatch. A separate
+**Farm & Admin Settings** entry is shown when the destination registry exposes
+an accessible configuration destination. The former “Everything you can manage”
+directory is not rendered, and retired `/admin/manage` attention targets are
+suppressed. Delegated users retain their permitted operations or settings entry
+even when they cannot fetch the system overview.
+
 The configuration shell is driven by URL parameters:
 
 - `?scope=<user|system>` — which shell you are in (defaults from the route).

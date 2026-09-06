@@ -4,6 +4,8 @@ import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
 import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
+import { AdminControlCenterPage } from '@/features/admin/pages/AdminControlCenterPage';
+import { client } from '@/services/api/httpClient';
 
 /**
  * Accessibility floor for the admin surface.
@@ -35,6 +37,11 @@ vi.mock('@/features/auth/hooks/useAuth', () => {
   };
   return { useAuth: () => value, useAuthInternal: () => value };
 });
+vi.mock('@/services/api/httpClient', () => ({
+  client: {
+    get: vi.fn(),
+  },
+}));
 vi.mock('@/common/hooks/useTheme', () => ({
   useTheme: () => ({
     theme: 'dark',
@@ -49,6 +56,8 @@ vi.mock('sonner', () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.f
 vi.mock('@/features/admin/pages/SettingsPage', () => ({
   SettingsPage: () => <div data-testid="legacy-settings-page">settings body</div>,
 }));
+
+const mockedApiGet = vi.mocked(client.get);
 
 const ROUTES: ReadonlyArray<readonly [string, string, 'system']> = [
   ['system settings', '/admin/settings?tab=general', 'system'],
@@ -156,5 +165,36 @@ describe('admin surface accessibility floor (#1016)', () => {
       .filter((el) => el.getAttribute('aria-current') === 'page');
 
     expect(current.length).toBeGreaterThan(0);
+  });
+
+  it('keeps the dashboard heading hierarchy and names its attention-first controls', async () => {
+    mockedApiGet.mockResolvedValue({
+      data: {
+        checkedAt: '2026-07-25T17:04:00Z',
+        overallStatus: 'Healthy',
+        subsystems: [{ key: 'backends', name: 'Backends', status: 'Healthy' }],
+        attention: [],
+      },
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/admin']}>
+          <AdminControlCenterPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await screen.findByTestId('admin-hub-attention-clear');
+    const headings = [...container.querySelectorAll('h1,h2,h3,h4,h5,h6')].map((h) =>
+      Number(h.tagName[1]),
+    );
+
+    expect(headings[0]).toBe(1);
+    expect(headings.slice(1).every((level) => level === 2)).toBe(true);
+    expect(headings.length).toBeGreaterThanOrEqual(4);
+    expect(screen.getByRole('link', { name: /System Status/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
   });
 });
