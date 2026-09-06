@@ -4,6 +4,10 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
+import {
+  draftChildPlanMarker,
+  evaluateEpicDependencies,
+} from '../verify-epic-dependencies.mjs';
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -25,6 +29,20 @@ const ciWorkflowPath = path.join(
 async function loadWorkflow() {
   return yaml.load(await readFile(workflowPath, 'utf8'));
 }
+
+test('the Feature Epic template starts with a valid draft child plan', async () => {
+  const body = await readFile(path.join(
+    repositoryRoot, '.github', 'ISSUE_TEMPLATE', 'feature-epic.md',
+  ), 'utf8');
+  const metadata = yaml.load(body.split('---')[1]);
+  assert.equal(body.split(draftChildPlanMarker).length - 1, 1);
+  const result = evaluateEpicDependencies({
+    issue: { number: 1, labels: metadata.labels, body },
+  });
+  assert.equal(result.classification, 'PASS');
+  assert.equal(result.childPlanState, 'draft');
+  assert.deepEqual(result.declaredChildren, []);
+});
 
 test('epic dependency workflow parses as valid YAML', async () => {
   assert.ok(await loadWorkflow());

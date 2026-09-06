@@ -23,7 +23,13 @@ Describe the user/business outcome this feature should deliver.
 
 ## Child Issues
 
-Use this checklist to track work. Add issue numbers as children are created.
+<!-- epic-child-plan: draft -->
+
+Add issue numbers as children are created. Before treating this epic as ready,
+replace the draft marker with a finalized child list (or explicitly empty plan)
+using the [epic author guidance](https://github.com/OlyForge3D/PrintFarmer/blob/development/.github/copilot-instructions.md#epic-dependency-definition-of-done).
+Link every child as a native GitHub sub-issue and read back its dependency edges;
+this checklist alone does not establish the graph.
 
 - [ ] #<issue-number> - <task title>
 - [ ] #<issue-number> - <task title>

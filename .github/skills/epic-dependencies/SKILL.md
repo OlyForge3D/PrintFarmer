@@ -42,6 +42,8 @@ blocks. Use one of these exact forms:
 <!-- epic-child-plan: finalized #123 #124 -->
 ```
 
+The Feature Epic issue template starts with the `draft` marker.
+
 These are alternatives, not three markers to paste together:
 
 - `draft`: planning is in progress. Proposed children may remain in prose;
