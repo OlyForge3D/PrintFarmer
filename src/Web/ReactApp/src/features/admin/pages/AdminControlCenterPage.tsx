@@ -347,7 +347,7 @@ export function AdminControlCenterPage() {
           <AdminSection
             caption="Needs attention"
             captionId="admin-hub-attention-heading"
-            count={data?.attention.length}
+            count={isError ? undefined : data?.attention.length}
           >
             {isLoading && (
               <AdminLoading

@@ -698,7 +698,7 @@ describe('AdminControlCenterPage', () => {
       expect(screen.getByTestId('admin-hub-operations')).toBeInTheDocument();
     });
     const cards = screen.getAllByTestId('admin-hub-destination');
-    expect(cards.length).toBe(2);
+    expect(cards.length).toBe(1);
     expect(screen.getByRole('link', { name: /Farm & Admin Settings/i })).toHaveAttribute(
       'href',
       '/admin/settings?scope=system',
