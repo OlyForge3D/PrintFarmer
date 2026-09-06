@@ -79,7 +79,10 @@ enum AppTab: String, Hashable, CaseIterable, Sendable {
         case .current:
             [.attention, .farm, .tasks, .inventory]
         case .simple:
-            [.attention, .farm, .inventory, .oversight]
+            // Tasks stays in the Simple tab set and is filtered out by
+            // `isEnabled(in:)` when `shiftPlanEnabled` is false (#2479).
+            // Layout may change prominence, never feature availability.
+            [.attention, .farm, .tasks, .inventory, .oversight]
         case .twoModes:
             switch mode {
             case .floor:
