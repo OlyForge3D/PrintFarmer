@@ -47,6 +47,401 @@ final class AppRouterTests: XCTestCase {
         XCTAssertTrue(router.consumeExternalScanRequest())
     }
 
+    // MARK: - External scan lifecycle (#2480)
+
+    func testCancelPendingExternalScanClearsTheRequestAndDismissalLatch() {
+        let router = AppRouter()
+        router.navigate(to: .scan, capabilities: capabilities)
+        router.beginScanFlowDismissal(queuedExternalRequestID: UUID())
+
+        router.cancelPendingExternalScan()
+
+        XCTAssertNil(router.pendingExternalScanRequestID)
+        XCTAssertFalse(router.isScanFlowDismissing)
+        XCTAssertFalse(router.consumeExternalScanRequest())
+    }
+
+    func testSignedOutLaunchRetainsAndScopesTheRequestInsteadOfConsumingIt() {
+        let request = PendingExternalScanRequest(
+            id: UUID(),
+            requestedAt: Date(),
+            scopedServerID: nil
+        )
+
+        let decision = ExternalScanRouting.decide(
+            pending: request,
+            isShowingMainContent: false,
+            activeServerID: originServerId
+        )
+
+        XCTAssertEqual(decision, .retain(scopeTo: originServerId))
+    }
+
+    func testSuccessfulLoginOnTheScopedServerDeliversTheRetainedRequest() {
+        let request = PendingExternalScanRequest(
+            id: UUID(),
+            requestedAt: Date(),
+            scopedServerID: originServerId
+        )
+
+        let decision = ExternalScanRouting.decide(
+            pending: request,
+            isShowingMainContent: true,
+            activeServerID: originServerId
+        )
+
+        XCTAssertEqual(decision, .deliver)
+    }
+
+    func testAuthenticatedDirectLaunchDeliversAnUnscopedRequest() {
+        let request = PendingExternalScanRequest(
+            id: UUID(),
+            requestedAt: Date(),
+            scopedServerID: nil
+        )
+
+        let decision = ExternalScanRouting.decide(
+            pending: request,
+            isShowingMainContent: true,
+            activeServerID: originServerId
+        )
+
+        XCTAssertEqual(decision, .deliver)
+    }
+
+    func testSigningIntoADifferentServerCancelsTheRetainedRequest() {
+        let request = PendingExternalScanRequest(
+            id: UUID(),
+            requestedAt: Date(),
+            scopedServerID: originServerId
+        )
+
+        let decision = ExternalScanRouting.decide(
+            pending: request,
+            isShowingMainContent: true,
+            activeServerID: UUID()
+        )
+
+        XCTAssertEqual(decision, .cancel)
+    }
+
+    func testAbandonedLoginExpiresRatherThanReplayingIntoALaterSession() {
+        let now = Date()
+        let request = PendingExternalScanRequest(
+            id: UUID(),
+            requestedAt: now.addingTimeInterval(-(ExternalScanRequestStore.expiry + 1)),
+            scopedServerID: originServerId
+        )
+
+        XCTAssertEqual(
+            ExternalScanRouting.decide(
+                pending: request,
+                isShowingMainContent: true,
+                activeServerID: originServerId,
+                now: now
+            ),
+            .cancel
+        )
+        XCTAssertEqual(
+            ExternalScanRouting.decide(
+                pending: request,
+                isShowingMainContent: false,
+                activeServerID: originServerId,
+                now: now
+            ),
+            .cancel
+        )
+    }
+
+    func testNoPendingRequestIsIdle() {
+        XCTAssertEqual(
+            ExternalScanRouting.decide(
+                pending: nil,
+                isShowingMainContent: true,
+                activeServerID: originServerId
+            ),
+            .idle
+        )
+    }
+
+    func testStoreScopesRetainsAndCancelsAcrossIdentityBoundaries() throws {
+        let suiteName = "ExternalScanStore-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertNil(ExternalScanRequestStore.pending(userDefaults: defaults))
+
+        ExternalScanRequestStore.request(userDefaults: defaults)
+        let pending = try XCTUnwrap(ExternalScanRequestStore.pending(userDefaults: defaults))
+        XCTAssertNil(pending.scopedServerID)
+
+        // Signed-out launch scopes without consuming — the request survives login.
+        ExternalScanRequestStore.scope(to: originServerId, userDefaults: defaults)
+        XCTAssertEqual(
+            ExternalScanRequestStore.pending(userDefaults: defaults)?.scopedServerID,
+            originServerId
+        )
+
+        // Scoping is sticky: a later identity cannot rebind an existing request.
+        ExternalScanRequestStore.scope(to: UUID(), userDefaults: defaults)
+        XCTAssertEqual(
+            ExternalScanRequestStore.pending(userDefaults: defaults)?.scopedServerID,
+            originServerId
+        )
+
+        // Logout / server switch cancels it outright.
+        ExternalScanRequestStore.cancel(userDefaults: defaults)
+        XCTAssertNil(ExternalScanRequestStore.pending(userDefaults: defaults))
+        XCTAssertFalse(ExternalScanRequestStore.consume(userDefaults: defaults))
+    }
+
+    func testLegacyBooleanRequestIsUpgradedRatherThanDropped() throws {
+        let suiteName = "ExternalScanLegacy-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(true, forKey: ExternalScanRequestStore.pendingKey)
+
+        let now = Date()
+        let upgraded = try XCTUnwrap(
+            ExternalScanRequestStore.pending(userDefaults: defaults, now: now)
+        )
+        XCTAssertNil(upgraded.scopedServerID)
+        XCTAssertEqual(
+            upgraded.requestedAt.timeIntervalSince1970,
+            now.timeIntervalSince1970,
+            accuracy: 1
+        )
+        XCTAssertEqual(ExternalScanRequestStore.pending(userDefaults: defaults)?.id, upgraded.id)
+        XCTAssertTrue(ExternalScanRequestStore.consume(userDefaults: defaults))
+    }
+
+    // MARK: - RootView lifecycle wiring (#2480)
+
+    /// Drives the shared lifecycle entry point `RootView` delegates every scan
+    /// hook to, so removing the wiring cannot leave these tests green.
+    private func makeScanLifecycleHarness() throws -> (
+        router: AppRouter,
+        defaults: UserDefaults,
+        suiteName: String
+    ) {
+        let suiteName = "ExternalScanLifecycle-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        return (AppRouter(), defaults, suiteName)
+    }
+
+    func testLogoutCancelsThePendingRequestThroughTheLifecycleWiring() throws {
+        let harness = try makeScanLifecycleHarness()
+        defer { harness.defaults.removePersistentDomain(forName: harness.suiteName) }
+        ExternalScanRequestStore.request(userDefaults: harness.defaults)
+        harness.router.navigate(to: .scan, capabilities: capabilities)
+
+        ExternalScanRouting.apply(
+            .authenticationChanged(isAuthenticated: false),
+            router: harness.router,
+            activeServerID: originServerId,
+            isShowingMainContent: false,
+            capabilities: capabilities,
+            userDefaults: harness.defaults
+        )
+
+        XCTAssertNil(ExternalScanRequestStore.pending(userDefaults: harness.defaults))
+        XCTAssertNil(harness.router.pendingExternalScanRequestID)
+    }
+
+    func testSwitchingAwayFromAKnownServerCancelsThroughTheLifecycleWiring() throws {
+        let harness = try makeScanLifecycleHarness()
+        defer { harness.defaults.removePersistentDomain(forName: harness.suiteName) }
+        ExternalScanRequestStore.request(userDefaults: harness.defaults)
+        ExternalScanRequestStore.scope(to: originServerId, userDefaults: harness.defaults)
+
+        ExternalScanRouting.apply(
+            .activeServerChanged(previousServerID: originServerId, newServerID: UUID()),
+            router: harness.router,
+            activeServerID: originServerId,
+            isShowingMainContent: false,
+            capabilities: capabilities,
+            userDefaults: harness.defaults
+        )
+
+        XCTAssertNil(ExternalScanRequestStore.pending(userDefaults: harness.defaults))
+    }
+
+    func testRegisteringTheFirstServerKeepsARequestRetainedPreSignIn() throws {
+        let harness = try makeScanLifecycleHarness()
+        defer { harness.defaults.removePersistentDomain(forName: harness.suiteName) }
+        ExternalScanRequestStore.request(userDefaults: harness.defaults)
+
+        // nil -> A is the AddFirstServerView flow, not a switch (#2480).
+        ExternalScanRouting.apply(
+            .activeServerChanged(previousServerID: nil, newServerID: originServerId),
+            router: harness.router,
+            activeServerID: originServerId,
+            isShowingMainContent: false,
+            capabilities: capabilities,
+            userDefaults: harness.defaults
+        )
+
+        XCTAssertNotNil(
+            ExternalScanRequestStore.pending(userDefaults: harness.defaults),
+            "Registering the first server must not destroy a request retained pre-sign-in (#2480)."
+        )
+    }
+
+    func testBackgroundingDuringLoginKeepsTheRequestAlive() throws {
+        let harness = try makeScanLifecycleHarness()
+        defer { harness.defaults.removePersistentDomain(forName: harness.suiteName) }
+        ExternalScanRequestStore.request(userDefaults: harness.defaults)
+
+        // Reaching for a password manager during 2FA must not abandon the scan.
+        ExternalScanRouting.apply(
+            .scenePhaseChanged(
+                isBackground: true,
+                isActive: false,
+                isShowingMainContent: false
+            ),
+            router: harness.router,
+            activeServerID: originServerId,
+            isShowingMainContent: false,
+            capabilities: capabilities,
+            userDefaults: harness.defaults
+        )
+
+        XCTAssertNotNil(
+            ExternalScanRequestStore.pending(userDefaults: harness.defaults),
+            "The 10-minute expiry covers abandonment; backgrounding alone must not (#2480)."
+        )
+    }
+
+    func testReturningToTheForegroundAfterLoginDeliversTheRetainedRequest() throws {
+        let harness = try makeScanLifecycleHarness()
+        defer { harness.defaults.removePersistentDomain(forName: harness.suiteName) }
+        ExternalScanRequestStore.request(userDefaults: harness.defaults)
+        ExternalScanRequestStore.scope(to: originServerId, userDefaults: harness.defaults)
+
+        ExternalScanRouting.apply(
+            .scenePhaseChanged(
+                isBackground: false,
+                isActive: true,
+                isShowingMainContent: true
+            ),
+            router: harness.router,
+            activeServerID: originServerId,
+            isShowingMainContent: true,
+            capabilities: capabilities,
+            userDefaults: harness.defaults
+        )
+
+        XCTAssertNil(ExternalScanRequestStore.pending(userDefaults: harness.defaults))
+        XCTAssertEqual(harness.router.selectedTab, .inventory)
+    }
+
+    func testBackgroundingThenExpiringStillDropsTheRequestOnReturn() throws {
+        let harness = try makeScanLifecycleHarness()
+        defer { harness.defaults.removePersistentDomain(forName: harness.suiteName) }
+        ExternalScanRequestStore.request(userDefaults: harness.defaults)
+
+        let wayLater = Date().addingTimeInterval(ExternalScanRequestStore.expiry + 60)
+        ExternalScanRouting.apply(
+            .scenePhaseChanged(
+                isBackground: false,
+                isActive: true,
+                isShowingMainContent: true
+            ),
+            router: harness.router,
+            activeServerID: originServerId,
+            isShowingMainContent: true,
+            capabilities: capabilities,
+            userDefaults: harness.defaults,
+            now: wayLater
+        )
+
+        XCTAssertNil(
+            ExternalScanRequestStore.pending(userDefaults: harness.defaults),
+            "Expiry, not backgrounding, is what abandons a request (#2480)."
+        )
+    }
+
+    func testSignedOutForegroundScopesTheRequestThroughTheLifecycleWiring() throws {
+        let harness = try makeScanLifecycleHarness()
+        defer { harness.defaults.removePersistentDomain(forName: harness.suiteName) }
+        ExternalScanRequestStore.request(userDefaults: harness.defaults)
+
+        ExternalScanRouting.apply(
+            .scenePhaseChanged(
+                isBackground: false,
+                isActive: true,
+                isShowingMainContent: false
+            ),
+            router: harness.router,
+            activeServerID: originServerId,
+            isShowingMainContent: false,
+            capabilities: capabilities,
+            userDefaults: harness.defaults
+        )
+
+        XCTAssertEqual(
+            ExternalScanRequestStore.pending(userDefaults: harness.defaults)?.scopedServerID,
+            originServerId
+        )
+    }
+
+    func testLifecycleActionsCoverEveryHookRootViewWiresUp() {
+        XCTAssertEqual(
+            ExternalScanRouting.lifecycleAction(
+                for: .authenticationChanged(isAuthenticated: false)
+            ),
+            .cancel
+        )
+        XCTAssertEqual(
+            ExternalScanRouting.lifecycleAction(
+                for: .authenticationChanged(isAuthenticated: true)
+            ),
+            .route
+        )
+        XCTAssertEqual(
+            ExternalScanRouting.lifecycleAction(
+                for: .scenePhaseChanged(
+                    isBackground: true,
+                    isActive: false,
+                    isShowingMainContent: false
+                )
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            ExternalScanRouting.lifecycleAction(
+                for: .scenePhaseChanged(
+                    isBackground: false,
+                    isActive: true,
+                    isShowingMainContent: false
+                )
+            ),
+            .route
+        )
+        XCTAssertEqual(
+            ExternalScanRouting.lifecycleAction(
+                for: .activeServerChanged(previousServerID: nil, newServerID: originServerId)
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            ExternalScanRouting.lifecycleAction(
+                for: .activeServerChanged(
+                    previousServerID: originServerId,
+                    newServerID: originServerId
+                )
+            ),
+            .none
+        )
+        XCTAssertEqual(
+            ExternalScanRouting.lifecycleAction(
+                for: .activeServerChanged(previousServerID: originServerId, newServerID: UUID())
+            ),
+            .cancel
+        )
+    }
+
     func testDeferredExternalScanWaitsForDismissalWithoutCancellingPrinterNavigation() async {
         let router = AppRouter()
         let requestID = UUID()

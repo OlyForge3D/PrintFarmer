@@ -20,6 +20,9 @@ struct RootView: View {
     @State private var disconnectTask: Task<Void, Never>?
     @State private var staleRegistrySignOutTask: Task<Void, Never>?
     @State private var certificateTrustPresentation = CertificateTrustPresentation.shared
+    /// Mirrors the active server across generation bumps so a first-server
+    /// registration can be told apart from a genuine switch (#2480).
+    @State private var observedActiveServerID: UUID?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -72,17 +75,32 @@ struct RootView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
+            handleExternalScanLifecycle(
+                .scenePhaseChanged(
+                    isBackground: newPhase == .background,
+                    isActive: newPhase == .active,
+                    isShowingMainContent: isShowingMainContent
+                )
+            )
             guard newPhase == .active else { return }
-            routePendingExternalScan()
             resumeConnectivityAfterForeground()
         }
         .onReceive(NotificationCenter.default.publisher(for: .externalScanRequested)) { _ in
             routePendingExternalScan()
         }
         .task {
+            observedActiveServerID = serverRegistry.activeServerID
+            routePendingExternalScan()
+        }
+        .onChange(of: isShowingMainContent) { _, _ in
+            // A completed sign-in is the moment a retained request becomes
+            // routable (#2480).
             routePendingExternalScan()
         }
         .onChange(of: authViewModel.isAuthenticated) { _, isAuthenticated in
+            handleExternalScanLifecycle(
+                .authenticationChanged(isAuthenticated: isAuthenticated)
+            )
             if !isAuthenticated {
                 pendingReadyMonitor.stopMonitoring()
                 connectionMonitor.stop()
@@ -93,8 +111,16 @@ struct RootView: View {
             }
         }
         .onChange(of: services.activeServerGeneration) {
+            let previousServerID = observedActiveServerID
+            observedActiveServerID = serverRegistry.activeServerID
             certificateTrustPresentation.respond(accepted: false)
             Task { await CertificateTrustCoordinator.shared.cancelPendingConfirmations() }
+            handleExternalScanLifecycle(
+                .activeServerChanged(
+                    previousServerID: previousServerID,
+                    newServerID: serverRegistry.activeServerID
+                )
+            )
             pendingReadyMonitor.stopMonitoring()
             connectionMonitor.stop()
             connectionGate.reset()
@@ -260,12 +286,32 @@ struct RootView: View {
         }
     }
 
-    private func routePendingExternalScan() {
-        guard ExternalScanRequestStore.consume() else { return }
-        router.navigate(
-            to: .scan,
+    /// Applies the action `ExternalScanRouting` prescribes for a lifecycle
+    /// event. Every `RootView` lifecycle hook that touches a pending external
+    /// scan request goes through here so the wiring is one testable path (#2480).
+    private func handleExternalScanLifecycle(_ event: ExternalScanRouting.LifecycleEvent) {
+        ExternalScanRouting.apply(
+            event,
+            router: router,
+            activeServerID: serverRegistry.activeServerID,
+            isShowingMainContent: isShowingMainContent,
             capabilities: services.capabilitiesService.resolved
         )
+    }
+
+    private func routePendingExternalScan() {
+        ExternalScanRouting.route(
+            router: router,
+            activeServerID: serverRegistry.activeServerID,
+            isShowingMainContent: isShowingMainContent,
+            capabilities: services.capabilitiesService.resolved
+        )
+    }
+
+    /// Abandons an external scan request that can no longer be honoured
+    /// coherently: logout or a server/account switch.
+    private func cancelPendingExternalScan() {
+        ExternalScanRouting.cancelPending(router: router)
     }
 
     private struct BackendConnectionCheckView: View {
