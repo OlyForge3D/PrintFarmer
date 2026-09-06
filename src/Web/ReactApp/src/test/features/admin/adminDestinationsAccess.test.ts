@@ -3,6 +3,10 @@ import {
   ADMIN_DESTINATIONS,
   filterDestinationsByAccess,
   getHubGroupedDestinations,
+  hasAccessibleHubTile,
+  canAccessSettingsTab,
+  getDestinationForTab,
+  SETTINGS_DISPLAY_GROUPS,
 } from '@/features/admin/registry/adminDestinations';
 
 /**
@@ -26,6 +30,36 @@ import {
 const ROLE_GATED_WITHOUT_PERMISSION = new Set(['admin-home', 'slicing-profiles']);
 
 describe('adminDestinations — permission gating (#1457)', () => {
+  it('classifies every destination without losing stable IDs or creating a second path registry', () => {
+    const groups = new Set(SETTINGS_DISPLAY_GROUPS.map((group) => group.id));
+    expect(ADMIN_DESTINATIONS).toHaveLength(28);
+    for (const destination of ADMIN_DESTINATIONS) {
+      if (destination.kind === 'configuration') {
+        expect(destination.settingsGroup && groups.has(destination.settingsGroup)).toBe(true);
+      } else {
+        expect(destination.settingsGroup).toBeUndefined();
+      }
+    }
+    expect(ADMIN_DESTINATIONS.filter((destination) => destination.kind === 'operational')).toHaveLength(7);
+  });
+
+  it.each(['power_monitors', 'locations', 'catalog'])('counts standalone %s access toward useful admin navigation', (resource) => {
+    const access = { hasRole: () => false, hasPermission: (r: string, action: string) => r === resource && action === 'admin' };
+    expect(hasAccessibleHubTile(access)).toBe(true);
+    expect(getHubGroupedDestinations(access).flatMap((group) => group.destinations)).toHaveLength(1);
+    expect(canAccessSettingsTab('general', undefined, access)).toBe(false);
+  });
+
+  it('category access is any accessible embedded leaf, not the first declared destination', () => {
+    const access = { hasRole: () => false, hasPermission: (resource: string) => resource === 'roles' };
+    expect(canAccessSettingsTab('users', undefined, access)).toBe(true);
+    expect(canAccessSettingsTab('users', 'roles', access)).toBe(true);
+    expect(canAccessSettingsTab('users', 'accounts', access)).toBe(false);
+    expect(canAccessSettingsTab('operations', undefined, access)).toBe(false);
+    expect(canAccessSettingsTab('unknown', undefined, access)).toBe(false);
+    expect(getDestinationForTab('user')).toBeUndefined();
+  });
+
   it('every destination is either permission-backed, explicitly public, or a documented role-only exception', () => {
     const misconfigured: { id: string; requiredRole: unknown; requiredPermission: unknown }[] = [];
     for (const destination of ADMIN_DESTINATIONS) {
@@ -131,7 +165,15 @@ describe('adminDestinations — permission gating (#1457)', () => {
       expect(accessible.map((d) => d.id)).toContain('int-connections');
     }
 
-    // Holding none of the three still hides it.
+    // Holding system_settings:admin alone grants access to int-connections and integrations tab
+    const sysSettingsAccess = {
+      hasRole: () => false,
+      hasPermission: (resource: string, action: string) => resource === 'system_settings' && action === 'admin',
+    };
+    expect(filterDestinationsByAccess(ADMIN_DESTINATIONS, sysSettingsAccess).map((d) => d.id)).toContain('int-connections');
+    expect(canAccessSettingsTab('integrations', 'connections', sysSettingsAccess)).toBe(true);
+
+    // Holding none of the permissions still hides it.
     const noneAccessible = filterDestinationsByAccess(ADMIN_DESTINATIONS, {
       hasRole: () => false,
       hasPermission: (resource) => resource === 'printers',

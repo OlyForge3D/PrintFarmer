@@ -14,6 +14,7 @@ import { useCommandPalette } from '@/features/settings/components/commandPalette
 
 const authState: {
   roles: string[];
+  grant?: string;
   logout: ReturnType<typeof vi.fn>;
 } = {
   roles: ['farm_admin'],
@@ -26,9 +27,18 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
     isAuthenticated: true,
     isLoading: false,
     hasRole: (role: string) => authState.roles.includes(role),
-    hasPermission: () => authState.roles.includes('farm_admin'),
+    hasPermission: (resource: string, action: string) => authState.roles.includes('farm_admin')
+      || authState.grant === `${resource}:${action}`,
     logout: authState.logout,
   }),
+}));
+
+vi.mock('@/features/settings/queries/useSettingsMetadata', () => ({
+  useSettingsMetadata: () => ({ data: [{
+    key: 'SystemLog', className: 'SystemLogSettings', group: 'System',
+    properties: [{ name: 'Enabled', type: 'boolean', display: { name: 'Enable System Logging' } }],
+  }] }),
+  useSettingsGroups: () => ({ data: [{ key: 'System', displayName: 'System', order: 0 }] }),
 }));
 
 const setThemeMock = vi.fn();
@@ -83,6 +93,7 @@ function renderProvider() {
 
 describe('GlobalCommandPaletteProvider', () => {
   beforeEach(() => {
+    authState.grant = undefined;
     authState.roles = ['farm_admin'];
     authState.logout.mockClear();
     setThemeMock.mockClear();
@@ -104,6 +115,20 @@ describe('GlobalCommandPaletteProvider', () => {
     expect(await screen.findByRole('dialog', { name: 'Command palette' })).toBeInTheDocument();
   });
 
+  it('gives a system-settings delegate a section-qualified field destination', async () => {
+    authState.roles = ['farm_user'];
+    authState.grant = 'system_settings:admin';
+    renderProvider();
+    fireEvent.click(screen.getByRole('button', { name: 'Open palette' }));
+    const input = await screen.findByRole('combobox', { name: 'Search settings command palette' });
+    fireEvent.change(input, { target: { value: 'Enable System Logging' } });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(screen.getByTestId('pathname')).toHaveTextContent('/admin/settings'));
+    expect(screen.getByTestId('search')).toHaveTextContent('scope=system');
+    expect(screen.getByTestId('search')).toHaveTextContent('field=SystemLog.Enabled');
+  });
+
   it('routes admin destination selection to the destination href', async () => {
     renderProvider();
 
@@ -114,9 +139,9 @@ describe('GlobalCommandPaletteProvider', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
 
     await waitFor(() => {
-      expect(screen.getByTestId('pathname')).toHaveTextContent('/admin/manage');
+      expect(screen.getByTestId('pathname')).toHaveTextContent('/admin/login-audit');
     });
-    expect(screen.getByTestId('search')).toHaveTextContent('tab=users');
+    expect(screen.getByTestId('search')).toHaveTextContent('');
   });
 
   it('runs the switch-theme action inline and closes the palette', async () => {

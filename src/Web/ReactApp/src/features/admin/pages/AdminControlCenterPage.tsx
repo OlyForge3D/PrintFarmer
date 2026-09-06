@@ -246,14 +246,17 @@ function DestinationCard({ destination }: { destination: AdminDestination }) {
  */
 export function AdminControlCenterPage() {
   const { hasRole, hasPermission } = useAuth();
-  const { data, isLoading, isError, error, isFetching, refetch } = useAdminOverview();
+  const canViewOverview = hasRole('farm_admin') || hasPermission('system_settings', 'admin');
+  const { data, isLoading, isError, error, isFetching, refetch } = useAdminOverview({
+    enabled: canViewOverview,
+  });
 
   const groupedDestinations = useMemo(
     () => getHubGroupedDestinations({ hasRole, hasPermission }),
     [hasRole, hasPermission],
   );
 
-  const refreshButton = (
+  const refreshButton = canViewOverview ? (
     <Button
       variant="secondary"
       size="sm"
@@ -265,12 +268,16 @@ export function AdminControlCenterPage() {
     >
       {isFetching ? 'Refreshing…' : 'Refresh'}
     </Button>
-  );
+  ) : null;
 
   return (
     <PageTemplate
       title="Admin Control Center"
-      subtitle="System health, alerts, and every admin destination in one place."
+      subtitle={
+        canViewOverview
+          ? 'System health, alerts, and every admin destination in one place.'
+          : 'Every admin destination available to your role.'
+      }
       icon={HomeIcon}
       actions={refreshButton}
       maxWidth="max-w-7xl"
@@ -278,95 +285,90 @@ export function AdminControlCenterPage() {
     >
       <div className="flex flex-col gap-8">
         {/* ── Band 1: health ── */}
-        <AdminSection
-          caption="System health"
-          captionId="admin-hub-health-heading"
-          captionAside={data ? <OverallStatusBadge status={data.overallStatus} /> : null}
-          headerAside={
-            data?.checkedAt ? (
-              <p className="text-xs text-pf-text-tertiary">
-                Checked at {formatCheckedAt(data.checkedAt)}
-              </p>
-            ) : null
-          }
-        >
-          {isLoading && (
-            <AdminLoading
-              variant="card-grid"
-              label="Loading system health"
-              rows={4}
-            />
-          )}
+        {canViewOverview && (
+          <AdminSection
+            caption="System health"
+            captionId="admin-hub-health-heading"
+            captionAside={data ? <OverallStatusBadge status={data.overallStatus} /> : null}
+            headerAside={
+              data?.checkedAt ? (
+                <p className="text-xs text-pf-text-tertiary">
+                  Checked at {formatCheckedAt(data.checkedAt)}
+                </p>
+              ) : null
+            }
+          >
+            {isLoading && (
+              <AdminLoading
+                variant="card-grid"
+                label="Loading system health"
+                rows={4}
+              />
+            )}
 
-          {isError && (
-            <AdminError
-              title="Couldn't load the admin overview"
-              description="The admin overview endpoint didn't respond, so health and attention are unavailable. Your admin destinations below still work."
-              error={error}
-              onRetry={() => {
-                void refetch();
-              }}
-            />
-          )}
+            {isError && (
+              <AdminError
+                title="Couldn't load the admin overview"
+                description="The admin overview endpoint didn't respond, so health and attention are unavailable. Your admin destinations below still work."
+                error={error}
+                onRetry={() => {
+                  void refetch();
+                }}
+              />
+            )}
 
-          {!isLoading && !isError && data && data.subsystems.length > 0 && (
-            <div
-              className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
-              data-testid="admin-hub-subsystems"
-            >
-              {data.subsystems.map((subsystem) => (
-                <SubsystemTile key={subsystem.key} subsystem={subsystem} />
-              ))}
-            </div>
-          )}
+            {!isLoading && !isError && data && data.subsystems.length > 0 && (
+              <div
+                className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
+                data-testid="admin-hub-subsystems"
+              >
+                {data.subsystems.map((subsystem) => (
+                  <SubsystemTile key={subsystem.key} subsystem={subsystem} />
+                ))}
+              </div>
+            )}
 
-          {!isLoading && !isError && data && data.subsystems.length === 0 && (
-            <AdminEmpty
-              icon={<HelpCircleIcon className="h-8 w-8" ariaLabel="" />}
-              title="No subsystems reported"
-              description="The overview endpoint returned an empty subsystem list."
-              size="compact"
-            />
-          )}
-        </AdminSection>
+            {!isLoading && !isError && data && data.subsystems.length === 0 && (
+              <AdminEmpty
+                icon={<HelpCircleIcon className="h-8 w-8" ariaLabel="" />}
+                title="No subsystems reported"
+                description="The overview endpoint returned an empty subsystem list."
+                size="compact"
+              />
+            )}
+          </AdminSection>
+        )}
 
         {/* ── Band 2: attention ── */}
-        {/* Suppressed on error — band 1 already reports the failure, and an
-            "Needs attention" heading with nothing beneath it reads as broken. */}
-        {!isError && (
-        <AdminSection
-          caption="Needs attention"
-          captionId="admin-hub-attention-heading"
-          count={data?.attention.length}
-        >
-          {isLoading && <AdminLoading variant="list" label="Loading attention items" rows={3} />}
+        {canViewOverview && !isError && (
+          <AdminSection
+            caption="Needs attention"
+            captionId="admin-hub-attention-heading"
+            count={data?.attention.length}
+          >
+            {isLoading && <AdminLoading variant="list" label="Loading attention items" rows={3} />}
 
-          {!isLoading && data && data.attention.length === 0 && (
-            /* An all-clear is one line of good news, not a 206px empty state.
-               Measured: the centred illustration treatment pushed the entire
-               destination grid down by a fifth of the viewport to say nothing
-               happened. The band still announces itself via the caption, so the
-               body only has to confirm it. */
-            <p
-              className="flex items-center gap-2 text-sm text-pf-text-secondary"
-              data-testid="admin-hub-attention-clear"
-            >
-              <CheckCircleIcon className="h-4 w-4 shrink-0 text-pf-success" ariaLabel="" />
-              Nothing needs your attention — every subsystem is reporting healthy.
-            </p>
-          )}
+            {!isLoading && data && data.attention.length === 0 && (
+              <p
+                className="flex items-center gap-2 text-sm text-pf-text-secondary"
+                data-testid="admin-hub-attention-clear"
+              >
+                <CheckCircleIcon className="h-4 w-4 shrink-0 text-pf-success" ariaLabel="" />
+                Nothing needs your attention — every subsystem is reporting healthy.
+              </p>
+            )}
 
-          {!isLoading && data && data.attention.length > 0 && (
-            <ul
-              className="flex flex-col gap-2"
-              data-testid="admin-hub-attention"
-            >
-              {data.attention.map((item) => (
-                <AttentionRowFromDto key={item.key} item={item} />
-              ))}
-            </ul>
-          )}
-        </AdminSection>
+            {!isLoading && data && data.attention.length > 0 && (
+              <ul
+                className="flex flex-col gap-2"
+                data-testid="admin-hub-attention"
+              >
+                {data.attention.map((item) => (
+                  <AttentionRowFromDto key={item.key} item={item} />
+                ))}
+              </ul>
+            )}
+          </AdminSection>
         )}
 
         {/* ── Band 3: domains ── */}

@@ -46,7 +46,7 @@ describe('SettingsSidebar is a flat grouped nav', () => {
     renderSidebar();
     const nav = within(desktopNav());
 
-    for (const caption of ['User', 'System', 'Admin']) {
+    for (const caption of ['User', 'System']) {
       expect(nav.getByRole('heading', { level: 2, name: caption })).toBeInTheDocument();
     }
     for (const category of ALL_CATEGORIES) {
@@ -74,7 +74,7 @@ describe('SettingsSidebar is a flat grouped nav', () => {
   });
 
   it('marks the active category with aria-current and the Control Center tile treatment', () => {
-    renderSidebar({ activeScope: 'admin', activeCategory: 'users' });
+    renderSidebar({ activeScope: 'system', activeCategory: 'users' });
     const active = within(desktopNav()).getByRole('button', { name: 'Users' });
 
     expect(active).toHaveAttribute('aria-current', 'page');

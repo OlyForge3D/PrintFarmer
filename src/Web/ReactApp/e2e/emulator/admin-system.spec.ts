@@ -31,8 +31,8 @@ test.describe('Admin System Dashboard — Emulator', () => {
   // Admin Operations
   // ---------------------------------------------------------------------------
 
-  test('system dashboard loads with tabs', async ({ page }) => {
-    await page.goto('/admin/manage?tab=operations&sub=status');
+  test('system status renders its operational frame', async ({ page }) => {
+    await page.goto('/admin/status');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_000);
 
@@ -41,19 +41,15 @@ test.describe('Admin System Dashboard — Emulator', () => {
     const hasSystemContent = /system|dashboard/i.test(bodyText);
     expect(hasSystemContent).toBeTruthy();
 
-    // Should have tab navigation. Scope to the tablist so the page-global
-    // header health button ("View system status — Healthy") is never matched.
-    // The Operations dashboard now exposes only the Status and Workers
-    // sub-tabs (see SettingsShell / adminDestinations); the historical Logs,
-    // Monitoring, Connections, and File Health tabs no longer exist.
-    const tabs = page.locator('[role="tablist"] [role="tab"]').filter({ hasText: /status|workers/i });
-    expect(await tabs.count()).toBeGreaterThan(0);
+    await expect(page.getByRole('heading', { level: 1, name: 'System Status' })).toHaveCount(1);
+    await expect(page.getByRole('link', { name: 'Admin Control Center', exact: true })).toHaveAttribute('href', '/admin');
+    await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeVisible();
 
     expect(criticalErrors()).toHaveLength(0);
   });
 
   test('status tab displays system status content', async ({ page }) => {
-    await page.goto('/admin/manage?tab=operations&sub=status');
+    await page.goto('/admin/status');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_500);
 
@@ -69,7 +65,7 @@ test.describe('Admin System Dashboard — Emulator', () => {
   });
 
   test('workers tab shows current worker status', async ({ page }) => {
-    await page.goto('/admin/manage?tab=operations&sub=workers');
+    await page.goto('/admin/workers');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_500);
 
@@ -86,26 +82,18 @@ test.describe('Admin System Dashboard — Emulator', () => {
     expect(criticalErrors()).toHaveLength(0);
   });
 
-  test('can switch between tabs', async ({ page }) => {
-    await page.goto('/admin/manage?tab=operations&sub=status');
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1_000);
-
-    const tabNames = ['status', 'workers'];
-    // Scope to the tablist so the page-global header health button
-    // ("View system status — Healthy") is never matched (see issue #1896).
-    const tabs = page.locator('[role="tablist"] [role="tab"]').filter({ hasText: /status|workers/i });
-    const tabCount = await tabs.count();
-
-    // Click each tab and verify content loads
-    for (let i = 0; i < Math.min(tabCount, tabNames.length); i++) {
-      await tabs.nth(i).click();
-      await page.waitForTimeout(1_000);
-
-      const content = page.locator('main, [role="main"], #root');
-      await expect(content.first()).toBeVisible();
-    }
-
+  test('worker jobs preserve their URL and browser history', async ({ page }) => {
+    await page.goto('/admin/workers');
+    await page.goto('/admin/workers?workerTab=jobs');
+    await expect(page.getByRole('heading', { level: 1, name: 'Workers & Jobs' })).toHaveCount(1);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/admin\/workers$/);
+    await page.goForward();
+    await expect(page).toHaveURL(/workerTab=jobs/);
+    await page.getByRole('button', { name: 'Workers', exact: true }).click();
+    await expect(page).toHaveURL(/\/admin\/workers$/);
+    await page.getByRole('button', { name: 'Jobs', exact: true }).click();
+    await expect(page).toHaveURL(/workerTab=jobs/);
     expect(criticalErrors()).toHaveLength(0);
   });
 
@@ -114,7 +102,7 @@ test.describe('Admin System Dashboard — Emulator', () => {
   // ---------------------------------------------------------------------------
 
   test('data management page loads', async ({ page }) => {
-    await page.goto('/admin/manage?tab=data&sub=management');
+    await page.goto('/admin/data-management');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_000);
 
@@ -130,7 +118,7 @@ test.describe('Admin System Dashboard — Emulator', () => {
   });
 
   test('data management has export functionality', async ({ page }) => {
-    await page.goto('/admin/manage?tab=data&sub=management');
+    await page.goto('/admin/data-management');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_000);
 
@@ -144,9 +132,9 @@ test.describe('Admin System Dashboard — Emulator', () => {
 
   test('no critical JS errors across system pages', async ({ page }) => {
     const systemPages = [
-      { path: '/admin/manage?tab=operations&sub=status', name: 'System Dashboard' },
-      { path: '/admin/manage?tab=operations&sub=workers', name: 'System Workers' },
-      { path: '/admin/manage?tab=data&sub=management', name: 'Data Management' },
+      { path: '/admin/status', name: 'System Dashboard' },
+      { path: '/admin/workers', name: 'System Workers' },
+      { path: '/admin/data-management', name: 'Data Management' },
     ];
 
     for (const pageConfig of systemPages) {

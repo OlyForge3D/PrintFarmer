@@ -259,7 +259,7 @@ Printer 3,http://192.168.1.102:7125,Moonraker,yyy_api_key_yyy,Workshop
 ### Import Steps
 
 1. Open the **Admin Control Center** at `/admin`, then **Data → Data Management**
-   (or navigate directly to `/admin/manage?tab=data&sub=management`)
+   (or navigate directly to `/admin/data-management`)
 2. Select CSV file
 3. Preview imported printers
 4. Click **Import**
@@ -445,7 +445,7 @@ GET /api/healthz       # Quick health check
 ### Diagnostics Tools
 
 Available from the Admin Control Center's **Operations → Status** page
-(`/admin/manage?tab=operations&sub=status`) and the `/admin` overview tiles:
+(`/admin/status`) and the `/admin` overview tiles:
 
 - Subsystem health tiles (API, database, SignalR, backends, Spoolman when configured)
 - Ranked attention list with per-item deep-links into the relevant page

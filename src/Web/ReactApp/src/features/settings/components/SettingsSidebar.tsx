@@ -27,7 +27,6 @@ interface NavGroup {
 const SCOPE_CAPTIONS: Record<SettingsScopeId, string> = {
   user: 'User',
   system: 'System',
-  admin: 'Admin',
 };
 
 /**

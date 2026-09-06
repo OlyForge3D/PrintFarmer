@@ -42,6 +42,7 @@ import {
 } from '@/features/settings/settings-navigation';
 import {
   ADMIN_DESTINATIONS,
+  canAccessSettingsTab,
   filterDestinationsByAccess,
 } from '@/features/admin/registry/adminDestinations';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -72,7 +73,6 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
   // once — no single `{resource}:action}` permission can represent "any
   // settings field", so it stays gated on the `farm_admin` role literally
   // (#1457). This is a deliberate, justified exception, not an oversight.
-  const isFarmAdmin = hasRole('farm_admin');
 
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => setIsOpen(false), []);
@@ -137,11 +137,12 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
   );
 
   const settingFieldItems = useMemo(() => {
-    if (!isFarmAdmin) {
+    if (!user || !hasPermission('system_settings', 'admin')) {
       return [] as SettingsCommandItem[];
     }
-    return buildSettingCommandItems(metadataQuery.data, groupsQuery.data);
-  }, [isFarmAdmin, metadataQuery.data, groupsQuery.data]);
+    return buildSettingCommandItems(metadataQuery.data, groupsQuery.data)
+      .filter((item) => canAccessSettingsTab(item.categoryId, item.subPageId, { hasRole, hasPermission }));
+  }, [user, hasRole, hasPermission, metadataQuery.data, groupsQuery.data]);
 
   const actionItems = useMemo<SettingsCommandItem[]>(() => {
     const actions: SettingsCommandItem[] = [];
@@ -176,7 +177,7 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
       actions.push({
         id: 'action.refresh-admin-overview',
         kind: 'action',
-        scopeId: 'admin',
+        scopeId: 'system',
         categoryId: 'operations',
         label: 'Refresh admin overview',
         description: 'Re-fetch every tile on the Admin Control Center.',

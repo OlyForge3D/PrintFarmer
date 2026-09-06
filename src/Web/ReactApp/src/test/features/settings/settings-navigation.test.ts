@@ -51,19 +51,19 @@ describe('resolveSettingsNavigationTarget', () => {
   });
 
   it('falls back within the route scope when the tab is not canonical', () => {
-    expect(resolveSettingsNavigationTarget('system', 'workers', 'admin')).toEqual({
-      scopeId: 'admin',
-      categoryId: 'operations',
-      subPageId: 'status',
+    expect(resolveSettingsNavigationTarget('operations', 'workers', 'system')).toEqual({
+      scopeId: 'system',
+      categoryId: 'general',
+      subPageId: 'farm',
     });
   });
 });
 
 describe('buildSettingsPath', () => {
-  it('routes admin scope to /admin/manage', () => {
+  it('routes accounts to the combined configuration workspace', () => {
     expect(
-      buildSettingsPath({ scopeId: 'admin', categoryId: 'users', subPageId: 'audit' }),
-    ).toBe('/admin/manage?scope=admin&tab=users&sub=audit');
+      buildSettingsPath({ scopeId: 'system', categoryId: 'users', subPageId: 'accounts' }),
+    ).toBe('/admin/settings?scope=system&tab=users&sub=accounts');
   });
 
   it('routes system scope to /admin/settings', () => {
@@ -93,12 +93,13 @@ describe('buildSettingsPath', () => {
 describe('buildAdminDestinationCommandItems', () => {
   const StubIcon = () => null;
   const destination: AdminDestination = {
+    kind: 'operational',
     id: 'users.audit',
     label: 'Login Audit',
     description: 'Recent sign-in attempts.',
     group: 'users',
     icon: StubIcon,
-    path: '/admin/manage?tab=users&sub=audit',
+    path: '/admin/login-audit',
     keywords: ['audit', 'login'],
   };
 
@@ -106,7 +107,7 @@ describe('buildAdminDestinationCommandItems', () => {
     const [item] = buildAdminDestinationCommandItems([destination]);
     expect(item.id).toBe('dest.users.audit');
     expect(item.kind).toBe('destination');
-    expect(item.href).toBe('/admin/manage?tab=users&sub=audit');
+    expect(item.href).toBe('/admin/login-audit');
     expect(item.icon).toBe(StubIcon);
     expect(item.label).toBe('Login Audit');
     expect(item.breadcrumb).toContain('Admin');

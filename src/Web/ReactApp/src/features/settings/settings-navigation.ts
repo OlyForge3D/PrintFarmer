@@ -101,10 +101,6 @@ export const SETTINGS_SUBPAGE_ICONS: Record<string, SettingsCategoryIcon> = {
 };
 
 function createScopeBreadcrumb(scopeId: SettingsScopeId): string {
-  if (scopeId === 'admin') {
-    return 'Admin';
-  }
-
   return `Settings / ${getSettingsScope(scopeId)?.label ?? 'Settings'}`;
 }
 
@@ -218,16 +214,12 @@ export const SETTINGS_GROUP_TO_LOCATION: Record<
 };
 
 /**
- * URL path for a resolved settings-navigation target. Encodes the scope split
- * introduced in #932: `admin` scope lives at `/admin/manage`, `system` scope
- * lives at `/admin/settings`, everything else at `/settings`.
+ * Personal settings and farm configuration have separate canonical routes.
  */
 export function buildSettingsPath(
   target: { scopeId: SettingsScopeId; categoryId: string; subPageId?: string; field?: string },
 ): string {
-  const basePath = target.scopeId === 'admin'
-    ? '/admin/manage'
-    : target.scopeId === 'system'
+  const basePath = target.scopeId === 'system'
       ? '/admin/settings'
       : '/settings';
   const params = new URLSearchParams();
@@ -263,7 +255,7 @@ export function buildAdminDestinationCommandItems(
       kind: 'destination',
       // `scopeId` is only meaningful for settings-nav items; pick a safe default
       // so downstream sorters that read the field still work.
-      scopeId: 'admin',
+      scopeId: 'system',
       categoryId: destination.group,
       label: destination.label,
       description: destination.description,

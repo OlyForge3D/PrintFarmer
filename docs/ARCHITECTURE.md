@@ -512,7 +512,7 @@ src/Web/ReactApp/
 │   ├── pages/            # Page-level components
 │   │   ├── PrintersPage.tsx
 │   │   ├── AdminControlCenterPage.tsx   # /admin hub of admin destination tiles
-│   │   ├── SettingsShell.tsx            # URL-driven admin/settings shell (/settings, /admin/settings, /admin/manage)
+│   │   ├── SettingsShell.tsx            # URL-driven admin/settings shell (/settings, /admin/settings; standalone operations)
 │   │   └── ...
 │   ├── contexts/         # React Context for state
 │   │   ├── AuthContext.tsx

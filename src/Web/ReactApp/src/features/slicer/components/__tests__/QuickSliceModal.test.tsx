@@ -210,7 +210,7 @@ describe('QuickSliceModal', () => {
 
       await waitFor(() => {
         expect(mockNavigate).toHaveBeenCalledWith(
-          '/admin/manage?tab=operations&sub=workers&workerTab=jobs',
+          '/admin/workers?workerTab=jobs',
         );
       });
     });

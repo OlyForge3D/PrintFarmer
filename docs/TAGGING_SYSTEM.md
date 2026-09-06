@@ -420,7 +420,7 @@ Mounted inside the settings shell at sub-page key `data.tags`.
 
 #### Route
 
-`/admin/manage?tab=data&sub=tags`
+`/admin/settings?tab=data&sub=tags`
 
 Internal navigation must use this canonical route directly.
 
@@ -1810,7 +1810,7 @@ if (model == null)
 │   │   ├─ Import: ModelDetailPage
 │   │   ├─ Import: TagAdminPage
 │   │   ├─ Route: /models/:modelId
-│   │   └─ Route: /admin/manage?tab=data&sub=tags (protected, legacy /admin/tags redirects)
+│   │   └─ Route: /admin/settings?tab=data&sub=tags (protected, legacy /admin/tags redirects)
 │   │
 │   ├── services/
 │   │   ├── api.ts (MODIFIED)
@@ -1956,7 +1956,7 @@ curl http://localhost:3000/
 
 ### Creating Your First Tag
 
-1. Navigate to <http://localhost:3000/admin/manage?tab=data&sub=tags>
+1. Navigate to <http://localhost:3000/admin/settings?tab=data&sub=tags>
    (or the legacy `/admin/tags` URL, which redirects there)
 2. Login with admin credentials
 3. Fill in tag form:

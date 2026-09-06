@@ -1,14 +1,14 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router';
-import { toast } from 'sonner';
+import { Link, useSearchParams } from 'react-router';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import {
   ADMIN_HUB_PARENT,
+  ADMIN_DESTINATIONS,
   canAccessDestination,
   canAccessSettingsTab,
   getDestinationForTab,
-  hasAccessibleDestinationWithPrefix,
+  filterDestinationsByAccess,
 } from '@/features/admin/registry/adminDestinations';
 import { ThemeSwitcher } from '@/common/components/ThemeSwitcher';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
@@ -26,6 +26,7 @@ import { SettingsSubTabs } from '@/features/settings/components/SettingsSubTabs'
 import { UserSettingsSection } from '@/features/settings/components/UserSettingsSection';
 import { FarmSettingsSection } from '@/features/settings/components/FarmSettingsSection';
 import { TelegramSettingsCard } from '@/features/settings/components/TelegramSettingsCard';
+import { HomeAssistantSettingsCard, SpoolmanSettingsCard } from '@/features/settings/components/IntegrationSettingsCards';
 import { resolveSettingsNavigationTarget } from '@/features/settings/settings-navigation';
 import {
   DEFAULT_SCOPE,
@@ -33,7 +34,6 @@ import {
   getDefaultCategoryForScope,
   getDefaultSubPage,
   getSettingsCategoriesForScope,
-  getSettingsCategory,
   getSettingsScope,
   getSettingsScopeForCategory,
 } from '@/features/settings/types';
@@ -44,25 +44,18 @@ import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
 import { CustomFieldsAdminPage } from '@/features/admin/pages/CustomFieldsAdminPage';
 import { WebhooksAdminPage } from '@/features/webhooks/pages/WebhooksAdminPage';
 import { TagAdminPage } from '@/features/admin/pages/TagAdminPage';
-import { DataManagementPage } from '@/features/admin/pages/DataManagementPage';
 import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 import { NotificationPreferencesPage } from '@/features/notifications/pages/NotificationPreferencesPage';
 import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage';
-import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
 import { RoleManagementPage } from '@/features/admin/pages/RoleManagementPage';
 import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroupsPage';
 import { NfcBindingsPage } from '@/features/nfc/pages/NfcBindingsPage';
 import { PasskeysPage } from '@/features/profile/pages/PasskeysPage';
-import { SystemStatusPage } from '@/features/system/pages/SystemStatusPage';
 import { SUB_PAGE_ALLOWED_GROUPS } from '@/features/settings/subpage-groups';
 
 const LazySlicerProfilesPage = lazy(() =>
   import('@/features/slicer/pages/SlicerProfilesPage').then((mod) => ({ default: mod.SlicerProfilesPage })),
-);
-
-const LazyWorkerManagementPage = lazy(() =>
-  import('@/features/slicer/pages/WorkerManagementPage').then((mod) => ({ default: mod.WorkerManagementPage })),
 );
 
 function scrollBehavior(): ScrollBehavior {
@@ -82,6 +75,29 @@ function TabLoader() {
       </div>
       <FormSkeleton fields={4} />
     </div>
+  );
+}
+
+function IntegrationConnectionsPanel() {
+  const { hasPermission } = useAuth();
+  const canEditMetadata = hasPermission('system_settings', 'admin');
+  const serviceCards = (
+    <div className="space-y-6">
+      {!canEditMetadata && hasPermission('spoolman', 'admin') && <SpoolmanSettingsCard />}
+      {hasPermission('home_assistant', 'admin') && <HomeAssistantSettingsCard />}
+      {hasPermission('telegram', 'admin') && <TelegramSettingsCard />}
+    </div>
+  );
+  return (
+    <SettingsSection>
+      {canEditMetadata ? (
+        <SettingsPage
+          allowedGroups={SUB_PAGE_ALLOWED_GROUPS['integrations.connections']}
+          introText="Configure third-party services, Smart Plugs, and slicer API connections."
+          afterContent={serviceCards}
+        />
+      ) : serviceCards}
+    </SettingsSection>
   );
 }
 
@@ -138,15 +154,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
       />
     </SettingsSection>
   ),
-  'integrations.connections': (
-    <SettingsSection>
-      <SettingsPage
-        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['integrations.connections']}
-        introText="Configure third-party services, Smart Plugs, and slicer API connections."
-        afterContent={<TelegramSettingsCard />}
-      />
-    </SettingsSection>
-  ),
+  'integrations.connections': <IntegrationConnectionsPanel />,
   'integrations.webhooks': (
     <SettingsSection>
       <WebhooksAdminPage embedded />
@@ -187,26 +195,17 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'hardware.printer-groups': <PrinterGroupsPage embedded />,
   'hardware.nfc-bindings': <NfcBindingsPage embedded />,
   'hardware.custom-fields': <CustomFieldsAdminPage embedded />,
-  'operations.status': <SystemStatusPage />,
-  'operations.workers': (
-    <Suspense fallback={<TabLoader />}>
-      <LazyWorkerManagementPage tabQueryParamName="workerTab" embedded />
-    </Suspense>
-  ),
   'users.accounts': <UserManagementPage embedded />,
-  'users.audit': <LoginAuditPage embedded />,
   'users.roles': <RoleManagementPage embedded />,
   'data.tags': <TagAdminPage embedded />,
-  'data.management': <DataManagementPage embedded />,
 };
 
 interface SettingsShellProps {
   /** Lock the shell to a specific route-level scope group.
    * - 'user': only user settings (no scope switcher)
-   * - 'admin': admin scope only (Operations, Users, Data)
-   * - 'system': system scope only (General, Slicing, Hardware, Integrations, Quotas)
+   * - 'system': combined farm and admin configuration
    * If omitted, shows all scopes the user can access (legacy behavior). */
-  routeScope?: 'user' | 'admin' | 'system';
+  routeScope?: 'user' | 'system';
 }
 
 export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
@@ -214,13 +213,15 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   // Passed to adminDestinations.ts helpers so scope/tab access checks share the
   // exact same permission semantics as the Control Center hub and nav (issue 1457).
   const destinationAccess = useMemo(() => ({ hasRole, hasPermission }), [hasRole, hasPermission]);
-  const canReachSystemScope = useMemo(
-    () => hasAccessibleDestinationWithPrefix(destinationAccess, '/admin/settings'),
+  const configurationDestinations = useMemo(
+    () => filterDestinationsByAccess(ADMIN_DESTINATIONS, destinationAccess)
+      .filter((destination) => destination.kind === 'configuration'),
     [destinationAccess],
   );
-  const canReachAdminScope = useMemo(
-    () => hasAccessibleDestinationWithPrefix(destinationAccess, '/admin/manage'),
-    [destinationAccess],
+  const canReachSystemScope = configurationDestinations.length > 0;
+  const standaloneDestinations = useMemo(
+    () => configurationDestinations.filter((destination) => !destination.path.startsWith('/admin/settings?')),
+    [configurationDestinations],
   );
   const [searchParams, setSearchParams] = useSearchParams();
   const { open: openCommandPalette } = useCommandPalette();
@@ -238,10 +239,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const query = searchParams.get('q') || '';
   const normalizedQuery = query.trim().toLowerCase();
 
-  // The shell serves three routes. `/admin/settings` and `/admin/manage` are
-  // destinations reached from the Control Center, so they carry a link back to
-  // it; `/settings` is a personal page that was never below /admin.
-  const isAdminRoute = routeScope === 'system' || routeScope === 'admin';
+  const isAdminRoute = routeScope === 'system';
 
   const availableScopes = useMemo(() => {
     if (routeScope === 'user') {
@@ -250,16 +248,12 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     if (routeScope === 'system') {
       return SETTINGS_SCOPES.filter((scope) => scope.id === 'system' && canReachSystemScope);
     }
-    if (routeScope === 'admin') {
-      return SETTINGS_SCOPES.filter((scope) => scope.id === 'admin' && canReachAdminScope);
-    }
     return SETTINGS_SCOPES.filter((scope) => {
       if (scope.id === 'system') return canReachSystemScope;
-      if (scope.id === 'admin') return canReachAdminScope;
       return !scope.adminOnly;
     });
-  }, [canReachAdminScope, canReachSystemScope, routeScope]);
-  const fallbackScopeId = availableScopes[0]?.id ?? DEFAULT_SCOPE;
+  }, [canReachSystemScope, routeScope]);
+  const fallbackScopeId = routeScope ?? availableScopes[0]?.id ?? DEFAULT_SCOPE;
   // Issue 1457 (Hicks review) — filter both the category list AND each category's
   // sub-pages by canAccessSettingsTab, not just the rendered content of the
   // active tab. Without this, SettingsSidebar/SettingsSubTabs still listed
@@ -283,8 +277,8 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   );
 
   const resolvedRequestedTarget = useMemo(
-    () => resolveSettingsNavigationTarget(requestedCategory, requestedSubPage, requestedScope),
-    [requestedCategory, requestedScope, requestedSubPage],
+    () => resolveSettingsNavigationTarget(requestedCategory, requestedSubPage, routeScope ?? requestedScope),
+    [requestedCategory, requestedScope, requestedSubPage, routeScope],
   );
 
   const activeScope = useMemo(() => {
@@ -297,16 +291,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     if (accessibleCategories.some((category) => category.id === resolvedRequestedTarget.categoryId)) {
       return resolvedRequestedTarget.categoryId;
     }
-    // Issue 1457 (Hicks round-3 review) — a bare `/admin/settings` or
-    // `/admin/manage` URL (no `?tab=`) resolved to the scope's hardcoded
-    // default category (e.g. `general`/`operations`) even when the user
-    // lacks access to it, landing them on the same "reachable nav, denied
-    // content" outcome the round-2 fix was meant to eliminate -- just via
-    // the no-tab-param path instead of clicking a nav item. Fall back to the
-    // first category this user can actually reach in the active scope;
-    // only fall back further to the hardcoded default if literally none of
-    // the scope's categories are accessible (canReachSystemScope/
-    // canReachAdminScope should already prevent that from happening).
+    // Defaults follow the same access predicate as navigation.
     const firstAccessibleInScope = accessibleCategories.find((category) => category.scopeId === activeScope);
     return firstAccessibleInScope?.id ?? getDefaultCategoryForScope(activeScope);
   }, [accessibleCategories, activeScope, resolvedRequestedTarget.categoryId]);
@@ -317,7 +302,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const handleCategoryChange = useCallback(
     (categoryId: string) => {
       const target = resolveSettingsNavigationTarget(categoryId, undefined, activeScope);
-      const targetCategory = getSettingsCategory(target.categoryId);
+      const targetCategory = accessibleCategories.find((category) => category.id === target.categoryId);
       shouldFocusSectionRef.current = true;
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
@@ -336,7 +321,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         if (matchingTargetSubPage) {
           next.set('sub', matchingTargetSubPage.id);
         } else {
-          const defaultSubPage = getDefaultSubPage(target.categoryId);
+          const defaultSubPage = targetCategory?.subPages[0]?.id;
           if (defaultSubPage) {
             next.set('sub', defaultSubPage);
           } else {
@@ -347,7 +332,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         return next;
       });
     },
-    [activeScope, normalizedQuery, setSearchParams],
+    [accessibleCategories, activeScope, normalizedQuery, setSearchParams],
   );
 
   const handleSubPageChange = useCallback(
@@ -359,9 +344,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         next.set('tab', activeCategory);
         next.set('sub', subPageId);
         next.delete('q');
-        if (subPageId !== 'workers') {
-          next.delete('workerTab');
-        }
         return next;
       });
     },
@@ -496,11 +478,13 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     }
 
     if (currentCategoryMatchesQuery) {
-      return currentCategory.subPages.map((subPage) => subPage.id);
+      return currentCategory.subPages
+        .filter((subPage) => canAccessSettingsTab(currentCategory.id, subPage.id, destinationAccess))
+        .map((subPage) => subPage.id);
     }
 
     return [];
-  }, [currentCategory, currentCategoryMatchesQuery, directMatchingCurrentSubPageIds]);
+  }, [currentCategory, currentCategoryMatchesQuery, destinationAccess, directMatchingCurrentSubPageIds]);
 
   const activeSubPage = useMemo(() => {
     if (!currentCategory || currentCategory.subPages.length === 0) {
@@ -508,9 +492,9 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     }
 
     const requestedTargetSubPage = resolvedRequestedTarget.categoryId === currentCategory.id
-      ? resolvedRequestedTarget.subPageId
+      ? requestedSubPage
       : undefined;
-    const requestedSubPageIsValid = requestedTargetSubPage
+    const requestedSubPageIsValid = requestedSubPage && requestedTargetSubPage
       && currentCategory.subPages.some((subPage) => subPage.id === requestedTargetSubPage);
 
     if (requestedSubPageIsValid) {
@@ -537,9 +521,9 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       ?.subPages[0]?.id;
 
     return firstAccessibleSubPage ?? getDefaultSubPage(currentCategory.id);
-  }, [accessibleCategories, currentCategory, isFiltering, matchingCurrentSubPageIds, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId]);
+  }, [accessibleCategories, currentCategory, isFiltering, matchingCurrentSubPageIds, requestedSubPage, resolvedRequestedTarget.categoryId]);
 
-  const hasSubTabs = currentCategory.subPages.length >= 2;
+  const hasSubTabs = accessibleCategories.length > 0 && currentCategory.subPages.length >= 2;
   const renderedContentKey = currentCategory.subPages.length === 0
     ? currentCategory.id
     : `${currentCategory.id}.${activeSubPage}`;
@@ -550,7 +534,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   // back to the unfiltered list if the category isn't present there, which
   // shouldn't happen for a category the user can currently see at all).
   const visibleSubPages = useMemo(
-    () => accessibleCategories.find((category) => category.id === currentCategory.id)?.subPages ?? currentCategory.subPages,
+    () => accessibleCategories.find((category) => category.id === currentCategory.id)?.subPages ?? [],
     [accessibleCategories, currentCategory],
   );
   const sectionHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -567,6 +551,19 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, [activeSubPageLabel, currentCategory.label, currentScopeMeta, hasSubTabs]);
 
   useEffect(() => {
+    if (isAdminRoute && accessibleCategories.length === 0) {
+      if (requestedScope !== 'system' || requestedCategory !== null || requestedSubPage !== null || searchParams.has('field')) {
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('scope', 'system');
+          next.delete('tab');
+          next.delete('sub');
+          next.delete('field');
+          return next;
+        }, { replace: true });
+      }
+      return;
+    }
     if (isFiltering && matchingCategoryIds?.length === 0) {
       if (requestedCategory === null && requestedSubPage === null) {
         return;
@@ -611,6 +608,9 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return next;
     }, { replace: true });
   }, [
+    accessibleCategories.length,
+    isAdminRoute,
+    searchParams,
     activeScope,
     activeSubPage,
     currentCategory.subPages.length,
@@ -651,19 +651,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     previousRenderedKeyRef.current = activeDestinationKey;
   }, [currentCategory.id, hasSubTabs, activeSubPage]);
 
-  useEffect(() => {
-    if (requestedScope === 'admin' && !canReachAdminScope) {
-      toast.info("You don't have access to admin settings. Showing your user settings instead.");
-    }
-    // Mirrors the 'admin' case above (issue 1457): the 'system' scope route
-    // (/admin/settings) previously had no equivalent notice — a gap that
-    // predates this change but sits right next to the code this migration
-    // touches, so it's fixed here too rather than left as a silent fallback.
-    if (requestedScope === 'system' && !canReachSystemScope) {
-      toast.info("You don't have access to system settings. Showing your user settings instead.");
-    }
-  }, [canReachAdminScope, canReachSystemScope, requestedScope]);
-
   // Per-tab/sub-page permission gate (issue 1457). Reuses the same
   // canAccessDestination predicate the registry's bulk filter and the
   // Layout nav use, so a directly-linked tab honours requiredRole,
@@ -683,13 +670,21 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     [activeSubPage, currentCategory],
   );
   const canAccessActiveTab = useMemo(() => {
+    if (isAdminRoute && accessibleCategories.length === 0) return false;
     if (!activeTabDestination) {
       return true;
     }
     return canAccessDestination(activeTabDestination, destinationAccess);
-  }, [activeTabDestination, destinationAccess]);
+  }, [accessibleCategories.length, activeTabDestination, destinationAccess, isAdminRoute]);
 
   const content = useMemo(() => {
+    if (isAdminRoute && accessibleCategories.length === 0) {
+      return (
+        <SettingsSection>
+          <p className="py-8 text-sm text-pf-text-secondary">No settings editor is available with your permissions. Use the authorized configuration links, if shown.</p>
+        </SettingsSection>
+      );
+    }
     if (!canAccessActiveTab) {
       return (
         <SettingsSection>
@@ -715,21 +710,12 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <p className="text-sm">Content not found for {renderedContentKey}</p>
       </div>
     );
-  }, [activeSubPageLabel, canAccessActiveTab, currentCategory, renderedContentKey]);
+  }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, isAdminRoute, renderedContentKey]);
 
-  // The scope registry already names every scope, and the document title (above)
-  // reads from it. The H1 used to hardcode its own strings, so the browser tab
-  // said "System Settings" while the heading said "Settings" — and `/settings`
-  // and `/admin/settings` shared one indistinguishable H1. Read the registry so
-  // there is a single source of truth. The one exception is `admin`, whose
-  // registry label is the short nav chip "Admin"; the page has been called the
-  // Admin Console since the redirect map was written, so keep that name here.
-  const pageTitle = effectiveScope === 'admin'
-    ? 'Admin Console'
-    : currentScopeMeta?.label ?? 'Settings';
+  const pageTitle = currentScopeMeta?.label ?? 'Settings';
   const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
 
-  const hasNoMatches = isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0;
+  const hasNoMatches = accessibleCategories.length > 0 && isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0;
 
   // Page-level actions. The mode toggle arrives by portal from whichever content
   // page owns it (see SettingsHeaderPortal); the palette is always available, so
@@ -765,7 +751,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           onSubPageChange={handleSubPageChange}
           matchingSubPageIds={matchingCurrentSubPageIds}
           isFiltering={isFiltering}
-          ariaLabel={`${currentCategory.label} ${effectiveScope === 'admin' ? 'admin' : 'settings'}`}
+          ariaLabel={`${currentCategory.label} settings`}
           searchQuery={query}
         />
       </div>
@@ -782,6 +768,19 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         parent={isAdminRoute ? ADMIN_HUB_PARENT : undefined}
         actions={headerActions}
       >
+        {isAdminRoute && standaloneDestinations.length > 0 && (
+          <nav aria-label="Standalone configuration" className="flex flex-wrap gap-3 pb-4">
+            {standaloneDestinations.map((destination) => (
+              <Link
+                key={destination.id}
+                to={destination.path}
+                className="rounded-md border border-pf-border px-3 py-2 text-sm text-pf-text-primary hover:bg-pf-bg-1 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
+              >
+                {destination.label}
+              </Link>
+            ))}
+          </nav>
+        )}
         <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-md border border-pf-border bg-pf-panel">
           <div className="relative flex min-h-0 flex-1 flex-col">
           {hasNoMatches ? (
@@ -846,7 +845,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                       tabIndex={-1}
                       className="sr-only focus-visible:not-sr-only focus-visible:mb-4 focus-visible:block focus-visible:w-fit focus-visible:rounded-md focus-visible:text-xl focus-visible:leading-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
                     >
-                      {currentCategory.label}
+                      {isAdminRoute && accessibleCategories.length === 0 ? 'Configuration' : currentCategory.label}
                     </h2>
 
                     <SettingsContentTransition key={renderedContentKey} className="relative">

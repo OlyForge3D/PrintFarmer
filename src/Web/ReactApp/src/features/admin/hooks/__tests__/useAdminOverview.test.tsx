@@ -76,4 +76,13 @@ describe('useAdminOverview — canonical wire-contract corpus (#2240)', () => {
     expect(result.current.error).toBeInstanceOf(Error);
     expect(result.current.data).toBeUndefined();
   });
+
+  it('respects enabled: false option and does not trigger fetch', async () => {
+    const { result } = renderHook(() => useAdminOverview({ enabled: false }), {
+      wrapper: makeWrapper(makeClient()),
+    });
+
+    expect(result.current.fetchStatus).toBe('idle');
+    expect(client.get).not.toHaveBeenCalled();
+  });
 });

@@ -46,7 +46,7 @@ test.describe('Admin Tags — Emulator', () => {
   test.beforeEach(async ({ page }) => {
     consoleErrors = [];
     page.on('pageerror', (error) => consoleErrors.push(error.message));
-    await page.goto('/admin/manage?tab=data&sub=tags');
+    await page.goto('/admin/settings?tab=data&sub=tags');
     await page.waitForLoadState('networkidle');
   });
 

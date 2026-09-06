@@ -1249,8 +1249,7 @@ The updated ETag is also returned in the `ETag` response header.
 ## Settings API
 
 The settings API is served by `UnifiedSettingsController` under `/api/settings`. It
-backs the tabbed Settings Shell in the React frontend (`/settings`, `/admin/settings`,
-`/admin/manage`). Each backend `[AppSetting]` class is one section, keyed by its
+backs the tabbed Settings Shell in the React frontend (`/settings`, `/admin/settings`). Each backend `[AppSetting]` class is one section, keyed by its
 `SectionName`. See [SETTINGS_ARCHITECTURE.md](./SETTINGS_ARCHITECTURE.md) for the
 end-to-end model.
 

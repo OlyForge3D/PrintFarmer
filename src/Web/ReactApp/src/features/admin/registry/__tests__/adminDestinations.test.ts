@@ -178,6 +178,7 @@ describe('filterDestinationsByAccess', () => {
 
   it('honours a destination that opts out with requiredRole: null', () => {
     const openDestination: AdminDestination = {
+      kind: 'operational',
       id: 'open',
       label: 'Open',
       description: 'Open to everyone',
@@ -193,6 +194,7 @@ describe('filterDestinationsByAccess', () => {
 
   it('respects requiredPermission in addition to requiredRole', () => {
     const gated: AdminDestination = {
+      kind: 'operational',
       ...ADMIN_DESTINATIONS[1],
       id: 'gated',
       requiredPermission: { resource: 'printers', action: 'admin' },
@@ -229,6 +231,7 @@ describe('filterDestinationsByAccess', () => {
 
   it('respects requiredPermissionAnyOf: any one of several permissions unlocks the destination', () => {
     const gated: AdminDestination = {
+      kind: 'operational',
       ...ADMIN_DESTINATIONS[1],
       id: 'gated-any-of',
       requiredRole: null,
@@ -315,7 +318,7 @@ describe('registry lookup helpers', () => {
     const grouped = getHubGroupedDestinations(accessAs('farm_admin'));
     for (const entry of grouped) {
       for (const destination of entry.destinations) {
-        expect(destination.isHubTile).toBe(true);
+        expect(destination.isHubTile || destination.kind === 'configuration').toBe(true);
       }
     }
   });

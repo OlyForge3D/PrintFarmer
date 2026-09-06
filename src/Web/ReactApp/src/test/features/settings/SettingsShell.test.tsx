@@ -54,6 +54,25 @@ vi.mock('@/features/admin/pages/SettingsPage', () => ({
   ),
 }));
 
+vi.mock('@/features/settings/components/IntegrationSettingsCards', () => ({
+  SpoolmanSettingsCard: () => <div data-testid="spoolman-settings">Spoolman settings</div>,
+  HomeAssistantSettingsCard: () => <div data-testid="home-assistant-settings">Home Assistant settings</div>,
+}));
+vi.mock('@/features/settings/components/TelegramSettingsCard', () => ({
+  TelegramSettingsCard: () => <div data-testid="telegram-settings">Telegram settings</div>,
+}));
+vi.mock('@/features/admin/pages/UserManagementPage', () => ({
+  UserManagementPage: () => <div data-testid="accounts-editor">Accounts editor</div>,
+}));
+vi.mock('@/features/admin/pages/RoleManagementPage', () => ({
+  RoleManagementPage: () => <div data-testid="roles-editor">Roles editor</div>,
+}));
+vi.mock('@/features/admin/pages/TagAdminPage', () => ({
+  TagAdminPage: () => <div data-testid="tags-editor">Tags editor</div>,
+}));
+vi.mock('@/features/quotas/pages/QuotaManagementPage', () => ({
+  QuotaManagementPage: () => <div data-testid="quotas-editor">Quotas editor</div>,
+}));
 vi.mock('@/features/settings/components/FarmSettingsSection', () => ({
   FarmSettingsSection: () => <div data-testid="farm-settings-section">Farm Settings Section</div>,
 }));
@@ -124,12 +143,12 @@ function LocationProbe() {
   );
 }
 
-function renderSettings(initialRoute = '/settings') {
+function renderSettings(initialRoute = '/settings', routeScope: 'user' | 'system' | undefined = initialRoute.startsWith('/admin/settings') ? 'system' : undefined) {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialRoute]}>
         <GlobalCommandPaletteProvider>
-          <SettingsShell />
+          <SettingsShell routeScope={routeScope} />
         </GlobalCommandPaletteProvider>
         <LocationProbe />
       </MemoryRouter>
@@ -164,6 +183,94 @@ beforeEach(() => {
 });
 
 describe('SettingsShell', () => {
+  it.each([
+    ['system_settings', 'general', 'farm', 'legacy-settings-page'],
+    ['users', 'users', 'accounts', 'accounts-editor'],
+    ['roles', 'users', 'roles', 'roles-editor'],
+    ['tags', 'data', 'tags', 'tags-editor'],
+    ['printers', 'hardware', 'printer-groups', 'printer-groups-page'],
+    ['quota', 'quotas', '', 'quotas-editor'],
+  ])('selects the first accessible editor for a %s delegate on bare, unknown, and category URLs', (resource, category, sub, editor) => {
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (r, action) => r === resource && action === 'admin';
+    for (const path of ['/admin/settings', '/admin/settings?tab=unknown', `/admin/settings?tab=${category}`, `/admin/settings?tab=${category}&sub=unknown`]) {
+      const mounted = renderSettings(path);
+      expect(screen.getByTestId(editor)).toBeInTheDocument();
+      expect(screen.queryByTestId('theme-switcher')).not.toBeInTheDocument();
+      expect(screen.getByTestId('location-search')).toHaveTextContent(`tab=${category}`);
+      if (sub) expect(screen.getByTestId('location-search')).toHaveTextContent(`sub=${sub}`);
+      mounted.unmount();
+    }
+  });
+
+  it.each([
+    ['power_monitors', 'Power Monitors', '/admin/power-monitors'],
+    ['locations', 'Locations', '/locations'],
+    ['catalog', 'Catalog', '/catalog'],
+  ])('keeps a standalone-only %s delegate on useful links without an editor', (resource, label, path) => {
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (r, action) => r === resource && action === 'admin';
+    renderSettings('/admin/settings?scope=user&tab=profile&sub=preferences&field=SystemLog.Enabled');
+    expect(screen.getByRole('link', { name: label })).toHaveAttribute('href', path);
+    expect(screen.getByText(/No settings editor is available/)).toBeInTheDocument();
+    expect(screen.queryByTestId('legacy-settings-page')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('theme-switcher')).not.toBeInTheDocument();
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=');
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('field=');
+  });
+
+  it('never falls back to personal content for a user with no admin grants', () => {
+    setAuthRoles(['farm_user']);
+    renderSettings('/admin/settings');
+    expect(screen.getByText(/No settings editor is available/)).toBeInTheDocument();
+    expect(screen.queryByTestId('legacy-settings-page')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('theme-switcher')).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Standalone configuration' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['spoolman', 'spoolman-settings'],
+    ['home_assistant', 'home-assistant-settings'],
+    ['telegram', 'telegram-settings'],
+  ])('mounts only the authorized service for an integration %s delegate', (resource, editor) => {
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (r, action) => r === resource && action === 'admin';
+    renderSettings('/admin/settings?tab=integrations&sub=connections');
+    expect(screen.getByTestId(editor)).toBeInTheDocument();
+    for (const id of ['spoolman-settings', 'home-assistant-settings', 'telegram-settings', 'legacy-settings-page']) {
+      if (id !== editor) expect(screen.queryByTestId(id)).not.toBeInTheDocument();
+    }
+  });
+
+  it.each([true, false])('uses one Spoolman editor when metadata editing is allowed (farm administrator: %s)', (isFarmAdmin) => {
+    if (!isFarmAdmin) {
+      setAuthRoles(['farm_user']);
+      authState.permissionOverride = (resource, action) =>
+        ['system_settings', 'spoolman'].includes(resource) && action === 'admin';
+    }
+    renderSettings('/admin/settings?tab=integrations&sub=connections');
+    expect(screen.getAllByTestId('legacy-settings-page')).toHaveLength(1);
+    expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'Integrations');
+    expect(screen.queryByTestId('spoolman-settings')).not.toBeInTheDocument();
+  });
+
+  it('keeps personal settings route-locked even for a farm administrator', () => {
+    renderSettings('/settings?scope=system&tab=users&sub=accounts', 'user');
+    expect(screen.getByTestId('theme-switcher')).toBeInTheDocument();
+    expect(screen.queryByTestId('accounts-editor')).not.toBeInTheDocument();
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
+  });
+
+  it('does not grant the role-only profile library to resource delegates', () => {
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = () => true;
+    renderSettings('/admin/settings?tab=slicing&sub=profiles');
+    expect(screen.getByText(/don't have permission to view/)).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Slicer Profiles' })).not.toBeInTheDocument();
+  });
+
   it('shows only the User scope to non-admins and keeps /settings on personal pages', () => {
     setAuthRoles(['farm_user']);
     renderSettings('/settings?scope=system&tab=hardware');
@@ -192,10 +299,10 @@ describe('SettingsShell', () => {
     expect(screen.queryByRole('radio')).not.toBeInTheDocument();
 
     // Every destination an admin can reach is visible at once, grouped by scope.
-    for (const label of ['User', 'System', 'Admin']) {
+    for (const label of ['User', 'System']) {
       expect(screen.getAllByRole('heading', { level: 2, name: label }).length).toBeGreaterThanOrEqual(1);
     }
-    for (const label of ['Profile', 'General', 'Slicing', 'Hardware', 'Integrations', 'Quotas', 'Operations', 'Users', 'Data']) {
+    for (const label of ['Profile', 'General', 'Slicing', 'Hardware', 'Integrations', 'Quotas', 'Users', 'Data']) {
       expect(getCategoryButton(label)).toBeInTheDocument();
     }
     expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
@@ -233,15 +340,12 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=notifications');
   });
 
-  it('opens worker jobs from its canonical Admin URL', () => {
-    renderSettings('/admin/manage?scope=admin&tab=operations&sub=workers&workerTab=jobs');
-
-    expect(getCategoryButton('Operations')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('tab', { name: 'Workers' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=admin');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=operations');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=workers');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('workerTab=jobs');
+  it('opens accounts inside the combined configuration workspace', () => {
+    renderSettings('/admin/settings?scope=system&tab=users&sub=accounts');
+    expect(getCategoryButton('Users')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: 'User Accounts' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
+    expect(screen.queryByRole('button', { name: 'Operations' })).not.toBeInTheDocument();
   });
 
   it('renders passkeys from the existing profile page inside User Settings', () => {
@@ -270,7 +374,7 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('scope=&');
   });
 
-  it('redirects a non-admin away from admin deep links and explains the redirect', async () => {
+  it('keeps an unprivileged personal request in user settings', async () => {
     setAuthRoles(['farm_user']);
     renderSettings('/settings?scope=admin&tab=users&sub=audit');
 
@@ -282,7 +386,7 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('scope=admin');
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=users');
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=audit');
-    expect(toast.info).toHaveBeenCalledWith("You don't have access to admin settings. Showing your user settings instead.");
+    expect(toast.info).not.toHaveBeenCalled();
   });
 
   it('filters across scopes and lands on Slicing when searching for slicer', () => {
@@ -321,7 +425,7 @@ describe('SettingsShell', () => {
     // `?scope=system` on /settings is a soft preference, not a route lock — an
     // admin can still reach the other scopes from the same nav.
     expect(getCategoryButton('Profile')).toBeInTheDocument();
-    expect(getCategoryButton('Operations')).toBeInTheDocument();
+    expect(getCategoryButton('Users')).toBeInTheDocument();
   });
 
   it('hides scopes the user cannot reach', () => {
@@ -467,7 +571,7 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=cameras');
   });
 
-  it('shows a toast when a non-admin is redirected away from admin scope', async () => {
+  it('normalizes an invalid scope on personal settings', async () => {
     setAuthRoles(['farm_user']);
     renderSettings('/settings?scope=admin');
 
@@ -478,7 +582,7 @@ describe('SettingsShell', () => {
     // rather than merely rendering some settings page.
     expect(screen.getAllByRole('heading', { level: 1, name: 'User Settings' }).length).toBeGreaterThan(0);
     expect(screen.queryByText('Access Denied')).not.toBeInTheDocument();
-    expect(toast.info).toHaveBeenCalledWith("You don't have access to admin settings. Showing your user settings instead.");
+    expect(toast.info).not.toHaveBeenCalled();
   });
 
   // The H1, the document title, and the sidebar's accessible name must all name
@@ -486,7 +590,7 @@ describe('SettingsShell', () => {
   // drifted and shipped a page whose tab and heading disagreed.
   it.each([
     ['/settings?scope=user', 'User Settings'],
-    ['/admin/settings?scope=system&tab=general', 'System Settings'],
+    ['/admin/settings?scope=system&tab=general', 'Farm & Admin Settings'],
   ])('titles %s from the scope registry, not a hardcoded string', (route, expected) => {
     setAuthRoles(['farm_admin']);
     renderSettings(route);
@@ -544,14 +648,9 @@ describe('SettingsShell', () => {
     fireEvent.keyDown(paletteSearch, { key: 'Enter' });
 
     expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
-    // Admin destinations live under /admin/manage — assert on pathname + query
-    // rather than on the internal scope switcher, which is a separate concern
-    // of the AdminManagePage wrapper.
     await waitFor(() => {
-      expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/manage');
+      expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/login-audit');
     });
-    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=users');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=audit');
   });
 });
 
