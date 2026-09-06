@@ -629,6 +629,53 @@ final class FarmShapeServiceTests: XCTestCase {
         XCTAssertEqual(store.shape(serverID: serverID), changed)
     }
 
+    /// #2478: `refreshLatest` had no production caller, so a farm that grew
+    /// while the app sat in the background was never re-observed and the
+    /// upgrade offer never fired. `ContentView` now calls it on foreground.
+    /// It must feed the offer inputs (`latestShape` + the store) only — the
+    /// resolved session shape drives the live shell, so moving it here would
+    /// switch layout underneath the user without an offer (Decision 4).
+    func testForegroundRefreshUpdatesLatestShapeWithoutMovingTheSessionShape() async {
+        let request = AsyncBarrier()
+        defer { request.close() }
+        let initial = FarmShape(accountCount: 1, locationCount: 1, printerCount: 5)
+        let grown = FarmShape(accountCount: 3, locationCount: 2, printerCount: 40)
+        store.setShape(initial, serverID: serverID)
+        let service = FarmShapeService(
+            serverID: serverID,
+            store: store,
+            fetchShape: {
+                await request.arriveAndWait()
+                return grown
+            },
+            sleep: { _ in }
+        )
+
+        // The startup fetch parks on the barrier, so the bounded wait wins and
+        // the session freezes on the persisted shape.
+        await service.resolveForAuthenticatedSession(
+            serverID: serverID,
+            timeout: .milliseconds(1)
+        )
+        XCTAssertEqual(service.sessionShape, initial)
+        XCTAssertTrue(service.isSessionResolved)
+
+        let latestChanged = expectation(description: "grown shape observed")
+        withObservationTracking {
+            _ = service.latestShape
+        } onChange: {
+            latestChanged.fulfill()
+        }
+        request.release()
+        await fulfillment(of: [latestChanged], timeout: 2)
+
+        await service.refreshLatest(serverID: serverID)
+
+        XCTAssertEqual(service.sessionShape, initial)
+        XCTAssertEqual(service.latestShape, grown)
+        XCTAssertEqual(store.shape(serverID: serverID), grown)
+    }
+
     func testAuthenticatedStartupBeginsShapeAndCapabilitiesInParallel() async throws {
         let registrySuiteName = "FarmShapeServiceTests.Registry.\(UUID().uuidString)"
         let registryDefaults = UserDefaults(suiteName: registrySuiteName)!

@@ -370,6 +370,245 @@ final class ServerRegistryTests: XCTestCase {
         ))
     }
 
+    // MARK: - Established automatic shell latch (#2478)
+
+    func testEstablishedAutomaticShellIsUnsetUntilAutomaticSettlesOnALayout() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://farm.example.com")!
+        )
+
+        XCTAssertNil(registry.establishedAutomaticShell(for: server.id, isFarmAdmin: true))
+
+        registry.recordEstablishedAutomaticShell(.simple, for: server.id)
+
+        XCTAssertEqual(
+            registry.establishedAutomaticShell(for: server.id, isFarmAdmin: true),
+            .simple
+        )
+    }
+
+    func testEstablishedAutomaticShellSurvivesRelaunchPerServer() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let first = try registry.add(
+            displayName: "One",
+            baseURL: URL(string: "https://one.example.com")!
+        )
+        let second = try registry.add(
+            displayName: "Two",
+            baseURL: URL(string: "https://two.example.com")!
+        )
+
+        try registry.setActive(id: first.id)
+        registry.recordEstablishedAutomaticShell(.simple, for: first.id)
+        try registry.setActive(id: second.id)
+        registry.recordEstablishedAutomaticShell(.twoModes, for: second.id)
+
+        let relaunched = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+
+        XCTAssertEqual(
+            relaunched.establishedAutomaticShell(for: first.id, isFarmAdmin: true),
+            .simple
+        )
+        XCTAssertEqual(
+            relaunched.establishedAutomaticShell(for: second.id, isFarmAdmin: true),
+            .twoModes
+        )
+    }
+
+    func testDismissingTheUpgradeOfferLatchesSimpleAcrossRelaunch() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://farm.example.com")!
+        )
+        let smallFarm = FarmShape(accountCount: 1, locationCount: 1, printerCount: 1)
+        let grownFarm = FarmShape(accountCount: 2, locationCount: 2, printerCount: 9)
+
+        _ = registry.observeOversightUpgradeOffer(
+            farmShape: smallFarm,
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        )
+        XCTAssertTrue(registry.observeOversightUpgradeOffer(
+            farmShape: grownFarm,
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        ))
+
+        registry.dismissOversightUpgradeOffer(for: server.id)
+
+        let relaunched = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        XCTAssertEqual(relaunched.navigationLayoutPreference, .automatic)
+        XCTAssertEqual(
+            relaunched.establishedAutomaticShell(for: server.id, isFarmAdmin: true),
+            .simple,
+            "\"Not now\" must keep Automatic on Simple after relaunch (#2478)."
+        )
+    }
+
+    func testAcceptingTheUpgradeOfferSeedsTwoModesForInstallsWithoutALatch() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://farm.example.com")!
+        )
+        _ = registry.observeOversightUpgradeOffer(
+            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        )
+        XCTAssertTrue(registry.observeOversightUpgradeOffer(
+            farmShape: FarmShape(accountCount: 2, locationCount: 2, printerCount: 9),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        ))
+        _ = registry.acceptOversightUpgradeOffer(for: server.id, isFarmAdmin: true)
+
+        // Simulate an install that predates the latch by dropping the stored value.
+        userDefaults.removeObject(
+            forKey: "pf_navigation_established_shell.\(server.id.uuidString.lowercased())"
+        )
+
+        XCTAssertEqual(
+            registry.establishedAutomaticShell(for: server.id, isFarmAdmin: true),
+            .twoModes
+        )
+    }
+
+    func testAPendingUnacceptedOfferKeepsAutomaticOnSimpleWithoutALatch() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://farm.example.com")!
+        )
+
+        _ = registry.observeOversightUpgradeOffer(
+            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        )
+        // Simulate an install that predates the latch: the offer is raised on a
+        // grown farm but the user has neither accepted nor dismissed it yet.
+        userDefaults.removeObject(
+            forKey: "pf_navigation_established_shell.\(server.id.uuidString.lowercased())"
+        )
+        XCTAssertTrue(registry.observeOversightUpgradeOffer(
+            farmShape: FarmShape(accountCount: 2, locationCount: 2, printerCount: 9),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        ))
+
+        XCTAssertEqual(
+            registry.establishedAutomaticShell(for: server.id, isFarmAdmin: true),
+            .simple,
+            "A pending offer must not derive Two modes from the very growth it is asking about (#2478)."
+        )
+    }
+
+    func testClearingTheLatchLetsAPromotedAdminDeriveTwoModesAgain() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://farm.example.com")!
+        )
+        // A latch left behind by a non-admin session on a multi-account server.
+        registry.recordEstablishedAutomaticShell(.simple, for: server.id)
+        XCTAssertEqual(
+            registry.establishedAutomaticShell(for: server.id, isFarmAdmin: false),
+            .simple
+        )
+
+        registry.clearEstablishedAutomaticShell(for: server.id)
+
+        XCTAssertNil(
+            registry.establishedAutomaticShell(for: server.id, isFarmAdmin: true),
+            "A stale Simple latch must not outrank the Two modes an admin earns back (#2478)."
+        )
+        XCTAssertEqual(
+            AdaptiveNavigationShell.requestedShell(
+                preference: .automatic,
+                automaticDerivation: NavigationShellDerivation.automatic(
+                    farmShape: FarmShape(accountCount: 2, locationCount: 2, printerCount: 9),
+                    shiftPlanEnabled: true,
+                    isFarmAdmin: true
+                ),
+                establishedShell: registry.establishedAutomaticShell(
+                    for: server.id,
+                    isFarmAdmin: true
+                )
+            ),
+            .twoModes
+        )
+    }
+
+    func testClearingTheLatchSurvivesRelaunch() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://farm.example.com")!
+        )
+        registry.recordEstablishedAutomaticShell(.simple, for: server.id)
+
+        registry.clearEstablishedAutomaticShell(for: server.id)
+
+        let relaunched = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        XCTAssertNil(relaunched.establishedAutomaticShell(for: server.id, isFarmAdmin: true))
+    }
+
+    func testExplicitLayoutOverrideClearsTheLatchSoAutomaticRederivesLater() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://farm.example.com")!
+        )
+        registry.recordEstablishedAutomaticShell(.simple, for: server.id)
+
+        registry.setNavigationLayoutPreference(.twoModes)
+
+        XCTAssertNil(registry.establishedAutomaticShell(for: server.id, isFarmAdmin: true))
+    }
+
+    func testLatchIsOnlyRecordedForTheActiveServerUnderAutomatic() throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        let first = try registry.add(
+            displayName: "One",
+            baseURL: URL(string: "https://one.example.com")!
+        )
+        let second = try registry.add(
+            displayName: "Two",
+            baseURL: URL(string: "https://two.example.com")!
+        )
+
+        try registry.setActive(id: first.id)
+        registry.recordEstablishedAutomaticShell(.twoModes, for: second.id)
+        XCTAssertNil(registry.establishedAutomaticShell(for: second.id, isFarmAdmin: true))
+
+        registry.setNavigationLayoutPreference(.simple)
+        registry.recordEstablishedAutomaticShell(.twoModes, for: first.id)
+        XCTAssertNil(registry.establishedAutomaticShell(for: first.id, isFarmAdmin: true))
+    }
+
+    func testRemovingAServerClearsItsEstablishedAutomaticShell() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        registry.snapshotPurgeHandler = { _ in .purged }
+        let first = try registry.add(
+            displayName: "One",
+            baseURL: URL(string: "https://one.example.com")!
+        )
+        _ = try registry.add(
+            displayName: "Two",
+            baseURL: URL(string: "https://two.example.com")!
+        )
+        try registry.setActive(id: first.id)
+        registry.recordEstablishedAutomaticShell(.twoModes, for: first.id)
+
+        try await registry.purgeAndRemove(id: first.id)
+
+        XCTAssertNil(registry.establishedAutomaticShell(for: first.id, isFarmAdmin: true))
+    }
+
     func testNormalizationAddsHTTPSLowercasesHostAndStripsTrailingSlash() throws {
         let normalized = try ServerRegistry.normalizedURLString(for: "  PRINT.example.COM/  ")
 

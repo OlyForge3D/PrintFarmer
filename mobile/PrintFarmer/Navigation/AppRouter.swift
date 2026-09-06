@@ -54,6 +54,11 @@ final class AppRouter {
     private(set) var configuredIsFarmAdmin = false
     private(set) var appliedNavigationPreference: NavigationLayoutPreference?
     private(set) var establishedAutomaticDerivation: NavigationShellDerivation?
+    /// The automatic layout this session settled on for the configured server,
+    /// or `nil` when Automatic had no grounded farm shape to settle on. The
+    /// value is persisted per server by `ServerRegistry` so growth cannot
+    /// silently change the layout on a later launch (#2478).
+    private(set) var establishedAutomaticShell: NavigationShell?
     private(set) var oversightAvailability = OversightNavigationAvailability.fullyAvailable
     var presentsExpandedSidebar = false
     var selectedTab: AppTab {
@@ -296,10 +301,16 @@ final class AppRouter {
         isFarmAdmin: Bool,
         capabilities: ResolvedSystemCapabilities,
         oversightAvailability: OversightNavigationAvailability,
+        persistedAutomaticShell: NavigationShell? = nil,
         preserveNavigationOnContextChange: Bool = false
     ) {
         let contextChanged = configuredServerID != serverID || configuredUserID != userID
         let preferenceChanged = appliedNavigationPreference != preference
+        // A promotion or demotion changes what Automatic derives without
+        // changing the server or the user, so the cached derivation has to be
+        // recomputed or the stale one keeps describing the previous role
+        // forever (#2478).
+        let farmAdminChanged = configuredIsFarmAdmin != isFarmAdmin
         configuredIsFarmAdmin = isFarmAdmin
 
         if contextChanged && !preserveNavigationOnContextChange {
@@ -307,7 +318,7 @@ final class AppRouter {
         }
 
         let automaticDerivation: NavigationShellDerivation
-        if contextChanged || establishedAutomaticDerivation == nil {
+        if contextChanged || farmAdminChanged || establishedAutomaticDerivation == nil {
             automaticDerivation = NavigationShellDerivation.automatic(
                 farmShape: farmShape,
                 shiftPlanEnabled: capabilities.shiftPlanEnabled,
@@ -323,16 +334,38 @@ final class AppRouter {
                 )
         }
 
-        if contextChanged || preferenceChanged || appliedNavigationPreference == nil {
+        if contextChanged || preferenceChanged || farmAdminChanged
+            || appliedNavigationPreference == nil {
+            let isFirstApply = appliedNavigationPreference == nil
             configuredServerID = serverID
             configuredUserID = userID
             appliedNavigationPreference = preference
-            requestedShell = AdaptiveNavigationShell.requestedShell(
+            let resolvedShell = AdaptiveNavigationShell.requestedShell(
                 preference: preference,
-                automaticDerivation: automaticDerivation
+                automaticDerivation: automaticDerivation,
+                establishedShell: persistedAutomaticShell
             )
-            activeMode = .floor
+            let shellChanged = resolvedShell != requestedShell
+            requestedShell = resolvedShell
+            // A role change that leaves the shell where it was must not yank
+            // the user back to Floor.
+            if contextChanged || preferenceChanged || isFirstApply || shellChanged {
+                activeMode = .floor
+            }
         }
+
+        // Only a derivation that actually read the farm's shape establishes a
+        // layout worth latching. An unknown/offline shape, a server that does
+        // not run shifts, and a non-administrator account all derive `.simple`
+        // without saying anything about farm size — latching those would pin a
+        // `.simple` layout that then permanently beats the `.twoModes`
+        // derivation the user gets once the capability or role changes (#2478).
+        // An explicit Simple/Two modes override is the user's own choice and is
+        // recorded as a preference, not a latch.
+        establishedAutomaticShell = preference == .automatic
+            && automaticDerivation.cause.readsFarmShape
+            ? requestedShell
+            : nil
 
         reconcileCapabilities(
             capabilities,
@@ -443,6 +476,7 @@ final class AppRouter {
         configuredUserID = nil
         appliedNavigationPreference = nil
         establishedAutomaticDerivation = nil
+        establishedAutomaticShell = nil
         oversightAvailability = .fullyAvailable
         presentsExpandedSidebar = false
         selectedTab = .attention

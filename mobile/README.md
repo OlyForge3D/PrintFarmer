@@ -142,6 +142,18 @@ become its own mode..."*. It is never a modal, never a toast, and never part
 of onboarding. The app never auto-switches shells; changing shells always
 requires an explicit user action.
 
+Automatic therefore **latches** the layout it settles on for a server, and the
+latch is persisted alongside the per-server preference. Once Automatic has
+settled on Simple, later farm growth can only raise the upgrade offer — it can
+never move the app to Two modes on a subsequent launch, and declining the offer
+with **Not now** survives relaunch. The latch is one-directional: a derivation
+that lands on Simple (shift planning switched off, the signed-in user is not a
+`farm_admin`, the farm shape is unknown, or the farm shrank back below every
+threshold) still applies immediately, because those are explicit negative
+signals rather than growth. Choosing an explicit **Simple** or **Two modes**
+override clears the latch, so returning to Automatic re-derives from the
+server's current shape.
+
 ### iPad Layout
 
 On iPad, the app uses a `NavigationSplitView`. Server switching lives in the
