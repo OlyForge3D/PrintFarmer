@@ -160,11 +160,17 @@ the current `?scope`, `?tab`, and `?sub` search params. See
 
 ## Epic Dependency Definition Of Done
 
-Any agent creating or revising a `type:epic` issue must link every child as a GitHub
-sub-issue and create every blocking relationship as a machine-readable dependency API
-edge, then read both back. Prose lists do not satisfy this requirement. Use
-`.github/skills/epic-dependencies/SKILL.md` for the exact commands, flat-graph opt-out,
-first-wave declaration, and verifier.
+Any agent creating or revising a `type:epic` issue must declare exactly one
+`epic-child-plan` HTML comment: `draft`, `empty`, or `finalized #123 #124`
+(with the actual implementation children). Finalize the list before treating the
+epic as ready, link every child as a GitHub sub-issue, and create every blocking
+relationship as a machine-readable dependency API edge, then read both back.
+Contextual issue references are not child declarations. Missing markers or native
+links for finalized children fail verification, including zero linked children.
+Draft status does not waive checks on existing links. Use
+`.github/skills/epic-dependencies/SKILL.md` for exact marker syntax, migration of
+unmarked epics, flat-graph opt-out, first-wave declaration, and verifier.
+The verifier supplies issue-level feedback, not a PR merge gate.
 
 ## Pre-PR Review Gate
 

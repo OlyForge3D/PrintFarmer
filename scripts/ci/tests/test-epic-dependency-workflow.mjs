@@ -38,6 +38,9 @@ test('workflow checks issue changes, closures, schedules, and manual dispatches'
   ]);
   assert.equal(on.schedule[0].cron, '17 9 * * *');
   assert.ok(on.workflow_dispatch);
+  assert.deepEqual(Object.keys(on).sort(), [
+    'issues', 'schedule', 'workflow_dispatch',
+  ]);
 });
 
 test('workflow uses least privilege and serializes each epic', async () => {
@@ -76,6 +79,7 @@ test('workflow loads default-branch logic and fails graph violations', async () 
   assert.match(script, /formatGateComment/);
   assert.match(script, /if \(!gate\.hasEpicLabel\(issue\.labels\)\)/);
   assert.match(script, /Matrix issue number must be a positive safe integer/);
+  assert.doesNotMatch(script, /createCommitStatus|checks\.create|pulls\.merge/);
 });
 
 test('ci-tools runs both epic dependency regression files', async () => {

@@ -25,10 +25,12 @@
 
 ## Epic definition of done
 
-An epic is not complete until every child is linked as a GitHub sub-issue and
-every blocking relationship exists as an API dependency edge, verified by
-reading both back. Use `.github/skills/epic-dependencies/SKILL.md`; prose alone
-is not a dependency graph.
+Declare exactly one `epic-child-plan` marker (`draft`, `empty`, or a finalized
+child list) using `.github/skills/epic-dependencies/SKILL.md`. An epic is not ready
+until its plan is finalized (or explicitly empty), every declared child is linked
+as a GitHub sub-issue, and every blocking relationship exists as an API dependency
+edge, verified by reading both back. Contextual references are not children;
+prose alone is not a dependency graph.
 
 ## Boundaries
 

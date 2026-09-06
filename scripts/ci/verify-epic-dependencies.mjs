@@ -15,6 +15,9 @@ import { pathToFileURL } from 'node:url';
 export const epicLabel = 'type:epic';
 export const flatGraphMarker = '<!-- epic-dependencies: flat -->';
 export const firstWaveExample = '<!-- epic-first-wave: #123 #124 -->';
+export const childPlanExample = '<!-- epic-child-plan: finalized #123 #124 -->';
+export const draftChildPlanMarker = '<!-- epic-child-plan: draft -->';
+export const emptyChildPlanMarker = '<!-- epic-child-plan: empty -->';
 export const gateCommentMarker = '<!-- epic-dependency-gate -->';
 
 function issueNumber(value) {
@@ -75,7 +78,7 @@ export function parseEpicDeclarations(body = '') {
     ...declarationBody.matchAll(/<!--[\s\S]*?(?:-->|$)/g),
   ].map((match) => match[0].trim());
   const outsideComments = declarationBody.replace(/<!--[\s\S]*?(?:-->|$)/g, '');
-  if (/\bepic-(?:dependencies|first-wave)\b/i.test(outsideComments)) {
+  if (/\bepic-(?:dependencies|first-wave|child-plan)\b/i.test(outsideComments)) {
     errors.push(
       'Epic dependency declarations must use the documented HTML comment markers.',
     );
@@ -120,10 +123,49 @@ export function parseEpicDeclarations(body = '') {
     }
   }
 
+  const childPlanDeclarations = declarationComments.filter((comment) =>
+    /epic-child-plan/i.test(comment));
+  let childPlanState = 'unspecified';
+  const declaredChildren = [];
+  if (childPlanDeclarations.length !== 1) {
+    errors.push(
+      'Exactly one child-plan declaration is required; use ' +
+      `${childPlanExample}, ${draftChildPlanMarker}, or ${emptyChildPlanMarker}.`,
+    );
+  } else {
+    const declaration = childPlanDeclarations[0];
+    if (declaration === draftChildPlanMarker) {
+      childPlanState = 'draft';
+    } else if (declaration === emptyChildPlanMarker) {
+      childPlanState = 'empty';
+    } else {
+      const match = /^<!-- epic-child-plan: finalized (#[1-9]\d*(?:[\s,]+#[1-9]\d*)*) -->$/
+        .exec(declaration);
+      if (!match) {
+        errors.push(`The child-plan declaration is malformed; use ${childPlanExample}, ` +
+          `${draftChildPlanMarker}, or ${emptyChildPlanMarker}.`);
+      } else {
+        childPlanState = 'finalized';
+        for (const reference of match[1].matchAll(/#([1-9]\d*)/g)) {
+          const number = Number(reference[1]);
+          if (!Number.isSafeInteger(number)) {
+            errors.push('Child-plan issue numbers must be positive safe integers.');
+          } else if (declaredChildren.includes(number)) {
+            errors.push(`The child-plan declaration repeats #${number}.`);
+          } else {
+            declaredChildren.push(number);
+          }
+        }
+      }
+    }
+  }
+
   return {
     flatGraph: validFlatDeclarations.length === 1 &&
       flatDeclarations.length === 1,
     firstWave,
+    childPlanState,
+    declaredChildren,
     errors,
   };
 }
@@ -180,6 +222,20 @@ export function evaluateEpicDependencies({ issue, children = [], edges = [] }) {
 
   const declarations = parseEpicDeclarations(issue?.body ?? '');
   errors.push(...declarations.errors);
+  const missingChildren = declarations.declaredChildren
+    .filter((number) => !childNumbers.has(number));
+  const childPlan = {
+    childPlanState: declarations.childPlanState,
+    declaredChildren: declarations.declaredChildren,
+    missingChildren,
+  };
+  if (missingChildren.length > 0) {
+    errors.push('Finalized child-plan issues are not linked sub-issues: ' +
+      missingChildren.map((number) => `#${number}`).join(', '));
+  }
+  if (declarations.childPlanState === 'empty' && childNumbers.size > 0) {
+    errors.push('The child plan declares an empty epic but linked sub-issues exist.');
+  }
   const unknownFirstWave = declarations.firstWave
     .filter((number) => !childNumbers.has(number));
   if (unknownFirstWave.length > 0) {
@@ -204,7 +260,10 @@ export function evaluateEpicDependencies({ issue, children = [], edges = [] }) {
     return {
       classification: 'PASS',
       passed: true,
-      reason: 'Epic has no linked sub-issues, so no dependency graph is required yet.',
+      reason: declarations.childPlanState === 'draft'
+        ? 'Draft child plan: no linked sub-issues yet; plan completeness is not verified.'
+        : 'Explicitly empty child plan has no linked sub-issues.',
+      ...childPlan,
       childCount: 0,
       edgeCount: 0,
       flatGraph: declarations.flatGraph,
@@ -242,6 +301,7 @@ export function evaluateEpicDependencies({ issue, children = [], edges = [] }) {
       classification: 'FAIL',
       passed: false,
       reason: errors.join(' '),
+      ...childPlan,
       childCount: childNumbers.size,
       edgeCount: normalizedEdges.length,
       flatGraph: declarations.flatGraph,
@@ -251,14 +311,17 @@ export function evaluateEpicDependencies({ issue, children = [], edges = [] }) {
     };
   }
 
-  const reason = declarations.flatGraph
+  const graphReason = declarations.flatGraph
     ? `Flat graph explicitly declared for ${childNumbers.size} linked sub-issues.`
     : `Verified ${normalizedEdges.length} dependency edges across ` +
       `${childNumbers.size} linked sub-issues.`;
   return {
     classification: 'PASS',
     passed: true,
-    reason,
+    reason: declarations.childPlanState === 'draft'
+      ? `Draft child plan: plan completeness is not verified. ${graphReason}`
+      : `All ${declarations.declaredChildren.length} declared children are linked. ${graphReason}`,
+    ...childPlan,
     childCount: childNumbers.size,
     edgeCount: normalizedEdges.length,
     flatGraph: declarations.flatGraph,
@@ -291,6 +354,10 @@ export function formatGateComment(result, issueNumberValue, runUrl) {
   const isolated = result.isolatedChildren.length > 0
     ? result.isolatedChildren.map((number) => `#${number}`).join(', ')
     : '(none)';
+  const declaredChildren = (result.declaredChildren ?? [])
+    .map((number) => `#${number}`).join(', ') || '(none)';
+  const missingChildren = (result.missingChildren ?? [])
+    .map((number) => `#${number}`).join(', ') || '(none)';
   return [
     gateCommentMarker,
     `## Epic dependency gate: ${status}`,
@@ -301,6 +368,9 @@ export function formatGateComment(result, issueNumberValue, runUrl) {
     '',
     '| Field | Value |',
     '|---|---|',
+    `| Child-plan state | ${result.childPlanState ?? 'unspecified'} |`,
+    `| Declared children | ${declaredChildren} |`,
+    `| Missing native child links | ${missingChildren} |`,
     `| Linked sub-issues | ${result.childCount} |`,
     `| Internal dependency edges | ${result.edgeCount} |`,
     `| Flat-graph opt-out | ${result.flatGraph ? 'yes' : 'no'} |`,
