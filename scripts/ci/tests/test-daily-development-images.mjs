@@ -250,9 +250,9 @@ test('registry and local validation overlays cover the complete stack', () => {
   );
   for (const binding of [
     '127.0.0.1:${POSTGRES_PORT:-15432}:5432',
-    '127.0.0.1:${API_PORT:-15245}:5245',
+    '127.0.0.1:${API_PORT:-5245}:5245',
     '127.0.0.1:${SLICER_HOST_PORT:-15246}:5246',
-    '127.0.0.1:${HTTP_PORT:-18080}:80',
+    '127.0.0.1:${HTTP_PORT:-3000}:80',
     '127.0.0.1:${HTTPS_PORT:-18443}:443',
     '127.0.0.1:${MOONRAKER_EMULATOR_PORT:-17125}:7125',
     '127.0.0.1:${MOONRAKER_EMULATOR_PRINTING_PORT:-17126}:7125',
@@ -273,7 +273,10 @@ test('registry and local validation overlays cover the complete stack', () => {
     /\.\/scripts\/generate-certs\.sh "\$STACK_DIR\/deploy\/nginx\/certs"/,
   );
   assert.match(documentation, /--project-name "\$COMPOSE_PROJECT_NAME"/);
-  assert.match(documentation, /export API_PORT=15245/);
+  assert.match(documentation, /export API_PORT=5245/);
+  assert.match(documentation, /export HTTP_PORT=3000/);
+  assert.match(documentation, /http:\/\/localhost:5245\/healthz/);
+  assert.match(documentation, /http:\/\/localhost:3000\//);
   assert.match(documentation, /export POSTGRES_USER=printfarmer/);
   assert.match(documentation, /unset POSTGRES_USER/);
 });

@@ -140,9 +140,9 @@ export ENABLE_DISTRIBUTED_SLICING=true
 export ENABLE_ORCA_WORKER=yes
 export ORCA_WORKER_COUNT=1
 export COMPOSE_PROJECT_NAME=printfarmer-daily-validation
-export API_PORT=15245
+export API_PORT=5245
 export SLICER_HOST_PORT=15246
-export HTTP_PORT=18080
+export HTTP_PORT=3000
 export HTTPS_PORT=18443
 export POSTGRES_PORT=15432
 export MOONRAKER_EMULATOR_PORT=17125
@@ -192,9 +192,16 @@ periodic network discovery so local validation does not probe the physical netwo
 The stack contains one upstream PostgreSQL container, exactly one OrcaSlicer worker,
 and four Moonraker emulator instances (the repository's "exactly one" rule applies
 only to the OrcaSlicer worker, not to these emulator replicas of a single image).
-The dedicated project name, reset container names, isolated network, and high host
-ports prevent cleanup from targeting an existing PrintFarmer deployment. Every
-published port binds to `127.0.0.1`; the authentication-bypass validation stack is
+The dedicated project name, reset container names, and isolated network prevent
+cleanup from targeting an existing PrintFarmer deployment. The API defaults to
+`http://127.0.0.1:5245` and the frontend (through nginx-proxy) to
+`http://127.0.0.1:3000`, matching the deterministic validation harness. Container
+ports remain `5245` for the API and `80` for nginx-proxy; internal service URLs
+are unchanged. Stop any local development servers occupying these host ports
+before starting validation. For a custom mapping, set `API_PORT` and `HTTP_PORT`
+and match the harness's `API_BASE_URL` and `BASE_URL` to them. Clear stale port
+exports or update your validation environment when regenerating an older stack.
+Every published port binds to `127.0.0.1`; the authentication-bypass validation stack is
 therefore reachable only from the local machine and must not be exposed externally.
 The validation override also removes the discovery service's host Docker socket mount.
 
@@ -220,8 +227,8 @@ docker compose \
   -f scripts/docker/compose-templates/docker-compose.daily-validation.yml \
   ps
 
-curl --fail --retry 30 --retry-delay 5 http://localhost:15245/healthz
-curl --fail --retry 30 --retry-delay 5 http://localhost:18080/
+curl --fail --retry 30 --retry-delay 5 http://localhost:5245/healthz
+curl --fail --retry 30 --retry-delay 5 http://localhost:3000/
 curl --fail --retry 30 --retry-delay 5 http://localhost:17125/healthz
 curl --fail --retry 30 --retry-delay 5 http://localhost:17126/healthz
 curl --fail --retry 30 --retry-delay 5 http://localhost:17127/healthz

@@ -4,6 +4,14 @@ import test from 'node:test';
 
 const script = readFileSync('scripts/ci/smoke-daily-validation-stack.sh', 'utf8');
 
+test('smoke script defaults to the deterministic harness host ports and probes those mappings', () => {
+  assert.ok(script.includes(': "${API_PORT:=5245}"'));
+  assert.ok(script.includes(': "${HTTP_PORT:=3000}"'));
+  assert.match(script, /wait_for_health "http:\/\/localhost:\$\{API_PORT\}\/healthz" "API"/);
+  assert.match(script, /wait_for_health "http:\/\/localhost:\$\{HTTP_PORT\}\/" "nginx-proxy\/frontend"/);
+  assert.match(script, /export [^\n]*(?:\\\n[^\n]*)*ConnectionStrings__Default API_PORT SLICER_HOST_PORT HTTP_PORT/);
+});
+
 test('smoke script is bash-strict and makes Docker-unavailable behavior explicit', () => {
   assert.match(script, /^#!\/usr\/bin\/env bash/);
   assert.match(script, /^set -euo pipefail/m);

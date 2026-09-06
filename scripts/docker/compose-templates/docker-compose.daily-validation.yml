@@ -10,7 +10,7 @@ services:
   api:
     container_name: !reset null
     ports: !override
-      - "127.0.0.1:${API_PORT:-15245}:5245"
+      - "127.0.0.1:${API_PORT:-5245}:5245"
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       # Local validation only: never expose this stack to an untrusted network.
@@ -41,7 +41,7 @@ services:
   nginx-proxy:
     container_name: !reset null
     ports: !override
-      - "127.0.0.1:${HTTP_PORT:-18080}:80"
+      - "127.0.0.1:${HTTP_PORT:-3000}:80"
       - "127.0.0.1:${HTTPS_PORT:-18443}:443"
 
   slicer-host:
