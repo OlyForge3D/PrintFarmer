@@ -132,6 +132,10 @@ struct ContentView: View {
 
     // MARK: - Compact (iPhone)
 
+    /// The compact shell owns tab selection only. The Floor/Oversight control
+    /// is rendered exactly once per root screen by `RootNavigationChrome`
+    /// inside that root's own `NavigationStack` (#2481), so the shell must not
+    /// render a second copy above the tab view.
     private func compactLayout(
         capabilities: ResolvedSystemCapabilities
     ) -> some View {
@@ -141,13 +145,7 @@ struct ContentView: View {
         )
         let tabs = router.visibleTabs(for: capabilities)
 
-        return VStack(spacing: 0) {
-            if router.shouldShowModeControl(for: router.resolvedTab(for: capabilities)) {
-                modeControl(capabilities: capabilities)
-            }
-
-            compactTabView(selection: selection, tabs: tabs)
-        }
+        return compactTabView(selection: selection, tabs: tabs)
     }
 
     @ViewBuilder
@@ -182,31 +180,6 @@ struct ContentView: View {
                 }
             }
         }
-    }
-
-    private func modeControl(
-        capabilities: ResolvedSystemCapabilities
-    ) -> some View {
-        Picker(
-            "Navigation mode",
-            selection: Binding(
-                get: { router.activeMode },
-                set: { router.setNavigationMode($0, capabilities: capabilities) }
-            )
-        ) {
-            Text("Floor").tag(OversightMode.floor)
-            Text("Oversight").tag(OversightMode.oversight)
-        }
-        .pickerStyle(.segmented)
-        .frame(minHeight: Self.modeControlMinimumHeight)
-        .padding(.horizontal)
-        .background(.bar)
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
-        .accessibilityLabel("Navigation mode")
-        .accessibilityHint("Switches between Floor work and Oversight.")
-        .accessibilityIdentifier("navigation.modeControl")
     }
 
     // MARK: - Regular (iPad)

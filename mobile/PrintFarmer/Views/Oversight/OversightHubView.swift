@@ -432,11 +432,16 @@ private struct OversightDestinationListRoot: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle(root.title)
+            // The root identifier must be applied to the list *before* the
+            // chrome. `accessibilityIdentifier` propagates to every element in
+            // the subtree it wraps, so applying it last also relabelled the
+            // chrome's Floor/Oversight picker as `oversight.root.*` and hid it
+            // from `navigation.modeControl` queries (#2481).
+            .accessibilityIdentifier(root.accessibilityIdentifier)
             .rootNavigationChrome(for: root.appTab)
             .navigationDestination(for: AppDestination.self) { destination in
                 destinationView(for: destination)
             }
-            .accessibilityIdentifier(root.accessibilityIdentifier)
         }
     }
 }

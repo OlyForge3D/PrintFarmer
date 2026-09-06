@@ -336,9 +336,9 @@ class PrintFarmerUITestCase: XCTestCase {
             line: line
         )
 
-        let modeControl = app.segmentedControls
+        let modeControls = app.segmentedControls
             .matching(identifier: "navigation.modeControl")
-            .firstMatch
+        let modeControl = modeControls.firstMatch
         if expectsModeControl {
             XCTAssertTrue(
                 modeControl.waitForExistence(timeout: 5),
@@ -346,11 +346,19 @@ class PrintFarmerUITestCase: XCTestCase {
                 file: file,
                 line: line
             )
+            XCTAssertEqual(
+                modeControls.count,
+                1,
+                "\(root.title) must render exactly one Floor/Oversight control",
+                file: file,
+                line: line
+            )
             XCTAssertTrue(modeControl.buttons["Floor"].exists, file: file, line: line)
             XCTAssertTrue(modeControl.buttons["Oversight"].exists, file: file, line: line)
         } else {
-            XCTAssertFalse(
-                modeControl.exists,
+            XCTAssertEqual(
+                modeControls.count,
+                0,
                 "\(root.title) must not show a mode control in Simple",
                 file: file,
                 line: line
