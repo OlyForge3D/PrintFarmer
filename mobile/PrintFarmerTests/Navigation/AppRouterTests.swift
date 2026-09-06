@@ -162,7 +162,7 @@ final class AppRouterTests: XCTestCase {
         )
         XCTAssertEqual(
             AppTab.tabs(for: .simple, mode: .floor),
-            [.attention, .farm, .inventory, .oversight]
+            [.attention, .farm, .tasks, .inventory, .oversight]
         )
         XCTAssertEqual(
             AppTab.tabs(for: .twoModes, mode: .floor),
@@ -292,7 +292,7 @@ final class AppRouterTests: XCTestCase {
     func testAdaptiveTabAccessibilityIdentifiersMatchSharedContract() {
         XCTAssertEqual(
             AppTab.tabs(for: .simple, mode: .floor).map(\.tabAccessibilityIdentifier),
-            ["tab.attention", "tab.farm", "tab.inventory", "tab.oversight"]
+            ["tab.attention", "tab.farm", "tab.tasks", "tab.inventory", "tab.oversight"]
         )
         XCTAssertEqual(
             AppTab.tabs(for: .twoModes, mode: .oversight)
@@ -314,7 +314,7 @@ final class AppRouterTests: XCTestCase {
                 for: .simple,
                 capabilities: capabilities
             ),
-            [.attention, .farm, .inventory]
+            [.attention, .farm, .tasks, .inventory]
         )
         XCTAssertEqual(
             AppTab.visibleTabs(
@@ -345,7 +345,10 @@ final class AppRouterTests: XCTestCase {
 
         XCTAssertEqual(
             router.visibleTabs(for: capabilities),
-            [.attention, .farm, .inventory, .overview, .fleet, .jobs, .upkeep, .reports]
+            [
+                .attention, .farm, .tasks, .inventory,
+                .overview, .fleet, .jobs, .upkeep, .reports
+            ]
         )
         router.selectTab(.reports, capabilities: capabilities)
         XCTAssertEqual(router.resolvedTab(for: capabilities), .reports)
@@ -458,7 +461,7 @@ final class AppRouterTests: XCTestCase {
         router.routeToJobQueue(capabilities: capabilities)
         XCTAssertEqual(router.selectedTab, .jobs)
         XCTAssertEqual(router.oversightJobsPath.count, 1)
-        XCTAssertFalse(router.visibleTabs(in: .floor, for: capabilities).contains(.tasks))
+        XCTAssertTrue(router.visibleTabs(in: .floor, for: capabilities).contains(.tasks))
 
         router.setExpandedSidebarPresentation(
             false,
@@ -528,7 +531,7 @@ final class AppRouterTests: XCTestCase {
                 capabilities: capabilities,
                 oversightAvailability: availability
             ),
-            [.attention, .farm, .inventory]
+            [.attention, .farm, .tasks, .inventory]
         )
         XCTAssertEqual(
             AppTab.visibleTabs(
@@ -565,8 +568,134 @@ final class AppRouterTests: XCTestCase {
         )
     }
 
-    func testChangingShellFallsBackWithinTheNewActiveSet() {
+    // MARK: - Tasks reachability (#2479)
+
+    func testEnabledTasksIsReachableInSimpleShellTabs() {
         let router = AppRouter()
+        router.setNavigationShell(.simple, capabilities: capabilities)
+
+        let tabs = router.visibleTabs(for: capabilities)
+        XCTAssertEqual(tabs, [.attention, .farm, .tasks, .inventory, .oversight])
+
+        router.selectTab(.tasks, capabilities: capabilities)
+        XCTAssertEqual(router.resolvedTab(for: capabilities), .tasks)
+        XCTAssertFalse(
+            router.shouldShowModeControl(for: .tasks),
+            "Simple never shows the Floor/Oversight control"
+        )
+    }
+
+    func testEnabledTasksIsReachableWhenAutomaticDerivesSimple() {
+        let router = AppRouter()
+        let derivation = NavigationShellDerivation.automatic(
+            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 6),
+            shiftPlanEnabled: capabilities.shiftPlanEnabled,
+            isFarmAdmin: true
+        )
+        XCTAssertEqual(derivation.shell, .simple)
+
+        router.configureAdaptiveShell(
+            serverID: UUID(),
+            userID: UUID(),
+            preference: .automatic,
+            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 6),
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.activeShell, .simple)
+        XCTAssertTrue(router.visibleTabs(for: capabilities).contains(.tasks))
+    }
+
+    func testEnabledTasksIsReachableInExpandedSidebarForBothShells() {
+        for shell in [NavigationShell.simple, .twoModes] {
+            let router = AppRouter()
+            router.setNavigationShell(shell, capabilities: capabilities)
+            router.setExpandedSidebarPresentation(
+                true,
+                capabilities: capabilities,
+                oversightAvailability: .fullyAvailable
+            )
+
+            XCTAssertTrue(
+                router.visibleTabs(in: .floor, for: capabilities).contains(.tasks),
+                "\(shell) sidebar must expose enabled Tasks"
+            )
+            router.selectTab(.tasks, capabilities: capabilities)
+            XCTAssertEqual(router.resolvedTab(for: capabilities), .tasks)
+        }
+    }
+
+    func testDisabledTasksStaysGatedInEveryShellAndSidebarSection() {
+        var tasksDisabled = capabilities
+        tasksDisabled.shiftPlanEnabled = false
+
+        for (shell, mode) in [
+            (NavigationShell.simple, OversightMode.floor),
+            (.twoModes, .floor),
+            (.twoModes, .oversight),
+            (.current, .floor)
+        ] {
+            XCTAssertFalse(
+                AppTab.visibleTabs(
+                    for: shell,
+                    mode: mode,
+                    capabilities: tasksDisabled
+                ).contains(.tasks),
+                "\(shell)/\(mode) must hide Tasks when shift planning is off"
+            )
+        }
+
+        for shell in [NavigationShell.simple, .twoModes] {
+            for section in SidebarSection.allCases {
+                XCTAssertFalse(
+                    AppTab.visibleTabs(
+                        in: section,
+                        for: shell,
+                        capabilities: tasksDisabled
+                    ).contains(.tasks),
+                    "\(shell)/\(section) sidebar must hide disabled Tasks"
+                )
+            }
+        }
+
+        let router = AppRouter()
+        router.setNavigationShell(.simple, capabilities: tasksDisabled)
+        router.selectTab(.tasks, capabilities: tasksDisabled)
+        XCTAssertNotEqual(router.resolvedTab(for: tasksDisabled), .tasks)
+    }
+
+    func testEveryEnabledOperatorTabRemainsReachableInBothAdaptiveShells() {
+        let enabledOperatorTabs: [AppTab] = [.attention, .farm, .tasks, .inventory]
+
+        for shell in [NavigationShell.simple, .twoModes] {
+            let router = AppRouter()
+            router.setNavigationShell(shell, capabilities: capabilities)
+
+            for tab in enabledOperatorTabs {
+                XCTAssertTrue(
+                    router.makeTabVisibleIfPossible(tab, capabilities: capabilities),
+                    "\(tab) must stay reachable in the \(shell) shell"
+                )
+                router.selectTab(tab, capabilities: capabilities)
+                XCTAssertEqual(router.resolvedTab(for: capabilities), tab)
+            }
+        }
+    }
+
+    func testJobQueueRoutingStillPrefersOversightOverTasksInSimple() {
+        let router = AppRouter()
+        router.setNavigationShell(.simple, capabilities: capabilities)
+
+        router.routeToJobQueue(capabilities: capabilities)
+
+        XCTAssertEqual(router.selectedTab, .oversight)
+        XCTAssertEqual(router.oversightPath.count, 1)
+        XCTAssertTrue(router.tasksPath.isEmpty)
+    }
+
+    func testChangingShellFallsBackWithinTheNewActiveSet() {        let router = AppRouter()
         router.selectedTab = .farm
 
         router.setNavigationShell(

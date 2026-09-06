@@ -23,7 +23,9 @@ private struct ResolvedNavigationIdentity: Equatable {
 /// operator role (see ``AdaptiveNavigationShell`` and the Navigation Shell
 /// section of `mobile/README.md`):
 ///
-/// * **Simple** — four tabs: Attention · Farm · Inventory · Oversight (hub).
+/// * **Simple** — Attention · Farm · Tasks · Inventory · Oversight (hub).
+///   Tasks is capability-gated on `shiftPlanEnabled`, so a server with shift
+///   planning off renders four tabs (#2479).
 /// * **Two modes** — a pinned Floor | Oversight control with four Floor tabs
 ///   (Attention · Farm · Tasks · Inventory) and five Oversight tabs
 ///   (Overview · Fleet · Jobs · Upkeep · Reports).

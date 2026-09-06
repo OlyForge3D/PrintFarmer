@@ -67,8 +67,11 @@ The compact (iPhone) layout picks one of two shells depending on the size and
 staffing of the connected server. Both shells reach the same destinations —
 growth expands the layout, it does not relocate features.
 
-- **Simple** (solo / owner-operator). Four tabs: **Attention · Farm · Inventory
-  · Oversight**. There is no mode control. Oversight is a single hub tab that
+- **Simple** (solo / owner-operator). **Attention · Farm · Tasks · Inventory
+  · Oversight**. There is no mode control. Tasks is capability-gated on
+  `shiftPlanEnabled` exactly as it is in Two modes, so a server with shift
+  planning switched off shows four tabs and one with it on shows five.
+  Oversight is a single hub tab that
   groups Dashboard, Dispatch, Filament Coverage, Maintenance, Analytics,
   Predictive Insights, Job History, Job Timeline, Locations, Uptime & Reliability
   and a row into the Navigation setting.

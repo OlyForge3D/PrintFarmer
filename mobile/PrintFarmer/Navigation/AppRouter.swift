@@ -6,7 +6,8 @@ import SwiftUI
 /// The router renders one of two compact shells (see the Navigation Shell
 /// section of `mobile/README.md` and ``AdaptiveNavigationShell``):
 ///
-/// * **Simple** — Attention · Farm · Inventory · Oversight (hub).
+/// * **Simple** — Attention · Farm · Tasks · Inventory · Oversight (hub).
+///   Tasks appears only while `shiftPlanEnabled` is true (#2479).
 /// * **Two modes** — pinned Floor | Oversight control with four Floor tabs
 ///   (Attention · Farm · Tasks · Inventory) and five Oversight tabs
 ///   (Overview · Fleet · Jobs · Upkeep · Reports).
