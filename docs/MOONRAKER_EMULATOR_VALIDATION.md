@@ -277,8 +277,8 @@ After the daily validation stack is healthy, run the strict Moonraker printer su
 from `src/Web/ReactApp`:
 
 ```bash
-API_BASE_URL=http://127.0.0.1:15245 \
-BASE_URL=http://127.0.0.1:18080 \
+API_BASE_URL=http://127.0.0.1:5245 \
+BASE_URL=http://127.0.0.1:3000 \
 npm run test:e2e:moonraker -- --project=chromium
 ```
 
@@ -303,8 +303,8 @@ credentials of that already-provisioned admin so the fixture authenticates as it
 instead:
 
 ```bash
-API_BASE_URL=http://127.0.0.1:15245 \
-BASE_URL=http://127.0.0.1:18080 \
+API_BASE_URL=http://127.0.0.1:5245 \
+BASE_URL=http://127.0.0.1:3000 \
 E2E_ADMIN_USERNAME=daily-smoke-admin \
 E2E_ADMIN_PASSWORD="$smoke_admin_password" \
 npm run test:e2e:moonraker -- --project=chromium
