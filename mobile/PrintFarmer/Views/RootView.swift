@@ -72,6 +72,11 @@ struct RootView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background && !isShowingMainContent {
+                // Backgrounding before the scanner could ever open means the
+                // login was abandoned — do not replay it later (#2480).
+                cancelPendingExternalScan()
+            }
             guard newPhase == .active else { return }
             routePendingExternalScan()
             resumeConnectivityAfterForeground()
@@ -82,8 +87,14 @@ struct RootView: View {
         .task {
             routePendingExternalScan()
         }
+        .onChange(of: isShowingMainContent) { _, _ in
+            // A completed sign-in is the moment a retained request becomes
+            // routable (#2480).
+            routePendingExternalScan()
+        }
         .onChange(of: authViewModel.isAuthenticated) { _, isAuthenticated in
             if !isAuthenticated {
+                cancelPendingExternalScan()
                 pendingReadyMonitor.stopMonitoring()
                 connectionMonitor.stop()
                 connectionGate.reset()
@@ -95,6 +106,7 @@ struct RootView: View {
         .onChange(of: services.activeServerGeneration) {
             certificateTrustPresentation.respond(accepted: false)
             Task { await CertificateTrustCoordinator.shared.cancelPendingConfirmations() }
+            cancelPendingExternalScan()
             pendingReadyMonitor.stopMonitoring()
             connectionMonitor.stop()
             connectionGate.reset()
@@ -261,11 +273,33 @@ struct RootView: View {
     }
 
     private func routePendingExternalScan() {
-        guard ExternalScanRequestStore.consume() else { return }
-        router.navigate(
-            to: .scan,
-            capabilities: services.capabilitiesService.resolved
+        let decision = ExternalScanRouting.decide(
+            pending: ExternalScanRequestStore.pending(),
+            isShowingMainContent: isShowingMainContent,
+            activeServerID: serverRegistry.activeServerID
         )
+        switch decision {
+        case .idle:
+            return
+        case .retain(let scopeTo):
+            // Held for the login the user is in the middle of — see #2480.
+            ExternalScanRequestStore.scope(to: scopeTo)
+        case .cancel:
+            cancelPendingExternalScan()
+        case .deliver:
+            ExternalScanRequestStore.consume()
+            router.navigate(
+                to: .scan,
+                capabilities: services.capabilitiesService.resolved
+            )
+        }
+    }
+
+    /// Abandons an external scan request that can no longer be honoured
+    /// coherently: logout, an abandoned login, or a server/account switch.
+    private func cancelPendingExternalScan() {
+        ExternalScanRequestStore.cancel()
+        router.cancelPendingExternalScan()
     }
 
     private struct BackendConnectionCheckView: View {
