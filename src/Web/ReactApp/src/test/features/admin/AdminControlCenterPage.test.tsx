@@ -534,6 +534,48 @@ describe('AdminControlCenterPage', () => {
     }
   });
 
+  it('bypasses overview fetch and hides health/attention bands for non-system-settings delegates', async () => {
+    // A delegate who has specific resource permissions (e.g. printers:admin)
+    // but not system_settings:admin or farm_admin should not trigger a 403
+    // on GET /admin/overview.
+    mockedUseAuth.mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+      user: {
+        id: 'user-delegate',
+        email: 'delegate@test.com',
+        roles: ['operator'],
+        isActive: true,
+      },
+      hasRole: () => false,
+      hasPermission: (resource: string, action: string) =>
+        resource === 'printers' && action === 'admin',
+      error: null,
+      login: vi.fn(),
+      loginWithPasskey: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    } as unknown as ReturnType<typeof useAuth>);
+
+    renderHub();
+
+    // Overview endpoint is never called
+    expect(mockedApiGet).not.toHaveBeenCalled();
+
+    // Health and attention bands are not rendered
+    expect(screen.queryByTestId('admin-hub-health-heading')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-hub-subsystems')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-hub-attention-heading')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /refresh/i })).not.toBeInTheDocument();
+
+    // Destination cards for accessible resources are still rendered
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-domains')).toBeInTheDocument();
+    });
+    const cards = screen.getAllByTestId('admin-hub-destination');
+    expect(cards.length).toBeGreaterThan(0);
+  });
+
   it('hides every admin destination for a non-admin user', async () => {
     mockedUseAuth.mockReturnValue(
       operatorAccess() as unknown as ReturnType<typeof useAuth>,
