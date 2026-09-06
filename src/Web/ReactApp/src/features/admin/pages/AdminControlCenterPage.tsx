@@ -368,7 +368,7 @@ export function AdminControlCenterPage() {
               />
             )}
 
-            {!isLoading && data && data.attention.length === 0 && (
+            {!isLoading && !isError && data && data.attention.length === 0 && (
               <p
                 className="flex items-center gap-2 text-sm text-pf-text-secondary"
                 data-testid="admin-hub-attention-clear"
@@ -386,7 +386,7 @@ export function AdminControlCenterPage() {
               </p>
             )}
 
-            {!isLoading && data && data.attention.length > 0 && (
+            {!isLoading && !isError && data && data.attention.length > 0 && (
               <ul
                 className="flex flex-col gap-2"
                 data-testid="admin-hub-attention"
