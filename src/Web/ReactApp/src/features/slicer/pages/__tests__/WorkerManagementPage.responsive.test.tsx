@@ -1,10 +1,14 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { WorkerManagementPage } from '../WorkerManagementPage';
 import { workerService, WorkerResponse } from '@/services/workerService';
 import { slicerHubService } from '@/services/slicerHubService';
+
+vi.mock('@/features/slicer/components/SliceJobsPanel', () => ({
+  SliceJobsPanel: () => <div data-testid="slice-jobs-panel">Slice jobs</div>,
+}));
 
 vi.mock('@/services/workerService', async () => {
   const actual = await vi.importActual<typeof import('@/services/workerService')>('@/services/workerService');
@@ -75,13 +79,42 @@ function setViewportWidth(width: number) {
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={['/admin/manage?tab=operations&sub=workers']}>
+    <MemoryRouter initialEntries={['/admin/workers']}>
       <WorkerManagementPage />
     </MemoryRouter>,
   );
 }
 
 describe('WorkerManagementPage responsive workers table', () => {
+  it('owns workerTab across jobs links, tab changes and browser history', async () => {
+    function HistoryControls() {
+      const location = useLocation();
+      const navigate = useNavigate();
+      return <>
+        <output data-testid="worker-location">{location.pathname}{location.search}</output>
+        <button onClick={() => navigate(-1)}>Back</button>
+        <button onClick={() => navigate(1)}>Forward</button>
+      </>;
+    }
+    render(
+      <MemoryRouter initialEntries={['/admin/workers', '/admin/workers?workerTab=jobs']} initialIndex={1}>
+        <WorkerManagementPage tabQueryParamName="workerTab" embedded />
+        <HistoryControls />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByTestId('slice-jobs-panel')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Back', exact: true }));
+    await waitFor(() => expect(screen.queryByTestId('slice-jobs-panel')).not.toBeInTheDocument());
+    expect(screen.getByTestId('worker-location')).toHaveTextContent(/^\/admin\/workers$/);
+    fireEvent.click(screen.getByRole('button', { name: 'Forward', exact: true }));
+    expect(await screen.findByTestId('slice-jobs-panel')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Workers', exact: true }));
+    expect(screen.getByTestId('worker-location')).toHaveTextContent(/^\/admin\/workers$/);
+    fireEvent.click(screen.getByRole('button', { name: 'Jobs', exact: true }));
+    expect(screen.getByTestId('worker-location')).toHaveTextContent('/admin/workers?workerTab=jobs');
+    expect(screen.getByTestId('worker-location')).not.toHaveTextContent('tab=operations');
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(workerService.getAllWorkers).mockResolvedValue([mockWorker]);

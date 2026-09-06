@@ -348,7 +348,7 @@ describe('AdminControlCenterPage', () => {
   it('resolves actionDestinationId through the ADMIN_DESTINATIONS registry', async () => {
     // Backend sends the stable id "ops-status" rather than a hardcoded route.
     // The client must look it up in ADMIN_DESTINATIONS and use the current canonical
-    // path (/admin/manage?tab=operations&sub=status), never a legacy /admin/system.
+    // path (/admin/status), never a legacy /admin/system.
     mockedApiGet.mockResolvedValue({
       data: makeOverview({
         attention: [
@@ -373,7 +373,7 @@ describe('AdminControlCenterPage', () => {
 
     const row = screen.getByTestId('admin-hub-attention-item');
     const actionLink = within(row).getByRole('link', { name: /Open System logs/i });
-    expect(actionLink).toHaveAttribute('href', '/admin/manage?tab=operations&sub=status');
+    expect(actionLink).toHaveAttribute('href', '/admin/status');
     // Legacy path must not leak through.
     expect(actionLink).not.toHaveAttribute('href', '/admin/system');
   });
@@ -403,7 +403,7 @@ describe('AdminControlCenterPage', () => {
 
     const row = screen.getByTestId('admin-hub-attention-item');
     const actionLink = within(row).getByRole('link', { name: /Open/i });
-    expect(actionLink).toHaveAttribute('href', '/admin/manage?tab=operations&sub=status');
+    expect(actionLink).toHaveAttribute('href', '/admin/status');
   });
 
   it('falls back to actionRoute when actionDestinationId does not resolve', async () => {

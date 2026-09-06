@@ -1,4 +1,4 @@
-export type SettingsScopeId = 'user' | 'system' | 'admin';
+export type SettingsScopeId = 'user' | 'system';
 
 /** Sub-page within a settings category */
 export interface SettingsSubPage {
@@ -45,18 +45,10 @@ export const SETTINGS_SCOPES: SettingsScope[] = [
   },
   {
     id: 'system',
-    label: 'System Settings',
-    description: 'Farm-wide configuration for printers, slicing, integrations, and policies.',
+    label: 'Farm & Admin Settings',
+    description: 'Farm-wide configuration, accounts, access, integrations, and policies.',
     keywords: ['system', 'farm', 'hardware', 'slicing', 'integrations', 'quotas', 'defaults'],
     defaultCategoryId: 'general',
-    adminOnly: true,
-  },
-  {
-    id: 'admin',
-    label: 'Admin',
-    description: 'Operational dashboards, user management, audit trails, and data maintenance.',
-    keywords: ['admin', 'operations', 'status', 'workers', 'users', 'audit', 'data'],
-    defaultCategoryId: 'operations',
     adminOnly: true,
   },
 ];
@@ -134,37 +126,24 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     subPages: [],
   },
   {
-    id: 'operations',
-    scopeId: 'admin',
-    label: 'Operations',
-    description: 'System health, worker status, and operational monitoring.',
-    keywords: ['system', 'status', 'health', 'workers', 'services', 'jobs', 'queue', 'monitoring'],
-    subPages: [
-      { id: 'status', label: 'Status', description: 'Inspect uptime, health, and infrastructure signals.', keywords: ['status', 'health', 'uptime', 'cpu', 'memory', 'disk', 'database', 'services'] },
-      { id: 'workers', label: 'Workers', description: 'Monitor slicer workers, queues, and background jobs.', keywords: ['workers', 'slicer', 'jobs', 'queue', 'processing'] },
-    ],
-  },
-  {
     id: 'users',
-    scopeId: 'admin',
+    scopeId: 'system',
     label: 'Users',
-    description: 'Accounts, roles, permissions, and authentication history.',
-    keywords: ['user', 'role', 'permission', 'account', 'admin', 'login', 'audit', 'security'],
+    description: 'Accounts, roles, and permissions.',
+    keywords: ['user', 'role', 'permission', 'account', 'admin', 'security'],
     subPages: [
       { id: 'accounts', label: 'User Accounts', description: 'Manage accounts, roles, and access levels.', keywords: ['user', 'account', 'role', 'permission', 'admin'] },
-      { id: 'audit', label: 'Login Audit', description: 'Review authentication attempts and sign-in history.', keywords: ['login', 'audit', 'history', 'security', 'log'] },
       { id: 'roles', label: 'Roles & Permissions', description: 'Create custom roles and manage their permission grants.', keywords: ['role', 'permission', 'matrix', 'grant', 'deny', 'access control'] },
     ],
   },
   {
     id: 'data',
-    scopeId: 'admin',
+    scopeId: 'system',
     label: 'Data',
-    description: 'Tags, exports, backups, cleanup workflows, and maintenance tasks.',
-    keywords: ['data', 'backup', 'export', 'import', 'storage', 'tag', 'label', 'cleanup'],
+    description: 'Reusable tags for organizing the farm.',
+    keywords: ['data', 'tag', 'label', 'organization'],
     subPages: [
       { id: 'tags', label: 'Tags', description: 'Manage reusable labels across the farm.', keywords: ['tag', 'label', 'category'] },
-      { id: 'management', label: 'Data Management', description: 'Run export, import, backup, and cleanup tasks.', keywords: ['backup', 'export', 'import', 'cleanup', 'storage'] },
     ],
   },
 ];
@@ -177,7 +156,6 @@ const settingsScopeLookup = new Map(SETTINGS_SCOPES.map((scope) => [scope.id, sc
 export const SETTINGS_CATEGORIES_BY_SCOPE: Record<SettingsScopeId, SettingsCategory[]> = {
   user: USER_SETTINGS_CATEGORIES,
   system: SETTINGS_CATEGORIES.filter((category) => category.scopeId === 'system'),
-  admin: SETTINGS_CATEGORIES.filter((category) => category.scopeId === 'admin'),
 };
 
 /** @deprecated Use SETTINGS_CATEGORIES instead */
@@ -194,7 +172,7 @@ export const DEFAULT_CATEGORY = getDefaultCategoryForScope(DEFAULT_SCOPE);
 export const DEFAULT_TAB = DEFAULT_CATEGORY;
 
 export function isSettingsScope(value: string | null | undefined): value is SettingsScopeId {
-  return value === 'user' || value === 'system' || value === 'admin';
+  return value === 'user' || value === 'system';
 }
 
 export function getSettingsScope(scopeId: SettingsScopeId): SettingsScope | undefined {

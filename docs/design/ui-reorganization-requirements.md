@@ -257,8 +257,9 @@ compatibility redirect registry.
 Rules:
 
 - `/analytics` is the canonical analytics hub.
-- Settings links use `/settings`, `/admin/settings?tab=<category>&sub=<page>`, or
-  `/admin/manage?tab=<category>&sub=<page>` according to scope.
+- Settings links use `/settings` for personal preferences and
+  `/admin/settings?tab=<category>&sub=<page>` for combined farm/admin configuration.
+  Operations use `/admin/status`, `/admin/workers`, `/admin/login-audit`, and `/admin/data-management`.
 - `/profile/api-keys` remains reachable by all authenticated users; do not gate it
   behind `farm_admin`.
 - Standalone contextual routes such as `/nfc-bindings` and `/printer-groups` retain

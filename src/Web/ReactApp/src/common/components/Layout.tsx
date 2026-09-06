@@ -1004,7 +1004,7 @@ export function Layout() {
             userMenuOpen={userMenuOpen}
             onToggleUserMenu={() => setUserMenuOpen((prev) => !prev)}
             onCloseUserMenu={() => setUserMenuOpen(false)}
-            onViewSystemStatus={() => navigate('/admin/manage?tab=operations&sub=status')}
+            onViewSystemStatus={() => navigate('/admin/status')}
             onOpenPreferences={() => navigate('/settings')}
             onOpenLogin={() => setShowLoginModal(true)}
             onOpenRegister={() => setShowRegisterModal(true)}
@@ -1085,7 +1085,7 @@ export function Layout() {
               userMenuOpen={userMenuOpen}
               onToggleUserMenu={() => setUserMenuOpen((prev) => !prev)}
               onCloseUserMenu={() => setUserMenuOpen(false)}
-              onViewSystemStatus={() => navigate('/admin/manage?tab=operations&sub=status')}
+              onViewSystemStatus={() => navigate('/admin/status')}
               onOpenPreferences={() => navigate('/settings')}
               onOpenLogin={() => setShowLoginModal(true)}
               onOpenRegister={() => setShowRegisterModal(true)}

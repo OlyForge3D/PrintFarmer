@@ -33,7 +33,7 @@ function pageTemplateOpeningTag(source: string): string {
 
 /**
  * Regression coverage for #1416: Settings (`/settings`, `/admin/settings`) and
- * Manage (`/admin/manage`) all render through `SettingsShell`, and the Admin
+ * configuration all render through `SettingsShell`, and the Admin
  * Control Center (`/admin`) renders through `AdminControlCenterPage`. Both
  * mount `<PageTemplate>` directly, so the outer horizontal padding every route
  * gets is whatever `padding` prop (or lack of one) each call site passes.

@@ -19,7 +19,7 @@ test.describe('Admin Users — Emulator', () => {
   test.beforeEach(async ({ page }) => {
     consoleErrors = [];
     page.on('pageerror', (error) => consoleErrors.push(error.message));
-    await page.goto('/admin/manage?tab=users&sub=accounts');
+    await page.goto('/admin/settings?tab=users&sub=accounts');
     await page.waitForLoadState('networkidle');
   });
 

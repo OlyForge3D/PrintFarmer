@@ -174,7 +174,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
       qc.invalidateQueries({ queryKey: ['slice-jobs-my'] });
       qc.invalidateQueries({ queryKey: ['slice-jobs'] });
       onClose();
-      navigate('/admin/manage?tab=operations&sub=workers&workerTab=jobs');
+      navigate('/admin/workers?workerTab=jobs');
     },
     onError: (err: unknown) => {
       setError(getErrorMessage(err, 'Failed to submit slice job'));

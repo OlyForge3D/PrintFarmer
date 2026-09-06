@@ -50,13 +50,12 @@ vi.mock('@/features/admin/pages/SettingsPage', () => ({
   SettingsPage: () => <div data-testid="legacy-settings-page">settings body</div>,
 }));
 
-const ROUTES: ReadonlyArray<readonly [string, string, 'system' | 'admin']> = [
+const ROUTES: ReadonlyArray<readonly [string, string, 'system']> = [
   ['system settings', '/admin/settings?tab=general', 'system'],
-  ['admin manage — users', '/admin/manage?tab=users&sub=accounts', 'admin'],
-  ['admin manage — operations', '/admin/manage?tab=operations&sub=status', 'admin'],
+  ['admin settings — users', '/admin/settings?tab=users&sub=accounts', 'system'],
 ];
 
-function renderAt(path: string, scope: 'system' | 'admin') {
+function renderAt(path: string, scope: 'system') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
@@ -146,15 +145,14 @@ describe('admin surface accessibility floor (#1016)', () => {
   });
 
   it.each(ROUTES)('%s marks the active nav item for assistive tech', (_name, path, scope) => {
-    const { container } = renderAt(path, scope);
-    const nav = container.querySelector('nav');
-    expect(nav).not.toBeNull();
+    renderAt(path, scope);
+    const nav = screen.getByRole('navigation', { name: /categories/i });
 
     // Highlighting the current page with colour alone does not reach a
     // screen reader; aria-current does.
-    const current = within(nav as HTMLElement)
+    const current = within(nav)
       .queryAllByRole('button')
-      .concat(within(nav as HTMLElement).queryAllByRole('link'))
+      .concat(within(nav).queryAllByRole('link'))
       .filter((el) => el.getAttribute('aria-current') === 'page');
 
     expect(current.length).toBeGreaterThan(0);

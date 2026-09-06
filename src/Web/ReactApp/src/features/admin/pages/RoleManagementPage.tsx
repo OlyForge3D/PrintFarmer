@@ -101,7 +101,7 @@ function buildCatalogIndex(catalog: PermissionCatalog | undefined): Map<string, 
 /**
  * Role management admin page (#1455). Lets a `farm_admin` create, edit, and retire
  * custom roles, and view/toggle every enforced permission per role via a matrix.
- * Mounted embedded inside `SettingsShell` at `/admin/manage?tab=users&sub=roles`.
+ * Mounted embedded inside `SettingsShell` at `/admin/settings?tab=users&sub=roles`.
  */
 export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
   const queryClient = useQueryClient();

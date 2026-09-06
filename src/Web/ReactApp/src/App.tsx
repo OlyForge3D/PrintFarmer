@@ -1,5 +1,6 @@
 // Common components
 import { ProtectedRoute } from '@/features/auth/components/ProtectedRoute';
+import { AdminDestinationRoute } from '@/features/admin/components/AdminDestinationRoute';
 import { ErrorBoundary } from '@/common/components/ErrorBoundary';
 import { NotFoundPage } from '@/common/components/NotFoundPage';
 import { Layout } from '@/common/components/Layout';
@@ -61,6 +62,18 @@ const LazyPrinterGroupsPage = lazy(() =>
 );
 const LazySettingsShell = lazy(() =>
   import('@/features/settings/pages/SettingsShell').then(mod => ({ default: mod.SettingsShell }))
+);
+const LazySystemStatusPage = lazy(() =>
+  import('@/features/system/pages/SystemStatusPage').then(mod => ({ default: mod.SystemStatusPage }))
+);
+const LazyWorkerManagementPage = lazy(() =>
+  import('@/features/slicer/pages/WorkerManagementPage').then(mod => ({ default: mod.WorkerManagementPage }))
+);
+const LazyLoginAuditPage = lazy(() =>
+  import('@/features/admin/pages/LoginAuditPage').then(mod => ({ default: mod.LoginAuditPage }))
+);
+const LazyDataManagementPage = lazy(() =>
+  import('@/features/admin/pages/DataManagementPage').then(mod => ({ default: mod.DataManagementPage }))
 );
 const LazyApiKeysPage = lazy(() =>
   import('@/features/profile/pages/ApiKeysPage').then(mod => ({ default: mod.ApiKeysPage }))
@@ -307,7 +320,10 @@ function AuthenticatedAppRoutes() {
         <Route path="admin" element={<Outlet />}>
           <Route index element={lazyRoute(<LazyAdminControlCenterPage />)} />
           <Route path="settings" element={lazyRoute(<LazySettingsShell routeScope="system" />)} />
-          <Route path="manage" element={lazyRoute(<LazySettingsShell routeScope="admin" />)} />
+          <Route path="status" element={<AdminDestinationRoute destinationId="ops-status">{lazyRoute(<LazySystemStatusPage />)}</AdminDestinationRoute>} />
+          <Route path="workers" element={<AdminDestinationRoute destinationId="ops-workers">{lazyRoute(<LazyWorkerManagementPage tabQueryParamName="workerTab" embedded />)}</AdminDestinationRoute>} />
+          <Route path="login-audit" element={<AdminDestinationRoute destinationId="users-audit">{lazyRoute(<LazyLoginAuditPage embedded />)}</AdminDestinationRoute>} />
+          <Route path="data-management" element={<AdminDestinationRoute destinationId="data-management">{lazyRoute(<LazyDataManagementPage embedded />)}</AdminDestinationRoute>} />
           {/*
            * Unlike settings/manage (which route through SettingsShell's own
            * scope/tab gating), power-monitors renders directly, so it needs

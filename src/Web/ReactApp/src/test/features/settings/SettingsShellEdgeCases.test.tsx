@@ -107,7 +107,7 @@ function renderSettings(initialRoute = '/settings') {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialRoute]}>
         <GlobalCommandPaletteProvider>
-          <SettingsShell />
+          <SettingsShell routeScope={initialRoute.startsWith('/admin/settings') ? 'system' : undefined} />
         </GlobalCommandPaletteProvider>
         <LocationProbe />
       </MemoryRouter>
@@ -168,24 +168,23 @@ describe('SettingsShell edge cases', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=farm');
   });
 
-  it('falls back to User Settings when a non-admin deep-links into the Admin scope', () => {
+  it('does not fall back to personal content when an unprivileged user opens configuration', () => {
     setAuthRoles(['farm_user']);
-    renderSettings('/settings?scope=admin&tab=users&sub=audit');
-
-    expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
-    expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=users');
-    expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=audit');
+    renderSettings('/admin/settings?scope=system&tab=users&sub=roles');
+    expect(screen.getByText(/No settings editor is available/)).toBeInTheDocument();
+    expect(screen.queryByTestId('theme-switcher')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('legacy-settings-page')).not.toBeInTheDocument();
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=');
   });
 
-  it('resolves admin deep links that include both tab and sub params', () => {
-    renderSettings('/settings?scope=admin&tab=users&sub=audit');
+  it('resolves unified configuration deep links that include both tab and sub params', () => {
+    renderSettings('/admin/settings?scope=system&tab=users&sub=roles');
 
     expect(getCategoryButton('Users')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('tab', { name: 'Login Audit' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=admin');
+    expect(screen.getByRole('tab', { name: 'Roles & Permissions' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=users');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=audit');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=roles');
   });
 });

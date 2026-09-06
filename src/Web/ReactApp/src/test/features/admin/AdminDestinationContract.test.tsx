@@ -11,6 +11,11 @@ import {
 } from '@/features/admin/registry/adminDestinations';
 import { PowerMonitorSettingsPage } from '@/features/power-monitors/components/PowerMonitorSettingsPage';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
+import { AdminDestinationRoute } from '@/features/admin/components/AdminDestinationRoute';
+import { SystemStatusPage } from '@/features/system/pages/SystemStatusPage';
+import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
+import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
+import { DataManagementPage } from '@/features/admin/pages/DataManagementPage';
 import { resolveSettingsNavigationTarget } from '@/features/settings/settings-navigation';
 import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
 
@@ -176,13 +181,12 @@ vi.mock('sonner', () => ({
 }));
 
 function renderShellAt(path: string) {
-  const scope = path.startsWith('/admin/manage') ? 'admin' : 'system';
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[path]}>
         <GlobalCommandPaletteProvider>
-          <SettingsShell routeScope={scope} />
+          <SettingsShell routeScope="system" />
         </GlobalCommandPaletteProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -196,6 +200,16 @@ function renderShellAt(path: string) {
  * ship with no way back to the hub.
  */
 const STANDALONE_RENDERERS: Record<string, () => void> = {
+  ...Object.fromEntries([
+    ['ops-status', '/admin/status', <SystemStatusPage />],
+    ['ops-workers', '/admin/workers', <WorkerManagementPage tabQueryParamName="workerTab" embedded />],
+    ['users-audit', '/admin/login-audit', <LoginAuditPage embedded />],
+    ['data-management', '/admin/data-management', <DataManagementPage embedded />],
+  ].map(([id, path, page]) => [String(path), () => render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter><AdminDestinationRoute destinationId={String(id)}>{page}</AdminDestinationRoute></MemoryRouter>
+    </QueryClientProvider>,
+  )])),
   '/admin/power-monitors': () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -237,7 +251,7 @@ describe('admin destination contract (#1016)', () => {
       // If this ever comes back empty the walk below would pass by accident.
       expect(declared.has('/admin')).toBe(true);
       expect(declared.has('/admin/settings')).toBe(true);
-      expect(declared.has('/admin/manage')).toBe(true);
+      expect(declared.has('/admin/manage')).toBe(false);
     });
 
     it.each(ADMIN_DESTINATIONS.map((d) => [d.id, d.path] as const))(
@@ -266,9 +280,9 @@ describe('admin destination contract (#1016)', () => {
       expect(deepLinks.length).toBeGreaterThan(10);
     });
 
-    it.each(deepLinks)('%s -> %s resolves to its own tab', (_id, _path, pathname, scope, tab, sub) => {
+    it.each(deepLinks)('%s -> %s resolves to its own tab', (_id, _path, _pathname, scope, tab, sub) => {
       // The route itself fixes the scope; `?scope=` is only ever a redundant echo.
-      const routeScope = scope ?? (pathname === '/admin/manage' ? 'admin' : 'system');
+      const routeScope = scope ?? 'system';
       const resolved = resolveSettingsNavigationTarget(tab, sub, routeScope);
 
       // Deliberately an identity check, not "resolves to *something*".
@@ -284,7 +298,7 @@ describe('admin destination contract (#1016)', () => {
 
   describe('every destination the shell owns keeps one h1 and a way back', () => {
     const shellOwned = ADMIN_OWNED.filter(
-      (d) => d.path.startsWith('/admin/settings') || d.path.startsWith('/admin/manage'),
+      (d) => d.path.startsWith('/admin/settings'),
     );
 
     it('covers most of the admin surface', () => {
@@ -355,7 +369,7 @@ const ROUTER_ONLY: Record<string, string> = {
 
 describe('admin destinations the shell does not draw (Hicks #5)', () => {
   const NOT_SHELL_DRAWN = ADMIN_OWNED.filter(
-    (d) => !d.path.startsWith('/admin/settings') && !d.path.startsWith('/admin/manage'),
+    (d) => !d.path.startsWith('/admin/settings'),
   );
 
   /** Paths that legitimately have no back link, each with the reason. */

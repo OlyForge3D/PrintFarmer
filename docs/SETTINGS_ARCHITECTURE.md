@@ -15,20 +15,26 @@ show up in the UI without any React changes, and where the sharp edges are.
 
 ## Routes And Scopes
 
-Every settings and admin page is rendered by `SettingsShell` under one of three routes,
-mapped to the three settings **scopes** in
-`src/Web/ReactApp/src/features/settings/types.ts`:
+The two settings routes share one engine with route-locked scopes. Operational pages
+are separate framed destinations, not configuration tabs. The workspace still uses
+category/sub-tab navigation; grouped-leaf/search presentation and an attention-first
+dashboard are downstream work, not delivered by the route migration (#2504).
 
 | Route | Scope | Access | Rendered by |
 |---|---|---|---|
-| `/settings` | `user` | Any authenticated user | `<SettingsShell routeScope="user" />` |
-| `/admin/settings` | `system` | `farm_admin` role | `<SettingsShell routeScope="system" />` via `SystemSettingsRoute` |
-| `/admin/manage` | `admin` | `farm_admin` role | `<SettingsShell routeScope="admin" />` |
-| `/admin` | — | `farm_admin` role | `AdminControlCenterPage` (hub, not a shell) |
+| `/settings` | `user` | Authenticated | SettingsShell, personal content only |
+| `/admin/settings` | `system` | Per-destination grants | SettingsShell, Farm & Admin Settings |
+| `/admin` | None | Authenticated, destinations filtered | AdminControlCenterPage |
+| `/admin/status` | None | `system_settings:admin` | SystemStatusPage |
+| `/admin/workers` | None | `dispatch-settings:manage` | WorkerManagementPage |
+| `/admin/login-audit` | None | `system_settings:admin` | LoginAuditPage |
+| `/admin/data-management` | None | `data_management:admin` | DataManagementPage |
 
-`/admin` itself is the Admin Control Center hub — a tiled landing page that links out to
-individual destinations from `adminDestinations.ts`. Every other admin/settings surface
-is one of the three shell routes above with query parameters.
+The four operational routes use AdminDestinationRoute and AdminPageShell: one h1,
+one parent link to `/admin`, retained actions, and no query subtree mounted until
+the registry predicate passes. `/admin/manage` is retired without alias or redirect.
+Personal `/profile/api-keys`, `/profile/notifications`, and `/profile/passkeys`
+remain available to every authenticated user.
 
 ## URL Contract
 
@@ -37,9 +43,9 @@ button all round-trip through these parameters:
 
 | Parameter | Purpose | Values |
 |---|---|---|
-| `?scope` | Which of the three shells this URL belongs to. Falls back to the route's `routeScope` when omitted. | `user` / `system` / `admin` |
-| `?tab` | Category within the scope (e.g. `general`, `slicing`, `operations`). | See `SETTINGS_CATEGORIES` in `types.ts`. |
-| `?sub` | Sub-page within the tab. Falls back to the first sub-page in the category. | See each category's `subPages` array. |
+| `?scope` | Optional scope, normalized from the route when omitted or inconsistent. | `user` / `system` |
+| `?tab` | Category within the scope (e.g. `general`, `slicing`, `users`). | See `SETTINGS_CATEGORIES` in `types.ts`. |
+| `?sub` | Sub-page within the tab. Falls back to the first accessible sub-page in the category. | See each category's `subPages` array. |
 | `?q` | Search query, applied to the current sub-page's settings metadata. | Free text. |
 | `?field` | Deep-link to a single property row on the current sub-page. Section-qualified — see below. | e.g. `SystemLog.Enabled`. |
 
@@ -58,11 +64,26 @@ Categories are defined in `SETTINGS_CATEGORIES` (`src/Web/ReactApp/src/features/
   - `slicing` → Defaults, Bed Types, Slicer Profiles
   - `hardware` → Cameras, NFC Devices, Printer Groups, NFC Bindings, Custom Fields
   - `integrations` → External Services, Webhooks
-  - `quotas` (no sub-pages yet)
-- **Admin scope** (`/admin/manage`):
-  - `operations` → Status, Workers
-  - `users` → User Accounts, Login Audit
-  - `data` → Tags, Data Management
+  - `quotas` (implemented QuotaManagementPage)
+  - `users` -> User Accounts, Roles & Permissions
+  - `data` -> Tags
+
+Access is defined once in `ADMIN_DESTINATIONS`: resource permissions, integration
+any-of grants, and the farm_admin-only Slicer Profiles exception. Neither the outlet
+nor the workspace requires that role globally. Bare/unknown/category URLs select the
+first accessible editor; explicit denied editors never mount. No admin URL falls back
+to personal content.
+
+The registry classifies destinations as hub/configuration/operational, with configuration
+display groups Farm, Printing & slicing, Hardware, Automation & costs, Integrations,
+People & access, Organization and System. Stable IDs, including overview
+`actionDestinationId`, do not change. The group metadata supports downstream presentation;
+it does not replace the intermediate category chrome yet.
+
+Power Monitors (`/admin/power-monitors`), Locations (`/locations`) and Catalog
+(`/catalog`) stay standalone configuration links. They count toward workspace/hub
+availability even without `isHubTile`. Standalone-only users see their authorized links
+and an honest no-editor state without `tab`, `sub` or `field` editor state.
 
 Categories/sub-pages that render *metadata-driven* settings (Farm Defaults, System Config,
 Automation & Costs, External Services, Slicing Defaults) do so by mounting `<SettingsPage
@@ -78,11 +99,11 @@ mapping is declared in `SUB_PAGE_CONTENT` in
 |---|---|---|
 | `general.farm` | `['General']` | `<FarmSettingsSection />` via `afterContent` |
 | `general.system` | `['System', 'Networking', 'Catalog', 'Files', 'Printers']` | — |
-| `general.automation` | `['Operations', 'Monitoring', 'Maintenance']` | — |
-| `integrations.connections` | `['Integrations']` | `<TelegramSettingsCard />` via `afterContent` |
+| `general.automation` | `['Operations', 'Monitoring', 'Maintenance', 'Job Queue']` | — |
+| `integrations.connections` | `['Integrations']` | Resource-gated Spoolman, Home Assistant and Telegram cards; generic editor requires `system_settings:admin`. |
 | `slicing.defaults` | `['Slicing']` | — |
 
-Other sub-pages (`operations.status`, `data.tags`, `hardware.cameras`, etc.) render
+Other sub-pages (`users.accounts`, `data.tags`, `hardware.cameras`, etc.) render
 bespoke pages instead of a metadata-driven `<SettingsPage>`.
 
 ### Groups declared in the code but not reachable via `allowedGroups`
@@ -298,11 +319,11 @@ Palette items are assembled from four sources:
 2. **Settings sections** (user scope only) — `buildSettingsCommandItems()` filtered to
    `scopeId === 'user'`. Avoids duplicating admin destinations that already appear under
    Places.
-3. **Individual setting properties** (farm_admin only) — `buildSettingCommandItems(metadata,
+3. **Individual setting properties** (`system_settings:admin`, filtered to accessible destinations) — `buildSettingCommandItems(metadata,
    groups)` walks the metadata API and emits one row per property, each linking to a
    `?field=Section.Property` deep-link.
 4. **Actions** — a curated list: **Sign out** (any user, with in-app confirmation),
-   **Refresh admin overview** (farm_admin — invalidates `ADMIN_OVERVIEW_QUERY_KEY`),
+   **Refresh admin overview** (`system_settings:admin` — invalidates `ADMIN_OVERVIEW_QUERY_KEY`),
    **Switch to light/dark theme** (any user).
 
 Keyboard handler details:
@@ -374,11 +395,11 @@ The settings and admin shell routes are:
 
 - `/settings` for user settings.
 - `/admin/settings?tab=<category>&sub=<page>` for system settings.
-- `/admin/manage?tab=<category>&sub=<page>` for administration.
+- `/admin/status`, `/admin/workers`, `/admin/login-audit`, `/admin/data-management` for operations.
 
 Use additional query parameters only when the destination owns them. For example, the
 canonical slice-job list is
-`/admin/manage?tab=operations&sub=workers&workerTab=jobs`.
+`/admin/workers?workerTab=jobs`. WorkerManagementPage alone reads/writes `workerTab`; tab clicks and browser Back/Forward preserve that ownership.
 
 Default children within a current route hierarchy use React Router index routes. For
 example, the Locations dashboard renders at the `/locations` index route without

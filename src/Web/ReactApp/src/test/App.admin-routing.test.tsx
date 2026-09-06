@@ -56,13 +56,18 @@ vi.mock('@/contexts/SlicerContext', () => ({
   SlicerProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+const access = vi.hoisted(() => ({
+  admin: true,
+  grant: '',
+}));
+
 vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({
     isAuthenticated: true,
     isLoading: false,
     user: { id: 'user-1', email: 'admin@test.com', role: 'farm_admin', isActive: true },
-    hasRole: (role: string) => role === 'farm_admin',
-    hasPermission: () => true,
+    hasRole: (role: string) => access.admin && role === 'farm_admin',
+    hasPermission: (resource: string, action: string) => access.admin || access.grant === `${resource}:${action}`,
   }),
 }));
 
@@ -129,25 +134,79 @@ vi.mock('sonner', () => ({
   },
 }));
 
+vi.mock('@/features/system/pages/SystemStatusPage', () => ({
+  SystemStatusPage: () => <div>SystemStatusMock</div>,
+}));
+vi.mock('@/features/slicer/pages/WorkerManagementPage', () => ({
+  WorkerManagementPage: ({ embedded, tabQueryParamName }: { embedded?: boolean; tabQueryParamName?: string }) => (
+    <div data-testid="worker-page" data-embedded={embedded} data-tab-param={tabQueryParamName}>WorkersMock</div>
+  ),
+}));
+vi.mock('@/features/admin/pages/LoginAuditPage', () => ({
+  LoginAuditPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="audit-page" data-embedded={embedded}>LoginAuditMock</div>,
+}));
+vi.mock('@/features/admin/pages/DataManagementPage', () => ({
+  DataManagementPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="data-page" data-embedded={embedded}>DataManagementMock</div>,
+}));
+
 import App from '../App';
 
 describe('App canonical admin routes', () => {
   beforeEach(() => {
+    access.admin = true;
+    access.grant = '';
     vi.clearAllMocks();
   });
 
   it.each([
-    '/admin/settings?tab=slicing&sub=profiles',
-    '/admin/manage?tab=operations&sub=workers&workerTab=jobs',
-  ])('renders the canonical destination without rewriting %s', async (destination) => {
+    ['/admin/settings?tab=slicing&sub=profiles', 'SettingsShellMock'],
+    ['/admin/workers?workerTab=jobs', 'WorkersMock'],
+    ['/admin/status', 'SystemStatusMock'],
+    ['/admin/login-audit', 'LoginAuditMock'],
+    ['/admin/data-management', 'DataManagementMock'],
+  ])('renders the canonical destination without rewriting %s', async (destination, content) => {
     window.history.pushState({}, '', destination);
 
     render(<App />);
 
-    expect(await screen.findByText('SettingsShellMock')).toBeInTheDocument();
+    expect(await screen.findByText(content)).toBeInTheDocument();
     await waitFor(() => {
       expect(`${window.location.pathname}${window.location.search}`).toBe(destination);
     });
+  });
+
+  it.each([
+    ['/admin/status', 'system_settings:admin', 'SystemStatusMock'],
+    ['/admin/workers?workerTab=jobs', 'dispatch-settings:manage', 'WorkersMock'],
+    ['/admin/login-audit', 'system_settings:admin', 'LoginAuditMock'],
+    ['/admin/data-management', 'data_management:admin', 'DataManagementMock'],
+  ])('allows the resource delegate but keeps denied query subtrees unmounted: %s', async (path, grant, content) => {
+    access.admin = false;
+    window.history.pushState({}, '', path);
+    const mounted = render(<App />);
+    expect(await screen.findByText('Access Denied')).toBeInTheDocument();
+    expect(screen.queryByText(content)).not.toBeInTheDocument();
+    mounted.unmount();
+    access.grant = grant;
+    render(<App />);
+    expect(await screen.findByText(content)).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getAllByRole('link', { name: 'Admin Control Center' })).toHaveLength(1);
+  });
+
+  it('preserves the worker page query ownership and embedded frame', async () => {
+    window.history.pushState({}, '', '/admin/workers?workerTab=jobs');
+    render(<App />);
+    expect(await screen.findByTestId('worker-page')).toHaveAttribute('data-tab-param', 'workerTab');
+    expect(screen.getByTestId('worker-page')).toHaveAttribute('data-embedded', 'true');
+  });
+
+  it('does not register or redirect the retired manage route', async () => {
+    window.history.pushState({}, '', '/admin/manage');
+    render(<App />);
+    await screen.findByText(/page not found/i);
+    expect(window.location.pathname).toBe('/admin/manage');
+    expect(screen.queryByText('SettingsShellMock')).not.toBeInTheDocument();
   });
 
   it('uses the locations index route for the dashboard default', async () => {

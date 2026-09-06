@@ -97,19 +97,21 @@ Standalone browser-based 3D slicer application for converting models to G-code.
 
 ### Admin Control Center And Settings
 
-Administrative UI is a **single URL-driven shell** rendered by
-`SettingsShell.tsx`. Every admin/settings page is one of three routes:
+Configuration uses a shared URL-driven SettingsShell, separate from operational tools.
+The current workspace retains category/sub-tab presentation.
 
 | Route | Scope | Access |
 |---|---|---|
-| `/settings` | User (self-service) | Any authenticated user |
-| `/admin/settings` | System (farm-wide config) | `farm_admin` role |
-| `/admin/manage` | Admin (accounts, data, operations) | `farm_admin` role |
-| `/admin` | Control Center hub | `farm_admin` role |
+| `/settings` | Personal | Any authenticated user |
+| `/admin/settings` | Farm & Admin configuration | Resource-specific grants; Slicer Profiles requires farm_admin |
+| `/admin` | Control Center hub | Authenticated, permission-filtered destinations |
+| `/admin/status`, `/admin/login-audit` | Operations | system_settings:admin |
+| `/admin/workers` | Operations | dispatch-settings:manage |
+| `/admin/data-management` | Operations | data_management:admin |
 
-The shell is entirely driven by URL parameters:
+The configuration shell is driven by URL parameters:
 
-- `?scope=<user|system|admin>` — which shell you are in (defaults from the route).
+- `?scope=<user|system>` — which shell you are in (defaults from the route).
 - `?tab=<categoryId>` — category within the scope.
 - `?sub=<subPageId>` — sub-page within the tab.
 - `?q=<query>` — search the current sub-page's metadata.
@@ -118,8 +120,9 @@ The shell is entirely driven by URL parameters:
 Exactly ONE settings page mounts at a time. The metadata-driven pages
 (`<SettingsPage>`) filter by group and render fields from the backend metadata
 API — no hand-written forms per property. Bespoke sub-pages (Bed Types,
-Cameras, Users, Login Audit, Tags, Data Management, Slicer Profiles, Webhooks,
-Workers, System Status) render their own components inside the shell.
+Cameras, Users, Roles, Tags, Quotas, Slicer Profiles, Webhooks) render existing embedded
+components. Operations use standalone framed pages. Power Monitors, Locations and
+Catalog remain standalone configuration links.
 
 For the full architecture, tab-to-group map, save model, Essential mode, and
 palette details, see [SETTINGS_ARCHITECTURE.md](./SETTINGS_ARCHITECTURE.md).

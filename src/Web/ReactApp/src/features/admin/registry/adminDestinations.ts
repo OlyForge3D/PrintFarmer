@@ -58,7 +58,30 @@ export interface AdminDestinationPermission {
   action: string;
 }
 
+export type SettingsDisplayGroup =
+  | 'farm'
+  | 'printing'
+  | 'hardware'
+  | 'automation'
+  | 'integrations'
+  | 'people'
+  | 'organization'
+  | 'system';
+
+export const SETTINGS_DISPLAY_GROUPS: readonly { id: SettingsDisplayGroup; label: string }[] = [
+  { id: 'farm', label: 'Farm' },
+  { id: 'printing', label: 'Printing & slicing' },
+  { id: 'hardware', label: 'Hardware' },
+  { id: 'automation', label: 'Automation & costs' },
+  { id: 'integrations', label: 'Integrations' },
+  { id: 'people', label: 'People & access' },
+  { id: 'organization', label: 'Organization' },
+  { id: 'system', label: 'System' },
+];
+
 export interface AdminDestination {
+  kind: 'hub' | 'configuration' | 'operational';
+  settingsGroup?: SettingsDisplayGroup;
   /** Stable unique identifier. Used as React key, palette command id, hub card id. */
   id: string;
   /** Short label shown in nav, hub cards, and palette results. */
@@ -137,7 +160,6 @@ export const ADMIN_HUB_PARENT = {
  *
  * Path conventions:
  * - `/admin/settings?tab=X&sub=Y` — SettingsShell system scope (deep-linkable tab).
- * - `/admin/manage?tab=X&sub=Y` — SettingsShell admin scope (deep-linkable tab).
  * - `/admin/*` — standalone admin pages.
  * - Bare `/foo` paths are operational pages surfaced in admin because a farm_admin
  *   uses them daily (Locations, Catalog, Analytics, Auto-Dispatch, Maintenance).
@@ -166,6 +188,7 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   // ── Overview ──────────────────────────────────────────────────────────
   {
     id: 'admin-home',
+    kind: 'hub',
     label: 'Admin Home',
     description: 'Control Center — status, alerts, and every admin destination in one place.',
     path: '/admin',
@@ -185,9 +208,10 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   // ── Operations ────────────────────────────────────────────────────────
   {
     id: 'ops-status',
+    kind: 'operational',
     label: 'System Status',
     description: 'Uptime, health checks, database, and infrastructure signals.',
-    path: '/admin/manage?tab=operations&sub=status',
+    path: '/admin/status',
     icon: ServerIcon,
     group: 'operations',
     // Backed by AdminOverviewController / SystemInfoController / SystemLogsController,
@@ -199,9 +223,10 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'ops-workers',
+    kind: 'operational',
     label: 'Workers & Jobs',
     description: 'Slicer workers, background jobs, and processing queues.',
-    path: '/admin/manage?tab=operations&sub=workers',
+    path: '/admin/workers',
     icon: DashboardIcon,
     group: 'operations',
     // Backed by the slicer module's WorkersController, `[RequirePermission("dispatch-settings:manage")]`.
@@ -212,6 +237,7 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'ops-maintenance',
+    kind: 'operational',
     label: 'Maintenance',
     description: 'Track printer maintenance schedules, tasks, and reminders.',
     path: '/maintenance',
@@ -226,6 +252,7 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'ops-analytics',
+    kind: 'operational',
     label: 'Analytics',
     description: 'Production, cost, and utilization dashboards.',
     path: '/analytics',
@@ -239,6 +266,7 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'ops-auto-dispatch',
+    kind: 'operational',
     label: 'Auto-Dispatch',
     description: 'Automated job dispatch across the farm.',
     path: '/auto-dispatch',
@@ -254,9 +282,11 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   // ── Users ─────────────────────────────────────────────────────────────
   {
     id: 'users-accounts',
+    kind: 'configuration',
+    settingsGroup: 'people',
     label: 'User Accounts',
     description: 'Manage accounts, roles, and access levels.',
-    path: '/admin/manage?tab=users&sub=accounts',
+    path: '/admin/settings?tab=users&sub=accounts',
     icon: UsersIcon,
     group: 'users',
     // Genuinely admin-only: UsersController is class-level `[RequirePermission("users", "admin")]`.
@@ -267,9 +297,10 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'users-audit',
+    kind: 'operational',
     label: 'Login Audit',
     description: 'Authentication attempts and sign-in history.',
-    path: '/admin/manage?tab=users&sub=audit',
+    path: '/admin/login-audit',
     icon: AlertIcon,
     group: 'users',
     // Backed by SecurityAuditController, `[RequirePermission("system_settings", "admin")]`.
@@ -280,9 +311,11 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'users-roles',
+    kind: 'configuration',
+    settingsGroup: 'people',
     label: 'Roles & Permissions',
     description: 'Create custom roles and manage their permission grants.',
-    path: '/admin/manage?tab=users&sub=roles',
+    path: '/admin/settings?tab=users&sub=roles',
     icon: ShieldIcon,
     group: 'users',
     requiredRole: null,
@@ -294,9 +327,11 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   // ── Data ──────────────────────────────────────────────────────────────
   {
     id: 'data-tags',
+    kind: 'configuration',
+    settingsGroup: 'organization',
     label: 'Tags',
     description: 'Reusable labels across models, printers, and jobs.',
-    path: '/admin/manage?tab=data&sub=tags',
+    path: '/admin/settings?tab=data&sub=tags',
     icon: TagIcon,
     group: 'data',
     // Backed by TagsController, `[RequirePermission("tags", "admin")]`.
@@ -307,9 +342,10 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'data-management',
+    kind: 'operational',
     label: 'Data Management',
     description: 'Export, import, backup, and cleanup workflows.',
-    path: '/admin/manage?tab=data&sub=management',
+    path: '/admin/data-management',
     icon: DatabaseIcon,
     group: 'data',
     // Backed by AdminDataController, `[RequirePermission("data_management", "admin")]`.
@@ -320,6 +356,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'data-catalog',
+    kind: 'configuration',
+    settingsGroup: 'organization',
     label: 'Catalog',
     description: 'Printer manufacturers, models, filaments, and reference data.',
     path: '/catalog',
@@ -335,6 +373,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   // ── Hardware ──────────────────────────────────────────────────────────
   {
     id: 'hw-locations',
+    kind: 'configuration',
+    settingsGroup: 'hardware',
     label: 'Locations',
     description: 'Physical zones, rooms, and printer placement.',
     path: '/locations',
@@ -349,6 +389,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'hw-printer-groups',
+    kind: 'configuration',
+    settingsGroup: 'hardware',
     label: 'Printer Groups',
     description: 'Organize printers into shared operational groups.',
     path: '/admin/settings?tab=hardware&sub=printer-groups',
@@ -362,6 +404,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'hw-cameras',
+    kind: 'configuration',
+    settingsGroup: 'hardware',
     label: 'Cameras',
     description: 'Camera feeds and monitoring views.',
     path: '/admin/settings?tab=hardware&sub=cameras',
@@ -374,6 +418,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'hw-nfc',
+    kind: 'configuration',
+    settingsGroup: 'hardware',
     label: 'NFC Devices',
     description: 'Register and manage NFC readers and hardware.',
     path: '/admin/settings?tab=hardware&sub=nfc',
@@ -386,6 +432,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'hw-nfc-bindings',
+    kind: 'configuration',
+    settingsGroup: 'hardware',
     label: 'NFC Bindings',
     description: 'Map NFC tags to printers, spools, and actions.',
     path: '/admin/settings?tab=hardware&sub=nfc-bindings',
@@ -398,6 +446,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'hw-custom-fields',
+    kind: 'configuration',
+    settingsGroup: 'hardware',
     label: 'Custom Fields',
     description: 'Extend hardware records with custom metadata.',
     path: '/admin/settings?tab=hardware&sub=custom-fields',
@@ -410,6 +460,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'hw-power-monitors',
+    kind: 'configuration',
+    settingsGroup: 'hardware',
     label: 'Power Monitors',
     description: 'Smart plug power monitors for printers and equipment.',
     path: '/admin/power-monitors',
@@ -424,6 +476,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   // ── Slicing ───────────────────────────────────────────────────────────
   {
     id: 'slicing-defaults',
+    kind: 'configuration',
+    settingsGroup: 'printing',
     label: 'Slicer Defaults',
     description: 'Farm-wide slicer defaults, process behavior, and plate settings.',
     path: '/admin/settings?tab=slicing&sub=defaults',
@@ -438,6 +492,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'slicing-bed-types',
+    kind: 'configuration',
+    settingsGroup: 'printing',
     label: 'Bed Types',
     description: 'Bed surfaces and plate presets.',
     path: '/admin/settings?tab=slicing&sub=bed-types',
@@ -450,6 +506,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'slicing-profiles',
+    kind: 'configuration',
+    settingsGroup: 'printing',
     label: 'Slicer Profiles',
     description: 'OrcaSlicer and PrusaSlicer profile libraries.',
     path: '/admin/settings?tab=slicing&sub=profiles',
@@ -468,6 +526,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   // ── Integrations ──────────────────────────────────────────────────────
   {
     id: 'int-connections',
+    kind: 'configuration',
+    settingsGroup: 'integrations',
     label: 'External Services',
     description: 'Spoolman, Home Assistant, Telegram, and slicer auth.',
     path: '/admin/settings?tab=integrations&sub=connections',
@@ -493,6 +553,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'int-webhooks',
+    kind: 'configuration',
+    settingsGroup: 'integrations',
     label: 'Webhooks',
     description: 'Outgoing webhook endpoints for automation.',
     path: '/admin/settings?tab=integrations&sub=webhooks',
@@ -507,6 +569,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   // ── General ───────────────────────────────────────────────────────────
   {
     id: 'gen-farm',
+    kind: 'configuration',
+    settingsGroup: 'farm',
     label: 'Farm Defaults',
     description: 'Farm identity, timezone, and appearance defaults.',
     path: '/admin/settings?tab=general&sub=farm',
@@ -521,6 +585,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   },
   {
     id: 'gen-system',
+    kind: 'configuration',
+    settingsGroup: 'system',
     label: 'System Config',
     description: 'Database, logging, network discovery, and file parameters.',
     path: '/admin/settings?tab=general&sub=system',
@@ -535,6 +601,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   // ── Automation ────────────────────────────────────────────────────────
   {
     id: 'auto-costs',
+    kind: 'configuration',
+    settingsGroup: 'automation',
     label: 'Automation & Costs',
     description: 'Cost tracking, failure detection, and auto-tag rules.',
     path: '/admin/settings?tab=general&sub=automation',
@@ -550,6 +618,8 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   // ── Quotas ────────────────────────────────────────────────────────────
   {
     id: 'quotas',
+    kind: 'configuration',
+    settingsGroup: 'organization',
     label: 'Quotas',
     description: 'Usage limits, allowance policies, and farm-wide constraints.',
     path: '/admin/settings?tab=quotas',
@@ -682,7 +752,7 @@ export function getDestinationsByGroup(group: AdminDestinationGroup): AdminDesti
  * True when at least one destination whose `path` starts with `pathPrefix` is
  * reachable by the current user.
  *
- * Used by `SettingsShell` (#1457) to decide whether the `system`/`admin`
+ * Used by `SettingsShell` (#1457) to decide whether the `system`
  * settings scopes should be offered at all — replacing a blanket
  * `hasRole('farm_admin')` scope gate with "does this user hold any permission
  * that unlocks something under this scope's path". Individual tabs within an
@@ -701,15 +771,19 @@ export function hasAccessibleDestinationWithPrefix(
 /**
  * Find the destination that backs a given `SettingsShell` tab/sub-page pair.
  *
- * Destinations under `/admin/settings` and `/admin/manage` encode their tab
+ * Destinations under `/admin/settings` encode their tab
  * (and, when present, sub-page) as `tab=<category>&sub=<subPage>` query
  * parameters — see the path conventions documented above `ADMIN_DESTINATIONS`.
  * Returns `undefined` for categories with no matching destination (e.g. the
  * `user`-scope profile tabs, which aren't admin destinations at all).
  */
 export function getDestinationForTab(categoryId: string, subPageId?: string): AdminDestination | undefined {
-  const suffix = subPageId ? `tab=${categoryId}&sub=${subPageId}` : `tab=${categoryId}`;
-  return ADMIN_DESTINATIONS.find((destination) => destination.path.includes(suffix));
+  return ADMIN_DESTINATIONS.find((destination) => {
+    const [path, query] = destination.path.split('?');
+    const params = new URLSearchParams(query);
+    return path === '/admin/settings' && params.get('tab') === categoryId
+      && (params.get('sub') ?? undefined) === subPageId;
+  });
 }
 
 /**
@@ -733,13 +807,19 @@ export function canAccessSettingsTab(
 ): boolean {
   const destination = getDestinationForTab(categoryId, subPageId);
   if (!destination) {
-    return true;
+    if (categoryId === 'profile') return true;
+    if (subPageId) return false;
+    return ADMIN_DESTINATIONS.some((entry) => {
+      const [path, query] = entry.path.split('?');
+      return path === '/admin/settings' && new URLSearchParams(query).get('tab') === categoryId
+        && canAccessDestination(entry, access);
+    });
   }
   return canAccessDestination(destination, access);
 }
 
 /**
- * True when the current user can reach at least one hub-tile destination —
+ * True when the current user can reach at least one hub or configuration destination —
  * i.e. the Admin Control Center page would render something for them.
  *
  * The hub renders `isHubTile` destinations regardless of their `path`
@@ -755,7 +835,7 @@ export function canAccessSettingsTab(
  */
 export function hasAccessibleHubTile(access: AdminDestinationAccess): boolean {
   return filterDestinationsByAccess(ADMIN_DESTINATIONS, access)
-    .some((destination) => destination.isHubTile);
+    .some((destination) => destination.isHubTile || destination.kind === 'configuration');
 }
 
 /**
@@ -769,7 +849,7 @@ export function getHubGroupedDestinations(access: AdminDestinationAccess): {
   destinations: AdminDestination[];
 }[] {
   const accessible = filterDestinationsByAccess(ADMIN_DESTINATIONS, access);
-  const hubDestinations = accessible.filter((destination) => destination.isHubTile);
+  const hubDestinations = accessible.filter((destination) => destination.isHubTile || destination.kind === 'configuration');
 
   return ADMIN_DESTINATION_GROUPS
     .map((group) => ({
