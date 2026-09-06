@@ -171,10 +171,15 @@ function resolveAttentionActionRoute(
     hasPermission: (resource: string, action: string) => boolean;
   },
 ): string | null {
+  const isRetiredManageRoute = (route: string) =>
+    route === '/admin/manage' ||
+    route.startsWith('/admin/manage?') ||
+    route.startsWith('/admin/manage#') ||
+    route.startsWith('/admin/manage/');
   const fallbackRoute =
     item.actionRoute &&
     item.actionRoute.startsWith('/') &&
-    !item.actionRoute.startsWith('/admin/manage')
+    !isRetiredManageRoute(item.actionRoute)
       ? item.actionRoute
       : null;
 
