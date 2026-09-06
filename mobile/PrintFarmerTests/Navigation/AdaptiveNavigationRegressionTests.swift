@@ -51,6 +51,158 @@ final class AdaptiveNavigationRegressionTests: XCTestCase {
         )
     }
 
+    // MARK: - Established automatic layout latch (#2478)
+
+    func testEstablishedSimpleLatchKeepsAutomaticOnSimpleAfterTheFarmGrows() {
+        let grownDerivation = NavigationShellDerivation.automatic(
+            farmShape: FarmShape(accountCount: 2, locationCount: 2, printerCount: 40),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        )
+        XCTAssertEqual(grownDerivation.shell, .twoModes)
+
+        XCTAssertEqual(
+            AdaptiveNavigationShell.requestedShell(
+                preference: .automatic,
+                automaticDerivation: grownDerivation,
+                establishedShell: .simple
+            ),
+            .simple,
+            "Growth may only raise the upgrade offer, never impose Two modes (#2478)."
+        )
+    }
+
+    func testAutomaticStillDerivesTwoModesOnAFirstRunWithNoLatch() {
+        let grownDerivation = NavigationShellDerivation.automatic(
+            farmShape: FarmShape(accountCount: 2, locationCount: 2, printerCount: 40),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        )
+
+        XCTAssertEqual(
+            AdaptiveNavigationShell.requestedShell(
+                preference: .automatic,
+                automaticDerivation: grownDerivation,
+                establishedShell: nil
+            ),
+            .twoModes
+        )
+    }
+
+    func testASimpleDerivationOverridesAnEstablishedTwoModesLatch() {
+        let shiftPlanningOff = NavigationShellDerivation.automatic(
+            farmShape: FarmShape(accountCount: 4, locationCount: 3, printerCount: 40),
+            shiftPlanEnabled: false,
+            isFarmAdmin: true
+        )
+        XCTAssertEqual(shiftPlanningOff.shell, .simple)
+
+        XCTAssertEqual(
+            AdaptiveNavigationShell.requestedShell(
+                preference: .automatic,
+                automaticDerivation: shiftPlanningOff,
+                establishedShell: .twoModes
+            ),
+            .simple,
+            "Simple is only derived from explicit negative signals, so it wins (#2478)."
+        )
+    }
+
+    func testExplicitPreferencesIgnoreTheLatchEntirely() {
+        let grownDerivation = NavigationShellDerivation.automatic(
+            farmShape: FarmShape(accountCount: 2, locationCount: 2, printerCount: 40),
+            shiftPlanEnabled: true,
+            isFarmAdmin: true
+        )
+
+        XCTAssertEqual(
+            AdaptiveNavigationShell.requestedShell(
+                preference: .simple,
+                automaticDerivation: grownDerivation,
+                establishedShell: .twoModes
+            ),
+            .simple
+        )
+        XCTAssertEqual(
+            AdaptiveNavigationShell.requestedShell(
+                preference: .twoModes,
+                automaticDerivation: grownDerivation,
+                establishedShell: .simple
+            ),
+            .twoModes
+        )
+    }
+
+    func testRouterHonoursThePersistedLatchAndRepublishesTheSettledShell() {
+        let router = AppRouter()
+        let serverID = UUID()
+        let userID = UUID()
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .automatic,
+            farmShape: FarmShape(accountCount: 2, locationCount: 2, printerCount: 40),
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable,
+            persistedAutomaticShell: .simple
+        )
+
+        XCTAssertEqual(router.activeShell, .simple)
+        XCTAssertEqual(router.establishedAutomaticShell, .simple)
+    }
+
+    func testRouterDoesNotLatchWithoutAGroundedFarmShape() {
+        let router = AppRouter()
+
+        router.configureAdaptiveShell(
+            serverID: UUID(),
+            userID: UUID(),
+            preference: .automatic,
+            farmShape: nil,
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertNil(router.establishedAutomaticShell)
+    }
+
+    func testRouterDoesNotLatchUnderAnExplicitPreference() {
+        let router = AppRouter()
+
+        router.configureAdaptiveShell(
+            serverID: UUID(),
+            userID: UUID(),
+            preference: .twoModes,
+            farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 1),
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertNil(router.establishedAutomaticShell)
+    }
+
+    func testResettingTheShellSessionClearsTheLatch() {
+        let router = AppRouter()
+        router.configureAdaptiveShell(
+            serverID: UUID(),
+            userID: UUID(),
+            preference: .automatic,
+            farmShape: FarmShape(accountCount: 2, locationCount: 2, printerCount: 40),
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        XCTAssertEqual(router.establishedAutomaticShell, .twoModes)
+
+        router.resetAdaptiveShellSession()
+
+        XCTAssertNil(router.establishedAutomaticShell)
+    }
+
     func testSwitchingServerContextChangesResolvedShell() {
         let router = AppRouter()
 

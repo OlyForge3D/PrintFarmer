@@ -53,6 +53,11 @@ final class AppRouter {
     private(set) var configuredIsFarmAdmin = false
     private(set) var appliedNavigationPreference: NavigationLayoutPreference?
     private(set) var establishedAutomaticDerivation: NavigationShellDerivation?
+    /// The automatic layout this session settled on for the configured server,
+    /// or `nil` when Automatic had no grounded farm shape to settle on. The
+    /// value is persisted per server by `ServerRegistry` so growth cannot
+    /// silently change the layout on a later launch (#2478).
+    private(set) var establishedAutomaticShell: NavigationShell?
     private(set) var oversightAvailability = OversightNavigationAvailability.fullyAvailable
     var presentsExpandedSidebar = false
     var selectedTab: AppTab {
@@ -295,6 +300,7 @@ final class AppRouter {
         isFarmAdmin: Bool,
         capabilities: ResolvedSystemCapabilities,
         oversightAvailability: OversightNavigationAvailability,
+        persistedAutomaticShell: NavigationShell? = nil,
         preserveNavigationOnContextChange: Bool = false
     ) {
         let contextChanged = configuredServerID != serverID || configuredUserID != userID
@@ -328,10 +334,18 @@ final class AppRouter {
             appliedNavigationPreference = preference
             requestedShell = AdaptiveNavigationShell.requestedShell(
                 preference: preference,
-                automaticDerivation: automaticDerivation
+                automaticDerivation: automaticDerivation,
+                establishedShell: persistedAutomaticShell
             )
             activeMode = .floor
         }
+
+        // Only a grounded Automatic derivation establishes a layout worth
+        // latching: an unknown/offline shape is not evidence, and an explicit
+        // Simple/Two modes override is the user's own choice (#2478).
+        establishedAutomaticShell = preference == .automatic && farmShape != nil
+            ? requestedShell
+            : nil
 
         reconcileCapabilities(
             capabilities,
@@ -442,6 +456,7 @@ final class AppRouter {
         configuredUserID = nil
         appliedNavigationPreference = nil
         establishedAutomaticDerivation = nil
+        establishedAutomaticShell = nil
         oversightAvailability = .fullyAvailable
         presentsExpandedSidebar = false
         selectedTab = .attention

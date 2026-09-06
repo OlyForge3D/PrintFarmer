@@ -41,6 +41,8 @@ private struct ResolvedNavigationIdentity: Equatable {
 struct ContentView: View {
     static let sidebarRowMinimumHeight: CGFloat = 44
     static let modeControlMinimumHeight = RootNavigationChrome.minimumTouchTarget
+    /// Minimum spacing between foreground farm-shape refreshes (#2478).
+    static let farmShapeRefreshInterval: TimeInterval = 300
 
     static func shippingTabs(
         for capabilities: ResolvedSystemCapabilities
@@ -57,9 +59,11 @@ struct ContentView: View {
     @Environment(ServiceContainer.self) private var services
     @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.scenePhase) private var scenePhase
     @State private var navigationIdentity: ResolvedNavigationIdentity?
     @State private var navigationIdentityError: String?
     @State private var navigationIdentityRetryRevision = 0
+    @State private var lastFarmShapeRefresh: Date?
 
     var body: some View {
         let capabilities = services.capabilitiesService.resolved
@@ -127,6 +131,40 @@ struct ContentView: View {
                 capabilities: capabilities,
                 oversightAvailability: oversightAvailability
             )
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            refreshLatestFarmShapeIfDue()
+        }
+    }
+
+    /// Foreground refresh of the *latest* observed farm shape (#2478).
+    ///
+    /// This never touches the session shape, so it cannot move the live shell:
+    /// its only job is to let a farm that grew while the app was backgrounded
+    /// reach the in-context upgrade offer instead of waiting for the next
+    /// startup fetch to lose a deadline race. It is throttled to at most one
+    /// request per ``farmShapeRefreshInterval`` per foregrounding, so it never
+    /// becomes a poll.
+    private func refreshLatestFarmShapeIfDue() {
+        guard let activeServer = serverRegistry.activeServer,
+              let navigationIdentity,
+              navigationIdentity.serverID == activeServer.id,
+              navigationIdentity.endpoint == activeServer.normalizedURLString,
+              !navigationIdentity.isProvisional else {
+            return
+        }
+
+        let now = Date()
+        if let lastFarmShapeRefresh,
+           now.timeIntervalSince(lastFarmShapeRefresh) < Self.farmShapeRefreshInterval {
+            return
+        }
+        lastFarmShapeRefresh = now
+
+        let serverID = activeServer.id
+        Task {
+            await services.farmShapeService.refreshLatest(serverID: serverID)
         }
     }
 
@@ -347,18 +385,34 @@ struct ContentView: View {
             isFarmAdmin: navigationIdentity.isFarmAdmin
         )
 
+        let preference: NavigationLayoutPreference = navigationIdentity.isProvisional
+            ? .simple
+            : serverRegistry.navigationLayoutPreference
+
         router.configureAdaptiveShell(
             serverID: activeServer.id,
             userID: navigationIdentity.userID,
-            preference: navigationIdentity.isProvisional
-                ? .simple
-                : serverRegistry.navigationLayoutPreference,
+            preference: preference,
             farmShape: services.farmShapeService.sessionShape,
             isFarmAdmin: navigationIdentity.isFarmAdmin,
             capabilities: capabilities,
             oversightAvailability: oversightAvailability,
+            persistedAutomaticShell: serverRegistry.establishedAutomaticShell(
+                for: activeServer.id,
+                isFarmAdmin: navigationIdentity.isFarmAdmin
+            ),
             preserveNavigationOnContextChange: preserveNavigationOnIdentityUpgrade
         )
+
+        // Latch the Automatic layout this session settled on so later farm
+        // growth can only offer Two modes, never impose it (#2478).
+        if preference == .automatic,
+           let establishedShell = router.establishedAutomaticShell {
+            serverRegistry.recordEstablishedAutomaticShell(
+                establishedShell,
+                for: activeServer.id
+            )
+        }
         if UITestBootstrap.isEnabled,
            UITestBootstrap.startsInOversightMode {
             router.setNavigationMode(

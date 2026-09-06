@@ -36,6 +36,7 @@ final class ServerRegistry {
     private static let advancedPrinterControlsPreferenceKeyPrefix = "pf_advanced_printer_controls_enabled"
     private static let navigationLayoutPreferenceKeyPrefix = "pf_navigation_layout"
     private static let oversightUpgradeOfferStateKeyPrefix = "pf_oversight_upgrade_offer"
+    private static let establishedAutomaticShellKeyPrefix = "pf_navigation_established_shell"
 
     private struct OversightUpgradeOfferState: Codable {
         var lastObserved: OversightUpgradeOfferSignature?
@@ -373,7 +374,70 @@ final class ServerRegistry {
             preference.rawValue,
             forKey: Self.navigationLayoutPreferenceKey(for: activeServerID)
         )
+        // An explicit override replaces the latched Automatic layout: choosing
+        // Automatic again later is a deliberate act and re-derives from the
+        // server's current shape (#2478).
+        if preference != .automatic {
+            userDefaults.removeObject(
+                forKey: Self.establishedAutomaticShellKey(for: activeServerID)
+            )
+        }
         navigationLayoutPreference = preference
+    }
+
+    /// The Automatic layout this installation has already settled on for a
+    /// server, or `nil` when nothing has been established yet.
+    ///
+    /// Installations that ran Automatic before this latch existed have no
+    /// stored value, so the baseline recorded by the upgrade-offer state is
+    /// used instead: it is the shape this installation was last observed on,
+    /// which is exactly the shape its layout was derived from (#2478).
+    func establishedAutomaticShell(
+        for serverID: UUID,
+        isFarmAdmin: Bool
+    ) -> NavigationShell? {
+        if let raw = userDefaults.string(
+            forKey: Self.establishedAutomaticShellKey(for: serverID)
+        ),
+           let shell = NavigationShell(rawValue: raw) {
+            return shell
+        }
+
+        let state = oversightUpgradeOfferState(for: serverID)
+        if state.hasAccepted {
+            return .twoModes
+        }
+        guard let baseline = state.lastObserved else { return nil }
+        if !state.dismissedThresholds.isEmpty {
+            return .simple
+        }
+        return NavigationShellDerivation.automatic(
+            farmShape: FarmShape(
+                accountCount: baseline.accountCount,
+                locationCount: baseline.locationCount,
+                printerCount: 0
+            ),
+            shiftPlanEnabled: baseline.shiftPlanEnabled,
+            isFarmAdmin: isFarmAdmin
+        ).shell
+    }
+
+    /// Latches the Automatic layout in use for a server so a later launch
+    /// cannot silently change it after the farm grows.
+    func recordEstablishedAutomaticShell(
+        _ shell: NavigationShell,
+        for serverID: UUID
+    ) {
+        guard activeServerID == serverID,
+              shell == .simple || shell == .twoModes,
+              navigationLayoutPreference == .automatic else {
+            return
+        }
+
+        userDefaults.set(
+            shell.rawValue,
+            forKey: Self.establishedAutomaticShellKey(for: serverID)
+        )
     }
 
     /// Records an observed farm shape and returns whether it newly qualifies for
@@ -434,6 +498,9 @@ final class ServerRegistry {
         state.dismissedThresholds.formUnion(state.pendingThresholds)
         state.pendingThresholds = []
         setOversightUpgradeOfferState(state, for: activeServerID)
+        // "Not now" is only meaningful if the layout it declines stays put
+        // across relaunches (#2478).
+        recordEstablishedAutomaticShell(.simple, for: activeServerID)
     }
 
     @discardableResult
@@ -583,6 +650,10 @@ final class ServerRegistry {
         "\(oversightUpgradeOfferStateKeyPrefix).\(serverID.uuidString.lowercased())"
     }
 
+    private static func establishedAutomaticShellKey(for serverID: UUID) -> String {
+        "\(establishedAutomaticShellKeyPrefix).\(serverID.uuidString.lowercased())"
+    }
+
     private func oversightUpgradeOfferState(for serverID: UUID) -> OversightUpgradeOfferState {
         guard let data = userDefaults.data(
             forKey: Self.oversightUpgradeOfferStateKey(for: serverID)
@@ -646,6 +717,9 @@ final class ServerRegistry {
     private func clearOversightUpgradeOfferState(for serverID: UUID) {
         userDefaults.removeObject(
             forKey: Self.oversightUpgradeOfferStateKey(for: serverID)
+        )
+        userDefaults.removeObject(
+            forKey: Self.establishedAutomaticShellKey(for: serverID)
         )
     }
 

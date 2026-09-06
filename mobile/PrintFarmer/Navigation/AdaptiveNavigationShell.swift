@@ -116,13 +116,26 @@ struct OversightNavigationAvailability: Equatable, Sendable {
 }
 
 enum AdaptiveNavigationShell {
+    /// Resolves the shell the app should request.
+    ///
+    /// In `Automatic`, an `establishedShell` — the layout this installation has
+    /// already settled on for this server, persisted by `ServerRegistry` — acts
+    /// as a latch so farm growth can never silently upgrade the layout on a
+    /// later launch (#2478, epic #2410 Decision 4). Moving up to Two modes
+    /// requires the explicit upgrade offer. A derivation that lands on Simple
+    /// always wins over the latch, because Simple is only ever derived from an
+    /// explicit negative signal (shift planning off, not a farm admin, shape
+    /// unknown, or a farm that shrank back below every threshold).
     static func requestedShell(
         preference: NavigationLayoutPreference,
-        automaticDerivation: NavigationShellDerivation
+        automaticDerivation: NavigationShellDerivation,
+        establishedShell: NavigationShell? = nil
     ) -> NavigationShell {
         switch preference {
         case .automatic:
-            automaticDerivation.shell
+            automaticDerivation.shell == .simple
+                ? .simple
+                : (establishedShell ?? automaticDerivation.shell)
         case .simple:
             .simple
         case .twoModes:

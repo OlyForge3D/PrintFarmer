@@ -32,7 +32,7 @@ enum AppDestination: Hashable {
 ///
 /// `current` keeps the shipping operator UI unchanged while the
 /// adaptive shells are introduced incrementally by the IOS navigation epic.
-enum NavigationShell: Hashable, CaseIterable, Sendable {
+enum NavigationShell: String, Hashable, CaseIterable, Sendable {
     case current
     case simple
     case twoModes
