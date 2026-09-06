@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
 import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
 import { AdminControlCenterPage } from '@/features/admin/pages/AdminControlCenterPage';
+import { client } from '@/services/api/httpClient';
 
 /**
  * Accessibility floor for the admin surface.
@@ -36,6 +37,11 @@ vi.mock('@/features/auth/hooks/useAuth', () => {
   };
   return { useAuth: () => value, useAuthInternal: () => value };
 });
+vi.mock('@/services/api/httpClient', () => ({
+  client: {
+    get: vi.fn(),
+  },
+}));
 vi.mock('@/common/hooks/useTheme', () => ({
   useTheme: () => ({
     theme: 'dark',
@@ -50,24 +56,8 @@ vi.mock('sonner', () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.f
 vi.mock('@/features/admin/pages/SettingsPage', () => ({
   SettingsPage: () => <div data-testid="legacy-settings-page">settings body</div>,
 }));
-vi.mock('@/features/admin/pages/AdminControlCenterPage', () => ({
-  AdminControlCenterPage: () => (
-    <main>
-      <h1>Admin Control Center</h1>
-      <section aria-labelledby="admin-hub-attention-heading">
-        <h2 id="admin-hub-attention-heading">Needs attention</h2>
-        <a href="/admin/status">System Status</a>
-      </section>
-      <section aria-labelledby="admin-hub-health-heading">
-        <h2 id="admin-hub-health-heading">System health</h2>
-      </section>
-      <section aria-labelledby="admin-hub-operations-heading">
-        <h2 id="admin-hub-operations-heading">Operations</h2>
-        <button type="button">Refresh</button>
-      </section>
-    </main>
-  ),
-}));
+
+const mockedApiGet = vi.mocked(client.get);
 
 const ROUTES: ReadonlyArray<readonly [string, string, 'system']> = [
   ['system settings', '/admin/settings?tab=general', 'system'],
@@ -177,13 +167,33 @@ describe('admin surface accessibility floor (#1016)', () => {
     expect(current.length).toBeGreaterThan(0);
   });
 
-  it('keeps the dashboard heading hierarchy and names its attention-first controls', () => {
-    const { container } = render(<AdminControlCenterPage />);
+  it('keeps the dashboard heading hierarchy and names its attention-first controls', async () => {
+    mockedApiGet.mockResolvedValue({
+      data: {
+        checkedAt: '2026-07-25T17:04:00Z',
+        overallStatus: 'Healthy',
+        subsystems: [{ key: 'backends', name: 'Backends', status: 'Healthy' }],
+        attention: [],
+      },
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/admin']}>
+          <AdminControlCenterPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await screen.findByTestId('admin-hub-attention-clear');
     const headings = [...container.querySelectorAll('h1,h2,h3,h4,h5,h6')].map((h) =>
       Number(h.tagName[1]),
     );
 
-    expect(headings).toEqual([1, 2, 2, 2]);
+    expect(headings[0]).toBe(1);
+    expect(headings.slice(1).every((level) => level === 2)).toBe(true);
+    expect(headings.length).toBeGreaterThanOrEqual(4);
     expect(screen.getByRole('link', { name: /System Status/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
   });
