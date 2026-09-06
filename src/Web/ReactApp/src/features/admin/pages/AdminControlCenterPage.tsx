@@ -22,8 +22,9 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
+  ADMIN_DESTINATIONS,
+  canAccessDestination,
   getDestinationById,
-  getHubGroupedDestinations,
   type AdminDestination,
 } from '@/features/admin/registry';
 import { useAdminOverview } from '@/features/admin/hooks/useAdminOverview';
@@ -163,18 +164,42 @@ function SubsystemTile({ subsystem }: { subsystem: SubsystemHealthDto }) {
  * `actionRoute`, and if that's also missing, the link disappears (visible failure,
  * not a silent broken navigation).
  */
-function resolveAttentionActionRoute(item: AttentionItemDto): string | null {
+function resolveAttentionActionRoute(
+  item: AttentionItemDto,
+  access: {
+    hasRole: (role: string) => boolean;
+    hasPermission: (resource: string, action: string) => boolean;
+  },
+): string | null {
+  const fallbackRoute =
+    item.actionRoute && !item.actionRoute.startsWith('/admin/manage')
+      ? item.actionRoute
+      : null;
+
   if (item.actionDestinationId) {
     const destination = getDestinationById(item.actionDestinationId);
-    if (destination) {
-      return destination.path;
+    if (!destination) {
+      return fallbackRoute === '/printers' ? fallbackRoute : null;
     }
+    if (!canAccessDestination(destination, access)) {
+      return null;
+    }
+    return destination.path;
   }
-  return item.actionRoute ?? null;
+  return fallbackRoute === '/printers' ? fallbackRoute : null;
 }
 
-function AttentionRowFromDto({ item }: { item: AttentionItemDto }) {
-  const actionRoute = resolveAttentionActionRoute(item);
+function AttentionRowFromDto({
+  item,
+  access,
+}: {
+  item: AttentionItemDto;
+  access: {
+    hasRole: (role: string) => boolean;
+    hasPermission: (resource: string, action: string) => boolean;
+  };
+}) {
+  const actionRoute = resolveAttentionActionRoute(item, access);
   return (
     <AttentionRow
       severity={item.severity}
@@ -192,6 +217,40 @@ function AttentionRowFromDto({ item }: { item: AttentionItemDto }) {
       }}
     />
   );
+}
+
+const OPERATIONAL_DESTINATION_IDS = [
+  'ops-status',
+  'ops-workers',
+  'users-audit',
+  'data-management',
+  'ops-maintenance',
+  'ops-analytics',
+  'ops-auto-dispatch',
+] as const;
+
+function getDashboardDestinations(
+  access: {
+    hasRole: (role: string) => boolean;
+    hasPermission: (resource: string, action: string) => boolean;
+  },
+): { operational: AdminDestination[]; settings: boolean } {
+  const operational = OPERATIONAL_DESTINATION_IDS
+    .map((id) => getDestinationById(id))
+    .filter((destination): destination is AdminDestination => Boolean(destination))
+    .filter((destination) => canAccessDestination(destination, access))
+    .map((destination) =>
+      destination.id === 'ops-workers'
+        ? { ...destination, path: '/admin/workers?workerTab=jobs' }
+        : destination,
+    );
+
+  const settings = ADMIN_DESTINATIONS.some(
+    (destination) =>
+      destination.kind === 'configuration' && canAccessDestination(destination, access),
+  );
+
+  return { operational, settings };
 }
 
 function DestinationCard({ destination }: { destination: AdminDestination }) {
@@ -234,11 +293,10 @@ function DestinationCard({ destination }: { destination: AdminDestination }) {
  * `/admin` Control Center hub.
  *
  * Three bands, always in this order:
- * 1. **Health strip** — one tile per subsystem returned by the overview endpoint.
- * 2. **Needs attention** — pre-sorted list of items from the API, plus a genuinely
- *    reassuring empty state.
- * 3. **Domain cards** — every admin destination the current user can reach,
- *    grouped by domain from the registry.
+ * 1. **Needs attention** — pre-sorted list of items from the API.
+ * 2. **System health** — compact, truthful subsystem status.
+ * 3. **Operations and settings** — only permitted day-to-day tools plus one
+ *    Farm & Admin Settings entry point.
  *
  * The page is fully usable at 430px. Loading uses `AdminLoading`, and a failed
  * overview fetch renders `AdminError` with a working retry — the hub is what an
@@ -251,8 +309,8 @@ export function AdminControlCenterPage() {
     enabled: canViewOverview,
   });
 
-  const groupedDestinations = useMemo(
-    () => getHubGroupedDestinations({ hasRole, hasPermission }),
+  const dashboardDestinations = useMemo(
+    () => getDashboardDestinations({ hasRole, hasPermission }),
     [hasRole, hasPermission],
   );
 
@@ -275,8 +333,8 @@ export function AdminControlCenterPage() {
       title="Admin Control Center"
       subtitle={
         canViewOverview
-          ? 'System health, alerts, and every admin destination in one place.'
-          : 'Every admin destination available to your role.'
+          ? 'See what needs attention first, then open the tools your role can use.'
+          : 'Open the admin tools and settings available to your role.'
       }
       icon={HomeIcon}
       actions={refreshButton}
@@ -284,25 +342,18 @@ export function AdminControlCenterPage() {
       titleWrap
     >
       <div className="flex flex-col gap-8">
-        {/* ── Band 1: health ── */}
+        {/* ── Band 1: attention ── */}
         {canViewOverview && (
           <AdminSection
-            caption="System health"
-            captionId="admin-hub-health-heading"
-            captionAside={data ? <OverallStatusBadge status={data.overallStatus} /> : null}
-            headerAside={
-              data?.checkedAt ? (
-                <p className="text-xs text-pf-text-tertiary">
-                  Checked at {formatCheckedAt(data.checkedAt)}
-                </p>
-              ) : null
-            }
+            caption="Needs attention"
+            captionId="admin-hub-attention-heading"
+            count={data?.attention.length}
           >
             {isLoading && (
               <AdminLoading
-                variant="card-grid"
-                label="Loading system health"
-                rows={4}
+                variant="list"
+                label="Loading attention items"
+                rows={3}
               />
             )}
 
@@ -317,7 +368,59 @@ export function AdminControlCenterPage() {
               />
             )}
 
-            {!isLoading && !isError && data && data.subsystems.length > 0 && (
+            {!isLoading && data && data.attention.length === 0 && (
+              <p
+                className="flex items-center gap-2 text-sm text-pf-text-secondary"
+                data-testid="admin-hub-attention-clear"
+              >
+                {data.overallStatus === 'Healthy' && data.subsystems.length > 0 &&
+                data.subsystems.every((subsystem) => subsystem.status === 'Healthy') ? (
+                  <CheckCircleIcon className="h-4 w-4 shrink-0 text-pf-success" ariaLabel="" />
+                ) : (
+                  <HelpCircleIcon className="h-4 w-4 shrink-0 text-pf-text-tertiary" ariaLabel="" />
+                )}
+                {data.overallStatus === 'Healthy' && data.subsystems.length > 0 &&
+                data.subsystems.every((subsystem) => subsystem.status === 'Healthy')
+                  ? 'Nothing needs your attention — every subsystem is reporting healthy.'
+                  : 'No attention items were reported. Review system health below for the current status.'}
+              </p>
+            )}
+
+            {!isLoading && data && data.attention.length > 0 && (
+              <ul
+                className="flex flex-col gap-2"
+                data-testid="admin-hub-attention"
+              >
+                {data.attention.map((item) => (
+                  <AttentionRowFromDto
+                    key={item.key}
+                    item={item}
+                    access={{ hasRole, hasPermission }}
+                  />
+                ))}
+              </ul>
+            )}
+          </AdminSection>
+        )}
+
+        {/* ── Band 2: health ── */}
+        {canViewOverview && !isError && (
+          <AdminSection
+            caption="System health"
+            captionId="admin-hub-health-heading"
+            captionAside={data ? <OverallStatusBadge status={data.overallStatus} /> : null}
+            headerAside={
+              data?.checkedAt ? (
+                <p className="text-xs text-pf-text-tertiary">
+                  Checked at {formatCheckedAt(data.checkedAt)}
+                </p>
+              ) : null
+            }
+          >
+            {isLoading && (
+              <AdminLoading variant="card-grid" label="Loading system health" rows={4} />
+            )}
+            {!isLoading && data && data.subsystems.length > 0 && (
               <div
                 className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4"
                 data-testid="admin-hub-subsystems"
@@ -327,8 +430,7 @@ export function AdminControlCenterPage() {
                 ))}
               </div>
             )}
-
-            {!isLoading && !isError && data && data.subsystems.length === 0 && (
+            {!isLoading && data && data.subsystems.length === 0 && (
               <AdminEmpty
                 icon={<HelpCircleIcon className="h-8 w-8" ariaLabel="" />}
                 title="No subsystems reported"
@@ -339,71 +441,39 @@ export function AdminControlCenterPage() {
           </AdminSection>
         )}
 
-        {/* ── Band 2: attention ── */}
-        {canViewOverview && !isError && (
-          <AdminSection
-            caption="Needs attention"
-            captionId="admin-hub-attention-heading"
-            count={data?.attention.length}
-          >
-            {isLoading && <AdminLoading variant="list" label="Loading attention items" rows={3} />}
-
-            {!isLoading && data && data.attention.length === 0 && (
-              <p
-                className="flex items-center gap-2 text-sm text-pf-text-secondary"
-                data-testid="admin-hub-attention-clear"
-              >
-                <CheckCircleIcon className="h-4 w-4 shrink-0 text-pf-success" ariaLabel="" />
-                Nothing needs your attention — every subsystem is reporting healthy.
-              </p>
-            )}
-
-            {!isLoading && data && data.attention.length > 0 && (
-              <ul
-                className="flex flex-col gap-2"
-                data-testid="admin-hub-attention"
-              >
-                {data.attention.map((item) => (
-                  <AttentionRowFromDto key={item.key} item={item} />
-                ))}
-              </ul>
-            )}
-          </AdminSection>
-        )}
-
-        {/* ── Band 3: domains ── */}
-        <AdminSection
-          caption="Everything you can manage"
-          captionId="admin-hub-domains-heading"
-          gap="loose"
-        >
-          {groupedDestinations.length === 0 ? (
+        {/* ── Band 3: operations and settings ── */}
+        <AdminSection caption="Operations" captionId="admin-hub-operations-heading" gap="loose">
+          {dashboardDestinations.operational.length === 0 ? (
             <AdminEmpty
               icon={<HomeIcon className="h-8 w-8" ariaLabel="" />}
-              title="No admin destinations available"
-              description="Your account does not have access to any admin destinations."
+              title="No operational tools available"
+              description="Your account does not have access to any operational tools."
               size="compact"
             />
           ) : (
-            <div className="flex flex-col gap-6" data-testid="admin-hub-domains">
-              {groupedDestinations.map(({ group, destinations }) => (
-                <div key={group.id} className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-0.5">
-                    <h3 className="text-[15px] font-semibold text-pf-text-primary">
-                      {group.label}
-                    </h3>
-                    <p className="text-xs text-pf-text-secondary">{group.description}</p>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {destinations.map((destination) => (
-                      <DestinationCard key={destination.id} destination={destination} />
-                    ))}
-                  </div>
-                </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="admin-hub-operations">
+              {dashboardDestinations.operational.map((destination) => (
+                <DestinationCard key={destination.id} destination={destination} />
               ))}
             </div>
           )}
         </AdminSection>
+
+        {dashboardDestinations.settings && (
+          <AdminSection caption="Farm & Admin Settings" captionId="admin-hub-settings-heading">
+            <DestinationCard
+              destination={{
+                id: 'admin-settings',
+                kind: 'configuration',
+                label: 'Farm & Admin Settings',
+                description: 'Configure farm-wide behavior, access, and integrations.',
+                path: '/admin/settings?scope=system',
+                icon: HomeIcon,
+                group: 'general',
+              }}
+            />
+          </AdminSection>
+        )}
       </div>
     </PageTemplate>
   );

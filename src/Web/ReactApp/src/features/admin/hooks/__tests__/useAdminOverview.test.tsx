@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import { useAdminOverview } from '../useAdminOverview';
+import { ADMIN_OVERVIEW_QUERY_KEY, useAdminOverview } from '../useAdminOverview';
 import { client } from '@/services/api/httpClient';
 import { loadWireContractFixture } from '@/test/wireContracts';
 import type { AdminOverviewDto } from '@/types/adminOverview';
@@ -84,5 +84,43 @@ describe('useAdminOverview — canonical wire-contract corpus (#2240)', () => {
 
     expect(result.current.fetchStatus).toBe('idle');
     expect(client.get).not.toHaveBeenCalled();
+  });
+
+  it('does not expose a cached overview when access is removed', async () => {
+    const queryClient = makeClient();
+    queryClient.setQueryData(ADMIN_OVERVIEW_QUERY_KEY, {
+      checkedAt: '2026-07-25T17:04:00Z',
+      overallStatus: 'Healthy',
+      subsystems: [{ key: 'api', name: 'API', status: 'Healthy' }],
+      attention: [],
+    } satisfies AdminOverviewDto);
+
+    const { result } = renderHook(() => useAdminOverview({ enabled: false }), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    expect(result.current.fetchStatus).toBe('idle');
+    expect(result.current.data).toBeUndefined();
+    expect(client.get).not.toHaveBeenCalled();
+  });
+
+  it('passes through empty and unhealthy overview states without adding an all-clear default', async () => {
+    const overview: AdminOverviewDto = {
+      checkedAt: '2026-07-25T17:04:00Z',
+      overallStatus: 'Unknown',
+      subsystems: [],
+      attention: [],
+    };
+    vi.mocked(client.get).mockResolvedValue({ data: overview });
+
+    const { result } = renderHook(() => useAdminOverview(), {
+      wrapper: makeWrapper(makeClient()),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual(overview);
+    expect(result.current.data?.attention).toHaveLength(0);
+    expect(result.current.data?.subsystems).toHaveLength(0);
+    expect(result.current.data?.overallStatus).toBe('Unknown');
   });
 });

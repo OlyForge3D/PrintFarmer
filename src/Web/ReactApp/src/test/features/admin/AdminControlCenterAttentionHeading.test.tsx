@@ -8,11 +8,9 @@ import { AdminControlCenterPage } from '@/features/admin/pages/AdminControlCente
 import type { AdminOverviewDto } from '@/types/adminOverview';
 
 /**
- * Epic #939 — the Admin Control Center's "Needs attention" band was
- * previously suppressed on error to avoid rendering an orphan heading with
- * nothing beneath it. That fix landed in #936. This suite locks it in:
- * on error the entire section (heading + body) must disappear, and on
- * success the heading must always be present.
+ * The attention band is the first overview surface. It must remain visible
+ * while loading and after a failed fetch so operators get an honest retry
+ * state instead of a blank or misleading dashboard.
  */
 
 vi.mock('@/services/api/httpClient', () => ({
@@ -103,7 +101,7 @@ describe('AdminControlCenterPage — attention heading orphan-suppression (#939)
     );
   });
 
-  it('does NOT render the "Needs attention" heading when the overview fetch errors', async () => {
+  it('renders the "Needs attention" heading and retry state when the overview fetch errors', async () => {
     mockedApiGet.mockRejectedValue(new Error('network down'));
 
     renderHub();
@@ -115,12 +113,8 @@ describe('AdminControlCenterPage — attention heading orphan-suppression (#939)
       ).toBeInTheDocument();
     });
 
-    // The whole attention section — heading, body, empty-state — is gone.
-    expect(
-      screen.queryByRole('heading', { name: 'Needs attention' }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByTestId('admin-hub-attention')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('admin-hub-attention-clear')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Needs attention' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
   });
 
   it('does render the "Needs attention" heading on a successful load, even with zero items', async () => {
