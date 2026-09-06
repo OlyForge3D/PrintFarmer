@@ -13,6 +13,7 @@ relationships are the source consumed by automation.
 
 An epic is ready only when:
 
+- Its child plan is explicitly finalized (or explicitly empty).
 - Every child is linked as a GitHub sub-issue, so the epic renders a real
   progress bar.
 - Every blocking relationship exists as a GitHub dependency edge.
@@ -29,6 +30,39 @@ An epic is ready only when:
 The existing `.github/workflows/squad-blocked-label-sync.yml` reads these
 dependency edges to add and remove `status:blocked`. Creating the edges is what
 makes that automation work.
+
+## Declare the child plan
+
+Every epic must contain exactly one child-plan HTML comment outside fenced code
+blocks. Use one of these exact forms:
+
+```text
+<!-- epic-child-plan: draft -->
+<!-- epic-child-plan: empty -->
+<!-- epic-child-plan: finalized #123 #124 -->
+```
+
+The Feature Epic issue template starts with the `draft` marker.
+
+These are alternatives, not three markers to paste together:
+
+- `draft`: planning is in progress. Proposed children may remain in prose;
+  a `PASS` verifies only the currently linked graph, not plan completeness.
+- `empty`: no implementation children are intended. Any native child link
+  contradicts this declaration and fails verification.
+- `finalized`: list every intended implementation child by repository-local
+  issue number, separated by spaces or commas. At least one number is required.
+  Every declared child must be a native sub-issue, including when zero children
+  are currently linked. Missing links fail even if the linked subset has a valid
+  dependency graph or the epic declares a flat graph.
+
+Contextual `#N` references elsewhere in the body are not child declarations.
+All native children still undergo dependency checks, including any additional
+linked children not in the declaration. Draft status never waives those checks.
+Malformed, repeated, conflicting, or missing child-plan markers fail closed.
+Existing epics without a marker must add one; they are not implicitly drafts.
+Replace `draft` with `finalized` and the complete list when the plan is ready,
+and keep the declaration current when revising the plan.
 
 ## Create dependency edges
 
@@ -94,6 +128,11 @@ node scripts/ci/verify-epic-dependencies.mjs \
 gh workflow run epic-dependency-gate.yml -f issue_number=<EPIC>
 ```
 
-The verifier fails closed when declarations are malformed, graph API reads are
-incomplete, a non-flat epic has zero internal edges, or a linked child is
-isolated outside the declared first wave.
+The verifier fails closed when declarations are missing or malformed, declared
+children lack native links, graph API reads are incomplete, a non-flat epic has
+zero internal edges, or a linked child is isolated outside the declared first
+wave.
+
+Verification remains issue-level feedback: the workflow updates its canonical
+issue comment and fails its own run on violations. It does not publish a PR
+commit status or introduce a merge gate.

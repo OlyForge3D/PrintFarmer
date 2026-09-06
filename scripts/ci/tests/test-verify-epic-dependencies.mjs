@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   epicLabel,
+  draftChildPlanMarker,
+  emptyChildPlanMarker,
   evaluateEpicDependencies,
   exitCodeFor,
   flatGraphMarker,
@@ -15,7 +17,7 @@ function epic(overrides = {}) {
   return {
     number: 2410,
     labels: [{ name: epicLabel }],
-    body: '',
+    body: draftChildPlanMarker,
     ...overrides,
   };
 }
@@ -33,10 +35,137 @@ test('non-epics are not applicable', () => {
   assert.equal(exitCodeFor(result.classification), 4);
 });
 
-test('an epic without linked children passes without inventing edges', () => {
+test('an explicitly draft epic without linked children passes without inventing edges', () => {
   const result = evaluateEpicDependencies({ issue: epic() });
   assert.equal(result.classification, 'PASS');
   assert.equal(result.childCount, 0);
+  assert.equal(result.childPlanState, 'draft');
+  assert.match(result.reason, /completeness is not verified/);
+});
+
+test('a finalized plan with zero native children fails, even with a flat opt-out', () => {
+  for (const graphMarker of ['', flatGraphMarker]) {
+    const result = evaluateEpicDependencies({
+      issue: epic({
+        body: `<!-- epic-child-plan: finalized #11 #12 -->\n${graphMarker}`,
+      }),
+    });
+    assert.equal(result.classification, 'FAIL');
+    assert.equal(exitCodeFor(result.classification), 2);
+    assert.equal(result.childPlanState, 'finalized');
+    assert.equal(result.childCount, 0);
+    assert.deepEqual(result.missingChildren, [11, 12]);
+    assert.match(result.reason, /not linked sub-issues: #11, #12/);
+  }
+});
+
+test('a finalized plan fails when only a valid connected subset is linked', () => {
+  const result = evaluateEpicDependencies({
+    issue: epic({ body: '<!-- epic-child-plan: finalized #11, #12, #13 -->' }),
+    children: children(11, 12),
+    edges: [{ blocker: 11, blocked: 12 }],
+  });
+  assert.equal(result.classification, 'FAIL');
+  assert.equal(result.edgeCount, 1);
+  assert.deepEqual(result.missingChildren, [13]);
+  assert.match(result.reason, /not linked sub-issues: #13/);
+});
+
+test('a complete finalized plan ignores contextual issue references', () => {
+  const result = evaluateEpicDependencies({
+    issue: epic({
+      body: 'Follow-up to #99; related #100.\n' +
+        '<!-- epic-child-plan: finalized #11, #12 -->',
+    }),
+    children: children(11, 12),
+    edges: [{ blocker: 11, blocked: 12 }],
+  });
+  assert.equal(result.classification, 'PASS');
+  assert.deepEqual(result.declaredChildren, [11, 12]);
+  assert.deepEqual(result.missingChildren, []);
+  assert.match(result.reason, /All 2 declared children are linked/);
+});
+
+test('a complete finalized flat plan passes without inventing edges', () => {
+  const result = evaluateEpicDependencies({
+    issue: epic({
+      body: `<!-- epic-child-plan: finalized #11 #12 -->\n${flatGraphMarker}`,
+    }),
+    children: children(11, 12),
+  });
+  assert.equal(result.classification, 'PASS');
+  assert.equal(result.edgeCount, 0);
+});
+
+test('explicit draft and empty plans ignore contextual references with zero links', () => {
+  for (const marker of [draftChildPlanMarker, emptyChildPlanMarker]) {
+    const result = evaluateEpicDependencies({
+      issue: epic({ body: `${marker}\nBackground #99; possible work #100.` }),
+    });
+    assert.equal(result.classification, 'PASS', marker);
+    assert.deepEqual(result.declaredChildren, []);
+    assert.deepEqual(result.missingChildren, []);
+  }
+});
+
+test('an explicitly empty plan cannot hide linked children', () => {
+  const result = evaluateEpicDependencies({
+    issue: epic({ body: emptyChildPlanMarker }),
+    children: children(11, 12),
+    edges: [{ blocker: 11, blocked: 12 }],
+  });
+  assert.equal(result.classification, 'FAIL');
+  assert.match(result.reason, /empty epic but linked sub-issues exist/);
+});
+
+test('missing child-plan declarations fail instead of implying draft or completeness', () => {
+  for (const linkedChildren of [[], children(11, 12)]) {
+    const result = evaluateEpicDependencies({
+      issue: epic({ body: 'Background #99; no machine-readable plan.' }),
+      children: linkedChildren,
+      edges: [{ blocker: 11, blocked: 12 }],
+    });
+    assert.equal(result.classification, 'FAIL');
+    assert.equal(result.childPlanState, 'unspecified');
+    assert.match(result.reason, /Exactly one child-plan declaration is required/);
+  }
+});
+
+test('malformed, duplicate and conflicting child-plan declarations fail closed', () => {
+  for (const body of [
+    '<!-- epic-child-plan: finalized -->',
+    '<!-- epic-child-plan: final #11 -->',
+    '<!-- epic-child-plan: draft #11 -->',
+    '<!-- epic-child-plan: empty #11 -->',
+    '<!-- epic-child-plan: finalized #0 -->',
+    '<!-- epic-child-plan: finalized #9007199254740992 -->',
+    '<!-- epic-child-plan: finalized #11 #11 -->',
+    '<!-- epic-child-plan: finalized #11',
+    'epic-child-plan: finalized #11 -->',
+    `${draftChildPlanMarker}\n${draftChildPlanMarker}`,
+    `${draftChildPlanMarker}\n<!-- epic-child-plan: finalized #11 -->`,
+    `${emptyChildPlanMarker}\n<!-- epic-child-plan: finalized #11 -->`,
+  ]) {
+    const result = evaluateEpicDependencies({
+      issue: epic({ body }),
+      children: children(11, 12),
+      edges: [{ blocker: 11, blocked: 12 }],
+    });
+    assert.equal(result.classification, 'FAIL', body);
+    assert.match(result.reason, /child-plan|Child-plan/, body);
+  }
+});
+
+test('fenced child-plan examples do not declare children or mask missing declarations', () => {
+  const example = '```text\n<!-- epic-child-plan: finalized #99 -->\n```';
+  const draft = evaluateEpicDependencies({
+    issue: epic({ body: `${draftChildPlanMarker}\n${example}` }),
+  });
+  assert.equal(draft.classification, 'PASS');
+  assert.deepEqual(draft.declaredChildren, []);
+  const missing = evaluateEpicDependencies({ issue: epic({ body: example }) });
+  assert.equal(missing.classification, 'FAIL');
+  assert.match(missing.reason, /Exactly one child-plan declaration is required/);
 });
 
 test('a connected dependency graph passes and deduplicates both API directions', () => {
@@ -67,7 +196,7 @@ test('a graph-less epic fails unless it explicitly opts out', () => {
 
 test('the exact flat-graph marker permits a genuinely flat epic', () => {
   const result = evaluateEpicDependencies({
-    issue: epic({ body: flatGraphMarker }),
+    issue: epic({ body: `${draftChildPlanMarker}\n${flatGraphMarker}` }),
     children: children(11, 12),
   });
   assert.equal(result.classification, 'PASS');
@@ -76,7 +205,7 @@ test('the exact flat-graph marker permits a genuinely flat epic', () => {
 
 test('a flat declaration fails when dependency edges exist', () => {
   const result = evaluateEpicDependencies({
-    issue: epic({ body: flatGraphMarker }),
+    issue: epic({ body: `${draftChildPlanMarker}\n${flatGraphMarker}` }),
     children: children(11, 12),
     edges: [{ blocker: 11, blocked: 12 }],
   });
@@ -86,7 +215,7 @@ test('a flat declaration fails when dependency edges exist', () => {
 
 test('declared first-wave children may be isolated in an otherwise real graph', () => {
   const result = evaluateEpicDependencies({
-    issue: epic({ body: '<!-- epic-first-wave: #11 -->' }),
+    issue: epic({ body: `${draftChildPlanMarker}\n<!-- epic-first-wave: #11 -->` }),
     children: children(11, 12, 13),
     edges: [{ blocker: 12, blocked: 13 }],
   });
@@ -142,6 +271,7 @@ test('declaration examples inside fenced code blocks are not binding', () => {
   const result = evaluateEpicDependencies({
     issue: epic({
       body: [
+        draftChildPlanMarker,
         'Example only:',
         '```text',
         '<!-- epic-dependencies: flat -->',
@@ -196,4 +326,31 @@ test('the workflow comment is marker-bound and reports graph counts', () => {
   assert.ok(comment.startsWith(gateCommentMarker));
   assert.match(comment, /Epic dependency gate: PASS/);
   assert.match(comment, /\| Internal dependency edges \| 1 \|/);
+  assert.match(comment, /\| Child-plan state \| draft \|/);
+});
+
+test('the workflow comment identifies a finalized plan with missing native links', () => {
+  const result = evaluateEpicDependencies({
+    issue: epic({ body: '<!-- epic-child-plan: finalized #11 #12 -->' }),
+  });
+  const comment = formatGateComment(result, 2410, 'https://example.com/run');
+  assert.ok(comment.startsWith(gateCommentMarker));
+  assert.match(comment, /Epic dependency gate: FAIL/);
+  assert.match(comment, /\| Child-plan state \| finalized \|/);
+  assert.match(comment, /\| Declared children \| #11, #12 \|/);
+  assert.match(comment, /\| Missing native child links \| #11, #12 \|/);
+});
+
+test('workflow API-read failures remain formattable without child-plan metadata', () => {
+  const comment = formatGateComment({
+    classification: 'FAIL',
+    reason: 'Could not read the complete epic graph.',
+    childCount: 0,
+    edgeCount: 0,
+    flatGraph: false,
+    firstWave: [],
+    isolatedChildren: [],
+  }, 2410, 'https://example.com/run');
+  assert.match(comment, /Epic dependency gate: FAIL/);
+  assert.match(comment, /Could not read the complete epic graph/);
 });

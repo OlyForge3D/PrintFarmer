@@ -4,6 +4,10 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
+import {
+  draftChildPlanMarker,
+  evaluateEpicDependencies,
+} from '../verify-epic-dependencies.mjs';
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -26,6 +30,20 @@ async function loadWorkflow() {
   return yaml.load(await readFile(workflowPath, 'utf8'));
 }
 
+test('the Feature Epic template starts with a valid draft child plan', async () => {
+  const body = await readFile(path.join(
+    repositoryRoot, '.github', 'ISSUE_TEMPLATE', 'feature-epic.md',
+  ), 'utf8');
+  const metadata = yaml.load(body.split('---')[1]);
+  assert.equal(body.split(draftChildPlanMarker).length - 1, 1);
+  const result = evaluateEpicDependencies({
+    issue: { number: 1, labels: metadata.labels, body },
+  });
+  assert.equal(result.classification, 'PASS');
+  assert.equal(result.childPlanState, 'draft');
+  assert.deepEqual(result.declaredChildren, []);
+});
+
 test('epic dependency workflow parses as valid YAML', async () => {
   assert.ok(await loadWorkflow());
 });
@@ -38,6 +56,9 @@ test('workflow checks issue changes, closures, schedules, and manual dispatches'
   ]);
   assert.equal(on.schedule[0].cron, '17 9 * * *');
   assert.ok(on.workflow_dispatch);
+  assert.deepEqual(Object.keys(on).sort(), [
+    'issues', 'schedule', 'workflow_dispatch',
+  ]);
 });
 
 test('workflow uses least privilege and serializes each epic', async () => {
@@ -76,6 +97,7 @@ test('workflow loads default-branch logic and fails graph violations', async () 
   assert.match(script, /formatGateComment/);
   assert.match(script, /if \(!gate\.hasEpicLabel\(issue\.labels\)\)/);
   assert.match(script, /Matrix issue number must be a positive safe integer/);
+  assert.doesNotMatch(script, /createCommitStatus|checks\.create|pulls\.merge/);
 });
 
 test('ci-tools runs both epic dependency regression files', async () => {
