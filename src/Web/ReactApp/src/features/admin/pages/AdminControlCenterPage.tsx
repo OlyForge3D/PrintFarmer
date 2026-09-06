@@ -24,6 +24,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
   canAccessDestination,
   getDestinationById,
+  getStandaloneConfigurationDestinations,
   hasAccessibleDestinationWithPrefix,
   type AdminDestination,
 } from '@/features/admin/registry';
@@ -241,7 +242,11 @@ function getDashboardDestinations(
     hasRole: (role: string) => boolean;
     hasPermission: (resource: string, action: string) => boolean;
   },
-): { operational: AdminDestination[]; settings: boolean } {
+): {
+  operational: AdminDestination[];
+  configuration: AdminDestination[];
+  settings: boolean;
+} {
   const operational = OPERATIONAL_DESTINATION_IDS
     .map((id) => getDestinationById(id))
     .filter((destination): destination is AdminDestination => Boolean(destination))
@@ -252,15 +257,24 @@ function getDashboardDestinations(
         : destination,
     );
 
+  // Configuration destinations that live outside the /admin/settings shell
+  // (`/catalog`, `/locations`, `/admin/power-monitors`) get their own cards.
+  // The Admin nav entry lights up for *any* accessible configuration
+  // destination (`hasAccessibleHubTile`), so omitting these left delegates —
+  // most sharply `power_monitors:admin`, whose destination is only reachable
+  // through the admin surface — on a dead-end hub (#2508, Hicks review).
+  const configuration = getStandaloneConfigurationDestinations(access);
+
   // Gate on actual reachability of the settings shell itself (not merely
   // holding *some* configuration-kind permission) — several configuration
   // destinations (data-catalog, hw-locations, hw-power-monitors) live outside
   // /admin/settings, so a user whose only configuration grant unlocks one of
   // those would otherwise see a "Farm & Admin Settings" card that leads
-  // nowhere (Bishop review, #2508).
+  // nowhere (Bishop review, #2508). Those destinations are surfaced directly
+  // via `configuration` above instead.
   const settings = hasAccessibleDestinationWithPrefix(access, '/admin/settings');
 
-  return { operational, settings };
+  return { operational, configuration, settings };
 }
 
 function DestinationCard({ destination }: { destination: AdminDestination }) {
@@ -305,8 +319,10 @@ function DestinationCard({ destination }: { destination: AdminDestination }) {
  * Three bands, always in this order:
  * 1. **Needs attention** — pre-sorted list of items from the API.
  * 2. **System health** — compact, truthful subsystem status.
- * 3. **Operations and settings** — only permitted day-to-day tools plus one
- *    Farm & Admin Settings entry point.
+ * 3. **Operations and settings** — only permitted day-to-day tools, any
+ *    permitted configuration destination that lives outside the settings shell
+ *    (`/catalog`, `/locations`, `/admin/power-monitors`), plus one Farm & Admin
+ *    Settings entry point.
  *
  * The page is fully usable at 430px. Loading uses `AdminLoading`, and a failed
  * overview fetch renders `AdminError` with a working retry — the hub is what an
@@ -323,6 +339,14 @@ export function AdminControlCenterPage() {
     () => getDashboardDestinations({ hasRole, hasPermission }),
     [hasRole, hasPermission],
   );
+
+  // The "no operational tools" empty state is only truthful when the whole
+  // band is empty — a delegate who reaches Power Monitors but no operational
+  // tool still has somewhere to go, so we must not tell them otherwise.
+  const hasAnyDestination =
+    dashboardDestinations.operational.length > 0 ||
+    dashboardDestinations.configuration.length > 0 ||
+    dashboardDestinations.settings;
 
   const refreshButton = canViewOverview ? (
     <Button
@@ -451,16 +475,23 @@ export function AdminControlCenterPage() {
           </AdminSection>
         )}
 
-        {/* ── Band 3: operations and settings ── */}
+        {/* ── Band 3: operations, standalone configuration, and settings ── */}
         <AdminSection caption="Operations" captionId="admin-hub-operations-heading" gap="loose">
           <div data-testid="admin-hub-operations">
             {dashboardDestinations.operational.length === 0 ? (
-              <AdminEmpty
-                icon={<HomeIcon className="h-8 w-8" ariaLabel="" />}
-                title="No operational tools available"
-                description="Your account does not have access to any operational tools."
-                size="compact"
-              />
+              hasAnyDestination ? (
+                <p className="text-sm text-pf-text-secondary">
+                  Your account has no day-to-day operational tools. The destinations you can
+                  reach are listed below.
+                </p>
+              ) : (
+                <AdminEmpty
+                  icon={<HomeIcon className="h-8 w-8" ariaLabel="" />}
+                  title="No operational tools available"
+                  description="Your account does not have access to any operational tools."
+                  size="compact"
+                />
+              )
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {dashboardDestinations.operational.map((destination) => (
@@ -470,6 +501,23 @@ export function AdminControlCenterPage() {
             )}
           </div>
         </AdminSection>
+
+        {dashboardDestinations.configuration.length > 0 && (
+          <AdminSection
+            caption="Configuration"
+            captionId="admin-hub-configuration-heading"
+            gap="loose"
+          >
+            <div
+              className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3"
+              data-testid="admin-hub-configuration"
+            >
+              {dashboardDestinations.configuration.map((destination) => (
+                <DestinationCard key={destination.id} destination={destination} />
+              ))}
+            </div>
+          </AdminSection>
+        )}
 
         {dashboardDestinations.settings && (
           <AdminSection caption="Farm & Admin Settings" captionId="admin-hub-settings-heading">

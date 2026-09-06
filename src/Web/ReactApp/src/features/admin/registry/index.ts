@@ -14,5 +14,6 @@ export {
   getDestinationById,
   getDestinationsByGroup,
   getHubGroupedDestinations,
+  getStandaloneConfigurationDestinations,
   hasAccessibleDestinationWithPrefix,
 } from './adminDestinations';

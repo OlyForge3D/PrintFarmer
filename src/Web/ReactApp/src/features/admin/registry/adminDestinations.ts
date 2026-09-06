@@ -770,6 +770,35 @@ export function hasAccessibleDestinationWithPrefix(
 }
 
 /**
+ * Accessible `configuration` destinations that do **not** live inside the
+ * `/admin/settings` shell, in registry order.
+ *
+ * The `/admin` Control Center collapses every `/admin/settings?...` destination
+ * behind a single "Farm & Admin Settings" entry point, so those are deliberately
+ * excluded here. A handful of configuration destinations sit outside that shell
+ * (`data-catalog` → `/catalog`, `hw-locations` → `/locations`, and
+ * `hw-power-monitors` → `/admin/power-monitors`) and have no other representation
+ * on the dashboard.
+ *
+ * This exists to keep `hasAccessibleHubTile` — which lights up the Admin nav entry
+ * for *any* accessible configuration destination — in step with what the hub
+ * actually renders. Without it, a delegate whose sole grant is
+ * `power_monitors:admin` is offered `/admin` and then shown "No operational tools
+ * available", i.e. a dead end (#2508, Hicks review). `/admin/power-monitors` is the
+ * sharpest case because, unlike `/catalog` and `/locations`, it is only reachable
+ * through the admin surface.
+ */
+export function getStandaloneConfigurationDestinations(
+  access: AdminDestinationAccess,
+): AdminDestination[] {
+  return filterDestinationsByAccess(ADMIN_DESTINATIONS, access).filter(
+    (destination) =>
+      destination.kind === 'configuration' &&
+      !destination.path.startsWith('/admin/settings'),
+  );
+}
+
+/**
  * Find the destination that backs a given `SettingsShell` tab/sub-page pair.
  *
  * Destinations under `/admin/settings` encode their tab

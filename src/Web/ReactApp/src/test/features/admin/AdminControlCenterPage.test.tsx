@@ -657,7 +657,9 @@ describe('AdminControlCenterPage', () => {
     });
 
     const cards = screen.getAllByTestId('admin-hub-destination');
-    expect(cards.length).toBe(8);
+    // 7 operational + 3 standalone configuration (Catalog, Locations, Power
+    // Monitors) + 1 Farm & Admin Settings entry point.
+    expect(cards.length).toBe(11);
     // Every card links somewhere absolute.
     for (const card of cards) {
       expect(card.getAttribute('href')).toMatch(/^\//);
@@ -669,6 +671,10 @@ describe('AdminControlCenterPage', () => {
     expect(screen.getByRole('link', { name: /Workers & Jobs/i })).toHaveAttribute(
       'href',
       '/admin/workers?workerTab=jobs',
+    );
+    expect(screen.getByRole('link', { name: /Power Monitors/i })).toHaveAttribute(
+      'href',
+      '/admin/power-monitors',
     );
     expect(screen.queryByText('Everything you can manage')).not.toBeInTheDocument();
   });
@@ -766,10 +772,66 @@ describe('AdminControlCenterPage', () => {
     });
 
     // catalog:admin does not map to any of the curated operational
-    // destinations, so the Operations band is empty for this delegate — the
-    // key assertion is that no dead-end settings card is offered either.
+    // destinations, so the Operations band is empty for this delegate — but the
+    // `data-catalog` configuration destination is surfaced directly so the hub
+    // is not a dead end, and no dead-end settings card is offered.
     expect(
       screen.queryByRole('link', { name: /Farm & Admin Settings/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Catalog/i })).toHaveAttribute('href', '/catalog');
+    expect(
+      screen.queryByRole('heading', { name: 'No operational tools available' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders a direct card for a delegate whose only permission is power_monitors:admin', async () => {
+    // `hw-power-monitors` is a configuration destination at /admin/power-monitors —
+    // outside the /admin/settings shell and, unlike /catalog and /locations, only
+    // reachable through the admin surface. `hasAccessibleHubTile` lights up the
+    // Admin nav entry for this delegate, so the hub must render something for them
+    // rather than "No operational tools available" (#2508, Hicks review).
+    mockedUseAuth.mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+      user: {
+        id: 'user-power-monitors-only',
+        email: 'power-delegate@test.com',
+        roles: ['operator'],
+        isActive: true,
+      },
+      hasRole: () => false,
+      hasPermission: (resource: string, action: string) =>
+        resource === 'power_monitors' && action === 'admin',
+      error: null,
+      login: vi.fn(),
+      loginWithPasskey: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    } as unknown as ReturnType<typeof useAuth>);
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-configuration')).toBeInTheDocument();
+    });
+
+    // Overview is farm_admin / system_settings:admin only — this delegate must not fetch it.
+    expect(mockedApiGet).not.toHaveBeenCalled();
+
+    const cards = screen.getAllByTestId('admin-hub-destination');
+    expect(cards.length).toBe(1);
+    expect(cards[0].getAttribute('data-destination-id')).toBe('hw-power-monitors');
+    expect(screen.getByRole('link', { name: /Power Monitors/i })).toHaveAttribute(
+      'href',
+      '/admin/power-monitors',
+    );
+
+    // No dead-end settings card, and no false "nothing here" claim.
+    expect(
+      screen.queryByRole('link', { name: /Farm & Admin Settings/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'No operational tools available' }),
     ).not.toBeInTheDocument();
   });
 });
