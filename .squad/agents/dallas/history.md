@@ -45,3 +45,11 @@ Early entries (pre-2026-03-25) summarized for maintainability. See decisions-arc
 
 - PR #750 remains draft; trio review is coordinator's next step per protocol
 - Contract untouched: capabilities endpoint, nine PascalCase enum tokens, camelCase DTO properties, unknown-token → 400, nine rows materialized with the expected attention defaults
+
+## 2026-09-03: iOS Navigation Redesign Epic Creation (Lead)
+
+Received A′ · Two Hats, adaptive shell architecture decision from Coordinator. Created GitHub epic #2410 with 17 child issues specifying the design into actionable tasks.
+
+**Epic**: #2410 — iOS Navigation Redesign (Two Hats, Adaptive)
+**Role**: Lead/Architect — specification and discipline breakdown
+**Status**: COMPLETE

@@ -21,3 +21,12 @@
 **Markdown quirk:** `.github/instructions/markdown.instructions.md` has YAML front matter (post_title, microsoft_alias, categories from categories.txt) clearly templated from a Microsoft blog repo. Existing docs in this repo do NOT use that front matter. I did not add it to my edits.
 
 **Route ownership caption in copilot-instructions.md:** I briefly regressed a plain caption line ("Route ownership in microservices mode:") into an H2 while editing, then reverted. Worth remembering: the file mixes H2 sections with H2-looking captions and it is easy to break the visual hierarchy.
+
+## 2026-09-03: iOS Navigation Redesign Accessibility & Refinement (1 child issue)
+
+Assigned to accessibility review and UI refinement of A′ · Two Hats, adaptive shell.
+
+**Epic**: #2410 — iOS Navigation Redesign
+**Assigned issue**: #2414 (accessibility and UI refinement)
+**Role**: Accessibility specialist — semantic structure, ARIA, assistive tech testing, visual polish
+**Status**: PENDING (awaiting implementation start)

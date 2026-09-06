@@ -160,3 +160,12 @@ tests that care about which section owns which field.
 
 **Delivered:** 6/6 defects fixed. 2900/275 tests passing (baseline 2894/273).
 Lint 0/0. Build clean. Deliberate-break proofs run on Defects 1 and 3.
+
+## 2026-09-03: iOS Navigation Redesign Documentation (1 child issue)
+
+Assigned to documentation of A′ · Two Hats, adaptive shell architecture.
+
+**Epic**: #2410 — iOS Navigation Redesign
+**Assigned issue**: #2426 (documentation)
+**Role**: Technical writer — architecture docs, user guide, shell mode explanation, migration notes
+**Status**: PENDING (awaiting implementation start)
