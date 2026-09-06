@@ -713,7 +713,10 @@ describe('AdminControlCenterPage', () => {
     });
     const cards = screen.getAllByTestId('admin-hub-destination');
     expect(cards.length).toBe(1);
-    expect(screen.queryByRole('link', { name: /Farm & Admin Settings/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Farm & Admin Settings/i })).toHaveAttribute(
+      'href',
+      '/admin/settings?scope=system',
+    );
   });
 
   it('hides every admin destination for a non-admin user', async () => {
