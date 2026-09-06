@@ -16,4 +16,5 @@ export {
   getHubGroupedDestinations,
   getStandaloneConfigurationDestinations,
   hasAccessibleDestinationWithPrefix,
+  isPathWithin,
 } from './adminDestinations';

@@ -750,8 +750,33 @@ export function getDestinationsByGroup(group: AdminDestinationGroup): AdminDesti
 }
 
 /**
- * True when at least one destination whose `path` starts with `pathPrefix` is
+ * True when `path` is `base` itself or a route *underneath* it.
+ *
+ * Deliberately not a bare `startsWith`: a registry path like
+ * `/admin/settings-foo` is a sibling route, not a member of the
+ * `/admin/settings` shell, and matching it would both hide it from the
+ * dashboard's standalone configuration cards and light up the generic
+ * "Farm & Admin Settings" card that does not actually represent it
+ * (#2508, Hicks review). A match requires the prefix to end at a real path
+ * boundary — end of string, `/`, `?`, or `#` — which also keeps
+ * `/administration` from matching `/admin`.
+ */
+export function isPathWithin(path: string, base: string): boolean {
+  if (!path.startsWith(base)) {
+    return false;
+  }
+
+  const boundary = path.charAt(base.length);
+  return boundary === '' || boundary === '/' || boundary === '?' || boundary === '#';
+}
+
+/**
+ * True when at least one destination at or underneath `pathPrefix` is
  * reachable by the current user.
+ *
+ * Matching is path-boundary aware (see `isPathWithin`), so `/admin` does not
+ * match `/administration` and `/admin/settings` does not match
+ * `/admin/settings-foo`.
  *
  * Used by `SettingsShell` (#1457) to decide whether the `system`
  * settings scopes should be offered at all — replacing a blanket
@@ -766,7 +791,7 @@ export function hasAccessibleDestinationWithPrefix(
   pathPrefix: string,
 ): boolean {
   return filterDestinationsByAccess(ADMIN_DESTINATIONS, access)
-    .some((destination) => destination.path.startsWith(pathPrefix));
+    .some((destination) => isPathWithin(destination.path, pathPrefix));
 }
 
 /**
@@ -794,7 +819,7 @@ export function getStandaloneConfigurationDestinations(
   return filterDestinationsByAccess(ADMIN_DESTINATIONS, access).filter(
     (destination) =>
       destination.kind === 'configuration' &&
-      !destination.path.startsWith('/admin/settings'),
+      !isPathWithin(destination.path, '/admin/settings'),
   );
 }
 
