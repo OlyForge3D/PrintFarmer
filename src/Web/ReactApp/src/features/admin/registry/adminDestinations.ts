@@ -544,6 +544,7 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     // per-permission once loaded.
     requiredRole: null,
     requiredPermissionAnyOf: [
+      { resource: 'system_settings', action: 'admin' },
       { resource: 'spoolman', action: 'admin' },
       { resource: 'home_assistant', action: 'admin' },
       { resource: 'telegram', action: 'admin' },

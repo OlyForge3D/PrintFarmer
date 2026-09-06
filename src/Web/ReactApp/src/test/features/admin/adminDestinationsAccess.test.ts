@@ -165,7 +165,15 @@ describe('adminDestinations — permission gating (#1457)', () => {
       expect(accessible.map((d) => d.id)).toContain('int-connections');
     }
 
-    // Holding none of the three still hides it.
+    // Holding system_settings:admin alone grants access to int-connections and integrations tab
+    const sysSettingsAccess = {
+      hasRole: () => false,
+      hasPermission: (resource: string, action: string) => resource === 'system_settings' && action === 'admin',
+    };
+    expect(filterDestinationsByAccess(ADMIN_DESTINATIONS, sysSettingsAccess).map((d) => d.id)).toContain('int-connections');
+    expect(canAccessSettingsTab('integrations', 'connections', sysSettingsAccess)).toBe(true);
+
+    // Holding none of the permissions still hides it.
     const noneAccessible = filterDestinationsByAccess(ADMIN_DESTINATIONS, {
       hasRole: () => false,
       hasPermission: (resource) => resource === 'printers',
