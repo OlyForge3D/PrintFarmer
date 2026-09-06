@@ -172,21 +172,23 @@ function resolveAttentionActionRoute(
   },
 ): string | null {
   const fallbackRoute =
-    item.actionRoute && !item.actionRoute.startsWith('/admin/manage')
+    item.actionRoute &&
+    item.actionRoute.startsWith('/') &&
+    !item.actionRoute.startsWith('/admin/manage')
       ? item.actionRoute
       : null;
 
   if (item.actionDestinationId) {
     const destination = getDestinationById(item.actionDestinationId);
     if (!destination) {
-      return fallbackRoute === '/printers' ? fallbackRoute : null;
+      return fallbackRoute;
     }
     if (!canAccessDestination(destination, access)) {
       return null;
     }
     return destination.path;
   }
-  return fallbackRoute === '/printers' ? fallbackRoute : null;
+  return fallbackRoute;
 }
 
 function AttentionRowFromDto({
@@ -443,20 +445,22 @@ export function AdminControlCenterPage() {
 
         {/* ── Band 3: operations and settings ── */}
         <AdminSection caption="Operations" captionId="admin-hub-operations-heading" gap="loose">
-          {dashboardDestinations.operational.length === 0 ? (
-            <AdminEmpty
-              icon={<HomeIcon className="h-8 w-8" ariaLabel="" />}
-              title="No operational tools available"
-              description="Your account does not have access to any operational tools."
-              size="compact"
-            />
-          ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="admin-hub-operations">
-              {dashboardDestinations.operational.map((destination) => (
-                <DestinationCard key={destination.id} destination={destination} />
-              ))}
-            </div>
-          )}
+          <div data-testid="admin-hub-operations">
+            {dashboardDestinations.operational.length === 0 ? (
+              <AdminEmpty
+                icon={<HomeIcon className="h-8 w-8" ariaLabel="" />}
+                title="No operational tools available"
+                description="Your account does not have access to any operational tools."
+                size="compact"
+              />
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {dashboardDestinations.operational.map((destination) => (
+                  <DestinationCard key={destination.id} destination={destination} />
+                ))}
+              </div>
+            )}
+          </div>
         </AdminSection>
 
         {dashboardDestinations.settings && (

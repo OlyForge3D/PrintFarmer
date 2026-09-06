@@ -298,7 +298,21 @@ describe('AdminControlCenterPage', () => {
   });
 
   it('renders a single reassuring line when the attention list is empty', async () => {
-    mockedApiGet.mockResolvedValue({ data: makeOverview({ attention: [] }) });
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        overallStatus: 'Healthy',
+        attention: [],
+        subsystems: [
+          { key: 'api', name: 'API', status: 'Healthy', detail: 'Responding' },
+          {
+            key: 'database',
+            name: 'Database',
+            status: 'Healthy',
+            detail: 'PostgreSQL · seeded (8 manufacturers)',
+          },
+        ],
+      }),
+    });
 
     renderHub();
 

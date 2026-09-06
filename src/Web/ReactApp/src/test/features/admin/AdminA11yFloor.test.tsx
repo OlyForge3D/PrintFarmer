@@ -184,7 +184,7 @@ describe('admin surface accessibility floor (#1016)', () => {
     );
 
     expect(headings).toEqual([1, 2, 2, 2]);
-    expect(screen.getByRole('link', { name: 'System Status' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /System Status/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
   });
 });
