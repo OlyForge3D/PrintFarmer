@@ -37,6 +37,7 @@ same reason.</Description>
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Refit.HttpClientFactory" Version="15.2.0" />
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
     <ProjectReference Include="..\..\settings\Farm.Settings.Abstractions\Farm.Settings.Abstractions.csproj" />
     <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />

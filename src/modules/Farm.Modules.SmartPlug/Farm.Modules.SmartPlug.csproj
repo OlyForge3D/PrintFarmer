@@ -18,6 +18,7 @@ Namespaces were renamed from Farm.Web.Api.* to Farm.Modules.SmartPlug.* by Phase
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Refit.HttpClientFactory" Version="15.2.0" />
     <ProjectReference Include="..\..\infra\Farm.Infrastructure.csproj" />
     <ProjectReference Include="..\Farm.Modules.Abstractions\Farm.Modules.Abstractions.csproj" />
   </ItemGroup>
