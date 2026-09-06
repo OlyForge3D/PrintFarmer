@@ -713,10 +713,7 @@ describe('AdminControlCenterPage', () => {
     });
     const cards = screen.getAllByTestId('admin-hub-destination');
     expect(cards.length).toBe(1);
-    expect(screen.getByRole('link', { name: /Farm & Admin Settings/i })).toHaveAttribute(
-      'href',
-      '/admin/settings?scope=system',
-    );
+    expect(screen.queryByRole('link', { name: /Farm & Admin Settings/i })).not.toBeInTheDocument();
   });
 
   it('hides every admin destination for a non-admin user', async () => {
@@ -733,5 +730,43 @@ describe('AdminControlCenterPage', () => {
       ).toBeInTheDocument();
     });
     expect(screen.queryByTestId('admin-hub-destination')).not.toBeInTheDocument();
+  });
+
+  it('does not show a dead-end settings card for a delegate whose only permission is a configuration destination outside /admin/settings', async () => {
+    // catalog:admin grants the `data-catalog` destination (kind: 'configuration',
+    // path `/catalog`) but does not unlock any `/admin/settings`-reachable tab.
+    // A "Farm & Admin Settings" card here would be a visible-but-denied false
+    // affordance (see PR #2510 review feedback).
+    mockedUseAuth.mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+      user: {
+        id: 'user-catalog-only',
+        email: 'catalog-delegate@test.com',
+        roles: ['operator'],
+        isActive: true,
+      },
+      hasRole: () => false,
+      hasPermission: (resource: string, action: string) =>
+        resource === 'catalog' && action === 'admin',
+      error: null,
+      login: vi.fn(),
+      loginWithPasskey: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
+    } as unknown as ReturnType<typeof useAuth>);
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-operations')).toBeInTheDocument();
+    });
+
+    // catalog:admin does not map to any of the curated operational
+    // destinations, so the Operations band is empty for this delegate — the
+    // key assertion is that no dead-end settings card is offered either.
+    expect(
+      screen.queryByRole('link', { name: /Farm & Admin Settings/i }),
+    ).not.toBeInTheDocument();
   });
 });

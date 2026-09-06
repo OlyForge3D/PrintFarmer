@@ -22,9 +22,9 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
-  ADMIN_DESTINATIONS,
   canAccessDestination,
   getDestinationById,
+  hasAccessibleDestinationWithPrefix,
   type AdminDestination,
 } from '@/features/admin/registry';
 import { useAdminOverview } from '@/features/admin/hooks/useAdminOverview';
@@ -252,10 +252,13 @@ function getDashboardDestinations(
         : destination,
     );
 
-  const settings = ADMIN_DESTINATIONS.some(
-    (destination) =>
-      destination.kind === 'configuration' && canAccessDestination(destination, access),
-  );
+  // Gate on actual reachability of the settings shell itself (not merely
+  // holding *some* configuration-kind permission) — several configuration
+  // destinations (data-catalog, hw-locations, hw-power-monitors) live outside
+  // /admin/settings, so a user whose only configuration grant unlocks one of
+  // those would otherwise see a "Farm & Admin Settings" card that leads
+  // nowhere (Bishop review, #2508).
+  const settings = hasAccessibleDestinationWithPrefix(access, '/admin/settings');
 
   return { operational, settings };
 }
