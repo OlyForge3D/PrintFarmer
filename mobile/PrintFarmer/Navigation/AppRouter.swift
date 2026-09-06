@@ -305,6 +305,11 @@ final class AppRouter {
     ) {
         let contextChanged = configuredServerID != serverID || configuredUserID != userID
         let preferenceChanged = appliedNavigationPreference != preference
+        // A promotion or demotion changes what Automatic derives without
+        // changing the server or the user, so the cached derivation has to be
+        // recomputed or the stale one keeps describing the previous role
+        // forever (#2478).
+        let farmAdminChanged = configuredIsFarmAdmin != isFarmAdmin
         configuredIsFarmAdmin = isFarmAdmin
 
         if contextChanged && !preserveNavigationOnContextChange {
@@ -312,7 +317,7 @@ final class AppRouter {
         }
 
         let automaticDerivation: NavigationShellDerivation
-        if contextChanged || establishedAutomaticDerivation == nil {
+        if contextChanged || farmAdminChanged || establishedAutomaticDerivation == nil {
             automaticDerivation = NavigationShellDerivation.automatic(
                 farmShape: farmShape,
                 shiftPlanEnabled: capabilities.shiftPlanEnabled,
@@ -328,22 +333,36 @@ final class AppRouter {
                 )
         }
 
-        if contextChanged || preferenceChanged || appliedNavigationPreference == nil {
+        if contextChanged || preferenceChanged || farmAdminChanged
+            || appliedNavigationPreference == nil {
+            let isFirstApply = appliedNavigationPreference == nil
             configuredServerID = serverID
             configuredUserID = userID
             appliedNavigationPreference = preference
-            requestedShell = AdaptiveNavigationShell.requestedShell(
+            let resolvedShell = AdaptiveNavigationShell.requestedShell(
                 preference: preference,
                 automaticDerivation: automaticDerivation,
                 establishedShell: persistedAutomaticShell
             )
-            activeMode = .floor
+            let shellChanged = resolvedShell != requestedShell
+            requestedShell = resolvedShell
+            // A role change that leaves the shell where it was must not yank
+            // the user back to Floor.
+            if contextChanged || preferenceChanged || isFirstApply || shellChanged {
+                activeMode = .floor
+            }
         }
 
-        // Only a grounded Automatic derivation establishes a layout worth
-        // latching: an unknown/offline shape is not evidence, and an explicit
-        // Simple/Two modes override is the user's own choice (#2478).
-        establishedAutomaticShell = preference == .automatic && farmShape != nil
+        // Only a derivation that actually read the farm's shape establishes a
+        // layout worth latching. An unknown/offline shape, a server that does
+        // not run shifts, and a non-administrator account all derive `.simple`
+        // without saying anything about farm size — latching those would pin a
+        // `.simple` layout that then permanently beats the `.twoModes`
+        // derivation the user gets once the capability or role changes (#2478).
+        // An explicit Simple/Two modes override is the user's own choice and is
+        // recorded as a preference, not a latch.
+        establishedAutomaticShell = preference == .automatic
+            && automaticDerivation.cause.readsFarmShape
             ? requestedShell
             : nil
 

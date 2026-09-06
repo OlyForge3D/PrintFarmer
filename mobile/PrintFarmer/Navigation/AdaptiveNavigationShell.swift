@@ -31,8 +31,72 @@ enum NavigationLayoutPreference: String, CaseIterable, Codable, Hashable, Identi
 }
 
 struct NavigationShellDerivation: Equatable, Sendable {
+    /// Why `automatic` landed on the shell it did.
+    ///
+    /// The shell alone is not enough to decide whether a derivation is worth
+    /// remembering: `automatic` returns `.simple` for a missing shape, for a
+    /// server that does not run shifts, and for a non-administrator account —
+    /// none of which say anything about how big the farm is. Latching those
+    /// would pin the layout on evidence that can flip back without the farm
+    /// changing at all, and a `.simple` latch established that way would then
+    /// permanently beat a later `.twoModes` derivation (#2478).
+    enum Cause: String, Equatable, Sendable {
+        /// The server did not report a shape, so nothing was actually read.
+        case unknownFarmShape
+        /// A capability reading: this server says it does not run shifts.
+        case shiftPlanningDisabled
+        /// A role reading: this account is not a farm administrator.
+        case notFarmAdmin
+        case multipleAccounts
+        case multipleLocations
+        case singleAccountSingleLocation
+
+        /// Whether the derivation actually read the farm's *shape* — the thing
+        /// the upgrade offer watches for growth, and so the only kind of
+        /// reading worth latching.
+        var readsFarmShape: Bool {
+            switch self {
+            case .multipleAccounts, .multipleLocations, .singleAccountSingleLocation:
+                true
+            case .unknownFarmShape, .shiftPlanningDisabled, .notFarmAdmin:
+                false
+            }
+        }
+
+        /// Whether this reading positively contradicts anything already latched.
+        ///
+        /// A latch is only ever written from a farm-shape reading, so a role or
+        /// capability reading proves the stored value describes a world that no
+        /// longer applies and it must be dropped. `unknownFarmShape` is
+        /// deliberately excluded: it is the ordinary transient state during
+        /// launch and while offline, and clearing on it would wipe a good latch
+        /// every cold start.
+        var contradictsLatch: Bool {
+            switch self {
+            case .shiftPlanningDisabled, .notFarmAdmin:
+                true
+            case .unknownFarmShape, .multipleAccounts, .multipleLocations,
+                 .singleAccountSingleLocation:
+                false
+            }
+        }
+    }
+
     let shell: NavigationShell
     let explanation: String
+    /// Defaults to the conservative, non-latchable reading so a derivation
+    /// assembled outside `automatic` can never establish a latch by accident.
+    let cause: Cause
+
+    init(
+        shell: NavigationShell,
+        explanation: String,
+        cause: Cause = .unknownFarmShape
+    ) {
+        self.shell = shell
+        self.explanation = explanation
+        self.cause = cause
+    }
 
     static func automatic(
         farmShape: FarmShape?,
@@ -42,7 +106,8 @@ struct NavigationShellDerivation: Equatable, Sendable {
         guard let farmShape else {
             return NavigationShellDerivation(
                 shell: .simple,
-                explanation: "This server doesn't report its size. Using the simple layout."
+                explanation: "This server doesn't report its size. Using the simple layout.",
+                cause: .unknownFarmShape
             )
         }
 
@@ -56,34 +121,39 @@ struct NavigationShellDerivation: Equatable, Sendable {
         if !shiftPlanEnabled {
             return NavigationShellDerivation(
                 shell: .simple,
-                explanation: "\(observedShape). That is the simple layout because this server says it does not run shifts. Printer count does not change the layout."
+                explanation: "\(observedShape). That is the simple layout because this server says it does not run shifts. Printer count does not change the layout.",
+                cause: .shiftPlanningDisabled
             )
         }
 
         if !isFarmAdmin {
             return NavigationShellDerivation(
                 shell: .simple,
-                explanation: "\(observedShape). That is the simple layout for this account because it is not a farm administrator. Printer count does not change the layout."
+                explanation: "\(observedShape). That is the simple layout for this account because it is not a farm administrator. Printer count does not change the layout.",
+                cause: .notFarmAdmin
             )
         }
 
         if farmShape.accountCount >= 2 {
             return NavigationShellDerivation(
                 shell: .twoModes,
-                explanation: "\(observedShape). That is the two modes layout because this server has multiple accounts. Printer count does not change the layout."
+                explanation: "\(observedShape). That is the two modes layout because this server has multiple accounts. Printer count does not change the layout.",
+                cause: .multipleAccounts
             )
         }
 
         if farmShape.locationCount >= 2 {
             return NavigationShellDerivation(
                 shell: .twoModes,
-                explanation: "\(observedShape). That is the two modes layout because this server has multiple bays. Printer count does not change the layout."
+                explanation: "\(observedShape). That is the two modes layout because this server has multiple bays. Printer count does not change the layout.",
+                cause: .multipleLocations
             )
         }
 
         return NavigationShellDerivation(
             shell: .simple,
-            explanation: "\(observedShape). That is the simple layout. Shift planning being on by itself does not indicate a staffed farm, and printer count does not change the layout."
+            explanation: "\(observedShape). That is the simple layout. Shift planning being on by itself does not indicate a staffed farm, and printer count does not change the layout.",
+            cause: .singleAccountSingleLocation
         )
     }
 

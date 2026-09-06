@@ -379,6 +379,16 @@ struct ContentView: View {
             oversightAvailability: oversightAvailability
         )
 
+        // Read the established latch BEFORE observing the offer: observing
+        // records the freshly grown shape as the new baseline, and the latch's
+        // pre-latch fallback derives from that same baseline. Reading after
+        // would derive `.twoModes` from the very growth the offer is about to
+        // ask the user about (#2478).
+        let persistedAutomaticShell = serverRegistry.establishedAutomaticShell(
+            for: activeServer.id,
+            isFarmAdmin: navigationIdentity.isFarmAdmin
+        )
+
         _ = serverRegistry.observeOversightUpgradeOffer(
             farmShape: services.farmShapeService.latestShape,
             shiftPlanEnabled: capabilities.shiftPlanEnabled,
@@ -397,21 +407,24 @@ struct ContentView: View {
             isFarmAdmin: navigationIdentity.isFarmAdmin,
             capabilities: capabilities,
             oversightAvailability: oversightAvailability,
-            persistedAutomaticShell: serverRegistry.establishedAutomaticShell(
-                for: activeServer.id,
-                isFarmAdmin: navigationIdentity.isFarmAdmin
-            ),
+            persistedAutomaticShell: persistedAutomaticShell,
             preserveNavigationOnContextChange: preserveNavigationOnIdentityUpgrade
         )
 
         // Latch the Automatic layout this session settled on so later farm
         // growth can only offer Two modes, never impose it (#2478).
-        if preference == .automatic,
-           let establishedShell = router.establishedAutomaticShell {
-            serverRegistry.recordEstablishedAutomaticShell(
-                establishedShell,
-                for: activeServer.id
-            )
+        if preference == .automatic {
+            if let establishedShell = router.establishedAutomaticShell {
+                serverRegistry.recordEstablishedAutomaticShell(
+                    establishedShell,
+                    for: activeServer.id
+                )
+            } else if router.establishedAutomaticDerivation?.cause.contradictsLatch == true {
+                // A role or capability reading has contradicted whatever was
+                // stored, so drop it instead of letting a stale Simple outrank
+                // the Two modes this account earns back on promotion (#2478).
+                serverRegistry.clearEstablishedAutomaticShell(for: activeServer.id)
+            }
         }
         if UITestBootstrap.isEnabled,
            UITestBootstrap.startsInOversightMode {

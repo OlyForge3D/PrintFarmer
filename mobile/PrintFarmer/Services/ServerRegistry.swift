@@ -408,7 +408,12 @@ final class ServerRegistry {
             return .twoModes
         }
         guard let baseline = state.lastObserved else { return nil }
-        if !state.dismissedThresholds.isEmpty {
+        // A dismissed or still-pending offer both mean the user has been shown
+        // Two modes and has not taken it, so the layout they are actually on is
+        // Simple. Without the pending case, an install with no stored latch
+        // would derive `.twoModes` from the very growth the offer is still
+        // asking about, imposing the switch it was meant to offer (#2478).
+        if !state.dismissedThresholds.isEmpty || !state.pendingThresholds.isEmpty {
             return .simple
         }
         return NavigationShellDerivation.automatic(
@@ -420,6 +425,20 @@ final class ServerRegistry {
             shiftPlanEnabled: baseline.shiftPlanEnabled,
             isFarmAdmin: isFarmAdmin
         ).shell
+    }
+
+    /// Drops a latch that a role or capability reading has just contradicted.
+    ///
+    /// A latch is only ever written from a farm-shape reading, so once the
+    /// session derives Simple purely because the account is not a farm
+    /// administrator, or because the server stopped running shifts, whatever is
+    /// stored describes a world that no longer exists. Leaving it in place lets
+    /// a stale `.simple` permanently outrank the `.twoModes` derivation the
+    /// user earns back on promotion (#2478).
+    func clearEstablishedAutomaticShell(for serverID: UUID) {
+        userDefaults.removeObject(
+            forKey: Self.establishedAutomaticShellKey(for: serverID)
+        )
     }
 
     /// Latches the Automatic layout in use for a server so a later launch

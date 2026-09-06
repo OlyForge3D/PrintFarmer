@@ -185,6 +185,158 @@ final class AdaptiveNavigationRegressionTests: XCTestCase {
         XCTAssertNil(router.establishedAutomaticShell)
     }
 
+    func testRouterDoesNotLatchWhenSimpleComesFromANonAdminRole() {
+        let router = AppRouter()
+
+        router.configureAdaptiveShell(
+            serverID: UUID(),
+            userID: UUID(),
+            preference: .automatic,
+            farmShape: FarmShape(accountCount: 4, locationCount: 3, printerCount: 40),
+            isFarmAdmin: false,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.activeShell, .simple)
+        XCTAssertNil(
+            router.establishedAutomaticShell,
+            "A non-admin reading says nothing about farm size, so it must not latch Simple (#2478)."
+        )
+        XCTAssertEqual(router.establishedAutomaticDerivation?.cause, .notFarmAdmin)
+        XCTAssertEqual(router.establishedAutomaticDerivation?.cause.contradictsLatch, true)
+    }
+
+    func testRouterDoesNotLatchWhenSimpleComesFromShiftPlanningBeingOff() {
+        let router = AppRouter()
+        var shiftsOff = capabilities
+        shiftsOff.shiftPlanEnabled = false
+
+        router.configureAdaptiveShell(
+            serverID: UUID(),
+            userID: UUID(),
+            preference: .automatic,
+            farmShape: FarmShape(accountCount: 4, locationCount: 3, printerCount: 40),
+            isFarmAdmin: true,
+            capabilities: shiftsOff,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(router.activeShell, .simple)
+        XCTAssertNil(router.establishedAutomaticShell)
+        XCTAssertEqual(router.establishedAutomaticDerivation?.cause, .shiftPlanningDisabled)
+    }
+
+    func testPromotionToFarmAdminRecomputesTheCachedDerivation() {
+        let router = AppRouter()
+        let serverID = UUID()
+        let userID = UUID()
+        let grownFarm = FarmShape(accountCount: 4, locationCount: 3, printerCount: 40)
+
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .automatic,
+            farmShape: grownFarm,
+            isFarmAdmin: false,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+        XCTAssertEqual(router.establishedAutomaticDerivation?.cause, .notFarmAdmin)
+
+        // Same server, same user — only the role changed.
+        router.configureAdaptiveShell(
+            serverID: serverID,
+            userID: userID,
+            preference: .automatic,
+            farmShape: grownFarm,
+            isFarmAdmin: true,
+            capabilities: capabilities,
+            oversightAvailability: .fullyAvailable
+        )
+
+        XCTAssertEqual(
+            router.establishedAutomaticDerivation?.shell,
+            .twoModes,
+            "A role change must recompute the cached derivation (#2478)."
+        )
+        XCTAssertEqual(router.establishedAutomaticShell, .twoModes)
+    }
+
+    func testDerivationCauseTracksTheReasonAutomaticChoseItsShell() {
+        XCTAssertEqual(
+            NavigationShellDerivation.automatic(
+                farmShape: nil,
+                shiftPlanEnabled: true,
+                isFarmAdmin: true
+            ).cause,
+            .unknownFarmShape
+        )
+        XCTAssertEqual(
+            NavigationShellDerivation.automatic(
+                farmShape: FarmShape(accountCount: 4, locationCount: 3, printerCount: 40),
+                shiftPlanEnabled: false,
+                isFarmAdmin: true
+            ).cause,
+            .shiftPlanningDisabled
+        )
+        XCTAssertEqual(
+            NavigationShellDerivation.automatic(
+                farmShape: FarmShape(accountCount: 4, locationCount: 3, printerCount: 40),
+                shiftPlanEnabled: true,
+                isFarmAdmin: false
+            ).cause,
+            .notFarmAdmin
+        )
+        XCTAssertEqual(
+            NavigationShellDerivation.automatic(
+                farmShape: FarmShape(accountCount: 2, locationCount: 1, printerCount: 1),
+                shiftPlanEnabled: true,
+                isFarmAdmin: true
+            ).cause,
+            .multipleAccounts
+        )
+        XCTAssertEqual(
+            NavigationShellDerivation.automatic(
+                farmShape: FarmShape(accountCount: 1, locationCount: 2, printerCount: 1),
+                shiftPlanEnabled: true,
+                isFarmAdmin: true
+            ).cause,
+            .multipleLocations
+        )
+        XCTAssertEqual(
+            NavigationShellDerivation.automatic(
+                farmShape: FarmShape(accountCount: 1, locationCount: 1, printerCount: 40),
+                shiftPlanEnabled: true,
+                isFarmAdmin: true
+            ).cause,
+            .singleAccountSingleLocation
+        )
+
+        // Only a shape reading may establish a latch, and only a role or
+        // capability reading may clear one.
+        for cause in [
+            NavigationShellDerivation.Cause.multipleAccounts,
+            .multipleLocations,
+            .singleAccountSingleLocation
+        ] {
+            XCTAssertTrue(cause.readsFarmShape, "\(cause) reads the farm shape.")
+            XCTAssertFalse(cause.contradictsLatch, "\(cause) must not clear a latch.")
+        }
+        for cause in [
+            NavigationShellDerivation.Cause.shiftPlanningDisabled,
+            .notFarmAdmin
+        ] {
+            XCTAssertFalse(cause.readsFarmShape, "\(cause) does not read the farm shape.")
+            XCTAssertTrue(cause.contradictsLatch, "\(cause) invalidates a stored latch.")
+        }
+        XCTAssertFalse(NavigationShellDerivation.Cause.unknownFarmShape.readsFarmShape)
+        XCTAssertFalse(
+            NavigationShellDerivation.Cause.unknownFarmShape.contradictsLatch,
+            "A transient unknown shape must never wipe a good latch (#2478)."
+        )
+    }
+
     func testResettingTheShellSessionClearsTheLatch() {
         let router = AppRouter()
         router.configureAdaptiveShell(
