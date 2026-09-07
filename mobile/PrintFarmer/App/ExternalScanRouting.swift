@@ -92,6 +92,107 @@ enum ExternalScanRouting {
         }
     }
 
+    /// Moves a pending request created by builds that used the app's standard
+    /// defaults into the App Group before app-side routing reads shared state.
+    ///
+    /// This type is app-target-only, so the widget extension cannot migrate its
+    /// own process-local standard domain.
+    static func migrateLegacyPendingRequest(
+        from legacyUserDefaults: UserDefaults = .standard,
+        to sharedUserDefaults: UserDefaults = ExternalScanRequestStore.sharedUserDefaults,
+        now: Date = Date()
+    ) {
+        let legacyHasPersistedTimestamp =
+            legacyUserDefaults.data(forKey: ExternalScanRequestStore.pendingKey) != nil
+        guard legacyUserDefaults !== sharedUserDefaults,
+              let legacyRequest = ExternalScanRequestStore.pending(
+                  userDefaults: legacyUserDefaults,
+                  now: now
+              ) else { return }
+
+        if let sharedRequest = ExternalScanRequestStore.pending(
+            userDefaults: sharedUserDefaults,
+            now: now
+        ), !legacyHasPersistedTimestamp
+            || sharedRequest.requestedAt >= legacyRequest.requestedAt {
+            // The shared request already supersedes the legacy one. Verify it
+            // remains intact before removing the stale source, otherwise it
+            // could be replayed after the shared request is consumed.
+            guard ExternalScanRequestStore.pending(
+                userDefaults: sharedUserDefaults,
+                now: now
+            ) == sharedRequest else { return }
+            legacyUserDefaults.removeObject(forKey: ExternalScanRequestStore.pendingKey)
+            return
+        }
+
+        guard ExternalScanRequestStore.store(
+            legacyRequest,
+            userDefaults: sharedUserDefaults
+        ), ExternalScanRequestStore.pending(
+            userDefaults: sharedUserDefaults,
+            now: now
+        ) == legacyRequest else { return }
+
+        legacyUserDefaults.removeObject(forKey: ExternalScanRequestStore.pendingKey)
+    }
+
+    /// App-side lifecycle entry point. Migration must happen here rather than
+    /// in the shared intent source, which also compiles into the widget target.
+    @MainActor
+    static func applyFromApp(
+        _ event: LifecycleEvent,
+        router: AppRouter,
+        activeServerID: UUID?,
+        isShowingMainContent: Bool,
+        capabilities: ResolvedSystemCapabilities,
+        legacyUserDefaults: UserDefaults = .standard,
+        sharedUserDefaults: UserDefaults = ExternalScanRequestStore.sharedUserDefaults,
+        now: Date = Date()
+    ) {
+        migrateLegacyPendingRequest(
+            from: legacyUserDefaults,
+            to: sharedUserDefaults,
+            now: now
+        )
+        apply(
+            event,
+            router: router,
+            activeServerID: activeServerID,
+            isShowingMainContent: isShowingMainContent,
+            capabilities: capabilities,
+            userDefaults: sharedUserDefaults,
+            now: now
+        )
+    }
+
+    /// App-side routing entry point that migrates legacy state before the first
+    /// shared-store read.
+    @MainActor
+    static func routeFromApp(
+        router: AppRouter,
+        activeServerID: UUID?,
+        isShowingMainContent: Bool,
+        capabilities: ResolvedSystemCapabilities,
+        legacyUserDefaults: UserDefaults = .standard,
+        sharedUserDefaults: UserDefaults = ExternalScanRequestStore.sharedUserDefaults,
+        now: Date = Date()
+    ) {
+        migrateLegacyPendingRequest(
+            from: legacyUserDefaults,
+            to: sharedUserDefaults,
+            now: now
+        )
+        route(
+            router: router,
+            activeServerID: activeServerID,
+            isShowingMainContent: isShowingMainContent,
+            capabilities: capabilities,
+            userDefaults: sharedUserDefaults,
+            now: now
+        )
+    }
+
     /// Applies a lifecycle event to the persisted request and the router.
     ///
     /// `RootView` delegates every scan-related lifecycle hook here, so a test

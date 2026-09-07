@@ -40,7 +40,7 @@ enum ExternalScanRequestStore {
         now: Date = Date(),
         id: UUID = UUID()
     ) {
-        store(
+        _ = store(
             PendingExternalScanRequest(id: id, requestedAt: now, scopedServerID: nil),
             userDefaults: userDefaults
         )
@@ -61,7 +61,7 @@ enum ExternalScanRequestStore {
         }
         guard userDefaults.bool(forKey: pendingKey) else { return nil }
         let upgraded = PendingExternalScanRequest(id: UUID(), requestedAt: now, scopedServerID: nil)
-        store(upgraded, userDefaults: userDefaults)
+        guard store(upgraded, userDefaults: userDefaults) else { return nil }
         return upgraded
     }
 
@@ -75,7 +75,7 @@ enum ExternalScanRequestStore {
               request.scopedServerID == nil,
               let serverID else { return }
         request.scopedServerID = serverID
-        store(request, userDefaults: userDefaults)
+        _ = store(request, userDefaults: userDefaults)
     }
 
     @discardableResult
@@ -91,12 +91,14 @@ enum ExternalScanRequestStore {
         userDefaults.removeObject(forKey: pendingKey)
     }
 
-    private static func store(
+    @discardableResult
+    static func store(
         _ request: PendingExternalScanRequest,
         userDefaults: UserDefaults
-    ) {
-        guard let data = try? JSONEncoder().encode(request) else { return }
+    ) -> Bool {
+        guard let data = try? JSONEncoder().encode(request) else { return false }
         userDefaults.set(data, forKey: pendingKey)
+        return userDefaults.data(forKey: pendingKey) == data
     }
 }
 
