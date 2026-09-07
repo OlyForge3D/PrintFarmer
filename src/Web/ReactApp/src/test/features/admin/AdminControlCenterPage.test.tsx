@@ -706,15 +706,47 @@ describe('AdminControlCenterPage', () => {
     const selfLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'))
       .filter((link) => {
         const href = link.getAttribute('href') ?? '';
-        return href === '/admin' || href.startsWith('/admin?') || href.startsWith('/admin#');
+        return href === '/admin'
+          || href === '/admin/'
+          || href.startsWith('/admin?')
+          || href.startsWith('/admin#')
+          || href.startsWith('/admin/?')
+          || href.startsWith('/admin/#');
       });
     expect(selfLinks).toHaveLength(0);
+  });
+
+  // #2526 — removing a destination from the navbar is only safe because the hub
+  // actually owns it. This is the positive half of that contract: if a tile ever
+  // disappears from the hub, the destination is stranded with no default home.
+  it.each([
+    ['Maintenance', '/maintenance'],
+    ['Analytics', '/analytics'],
+    ['Locations', '/locations'],
+    ['Catalog', '/catalog'],
+    ['Auto-Dispatch', '/auto-dispatch'],
+  ])('owns %s as its single default home (#2526)', async (_label, href) => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-operations')).toBeInTheDocument();
+    });
+
+    const tiles = screen
+      .getAllByTestId('admin-hub-destination')
+      .filter((card) => card.getAttribute('href') === href);
+    expect(tiles).toHaveLength(1);
   });
 
   it.each([
     ['a destination id that resolves to /admin', { actionDestinationId: 'admin-home' }],
     ['a raw /admin action route', { actionRoute: '/admin' }],
     ['a query-suffixed /admin action route', { actionRoute: '/admin?from=attention' }],
+    ['a hash-suffixed /admin action route', { actionRoute: '/admin#attention' }],
+    ['a trailing-slash /admin/ action route', { actionRoute: '/admin/' }],
+    ['a trailing-slash query /admin/?x=1 action route', { actionRoute: '/admin/?x=1' }],
   ])('suppresses an attention action pointing at the hub itself — %s (#2526)', async (_label, action) => {
     mockedApiGet.mockResolvedValue({
       data: makeOverview({
@@ -740,7 +772,14 @@ describe('AdminControlCenterPage', () => {
     expect(screen.getByTestId('admin-hub-attention-item').querySelector('a')).toBeNull();
   });
 
-  it('keeps a legitimate /admin child action route (the self-link guard is exact)', async () => {
+  it.each([
+    ['a child destination under the hub', '/admin/status'],
+    ['the settings shell', '/admin/settings?tab=general'],
+    ['the worker console', '/admin/workers?workerTab=jobs'],
+    // The naive `startsWith('/admin')` bug would wrongly suppress this: it is a
+    // sibling route whose path merely shares the `/admin` prefix, not a child.
+    ['an unrelated sibling route sharing the /admin prefix', '/admin-something'],
+  ])('keeps a legitimate action route — %s (the self-link guard is exact)', async (_label, actionRoute) => {
     mockedApiGet.mockResolvedValue({
       data: makeOverview({
         attention: [
@@ -750,7 +789,7 @@ describe('AdminControlCenterPage', () => {
             title: 'Worker offline',
             detail: 'A child destination under /admin is still a valid target.',
             actionLabel: 'Open',
-            actionRoute: '/admin/status',
+            actionRoute,
           },
         ],
       }),
@@ -764,7 +803,7 @@ describe('AdminControlCenterPage', () => {
 
     expect(screen.getByTestId('admin-hub-attention-item').querySelector('a')).toHaveAttribute(
       'href',
-      '/admin/status',
+      actionRoute,
     );
   });
 

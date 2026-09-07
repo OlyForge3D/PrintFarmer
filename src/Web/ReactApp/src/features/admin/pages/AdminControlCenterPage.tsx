@@ -182,10 +182,18 @@ function resolveAttentionActionRoute(
     route.startsWith('/admin/manage?') ||
     route.startsWith('/admin/manage#') ||
     route.startsWith('/admin/manage/');
-  // `/admin` exactly, or `/admin?…` / `/admin#…` — but not `/admin/status`,
-  // which is a legitimate child destination.
+  // `/admin` exactly, `/admin/`, or `/admin?…` / `/admin#…` — but not
+  // `/admin/status`, which is a legitimate child destination, and not
+  // `/admin-something`, which is an unrelated sibling route. `/admin/` is
+  // included because React Router normalises it to `/admin`, so a link to it
+  // would still be a self-link.
   const isControlCenterSelfRoute = (route: string) =>
-    route === '/admin' || route.startsWith('/admin?') || route.startsWith('/admin#');
+    route === '/admin' ||
+    route === '/admin/' ||
+    route.startsWith('/admin?') ||
+    route.startsWith('/admin#') ||
+    route.startsWith('/admin/?') ||
+    route.startsWith('/admin/#');
   const fallbackRoute =
     item.actionRoute &&
     item.actionRoute.startsWith('/') &&

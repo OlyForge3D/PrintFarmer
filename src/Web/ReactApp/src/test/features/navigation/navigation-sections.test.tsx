@@ -152,16 +152,33 @@ describe('Navigation rail sections', () => {
     expect(within(desktopNav).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
   });
 
-  it('renders each default desktop nav link once', async () => {
+  // #2526 — the default admin rail is pinned to an exact set, not a count. A
+  // raw length says nothing about *which* destinations own the default surface,
+  // so it cannot catch a swap (one admin duplicate removed, another added).
+  const DEFAULT_ADMIN_RAIL_HREFS = [
+    '/dashboard',
+    '/printers',
+    '/printQueue',
+    '/scheduling',
+    '/slicer',
+    '/spools',
+    '/projects',
+    '/files',
+    '/parts-inventory',
+    '/admin',
+  ];
+
+  it('renders exactly the default desktop nav destinations, each once', async () => {
     const { container } = renderLayout();
     const desktopNav = getDesktopNav(container);
 
     await waitFor(() => {
-      expect(desktopNav.querySelectorAll('a[href]')).toHaveLength(10);
+      expect(desktopNav.querySelector('a[href="/admin"]')).not.toBeNull();
     });
 
     const hrefs = Array.from(desktopNav.querySelectorAll<HTMLAnchorElement>('a[href]')).map((link) => link.getAttribute('href'));
     expect(new Set(hrefs).size).toBe(hrefs.length);
+    expect([...hrefs].sort()).toEqual([...DEFAULT_ADMIN_RAIL_HREFS].sort());
   });
 
   // #2526 — every admin destination has exactly one default navigation home.
@@ -201,6 +218,65 @@ describe('Navigation rail sections', () => {
     expect(container.querySelectorAll('a[href="/analytics"]')).toHaveLength(0);
     expect(container.querySelectorAll('a[href="/auto-dispatch"]')).toHaveLength(0);
   });
+
+  // #2526 — the permission matrix the issue AC calls out. Each row is a user
+  // shape that could previously reach a now-removed rail entry. The Admin
+  // entry (`requiresAnyAccessibleHubTile`) must stay reachable for every shape
+  // that can still reach at least one hub tile, and every removed destination
+  // must be absent from the default chrome regardless of grants — moving a link
+  // must not add a blanket farm_admin gate, and must not strand anyone.
+  it.each([
+    [
+      'a queue:read delegate (Analytics + Auto-Dispatch)',
+      (r: string, a: string) => r === 'queue' && a === 'read',
+      true,
+    ],
+    [
+      'a catalog:admin standalone-only delegate',
+      (r: string, a: string) => r === 'catalog' && a === 'admin',
+      true,
+    ],
+    [
+      'a locations:admin standalone-only delegate',
+      (r: string, a: string) => r === 'locations' && a === 'admin',
+      true,
+    ],
+    [
+      'a maintenance:admin delegate',
+      (r: string, a: string) => r === 'maintenance' && a === 'admin',
+      true,
+    ],
+    [
+      'an any-of delegate holding catalog:admin and maintenance:admin',
+      (r: string, a: string) => (r === 'catalog' || r === 'maintenance') && a === 'admin',
+      true,
+    ],
+    [
+      'a role-restricted user with zero admin grants',
+      () => false,
+      false,
+    ],
+  ])(
+    'keeps the single default home reachable and the duplicates gone for %s',
+    (_label, override, expectsAdminEntry) => {
+      mockUserRole = 'custom-delegate';
+      mockPermissionOverride = override;
+      const { container } = renderLayout();
+      const desktopNav = getDesktopNav(container);
+
+      if (expectsAdminEntry) {
+        expect(within(desktopNav).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+      } else {
+        expect(container.querySelector('a[href="/admin"]')).toBeNull();
+      }
+
+      // No grant shape resurrects a Control-Center-owned destination in the
+      // default chrome (desktop rail or mobile drawer).
+      for (const href of ['/maintenance', '/locations', '/analytics', '/auto-dispatch', '/catalog']) {
+        expect(container.querySelectorAll(`a[href="${href}"]`)).toHaveLength(0);
+      }
+    },
+  );
 
   it('does not resurrect a removed admin entry from a stored nav preference naming it', async () => {
     // Legacy automatic ordering (and any pin persisted before the entries were
