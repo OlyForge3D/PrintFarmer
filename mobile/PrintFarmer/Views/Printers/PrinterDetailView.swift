@@ -285,8 +285,13 @@ struct PrinterDetailView: View {
         case .set, .change:
             viewModel.loadFilament()
         case .clearAssignment:
+            // Assignment-only (issue #2522 / #2519 integration contract):
+            // NEVER alias to `ejectFilament()`, which also dispatches a
+            // physical `unloadFilament()` POST. That combined operation
+            // stays reachable separately, accurately labeled "Eject
+            // Filament", in `setupActionsSection`.
             UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-            let task = Task { await viewModel.ejectFilament() }
+            let task = Task { await viewModel.clearActiveSpoolAssignment() }
             activeTasks.append(task)
         case .scanNFC:
             viewModel.handleNFCScanToLoad()
@@ -397,26 +402,46 @@ struct PrinterDetailView: View {
     }
 
     /// Retained-location setup actions (issue #2522 preserve-before-cleanup
-    /// checklist): the admin maintenance toggle and NFC printer-tag write,
-    /// both previously nested inside the old Advanced disclosure's Actions
-    /// block, which rendered `if printer.isOnline` regardless of the
-    /// Advanced Printer Controls safety preference. The caller
-    /// (`statusPage`) reproduces that exact `printer.isOnline` gate; this
-    /// function itself only decides whether it has anything to show at all.
+    /// checklist): the admin maintenance toggle, NFC printer-tag write, and
+    /// the physical filament eject, all previously nested inside the old
+    /// Advanced disclosure's Actions block, which rendered
+    /// `if printer.isOnline` regardless of the Advanced Printer Controls
+    /// safety preference. The caller (`statusPage`) reproduces that exact
+    /// `printer.isOnline` gate; this function itself only decides whether
+    /// it has anything to show at all.
+    ///
+    /// "Eject Filament" here dispatches the ORIGINAL combined operation
+    /// (`ejectFilament()`: clears the assignment AND physically unloads via
+    /// `unloadFilament()`) preserved with truthful, distinct wording — never
+    /// to be confused with #2519's "Clear spool assignment" action in
+    /// `PrinterFilamentSection`, which is assignment-only
+    /// (`clearActiveSpoolAssignment()`, no physical unload).
     @ViewBuilder
     private func setupActionsSection(_ printer: Printer) -> some View {
         let showsMaintenanceToggle = authViewModel.currentUserRole == "farm_admin"
+        let showsEjectFilament = viewModel.effectiveSpoolInfo?.hasActiveSpool ?? false
         #if canImport(UIKit)
         let showsWriteTag = true
         #else
         let showsWriteTag = false
         #endif
-        if showsMaintenanceToggle || showsWriteTag {
+        if showsMaintenanceToggle || showsWriteTag || showsEjectFilament {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Setup Actions")
                     .font(.headline)
 
                 VStack(spacing: 10) {
+                    if showsEjectFilament {
+                        PrinterDetailBorderedDestructiveButton(kind: .eject) {
+                            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                            let task = Task { await viewModel.ejectFilament() }
+                            activeTasks.append(task)
+                        }
+                        .disabled(viewModel.isPerformingAction)
+                        .accessibilityLabel("Eject filament: clears the spool assignment and physically unloads")
+                        .accessibilityIdentifier("printer.detail.status.ejectFilament")
+                    }
+
                     if showsMaintenanceToggle {
                         Button {
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()

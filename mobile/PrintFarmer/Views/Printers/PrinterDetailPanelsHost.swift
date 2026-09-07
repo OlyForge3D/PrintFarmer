@@ -196,12 +196,24 @@ enum PrinterDetailFilamentActionMapping {
             actions.append(PrinterFilamentAction(kind: .change, target: target, disabledReason: busyReason))
             actions.append(PrinterFilamentAction(kind: .clearAssignment, target: target, disabledReason: busyReason))
         } else {
-            actions.append(PrinterFilamentAction(kind: .set, target: target, disabledReason: nil))
+            // `.set` must be disabled while another action is in progress
+            // just like `.change`/`.clearAssignment` — it dispatches the
+            // same single-flight `printerService.setActiveSpool` path via
+            // the spool-picker sheet, so it is not safe to fire it
+            // mid-flight either (Vasquez review finding 8).
+            actions.append(PrinterFilamentAction(kind: .set, target: target, disabledReason: busyReason))
         }
+        // NFC availability and single-flight busy state are independent
+        // gates on the same action; combine them rather than letting a
+        // busy scan remain tappable merely because NFC hardware is present
+        // (Vasquez review finding 8).
+        let scanNFCDisabledReason = !nfcAvailable
+            ? "NFC scanning is not available on this device."
+            : busyReason
         actions.append(PrinterFilamentAction(
             kind: .scanNFC,
             target: target,
-            disabledReason: nfcAvailable ? nil : "NFC scanning is not available on this device."
+            disabledReason: scanNFCDisabledReason
         ))
         return actions
     }

@@ -573,6 +573,60 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertEqual(mockService.stopCalledWith, TestData.testUUID)
     }
 
+    // MARK: - Filament Assignment (issue #2522, Vasquez review finding 7)
+
+    /// `clearActiveSpoolAssignment()` must be assignment-only: it dispatches
+    /// `setActiveSpool(spoolId: nil, ...)` and must NEVER also dispatch the
+    /// physical `unloadFilament()` POST — that combined behavior belongs
+    /// exclusively to `ejectFilament()`, reachable separately with distinct,
+    /// truthful wording ("Eject Filament").
+    func testClearActiveSpoolAssignmentClearsAssignmentWithoutPhysicalUnload() async throws {
+        // Uses `printerMinimal`, not the default fixture: it carries a
+        // non-empty `rowVersion`, required by `reviewedPrinterRowVersion()`
+        // before either service call can dispatch.
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+
+        await viewModel.clearActiveSpoolAssignment()
+
+        guard let called = mockService.setActiveSpoolCalledWith else {
+            XCTFail("setActiveSpool must be called")
+            return
+        }
+        XCTAssertEqual(called.printerId, TestData.testUUID)
+        XCTAssertNil(called.spoolId, "Assignment-only clear must pass a nil spoolId")
+        XCTAssertNil(
+            mockService.unloadFilamentCalledWith,
+            "Assignment-only clear must never dispatch a physical unload"
+        )
+        XCTAssertNil(viewModel.actionError)
+        XCTAssertFalse(viewModel.isPerformingAction)
+    }
+
+    /// `ejectFilament()` itself is unchanged and still performs the combined
+    /// operation — this pins that its behavior did NOT silently change while
+    /// `clearActiveSpoolAssignment()` was split out.
+    func testEjectFilamentStillClearsAssignmentAndPhysicallyUnloads() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+
+        await viewModel.ejectFilament()
+
+        guard let called = mockService.setActiveSpoolCalledWith else {
+            XCTFail("setActiveSpool must be called")
+            return
+        }
+        XCTAssertEqual(called.printerId, TestData.testUUID)
+        XCTAssertNil(called.spoolId)
+        XCTAssertEqual(
+            mockService.unloadFilamentCalledWith,
+            TestData.testUUID,
+            "Eject must still dispatch the physical unload"
+        )
+    }
+
     // MARK: - Destructive Action Confirmation
 
     func testRequestCancelShowsConfirmation() {

@@ -497,6 +497,37 @@ final class PrinterDetailViewModel {
         isPerformingAction = false
     }
 
+    /// Assignment-only clear (issue #2522 / #2519 integration contract).
+    ///
+    /// Unlike `ejectFilament()`, this clears ONLY the active-spool
+    /// assignment via `setActiveSpool(spoolId: nil, ...)` and deliberately
+    /// never dispatches the physical `unloadFilament()` POST. #2519's
+    /// `PrinterFilamentAction.Kind.clearAssignment` — visible copy "Clear
+    /// spool assignment" — is assignment-only by contract; it must never
+    /// alias the combined eject flow, which stays reachable separately
+    /// (accurately labeled "Eject Filament") for the physical operation.
+    func clearActiveSpoolAssignment() async {
+        guard isViewActive else { return }
+        guard let printerService else { return }
+        isPerformingAction = true
+        actionError = nil
+        do {
+            _ = try await printerService.setActiveSpool(
+                printerId: printerId,
+                spoolId: nil,
+                reviewedRowVersion: try reviewedPrinterRowVersion()
+            )
+            guard isViewActive else { return }
+            lastSetSpoolInfo = nil
+            await loadPrinter()
+        } catch {
+            guard isViewActive else { return }
+            actionError = error.localizedDescription
+        }
+        guard isViewActive else { return }
+        isPerformingAction = false
+    }
+
     func setActiveSpool(_ spool: SpoolmanSpool) async {
         guard isViewActive else { return }
         showSpoolPicker = false

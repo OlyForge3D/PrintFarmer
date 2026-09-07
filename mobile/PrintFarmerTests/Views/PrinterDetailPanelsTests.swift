@@ -182,9 +182,40 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertNotNil(clear?.disabledReason)
     }
 
+    func testFilamentActionsDisableSetWhilePerformingAction() {
+        // Vasquez review finding 8: `.set` dispatches the same single-flight
+        // `setActiveSpool` path as `.change`/`.clearAssignment` via the
+        // spool-picker sheet, so it must be disabled while busy too, not
+        // left tappable just because no spool is currently assigned.
+        let actions = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(), hasActiveSpool: false, isPerformingAction: true, nfcAvailable: true
+        )
+        let set = actions.first { $0.kind == .set }
+        XCTAssertNotNil(set?.disabledReason)
+    }
+
+    func testFilamentActionsEnableSetWhenNotPerformingAction() {
+        let actions = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(), hasActiveSpool: false, isPerformingAction: false, nfcAvailable: true
+        )
+        let set = actions.first { $0.kind == .set }
+        XCTAssertNil(set?.disabledReason)
+    }
+
     func testFilamentActionsDisableScanNFCWhenUnavailable() {
         let actions = PrinterDetailFilamentActionMapping.actions(
             printerID: UUID(), hasActiveSpool: false, isPerformingAction: false, nfcAvailable: false
+        )
+        let scan = actions.first { $0.kind == .scanNFC }
+        XCTAssertNotNil(scan?.disabledReason)
+    }
+
+    func testFilamentActionsDisableScanNFCWhilePerformingActionEvenWhenAvailable() {
+        // Vasquez review finding 8: NFC availability and the single-flight
+        // busy state are independent gates on the same action; a busy scan
+        // must stay disabled even though NFC hardware is present.
+        let actions = PrinterDetailFilamentActionMapping.actions(
+            printerID: UUID(), hasActiveSpool: false, isPerformingAction: true, nfcAvailable: true
         )
         let scan = actions.first { $0.kind == .scanNFC }
         XCTAssertNotNil(scan?.disabledReason)
