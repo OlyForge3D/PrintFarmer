@@ -26,4 +26,5 @@ Updated `docs/SETTINGS_ARCHITECTURE.md` to document the browser-local pin behavi
 Frontend validation completed successfully: build, TypeScript check, test suite,
 and lint. Post-review fixes preserve pins across unrelated navbar customization
 and reset operations, and keep preference persistence out of React state
-updater callbacks.
+updater callbacks. The final full frontend run has one inherited failure in
+`SettingsRealRouterDraftGuard.test.tsx` (issue #2543); all other tests pass.

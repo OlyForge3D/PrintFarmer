@@ -547,7 +547,12 @@ export function Layout() {
       return item.matches(location.pathname);
     }
 
-    return location.pathname === item.href || location.pathname.startsWith(`${item.href}/`);
+    const target = new URL(item.href, window.location.origin);
+    if (target.search) {
+      return location.pathname === target.pathname && location.search === target.search;
+    }
+
+    return location.pathname === target.pathname || location.pathname.startsWith(`${target.pathname}/`);
   };
 
   const handleLogout = async () => {

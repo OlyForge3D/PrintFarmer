@@ -204,7 +204,9 @@ export function saveNavPreferences(storageKey: string, preferences: NavPreferenc
   try {
     storage.setItem(storageKey, JSON.stringify(preferences));
     if (storage === localStorage && typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent(NAV_PREFERENCES_UPDATED_EVENT, { detail: { storageKey } }));
+      queueMicrotask(() => {
+        window.dispatchEvent(new CustomEvent(NAV_PREFERENCES_UPDATED_EVENT, { detail: { storageKey } }));
+      });
     }
   } catch (error) {
     console.warn('Unable to save navigation preferences.', error);
