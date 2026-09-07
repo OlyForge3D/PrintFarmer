@@ -195,6 +195,41 @@ describe('WorkspaceSearchResults', () => {
     expect(input).toHaveValue('');
   });
 
+  it('re-syncs the visible input when `initialQuery` changes for a reason other than this component\'s own commit (browser back/forward, a fresh deep link)', () => {
+    const { rerender } = render(
+      <WorkspaceSearchResults initialQuery="system log" onQueryCommit={vi.fn()} onSelect={vi.fn()} />,
+    );
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    expect(input).toHaveValue('system log');
+
+    // Simulate the parent's `?q=` changing for an external reason (e.g. the
+    // user pressed the browser back button) rather than because this
+    // component itself just committed a debounced keystroke.
+    rerender(<WorkspaceSearchResults initialQuery="printer" onQueryCommit={vi.fn()} onSelect={vi.fn()} />);
+
+    expect(input).toHaveValue('printer');
+  });
+
+  it('does not clobber in-progress typing when the parent echoes back the same value this component just committed', () => {
+    const onQueryCommit = vi.fn();
+    const { rerender } = render(
+      <WorkspaceSearchResults initialQuery="" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />,
+    );
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.change(input, { target: { value: 'log' } });
+    vi.advanceTimersByTime(200);
+    expect(onQueryCommit).toHaveBeenCalledWith('log');
+
+    // The parent re-renders with the committed value echoed back as
+    // `initialQuery` — this must not reset the input, since it is simply
+    // confirming what this component already wrote.
+    rerender(<WorkspaceSearchResults initialQuery="log" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />);
+
+    expect(input).toHaveValue('log');
+  });
+
   it('shows a loading state while the index is fetching', () => {
     searchIndexState.isLoading = true;
     render(<WorkspaceSearchResults initialQuery="" onQueryCommit={vi.fn()} onSelect={vi.fn()} />);

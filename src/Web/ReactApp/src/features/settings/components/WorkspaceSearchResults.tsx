@@ -65,6 +65,23 @@ export function WorkspaceSearchResults({ initialQuery, onQueryCommit, onSelect, 
     onQueryCommitRef.current = onQueryCommit;
   }, [onQueryCommit]);
 
+  // Tracks the last value *this component* committed via `onQueryCommit`, so
+  // we can tell "the parent's `?q=` changed because we just wrote it" (an
+  // echo — ignore) apart from "the parent's `?q=` changed for some other
+  // reason" (browser back/forward, a bookmarked deep link re-arriving while
+  // mounted, another shell affordance clearing the query) — which must
+  // re-sync the visible input/results, or they silently go stale relative to
+  // the persisted search state. This is the React-documented "adjusting
+  // state when a prop changes" pattern (render-time, not an effect, and
+  // tracked as state rather than a ref so the write is idempotent under
+  // React's render rules), for the same reason the active-index reset below
+  // uses it: it must apply before paint, not after.
+  const [lastCommittedQuery, setLastCommittedQuery] = useState(initialQuery);
+  if (initialQuery !== lastCommittedQuery) {
+    setLastCommittedQuery(initialQuery);
+    setQuery(initialQuery);
+  }
+
   const trimmedQuery = query.trim();
   // The index only needs to be fetched once the box has ever been used —
   // gating on focus-or-non-empty avoids an extra background fetch for every
@@ -85,6 +102,10 @@ export function WorkspaceSearchResults({ initialQuery, onQueryCommit, onSelect, 
   // never push a history entry or drive navigation on its own.
   useEffect(() => {
     const timer = window.setTimeout(() => {
+      // Record before calling out, so the `initialQuery` echo this commit
+      // produces (once the parent re-renders with the new `?q=`) is
+      // recognized as our own write, not an external change to re-sync from.
+      setLastCommittedQuery(query);
       onQueryCommitRef.current(query);
     }, COMMIT_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
