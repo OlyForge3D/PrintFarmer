@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useOptimistic, useTransition, useEffectEvent, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useOptimistic, useTransition, useEffectEvent, useMemo, useRef, useCallback } from 'react';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DeleteIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusIcon, RefreshIcon } from '@/common/components/icons/MdiIcons';
@@ -16,6 +16,7 @@ import {
     useDirtyState,
 } from '@/common/components/admin';
 import { getRevisionConflict, getErrorMessage } from '@/common/utils/apiErrors';
+import { SettingsSaveRegistryContext } from '@/features/admin/settings/settingsSaveRegistry';
 import { apiClient } from '@/services/api';
 import TagAnalyticsDashboard from '@/components/TagAnalyticsDashboard';
 import type { TagOption, UpdateTagRequest } from '@/types/admin';
@@ -74,6 +75,7 @@ const hslToHex = (hslString: string): string => {
 };
 
 export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }) => {
+    const saveRegistry = React.useContext(SettingsSaveRegistryContext);
     const queryClient = useQueryClient();
     const [activeTab, setActiveTab] = useState<'management' | 'analytics'>('management');
     const [showNewTagForm, setShowNewTagForm] = useState(false);
@@ -268,15 +270,15 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
         });
     };
 
-    const handleCancelEdit = () => {
+    const handleCancelEdit = useCallback(() => {
         setEditingTagId(null);
         editForm.reset();
         setEditingRevision(undefined);
         setSaveError(null);
         setConflictServerTag(null);
-    };
+    }, [editForm]);
 
-    const handleSaveEdit = async () => {
+    const handleSaveEdit = useCallback(async () => {
         if (!editingTagId || !editForm.values.name.trim()) {
             return;
         }
@@ -336,7 +338,42 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
             }
             setSaveError(getErrorMessage(error, 'Failed to update tag'));
         }
-    };
+    }, [editingTagId, editForm, editingRevision, updateTagMutation]);
+
+    const isDirty = createForm.isDirty || editForm.isDirty;
+    const saveDirtyTagSection = useEffectEvent(async () => {
+        if (editForm.isDirty && editingTagId) {
+            await handleSaveEdit();
+        } else if (createForm.isDirty && showNewTagForm) {
+            await createTagMutation.mutateAsync();
+        }
+    });
+    const discardDirtyTagSection = useEffectEvent(() => {
+        if (editForm.isDirty) handleCancelEdit();
+        if (createForm.isDirty) {
+            createForm.reset();
+            setShowNewTagForm(false);
+        }
+    });
+
+    useEffect(() => {
+        if (!saveRegistry?.registerSection) return;
+        const sectionId = 'tag-admin';
+        if (isDirty) {
+            saveRegistry.registerSection({
+                id: sectionId,
+                name: 'Tag Management',
+                isDirty: true,
+                onSave: saveDirtyTagSection,
+                onDiscard: discardDirtyTagSection,
+            });
+        } else {
+            saveRegistry.unregisterSection?.(sectionId);
+        }
+        return () => {
+            saveRegistry.unregisterSection?.(sectionId);
+        };
+    }, [saveRegistry, isDirty]);
 
     // Reloads the fresh server tag into the edit form's revision baseline so a retry can
     // succeed, without discarding the name/color/description the user already typed.

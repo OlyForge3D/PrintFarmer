@@ -74,8 +74,8 @@ describe('SettingsSidebar is a flat grouped nav', () => {
   });
 
   it('marks the active category with aria-current and the Control Center tile treatment', () => {
-    renderSidebar({ activeScope: 'system', activeCategory: 'users' });
-    const active = within(desktopNav()).getByRole('button', { name: 'Users' });
+    renderSidebar({ activeScope: 'system', activeCategory: 'users-accounts' });
+    const active = within(desktopNav()).getByRole('button', { name: 'User Accounts' });
 
     expect(active).toHaveAttribute('aria-current', 'page');
     // Raised surface + hairline border + 6px radius — the same treatment the hub

@@ -15,10 +15,7 @@ show up in the UI without any React changes, and where the sharp edges are.
 
 ## Routes And Scopes
 
-The two settings routes share one engine with route-locked scopes. Operational pages
-are separate framed destinations, not configuration tabs. The workspace still uses
-category/sub-tab navigation; grouped-leaf/search presentation and an attention-first
-dashboard are downstream work, not delivered by the route migration (#2504).
+The settings routes share one engine with route-locked scopes:
 
 | Route | Scope | Access | Rendered by |
 |---|---|---|---|
@@ -30,11 +27,46 @@ dashboard are downstream work, not delivered by the route migration (#2504).
 | `/admin/login-audit` | None | `system_settings:admin` | LoginAuditPage |
 | `/admin/data-management` | None | `data_management:admin` | DataManagementPage |
 
-The four operational routes use AdminDestinationRoute and AdminPageShell: one h1,
-one parent link to `/admin`, retained actions, and no query subtree mounted until
-the registry predicate passes. `/admin/manage` is retired without alias or redirect.
-Personal `/profile/api-keys`, `/profile/notifications`, and `/profile/passkeys`
-remain available to every authenticated user.
+Operational routes use `AdminDestinationRoute` and `AdminPageShell`. `/admin/settings` operates
+under `system` scope with unified grouped direct-leaf navigation, single-pane mounting (no
+horizontal settings sub-tabs or scope switcher), accessible mobile drawer navigation, in-memory draft transition safety, and single page-level save presentation. Personal `/settings` (`user` scope) remains category and sub-tab workspace navigation.
+
+## Grouped Direct-Leaf Navigation & Single-Pane Mounting
+
+Under `/admin/settings` (`system` scope), settings navigation is organized into 8 display groups consuming `adminDestinations.ts`:
+
+1. **Farm**: Farm Defaults (`gen-farm`)
+2. **Printing & slicing**: Defaults (`slicing-defaults`), Bed Types (`slicing-bed-types`), Slicer Profiles (`slicing-profiles`)
+3. **Hardware**: Locations (`hw-locations`), Printer Groups (`hw-printer-groups`), Cameras (`hw-cameras`), NFC Devices (`hw-nfc`), NFC Bindings (`hw-nfc-bindings`), Custom Fields (`hw-custom-fields`), Power Monitors (`hw-power-monitors`)
+4. **Automation & costs**: Automation & Costs (`auto-costs`)
+5. **Integrations**: External Services (`int-connections`), Webhooks (`int-webhooks`)
+6. **People & access**: User Accounts (`users-accounts`), Roles & Permissions (`users-roles`)
+7. **Organization**: Tags (`data-tags`), Catalog (`data-catalog`)
+8. **System**: System Config (`gen-system`), Quotas (`quotas`)
+
+In `system` scope, exactly ONE content page is mounted at a time in a single-pane layout. Horizontal sub-tabs and scope switchers are hidden for `system` scope to ensure clean, focused leaf editing. Standalone links (Locations, Catalog, Power Monitors) remain correctly labeled direct links.
+
+## Mobile Grouped Navigation
+
+Mobile navigation renders a labeled grouped dropdown control (`<nav aria-label="Settings categories">`) containing all accessible display groups and leaves:
+
+- **Escape Key & Focus Restoration**: Pressing Escape or selecting a destination closes the drawer and restores focus to the mobile control trigger.
+- **Accessibility**: Includes proper ARIA expanded states, list semantics, and high-contrast match highlighting for search queries.
+
+## Safe Draft Transitions & Partial Saves
+
+### In-Memory Draft Safety
+Draft safety protects unsaved form edits across leaf changes, category switches, workspace exit, and palette navigation:
+- **Decision Dialog**: Changing navigation while dirty intercepts the transition with a `ConfirmationModal` ("Unsaved Changes" title, "Stay" and "Discard Changes" options).
+- **Stay Behavior**: Preserves current URL, form values, validation state, and field focus.
+- **Discard Behavior**: Resets dirty state, discards uncommitted section edits, and proceeds to the pending navigation target.
+- **Browser Unload**: An active `beforeunload` listener prompts the browser when attempting to close or navigate away from the tab while form fields are dirty.
+
+### Page-Level Save Presentation & Registry
+- **Save Bar Presentation**: Single page-level save bar (`SettingsSaveBar`) docked at the bottom of the viewport, backed by `SettingsSaveRegistryContext`.
+- **Dirty Section Requests**: Fanned out per dirty group to `POST /api/settings/{keyName}`. Successful section responses advance baseline values for saved sections.
+- **Partial Failure Handling**: If some sections fail validation or network save while others succeed, successful baselines advance, error messages remain pinned to failed sections, and in-flight user edits are strictly preserved.
+- **No Batch Saves**: Strictly no `saveAllSettings` or batch `POST /api/settings` calls.
 
 ## URL Contract
 

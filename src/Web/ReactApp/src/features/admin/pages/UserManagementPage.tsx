@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useEffectEvent } from 'react';
+import React, { useState, useEffect, useEffectEvent, useContext } from 'react';
 import { usePasswordPolicy } from '@/common/hooks/usePasswordPolicy';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
@@ -10,6 +10,7 @@ import {
   adminToast,
   useDirtyState,
 } from '@/common/components/admin';
+import { SettingsSaveRegistryContext } from '@/features/admin/settings/settingsSaveRegistry';
 import {
   Plus,
   Shield,
@@ -64,6 +65,7 @@ const EMPTY_PASSWORD_FORM = {
 };
 
 export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
+  const saveRegistry = useContext(SettingsSaveRegistryContext);
   const { hasPermission } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -312,6 +314,53 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     }
   };
 
+  const isDirty = createForm.isDirty || editForm.isDirty || permissionForm.isDirty || passwordForm.isDirty;
+  const saveDirtySection = useEffectEvent(async () => {
+    if (editForm.isDirty && showEditModal) {
+      await saveSelectedUser();
+    } else if (permissionForm.isDirty && showPermissionsModal) {
+      await savePermissions();
+    } else if (createForm.isDirty && showCreateModal) {
+      await createUser();
+    }
+  });
+  const discardDirtySection = useEffectEvent(() => {
+    if (editForm.isDirty) {
+      editForm.reset();
+      setShowEditModal(false);
+    }
+    if (permissionForm.isDirty) {
+      permissionForm.reset();
+      setShowPermissionsModal(false);
+    }
+    if (createForm.isDirty) {
+      createForm.reset();
+      setShowCreateModal(false);
+    }
+    if (passwordForm.isDirty) {
+      passwordForm.reset();
+      setShowChangePasswordModal(false);
+    }
+  });
+
+  useEffect(() => {
+    if (!saveRegistry?.registerSection) return;
+    const sectionId = 'user-management';
+    if (isDirty) {
+      saveRegistry.registerSection({
+        id: sectionId,
+        name: 'User Management',
+        isDirty: true,
+        onSave: saveDirtySection,
+        onDiscard: discardDirtySection,
+      });
+    } else {
+      saveRegistry.unregisterSection?.(sectionId);
+    }
+    return () => {
+      saveRegistry.unregisterSection?.(sectionId);
+    };
+  }, [saveRegistry, isDirty]);
   const loadUsers = async () => {
     try {
       setLoadError(null);
@@ -600,47 +649,45 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
         )}
       </div>
 
-      {/* User count and modals section */}
-      <div>
-        {/* User count */}
-        <div className="mt-4 text-sm text-pf-text-secondary">
-          Showing {filteredUsers.length} of {users.length} users
-        </div>
+      {/* User count */}
+      <div className="mt-4 text-sm text-pf-text-secondary">
+        Showing {filteredUsers.length} of {users.length} users
+      </div>
 
-        {showCreateModal && (
-          <Modal
-            isOpen={showCreateModal}
-            onClose={() => {
-              createForm.reset();
-              setShowCreateModal(false);
-            }}
-            title="Create New User"
-            size="lg"
-            footer={(
-              <AdminSaveBar
-                isDirty={createForm.isDirty}
-                changeCount={createForm.changedCount}
-                changedLabels={createForm.changedKeys.map(key => ({
-                  user: 'User details',
-                  roleIds: 'Roles',
-                  permissions: 'Application access',
-                })[key])}
-                onDiscard={() => {
-                  createForm.reset();
-                  setShowCreateModal(false);
-                }}
-                onSave={createUser}
-                isSaving={isCreating}
-                error={usernameStatus === 'taken' || emailStatus === 'taken'
-                  ? 'Choose an available username and email before creating the user.'
-                  : null}
-                saveLabel="Create user"
-                discardLabel="Cancel"
-                className="-mx-6 -my-4"
-              />
-            )}
-          >
-            <div className="space-y-4">
+      {showCreateModal && (
+        <Modal
+          isOpen={showCreateModal}
+          onClose={() => {
+            createForm.reset();
+            setShowCreateModal(false);
+          }}
+          title="Create New User"
+          size="lg"
+          footer={(
+            <AdminSaveBar
+              isDirty={createForm.isDirty}
+              changeCount={createForm.changedCount}
+              changedLabels={createForm.changedKeys.map(key => ({
+                user: 'User details',
+                roleIds: 'Roles',
+                permissions: 'Application access',
+              })[key] || key)}
+              onDiscard={() => {
+                createForm.reset();
+                setShowCreateModal(false);
+              }}
+              onSave={createUser}
+              isSaving={isCreating}
+              error={usernameStatus === 'taken' || emailStatus === 'taken'
+                ? 'Choose an available username and email before creating the user.'
+                : null}
+          saveLabel="Create user"
+          discardLabel="Cancel"
+          className="-mx-6 -my-4"
+        />
+        )}
+      >
+        <div className="space-y-4">
               {createErrors.general && (
                 <Alert type="error">{createErrors.general}</Alert>
               )}
@@ -844,36 +891,36 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 </div>
               </div>
             </div>
+        </Modal>
+      )}
 
-          </Modal>
-        )}
-        {showEditModal && selectedUser && (
-          <Modal
-            isOpen={showEditModal}
-            onClose={() => {
-              if (isSavingUser) return;
-              editForm.reset();
-              setShowEditModal(false);
-            }}
-            title={`Edit User: ${selectedUser.username}`}
-            size="lg"
-            footer={(
-              <AdminSaveBar
-                isDirty={editForm.isDirty}
-                changeCount={editForm.changedCount}
-                changedLabels={['User details']}
-                onDiscard={() => {
-                  editForm.reset();
-                  setShowEditModal(false);
-                }}
-                onSave={saveSelectedUser}
-                isSaving={isSavingUser}
-                saveLabel="Save changes"
-                discardLabel="Cancel"
-                className="-mx-6 -my-4"
-              />
-            )}
-          >
+      {showEditModal && selectedUser && (
+        <Modal
+          isOpen={showEditModal}
+          onClose={() => {
+            if (isSavingUser) return;
+            editForm.reset();
+            setShowEditModal(false);
+          }}
+          title={`Edit User: ${selectedUser.username}`}
+          size="lg"
+          footer={(
+            <AdminSaveBar
+              isDirty={editForm.isDirty}
+              changeCount={editForm.changedCount}
+              changedLabels={['User details']}
+              onDiscard={() => {
+                editForm.reset();
+                setShowEditModal(false);
+              }}
+              onSave={saveSelectedUser}
+              isSaving={isSavingUser}
+              saveLabel="Save changes"
+              discardLabel="Cancel"
+              className="-mx-6 -my-4"
+            />
+          )}
+        >
             <form className="space-y-4" onSubmit={(event) => event.preventDefault()}>
               <FormField label="First Name">
                 <Input
@@ -992,7 +1039,6 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 </div>
               </div>
             </form>
-
           </Modal>
         )}
 
@@ -1057,7 +1103,6 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 })}
               </div>
             </div>
-
           </Modal>
         )}
 
@@ -1081,7 +1126,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 changedLabels={passwordForm.changedKeys.map(key => ({
                   newPassword: 'New password',
                   confirmNewPassword: 'Password confirmation',
-                })[key])}
+                })[key] || key)}
                 onDiscard={() => {
                   passwordForm.reset();
                   setShowChangePasswordModal(false);
@@ -1168,7 +1213,6 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 </ul>
               )}
             </div>
-
           </Modal>
         )}
 
@@ -1236,7 +1280,6 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
           }}
           onCancel={() => setUserToDelete(null)}
         />
-      </div>
-    </PageTemplate>
-  );
+      </PageTemplate>
+    );
 }

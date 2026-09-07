@@ -3,10 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   ADMIN_DESTINATION_GROUPS,
   ADMIN_DESTINATIONS,
+  SETTINGS_DISPLAY_GROUPS,
   filterDestinationsByAccess,
   getDestinationById,
   getDestinationsByGroup,
   getHubGroupedDestinations,
+  getSettingsGroupedDestinations,
   type AdminDestination,
   type AdminDestinationGroup,
 } from '../adminDestinations';
@@ -334,6 +336,35 @@ describe('registry lookup helpers', () => {
     // resource permission sees nothing.
     const noAccess = { hasRole: () => false, hasPermission: () => false };
     const grouped = getHubGroupedDestinations(noAccess);
+    expect(grouped).toHaveLength(0);
+  });
+
+  it('getSettingsGroupedDestinations returns configuration destinations grouped in canonical display group order', () => {
+    const grouped = getSettingsGroupedDestinations(accessAs('farm_admin'));
+    expect(grouped.length).toBe(SETTINGS_DISPLAY_GROUPS.length);
+
+    const groupOrder = grouped.map((entry) => entry.group.id);
+    const canonicalOrder = SETTINGS_DISPLAY_GROUPS.map((group) => group.id);
+    expect(groupOrder).toEqual(canonicalOrder);
+
+    const totalCount = grouped.reduce((sum, g) => sum + g.destinations.length, 0);
+    const expectedConfigCount = ADMIN_DESTINATIONS.filter((d) => d.settingsGroup !== undefined).length;
+    expect(totalCount).toBe(expectedConfigCount);
+  });
+
+  it('getSettingsGroupedDestinations excludes destinations without a settingsGroup', () => {
+    const grouped = getSettingsGroupedDestinations(accessAs('farm_admin'));
+    for (const entry of grouped) {
+      for (const destination of entry.destinations) {
+        expect(destination.settingsGroup).toBeDefined();
+        expect(destination.settingsGroup).toBe(entry.group.id);
+      }
+    }
+  });
+
+  it('getSettingsGroupedDestinations returns nothing for a user with no access', () => {
+    const noAccess = { hasRole: () => false, hasPermission: () => false };
+    const grouped = getSettingsGroupedDestinations(noAccess);
     expect(grouped).toHaveLength(0);
   });
 });

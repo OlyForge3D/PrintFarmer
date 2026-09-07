@@ -87,7 +87,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     description: 'Bed types, slicer profiles, and print process defaults.',
     keywords: ['slicer', 'slice', 'profile', 'orcaslicer', 'prusaslicer', 'bed type', 'nozzle', 'process', 'print settings'],
     subPages: [
-      { id: 'defaults', label: 'Defaults', description: 'Configure slicer defaults and print process behavior.', keywords: ['default', 'process', 'print settings', 'nozzle', 'speed'] },
+      { id: 'defaults', label: 'Defaults', description: 'Configure slicer defaults and print process behavior.', keywords: ['slicer', 'default', 'process', 'print settings', 'nozzle', 'speed'] },
       { id: 'bed-types', label: 'Bed Types', description: 'Manage bed surfaces and plate presets.', keywords: ['bed', 'type', 'surface', 'plate'] },
       { id: 'profiles', label: 'Slicer Profiles', description: 'Review OrcaSlicer and PrusaSlicer profile libraries.', keywords: ['profile', 'slicer', 'orcaslicer', 'prusaslicer', 'process'] },
     ],
@@ -97,11 +97,11 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     scopeId: 'system',
     label: 'Hardware',
     description: 'Cameras, NFC, printer groups, and device metadata.',
-    keywords: ['printer', 'hardware', 'camera', 'nfc', 'custom field', 'device', 'webcam', 'group', 'binding'],
+    keywords: ['printer', 'printers', 'hardware', 'camera', 'nfc', 'custom field', 'device', 'webcam', 'group', 'binding'],
     subPages: [
       { id: 'cameras', label: 'Cameras', description: 'Configure camera feeds and monitoring views.', keywords: ['camera', 'webcam', 'stream', 'video'] },
       { id: 'nfc', label: 'NFC Devices', description: 'Register and manage NFC readers and hardware.', keywords: ['nfc', 'tag', 'reader', 'rfid'] },
-      { id: 'printer-groups', label: 'Printer Groups', description: 'Organize printers into shared operational groups.', keywords: ['printer', 'group', 'grouping', 'cluster'] },
+      { id: 'printer-groups', label: 'Printer Groups', description: 'Organize printers into shared operational groups.', keywords: ['printer', 'printers', 'hardware', 'group', 'grouping', 'cluster'] },
       { id: 'nfc-bindings', label: 'NFC Bindings', description: 'Map NFC tags to printers, spools, and actions.', keywords: ['nfc', 'binding', 'bind', 'tag', 'assignment'] },
       { id: 'custom-fields', label: 'Custom Fields', description: 'Extend hardware records with custom metadata.', keywords: ['custom', 'field', 'attribute', 'metadata'] },
     ],

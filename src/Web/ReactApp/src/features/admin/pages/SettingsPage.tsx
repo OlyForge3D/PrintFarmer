@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { type ReactNode, useEffect, useRef, useState, useCallback, useMemo, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import { useSettingsFooterSlot } from '@/features/settings/components/settingsFooterSlotContext';
 import { useSearchParams } from 'react-router';
@@ -739,8 +739,10 @@ export function SettingsPage({
   const [isSavingAll, setIsSavingAll] = useState(false);
   const [saveAllError, setSaveAllError] = useState<string | null>(null);
   const footerSlot = useSettingsFooterSlot();
+  const parentRegistry = useContext(SettingsSaveRegistryContext);
 
   const publishSummary = useCallback((group: string, summary: GroupDirtySummary | null) => {
+    parentRegistry?.publishSummary(group, summary);
     setDirtyByGroup((prev) => {
       const current = prev[group];
       if (!summary) {
@@ -758,18 +760,20 @@ export function SettingsPage({
         && current.labels.every((label, i) => label === summary.labels[i]);
       return same ? prev : { ...prev, [group]: summary };
     });
-  }, []);
+  }, [parentRegistry]);
 
   const registerActions = useCallback((group: string, actions: GroupSaveActions | null) => {
+    parentRegistry?.registerActions(group, actions);
     if (actions) groupActionsRef.current.set(group, actions);
     else groupActionsRef.current.delete(group);
-  }, []);
+  }, [parentRegistry]);
 
   // Same identity-bailout discipline as `publishSummary`: blocks republish on
   // every keystroke, and only a genuine change of the issue list may re-render
   // the page. Comparing the flattened messages is enough — two issue lists that
   // agree field-for-field and message-for-message render identically.
   const publishIssues = useCallback((group: string, issues: readonly SettingsIssue[]) => {
+    parentRegistry?.publishIssues(group, issues);
     setIssuesByGroup((prev) => {
       const current = prev[group];
       if (issues.length === 0) {
@@ -788,7 +792,7 @@ export function SettingsPage({
         ));
       return same ? prev : { ...prev, [group]: [...issues] };
     });
-  }, []);
+  }, [parentRegistry]);
 
   const saveRegistry = useMemo(
     () => ({ publishSummary, publishIssues, registerActions }),

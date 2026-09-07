@@ -32,6 +32,14 @@ export interface GroupSaveActions {
   discard: () => void;
 }
 
+export interface RegisteredSection {
+  id: string;
+  name: string;
+  isDirty: boolean;
+  onSave: () => Promise<void>;
+  onDiscard?: () => void;
+}
+
 export interface SettingsSaveRegistry {
   /**
    * Publish (or with `null`, retract) a group's dirty summary. Drives what the
@@ -55,6 +63,15 @@ export interface SettingsSaveRegistry {
    * on it.
    */
   registerActions: (group: string, actions: GroupSaveActions | null) => void;
+  /**
+   * Register (or with `null` / `sectionId`, unregister) an individual section's
+   * dirty state and save/discard callbacks.
+   */
+  registerSection?: (section: RegisteredSection | null, sectionId?: string) => void;
+  /**
+   * Explicitly unregister an individual section by its section ID.
+   */
+  unregisterSection?: (sectionId: string) => void;
 }
 
 /**

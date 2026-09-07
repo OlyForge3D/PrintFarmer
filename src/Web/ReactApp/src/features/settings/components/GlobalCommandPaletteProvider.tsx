@@ -20,6 +20,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -66,6 +67,7 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
   const [isOpen, setIsOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<SettingsCommandItem | null>(null);
   const navigate = useNavigate();
+  const navigationGuardRef = useRef<((href: string) => boolean) | null>(null);
   const queryClient = useQueryClient();
   const { user, hasRole, hasPermission, logout } = useAuth();
   const { theme, setTheme } = useTheme();
@@ -76,6 +78,14 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
 
   const open = useCallback(() => setIsOpen(true), []);
   const close = useCallback(() => setIsOpen(false), []);
+  const registerNavigationGuard = useCallback((guard: (href: string) => boolean) => {
+    navigationGuardRef.current = guard;
+    return () => {
+      if (navigationGuardRef.current === guard) {
+        navigationGuardRef.current = null;
+      }
+    };
+  }, []);
 
   // Ctrl/Cmd+K opens the palette from anywhere. Modelled on the pre-existing
   // handler in SettingsShell — no state reads inside the closure, no refs
@@ -236,11 +246,15 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
         void item.onExecute({ close });
         return;
       }
+      let href: string;
       if (item.href) {
-        navigate(item.href);
+        href = item.href;
       } else {
         const resolved = resolveSettingsNavigationTarget(item.categoryId, item.subPageId, item.scopeId);
-        navigate(buildSettingsPath({ ...resolved }));
+        href = buildSettingsPath({ ...resolved });
+      }
+      if (!navigationGuardRef.current?.(href)) {
+        navigate(href);
       }
       close();
     },
@@ -265,8 +279,8 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
   }, []);
 
   const value = useMemo<CommandPaletteContextValue>(
-    () => ({ open, close, isOpen }),
-    [open, close, isOpen],
+    () => ({ open, close, isOpen, registerNavigationGuard }),
+    [open, close, isOpen, registerNavigationGuard],
   );
 
   return (
