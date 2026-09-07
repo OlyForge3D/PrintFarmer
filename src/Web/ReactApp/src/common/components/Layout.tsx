@@ -59,6 +59,7 @@ import {
   loadNavPreferences,
   moveNavItem,
   normalizeNavPreferences,
+  NAV_PREFERENCES_UPDATED_EVENT,
   resolveNavPreferences,
   saveNavPreferences,
   setNavItemHidden,
@@ -397,6 +398,17 @@ export function Layout() {
     setStoredNavPreferences(loadNavPreferences(navPreferencesStorageKey));
   }, [navPreferencesStorageKey]);
 
+  useEffect(() => {
+    const refresh = (event: Event) => {
+      const detail = (event as CustomEvent<{ storageKey?: string }>).detail;
+      if (!detail?.storageKey || detail.storageKey === navPreferencesStorageKey) {
+        setStoredNavPreferences(loadNavPreferences(navPreferencesStorageKey));
+      }
+    };
+    window.addEventListener(NAV_PREFERENCES_UPDATED_EVENT, refresh);
+    return () => window.removeEventListener(NAV_PREFERENCES_UPDATED_EVENT, refresh);
+  }, [navPreferencesStorageKey]);
+
   const navPreferenceRole = useMemo<NavPreferenceRole>(() => {
     if (!isAuthenticated) {
       return 'guest';
@@ -518,7 +530,13 @@ export function Layout() {
   }, [navPreferenceItems, navPreferenceRole, navPreferencesStorageKey]);
 
   const resetNavPreferences = useCallback(() => {
-    const defaults = createDefaultNavPreferences(navPreferenceItems, navPreferenceRole);
+    const existing = loadNavPreferences(navPreferencesStorageKey);
+    const defaults = {
+      ...createDefaultNavPreferences(navPreferenceItems, navPreferenceRole),
+      ...(Array.isArray(existing?.adminPinnedItemIds)
+        ? { adminPinnedItemIds: [...new Set(existing.adminPinnedItemIds)] }
+        : {}),
+    };
     saveNavPreferences(navPreferencesStorageKey, defaults);
     setStoredNavPreferences(defaults);
     setShowHiddenNavigation(false);

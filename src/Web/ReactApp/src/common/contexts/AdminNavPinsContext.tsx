@@ -26,22 +26,21 @@ export function AdminNavPinsProvider({ children }: { children: ReactNode }) {
   }, [storageKey]);
 
   const setPinned = useCallback((destinationId: string, pinned: boolean) => {
-    setPinnedIds((current) => {
-      const nextIds = pinned
-        ? [...new Set([...current, destinationId])]
-        : current.filter((id) => id !== destinationId);
-      const existing = loadNavPreferences(storageKey);
-      const next: NavPreferences = {
-        version: NAV_PREFERENCES_VERSION,
-        orderedItemIds: existing?.orderedItemIds ?? [],
-        hiddenItemIds: existing?.hiddenItemIds ?? [],
-        pinnedItemIds: existing?.pinnedItemIds ?? [],
-        ...existing,
-        adminPinnedItemIds: nextIds,
-      };
-      saveNavPreferences(storageKey, next);
-      return nextIds;
-    });
+    const existing = loadNavPreferences(storageKey);
+    const current = Array.isArray(existing?.adminPinnedItemIds) ? [...new Set(existing.adminPinnedItemIds)] : [];
+    const nextIds = pinned
+      ? [...new Set([...current, destinationId])]
+      : current.filter((id) => id !== destinationId);
+    const next: NavPreferences = {
+      version: NAV_PREFERENCES_VERSION,
+      orderedItemIds: existing?.orderedItemIds ?? [],
+      hiddenItemIds: existing?.hiddenItemIds ?? [],
+      pinnedItemIds: existing?.pinnedItemIds ?? [],
+      ...existing,
+      adminPinnedItemIds: nextIds,
+    };
+    saveNavPreferences(storageKey, next);
+    setPinnedIds(nextIds);
   }, [storageKey]);
 
   return (

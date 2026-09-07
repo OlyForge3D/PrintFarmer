@@ -24,4 +24,6 @@ admin navigation remains unchanged.
 
 Updated `docs/SETTINGS_ARCHITECTURE.md` to document the browser-local pin behavior.
 Frontend validation completed successfully: build, TypeScript check, test suite,
-and lint.
+and lint. Post-review fixes preserve pins across unrelated navbar customization
+and reset operations, and keep preference persistence out of React state
+updater callbacks.
