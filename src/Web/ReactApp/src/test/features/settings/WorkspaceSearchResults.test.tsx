@@ -211,7 +211,7 @@ describe('WorkspaceSearchResults', () => {
     expect(input).toHaveValue('printer');
   });
 
-  it('does not clobber in-progress typing when the parent echoes back the same value this component just committed', () => {
+  it('does not let a delayed echo of an older commit stomp on newer typing (async/deferred parent state update)', () => {
     const onQueryCommit = vi.fn();
     const { rerender } = render(
       <WorkspaceSearchResults initialQuery="" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />,
@@ -222,12 +222,26 @@ describe('WorkspaceSearchResults', () => {
     vi.advanceTimersByTime(200);
     expect(onQueryCommit).toHaveBeenCalledWith('log');
 
-    // The parent re-renders with the committed value echoed back as
-    // `initialQuery` — this must not reset the input, since it is simply
-    // confirming what this component already wrote.
-    rerender(<WorkspaceSearchResults initialQuery="log" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />);
+    // Keep typing before the parent has had a chance to reflect the
+    // committed "log" back through `initialQuery` — simulating a parent
+    // whose state update does not land in the very next render (routing
+    // libraries, `startTransition`, or any other deferred commit).
+    fireEvent.change(input, { target: { value: 'logs' } });
+    expect(input).toHaveValue('logs');
 
-    expect(input).toHaveValue('log');
+    // The stale echo of the *earlier* commit ("log") now arrives late. It
+    // must be recognized as this component's own prior write and discarded
+    // rather than treated as an external change that stomps the newer
+    // "logs" text the user has since typed.
+    rerender(<WorkspaceSearchResults initialQuery="log" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />);
+    expect(input).toHaveValue('logs');
+
+    // The follow-up commit for "logs" then fires and its own echo arrives —
+    // this is a genuine self-echo too, so it still must not reset anything.
+    vi.advanceTimersByTime(200);
+    expect(onQueryCommit).toHaveBeenCalledWith('logs');
+    rerender(<WorkspaceSearchResults initialQuery="logs" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />);
+    expect(input).toHaveValue('logs');
   });
 
   it('shows a loading state while the index is fetching', () => {
