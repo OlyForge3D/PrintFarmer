@@ -11,6 +11,10 @@ struct PrinterDetailView: View {
     @State private var coverageViewModel: PrinterFilamentCoverageViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
     @State private var guidedSwapTarget: AppRouter.FilamentSwapDeepLink?
+    // Transient UI state only (issue #2522) — never persisted, resets to
+    // `.status` whenever this view is (re)constructed for a printer/server,
+    // matching `viewModel`/`coverageViewModel`'s own per-identity lifetime.
+    @State private var selectedPanel: PrinterDetailPanel = .status
 
     private let printerId: UUID
 
@@ -222,151 +226,130 @@ struct PrinterDetailView: View {
         }
     }
 
-    // MARK: - Filament Section
+    // MARK: - Filament Section (issue #2522 — single #2519 PrinterFilamentSection,
+    // replacing the old duplicate Filament Slots / Coverage / printer-spool blocks)
 
-    private func filamentSection(_ printer: Printer) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Filament")
-                .font(.headline)
-
-            VStack(alignment: .leading, spacing: 10) {
-                if let spool = viewModel.effectiveSpoolInfo, spool.hasActiveSpool {
-                    activeSpoolContent(spool)
-                } else {
-                    // No filament loaded
-                    VStack(spacing: 12) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "cylinder")
-                                .font(.title2)
-                                .foregroundStyle(Color.pfTextTertiary)
-                            Text("No filament loaded")
-                                .font(.subheadline)
-                                .foregroundStyle(Color.pfTextSecondary)
-                            Spacer()
-                        }
-
-                        HStack(spacing: 10) {
-                            Button {
-                                viewModel.loadFilament()
-                            } label: {
-                                Label("Set", systemImage: "plus.circle.fill")
-                                    .frame(maxWidth: .infinity, minHeight: 44)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Color.pfAccent)
-
-                            NFCScanButton(action: {
-                                viewModel.handleNFCScanToLoad()
-                            })
-                        }
-                    }
-                }
-            }
-            .padding()
-            .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.pfBorder, lineWidth: 1)
+    private func filamentPresentation(_ printer: Printer) -> PrinterFilamentPresentation {
+        let coverageState = PrinterDetailFilamentCoverageStateMapping.coverageState(
+            featureEnabled: filamentCoverageEnabled,
+            isFeatureDisabled: coverageViewModel.isFeatureDisabled,
+            isPrinterNotFound: coverageViewModel.isPrinterNotFound,
+            hasCoverage: coverageViewModel.coverage != nil,
+            lastLoadError: coverageViewModel.lastLoadError
+        )
+        return PrinterFilamentPresentation(
+            printer: printer,
+            toolheads: viewModel.toolheads,
+            spool: viewModel.effectiveSpoolInfo,
+            coverage: coverageViewModel.coverage,
+            coverageState: coverageState,
+            isStale: coverageViewModel.isShowingStaleCache,
+            supportedActions: PrinterDetailFilamentActionMapping.supportedActions(
+                hasActiveSpool: viewModel.effectiveSpoolInfo?.hasActiveSpool ?? false
             )
-        }
+        )
     }
 
-    @ViewBuilder
-    private func activeSpoolContent(_ spool: PrinterSpoolInfo) -> some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(Color(hex: spool.colorHex ?? "#808080"))
-                .frame(width: 28, height: 28)
-                .overlay(
-                    Circle()
-                        .strokeBorder(Color.pfBorder, lineWidth: 1)
-                )
+    private func filamentActions(_ printer: Printer) -> [PrinterFilamentAction] {
+        PrinterDetailFilamentActionMapping.actions(
+            printerID: printer.id,
+            hasActiveSpool: viewModel.effectiveSpoolInfo?.hasActiveSpool ?? false,
+            isPerformingAction: viewModel.isPerformingAction,
+            nfcAvailable: services.nfcService?.isAvailable ?? false
+        )
+    }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(spool.filamentName ?? spool.spoolName ?? "Unknown")
-                    .font(.subheadline.weight(.medium))
+    private func filamentSectionView(_ printer: Printer) -> some View {
+        PrinterFilamentSection(
+            presentation: filamentPresentation(printer),
+            actions: filamentActions(printer),
+            onAction: { action in handleFilamentAction(action) }
+        )
+    }
 
-                HStack(spacing: 6) {
-                    if let material = spool.material {
-                        Text(material)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.pfBackgroundTertiary, in: Capsule())
-                    }
-                    if let vendor = spool.vendor {
-                        Text(vendor)
-                            .font(.caption)
-                            .foregroundStyle(Color.pfTextSecondary)
-                    }
-                }
-            }
-
-            Spacer()
-        }
-
-        if let remaining = spool.remainingWeightG {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Remaining")
-                        .font(.caption)
-                        .foregroundStyle(Color.pfTextSecondary)
-                    Spacer()
-                    Text("\(Int(remaining))g")
-                        .font(.caption.weight(.medium))
-                }
-
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(Color.pfBackgroundTertiary)
-                            .frame(height: 8)
-
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(Color.pfAccent)
-                            .frame(width: geo.size.width * filamentProgress(remaining: remaining), height: 8)
-                    }
-                }
-                .frame(height: 8)
-            }
-        }
-
-        Divider()
-
-        HStack(spacing: 12) {
-            Button {
-                viewModel.loadFilament()
-            } label: {
-                Label("Change", systemImage: "arrow.triangle.swap")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-
-            PrinterDetailBorderedDestructiveButton(kind: .eject) {
-                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                let task = Task { await viewModel.ejectFilament() }
-                activeTasks.append(task)
-            }
-        }
-        .disabled(viewModel.isPerformingAction)
-
-        NFCScanButton(action: {
+    @MainActor
+    private func handleFilamentAction(_ action: PrinterFilamentAction) {
+        switch action.kind {
+        case .set, .change:
+            viewModel.loadFilament()
+        case .clearAssignment:
+            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+            let task = Task { await viewModel.ejectFilament() }
+            activeTasks.append(task)
+        case .scanNFC:
             viewModel.handleNFCScanToLoad()
-        }, compact: true)
+        case .guidedSwap:
+            // Not offered from this surface (see PrinterDetailFilamentActionMapping);
+            // only reachable via the existing NFC deep link.
+            break
+        }
     }
 
-    /// Estimate progress assuming ~1000g full spool when no initial weight data is available
-    private func filamentProgress(remaining: Double) -> CGFloat {
-        let assumed = 1000.0
-        return min(max(CGFloat(remaining / assumed), 0), 1)
-    }
+    // MARK: - Main Content (issue #2522 — Status/Controls paging)
 
-    // MARK: - Main Content
+    private func controlsAvailable(for printer: Printer) -> Bool {
+        AdvancedPrinterControlsAccess.isEntryVisible(
+            isEnabled: serverRegistry.advancedPrinterControlsEnabled,
+            for: printer
+        )
+    }
 
     private func printerContent(_ printer: Printer) -> some View {
+        PrinterDetailPanelsHost(
+            selection: $selectedPanel,
+            controlsAvailable: controlsAvailable(for: printer),
+            status: { statusPage(printer) },
+            controls: { controlsPage(printer) }
+        )
+        .safeAreaInset(edge: .bottom) {
+            let presentation = runActionPresentation(for: printer)
+            if !presentation.visibleDescriptors.isEmpty {
+                PrinterRunActionBar(
+                    presentation: presentation,
+                    onSelect: { kind in handleRunAction(kind) }
+                )
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 4)
+                .background(.bar)
+            }
+        }
+    }
+
+    /// Fixed operator-first section order (issue #712, F7), now the Status
+    /// page of the Status/Controls pair (issue #2522). The six operator
+    /// questions — what's printing, when it's done, what's loaded, whether it
+    /// covers, what's queued, what's due — are answerable within ~two
+    /// screens. Jog/preheat/home setup moved to the adjacent Controls page;
+    /// the shared run-action bar is mounted once outside both pages.
+    private func statusPage(_ printer: Printer) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                operatorSections(printer)
+                // 1. Header — printer state + connection.
+                headerSection(printer)
+                // 2. Camera — snapshot with tap-to-live (existing MJPEGStreamView).
+                cameraSection(printer)
+                if printer.obicoEnabled && viewModel.isActivelyPrinting {
+                    failureDetectionSummary(printer)
+                }
+                // 3. Current job — progress, ETA, part + thumbnail.
+                currentJobBlock(printer)
+                // 4. Filament — one #2519 section (roster + coverage + spool).
+                filamentSectionView(printer)
+                // 5. Queue — next 3 assigned jobs, per-tool match state, dispatch-to.
+                queueSection(printer)
+                // 6. Maintenance odometer — hours vs threshold, due → log completion.
+                maintenanceSection(printer)
+                // 7. History tail — last 5 job outcomes.
+                historySection(printer)
+                // 8. Open in Mainsail — printer backend deep link.
+                mainsailLinkSection(printer)
+                // 9. Compact temperatures.
+                temperatureSection(printer)
+                // 10. Auto-Dispatch — queue automation status/actions.
+                AutoDispatchSection(printerId: printer.id, isPrinting: viewModel.isPrinting || viewModel.isPaused)
+                // 11. Predictive Insights — retained monitoring link.
+                predictiveInsightsLink(printer)
             }
             .frame(maxWidth: sizeClass == .regular ? 760 : .infinity, alignment: .leading)
             .frame(maxWidth: .infinity)
@@ -374,92 +357,107 @@ struct PrinterDetailView: View {
         }
     }
 
-    /// Fixed operator-first section order (issue #712, F7). Identical on iPhone
-    /// and iPad (iPad only constrains the content width) so the six operator
-    /// questions — what's printing, when it's done, what's loaded, whether it
-    /// covers, what's queued, what's due — are answerable within ~two screens.
-    /// Temperatures, jog/console, and destructive actions are demoted into the
-    /// collapsed Advanced disclosure so no temperature graph appears by default.
-    @ViewBuilder
-    private func operatorSections(_ printer: Printer) -> some View {
-        // 1. Header — printer state + primary Pause/Resume/Cancel controls.
-        headerSection(printer)
-        primaryControlsRow(printer)
-        // 2. Camera — snapshot with tap-to-live (existing MJPEGStreamView).
-        cameraSection(printer)
-        if printer.obicoEnabled && viewModel.isActivelyPrinting {
-            failureDetectionSummary(printer)
-        }
-        // 3. Current job — progress, ETA, F4 coverage verdict, part + thumbnail.
-        currentJobBlock(printer)
-        // 4. Filament slots — F6 toolhead roster + per-tool coverage + spool.
-        filamentSlotsSection(printer)
-        // 5. Queue — next 3 assigned jobs, per-tool match state, dispatch-to.
-        queueSection(printer)
-        // 6. Maintenance odometer — hours vs threshold, due → log completion.
-        maintenanceSection(printer)
-        // 7. History tail — last 5 job outcomes.
-        historySection(printer)
-        // 8. Open in Mainsail — printer backend deep link.
-        mainsailLinkSection(printer)
-        // 9. Advanced — temps, jog/console, predictive, destructive actions.
-        advancedSection(printer)
-    }
-
-    // MARK: - Primary Controls (header row)
-
-    @ViewBuilder
-    private func primaryControlsRow(_ printer: Printer) -> some View {
-        if viewModel.isPrinting || viewModel.isPaused {
-            HStack(spacing: 12) {
-                if viewModel.isPaused {
-                    primaryControlButton(
-                        "Resume", icon: "play.fill", tint: Color.pfAccent,
-                        identifier: "printer.detail.control.resume"
-                    ) {
-                        await viewModel.resumePrinter()
-                    }
-                } else {
-                    primaryControlButton(
-                        "Pause", icon: "pause.fill", tint: Color.pfAccent,
-                        identifier: "printer.detail.control.pause"
-                    ) {
-                        await viewModel.pausePrinter()
-                    }
-                }
-
-                PrinterDetailBorderedDestructiveButton(kind: .cancel) {
-                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                    viewModel.requestCancel()
-                }
-                .disabled(viewModel.isPerformingAction)
-                .accessibilityIdentifier("printer.detail.control.cancel")
-                .accessibilityLabel("Cancel current print")
+    /// Controls page (issue #2522): embeds #2521's `PrinterControlsSection`
+    /// directly — no nested "Advanced" navigation link. Only reachable when
+    /// `controlsAvailable(for:)` gates the page in, mirroring the old link's
+    /// visibility rule exactly (`AdvancedPrinterControlsAccess.isEntryVisible`).
+    private func controlsPage(_ printer: Printer) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                PrinterControlsSection(printer: printer, printerService: services.printerService)
+                controlsSetupActionsSection(printer)
             }
-            .accessibilityIdentifier("printer.detail.header.controls")
+            .frame(maxWidth: sizeClass == .regular ? 760 : .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity)
+            .padding()
         }
     }
 
-    private func primaryControlButton(
-        _ title: String,
-        icon: String,
-        tint: Color,
-        identifier: String,
-        action: @escaping () async -> Void
-    ) -> some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            let task = Task { await action() }
-            activeTasks.append(task)
-        } label: {
-            Label(title, systemImage: icon)
-                .frame(maxWidth: .infinity, minHeight: 44)
+    /// Retained-location setup actions (issue #2522 preserve-before-cleanup
+    /// checklist): the admin maintenance toggle and NFC printer-tag write,
+    /// both previously nested inside the old Advanced disclosure's Actions
+    /// block. This page only renders while `controlsAvailable(for:)` is true,
+    /// which already implies the printer is online.
+    @ViewBuilder
+    private func controlsSetupActionsSection(_ printer: Printer) -> some View {
+        let showsMaintenanceToggle = authViewModel.currentUserRole == "farm_admin"
+        #if canImport(UIKit)
+        let showsWriteTag = true
+        #else
+        let showsWriteTag = false
+        #endif
+        if showsMaintenanceToggle || showsWriteTag {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Setup Actions")
+                    .font(.headline)
+
+                VStack(spacing: 10) {
+                    if showsMaintenanceToggle {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            let task = Task { await viewModel.toggleMaintenance() }
+                            activeTasks.append(task)
+                        } label: {
+                            Label(
+                                printer.inMaintenance ? "Exit Maintenance" : "Enter Maintenance",
+                                systemImage: "wrench.and.screwdriver"
+                            )
+                            .fullWidthActionButton()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(viewModel.isPerformingAction || viewModel.isPrinting || viewModel.isPaused)
+                        .accessibilityLabel(printer.inMaintenance ? "Exit maintenance mode" : "Enter maintenance mode")
+                    }
+
+                    #if canImport(UIKit)
+                    Button {
+                        viewModel.writeNFCPrinterTag()
+                    } label: {
+                        Label("Write Tag", systemImage: "wave.3.right")
+                            .fullWidthActionButton()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.isPerformingAction)
+                    .accessibilityLabel("Write NFC printer identification tag")
+                    #endif
+                }
+            }
+            .accessibilityIdentifier("printer.detail.controls.setupActions")
         }
-        .buttonStyle(.borderedProminent)
-        .tint(tint)
-        .disabled(viewModel.isPerformingAction)
-        .accessibilityIdentifier(identifier)
-        .accessibilityLabel(title)
+    }
+
+    // MARK: - Shared Run-Action Bar (issue #2522 / #2520)
+
+    private func runActionPresentation(for printer: Printer) -> PrinterRunActionPresentation {
+        PrinterDetailRunActionMapping.presentation(
+            isOnline: printer.isOnline,
+            isPrinting: viewModel.isPrinting,
+            isPaused: viewModel.isPaused,
+            isPerformingAction: viewModel.isPerformingAction
+        )
+    }
+
+    @MainActor
+    private func handleRunAction(_ kind: PrinterRunActionKind) {
+        switch kind {
+        case .pause:
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            let task = Task { await viewModel.pausePrinter() }
+            activeTasks.append(task)
+        case .resume:
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            let task = Task { await viewModel.resumePrinter() }
+            activeTasks.append(task)
+        case .cancel:
+            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+            viewModel.requestCancel()
+        case .stop:
+            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+            let task = Task { await viewModel.stopPrinter() }
+            activeTasks.append(task)
+        case .emergencyStop:
+            viewModel.requestEmergencyStop()
+        }
     }
 
     // MARK: - Current Job Block (progress · ETA · coverage · part)
@@ -479,14 +477,6 @@ struct PrinterDetailView: View {
                             Text(jobName ?? "Printing")
                                 .font(.subheadline.weight(.semibold))
                                 .fixedSize(horizontal: false, vertical: true)
-                            if filamentCoverageEnabled,
-                               let coverage = coverageViewModel.coverage,
-                               coverage.status != .unknown {
-                                FilamentCoverageBadge(
-                                    status: coverage.status,
-                                    earliestPredictedRunoutAt: coverage.earliestPredictedRunoutAt
-                                )
-                            }
                         }
                         Spacer(minLength: 0)
                     }
@@ -529,68 +519,6 @@ struct PrinterDetailView: View {
             )
             .accessibilityIdentifier("printer.detail.job.eta")
         }
-    }
-
-    // MARK: - Filament Slots (F6 toolheads + coverage + spool)
-
-    private func filamentSlotsSection(_ printer: Printer) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if !viewModel.toolheads.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Filament Slots")
-                        .font(.headline)
-                        .accessibilityIdentifier("printer.detail.slots")
-                    VStack(spacing: 8) {
-                        ForEach(viewModel.toolheads) { toolhead in
-                            toolheadSlotRow(toolhead)
-                        }
-                    }
-                    .padding()
-                    .operatorCard()
-                }
-            }
-
-            if filamentCoverageEnabled, let coverage = coverageViewModel.coverage {
-                FilamentCoverageDetailSection(coverage: coverage)
-            }
-
-            filamentSection(printer)
-        }
-    }
-
-    private func toolheadSlotRow(_ toolhead: Toolhead) -> some View {
-        let slotName = toolhead.name ?? "Tool \(toolhead.index)"
-        let material = toolhead.currentMaterial?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let hasMaterial = !(material?.isEmpty ?? true)
-        return HStack(spacing: 12) {
-            Circle()
-                .fill(Color(hex: toolhead.currentFilamentColor ?? "#808080"))
-                .frame(width: 22, height: 22)
-                .overlay(Circle().strokeBorder(Color.pfBorder, lineWidth: 1))
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(slotName)
-                    .font(.subheadline.weight(.medium))
-                Text(hasMaterial ? material! : "Empty")
-                    .font(.caption)
-                    .foregroundStyle(hasMaterial ? Color.pfTextSecondary : Color.pfTextTertiary)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-
-            Spacer(minLength: 8)
-
-            if let nozzle = toolhead.nozzleDiameter {
-                Text("\(nozzle, specifier: "%.1f") mm")
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(Color.pfTextSecondary)
-            }
-        }
-        .frame(minHeight: 44)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(slotName), \(hasMaterial ? material! : "empty")")
-        .accessibilityIdentifier("printer.detail.slot.\(toolhead.index)")
     }
 
     // MARK: - Queue (next 3 assigned jobs + match state + dispatch-to)
@@ -851,29 +779,6 @@ struct PrinterDetailView: View {
             .accessibilityHint("Opens the printer's web interface in your browser.")
             .accessibilityAddTraits(.isButton)
         }
-    }
-
-    // MARK: - Advanced (collapsed disclosure)
-
-    private func advancedSection(_ printer: Printer) -> some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 16) {
-                temperatureSection(printer)
-                advancedControlsLink(for: printer)
-                AutoDispatchSection(printerId: printer.id, isPrinting: viewModel.isPrinting || viewModel.isPaused)
-                predictiveInsightsLink(printer)
-                if printer.isOnline {
-                    actionSection(printer)
-                }
-            }
-            .padding(.top, 12)
-        } label: {
-            Label("Advanced", systemImage: "chevron.down.circle")
-                .font(.headline)
-        }
-        .padding()
-        .operatorCard()
-        .accessibilityIdentifier("printer.detail.advanced.disclosure")
     }
 
     private func predictiveInsightsLink(_ printer: Printer) -> some View {
@@ -1204,59 +1109,6 @@ struct PrinterDetailView: View {
         }
     }
 
-    // MARK: - Advanced Controls Entry
-    //
-    // F1 (#706) gates jog/preheat/z-offset/home controls behind this link.
-    // The section is hidden when the printer is offline (mirroring the
-    // previous inline behavior via `PrinterControlsSection.isHidden`).
-
-    @ViewBuilder
-    private func advancedControlsLink(for printer: Printer) -> some View {
-        if AdvancedPrinterControlsAccess.isEntryVisible(
-            isEnabled: serverRegistry.advancedPrinterControlsEnabled,
-            for: printer
-        ) {
-            NavigationLink(value: AppDestination.advancedPrinterControls(printerId: printer.id)) {
-                HStack(spacing: 12) {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.headline)
-                        .foregroundStyle(Color.pfAccent)
-                        .frame(width: 32)
-                        .accessibilityHidden(true)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Advanced")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(Color.pfTextPrimary)
-                        Text("Jog, preheat, home, z-offset")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
-
-                    Spacer(minLength: 8)
-
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .accessibilityHidden(true)
-                }
-                .padding()
-                .frame(minHeight: 44)
-                .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(Color.pfBorder, lineWidth: 1)
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Advanced controls")
-            .accessibilityHint("Opens jog, preheat, home, and z-offset controls.")
-            .accessibilityAddTraits(.isButton)
-            .accessibilityIdentifier("printer.detail.advanced")
-        }
-    }
-
     // MARK: - Camera Snapshot
 
     private func cameraSection(_ printer: Printer) -> some View {
@@ -1560,113 +1412,6 @@ struct PrinterDetailView: View {
         }
         .frame(height: 200)
         .frame(maxWidth: .infinity)
-    }
-
-    // MARK: - Action Buttons
-
-    private func actionSection(_ printer: Printer) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Actions")
-                .font(.headline)
-
-            VStack(spacing: 10) {
-                // Contextual actions based on state
-                if viewModel.isPrinting {
-                    HStack(spacing: 12) {
-                        actionButton("Pause", icon: "pause.fill") {
-                            await viewModel.pausePrinter()
-                        }
-                        .disabled(viewModel.isPerformingAction)
-
-                        actionButton("Cancel", icon: "xmark.circle.fill", role: .destructive) {
-                            viewModel.requestCancel()
-                        }
-                        .disabled(viewModel.isPerformingAction)
-                    }
-                }
-
-                if viewModel.isPaused {
-                    HStack(spacing: 12) {
-                        actionButton("Resume", icon: "play.fill") {
-                            await viewModel.resumePrinter()
-                        }
-                        .disabled(viewModel.isPerformingAction)
-
-                        actionButton("Cancel", icon: "xmark.circle.fill", role: .destructive) {
-                            viewModel.requestCancel()
-                        }
-                        .disabled(viewModel.isPerformingAction)
-                    }
-                }
-
-                if viewModel.isPrinting || viewModel.isPaused {
-                    actionButton("Stop", icon: "stop.fill", role: .destructive) {
-                        await viewModel.stopPrinter()
-                    }
-                    .disabled(viewModel.isPerformingAction)
-                }
-
-                // Maintenance toggle (admin only)
-                if authViewModel.currentUserRole == "farm_admin" {
-                    Button {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        let task = Task { await viewModel.toggleMaintenance() }
-                        activeTasks.append(task)
-                    } label: {
-                        Label(
-                            printer.inMaintenance ? "Exit Maintenance" : "Enter Maintenance",
-                            systemImage: "wrench.and.screwdriver"
-                        )
-                        .fullWidthActionButton()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(viewModel.isPerformingAction || viewModel.isPrinting || viewModel.isPaused)
-                    .accessibilityLabel(printer.inMaintenance ? "Exit maintenance mode" : "Enter maintenance mode")
-                }
-
-                #if canImport(UIKit)
-                // Write NFC printer tag
-                Button {
-                    viewModel.writeNFCPrinterTag()
-                } label: {
-                    Label("Write Tag", systemImage: "wave.3.right")
-                        .fullWidthActionButton()
-                }
-                .buttonStyle(.bordered)
-                .disabled(viewModel.isPerformingAction)
-                .accessibilityLabel("Write NFC printer identification tag")
-                #endif
-
-                // Emergency Stop — always enabled when online
-                Button(role: .destructive) {
-                    viewModel.requestEmergencyStop()
-                } label: {
-                    Label("Emergency Stop", systemImage: "exclamationmark.octagon.fill")
-                        .fullWidthActionButton(prominence: .prominent)
-                        .fontWeight(.semibold)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.pfErrorFill)
-                .accessibilityLabel("Emergency stop printer")
-            }
-        }
-    }
-
-    private func actionButton(
-        _ title: String,
-        icon: String,
-        role: ButtonRole? = nil,
-        action: @escaping () async -> Void
-    ) -> some View {
-        Button(role: role) {
-            UIImpactFeedbackGenerator(style: role == .destructive ? .heavy : .medium).impactOccurred()
-            let task = Task { await action() }
-            activeTasks.append(task)
-        } label: {
-            Label(title, systemImage: icon)
-                .fullWidthActionButton()
-        }
-        .buttonStyle(.bordered)
     }
 }
 

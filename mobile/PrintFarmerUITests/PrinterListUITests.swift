@@ -32,7 +32,11 @@ final class PrinterListUITests: PrintFarmerUITestCase {
         XCTAssertTrue(printerCard.waitForExistence(timeout: 5))
         printerCard.tap()
 
-        let detail = app.scrollViews["printer.detail.root.\(printerID)"]
+        // Query broadly rather than `.scrollViews[...]`: issue #2522
+        // restructured the detail root from a single `ScrollView` into the
+        // Status/Controls paged host, which can change which concrete
+        // element type this identifier bubbles up to.
+        let detail = app.descendants(matching: .any)["printer.detail.root.\(printerID)"]
         XCTAssertTrue(
             detail.waitForExistence(timeout: 8),
             "Tapping the stable printer card should open that printer's detail"
