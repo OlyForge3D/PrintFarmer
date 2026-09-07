@@ -538,6 +538,11 @@ describe('Admin workspace integrated flow (#2507)', () => {
     await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('field=NetworkDiscovery.scanIntervalMinutes'));
     expect(screen.getByTestId('location-search')).toHaveTextContent('q=scan+interval');
     await waitFor(() => expect(fieldInput('NetworkDiscovery', 'scanIntervalMinutes')).toHaveValue(10));
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    });
+    expect(screen.queryByText(/No matching settings/i)).not.toBeInTheDocument();
+    expect(fieldInput('NetworkDiscovery', 'scanIntervalMinutes')).toHaveValue(10);
     expect(screen.queryByRole('heading', { level: 1, name: 'User Settings' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
 
