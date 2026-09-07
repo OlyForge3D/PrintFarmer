@@ -7,6 +7,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/docker/container-versions.conf"
 source "$SCRIPT_DIR/docker-utils.sh"
+# shellcheck source=./build-metadata.sh
+source "$SCRIPT_DIR/build-metadata.sh"
 
 REGISTRY_HOST=${REGISTRY_HOST:-localhost:5000}
 GITHUB_TOKEN=${GITHUB_TOKEN:-}
@@ -18,9 +20,7 @@ fi
 
 # Full git SHA of the source commit, injected into the worker build so
 # /api/system/version reports the deployed commit (.git is not in the build context).
-GIT_SHA="${GIT_SHA:-$(git -C "$(dirname "$0")/.." rev-parse HEAD 2>/dev/null || echo "unknown")}"
-if [[ ! "$GIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
-    print_error "A full 40-character GIT_SHA is required to build identifiable images."
+if ! GIT_SHA="$(resolve_local_build_git_sha "$SCRIPT_DIR/.." "${GIT_SHA:-}")"; then
     exit 1
 fi
 export GIT_SHA

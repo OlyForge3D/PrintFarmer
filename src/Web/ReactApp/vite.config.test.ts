@@ -37,6 +37,13 @@ describe('production commit provenance', () => {
     expect(resolveGitHash('build')).toBe('a'.repeat(40));
   });
 
+  it('does not hide an invalid explicit Vite commit behind a valid fallback', () => {
+    process.env.VITE_GIT_SHA = 'unknown';
+    process.env.GIT_SHA = 'a'.repeat(40);
+
+    expect(() => resolveGitHash('build')).toThrow(/full 40-character commit SHA/);
+  });
+
   it('keeps development startup usable without a deployable injected commit', () => {
     process.env.VITE_GIT_SHA = 'unknown';
     delete process.env.GIT_SHA;

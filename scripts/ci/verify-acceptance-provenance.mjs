@@ -85,20 +85,23 @@ async function fetchResponse(url, label, fetchImpl, timeoutMs) {
             ? 'application/javascript'
             : 'application/json',
       },
-      redirect: 'follow',
+      redirect: 'manual',
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     throw new Error(`${label} request failed at ${url}: ${error.message}`);
   }
 
-  if (!response.ok) {
-    throw new Error(`${label} request failed at ${url}: HTTP ${response.status}.`);
+  if (response.redirected || (response.status >= 300 && response.status < 400)) {
+    throw new Error(`${label} must not redirect from ${url}.`);
   }
 
   const resolvedUrl = new URL(response.url || url);
-  if (resolvedUrl.origin !== url.origin) {
-    throw new Error(`${label} redirected outside the acceptance origin.`);
+  if (resolvedUrl.href !== url.href) {
+    throw new Error(`${label} resolved to an unexpected URL.`);
+  }
+  if (!response.ok) {
+    throw new Error(`${label} request failed at ${url}: HTTP ${response.status}.`);
   }
   return response;
 }

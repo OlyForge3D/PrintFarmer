@@ -23,8 +23,10 @@ async function startFixtureServer({
   frontendBody,
   frontendRaw,
   frontendStatus = 200,
+  frontendRedirect,
   apiBody,
   apiStatus = 200,
+  apiRedirect,
   indexHtml = '<script type="module" src="/assets/index-test123.js"></script>',
   bundleStatus = 200,
 } = {}) {
@@ -40,6 +42,11 @@ async function startFixtureServer({
       return;
     }
     if (request.url === '/version.json') {
+      if (frontendRedirect) {
+        response.writeHead(302, { location: frontendRedirect });
+        response.end();
+        return;
+      }
       if (frontendRaw !== undefined) {
         response.writeHead(frontendStatus, { 'content-type': 'application/json' });
         response.end(frontendRaw);
@@ -54,6 +61,11 @@ async function startFixtureServer({
       return;
     }
     if (request.url === '/api/system/version') {
+      if (apiRedirect) {
+        response.writeHead(302, { location: apiRedirect });
+        response.end();
+        return;
+      }
       response.writeHead(apiStatus, { 'content-type': 'application/json' });
       response.end(JSON.stringify(apiBody ?? {
         service: 'Farm.Web.Api',
@@ -250,6 +262,30 @@ test('fails closed when a version endpoint returns a non-success status', async 
     });
   } finally {
     await fixture.close();
+  }
+});
+
+test('fails closed when a required version endpoint redirects', async () => {
+  for (const fixtureOptions of [
+    { frontendRedirect: '/api/system/version' },
+    { apiRedirect: '/version.json' },
+  ]) {
+    const fixture = await startFixtureServer(fixtureOptions);
+    try {
+      await withEvidenceDirectory(async (evidenceDir) => {
+        await assert.rejects(
+          verifyAcceptanceProvenance({
+            expectedSha,
+            baseUrl: fixture.baseUrl,
+            evidenceDir,
+          }),
+          /must not redirect/,
+        );
+        assert.deepEqual(await readdir(evidenceDir), []);
+      });
+    } finally {
+      await fixture.close();
+    }
   }
 });
 

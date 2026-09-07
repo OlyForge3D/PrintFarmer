@@ -26,6 +26,8 @@ DEPLOY_CONFIG_FILE="$REPO_ROOT/.deploy-config"
 CERT_SCRIPT="$REPO_ROOT/scripts/generate-certs.sh"
 CERT_DIR="$REPO_ROOT/deploy/nginx/certs"
 LEGACY_CERT_DIR="$REPO_ROOT/nginx/certs"
+# shellcheck source=./build-metadata.sh
+source "$SCRIPT_DIR/build-metadata.sh"
 
 # Ensure symlink exists for global access
 ensure_symlink() {
@@ -136,11 +138,7 @@ load_deployment_env() {
 }
 
 ensure_build_git_sha() {
-    if [[ -z "${GIT_SHA:-}" ]]; then
-        GIT_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
-    fi
-    if [[ ! "$GIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
-        echo "❌ A full 40-character GIT_SHA is required to build identifiable images."
+    if ! GIT_SHA="$(resolve_local_build_git_sha "$REPO_ROOT" "${GIT_SHA:-}")"; then
         return 1
     fi
     export GIT_SHA

@@ -55,6 +55,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEMPLATES_DIR="$REPO_ROOT/scripts/docker/compose-templates"
 source "$REPO_ROOT/scripts/docker/container-versions.conf"
+# shellcheck source=../build-metadata.sh
+source "$REPO_ROOT/scripts/build-metadata.sh"
 export PRINTFARMER_BUILD_CONTEXT="${PRINTFARMER_BUILD_CONTEXT:-$REPO_ROOT}"
 export PRINTFARMER_DOCKERFILE="${PRINTFARMER_DOCKERFILE:-scripts/docker/dockerfiles/Dockerfile.multistage}"
 
@@ -98,6 +100,13 @@ if [[ ! "$EXPECTED_ACCEPTANCE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
   exit 1
 fi
 EXPECTED_ACCEPTANCE_SHA="$(printf '%s' "$EXPECTED_ACCEPTANCE_SHA" | tr '[:upper:]' '[:lower:]')"
+if [[ "$USE_REGISTRY" != "true" ]]; then
+  if ! EXPECTED_ACCEPTANCE_SHA="$(
+    resolve_local_build_git_sha "$REPO_ROOT" "$EXPECTED_ACCEPTANCE_SHA"
+  )"; then
+    exit 1
+  fi
+fi
 export GIT_SHA="$EXPECTED_ACCEPTANCE_SHA"
 ACCEPTANCE_EVIDENCE_DIR="${ACCEPTANCE_EVIDENCE_DIR:-$REPO_ROOT/acceptance-evidence}"
 
