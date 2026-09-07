@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, useContext } from 'react';
-import { Link, useNavigate, useNavigationType, useSearchParams, useBlocker, UNSAFE_DataRouterContext, type BlockerFunction } from 'react-router';
+import { Link, useLocation, useNavigate, useNavigationType, useSearchParams, useBlocker, UNSAFE_DataRouterContext, type BlockerFunction } from 'react-router';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import {
@@ -210,6 +210,19 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'users.roles': <RoleManagementPage embedded />,
   'data.tags': <TagAdminPage embedded />,
 };
+
+/**
+ * Position of the current entry in the browser history stack.
+ *
+ * React Router stamps this index into `history.state` and derives its own POP
+ * deltas from it (`history.js`: `delta = getIndex() - index`), so reading it here
+ * gives the guard the same notion of "how far did the user jump" that the router
+ * uses. Returns `null` for entries the router did not create.
+ */
+function readHistoryIndex(): number | null {
+  const index = (window.history.state as { idx?: unknown } | null)?.idx;
+  return typeof index === 'number' ? index : null;
+}
 
 function DataRouterBlocker({
   shouldBlock,
@@ -603,6 +616,25 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
    */
   const [blockedTarget, setBlockedTarget] = useState<string | null>(null);
 
+  /**
+   * How far through the history stack the blocked navigation was trying to jump.
+   *
+   * Only meaningful for a POP. Resuming a confirmed Back/Forward by URL would
+   * push a new entry and corrupt the stack (a discarded Back would leave
+   * `[Printers, Settings, Printers]`, so the *next* Back would surprise the user
+   * by returning to Settings). Replaying the delta instead moves the cursor to
+   * the entry the user actually asked for, preserving its key and state.
+   */
+  const [blockedDelta, setBlockedDelta] = useState<number | null>(null);
+
+  const location = useLocation();
+  const historyIndexRef = useRef<number | null>(readHistoryIndex());
+  useEffect(() => {
+    // Only committed locations move the cursor; a blocked POP is rolled back by
+    // the router and never reaches here, so this stays pinned to where we are.
+    historyIndexRef.current = readHistoryIndex();
+  }, [location.key]);
+
   const handleBlockerChange = useCallback(
     (next: { state: 'unblocked' | 'blocked'; proceed?: () => void; reset?: () => void; target?: string }) => {
       setDataBlocker(next);
@@ -643,6 +675,14 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         // the one place that reliably knows a navigation was stopped and where it
         // was headed.
         setBlockedTarget(`${nextLocation.pathname}${nextLocation.search}`);
+        if (historyAction === 'POP') {
+          const nextIndex = readHistoryIndex();
+          const currentIndex = historyIndexRef.current;
+          const delta = nextIndex !== null && currentIndex !== null ? nextIndex - currentIndex : 0;
+          setBlockedDelta(delta !== 0 ? delta : null);
+        } else {
+          setBlockedDelta(null);
+        }
       }
       return block;
     },
@@ -665,6 +705,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       }
     }
     setBlockedTarget(null);
+    setBlockedDelta(null);
     setShowDraftModal(false);
     setPendingNavigation(null);
   }, [blocker]);
@@ -684,18 +725,22 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       }
     }
     if (!resumed) {
-      if (blockedTarget) {
-        // Resume the navigation ourselves (see `blockedTarget`). A blocked Back
-        // lands on the right URL as a push rather than a pop, which is a fair
-        // trade for not silently dropping the user's confirmed intent.
+      if (blockedDelta !== null) {
+        // The user confirmed a Back/Forward. Replay the traversal rather than
+        // pushing `blockedTarget`, so the history cursor lands on the entry they
+        // asked for instead of stacking a duplicate on top of it.
+        navigate(blockedDelta);
+      } else if (blockedTarget) {
+        // Resume the navigation ourselves (see `blockedTarget`).
         navigate(blockedTarget);
       } else if (pendingNavigation) {
         pendingNavigation();
       }
     }
     setBlockedTarget(null);
+    setBlockedDelta(null);
     setPendingNavigation(null);
-  }, [blocker, blockedTarget, handleDiscardAll, navigate, pendingNavigation]);
+  }, [blocker, blockedDelta, blockedTarget, handleDiscardAll, navigate, pendingNavigation]);
 
   useEffect(() => {
     if (!isDirty) return;

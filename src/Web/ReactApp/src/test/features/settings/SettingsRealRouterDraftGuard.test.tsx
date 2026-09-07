@@ -303,6 +303,18 @@ function currentUrl() {
   return `${window.location.pathname}${window.location.search}`;
 }
 
+/**
+ * Position of the current entry in the history stack.
+ *
+ * Resuming a confirmed Back by URL would *push* a duplicate entry rather than
+ * moving the cursor, which looks identical if you only assert the URL. Asserting
+ * the index (and that a subsequent traversal still works) is what distinguishes
+ * a real traversal from a stack-corrupting push.
+ */
+function historyIndex() {
+  return (window.history.state as { idx?: number } | null)?.idx ?? null;
+}
+
 /** Drive a real browser history traversal and let react-router settle. */
 async function traverseHistory(direction: 'back' | 'forward') {
   await act(async () => {
@@ -316,7 +328,9 @@ async function traverseHistory(direction: 'back' | 'forward') {
 }
 
 async function makeDraftDirty(value = '45') {
-  const input = await screen.findByLabelText('Retention Days');
+  // Generous timeout: this mounts the whole lazily-loaded app, which can exceed
+  // testing-library's 1s default on a cold CI worker.
+  const input = await screen.findByLabelText('Retention Days', undefined, { timeout: 5000 });
   fireEvent.change(input, { target: { value } });
   await waitFor(() => expect(screen.getByLabelText('Retention Days')).toHaveValue(Number(value)));
   // The input echoing the new value is not enough: the blocker reads the shell's
@@ -333,7 +347,7 @@ function expectDraftModal() {
 
 async function openSettingsFromNavbar() {
   fireEvent.click(screen.getByRole('link', { name: 'Farm & Admin Settings' }));
-  await screen.findByLabelText('Retention Days');
+  await screen.findByLabelText('Retention Days', undefined, { timeout: 5000 });
 }
 
 describe('dirty settings drafts survive real-router navigation (#2525)', () => {
@@ -417,11 +431,12 @@ describe('dirty settings drafts survive real-router navigation (#2525)', () => {
     expect(screen.getByLabelText('Retention Days')).toHaveValue(45);
   });
 
-  it('lets browser Back through once the user discards', async () => {
+  it('lets browser Back through once the user discards, without corrupting the history stack', async () => {
     window.history.pushState({}, '', '/printers');
     render(<App />);
     await screen.findByText('PrintersPageMock');
     await openSettingsFromNavbar();
+    const settingsIndex = historyIndex();
     await makeDraftDirty('45');
 
     await traverseHistory('back');
@@ -431,6 +446,40 @@ describe('dirty settings drafts survive real-router navigation (#2525)', () => {
 
     expect(await screen.findByText('PrintersPageMock')).toBeInTheDocument();
     await waitFor(() => expect(currentUrl()).toBe('/printers'));
+    // A confirmed Back must move the cursor back, not push a third entry on top.
+    await waitFor(() => expect(historyIndex()).toBe((settingsIndex ?? 1) - 1));
+
+    // The decisive check: the forward entry still exists, which it would not if
+    // the resume had pushed (a push truncates the forward stack).
+    await traverseHistory('forward');
+    await waitFor(() => expect(currentUrl()).toBe(SETTINGS_URL));
+  });
+
+  it('lets browser Forward through once the user discards', async () => {
+    window.history.pushState({}, '', '/printers');
+    render(<App />);
+    await screen.findByText('PrintersPageMock');
+    await openSettingsFromNavbar();
+
+    fireEvent.click(screen.getByRole('link', { name: 'Projects' }));
+    await screen.findByText('ProjectsPageMock');
+    const projectsIndex = historyIndex();
+
+    await traverseHistory('back');
+    await makeDraftDirty('45');
+
+    await traverseHistory('forward');
+    await expectDraftModal();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Discard Changes' }));
+
+    expect(await screen.findByText('ProjectsPageMock')).toBeInTheDocument();
+    await waitFor(() => expect(currentUrl()).toBe('/projects'));
+    await waitFor(() => expect(historyIndex()).toBe(projectsIndex));
+
+    // And the entry we came from is still reachable behind us.
+    await traverseHistory('back');
+    await waitFor(() => expect(currentUrl()).toBe(SETTINGS_URL));
   });
 
   it('blocks browser Forward and keeps the draft when the user stays', async () => {

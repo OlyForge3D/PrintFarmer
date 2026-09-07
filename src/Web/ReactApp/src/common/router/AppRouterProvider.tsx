@@ -1,5 +1,7 @@
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createBrowserRouter, RouterProvider } from 'react-router';
+
+type AppRouter = ReturnType<typeof createBrowserRouter>;
 
 /**
  * Owns the application's router composition.
@@ -31,10 +33,56 @@ function AppRouterChildren() {
   return <>{useContext(AppRouterChildrenContext)}</>;
 }
 
+/**
+ * Every router built but not yet claimed by a mounted provider.
+ *
+ * Building a router calls `initialize()`, which installs a `popstate` listener
+ * that only `dispose()` removes — and `RouterProvider` never disposes. React
+ * also invokes state initialisers speculatively under StrictMode and keeps only
+ * one result, so construction cannot be assumed to happen once. Tracking each
+ * instance is what makes it possible to dispose the ones React threw away;
+ * otherwise they keep reacting to Back/Forward for the life of the page.
+ */
+const unclaimedRouters = new Set<AppRouter>();
+
+function createAppRouter(): AppRouter {
+  const router = createBrowserRouter([{ path: '*', element: <AppRouterChildren /> }]);
+  unclaimedRouters.add(router);
+  return router;
+}
+
+/** Dispose every instance except the one React actually kept. */
+function disposeUnclaimedRouters(kept: AppRouter) {
+  for (const router of unclaimedRouters) {
+    if (router !== kept) router.dispose();
+  }
+  unclaimedRouters.clear();
+}
+
 export function AppRouterProvider({ children }: { children: ReactNode }) {
-  // Created once per mount: a module-scope router would leak history state
-  // between tests and survive HMR with a stale element tree.
-  const [router] = useState(() => createBrowserRouter([{ path: '*', element: <AppRouterChildren /> }]));
+  const [router] = useState(createAppRouter);
+  const disposePendingRef = useRef(false);
+
+  useEffect(() => {
+    // Any disposal scheduled by a previous cleanup is cancelled here: StrictMode
+    // runs setup -> cleanup -> setup, and tearing the router down on that
+    // simulated remount would leave the app holding one that no longer listens
+    // to history. Only a cleanup with no setup behind it is a real unmount.
+    disposePendingRef.current = false;
+    disposeUnclaimedRouters(router);
+    return () => {
+      disposePendingRef.current = true;
+      // A microtask, not a timer: it still lands after React's synchronous
+      // effect flush, but cannot be stranded by a suite using fake timers.
+      queueMicrotask(() => {
+        if (!disposePendingRef.current) return;
+        disposePendingRef.current = false;
+        unclaimedRouters.delete(router);
+        router.dispose();
+      });
+    };
+  }, [router]);
+
   return (
     <AppRouterChildrenContext.Provider value={children}>
       <RouterProvider router={router} />

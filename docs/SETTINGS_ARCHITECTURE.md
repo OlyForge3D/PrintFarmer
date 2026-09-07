@@ -86,7 +86,21 @@ Two react-router behaviours the implementation has to absorb:
   `blocker.state === 'blocked'` from an effect.
 - **Handles go stale.** A captured `proceed`/`reset` throws once the router has
   released the blocker, so both are called defensively and "Discard" falls back
-  to navigating to the recorded destination.
+  to resuming the navigation itself. For a Back/Forward the fallback replays the
+  recorded history **delta**, not the destination URL: navigating by URL would
+  push a duplicate entry, so a discarded Back would leave
+  `[Printers, Settings, Printers]` and the next Back would surprise the user by
+  returning to Settings.
+- **Routers must be disposed.** `createBrowserRouter` calls `initialize()`, which
+  installs a `popstate` listener that only `dispose()` removes — and
+  `RouterProvider` never disposes. React also invokes state initialisers
+  speculatively under StrictMode and keeps one result, so construction cannot be
+  assumed to happen once. `AppRouterProvider` therefore tracks every instance it
+  builds, disposes the ones React discarded, and defers unmount disposal by a
+  microtask so StrictMode's simulated remount does not tear down a live router.
+  Without this, every remount strands another router still reacting to
+  Back/Forward. Covered by
+  `src/test/common/AppRouterProviderLifecycle.test.tsx`.
 
 Regression coverage lives in
 `src/test/features/settings/SettingsRealRouterDraftGuard.test.tsx`, which renders
