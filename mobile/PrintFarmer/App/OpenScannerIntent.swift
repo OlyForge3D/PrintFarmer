@@ -112,3 +112,7 @@ struct OpenScannerIntent: AppIntent {
         return .result()
     }
 }
+
+@available(iOS, introduced: 16.4, obsoleted: 26.0)
+@available(iOSApplicationExtension, unavailable)
+extension OpenScannerIntent: ForegroundContinuableIntent {}

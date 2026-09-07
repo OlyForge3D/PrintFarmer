@@ -1,5 +1,6 @@
 import XCTest
 import Observation
+import AppIntents
 @testable import PrintFarmer
 
 /// Tests for shell-aware tab selection, deep-link mapping, and path isolation.
@@ -209,6 +210,14 @@ final class AppRouterTests: XCTestCase {
 
         XCTAssertNotNil(ExternalScanRequestStore.pending(userDefaults: defaults))
     }
+
+    @available(iOS, introduced: 17.0, obsoleted: 26.0)
+    func testOpenScannerIntentForcesContainingAppExecutionBeforeIOS26() {
+        assertForegroundContinuable(OpenScannerIntent.self)
+    }
+
+    @available(iOS, introduced: 17.0, obsoleted: 26.0)
+    private func assertForegroundContinuable<T: ForegroundContinuableIntent>(_: T.Type) {}
 
     func testLegacyBooleanRequestIsUpgradedRatherThanDropped() throws {
         let suiteName = "ExternalScanLegacy-\(UUID().uuidString)"
