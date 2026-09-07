@@ -967,11 +967,28 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       // signal made the poll declare victory (or defeat) on a false premise.
       // Location is the only signal that cannot lie about whether the resume
       // actually happened, so it is now the sole basis for giving up.
-      setResumeAttempt((current) => {
-        if (current !== resumeAttempt) return current; // superseded by a newer attempt
-        replay(current);
-        return null;
-      });
+      //
+      // Issue the replay directly here, not from inside a setState updater:
+      // React may re-invoke an updater function to check its purity (e.g.
+      // StrictMode double-invokes state updaters), and navigate() is a side
+      // effect that must not run twice. The `cancelled` guard at the top of
+      // `check` already prevents this from firing after `resumeAttempt` has
+      // moved on to a newer attempt (a dependency change re-runs this whole
+      // effect, cancelling the stale one first), so no extra staleness check
+      // is needed here.
+      //
+      // Clear the FULL resume state, not just `resumeAttempt` — leaving
+      // `blockedTargetIndex` set would leave `isResumePending` permanently
+      // true for the rest of the shell's lifetime (nothing else can clear
+      // it), wedging every replace-guarded effect (the search-query commit,
+      // #2517 canonicalization) for the whole session, not just this one
+      // resume attempt.
+      replay(resumeAttempt);
+      setResumeAttempt(null);
+      setBlockedTarget(null);
+      setBlockedTargetIndex(null);
+      setRespondedToBlock(false);
+      setPendingNavigation(null);
     };
     const timer = setTimeout(() => check(0), pollIntervalMs);
     return () => {
