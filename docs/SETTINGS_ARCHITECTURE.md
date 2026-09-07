@@ -78,8 +78,8 @@ button all round-trip through these parameters:
 | `?scope` | Optional scope, normalized from the route when omitted or inconsistent. | `user` / `system` |
 | `?tab` | Category within the scope (e.g. `general`, `slicing`, `users`). | See `SETTINGS_CATEGORIES` in `types.ts`. |
 | `?sub` | Sub-page within the tab. Falls back to the first accessible sub-page in the category. | See each category's `subPages` array. |
-| `?q` | Search query, applied to the current sub-page's settings metadata. | Free text. |
-| `?field` | Deep-link to a single property row on the current sub-page. Section-qualified — see below. | e.g. `SystemLog.Enabled`. |
+| `?q` | Search query. Filters the current sub-page's settings metadata (legacy, pre-#2505 behavior) **and** seeds the persistent workspace search box (§ Persistent Workspace Search) on admin routes. | Free text. |
+| `?field` | Deep-link to a single property row on the current sub-page. Section-qualified — see below. | e.g. `SystemLog.enabled`. |
 
 Exactly ONE `SettingsPage` mounts at a time, selected by the key `${scope}.${category}.${subPage}`
 into `SUB_PAGE_CONTENT` in `SettingsShell.tsx`. Everything else on the page (sidebar,
@@ -327,7 +327,7 @@ otherwise hide them.
 ### `?field=` must be section-qualified
 
 The palette generates section-qualified `?field=Section.Property` values (e.g.
-`?field=SystemLog.Enabled`) rather than bare property names. This is load-bearing:
+`?field=SystemLog.enabled`) rather than bare property names. This is load-bearing:
 
 > `public bool Enabled` is declared on **13 different settings classes** — several of
 > which render on the same page (for example, Telegram, HomeAssistant, Obico, and
@@ -370,6 +370,111 @@ Keyboard handler details:
 - The settings metadata query is disabled until the palette is first opened. This avoids
   a background `401` for signed-out users; the metadata endpoint is `[Authorize]` under
   the hood.
+
+## Persistent Workspace Search (#2505)
+
+Admin routes (`/admin/settings` and every route under `AdminPageShell`) render a
+**persistent** search box in the page header — distinct from, and complementary to, the
+modal `Ctrl+K` command palette above. It never opens as an overlay: it's always mounted,
+always focusable, and its results appear as an inline listbox beneath the input.
+
+| | Command Palette (`Ctrl+K`) | Persistent Workspace Search |
+|---|---|---|
+| Mount | Global, one instance in `Layout.tsx`, opens as a modal overlay | Header of `SettingsShell`, gated on `isAdminRoute`; always mounted, never modal |
+| Scope | Every authenticated route | Admin settings routes only — never on personal `/settings` (preserves personal/system separation) |
+| Result surface | `CommandPalette.tsx`, overlay dialog | `WorkspaceSearchResults.tsx`, inline `role="listbox"` beneath the input |
+| Shared logic | Both rank the same `FuzzyResult` shape via `settings-navigation.ts` and highlight matches with the same `HighlightedFuzzyText` component | |
+
+### Typing must never itself navigate
+
+This is the central design invariant, and the reason the box needed new state beyond
+`?q`: **typing a character must never, by itself, select and navigate to a result.**
+Only an explicit action — pressing **Enter**, or **clicking** a result — commits a
+navigation. This matters because `?q` already drove *legacy* auto-navigation behavior
+before #2505 (a bookmarked `?q=slicer` lands on the first matching category on load), and
+that behavior has to keep working for old links while the *new* persistent box must not
+reproduce it while the user is still typing.
+
+`SettingsShell` resolves this with `isSelfAuthoredQuery`: a `lastSelfWrittenQueryRef` records
+the most recent `q` value the box itself wrote to the URL. When the URL's `q` changes to a
+value that matches that ref, the change is attributed to the box's own typing and the
+legacy auto-navigation path is skipped. When `q` arrives some other way — a pasted URL, a
+browser back/forward to a bookmarked link, a fresh page load — the ref doesn't match (or is
+empty) and the pre-#2505 auto-navigation still applies. This is why the two sit side by
+side in tests: a genuinely external `?q=slicer` still auto-navigates on load, while typing
+`slicer` into the persistent box, with nothing else changing, does not.
+
+Value-equality alone isn't sufficient, though: a browser back/forward can land on an older
+`q` that *coincidentally* equals a value the box previously wrote itself (type "slicer",
+navigate to an unrelated category, then go Back). `commitSearchQuery` only ever writes `q`
+via a history *replace*, so a genuine back/forward is always reported as a React Router
+`POP` navigation (`useNavigationType()`); a same-value match is therefore only trusted when
+the most recent navigation wasn't a `POP`, so history restoration always re-triggers legacy
+auto-navigation regardless of what the ref remembers.
+
+Explicit selection (`WorkspaceSearchResults`'s `onSelect`, wired to Enter and click) always
+retains the query in the URL (`withRetainedQuery()`) and pushes a real history entry, so
+Back returns to the pre-selection state rather than replacing it.
+
+### Cross-group, permission-filtered result index
+
+`useSettingsSearchIndex` (`src/Web/ReactApp/src/features/settings/hooks/useSettingsSearchIndex.ts`)
+is the single hook backing both result rows in the box and the box's own permission
+filtering. It merges three item shapes into one ranked, grouped list:
+
+1. **Destinations** — every entry in `ADMIN_DESTINATIONS` the current user can reach,
+   filtered the same way the sidebar and standalone links are (`filterDestinationsByAccess`).
+   A delegate who only holds `printers:admin` sees `Printer Groups` but not `Login Audit`.
+2. **Settings-nav items** (user scope) — `buildSettingsCommandItems()` filtered to
+   `scopeId === 'user'`. This list is not permission-gated (same as the palette's
+   equivalent source) — it stays populated even for a signed-out user.
+3. **Individual setting fields** — `buildSettingCommandItems(metadata, groups)`, gated on
+   the literal `hasPermission('system_settings', 'admin')` grant. This is why a delegate
+   with `printers:admin` alone gets zero field results: field search reaches *any*
+   settings section, including ones the delegate has no business editing, so it requires
+   the broad `system_settings:admin` grant rather than a narrower resource permission.
+
+`enabled: false` (the box is closed/blurred) disables the underlying metadata/groups
+queries entirely rather than merely hiding results — no background fetch happens until
+the user actually opens the box.
+
+### Exact qualified field navigation
+
+Selecting a field result always lands on `?field=Section.Property` (never a bare
+property name) for the same reason the command palette does — see
+[§ `?field=` must be section-qualified](#field-must-be-section-qualified) above. The
+persistent search reuses `buildSettingCommandItems`, so this qualification is automatic;
+there is no separate field-linking code path to keep in sync.
+
+If the resolved field doesn't actually render on the destination page (stale metadata, a
+typo carried over from an old link, or — now that field search can reach *any* admin
+page — a field that lives elsewhere entirely), `SettingsPage` surfaces a
+`toast.error(...)` instead of silently doing nothing. The page and its current editor
+stay mounted exactly as they were, and `?field=` stays in the URL so the link remains
+inspectable.
+
+### Draft safety is preserved
+
+Explicit selection from the persistent search goes through the exact same
+`ConfirmationModal` dirty-guard as every other navigation source (category switch,
+palette selection, sidebar link) — see [§ Safe Draft Transitions](#safe-draft-transitions--partial-saves).
+Selecting a result while a section is dirty intercepts the navigation with the "Unsaved
+Changes" dialog; **Stay** leaves the current URL, query, and form state untouched;
+**Discard Changes** resets the dirty section and then proceeds to the selected result.
+Typing alone — since it never navigates — never triggers this dialog.
+
+### Maintaining the shared ranking/highlighting code
+
+`settings-navigation.ts` and `HighlightedFuzzyText.tsx` are shared between the modal
+palette and the persistent search. If you change fuzzy-match ranking, grouping order
+(`KIND_SECTION_ORDER`), or match highlighting, both surfaces pick up the change — verify
+both `GlobalCommandPaletteProvider.test.tsx` and `WorkspaceSearchResults.test.tsx` still
+pass. `HighlightedFuzzyText` renders one `<span>` per character when there are matches to
+highlight; it sets `aria-label={text}` on the wrapping span specifically so the
+accessible name stays the literal, space-preserving `text` — per-character spans are
+`aria-hidden` and contribute only visual highlighting. Removing that `aria-label` will
+silently merge words in the computed accessible name (e.g. "Login Audit" reads as
+"LoginAudit" to a screen reader) without failing any visual/snapshot check.
 
 ## Admin Control Center Overview
 
@@ -464,6 +569,10 @@ Frontend:
 - Essential manifest: `src/Web/ReactApp/src/features/admin/settings/essential-manifest.ts`.
 - Command palette: `src/Web/ReactApp/src/features/settings/components/GlobalCommandPaletteProvider.tsx`.
 - Palette mount: `src/Web/ReactApp/src/common/components/Layout.tsx`.
+- Persistent workspace search: `src/Web/ReactApp/src/features/settings/components/WorkspaceSearchResults.tsx`.
+- Shared search index: `src/Web/ReactApp/src/features/settings/hooks/useSettingsSearchIndex.ts`.
+- Shared fuzzy-match/rank/highlight helpers: `src/Web/ReactApp/src/features/settings/settings-navigation.ts`,
+  `src/Web/ReactApp/src/features/settings/components/HighlightedFuzzyText.tsx`.
 
 ## Related Documentation
 

@@ -81,6 +81,198 @@ export interface ResolvedSettingsNavigationTarget {
   subPageId?: string;
 }
 
+/**
+ * Fuzzy-match ranking shared between the modal {@link CommandPalette} (#938)
+ * and the persistent workspace search results panel (#2505). Both surfaces
+ * search the same permission-filtered item shape ({@link SettingsCommandItem})
+ * and must rank/group results identically — kept here as the single
+ * implementation rather than duplicated per surface.
+ */
+export interface FuzzyResult {
+  item: SettingsCommandItem;
+  score: number;
+  labelMatches: number[];
+  breadcrumbMatches: number[];
+}
+
+export interface FuzzyGroup {
+  kind: SettingsCommandItemKind;
+  label: string;
+  results: FuzzyResult[];
+}
+
+/**
+ * Display order and human-readable label for each result section. Kinds
+ * missing from this list still render, but only at the tail of the results in
+ * insertion order — the array is authoritative for the visible sections.
+ */
+export const KIND_SECTION_ORDER: { kind: SettingsCommandItemKind; label: string }[] = [
+  { kind: 'destination', label: 'Places' },
+  { kind: 'settings-nav', label: 'Settings sections' },
+  { kind: 'setting', label: 'Individual settings' },
+  { kind: 'action', label: 'Actions' },
+];
+
+export function getItemKind(item: SettingsCommandItem): SettingsCommandItemKind {
+  return item.kind ?? 'settings-nav';
+}
+
+export function normalizeSearchQuery(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+/**
+ * Subsequence fuzzy match: every character of `query`, in order, must appear
+ * somewhere in `text` (case-insensitive). Returns the matched character
+ * indices (for highlighting) or `null` when no such subsequence exists.
+ */
+export function getFuzzyMatchIndices(text: string, query: string): number[] | null {
+  if (!query) {
+    return [];
+  }
+
+  const normalizedText = text.toLowerCase();
+  const matches: number[] = [];
+  let searchIndex = 0;
+
+  for (const character of query) {
+    const nextMatch = normalizedText.indexOf(character, searchIndex);
+    if (nextMatch === -1) {
+      return null;
+    }
+
+    matches.push(nextMatch);
+    searchIndex = nextMatch + 1;
+  }
+
+  return matches;
+}
+
+function scoreFuzzyMatches(matches: number[]): number {
+  if (matches.length === 0) {
+    return 0;
+  }
+
+  const spread = matches[matches.length - 1] - matches[0];
+  let contiguousBonus = 0;
+
+  for (let index = 1; index < matches.length; index += 1) {
+    if (matches[index] === matches[index - 1] + 1) {
+      contiguousBonus += 4;
+    }
+  }
+
+  return spread - contiguousBonus;
+}
+
+/**
+ * Score a single item against an already-normalized query. Lower scores rank
+ * first. Returns `null` when the item does not match at all (label,
+ * breadcrumb, and keywords all miss).
+ */
+export function getFuzzyResult(item: SettingsCommandItem, normalizedQuery: string): FuzzyResult | null {
+  if (!normalizedQuery) {
+    return {
+      item,
+      score: 0,
+      labelMatches: [],
+      breadcrumbMatches: [],
+    };
+  }
+
+  const labelMatches = getFuzzyMatchIndices(item.label, normalizedQuery);
+  const breadcrumbMatches = getFuzzyMatchIndices(item.breadcrumb, normalizedQuery);
+  const keywordExactMatch = item.keywords.some((keyword) => keyword.includes(normalizedQuery));
+
+  if (!labelMatches && !breadcrumbMatches && !keywordExactMatch) {
+    return null;
+  }
+
+  let score = 300;
+
+  if (labelMatches) {
+    score -= 180;
+    score += scoreFuzzyMatches(labelMatches);
+    if (item.label.toLowerCase().includes(normalizedQuery)) {
+      score -= 24;
+    }
+    if (item.label.toLowerCase().startsWith(normalizedQuery)) {
+      score -= 30;
+    }
+  }
+
+  if (breadcrumbMatches) {
+    score -= 70;
+    score += scoreFuzzyMatches(breadcrumbMatches);
+  }
+
+  if (keywordExactMatch) {
+    score -= 28;
+  }
+
+  if (item.subPageId) {
+    score -= 6;
+  }
+
+  return {
+    item,
+    score,
+    labelMatches: labelMatches ?? [],
+    breadcrumbMatches: breadcrumbMatches ?? [],
+  };
+}
+
+/**
+ * Rank every item against a raw (not-yet-normalized) query, dropping
+ * non-matches and sorting best-first. Ties break on breadcrumb so results are
+ * stable across renders. `maxVisible` bounds the result count (the modal
+ * palette and the workspace search panel may want different limits).
+ */
+export function rankSettingsCommandItems(
+  items: readonly SettingsCommandItem[],
+  query: string,
+  options?: { maxVisible?: number },
+): FuzzyResult[] {
+  const normalizedQuery = normalizeSearchQuery(query);
+  const results = items
+    .map((item) => getFuzzyResult(item, normalizedQuery))
+    .filter((result): result is FuzzyResult => result !== null)
+    .sort((left, right) => left.score - right.score || left.item.breadcrumb.localeCompare(right.item.breadcrumb));
+
+  return options?.maxVisible ? results.slice(0, options.maxVisible) : results;
+}
+
+/**
+ * Bucket ranked results by {@link SettingsCommandItemKind}, in
+ * {@link KIND_SECTION_ORDER} order, dropping empty sections. Any kind absent
+ * from that order still renders, at the tail, labelled by its raw kind.
+ */
+export function groupRankedResults(results: readonly FuzzyResult[]): FuzzyGroup[] {
+  if (results.length === 0) {
+    return [];
+  }
+  const byKind = new Map<SettingsCommandItemKind, FuzzyResult[]>();
+  for (const result of results) {
+    const kind = getItemKind(result.item);
+    const bucket = byKind.get(kind) ?? [];
+    bucket.push(result);
+    byKind.set(kind, bucket);
+  }
+
+  const groups: FuzzyGroup[] = [];
+  for (const { kind, label } of KIND_SECTION_ORDER) {
+    const bucket = byKind.get(kind);
+    if (bucket && bucket.length > 0) {
+      groups.push({ kind, label, results: bucket });
+      byKind.delete(kind);
+    }
+  }
+  for (const [kind, bucket] of byKind.entries()) {
+    groups.push({ kind, label: kind, results: bucket });
+  }
+  return groups;
+}
+
 export const SETTINGS_CATEGORY_ICONS: Record<string, SettingsCategoryIcon> = {
   profile: AccountIcon,
   general: GearIcon,
@@ -248,6 +440,26 @@ export function buildSettingsPath(
     params.set('field', target.field);
   }
   return `${basePath}?${params.toString()}`;
+}
+
+/**
+ * Re-append the current workspace search text onto a same-shell destination
+ * href built by {@link buildSettingsPath}/{@link buildSettingCommandItems}/
+ * {@link buildAdminDestinationCommandItems}, so explicit workspace-search
+ * result selection "retains q within `/admin/settings`" (#2505) instead of
+ * dropping the in-progress search the moment the user lands. Only same-shell
+ * targets (`/admin/settings`, `/settings`) get `q` appended — an admin
+ * destination that lands somewhere else entirely (a standalone operational
+ * page) must not leak a settings search param onto an unrelated surface.
+ */
+export function withRetainedQuery(href: string, query: string): string {
+  const [path, existingQuery] = href.split('?');
+  if (!query || (path !== '/admin/settings' && path !== '/settings')) {
+    return href;
+  }
+  const params = new URLSearchParams(existingQuery ?? '');
+  params.set('q', query);
+  return `${path}?${params.toString()}`;
 }
 
 const ADMIN_GROUP_LABEL_BY_ID = new Map<AdminDestinationGroup, string>(

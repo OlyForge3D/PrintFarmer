@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState, useCallback, useMemo, useContext } from 'react';
 import { createPortal } from 'react-dom';
+import { toast } from 'sonner';
 import { useSettingsFooterSlot } from '@/features/settings/components/settingsFooterSlotContext';
 import { useSearchParams } from 'react-router';
 import clsx from 'clsx';
@@ -876,6 +877,15 @@ export function SettingsPage({
         window.setTimeout(() => {
           target.classList.remove('pf-setting-focus');
         }, 2000);
+      } else {
+        // #2505: a qualified field link can fail to resolve — stale metadata,
+        // a typo carried over from an older link, or (now that the workspace
+        // search can reach fields on other admin pages) a field that simply
+        // doesn't render on *this* page. Surface it rather than silently
+        // doing nothing: the current page and its editor stay mounted
+        // exactly as they were, `?field=` stays in the URL so the link
+        // remains inspectable, and nothing crashes.
+        toast.error(`Couldn't find the "${fieldParam}" setting on this page.`);
       }
       scrolledFieldRef.current = fieldParam;
     });
