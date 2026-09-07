@@ -45,6 +45,7 @@ struct PrinterFilamentSection: View {
                     .buttonStyle(.bordered)
                     .disabled(presentation.disabledReason(for: action) != nil)
                     .accessibilityLabel("\(action.kind.title), \(action.target.label)")
+                    .accessibilityHint(presentation.disabledReason(for: action) ?? "")
                     .accessibilityIdentifier("printer.filament.action.\(action.id)")
                     if let reason = presentation.disabledReason(for: action) {
                         Text(reason).font(.caption).foregroundStyle(.secondary)
@@ -71,9 +72,13 @@ struct PrinterFilamentSection: View {
             if let index = row.index {
                 Text("T\(index)").font(.caption).foregroundStyle(.secondary)
             }
-            Text(row.material ?? "Material unknown").font(.subheadline)
-            if let spool = row.spoolID {
-                Text("Assigned spool #\(spool)").font(.caption)
+            if row.isCoverageOnly {
+                Text("Coverage-only slot; current assignment unavailable").font(.caption)
+            } else {
+                Text(row.material ?? "Material unknown").font(.subheadline)
+                if let spool = row.spoolID {
+                    Text("Assigned spool #\(spool)").font(.caption)
+                }
             }
             if let name = row.spoolName { Text(name).font(.subheadline) }
             if row.index == nil {
@@ -84,6 +89,7 @@ struct PrinterFilamentSection: View {
                 if let spool = coverage.spoolId {
                     Text("Coverage for spool #\(spool)").font(.caption)
                 }
+                Text("Coverage material: \(coverage.material ?? "Unknown")").font(.caption)
                 quantity("Remaining at evaluation", coverage.remainingGrams)
                 quantity("Current job remaining demand", coverage.currentJobRemainingGrams)
                 quantity("Assigned queued demand", coverage.queuedRequiredGrams)

@@ -155,6 +155,43 @@ final class PrinterFilamentPresentationTests: XCTestCase {
         XCTAssertEqual(model.rows.last?.remainingGrams, 1200)
     }
 
+    func testCoverageCannotResurrectClearedOrChangedAssignments() throws {
+        let printer = try TestData.decodePrinter()
+        let id = UUID()
+        let old = ToolheadFilamentCoverage(
+            toolheadIndex: 0, toolheadId: id, toolheadName: "Tool",
+            spoolId: 10, material: "Old PLA", remainingGrams: 800, status: .covers
+        )
+        for newSpool: Int? in [nil, 20] {
+            let roster = [Toolhead(id: id, name: "Tool", index: 0, isPrimary: true, currentSpoolId: newSpool)]
+            for stale in [false, true] {
+                let model = try build(printer: printer, roster: roster, coverage: snapshot(printer: printer, slots: [old]), stale: stale)
+                XCTAssertEqual(model.rows[0].spoolID, newSpool)
+                XCTAssertNil(model.rows[0].material)
+                XCTAssertEqual(model.rows[0].coverage?.spoolId, 10)
+                XCTAssertEqual(model.rows[0].coverage?.material, "Old PLA")
+                XCTAssertFalse(model.rows[0].isCoverageOnly)
+            }
+        }
+        let coverageOnly = try build(printer: printer, coverage: snapshot(printer: printer, slots: [old]), stale: true)
+        XCTAssertTrue(coverageOnly.rows[0].isCoverageOnly)
+        XCTAssertNil(coverageOnly.rows[0].spoolID)
+        XCTAssertNil(coverageOnly.rows[0].material)
+        XCTAssertEqual(coverageOnly.rows[0].coverage?.spoolId, 10)
+    }
+
+    func testUnassignedPrinterSpoolCannotRetainOldMaterialOrQuantity() throws {
+        let printer = try TestData.decodePrinter()
+        let model = try build(
+            printer: printer,
+            spool: PrinterSpoolInfo(hasActiveSpool: false, activeSpoolId: 10, material: "Old PLA", remainingWeightG: 800)
+        )
+        XCTAssertNil(model.rows[0].spoolID)
+        XCTAssertNil(model.rows[0].material)
+        XCTAssertNil(model.rows[0].remainingGrams)
+        XCTAssertEqual(model.rows[0].spoolName, "No printer-level spool assigned")
+    }
+
     func testRejectsWrongPrinterAndDuplicateUUIDsWithVisibleDegradedState() throws {
         let printer = try TestData.decodePrinter()
         let wrong = PrinterFilamentCoverage(

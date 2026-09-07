@@ -21,6 +21,7 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
         let remainingGrams: Double?
         let coverage: ToolheadFilamentCoverage?
         let isLastConfirmed: Bool
+        let isCoverageOnly: Bool
 
         var notice: String? {
             guard let coverage else { return nil }
@@ -117,11 +118,11 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
                 id: "\(printer.id)/id:\(toolhead.id)",
                 toolheadID: toolhead.id, index: toolhead.index,
                 title: toolhead.name ?? "Tool \(toolhead.index)",
-                material: toolhead.currentMaterial ?? slot?.material,
-                spoolID: toolhead.currentSpoolId ?? slot?.spoolId,
+                material: toolhead.currentMaterial,
+                spoolID: toolhead.currentSpoolId,
                 spoolName: nil,
                 remainingGrams: nil,
-                coverage: slot, isLastConfirmed: self.isStale
+                coverage: slot, isLastConfirmed: self.isStale, isCoverageOnly: false
             ))
         }
         for offset in slots.indices where !used.contains(offset) {
@@ -134,8 +135,8 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
                 id: "\(printer.id)/coverage/\(identity)",
                 toolheadID: slot.toolheadId, index: slot.toolheadIndex,
                 title: slot.toolheadName,
-                material: slot.material, spoolID: slot.spoolId, spoolName: nil,
-                remainingGrams: nil, coverage: slot, isLastConfirmed: self.isStale
+                material: nil, spoolID: nil, spoolName: nil,
+                remainingGrams: nil, coverage: slot, isLastConfirmed: self.isStale, isCoverageOnly: true
             ))
         }
         // Printer-level spool data has no slot authority. Keep it once, explicitly
@@ -145,12 +146,13 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
                 id: "\(printer.id)/printer-spool",
                 toolheadID: nil, index: nil,
                 title: "Printer-level spool (slot not specified)",
-                material: spool.material, spoolID: spool.activeSpoolId,
+                material: spool.hasActiveSpool ? spool.material : nil,
+                spoolID: spool.hasActiveSpool ? spool.activeSpoolId : nil,
                 spoolName: spool.hasActiveSpool
                     ? (spool.filamentName ?? spool.spoolName ?? "Assigned spool")
                     : "No printer-level spool assigned",
-                remainingGrams: spool.remainingWeightG,
-                coverage: nil, isLastConfirmed: false
+                remainingGrams: spool.hasActiveSpool ? spool.remainingWeightG : nil,
+                coverage: nil, isLastConfirmed: false, isCoverageOnly: false
             ))
         }
         rows = result
