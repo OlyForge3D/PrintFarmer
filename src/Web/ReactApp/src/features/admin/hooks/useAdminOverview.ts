@@ -24,12 +24,17 @@ async function fetchAdminOverview(signal?: AbortSignal): Promise<AdminOverviewDt
  * `refetchOnWindowFocus` is on because the hub is what operators reopen when they
  * suspect something is wrong; stale-under-focus is the wrong default for it.
  */
-export function useAdminOverview(options?: { enabled?: boolean }): UseQueryResult<AdminOverviewDto> {
-  return useQuery<AdminOverviewDto>({
+export function useAdminOverview(
+  options?: { enabled?: boolean },
+): UseQueryResult<AdminOverviewDto | undefined> {
+  return useQuery<AdminOverviewDto, Error, AdminOverviewDto | undefined>({
     queryKey: ADMIN_OVERVIEW_QUERY_KEY,
     queryFn: ({ signal }) => fetchAdminOverview(signal),
     staleTime: 30_000,
     refetchOnWindowFocus: true,
     enabled: options?.enabled ?? true,
+    // React Query retains cached data when a query becomes disabled. Do not let
+    // a principal who loses overview access render that old snapshot.
+    select: options?.enabled === false ? () => undefined : undefined,
   });
 }

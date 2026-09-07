@@ -109,6 +109,30 @@ The current workspace retains category/sub-tab presentation.
 | `/admin/workers` | Operations | dispatch-settings:manage |
 | `/admin/data-management` | Operations | data_management:admin |
 
+The `/admin` Control Center is intentionally attention-first. Authorized
+overview users see the server-ranked **Needs attention** list first, followed by
+a compact **System health** band that preserves the server's overall status,
+subsystem statuses, unknown values, and `checkedAt` timestamp. An empty
+attention list only receives the all-clear message when every reported
+subsystem is healthy; an empty or degraded/unknown overview remains explicitly
+non-reassuring. Loading and network-error states include accessible feedback and
+a retry action without hiding the dashboard's usable links.
+
+The final band contains only permission-filtered destinations. **Operations**
+lists the day-to-day shortcuts: System Status, Workers & Jobs (opened on the
+Jobs tab), Login Audit, Data Management, Maintenance, Analytics, and
+Auto-Dispatch. **Configuration** lists any permitted configuration destination
+that lives outside the settings shell — Catalog (`/catalog`), Locations
+(`/locations`), and Power Monitors (`/admin/power-monitors`) — so a delegate
+whose only grant is one of those still has somewhere to go. A separate
+**Farm & Admin Settings** entry is shown only when the destination registry
+exposes an accessible destination under `/admin/settings`, so it is never a
+dead-end link. The "no operational tools" empty state appears only when the
+whole band is empty. The former “Everything you can manage” directory is not
+rendered, and retired `/admin/manage` attention targets are suppressed.
+Delegated users retain their permitted destinations even when they cannot fetch
+the system overview.
+
 The configuration shell is driven by URL parameters:
 
 - `?scope=<user|system>` — which shell you are in (defaults from the route).

@@ -8,9 +8,13 @@ export type {
 export {
   ADMIN_DESTINATIONS,
   ADMIN_DESTINATION_GROUPS,
+  canAccessDestination,
   canAccessSettingsTab,
   filterDestinationsByAccess,
   getDestinationById,
   getDestinationsByGroup,
   getHubGroupedDestinations,
+  getStandaloneConfigurationDestinations,
+  hasAccessibleDestinationWithPrefix,
+  isPathWithin,
 } from './adminDestinations';
