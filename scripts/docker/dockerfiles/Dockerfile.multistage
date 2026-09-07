@@ -9,7 +9,7 @@
 ARG ORCASLICER_VERSION=2.4.2
 ARG ORCASLICER_SHA256=d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
 ARG BUILD_VERBOSITY=quiet
-# Short git SHA of the source commit; embedded into each service's version endpoint
+# Full git SHA of the source commit; embedded into each service's version endpoint
 ARG GIT_SHA=unknown
 
 # Multi-architecture support
@@ -731,7 +731,7 @@ COPY compliance/licenses /compliance/licenses
 ARG VITE_API_BASE_URL=/api
 ARG VITE_SIGNALR_PRINTERS_URL=/hubs/printers
 ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
-# Short git SHA baked into the frontend bundle (vite.config reads process.env.VITE_GIT_SHA
+# Full git SHA baked into the frontend bundle (vite.config reads process.env.VITE_GIT_SHA
 # as a fallback when .git is not present in the build context).
 ARG GIT_SHA=unknown
 ARG VITE_GIT_SHA=${GIT_SHA}

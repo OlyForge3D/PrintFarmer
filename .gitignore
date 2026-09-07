@@ -102,6 +102,7 @@ deploy/nginx/certs/
 # Playwright
 .playwright-mcp/
 .playwright-cli/
+/acceptance-evidence/
 
 # Local parity capture artifacts
 simplyprint-*
@@ -172,4 +173,3 @@ __pycache__/
 
 # Wire-contract corpus cross-process manifest lock (issue #2238) - runtime artifact, never committed
 fixtures/wire-contracts/manifest.json.lock
-

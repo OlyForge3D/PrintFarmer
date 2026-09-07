@@ -637,9 +637,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
-      - name: Compute short SHA
+      - name: Compute full SHA
         id: gitsha
-        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+        run: echo "full=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Download reviewed license inventory
         uses: actions/download-artifact@v8
@@ -735,8 +735,8 @@ jobs:
             NODE_TAG=24-alpine
             NGINX_TAG=alpine
             UBUNTU_TAG=24.04
-            GIT_SHA=${{ steps.gitsha.outputs.short }}
-            VITE_GIT_SHA=${{ steps.gitsha.outputs.short }}
+            GIT_SHA=${{ steps.gitsha.outputs.full }}
+            VITE_GIT_SHA=${{ steps.gitsha.outputs.full }}
             BUILD_VERSION=${{ steps.source.outputs.version }}
             VCS_REF=${{ github.sha }}
             SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}

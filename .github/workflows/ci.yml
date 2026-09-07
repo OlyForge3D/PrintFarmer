@@ -182,6 +182,13 @@ jobs:
       - name: Test daily development image-set policy
         run: node --test scripts/ci/tests/test-daily-development-images.mjs
 
+      - name: Test acceptance provenance preflight
+        run: >-
+          node --test
+          scripts/ci/tests/test-acceptance-provenance-build-paths.mjs
+          scripts/ci/tests/test-verify-acceptance-provenance.mjs
+          scripts/ci/tests/test-smoke-daily-validation-stack.mjs
+
       - name: Test Squad state-root containment
         run: node --test scripts/ci/tests/test-squad-state-root.mjs
 
