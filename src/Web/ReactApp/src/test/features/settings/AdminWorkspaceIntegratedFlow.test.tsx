@@ -579,7 +579,7 @@ describe('Admin workspace integrated flow (#2507)', () => {
     expect(workersLink).toHaveAttribute('href', '/admin/workers?workerTab=jobs');
     fireEvent.click(workersLink);
     await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('workerTab=jobs'));
-    expect(screen.getByTestId('slice-jobs-panel')).toBeInTheDocument();
+    expect(await screen.findByTestId('slice-jobs-panel')).toBeInTheDocument();
     workersView.unmount();
 
     grantOnly('power_monitors:admin');
