@@ -37,6 +37,7 @@ import { TelegramSettingsCard } from '@/features/settings/components/TelegramSet
 import { HomeAssistantSettingsCard, SpoolmanSettingsCard } from '@/features/settings/components/IntegrationSettingsCards';
 import { WorkspaceSearchResults } from '@/features/settings/components/WorkspaceSearchResults';
 import { resolveSettingsNavigationTarget, withRetainedQuery, type SettingsCommandItem } from '@/features/settings/settings-navigation';
+import { useSettingsSearchIndex } from '@/features/settings/hooks/useSettingsSearchIndex';
 import {
   DEFAULT_SCOPE,
   SETTINGS_SCOPES,
@@ -227,6 +228,11 @@ function DataRouterBlocker({
   return null;
 }
 
+function getFieldParamFromHref(href: string | undefined): string | null {
+  const [, queryString] = href?.split('?') ?? [];
+  return new URLSearchParams(queryString ?? '').get('field');
+}
+
 interface SettingsShellProps {
   /** Lock the shell to a specific route-level scope group.
    * - 'user': only user settings (no scope switcher)
@@ -264,6 +270,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const requestedScope = searchParams.get('scope');
   const requestedCategory = searchParams.get('tab');
   const requestedSubPage = searchParams.get('sub');
+  const requestedField = searchParams.get('field');
   const query = searchParams.get('q') || '';
   const normalizedQuery = query.trim().toLowerCase();
 
@@ -310,6 +317,9 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, [setSearchParams]);
 
   const isAdminRoute = routeScope === 'system';
+  const fieldSearchIndex = useSettingsSearchIndex({
+    enabled: isAdminRoute && Boolean(requestedField),
+  });
 
   const availableScopes = useMemo(() => {
     if (routeScope === 'user') {
@@ -350,6 +360,28 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     () => resolveSettingsNavigationTarget(requestedCategory, requestedSubPage, routeScope ?? requestedScope),
     [requestedCategory, requestedScope, requestedSubPage, routeScope],
   );
+
+  const requestedFieldTarget = useMemo(() => {
+    if (!requestedField) {
+      return undefined;
+    }
+
+    const matchingField = fieldSearchIndex.settingFieldItems.find((item) => getFieldParamFromHref(item.href) === requestedField);
+    if (!matchingField) {
+      return undefined;
+    }
+
+    const scopeConstraint = routeScope ?? (requestedScope === 'user' || requestedScope === 'system' ? requestedScope : undefined);
+    if (scopeConstraint && matchingField.scopeId !== scopeConstraint) {
+      return undefined;
+    }
+
+    return {
+      scopeId: matchingField.scopeId,
+      categoryId: matchingField.categoryId,
+      subPageId: matchingField.subPageId,
+    };
+  }, [fieldSearchIndex.settingFieldItems, requestedField, requestedScope, routeScope]);
 
   const activeScope = useMemo(() => {
     return availableScopes.some((scope) => scope.id === resolvedRequestedTarget.scopeId)
@@ -739,6 +771,10 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const canAutoNavigate = isFiltering && !isDirty && !isSelfAuthoredQuery;
 
   const effectiveScope = useMemo(() => {
+    if (!isDirty && requestedFieldTarget) {
+      return requestedFieldTarget.scopeId;
+    }
+
     if (!canAutoNavigate || !matchingCategoryIds || matchingCategoryIds.length === 0) {
       return activeScope;
     }
@@ -749,7 +785,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return getSettingsScopeForCategory(firstMatchingSubPageCategoryId);
     }
     return getSettingsScopeForCategory(matchingCategoryIds[0]);
-  }, [activeCategory, activeScope, canAutoNavigate, firstMatchingSubPageCategoryId, matchingCategoryIds]);
+  }, [activeCategory, activeScope, canAutoNavigate, firstMatchingSubPageCategoryId, isDirty, matchingCategoryIds, requestedFieldTarget]);
 
   const scopeCategories = useMemo(
     () => getSettingsCategoriesForScope(effectiveScope),
@@ -757,6 +793,10 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   );
 
   const effectiveCategory = useMemo(() => {
+    if (!isDirty && requestedFieldTarget && scopeCategories.some((category) => category.id === requestedFieldTarget.categoryId)) {
+      return requestedFieldTarget.categoryId;
+    }
+
     if (!canAutoNavigate || !matchingCategoryIds || matchingCategoryIds.length === 0) {
       return scopeCategories.some((category) => category.id === activeCategory)
         ? activeCategory
@@ -769,7 +809,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
     const firstMatchingCategory = scopeCategories.find((category) => matchingCategoryIds.includes(category.id));
     return firstMatchingCategory?.id ?? scopeCategories[0]?.id ?? getDefaultCategoryForScope(effectiveScope);
-  }, [activeCategory, canAutoNavigate, effectiveScope, matchingCategoryIds, scopeCategories]);
+  }, [activeCategory, canAutoNavigate, effectiveScope, isDirty, matchingCategoryIds, requestedFieldTarget, scopeCategories]);
 
   const currentCategory = useMemo(
     () => scopeCategories.find((category) => category.id === effectiveCategory) ?? scopeCategories[0],
@@ -827,10 +867,13 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       .find((category) => category.id === currentCategory.id)
       ?.subPages ?? [];
 
-    const isExplicitSubPage = Boolean(requestedSubPage);
-    const requestedTargetSubPage = resolvedRequestedTarget.categoryId === currentCategory.id
-      ? (requestedSubPage ?? resolvedRequestedTarget.subPageId)
+    const requestedFieldSubPage = requestedFieldTarget?.categoryId === currentCategory.id
+      ? requestedFieldTarget.subPageId
       : undefined;
+    const isExplicitSubPage = Boolean(requestedSubPage || requestedFieldSubPage);
+    const requestedTargetSubPage = requestedFieldSubPage ?? (resolvedRequestedTarget.categoryId === currentCategory.id
+      ? (requestedSubPage ?? resolvedRequestedTarget.subPageId)
+      : undefined);
 
     const isAccessibleSubPage = requestedTargetSubPage
       ? accessibleSubPages.some((subPage) => subPage.id === requestedTargetSubPage)
@@ -865,7 +908,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     const firstAccessibleSubPage = accessibleSubPages[0]?.id;
 
     return firstAccessibleSubPage ?? getDefaultSubPage(currentCategory.id);
-  }, [accessibleCategories, canAutoNavigate, currentCategory, matchingCurrentSubPageIds, requestedSubPage, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId]);
+  }, [accessibleCategories, canAutoNavigate, currentCategory, matchingCurrentSubPageIds, requestedFieldTarget, requestedSubPage, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId]);
 
   const hasSubTabs = accessibleCategories.length > 0 && currentCategory.subPages.length >= 2;
   const renderedContentKey = currentCategory.subPages.length === 0
@@ -923,7 +966,10 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     if (isDirty || isSelfAuthoredQuery) {
       return;
     }
-    if (isFiltering && matchingCategoryIds?.length === 0) {
+    if (requestedField && (fieldSearchIndex.isLoading || fieldSearchIndex.isError)) {
+      return;
+    }
+    if (isFiltering && !requestedFieldTarget && matchingCategoryIds?.length === 0) {
       if (requestedCategory === null && requestedSubPage === null) {
         return;
       }
@@ -937,12 +983,15 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return;
     }
 
-    const shouldSyncScope = isFiltering || requestedScope !== null || requestedCategory !== null || activeScope !== DEFAULT_SCOPE;
-    const shouldSyncCategory = isFiltering || requestedCategory !== null || activeScope !== DEFAULT_SCOPE;
+    const syncScope = requestedFieldTarget?.scopeId ?? activeScope;
+    const syncCategory = requestedFieldTarget?.categoryId ?? effectiveCategory;
+    const shouldSyncScope = Boolean(requestedFieldTarget) || isFiltering || requestedScope !== null || requestedCategory !== null || activeScope !== DEFAULT_SCOPE;
+    const shouldSyncCategory = Boolean(requestedFieldTarget) || isFiltering || requestedCategory !== null || activeScope !== DEFAULT_SCOPE;
     const shouldSyncSub = requestedSubPage !== null
+      || Boolean(requestedFieldTarget)
       || (activeSubPage !== '' && currentCategory.subPages.length > 0 && (requestedCategory !== null || isFiltering || activeScope !== DEFAULT_SCOPE));
-    const scopeMismatch = shouldSyncScope && requestedScope !== activeScope;
-    const categoryMismatch = shouldSyncCategory && requestedCategory !== effectiveCategory;
+    const scopeMismatch = shouldSyncScope && requestedScope !== syncScope;
+    const categoryMismatch = shouldSyncCategory && requestedCategory !== syncCategory;
     const subMismatch = shouldSyncSub && (requestedSubPage ?? '') !== activeSubPage;
 
     if (!scopeMismatch && !categoryMismatch && !subMismatch) {
@@ -952,10 +1001,10 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       if (shouldSyncScope) {
-        next.set('scope', activeScope);
+        next.set('scope', syncScope);
       }
       if (shouldSyncCategory) {
-        next.set('tab', effectiveCategory);
+        next.set('tab', syncCategory);
       }
       if (shouldSyncSub) {
         if (activeSubPage) {
@@ -976,9 +1025,13 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     activeSubPage,
     currentCategory.subPages.length,
     effectiveCategory,
+    fieldSearchIndex.isError,
+    fieldSearchIndex.isLoading,
     isFiltering,
     matchingCategoryIds,
     requestedCategory,
+    requestedField,
+    requestedFieldTarget,
     requestedScope,
     requestedSubPage,
     setSearchParams,
@@ -1076,7 +1129,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const pageTitle = currentScopeMeta?.label ?? 'Settings';
   const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
 
-  const hasNoMatches = accessibleCategories.length > 0 && canAutoNavigate && matchingCategoryIds && matchingCategoryIds.length === 0;
+  const hasNoMatches = accessibleCategories.length > 0 && canAutoNavigate && !requestedFieldTarget && matchingCategoryIds && matchingCategoryIds.length === 0;
 
   // Page-level actions. The mode toggle arrives by portal from whichever content
   // page owns it (see SettingsHeaderPortal); the palette is always available, so
