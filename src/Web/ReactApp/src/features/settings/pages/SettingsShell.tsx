@@ -627,6 +627,27 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
    */
   const [blockedDelta, setBlockedDelta] = useState<number | null>(null);
 
+  /**
+   * A resume via `blocker.proceed()` that has been attempted but not yet
+   * confirmed. `proceed()` resumes asynchronously and can be a silent no-op on
+   * a stale handle, so the attempt is verified against an observed `location`
+   * change (see the effect that consumes this) rather than trusted outright.
+   */
+  const [resumeAttempt, setResumeAttempt] = useState<{
+    target: string;
+    delta: number | null;
+    /**
+     * Whether this attempt went through `blocker.proceed()` (a real router
+     * transition we can track via `blocker.state`) or a manual `navigate()`
+     * call we made ourselves because the blocker was already stale/unblocked.
+     * `blocker.state` never enters `'blocked'` for our own manual call, so it
+     * cannot be used as a "settled" signal there — using it anyway made the
+     * poll declare defeat on its very first tick and fire a second, doubling
+     * `navigate()` call while the first one was still in flight.
+     */
+    viaProceed: boolean;
+  } | null>(null);
+
   const location = useLocation();
   const historyIndexRef = useRef<number | null>(readHistoryIndex());
   useEffect(() => {
@@ -635,11 +656,22 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     historyIndexRef.current = readHistoryIndex();
   }, [location.key]);
 
+  /**
+   * Whether the user has already told us what to do about the currently
+   * recorded block (Stay or Discard). `blockedTarget`/`blockedDelta` are kept
+   * alive after that response so a stale/no-op `proceed()` still has replay
+   * data to fall back on (see `handleDiscardAndNavigate`) — but the modal
+   * itself must not stay visually open for that entire window, so its
+   * `isOpen` check needs to know a response already happened.
+   */
+  const [respondedToBlock, setRespondedToBlock] = useState(false);
+
   const handleBlockerChange = useCallback(
     (next: { state: 'unblocked' | 'blocked'; proceed?: () => void; reset?: () => void; target?: string }) => {
       setDataBlocker(next);
       if (next.state === 'blocked' && next.target) {
         setBlockedTarget(next.target);
+        setRespondedToBlock(false);
       }
     },
     [],
@@ -675,6 +707,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         // the one place that reliably knows a navigation was stopped and where it
         // was headed.
         setBlockedTarget(`${nextLocation.pathname}${nextLocation.search}`);
+        setRespondedToBlock(false);
         if (historyAction === 'POP') {
           const nextIndex = readHistoryIndex();
           const currentIndex = historyIndexRef.current;
@@ -691,7 +724,24 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
   const blocker = dataBlocker;
 
+  /**
+   * Live mirror of `blocker.state` for the resume-verification poll below.
+   * That poll runs its own recursive `setTimeout` chain rather than a fresh
+   * effect per tick, so it must not close over `blocker` from the render that
+   * scheduled it — captured at the moment `proceed()` was just called, that
+   * value is `'blocked'` almost every time and never updates within the
+   * closure, defeating the early-exit and burning the full bounded window on
+   * every resume regardless of how quickly the router actually settles.
+   */
+  const blockerStateRef = useRef(blocker.state);
+  blockerStateRef.current = blocker.state;
+
   const isBlocked = blocker.state === 'blocked' || blockedTarget !== null;
+  // Once the user has answered (Stay or Discard), the modal must not stay
+  // visually open just because `blockedTarget`/`blockedDelta` are still
+  // retained as fallback replay data — that retention outlives the response
+  // by design (see `handleDiscardAndNavigate`), so it can't drive visibility.
+  const isModalOpen = showDraftModal || (isBlocked && !respondedToBlock);
 
   const handleStay = useCallback(() => {
     if (blocker.state === 'blocked' && blocker.reset) {
@@ -706,50 +756,157 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     }
     setBlockedTarget(null);
     setBlockedDelta(null);
+    setRespondedToBlock(false);
+    setResumeAttempt(null);
     setShowDraftModal(false);
     setPendingNavigation(null);
   }, [blocker]);
 
   const handleDiscardAndNavigate = useCallback(() => {
     setShowDraftModal(false);
+    setRespondedToBlock(true);
     handleDiscardAll();
 
     const targetLocation = blocker.target ?? blockedTarget;
-    const previousLocation = `${window.location.pathname}${window.location.search}`;
-    let resumed = false;
+    const delta = blockedDelta;
+    let proceeded = false;
     if (blocker.state === 'blocked' && blocker.proceed) {
       try {
         blocker.proceed();
-        const nextLocation = `${window.location.pathname}${window.location.search}`;
-        // A stale or released blocker can be a silent no-op even when its handle
-        // still exists. A no-throw does not prove the router actually took the
-        // blocked target, and a different route change is not the same as the
-        // one we were asked to resume. Only the blocked destination counts.
-        resumed = Boolean(targetLocation) && nextLocation === targetLocation;
+        proceeded = true;
       } catch {
-        // Stale handle: the router released this blocker between the render that
-        // captured it and this click. Fall through and navigate by hand.
-        resumed = false;
-      }
-    }
-    if (!resumed) {
-      if (blockedDelta !== null) {
-        // The user confirmed a Back/Forward. Replay the traversal rather than
-        // pushing `blockedTarget`, so the history cursor lands on the entry they
-        // asked for instead of stacking a duplicate on top of it.
-        navigate(blockedDelta);
-      } else if (blockedTarget) {
-        // Resume the navigation ourselves (see `blockedTarget`).
-        navigate(blockedTarget);
-      } else if (pendingNavigation) {
-        pendingNavigation();
+        // Stale handle: the router released this blocker between the render
+        // that captured it and this click. Fall through to the manual replay
+        // below instead of trusting a proceed() that never actually ran.
+        proceeded = false;
       }
     }
 
-    if (resumed) {
-      setPendingNavigation(null);
+    if (proceeded && targetLocation) {
+      // `proceed()` not throwing is not proof the router actually reached the
+      // blocked destination — a stale/released blocker can be a silent
+      // no-op — and it resumes asynchronously, so we can't check
+      // `window.location` synchronously here without racing it. Do NOT also
+      // call `navigate(delta)` ourselves: that transition is already in
+      // flight from `proceed()`, and re-applying the same delta on top of it
+      // would double-traverse the history stack. Record what we attempted
+      // and let the effect below verify it against an observed location
+      // change, replaying the traversal only if it never arrives.
+      setResumeAttempt({ target: targetLocation, delta, viaProceed: true });
+    } else if (delta !== null && targetLocation) {
+      // The blocker was already stale/unblocked by the time this handler ran
+      // (a re-render between the block and the click can flip `blocker.state`
+      // to `'unblocked'` before we ever get here) — nothing is in flight to
+      // resume, so we must replay the traversal ourselves. Do NOT call
+      // `navigate(delta)` synchronously right here: the block that was just
+      // discarded may itself still be settling in the browser's own history
+      // machinery (a blocked POP is "undone" by the router issuing a reverse
+      // traversal, which is itself async), and issuing our own history jump
+      // on top of that before it settles can race and silently cancel out.
+      // Record the attempt and let the effect below issue the replay a tick
+      // later, once state has committed, then verify it the same way as a
+      // `proceed()` attempt.
+      setResumeAttempt({ target: targetLocation, delta, viaProceed: false });
+    } else if (targetLocation) {
+      setResumeAttempt({ target: targetLocation, delta: null, viaProceed: false });
+    } else if (pendingNavigation) {
+      pendingNavigation();
     }
   }, [blocker, blockedDelta, blockedTarget, handleDiscardAll, navigate, pendingNavigation]);
+
+  /**
+   * Verifies a resume attempted in `handleDiscardAndNavigate`, whether it went
+   * through `blocker.proceed()` or a manual `navigate()` call.
+   *
+   * Both resume through an async pipeline, so completion is only observable a
+   * render (or more) later, via `location` changing — and either can be a
+   * silent no-op that never changes `location` at all. A single tick is not a
+   * safe cutoff: a `proceed()` transition can still be in flight
+   * (`blocker.state` still `'blocked'`) well after the first check, and
+   * replaying the traversal while it lands double-applies the delta (observed
+   * landing two entries back instead of one). So this polls a bounded number
+   * of times, at a real interval.
+   *
+   * `blocker.state` is only a meaningful "settled" signal for a `proceed()`
+   * attempt (`resumeAttempt.viaProceed`) — it is the router's own state for
+   * that transition. For a manual `navigate()` call we made ourselves, the
+   * blocker never enters `'blocked'` at all, so treating it as "already
+   * settled" would give up on attempt 0 and fire a second, doubling
+   * `navigate()` call while the first one was still in flight (observed in
+   * practice). For that path the bounded attempt count is the only cutoff.
+   *
+   * A manual (non-`viaProceed`) replay is issued from here — on the poll's
+   * first tick, a render after the click was handled — rather than
+   * synchronously in the click handler. The block that was just discarded is
+   * itself "undone" by the router reversing the browser's already-completed
+   * POP, which is its own async history operation; issuing our replacement
+   * traversal in the very same synchronous tick as the click can race that
+   * reversal and cancel it out (observed: a `popstate` fires but `location`
+   * never actually moves). Deferring by even one tick avoids the overlap.
+   */
+  useEffect(() => {
+    if (!resumeAttempt) return;
+    const currentLocation = `${location.pathname}${location.search}`;
+    if (currentLocation === resumeAttempt.target) {
+      setResumeAttempt(null);
+      setBlockedTarget(null);
+      setBlockedDelta(null);
+      setRespondedToBlock(false);
+      setPendingNavigation(null);
+      return;
+    }
+
+    let cancelled = false;
+    let navigated = resumeAttempt.viaProceed; // a proceed() attempt already navigated; a manual one hasn't yet.
+    const maxAttempts = 25; // ~500ms total at 20ms/attempt: generous for a real transition, bounded against a stale handle.
+    const pollIntervalMs = 20;
+
+    const replay = (current: { target: string; delta: number | null }) => {
+      if (current.delta !== null) {
+        navigate(current.delta);
+      } else {
+        navigate(current.target);
+      }
+    };
+
+    const check = (attempt: number) => {
+      if (cancelled) return;
+      if (!navigated) {
+        navigated = true;
+        replay(resumeAttempt);
+        setTimeout(() => check(attempt + 1), pollIntervalMs);
+        return;
+      }
+      const latestLocation = `${window.location.pathname}${window.location.search}`;
+      if (latestLocation === resumeAttempt.target) {
+        setResumeAttempt(null);
+        setBlockedTarget(null);
+        setBlockedDelta(null);
+        setRespondedToBlock(false);
+        setPendingNavigation(null);
+        return;
+      }
+      const routerSettled = resumeAttempt.viaProceed ? blockerStateRef.current !== 'blocked' : false;
+      if (!routerSettled && attempt < maxAttempts) {
+        setTimeout(() => check(attempt + 1), pollIntervalMs);
+        return;
+      }
+      // Either the router reports nothing in flight (settled, immediately
+      // replay — there is nothing left to wait for) or the bound is exhausted
+      // while still blocked (a pathologically stuck handle; replay rather
+      // than wait forever). Either way, the resume never actually happened.
+      setResumeAttempt((current) => {
+        if (current !== resumeAttempt) return current; // superseded by a newer attempt
+        replay(current);
+        return null;
+      });
+    };
+    const timer = setTimeout(() => check(0), pollIntervalMs);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [resumeAttempt, location.pathname, location.search, blocker.state, navigate]);
 
   const previousLocationRef = useRef<string | null>(null);
   useEffect(() => {
@@ -758,10 +915,12 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     if (hadBlockedFallback && previousLocationRef.current && previousLocationRef.current !== currentLocation) {
       setBlockedTarget(null);
       setBlockedDelta(null);
+      setRespondedToBlock(false);
       setPendingNavigation(null);
     }
     previousLocationRef.current = currentLocation;
   }, [blockedDelta, blockedTarget, location.pathname, location.search]);
+
 
   useEffect(() => {
     if (!isDirty) return;
@@ -1478,7 +1637,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
             </div>
           </PageTemplate>
           <ConfirmationModal
-            isOpen={showDraftModal || isBlocked}
+            isOpen={isModalOpen}
             onCancel={handleStay}
             onConfirm={handleDiscardAndNavigate}
             title="Unsaved Changes"
