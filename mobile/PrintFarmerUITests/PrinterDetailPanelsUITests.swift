@@ -9,10 +9,16 @@ import XCTest
 /// exercised by `OperatorShellUITests`.
 ///
 /// Deterministic-test discipline: every wait is a bounded
-/// `waitForExistence`; no `Thread.sleep`/`Task.sleep`/retry-until-pass. Every
-/// test soft-skips (returns) when demo data or rich detail content is not
-/// present in this environment, mirroring the existing `OperatorShellUITests`
-/// pattern rather than failing on environment variance.
+/// `waitForExistence`; no `Thread.sleep`/`Task.sleep`/retry-until-pass. Only
+/// the initial navigation-entry helpers (`openFirstPrinterDetail`,
+/// `enableAdvancedPrinterControls`) soft-skip (return) when the shell/demo
+/// fleet/Settings surface they depend on is not present at all — mirroring
+/// the existing `OperatorShellUITests` convention for environment variance
+/// unrelated to this feature. Once a test has actually reached printer
+/// detail, every assertion about the Status page, the panel selector, the
+/// Controls page, and Emergency Stop is a deterministic `XCTAssertTrue`/
+/// `XCTAssertFalse` — a bare `return` there would let a real regression
+/// (the page/selector/action never appearing) silently pass.
 @MainActor
 final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
 
@@ -37,8 +43,9 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
     }
 
     /// Enables the per-server "Advanced Printer Controls" safety toggle from
-    /// Settings, then returns to Farm. Soft-skips (returns false) if any
-    /// expected Settings surface is unavailable in this environment.
+    /// Settings, then returns to Farm. Soft-skips (returns false) only if the
+    /// Settings navigation itself is unavailable in this environment — not a
+    /// concern of the panels feature under test.
     @discardableResult
     private func enableAdvancedPrinterControls() -> Bool {
         let attention = shellDestinationButton(tabIdentifier: "tab.attention", timeout: 5)
@@ -67,18 +74,20 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         guard openFirstPrinterDetail() else { return }
 
         let statusPage = app.descendants(matching: .any)["printer.detail.panel.status"]
-        guard statusPage.waitForExistence(timeout: 5) else {
-            // Demo data did not render rich content in this environment — skip.
-            return
-        }
-        XCTAssertTrue(statusPage.exists, "Printer detail must default to the Status page")
+        XCTAssertTrue(
+            statusPage.waitForExistence(timeout: 8),
+            "Printer detail must default to the Status page"
+        )
     }
 
     func testSelectorAndControlsPageOmittedWhileSafetyToggleIsOff() {
         guard openFirstPrinterDetail() else { return }
-        guard app.descendants(matching: .any)["printer.detail.panel.status"]
-            .waitForExistence(timeout: 5) else { return }
 
+        XCTAssertTrue(
+            app.descendants(matching: .any)["printer.detail.panel.status"]
+                .waitForExistence(timeout: 8),
+            "Printer detail must render the Status page"
+        )
         XCTAssertFalse(
             app.segmentedControls["printer.detail.panel.selector"].exists,
             "Panel selector must not appear while the per-server safety toggle is off"
@@ -96,29 +105,34 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         guard openFirstPrinterDetail() else { return }
 
         let selector = app.segmentedControls["printer.detail.panel.selector"]
-        guard selector.waitForExistence(timeout: 5) else {
-            // This printer may be offline in the demo fleet (Controls is
-            // gated on the printer being online too) — skip gracefully.
-            return
-        }
+        XCTAssertTrue(
+            selector.waitForExistence(timeout: 8),
+            "Panel selector must appear once Advanced Printer Controls is enabled for an online printer"
+        )
 
         let controlsSegment = selector.buttons["Controls"]
-        guard controlsSegment.waitForExistence(timeout: 3) else { return }
+        XCTAssertTrue(
+            controlsSegment.waitForExistence(timeout: 3),
+            "Selector must expose a Controls segment once Advanced Printer Controls is enabled"
+        )
         controlsSegment.tap()
 
         XCTAssertTrue(
             app.descendants(matching: .any)["printer.detail.panel.controls"]
-                .waitForExistence(timeout: 5),
+                .waitForExistence(timeout: 8),
             "Tapping the Controls segment must reveal the Controls page"
         )
 
         let statusSegment = selector.buttons["Status"]
-        guard statusSegment.waitForExistence(timeout: 3) else { return }
+        XCTAssertTrue(
+            statusSegment.waitForExistence(timeout: 3),
+            "Selector must expose a Status segment"
+        )
         statusSegment.tap()
 
         XCTAssertTrue(
             app.descendants(matching: .any)["printer.detail.panel.status"]
-                .waitForExistence(timeout: 5),
+                .waitForExistence(timeout: 8),
             "Tapping the Status segment must return to the Status page"
         )
     }
@@ -128,19 +142,28 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         guard openFirstPrinterDetail() else { return }
 
         let selector = app.segmentedControls["printer.detail.panel.selector"]
-        guard selector.waitForExistence(timeout: 5) else { return }
+        XCTAssertTrue(
+            selector.waitForExistence(timeout: 8),
+            "Panel selector must appear once Advanced Printer Controls is enabled for an online printer"
+        )
 
         // Emergency Stop is the one run action guaranteed to be visible for
         // any online printer regardless of print state (issue #2520/#2522).
         let emergencyStopOnStatus = app.buttons["printer.detail.control.emergencyStop"]
-        guard emergencyStopOnStatus.waitForExistence(timeout: 5) else { return }
+        XCTAssertTrue(
+            emergencyStopOnStatus.waitForExistence(timeout: 8),
+            "Emergency Stop must be reachable on the Status page for an online printer"
+        )
 
         let controlsSegment = selector.buttons["Controls"]
-        guard controlsSegment.waitForExistence(timeout: 3) else { return }
+        XCTAssertTrue(
+            controlsSegment.waitForExistence(timeout: 3),
+            "Selector must expose a Controls segment once Advanced Printer Controls is enabled"
+        )
         controlsSegment.tap()
 
         XCTAssertTrue(
-            app.buttons["printer.detail.control.emergencyStop"].waitForExistence(timeout: 5),
+            app.buttons["printer.detail.control.emergencyStop"].waitForExistence(timeout: 8),
             "The shared run-action bar (and Emergency Stop within it) must remain reachable on the Controls page without scrolling or an Advanced disclosure"
         )
     }

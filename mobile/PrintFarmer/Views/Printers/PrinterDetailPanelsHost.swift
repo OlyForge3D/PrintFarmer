@@ -123,8 +123,15 @@ struct PrinterDetailPanelsHost<Status: View, Controls: View>: View {
 /// without hosting a view or a live view model.
 enum PrinterDetailRunActionMapping {
     /// - Parameters:
-    ///   - isOnline: Printer's current connection state. Emergency Stop is
-    ///     the only descriptor gated on this alone.
+    ///   - isOnline: Printer's current connection state. This is the outer
+    ///     gate for every descriptor: the original `actionSection` (which
+    ///     held Pause/Resume/Cancel/Stop/Emergency Stop together) only
+    ///     rendered at all `if printer.isOnline`, so a printer that reports
+    ///     offline while retaining a stale `printing`/`paused` state must
+    ///     never expose Stop (or any other run action) as if it were still
+    ///     reachable. Emergency Stop is never a special case here — it is
+    ///     gated by the same `isOnline` check as everything else, it is
+    ///     just never additionally gated by `isPerformingAction`.
     ///   - isPrinting: Mirrors `PrinterDetailViewModel.isPrinting`.
     ///   - isPaused: Mirrors `PrinterDetailViewModel.isPaused`.
     ///   - isPerformingAction: Mirrors `PrinterDetailViewModel.isPerformingAction`,
@@ -138,6 +145,7 @@ enum PrinterDetailRunActionMapping {
         isPaused: Bool,
         isPerformingAction: Bool
     ) -> PrinterRunActionPresentation {
+        guard isOnline else { return .empty }
         var descriptors: [PrinterRunActionDescriptor] = []
         if isPrinting {
             descriptors.append(.init(kind: .pause, isEnabled: !isPerformingAction))
@@ -149,9 +157,7 @@ enum PrinterDetailRunActionMapping {
             descriptors.append(.init(kind: .cancel, isEnabled: !isPerformingAction))
             descriptors.append(.init(kind: .stop, isEnabled: !isPerformingAction))
         }
-        if isOnline {
-            descriptors.append(.init(kind: .emergencyStop, isEnabled: true))
-        }
+        descriptors.append(.init(kind: .emergencyStop, isEnabled: true))
         return PrinterRunActionPresentation(descriptors: descriptors)
     }
 }

@@ -348,7 +348,15 @@ struct PrinterDetailView: View {
                 temperatureSection(printer)
                 // 10. Auto-Dispatch — queue automation status/actions.
                 AutoDispatchSection(printerId: printer.id, isPrinting: viewModel.isPrinting || viewModel.isPaused)
-                // 11. Predictive Insights — retained monitoring link.
+                // 11. Setup Actions — maintenance toggle + NFC tag write.
+                // Independent of the Advanced Printer Controls safety
+                // preference (only jog/preheat/home is gated by that); this
+                // matches the prior `if printer.isOnline { actionSection(...) }`
+                // availability exactly.
+                if printer.isOnline {
+                    setupActionsSection(printer)
+                }
+                // 12. Predictive Insights — retained monitoring link.
                 predictiveInsightsLink(printer)
             }
             .frame(maxWidth: sizeClass == .regular ? 760 : .infinity, alignment: .leading)
@@ -361,11 +369,14 @@ struct PrinterDetailView: View {
     /// directly — no nested "Advanced" navigation link. Only reachable when
     /// `controlsAvailable(for:)` gates the page in, mirroring the old link's
     /// visibility rule exactly (`AdvancedPrinterControlsAccess.isEntryVisible`).
+    /// Only jog/preheat/home is gated by the Advanced Printer Controls safety
+    /// preference; the maintenance toggle and NFC tag write live on the
+    /// Status page instead (`setupActionsSection`) so they stay reachable
+    /// independent of that preference, matching prior behavior.
     private func controlsPage(_ printer: Printer) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 PrinterControlsSection(printer: printer, printerService: services.printerService)
-                controlsSetupActionsSection(printer)
             }
             .frame(maxWidth: sizeClass == .regular ? 760 : .infinity, alignment: .leading)
             .frame(maxWidth: .infinity)
@@ -376,10 +387,12 @@ struct PrinterDetailView: View {
     /// Retained-location setup actions (issue #2522 preserve-before-cleanup
     /// checklist): the admin maintenance toggle and NFC printer-tag write,
     /// both previously nested inside the old Advanced disclosure's Actions
-    /// block. This page only renders while `controlsAvailable(for:)` is true,
-    /// which already implies the printer is online.
+    /// block, which rendered `if printer.isOnline` regardless of the
+    /// Advanced Printer Controls safety preference. The caller
+    /// (`statusPage`) reproduces that exact `printer.isOnline` gate; this
+    /// function itself only decides whether it has anything to show at all.
     @ViewBuilder
-    private func controlsSetupActionsSection(_ printer: Printer) -> some View {
+    private func setupActionsSection(_ printer: Printer) -> some View {
         let showsMaintenanceToggle = authViewModel.currentUserRole == "farm_admin"
         #if canImport(UIKit)
         let showsWriteTag = true
@@ -422,7 +435,7 @@ struct PrinterDetailView: View {
                     #endif
                 }
             }
-            .accessibilityIdentifier("printer.detail.controls.setupActions")
+            .accessibilityIdentifier("printer.detail.status.setupActions")
         }
     }
 

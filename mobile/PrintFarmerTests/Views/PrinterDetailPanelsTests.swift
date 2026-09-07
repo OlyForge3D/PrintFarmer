@@ -85,13 +85,40 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(presentation.visibleKinds, [.emergencyStop])
     }
 
-    func testRunActionMappingNeverShowsEmergencyStopWhenOffline() {
+    func testRunActionMappingNeverShowsEmergencyStopWhenOfflineAndIdle() {
+        let presentation = PrinterDetailRunActionMapping.presentation(
+            isOnline: false, isPrinting: false, isPaused: false, isPerformingAction: false
+        )
+        XCTAssertFalse(presentation.visibleKinds.contains(.emergencyStop))
+    }
+
+    func testRunActionMappingHidesEveryActionWhenOfflineWhilePrinting() {
+        // The original `actionSection` (which held Pause/Resume/Cancel/Stop
+        // and Emergency Stop together) only rendered at all `if
+        // printer.isOnline`. A printer reporting offline while retaining a
+        // stale `printing` state must not expose Stop (or any other run
+        // action, including Emergency Stop) as if it were still reachable.
         let presentation = PrinterDetailRunActionMapping.presentation(
             isOnline: false, isPrinting: true, isPaused: false, isPerformingAction: false
         )
-        // Printing while reported offline is not a state the mapping special-
-        // cases; the point under test is Emergency Stop's own online gate.
-        XCTAssertFalse(presentation.visibleKinds.contains(.emergencyStop))
+        XCTAssertTrue(presentation.visibleKinds.isEmpty)
+        XCTAssertNil(presentation.descriptor(for: .stop))
+        XCTAssertNil(presentation.descriptor(for: .cancel))
+        XCTAssertNil(presentation.descriptor(for: .emergencyStop))
+        XCTAssertFalse(presentation.shouldFireCallback(for: .stop))
+        XCTAssertFalse(presentation.shouldFireCallback(for: .emergencyStop))
+    }
+
+    func testRunActionMappingHidesEveryActionWhenOfflineWhilePaused() {
+        let presentation = PrinterDetailRunActionMapping.presentation(
+            isOnline: false, isPrinting: false, isPaused: true, isPerformingAction: false
+        )
+        XCTAssertTrue(presentation.visibleKinds.isEmpty)
+        XCTAssertNil(presentation.descriptor(for: .resume))
+        XCTAssertNil(presentation.descriptor(for: .stop))
+        XCTAssertNil(presentation.descriptor(for: .emergencyStop))
+        XCTAssertFalse(presentation.shouldFireCallback(for: .resume))
+        XCTAssertFalse(presentation.shouldFireCallback(for: .stop))
     }
 
     func testRunActionMappingDisablesPauseCancelStopWhilePerformingAction() {
