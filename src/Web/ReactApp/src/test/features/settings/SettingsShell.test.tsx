@@ -1,6 +1,6 @@
 import { beforeAll, beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, fireEvent, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
@@ -206,6 +206,19 @@ function LocationProbe() {
   );
 }
 
+// Test-only helper: browser back/forward is a delta ("POP") navigation, which
+// `navigate(-1)` reproduces faithfully (unlike a fresh `navigate(path)` call,
+// which is a PUSH/REPLACE). Used to regression-test that a POP re-arriving at
+// a `q` value we previously wrote ourselves is correctly treated as external.
+function GoBackProbe() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate(-1)}>
+      Go Back
+    </button>
+  );
+}
+
 function renderSettings(initialRoute = '/settings', routeScope: 'user' | 'system' | undefined = initialRoute.startsWith('/admin/settings') ? 'system' : undefined) {
   return render(
     <QueryClientProvider client={queryClient}>
@@ -214,6 +227,7 @@ function renderSettings(initialRoute = '/settings', routeScope: 'user' | 'system
           <SettingsShell routeScope={routeScope} />
         </GlobalCommandPaletteProvider>
         <LocationProbe />
+        <GoBackProbe />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -851,6 +865,42 @@ describe('SettingsShell — persistent workspace search (#2505)', () => {
     // typed into — it was present in the URL before the box ever mounted, so
     // `isSelfAuthoredQuery` is false and the pre-#2505 auto-nav still applies.
     renderSettings('/admin/settings?q=slicer');
+    expect(getCategoryButton('Slicer Defaults')).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('browser back to a URL whose q coincidentally matches a value the box wrote earlier still auto-navigates', async () => {
+    // Regression for: `lastSelfWrittenQueryRef` never got invalidated on a
+    // genuine external navigation, so a POP (browser back/forward) landing on
+    // a `q` that happens to equal a value the box previously committed itself
+    // was misread as self-authored, wrongly suppressing legacy auto-nav.
+    renderSettings('/admin/settings?scope=system');
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'slicer' } });
+    // Past the debounce, the box's own replace-commit writes q=slicer and
+    // `lastSelfWrittenQueryRef` now holds "slicer".
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('q=slicer'));
+
+    // Explicitly select an unrelated destination — a real PUSH that clears q
+    // — leaving the ref stale at "slicer" against the new, q-less location.
+    fireEvent.change(input, { target: { value: 'quotas' } });
+    const option = await screen.findByRole('option', { name: /Quotas/i });
+    fireEvent.click(option);
+    await waitFor(() => expect(getCategoryButton('Quotas')).toHaveAttribute('aria-current', 'page'));
+    // The persistent search box retains whatever was typed ("quotas") rather
+    // than clearing q on selection — that's the "persistent" part of the
+    // feature. Crucially `lastSelfWrittenQueryRef` still holds "slicer" here
+    // (the click fired before the "quotas" debounce had a chance to commit).
+    expect(screen.getByTestId('location-search')).toHaveTextContent('q=quotas');
+
+    // Browser back (POP) returns to the replaced entry, whose q is "slicer"
+    // again — the exact same value the ref still remembers.
+    fireEvent.click(screen.getByRole('button', { name: 'Go Back' }));
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('q=slicer'));
+
+    // Because this arrived via POP, it must be treated as external and drive
+    // legacy auto-navigation, not be suppressed as a self-authored echo.
     expect(getCategoryButton('Slicer Defaults')).toHaveAttribute('aria-current', 'page');
   });
 

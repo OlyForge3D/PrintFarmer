@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, useContext } from 'react';
-import { Link, useNavigate, useSearchParams, useBlocker, UNSAFE_DataRouterContext } from 'react-router';
+import { Link, useNavigate, useNavigationType, useSearchParams, useBlocker, UNSAFE_DataRouterContext } from 'react-router';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import {
@@ -279,8 +279,22 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   // changed only because the box committed a keystroke"; once the URL's `q`
   // diverges from that (navigate away and back, a fresh deep link, etc.) the
   // ref and the live query stop matching and auto-navigation resumes.
+  //
+  // Value-equality alone isn't sufficient, though: browser back/forward can
+  // return to an *older* URL whose `q` happens to equal a value we wrote
+  // earlier (e.g. the user typed "quotas", navigated to another category —
+  // which clears `q` — then hit Back). The ref would still hold "quotas"
+  // and wrongly read as self-authored, suppressing legacy auto-navigation
+  // for what is really an external history restoration. `commitSearchQuery`
+  // only ever writes `q` via a `replace`, so a genuine browser back/forward
+  // is always reported as a POP navigation; a same-value match is trusted
+  // only when the most recent navigation wasn't a POP.
+  const navigationType = useNavigationType();
   const lastSelfWrittenQueryRef = useRef<string | null>(null);
-  const isSelfAuthoredQuery = lastSelfWrittenQueryRef.current !== null && lastSelfWrittenQueryRef.current === query;
+  const isSelfAuthoredQuery =
+    navigationType !== 'POP' &&
+    lastSelfWrittenQueryRef.current !== null &&
+    lastSelfWrittenQueryRef.current === query;
 
   const commitSearchQuery = useCallback((nextQuery: string) => {
     lastSelfWrittenQueryRef.current = nextQuery;

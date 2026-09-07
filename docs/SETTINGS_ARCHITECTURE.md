@@ -404,6 +404,14 @@ empty) and the pre-#2505 auto-navigation still applies. This is why the two sit 
 side in tests: a genuinely external `?q=slicer` still auto-navigates on load, while typing
 `slicer` into the persistent box, with nothing else changing, does not.
 
+Value-equality alone isn't sufficient, though: a browser back/forward can land on an older
+`q` that *coincidentally* equals a value the box previously wrote itself (type "slicer",
+navigate to an unrelated category, then go Back). `commitSearchQuery` only ever writes `q`
+via a history *replace*, so a genuine back/forward is always reported as a React Router
+`POP` navigation (`useNavigationType()`); a same-value match is therefore only trusted when
+the most recent navigation wasn't a `POP`, so history restoration always re-triggers legacy
+auto-navigation regardless of what the ref remembers.
+
 Explicit selection (`WorkspaceSearchResults`'s `onSelect`, wired to Enter and click) always
 retains the query in the URL (`withRetainedQuery()`) and pushes a real history entry, so
 Back returns to the pre-selection state rather than replacing it.
