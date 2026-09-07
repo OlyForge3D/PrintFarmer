@@ -166,18 +166,38 @@ vi.mock('@/hooks/useSlicer', () => ({
 // below) come from the static registries and are unaffected by this mock.
 vi.mock('@/features/settings/queries/useSettingsMetadata', () => ({
   useSettingsMetadata: () => ({
-    data: [{
-      key: 'SystemLog',
-      className: 'SystemLogSettings',
-      group: 'System',
-      properties: [{ name: 'Enabled', type: 'boolean', display: { name: 'Enable System Logging' } }],
-    }],
+    data: [
+      {
+        key: 'SystemLog',
+        className: 'SystemLogSettings',
+        group: 'System',
+        properties: [{ name: 'Enabled', type: 'boolean', display: { name: 'Enable System Logging' } }],
+      },
+      {
+        key: 'NetworkDiscovery',
+        className: 'NetworkDiscoverySettings',
+        displayName: 'Network Discovery',
+        group: 'Networking',
+        properties: [{ name: 'scanIntervalMinutes', type: 'number', display: { name: 'Scan Interval Minutes' } }],
+      },
+      {
+        key: 'SlicerDefaults',
+        className: 'SlicerDefaultsSettings',
+        displayName: 'Slicer Defaults',
+        group: 'Slicing',
+        properties: [{ name: 'enabled', type: 'boolean', display: { name: 'Enable Slicing Defaults' } }],
+      },
+    ],
     isLoading: false,
     isError: false,
     refetch: vi.fn(),
   }),
   useSettingsGroups: () => ({
-    data: [{ key: 'System', displayName: 'System', order: 0 }],
+    data: [
+      { key: 'System', displayName: 'System', order: 0 },
+      { key: 'Networking', displayName: 'Networking', order: 1 },
+      { key: 'Slicing', displayName: 'Slicing', order: 2 },
+    ],
     isLoading: false,
     isError: false,
     refetch: vi.fn(),
@@ -219,6 +239,24 @@ function GoBackProbe() {
   );
 }
 
+function GoForwardProbe() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate(1)}>
+      Go Forward
+    </button>
+  );
+}
+
+function GoToQuotasProbe() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate('/admin/settings?scope=system&tab=quotas')}>
+      Go To Quotas
+    </button>
+  );
+}
+
 function renderSettings(initialRoute = '/settings', routeScope: 'user' | 'system' | undefined = initialRoute.startsWith('/admin/settings') ? 'system' : undefined) {
   return render(
     <QueryClientProvider client={queryClient}>
@@ -228,6 +266,8 @@ function renderSettings(initialRoute = '/settings', routeScope: 'user' | 'system
         </GlobalCommandPaletteProvider>
         <LocationProbe />
         <GoBackProbe />
+        <GoForwardProbe />
+        <GoToQuotasProbe />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -942,6 +982,68 @@ describe('SettingsShell — persistent workspace search (#2505)', () => {
     fireEvent.click(option);
 
     await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('field=SystemLog.Enabled'));
+  });
+
+  it('keeps exact-field search navigation on the field owner tab/sub even when q does not match navigation labels', async () => {
+    renderSettings('/admin/settings?scope=system&tab=general&sub=system');
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'scan interval' } });
+
+    const option = await screen.findByRole('option', { name: /Scan Interval Minutes/i });
+    fireEvent.click(option);
+
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('field=NetworkDiscovery.scanIntervalMinutes'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=system');
+    expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'System,Networking,Catalog,Files,Printers');
+  });
+
+  it('restores exact-field tab/sub navigation through browser back and forward history', async () => {
+    renderSettings('/admin/settings?scope=system&tab=general&sub=system');
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'scan interval' } });
+
+    const option = await screen.findByRole('option', { name: /Scan Interval Minutes/i });
+    fireEvent.click(option);
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('field=NetworkDiscovery.scanIntervalMinutes'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go To Quotas' }));
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('tab=quotas'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go Back' }));
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('field=NetworkDiscovery.scanIntervalMinutes'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=system');
+    expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'System,Networking,Catalog,Files,Printers');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go Forward' }));
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('tab=quotas'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go Back' }));
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('field=NetworkDiscovery.scanIntervalMinutes'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=system');
+  });
+
+  it('keeps exact-field destination tab/sub when the retained q also matches a category label', async () => {
+    renderSettings('/admin/settings?scope=system');
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'slicing' } });
+
+    const option = await screen.findByRole('option', { name: /Enable Slicing Defaults/i });
+    fireEvent.click(option);
+
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('field=SlicerDefaults.enabled'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=slicing');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=defaults');
+    expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'Slicing');
   });
 
   it('prompts Stay/Discard on explicit selection while a section is dirty, and proceeds only on Discard', async () => {
