@@ -68,28 +68,41 @@ export function WorkspaceSearchResults({ initialQuery, onQueryCommit, onSelect, 
   // Distinguishes "the parent's `?q=` changed because it's echoing back a
   // value this component just committed" (ignore — the debounce/commit
   // round trip is not guaranteed to land in the same render as the commit,
-  // so this cannot be inferred from a synchronous "last written" snapshot)
-  // from "the parent's `?q=` changed for some other reason" (browser
-  // back/forward, a bookmarked deep link re-arriving while mounted, another
-  // shell affordance clearing the query) — which must re-sync the visible
-  // input/results, or they silently go stale relative to the persisted
-  // search state. `pendingSelfCommitValue` holds the exact value most
-  // recently committed and not yet seen echoed back; only a matching
-  // `initialQuery` clears it without touching `query`, so a late echo can
-  // never stomp on further typing that happened in the meantime. This is
-  // the React-documented "adjusting state when a prop changes" pattern
-  // (render-time, not an effect, and tracked as state rather than a ref so
-  // the write is idempotent under React's render rules), for the same
-  // reason the active-index reset below uses it: it must apply before
-  // paint, not after.
+  // nor are commits guaranteed to echo back in the order they were sent, so
+  // this cannot be inferred from a single synchronous "last written"
+  // snapshot) from "the parent's `?q=` changed for some other reason"
+  // (browser back/forward, a bookmarked deep link re-arriving while
+  // mounted, another shell affordance clearing the query) — which must
+  // re-sync the visible input/results, or they silently go stale relative
+  // to the persisted search state. `pendingSelfCommits` holds every value
+  // committed and not yet seen echoed back, in commit order; any
+  // `initialQuery` matching an entry — regardless of whether newer commits
+  // have since been queued — consumes just that one entry without touching
+  // `query`, so an out-of-order or arbitrarily delayed echo can never stomp
+  // on further typing that happened in the meantime. An `initialQuery` that
+  // matches none of them is a genuine external change: it resyncs `query`
+  // and drops every outstanding pending commit, since state has now moved
+  // for a reason none of them anticipated. This is the React-documented
+  // "adjusting state when a prop changes" pattern (render-time, not an
+  // effect, and tracked as state rather than a ref so the write is
+  // idempotent under React's render rules), for the same reason the
+  // active-index reset below uses it: it must apply before paint, not
+  // after.
   const [prevInitialQuery, setPrevInitialQuery] = useState(initialQuery);
-  const [pendingSelfCommitValue, setPendingSelfCommitValue] = useState<string | null>(null);
+  const [pendingSelfCommits, setPendingSelfCommits] = useState<readonly string[]>([]);
   if (initialQuery !== prevInitialQuery) {
     setPrevInitialQuery(initialQuery);
-    if (pendingSelfCommitValue !== null && pendingSelfCommitValue === initialQuery) {
-      setPendingSelfCommitValue(null);
+    const matchIndex = pendingSelfCommits.indexOf(initialQuery);
+    if (matchIndex !== -1) {
+      setPendingSelfCommits([
+        ...pendingSelfCommits.slice(0, matchIndex),
+        ...pendingSelfCommits.slice(matchIndex + 1),
+      ]);
     } else {
       setQuery(initialQuery);
+      if (pendingSelfCommits.length > 0) {
+        setPendingSelfCommits([]);
+      }
     }
   }
 
@@ -113,10 +126,12 @@ export function WorkspaceSearchResults({ initialQuery, onQueryCommit, onSelect, 
   // never push a history entry or drive navigation on its own.
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      // Record before calling out — however long the parent takes to echo
-      // this back through `initialQuery`, it will be recognized as our own
-      // write rather than an external change to re-sync from.
-      setPendingSelfCommitValue(query);
+      // Queue before calling out — however long the parent takes to echo
+      // this back through `initialQuery`, and regardless of the order in
+      // which multiple queued commits eventually echo, each will be
+      // recognized as our own write rather than an external change to
+      // re-sync from.
+      setPendingSelfCommits((prev) => [...prev, query]);
       onQueryCommitRef.current(query);
     }, COMMIT_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);

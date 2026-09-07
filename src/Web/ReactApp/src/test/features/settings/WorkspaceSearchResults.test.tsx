@@ -211,7 +211,7 @@ describe('WorkspaceSearchResults', () => {
     expect(input).toHaveValue('printer');
   });
 
-  it('does not let a delayed echo of an older commit stomp on newer typing (async/deferred parent state update)', () => {
+  it('does not let a delayed echo of an older commit stomp on newer typing, even when a newer commit has already fired (out-of-order/async echoes)', () => {
     const onQueryCommit = vi.fn();
     const { rerender } = render(
       <WorkspaceSearchResults initialQuery="" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />,
@@ -225,23 +225,51 @@ describe('WorkspaceSearchResults', () => {
     // Keep typing before the parent has had a chance to reflect the
     // committed "log" back through `initialQuery` — simulating a parent
     // whose state update does not land in the very next render (routing
-    // libraries, `startTransition`, or any other deferred commit).
+    // libraries, `startTransition`, or any other deferred commit) — and let
+    // the follow-up "logs" commit fire too, so *two* commits ("log" and
+    // "logs") are now outstanding before either has echoed back.
     fireEvent.change(input, { target: { value: 'logs' } });
+    vi.advanceTimersByTime(200);
+    expect(onQueryCommit).toHaveBeenCalledWith('logs');
     expect(input).toHaveValue('logs');
 
-    // The stale echo of the *earlier* commit ("log") now arrives late. It
-    // must be recognized as this component's own prior write and discarded
-    // rather than treated as an external change that stomps the newer
-    // "logs" text the user has since typed.
+    // The stale echo of the *older* "log" commit now arrives late — after
+    // the newer "logs" commit has already fired. It must still be
+    // recognized as this component's own prior write and discarded, even
+    // though it is no longer the most recently queued commit, rather than
+    // being treated as an external change that stomps "logs".
     rerender(<WorkspaceSearchResults initialQuery="log" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />);
     expect(input).toHaveValue('logs');
 
-    // The follow-up commit for "logs" then fires and its own echo arrives —
-    // this is a genuine self-echo too, so it still must not reset anything.
-    vi.advanceTimersByTime(200);
-    expect(onQueryCommit).toHaveBeenCalledWith('logs');
+    // The "logs" echo finally arrives too — also a genuine self-echo, so it
+    // must not reset anything either.
     rerender(<WorkspaceSearchResults initialQuery="logs" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />);
     expect(input).toHaveValue('logs');
+  });
+
+  it('clears outstanding pending-commit tracking on a genuine external change, so a later coincidental value match is not mistaken for an echo', () => {
+    const onQueryCommit = vi.fn();
+    const { rerender } = render(
+      <WorkspaceSearchResults initialQuery="" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />,
+    );
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.change(input, { target: { value: 'log' } });
+    vi.advanceTimersByTime(200);
+    expect(onQueryCommit).toHaveBeenCalledWith('log');
+
+    // An external change (browser back/forward) arrives before the "log"
+    // commit ever echoes back — this resyncs the input and discards the
+    // outstanding pending commit.
+    rerender(<WorkspaceSearchResults initialQuery="printer" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />);
+    expect(input).toHaveValue('printer');
+
+    // If the stale "log" commit's echo now shows up anyway, it must not be
+    // mistaken for confirming a still-pending write — state has already
+    // moved on externally, so this must resync (no-op here, since the
+    // value already matches) rather than silently reusing dropped tracking.
+    rerender(<WorkspaceSearchResults initialQuery="log" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />);
+    expect(input).toHaveValue('log');
   });
 
   it('shows a loading state while the index is fetching', () => {
