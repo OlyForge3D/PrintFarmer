@@ -26,10 +26,15 @@ The settings routes share one engine with route-locked scopes:
 | `/admin/workers` | None | `dispatch-settings:manage` | WorkerManagementPage |
 | `/admin/login-audit` | None | `system_settings:admin` | LoginAuditPage |
 | `/admin/data-management` | None | `data_management:admin` | DataManagementPage |
+| `/admin/power-monitors` | None | `power_monitors:admin` | PowerMonitorSettingsPage |
 
-Operational routes use `AdminDestinationRoute` and `AdminPageShell`. `/admin/settings` operates
-under `system` scope with unified grouped direct-leaf navigation, single-pane mounting (no
-horizontal settings sub-tabs or scope switcher), accessible mobile drawer navigation, in-memory draft transition safety, and single page-level save presentation. Personal `/settings` (`user` scope) remains category and sub-tab workspace navigation.
+Operational routes use `AdminDestinationRoute` and `AdminPageShell`. `/admin/settings`
+operates under `system` scope with unified grouped direct-leaf navigation,
+single-pane mounting (no horizontal settings sub-tabs or scope switcher),
+accessible mobile drawer navigation, persistent cross-group workspace search,
+in-memory draft transition safety, and single page-level save presentation.
+Personal `/settings` (`user` scope) remains a separate profile workspace with
+category and sub-tab navigation.
 
 ## Grouped Direct-Leaf Navigation & Single-Pane Mounting
 
@@ -96,9 +101,9 @@ Categories are defined in `SETTINGS_CATEGORIES` (`src/Web/ReactApp/src/features/
   - `slicing` → Defaults, Bed Types, Slicer Profiles
   - `hardware` → Cameras, NFC Devices, Printer Groups, NFC Bindings, Custom Fields
   - `integrations` → External Services, Webhooks
-  - `quotas` (implemented QuotaManagementPage)
-  - `users` -> User Accounts, Roles & Permissions
-  - `data` -> Tags
+  - `quotas` → Print Quotas (`QuotaManagementPage`)
+  - `users` → User Accounts, Roles & Permissions
+  - `data` → Tags
 
 Access is defined once in `ADMIN_DESTINATIONS`: resource permissions, integration
 any-of grants, and the farm_admin-only Slicer Profiles exception. Neither the outlet
@@ -109,13 +114,14 @@ to personal content.
 The registry classifies destinations as hub/configuration/operational, with configuration
 display groups Farm, Printing & slicing, Hardware, Automation & costs, Integrations,
 People & access, Organization and System. Stable IDs, including overview
-`actionDestinationId`, do not change. The group metadata supports downstream presentation;
-it does not replace the intermediate category chrome yet.
+`actionDestinationId`, do not change. These display groups are the admin settings
+navigation; they replace the earlier intermediate category-first admin presentation.
 
 Power Monitors (`/admin/power-monitors`), Locations (`/locations`) and Catalog
 (`/catalog`) stay standalone configuration links. They count toward workspace/hub
-availability even without `isHubTile`. Standalone-only users see their authorized links
-and an honest no-editor state without `tab`, `sub` or `field` editor state.
+availability even without rendering inside the settings shell. Standalone-only
+users see their authorized links and an honest no-editor state without `tab`,
+`sub` or `field` editor state.
 
 Categories/sub-pages that render *metadata-driven* settings (Farm Defaults, System Config,
 Automation & Costs, External Services, Slicing Defaults) do so by mounting `<SettingsPage
@@ -536,7 +542,9 @@ The settings and admin shell routes are:
 
 - `/settings` for user settings.
 - `/admin/settings?tab=<category>&sub=<page>` for system settings.
-- `/admin/status`, `/admin/workers`, `/admin/login-audit`, `/admin/data-management` for operations.
+- `/admin/status`, `/admin/workers`, `/admin/login-audit`, `/admin/data-management`
+  for operations.
+- `/admin/power-monitors` for standalone Power Monitors configuration.
 
 Use additional query parameters only when the destination owns them. For example, the
 canonical slice-job list is

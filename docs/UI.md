@@ -98,7 +98,8 @@ Standalone browser-based 3D slicer application for converting models to G-code.
 ### Admin Control Center And Settings
 
 Configuration uses a shared URL-driven SettingsShell, separate from operational tools.
-The current workspace retains category/sub-tab presentation.
+Farm & Admin Settings now uses grouped direct-leaf navigation, while personal
+settings keeps its smaller profile category/sub-tab workspace.
 
 | Route | Scope | Access |
 |---|---|---|
@@ -108,6 +109,7 @@ The current workspace retains category/sub-tab presentation.
 | `/admin/status`, `/admin/login-audit` | Operations | system_settings:admin |
 | `/admin/workers` | Operations | dispatch-settings:manage |
 | `/admin/data-management` | Operations | data_management:admin |
+| `/admin/power-monitors` | Standalone configuration | power_monitors:admin |
 
 The `/admin` Control Center is intentionally attention-first. Authorized
 overview users see the server-ranked **Needs attention** list first, followed by
@@ -129,7 +131,7 @@ whose only grant is one of those still has somewhere to go. A separate
 exposes an accessible destination under `/admin/settings`, so it is never a
 dead-end link. The "no operational tools" empty state appears only when the
 whole band is empty. The former “Everything you can manage” directory is not
-rendered, and retired `/admin/manage` attention targets are suppressed.
+rendered.
 Delegated users retain their permitted destinations even when they cannot fetch
 the system overview.
 
@@ -141,7 +143,13 @@ The configuration shell is driven by URL parameters:
 - `?q=<query>` — search the current sub-page's metadata.
 - `?field=<Section.Property>` — deep-link to one property row.
 
-Exactly ONE settings page mounts at a time. The metadata-driven pages
+Exactly ONE settings page mounts at a time. `/admin/settings` also renders a
+persistent **Search all settings** box that searches across permitted
+destinations and exact section-qualified fields without auto-navigating while
+the user types; explicit Enter/click selection is what changes route and it
+uses the same dirty-draft guard as sidebar and palette navigation.
+
+The metadata-driven pages
 (`<SettingsPage>`) filter by group and render fields from the backend metadata
 API — no hand-written forms per property. Bespoke sub-pages (Bed Types,
 Cameras, Users, Roles, Tags, Quotas, Slicer Profiles, Webhooks) render existing embedded
