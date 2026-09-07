@@ -67,7 +67,7 @@ export interface SettingsSaveRegistry {
    * Register (or with `null`, unregister) an individual section's dirty state
    * and save/discard callbacks.
    */
-  registerSection?: (section: RegisteredSection | null) => void;
+  registerSection?: (section: RegisteredSection | null, sectionId?: string) => void;
 }
 
 /**

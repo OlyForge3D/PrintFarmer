@@ -269,6 +269,9 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
       if (activeCategory === dest.id) {
         return true;
       }
+      if (dest.path === window.location.pathname) {
+        return true;
+      }
       if (dest.path.includes('?')) {
         const queryParams = new URLSearchParams(dest.path.split('?')[1]);
         const destTab = queryParams.get('tab');
@@ -436,6 +439,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         matchingCategoryIds={matchingCategoryIds}
         isFiltering={isFiltering}
         searchQuery={searchQuery}
+        isDestActive={isDestActive}
       />
     </>
   );
@@ -454,6 +458,7 @@ interface MobileCategorySelectorProps {
   matchingCategoryIds?: string[];
   isFiltering?: boolean;
   searchQuery?: string;
+  isDestActive?: (dest: AdminDestination) => boolean;
 }
 
 const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
@@ -469,6 +474,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
   matchingCategoryIds,
   isFiltering = false,
   searchQuery,
+  isDestActive,
 }) => {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -554,12 +560,25 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
     buttonRef.current?.focus();
   };
 
-  const handleSelectDestination = (dest: AdminDestination) => {
+  const handleDestinationClick = (dest: AdminDestination) => {
     if (onSelectDestination) {
       onSelectDestination(dest);
+    } else if (dest.path.includes('?')) {
+      const queryParams = new URLSearchParams(dest.path.split('?')[1]);
+      const destTab = queryParams.get('tab');
+      const destSub = queryParams.get('sub');
+      if (destTab) {
+        onCategoryChange(destTab, destSub ?? undefined);
+      } else {
+        onCategoryChange(dest.id);
+      }
     } else {
-      onCategoryChange(dest.tab || dest.id);
+      onCategoryChange(dest.id);
     }
+  };
+
+  const handleSelectDestination = (dest: AdminDestination) => {
+    handleDestinationClick(dest);
     setIsOpen(false);
     buttonRef.current?.focus();
   };
@@ -583,11 +602,14 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
     );
   };
 
-  const isDestActive = (dest: AdminDestination) => {
+  const checkDestActive = (dest: AdminDestination) => {
+    if (isDestActive) {
+      return isDestActive(dest);
+    }
     if (activeDestinationId) {
       return activeDestinationId === dest.id;
     }
-    return activeCategory === dest.id || activeCategory === dest.tab;
+    return activeCategory === dest.id;
   };
 
   return (
@@ -634,7 +656,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
                   >
                     {g.destinations.map((dest) => {
                       const Icon = dest.icon;
-                      const isActive = isDestActive(dest);
+                      const isActive = checkDestActive(dest);
 
                       return (
                         <li key={dest.id}>

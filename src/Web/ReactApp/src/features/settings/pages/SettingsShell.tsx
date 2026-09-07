@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import {
@@ -230,6 +230,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     () => configurationDestinations.filter((destination) => !destination.path.startsWith('/admin/settings?')),
     [configurationDestinations],
   );
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { open: openCommandPalette } = useCommandPalette();
 
@@ -342,17 +343,21 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     }
   }, []);
 
-  const registerSection = useCallback((section: RegisteredSection | null) => {
+  const registerSection = useCallback((section: RegisteredSection | null, sectionId?: string) => {
     if (section) {
       registeredSectionsRef.current.set(section.id, section);
       setRegisteredSections((prev) => ({ ...prev, [section.id]: section }));
-    } else if (section?.id) {
-      registeredSectionsRef.current.delete(section.id);
-      setRegisteredSections((prev) => {
-        const next = { ...prev };
-        delete next[section.id];
-        return next;
-      });
+    } else {
+      const idToRemove = sectionId;
+      if (idToRemove) {
+        registeredSectionsRef.current.delete(idToRemove);
+        setRegisteredSections((prev) => {
+          if (!(idToRemove in prev)) return prev;
+          const next = { ...prev };
+          delete next[idToRemove];
+          return next;
+        });
+      }
     }
   }, []);
 
@@ -397,54 +402,57 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
-  const handleCategoryChange = useCallback(
+  const executeCategoryChange = useCallback(
     (categoryId: string, explicitSubPageId?: string) => {
-      const doNavigate = () => {
-        const target = resolveSettingsNavigationTarget(categoryId, explicitSubPageId, activeScope);
-        const targetCategory = accessibleCategories.find((category) => category.id === target.categoryId);
-        shouldFocusSectionRef.current = true;
-        setSearchParams((prev) => {
-          const next = new URLSearchParams(prev);
-          next.set('scope', target.scopeId);
-          next.set('tab', target.categoryId);
-          next.delete('q');
-          next.delete('workerTab');
+      const target = resolveSettingsNavigationTarget(categoryId, explicitSubPageId, activeScope);
+      const targetCategory = accessibleCategories.find((category) => category.id === target.categoryId);
+      shouldFocusSectionRef.current = true;
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('scope', target.scopeId);
+        next.set('tab', target.categoryId);
+        next.delete('q');
+        next.delete('workerTab');
 
-          const subToUse = explicitSubPageId ?? target.subPageId;
-          if (subToUse) {
-            next.set('sub', subToUse);
+        const subToUse = explicitSubPageId ?? target.subPageId;
+        if (subToUse) {
+          next.set('sub', subToUse);
+        } else {
+          const matchingTargetSubPage = !normalizedQuery || !targetCategory
+            ? undefined
+            : targetCategory.subPages.find((subPage) => (
+                subPage.label.toLowerCase().includes(normalizedQuery)
+                || subPage.keywords.some((keyword) => keyword.includes(normalizedQuery))
+              ));
+
+          if (matchingTargetSubPage) {
+            next.set('sub', matchingTargetSubPage.id);
           } else {
-            const matchingTargetSubPage = !normalizedQuery || !targetCategory
-              ? undefined
-              : targetCategory.subPages.find((subPage) => (
-                  subPage.label.toLowerCase().includes(normalizedQuery)
-                  || subPage.keywords.some((keyword) => keyword.includes(normalizedQuery))
-                ));
-
-            if (matchingTargetSubPage) {
-              next.set('sub', matchingTargetSubPage.id);
+            const defaultSubPage = targetCategory?.subPages[0]?.id;
+            if (defaultSubPage) {
+              next.set('sub', defaultSubPage);
             } else {
-              const defaultSubPage = targetCategory?.subPages[0]?.id;
-              if (defaultSubPage) {
-                next.set('sub', defaultSubPage);
-              } else {
-                next.delete('sub');
-              }
+              next.delete('sub');
             }
           }
+        }
 
-          return next;
-        });
-      };
+        return next;
+      });
+    },
+    [accessibleCategories, activeScope, normalizedQuery, setSearchParams],
+  );
 
+  const handleCategoryChange = useCallback(
+    (categoryId: string, explicitSubPageId?: string) => {
       if (isDirty) {
-        setPendingNavigation(() => doNavigate);
+        setPendingNavigation(() => () => executeCategoryChange(categoryId, explicitSubPageId));
         setShowDraftModal(true);
       } else {
-        doNavigate();
+        executeCategoryChange(categoryId, explicitSubPageId);
       }
     },
-    [accessibleCategories, activeScope, isDirty, normalizedQuery, setSearchParams],
+    [executeCategoryChange, isDirty],
   );
 
   const handleSubPageChange = useCallback(
@@ -469,6 +477,32 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       }
     },
     [activeCategory, activeScope, isDirty, setSearchParams],
+  );
+
+  const handleSelectDestination = useCallback(
+    (dest: AdminDestination) => {
+      const doNavigate = () => {
+        if (dest.path.startsWith('/admin/settings')) {
+          const queryString = dest.path.includes('?') ? dest.path.split('?')[1] : '';
+          const queryParams = new URLSearchParams(queryString);
+          const destTab = queryParams.get('tab');
+          const destSub = queryParams.get('sub');
+          if (destTab) {
+            executeCategoryChange(destTab, destSub ?? undefined);
+            return;
+          }
+        }
+        navigate(dest.path);
+      };
+
+      if (isDirty) {
+        setPendingNavigation(() => doNavigate);
+        setShowDraftModal(true);
+      } else {
+        doNavigate();
+      }
+    },
+    [executeCategoryChange, isDirty, navigate],
   );
 
   const { matchingCategoryIds, matchingSubPageIds, firstMatchingSubPageCategoryId, isFiltering } = useMemo(() => {
@@ -902,6 +936,13 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                   <Link
                     key={destination.id}
                     to={destination.path}
+                    onClick={(e) => {
+                      if (isDirty) {
+                        e.preventDefault();
+                        setPendingNavigation(() => () => navigate(destination.path));
+                        setShowDraftModal(true);
+                      }
+                    }}
                     className="rounded-md border border-pf-border px-3 py-2 text-sm text-pf-text-primary hover:bg-pf-bg-1 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
                   >
                     {destination.label}
@@ -933,6 +974,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                     activeSubPage={activeSubPage}
                     availableScopes={availableScopes}
                     onCategoryChange={handleCategoryChange}
+                    onSelectDestination={handleSelectDestination}
                     destinationAccess={destinationAccess}
                     matchingCategoryIds={matchingCategoryIds}
                     isFiltering={isFiltering}
@@ -957,7 +999,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                         </h2>
 
                         <SettingsContentTransition key={renderedContentKey} className="relative">
-                          {hasSubTabs ? (
+                          {showSubTabs ? (
                             <section role="tabpanel" id={`panel-${activeSubPage}`} aria-labelledby={`tab-${activeSubPage}`}>
                               {content}
                             </section>
