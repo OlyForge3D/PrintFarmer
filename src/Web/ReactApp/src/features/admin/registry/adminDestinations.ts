@@ -921,13 +921,25 @@ export function getHubGroupedDestinations(access: AdminDestinationAccess): {
  * defined by `SETTINGS_DISPLAY_GROUPS` (Farm, Printing & slicing, Hardware,
  * Automation & costs, Integrations, People & access, Organization, System).
  * Groups with no accessible configuration destinations for the user are omitted.
+ *
+ * Only destinations *embedded* in the `/admin/settings` shell are returned
+ * (#2526). `data-catalog` → `/catalog`, `hw-locations` → `/locations` and
+ * `hw-power-monitors` → `/admin/power-monitors` carry a `settingsGroup` for
+ * classification, but they render their own pages rather than a settings
+ * category, and their single default home is the Admin Control Center. Listing
+ * them in this sidebar made the settings workspace a second directory for them
+ * and produced a category that navigates out of the shell entirely. Use
+ * `getStandaloneConfigurationDestinations` when you specifically want those.
  */
 export function getSettingsGroupedDestinations(access: AdminDestinationAccess): {
   group: (typeof SETTINGS_DISPLAY_GROUPS)[number];
   destinations: AdminDestination[];
 }[] {
   const accessible = filterDestinationsByAccess(ADMIN_DESTINATIONS, access);
-  const configDestinations = accessible.filter((destination) => destination.settingsGroup !== undefined);
+  const configDestinations = accessible.filter(
+    (destination) =>
+      destination.settingsGroup !== undefined && isPathWithin(destination.path, '/admin/settings'),
+  );
 
   return SETTINGS_DISPLAY_GROUPS
     .map((group) => ({

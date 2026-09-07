@@ -338,8 +338,32 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('field=');
   });
 
-  it('never falls back to personal content for a user with no admin grants', () => {
-    setAuthRoles(['farm_user']);
+  it('shows the standalone links only as a recovery affordance, not as a second directory (#2526)', () => {
+    // A user who can reach an embedded `/admin/settings` category already has a
+    // working workspace. Catalog / Locations / Power Monitors have exactly one
+    // default home — the Admin Control Center — so repeating them here would be
+    // a second directory for the same destinations.
+    setAuthRoles(['farm_admin']);
+    renderSettings('/admin/settings?tab=general&sub=farm');
+
+    expect(screen.queryByRole('navigation', { name: 'Standalone configuration' })).not.toBeInTheDocument();
+    for (const label of ['Power Monitors', 'Locations', 'Catalog']) {
+      expect(screen.queryByRole('link', { name: label })).not.toBeInTheDocument();
+    }
+  });
+
+  it('keeps standalone destinations out of the settings sidebar categories (#2526)', () => {
+    setAuthRoles(['farm_admin']);
+    renderSettings('/admin/settings?tab=hardware&sub=printer-groups');
+
+    // Hardware still lists its embedded sub-pages; Locations and Power Monitors
+    // are classified into hardware/printing but render their own pages.
+    for (const label of ['Locations', 'Power Monitors', 'Catalog']) {
+      expect(screen.queryByRole('link', { name: label })).not.toBeInTheDocument();
+    }
+  });
+
+  it('never falls back to personal content for a user with no admin grants', () => {    setAuthRoles(['farm_user']);
     renderSettings('/admin/settings');
     expect(screen.getByText(/No settings editor is available/)).toBeInTheDocument();
     expect(screen.queryByTestId('legacy-settings-page')).not.toBeInTheDocument();

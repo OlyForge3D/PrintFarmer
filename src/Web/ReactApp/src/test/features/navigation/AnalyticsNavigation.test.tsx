@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 import { Layout } from '@/common/components/Layout';
+import { ADMIN_DESTINATIONS } from '@/features/admin/registry/adminDestinations';
 
 const createTestQueryClient = () => new QueryClient({
   defaultOptions: {
@@ -64,7 +65,17 @@ vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
 }));
 
 describe('Analytics navigation entry', () => {
-  it('uses only the canonical Analytics target', async () => {
+  it('routes Analytics only at its canonical target, from its single default home', async () => {
+    // Analytics used to be an anchored rail entry *and* an Admin Control Center
+    // tile. #2526 gave it one default home — the Control Center — so the rail
+    // must no longer link it. The original regression this test guards still
+    // applies to the surviving home: the canonical target is `/analytics`, and
+    // the retired `/statistics` routes must not come back anywhere.
+    const analytics = ADMIN_DESTINATIONS.find((destination) => destination.id === 'ops-analytics');
+    expect(analytics?.path).toBe('/analytics');
+    expect(analytics?.isHubTile).toBe(true);
+    expect(ADMIN_DESTINATIONS.filter((destination) => destination.path.startsWith('/statistics'))).toHaveLength(0);
+
     const queryClient = createTestQueryClient();
     const { container } = render(
       <QueryClientProvider client={queryClient}>
@@ -75,9 +86,10 @@ describe('Analytics navigation entry', () => {
     );
 
     await waitFor(() => {
-      expect(container.querySelector('a[href="/analytics"]')).not.toBeNull();
+      expect(container.querySelector('a[href="/admin"]')).not.toBeNull();
     });
 
+    expect(container.querySelector('a[href="/analytics"]')).toBeNull();
     expect(container.querySelector('a[href="/statistics"]')).toBeNull();
     expect(container.querySelector('a[href="/statistics/costs"]')).toBeNull();
   });

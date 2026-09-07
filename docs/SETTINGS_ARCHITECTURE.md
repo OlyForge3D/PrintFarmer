@@ -67,6 +67,46 @@ Draft safety protects unsaved form edits across leaf changes, category switches,
 - **Discard Behavior**: Resets dirty state, discards uncommitted section edits, and proceeds to the pending navigation target.
 - **Browser Unload**: An active `beforeunload` listener prompts the browser when attempting to close or navigate away from the tab while form fields are dirty.
 
+### Router-Level Draft Boundary
+In-app links that the shell does not own — main-navbar `NavLink`s — and browser
+Back/Forward are guarded by a React Router `useBlocker` predicate rather than by
+per-link `onClick` handlers. `useBlocker` only functions under a **data router**,
+so `src/common/router/AppRouterProvider.tsx` composes the app with
+`createBrowserRouter` + `RouterProvider`; the declarative `<Routes>` tree is
+hosted unchanged as a descendant of a single splat route. Composing with plain
+`BrowserRouter` silently disables this guard and lets drafts be discarded without
+a prompt — the defect behind issue 2525.
+
+Two react-router behaviours the implementation has to absorb:
+- **Blocked state is transient.** React Router resets *every* blocker to idle
+  whenever any navigation completes, and the shell self-navigates constantly
+  (`?q=` commits, `?tab=`/`?sub=` normalisation). The blocked state can therefore
+  be created and destroyed inside a single React batch, so the shell records the
+  blocked destination in the predicate itself instead of observing
+  `blocker.state === 'blocked'` from an effect.
+- **Handles go stale.** A captured `proceed`/`reset` throws once the router has
+  released the blocker, so both are called defensively and "Discard" falls back
+  to resuming the navigation itself. For a Back/Forward the fallback replays the
+  recorded history **delta**, not the destination URL: navigating by URL would
+  push a duplicate entry, so a discarded Back would leave
+  `[Printers, Settings, Printers]` and the next Back would surprise the user by
+  returning to Settings.
+- **Routers must be disposed.** `createBrowserRouter` calls `initialize()`, which
+  installs a `popstate` listener that only `dispose()` removes — and
+  `RouterProvider` never disposes. React also invokes state initialisers
+  speculatively under StrictMode and keeps one result, so construction cannot be
+  assumed to happen once. `AppRouterProvider` therefore tracks every instance it
+  builds, disposes the ones React discarded, and defers unmount disposal by a
+  microtask so StrictMode's simulated remount does not tear down a live router.
+  Without this, every remount strands another router still reacting to
+  Back/Forward. Covered by
+  `src/test/common/AppRouterProviderLifecycle.test.tsx`.
+
+Regression coverage lives in
+`src/test/features/settings/SettingsRealRouterDraftGuard.test.tsx`, which renders
+the real `App` — a `MemoryRouter`/`createMemoryRouter` stand-in satisfies the
+data-router branch for free and would not have caught this.
+
 ### Page-Level Save Presentation & Registry
 - **Save Bar Presentation**: Single page-level save bar (`SettingsSaveBar`) docked at the bottom of the viewport, backed by `SettingsSaveRegistryContext`.
 - **Dirty Section Requests**: Fanned out per dirty group to `POST /api/settings/{keyName}`. Successful section responses advance baseline values for saved sections.
@@ -499,6 +539,43 @@ notes here are:
   tile builder. Adding a new attention item means appending to `AppendAttentionForEntry`
   or `AppendExternalServicesAttention` in the same service.
 
+## One Default Home Per Admin Destination
+
+Every admin destination is reachable from exactly **one** default surface. The Admin
+Control Center at `/admin` is the default home for the whole admin surface, and the
+`Admin` entry in the main navigation rail is the one default link that reaches it.
+
+Consequences, all enforced by tests:
+
+- **The rail carries no second route to a Control Center destination.** Maintenance,
+  Locations, Analytics, Auto-Dispatch and Catalog used to be anchored rail entries *and*
+  hub tiles; the rail entries are gone. `Printed Parts` (`/parts-inventory`) is not an
+  `ADMIN_DESTINATIONS` entry, so the rail is its only home and it stays.
+- **The Control Center never links to itself.** `admin-home` is `kind: 'hub'`, so
+  neither `OPERATIONAL_DESTINATION_IDS` nor `getStandaloneConfigurationDestinations`
+  can render it, `AdminControlCenterPage` passes no `parent` to `PageTemplate`, and
+  `resolveAttentionActionRoute` drops any attention action resolving to `/admin`
+  exactly (a `/admin/...` child route is still a valid target). Child pages linking
+  *back* to the hub are a different surface and are unaffected.
+- **The settings workspace is not a second admin directory.**
+  `getSettingsGroupedDestinations` returns only destinations embedded under
+  `/admin/settings`. Catalog, Locations and Power Monitors carry a `settingsGroup` for
+  classification but render their own pages, so the sidebar no longer lists them.
+- **One authorized exception, and it is a recovery affordance, not a directory.** A
+  delegate whose only configuration grant is one of those standalone destinations can
+  still open the settings shell but has no category to render. `SettingsShell` shows the
+  `Standalone configuration` link strip only for that user — anyone with an embedded
+  settings destination does not see it.
+
+Removing a rail entry must never strand a user. The `Admin` entry is gated on
+`requiresAnyAccessibleHubTile`, so every permission that used to unlock a removed rail
+entry still lights up `/admin`, including custom roles with no `farm_admin`.
+
+Opt-in **pinning** of an admin destination back onto the rail is separate work (#2527).
+A pin is an explicit user choice and is not a default home, so it does not contradict
+this rule. Stored navigation preferences naming a removed entry are filtered out by
+`uniqueKnownIds`, so legacy automatic ordering is never read as an intentional pin.
+
 ## Adding A New Settings Section
 
 The end-to-end steps to expose a new setting in the UI, without touching any React
@@ -570,6 +647,7 @@ Backend:
 Frontend:
 
 - Shell: `src/Web/ReactApp/src/features/settings/pages/SettingsShell.tsx`.
+- Router composition: `src/Web/ReactApp/src/common/router/AppRouterProvider.tsx`.
 - Metadata-driven page: `src/Web/ReactApp/src/features/admin/pages/SettingsPage.tsx`.
 - Categories / scopes: `src/Web/ReactApp/src/features/settings/types.ts`.
 - Group → location map: `src/Web/ReactApp/src/features/settings/settings-navigation.ts`.

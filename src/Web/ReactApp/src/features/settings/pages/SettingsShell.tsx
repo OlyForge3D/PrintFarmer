@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, useContext } from 'react';
-import { Link, useNavigate, useNavigationType, useSearchParams, useBlocker, UNSAFE_DataRouterContext } from 'react-router';
+import { Link, useLocation, useNavigate, useNavigationType, useSearchParams, useBlocker, UNSAFE_DataRouterContext, type BlockerFunction } from 'react-router';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import {
@@ -16,6 +16,7 @@ import {
   canAccessSettingsTab,
   getDestinationForTab,
   filterDestinationsByAccess,
+  isPathWithin,
   type AdminDestination,
 } from '@/features/admin/registry/adminDestinations';
 import { ThemeSwitcher } from '@/common/components/ThemeSwitcher';
@@ -210,12 +211,30 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'data.tags': <TagAdminPage embedded />,
 };
 
+/**
+ * Position of the current entry in the browser history stack.
+ *
+ * React Router stamps this index into `history.state` and derives its own POP
+ * deltas from it (`history.js`: `delta = getIndex() - index`), so reading it here
+ * gives the guard the same notion of "how far did the user jump" that the router
+ * uses. Returns `null` for entries the router did not create.
+ */
+function readHistoryIndex(): number | null {
+  const index = (window.history.state as { idx?: unknown } | null)?.idx;
+  return typeof index === 'number' ? index : null;
+}
+
 function DataRouterBlocker({
   shouldBlock,
   onBlockerChange,
 }: {
-  shouldBlock: (args: { currentLocation: { pathname: string; search: string }; nextLocation: { pathname: string; search: string } }) => boolean;
-  onBlockerChange: (blocker: { state: 'unblocked' | 'blocked'; proceed?: () => void; reset?: () => void }) => void;
+  shouldBlock: BlockerFunction;
+  onBlockerChange: (blocker: {
+    state: 'unblocked' | 'blocked';
+    proceed?: () => void;
+    reset?: () => void;
+    target?: string;
+  }) => void;
 }) {
   const blocker = useBlocker(shouldBlock);
   useEffect(() => {
@@ -223,6 +242,10 @@ function DataRouterBlocker({
       state: blocker.state === 'blocked' ? 'blocked' : 'unblocked',
       proceed: blocker.state === 'blocked' && typeof blocker.proceed === 'function' ? blocker.proceed : undefined,
       reset: blocker.state === 'blocked' && typeof blocker.reset === 'function' ? blocker.reset : undefined,
+      target:
+        blocker.state === 'blocked' && blocker.location
+          ? `${blocker.location.pathname}${blocker.location.search}`
+          : undefined,
     });
   }, [blocker, onBlockerChange]);
   return null;
@@ -252,10 +275,23 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     [destinationAccess],
   );
   const canReachSystemScope = configurationDestinations.length > 0;
+  // Issue 2526 — configuration destinations that render their own page instead
+  // of a `/admin/settings` category (Catalog, Locations, Power Monitors). Their
+  // one default home is the Admin Control Center, so the shell no longer lists
+  // them as a second directory. The exception below is a recovery affordance,
+  // not a directory: a delegate whose only configuration grant is one of these
+  // can still open the settings shell (`canReachSystemScope` is true for them)
+  // but has no category to render, so without a link out they land on an empty
+  // workspace with no way forward.
   const standaloneDestinations = useMemo(
-    () => configurationDestinations.filter((destination) => !destination.path.startsWith('/admin/settings?')),
+    () => configurationDestinations.filter((destination) => !isPathWithin(destination.path, '/admin/settings')),
     [configurationDestinations],
   );
+  const hasEmbeddedSettingsDestination = useMemo(
+    () => configurationDestinations.some((destination) => isPathWithin(destination.path, '/admin/settings')),
+    [configurationDestinations],
+  );
+  const showStandaloneRecoveryLinks = standaloneDestinations.length > 0 && !hasEmbeddedSettingsDestination;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { open: openCommandPalette, registerNavigationGuard } = useCommandPalette();
@@ -415,6 +451,18 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     [dirtyByGroup, registeredSections],
   );
 
+  /**
+   * Mirror of {@link isDirty} that the router blocker predicate reads instead of
+   * the state value. `handleDiscardAndNavigate` discards and then proceeds in the
+   * same tick, so a predicate closing over React state would still observe the
+   * pre-discard `true` and re-block the very navigation the user just confirmed.
+   * The ref is cleared synchronously in `handleDiscardAll` to close that window.
+   */
+  const isDirtyRef = useRef(isDirty);
+  useEffect(() => {
+    isDirtyRef.current = isDirty;
+  }, [isDirty]);
+
   const handleWorkspaceResultSelect = useCallback((item: SettingsCommandItem, queryText: string) => {
     const doNavigate = () => {
       if (item.onExecute) {
@@ -522,42 +570,142 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     for (const section of registeredSectionsRef.current.values()) {
       section.onDiscard?.();
     }
+    isDirtyRef.current = false;
     setDirtyByGroup({});
     setRegisteredSections({});
     registeredSectionsRef.current.clear();
   }, []);
 
+  /**
+   * `useBlocker` requires a data router, so the adapter below stays conditional —
+   * a non-data-router host (tests, Storybook) would otherwise crash on mount.
+   * The app itself always supplies one via `AppRouterProvider`; a missing context
+   * in a browser means the router-level draft guard is inert, which is exactly
+   * the silent data-loss defect from issue 2525, so say so loudly in development.
+   */
   const hasDataRouter = Boolean(useContext(UNSAFE_DataRouterContext));
+  useEffect(() => {
+    if (!hasDataRouter && import.meta.env.DEV) {
+      console.warn(
+        '[SettingsShell] No data router in context — unsaved-draft protection for navbar links ' +
+          'and browser Back/Forward is inactive. See issue 2525.',
+      );
+    }
+  }, [hasDataRouter]);
+
   const [dataBlocker, setDataBlocker] = useState<{
     state: 'unblocked' | 'blocked';
     proceed?: () => void;
     reset?: () => void;
+    target?: string;
   }>({
     state: 'unblocked',
     proceed: undefined,
     reset: () => {},
   });
 
+  /**
+   * The destination of the navigation the router most recently blocked.
+   *
+   * React Router resets *every* blocker to idle whenever any navigation
+   * completes. The shell navigates to itself constantly (search-query commits,
+   * tab/sub param normalisation), so a blocked `proceed`/`reset` handle can be
+   * torn down a tick after it is handed to us — while the confirmation modal is
+   * still on screen. Remembering the destination ourselves keeps the modal open
+   * and keeps "Discard" working even when the handle has gone stale.
+   */
+  const [blockedTarget, setBlockedTarget] = useState<string | null>(null);
+
+  /**
+   * How far through the history stack the blocked navigation was trying to jump.
+   *
+   * Only meaningful for a POP. Resuming a confirmed Back/Forward by URL would
+   * push a new entry and corrupt the stack (a discarded Back would leave
+   * `[Printers, Settings, Printers]`, so the *next* Back would surprise the user
+   * by returning to Settings). Replaying the delta instead moves the cursor to
+   * the entry the user actually asked for, preserving its key and state.
+   */
+  const [blockedDelta, setBlockedDelta] = useState<number | null>(null);
+
+  const location = useLocation();
+  const historyIndexRef = useRef<number | null>(readHistoryIndex());
+  useEffect(() => {
+    // Only committed locations move the cursor; a blocked POP is rolled back by
+    // the router and never reaches here, so this stays pinned to where we are.
+    historyIndexRef.current = readHistoryIndex();
+  }, [location.key]);
+
+  const handleBlockerChange = useCallback(
+    (next: { state: 'unblocked' | 'blocked'; proceed?: () => void; reset?: () => void; target?: string }) => {
+      setDataBlocker(next);
+      if (next.state === 'blocked' && next.target) {
+        setBlockedTarget(next.target);
+      }
+    },
+    [],
+  );
+
   const shouldBlockNav = useCallback(
-    ({ currentLocation, nextLocation }: { currentLocation: { pathname: string; search: string }; nextLocation: { pathname: string; search: string } }) =>
-      isDirty && (currentLocation.pathname + currentLocation.search !== nextLocation.pathname + nextLocation.search),
-    [isDirty],
+    ({
+      currentLocation,
+      nextLocation,
+      historyAction,
+    }: {
+      currentLocation: { pathname: string; search: string };
+      nextLocation: { pathname: string; search: string };
+      historyAction?: string;
+    }) => {
+      if (!isDirtyRef.current) return false;
+      // The shell rewrites its own query string constantly (`?q=` is committed on
+      // every search keystroke, `?tab=`/`?sub=` on every in-page move). Those are
+      // shell-authored and already guarded by the in-page modal, so blocking them
+      // here would fire the confirmation on each keystroke. A POP is different:
+      // it is a genuine history restoration the user asked for, and its target
+      // may well be the same pathname.
+      if (historyAction !== 'POP' && currentLocation.pathname === nextLocation.pathname) return false;
+      const block =
+        currentLocation.pathname + currentLocation.search !== nextLocation.pathname + nextLocation.search;
+      if (block) {
+        // Record the destination here rather than waiting to observe
+        // `blocker.state === 'blocked'` from an effect. React Router clears every
+        // blocker back to idle as soon as *any* navigation completes, and the
+        // shell self-navigates (param normalisation, `?q=` commits) constantly —
+        // so the blocked state can be created and destroyed inside a single React
+        // batch, and the effect then only ever sees `unblocked`. The predicate is
+        // the one place that reliably knows a navigation was stopped and where it
+        // was headed.
+        setBlockedTarget(`${nextLocation.pathname}${nextLocation.search}`);
+        if (historyAction === 'POP') {
+          const nextIndex = readHistoryIndex();
+          const currentIndex = historyIndexRef.current;
+          const delta = nextIndex !== null && currentIndex !== null ? nextIndex - currentIndex : 0;
+          setBlockedDelta(delta !== 0 ? delta : null);
+        } else {
+          setBlockedDelta(null);
+        }
+      }
+      return block;
+    },
+    [],
   );
 
-  const blocker = useMemo(
-    () =>
-      hasDataRouter
-        ? dataBlocker
-        : ({ state: 'unblocked' as const, proceed: undefined, reset: () => {} }),
-    [hasDataRouter, dataBlocker],
-  );
+  const blocker = dataBlocker;
 
-  const isBlocked = blocker.state === 'blocked';
+  const isBlocked = blocker.state === 'blocked' || blockedTarget !== null;
 
   const handleStay = useCallback(() => {
     if (blocker.state === 'blocked' && blocker.reset) {
-      blocker.reset();
+      // The handle may already be stale — React Router clears blockers whenever
+      // any navigation completes, and it throws on an invalid state transition.
+      // Staying put is still the correct outcome, so a dead handle is harmless.
+      try {
+        blocker.reset();
+      } catch {
+        /* blocker already released by the router */
+      }
     }
+    setBlockedTarget(null);
+    setBlockedDelta(null);
     setShowDraftModal(false);
     setPendingNavigation(null);
   }, [blocker]);
@@ -565,13 +713,34 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const handleDiscardAndNavigate = useCallback(() => {
     setShowDraftModal(false);
     handleDiscardAll();
+    let resumed = false;
     if (blocker.state === 'blocked' && blocker.proceed) {
-      blocker.proceed();
-    } else if (pendingNavigation) {
-      pendingNavigation();
+      try {
+        blocker.proceed();
+        resumed = true;
+      } catch {
+        // Stale handle: the router released this blocker between the render that
+        // captured it and this click. Fall through and navigate by hand.
+        resumed = false;
+      }
     }
+    if (!resumed) {
+      if (blockedDelta !== null) {
+        // The user confirmed a Back/Forward. Replay the traversal rather than
+        // pushing `blockedTarget`, so the history cursor lands on the entry they
+        // asked for instead of stacking a duplicate on top of it.
+        navigate(blockedDelta);
+      } else if (blockedTarget) {
+        // Resume the navigation ourselves (see `blockedTarget`).
+        navigate(blockedTarget);
+      } else if (pendingNavigation) {
+        pendingNavigation();
+      }
+    }
+    setBlockedTarget(null);
+    setBlockedDelta(null);
     setPendingNavigation(null);
-  }, [blocker, handleDiscardAll, pendingNavigation]);
+  }, [blocker, blockedDelta, blockedTarget, handleDiscardAll, navigate, pendingNavigation]);
 
   useEffect(() => {
     if (!isDirty) return;
@@ -1186,7 +1355,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
   return (
     <SettingsSaveRegistryContext.Provider value={saveRegistry}>
-      {hasDataRouter && <DataRouterBlocker shouldBlock={shouldBlockNav} onBlockerChange={setDataBlocker} />}
+      {hasDataRouter && <DataRouterBlocker shouldBlock={shouldBlockNav} onBlockerChange={handleBlockerChange} />}
       <SettingsHeaderSlotContext.Provider value={headerSlot}>
         <SettingsFooterSlotContext.Provider value={footerSlot}>
           <PageTemplate
@@ -1197,7 +1366,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
             parent={isAdminRoute ? ADMIN_HUB_PARENT : undefined}
             actions={headerActions}
           >
-            {isAdminRoute && standaloneDestinations.length > 0 && (
+            {isAdminRoute && showStandaloneRecoveryLinks && (
               <nav aria-label="Standalone configuration" className="flex flex-wrap gap-3 pb-4">
                 {standaloneDestinations.map((destination) => (
                   <Link

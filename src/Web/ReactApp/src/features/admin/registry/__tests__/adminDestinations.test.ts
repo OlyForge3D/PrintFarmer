@@ -9,6 +9,8 @@ import {
   getDestinationsByGroup,
   getHubGroupedDestinations,
   getSettingsGroupedDestinations,
+  getStandaloneConfigurationDestinations,
+  isPathWithin,
   type AdminDestination,
   type AdminDestinationGroup,
 } from '../adminDestinations';
@@ -348,8 +350,33 @@ describe('registry lookup helpers', () => {
     expect(groupOrder).toEqual(canonicalOrder);
 
     const totalCount = grouped.reduce((sum, g) => sum + g.destinations.length, 0);
-    const expectedConfigCount = ADMIN_DESTINATIONS.filter((d) => d.settingsGroup !== undefined).length;
+    const expectedConfigCount = ADMIN_DESTINATIONS.filter(
+      (d) => d.settingsGroup !== undefined && isPathWithin(d.path, '/admin/settings'),
+    ).length;
     expect(totalCount).toBe(expectedConfigCount);
+  });
+
+  it('getSettingsGroupedDestinations lists only destinations embedded in the settings shell', () => {
+    // #2526 — Catalog, Locations and Power Monitors carry a settingsGroup for
+    // classification but render their own pages, and the Admin Control Center is
+    // their single default home. Listing them here made the settings workspace a
+    // second directory for them, and produced a sidebar category that navigates
+    // out of the shell.
+    const grouped = getSettingsGroupedDestinations(accessAs('farm_admin'));
+    const listedIds = grouped.flatMap((entry) => entry.destinations.map((d) => d.id));
+
+    expect(listedIds).not.toContain('data-catalog');
+    expect(listedIds).not.toContain('hw-locations');
+    expect(listedIds).not.toContain('hw-power-monitors');
+    for (const entry of grouped) {
+      for (const destination of entry.destinations) {
+        expect(isPathWithin(destination.path, '/admin/settings')).toBe(true);
+      }
+    }
+
+    // Those destinations are still reachable — just from one home, via the hub.
+    const standaloneIds = getStandaloneConfigurationDestinations(accessAs('farm_admin')).map((d) => d.id);
+    expect(standaloneIds).toEqual(expect.arrayContaining(['data-catalog', 'hw-locations', 'hw-power-monitors']));
   });
 
   it('getSettingsGroupedDestinations excludes destinations without a settingsGroup', () => {

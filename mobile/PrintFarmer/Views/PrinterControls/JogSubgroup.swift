@@ -65,10 +65,7 @@ struct JogSubgroup: View {
                     .transition(.opacity)
             }
         }
-        .task {
-            await viewModel.loadCapabilities()
-        }
-        .onChange(of: viewModel.capabilities) { _, newCaps in
+        .onChange(of: viewModel.capabilities, initial: true) { _, newCaps in
             // If the printer reports a narrower axis set than what's currently
             // selected, snap to the first available axis so we never dispatch
             // a jog against an unsupported axis.

@@ -184,7 +184,7 @@ describe('AdminControlCenterPage', () => {
 
     const headings = screen.getAllByRole('heading');
     expect(headings.findIndex((heading) => heading.textContent === 'Needs attention')).toBeLessThan(
-      headings.findIndex((heading) => heading.textContent === 'System health'),
+      headings.findIndex((heading) => heading.textContent === 'System health checks'),
     );
     expect(screen.getByText(/Checked at/i)).toBeInTheDocument();
   });
@@ -218,8 +218,8 @@ describe('AdminControlCenterPage', () => {
 
     const overallBadge = screen.getByTestId('admin-hub-overall-status');
     expect(overallBadge).toHaveAttribute('data-overall-status', 'Degraded');
-    expect(within(overallBadge).getByText(/System Degraded/i)).toBeInTheDocument();
-    expect(within(overallBadge).queryByText(/System Healthy/i)).not.toBeInTheDocument();
+    expect(within(overallBadge).getByText(/Health checks: Degraded/i)).toBeInTheDocument();
+    expect(within(overallBadge).queryByText(/Health checks: Healthy/i)).not.toBeInTheDocument();
   });
 
   it('shows a healthy overall badge when every subsystem is healthy', async () => {
@@ -241,7 +241,38 @@ describe('AdminControlCenterPage', () => {
 
     const overallBadge = screen.getByTestId('admin-hub-overall-status');
     expect(overallBadge).toHaveAttribute('data-overall-status', 'Healthy');
-    expect(within(overallBadge).getByText(/System Healthy/i)).toBeInTheDocument();
+    expect(within(overallBadge).getByText(/Health checks: Healthy/i)).toBeInTheDocument();
+  });
+
+  /**
+   * #2517: the hub's health band and the header's System pill read different
+   * feeds — subsystem health checks (`/api/admin/overview`) versus service
+   * health (`/api/system/info`). Users were reading the two as contradicting
+   * each other. The band must therefore say which feed it speaks for and point
+   * at the other, so a disagreement reads as two domains rather than a bug.
+   */
+  it('states which health feed the band reports and names the other one', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-subsystems')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByRole('heading', { name: 'System health checks' }),
+    ).toBeInTheDocument();
+
+    const domainNote = screen.getByTestId('admin-hub-health-domain');
+    expect(domainNote).toHaveTextContent(/admin overview/i);
+    expect(domainNote).toHaveTextContent(/System pill/i);
+    expect(domainNote).toHaveTextContent(/service health/i);
+
+    // The badge must not read as an unqualified whole-system verdict.
+    expect(screen.getByTestId('admin-hub-overall-status')).toHaveTextContent(
+      /^Health checks:/,
+    );
   });
 
   it('does not hardcode the four subsystems — renders whatever arrives (e.g. spoolman)', async () => {
@@ -320,7 +351,7 @@ describe('AdminControlCenterPage', () => {
       expect(screen.getByTestId('admin-hub-attention-clear')).toBeInTheDocument();
     });
     expect(screen.getByTestId('admin-hub-attention-clear')).toHaveTextContent(
-      'Nothing needs your attention — every subsystem is reporting healthy.',
+      'Nothing needs your attention — every subsystem health check is reporting healthy.',
     );
     // An all-clear must not be an illustrated empty state: it used to push the
     // destination grid down by 206px to report that nothing happened.
@@ -348,10 +379,10 @@ describe('AdminControlCenterPage', () => {
     });
 
     expect(screen.getByTestId('admin-hub-attention-clear')).toHaveTextContent(
-      'No attention items were reported. Review system health below for the current status.',
+      'The admin overview reported no attention items. Review the system health checks below for the current status.',
     );
     expect(screen.getByTestId('admin-hub-attention-clear')).not.toHaveTextContent(
-      'every subsystem is reporting healthy',
+      'every subsystem health check is reporting healthy',
     );
   });
 
@@ -367,7 +398,7 @@ describe('AdminControlCenterPage', () => {
     });
 
     expect(screen.getByTestId('admin-hub-attention-clear')).toHaveTextContent(
-      'No attention items were reported. Review system health below for the current status.',
+      'The admin overview reported no attention items. Review the system health checks below for the current status.',
     );
     expect(screen.getByRole('heading', { name: 'No subsystems reported' })).toBeInTheDocument();
   });
@@ -677,6 +708,207 @@ describe('AdminControlCenterPage', () => {
       '/admin/power-monitors',
     );
     expect(screen.queryByText('Everything you can manage')).not.toBeInTheDocument();
+  });
+
+  it('never links back to itself — a hub has no self-link (#2526)', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-operations')).toBeInTheDocument();
+    });
+
+    // The page *is* /admin. Every destination card, the settings entry point and
+    // the attention actions must point somewhere else. The global Admin nav
+    // entry and child pages' back links live outside this component and are
+    // unaffected.
+    //
+    // Issue 2526 AC requires assertions that distinguish main content from
+    // global navigation. This component renders page content only — the assert
+    // below proves the global rail is genuinely absent from this tree, so the
+    // document-wide anchor scan that follows can only see hub content. The
+    // surviving global Admin entry is asserted separately, against the real
+    // rail, in test/features/navigation/navigation-sections.test.tsx.
+    expect(document.querySelector('nav[aria-label="Main navigation"]')).toBeNull();
+    for (const card of screen.getAllByTestId('admin-hub-destination')) {
+      expect(card.getAttribute('href')).not.toBe('/admin');
+    }
+    const selfLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'))
+      .filter((link) => {
+        const href = link.getAttribute('href') ?? '';
+        return href === '/admin'
+          || href === '/admin/'
+          || href.startsWith('/admin?')
+          || href.startsWith('/admin#')
+          || href.startsWith('/admin/?')
+          || href.startsWith('/admin/#');
+      });
+    expect(selfLinks).toHaveLength(0);
+  });
+
+  // #2526 — removing a destination from the navbar is only safe because the hub
+  // actually owns it. This is the positive half of that contract: if a tile ever
+  // disappears from the hub, the destination is stranded with no default home.
+  it.each([
+    ['Maintenance', '/maintenance'],
+    ['Analytics', '/analytics'],
+    ['Locations', '/locations'],
+    ['Catalog', '/catalog'],
+    ['Auto-Dispatch', '/auto-dispatch'],
+  ])('owns %s as its single default home (#2526)', async (_label, href) => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-operations')).toBeInTheDocument();
+    });
+
+    const tiles = screen
+      .getAllByTestId('admin-hub-destination')
+      .filter((card) => card.getAttribute('href') === href);
+    expect(tiles).toHaveLength(1);
+  });
+
+  it.each([
+    ['a destination id that resolves to /admin', { actionDestinationId: 'admin-home' }],
+    ['a raw /admin action route', { actionRoute: '/admin' }],
+    ['a query-suffixed /admin action route', { actionRoute: '/admin?from=attention' }],
+    ['a hash-suffixed /admin action route', { actionRoute: '/admin#attention' }],
+    ['a trailing-slash /admin/ action route', { actionRoute: '/admin/' }],
+    ['a trailing-slash query /admin/?x=1 action route', { actionRoute: '/admin/?x=1' }],
+    // Route *identity* must survive equivalent spellings. React Router matches
+    // case-insensitively and folds a trailing slash, so each of these lands on
+    // /admin and would be a live self-link under a raw string comparison.
+    ['an uppercase /ADMIN action route', { actionRoute: '/ADMIN' }],
+    ['a mixed-case /Admin/ action route', { actionRoute: '/Admin/' }],
+    ['a whitespace-padded /admin action route', { actionRoute: '  /admin  ' }],
+    ['a repeated-trailing-slash /admin// action route', { actionRoute: '/admin//' }],
+    // A browser applies full URL semantics to an href before the router sees
+    // it, so these three also resolve to /admin. Lexical normalisation misses
+    // every one of them.
+    ['a dot-segment route resolving to /admin', { actionRoute: '/foo/../admin' }],
+    ['a dot-segment route climbing above root', { actionRoute: '/foo/bar/../../admin' }],
+    ['a percent-encoded dot-segment route', { actionRoute: '/foo/%2e%2e/admin' }],
+    ['a percent-encoded /%61dmin action route', { actionRoute: '/%61dmin' }],
+    ['a percent-encoded trailing slash /admin%2f', { actionRoute: '/admin%2f' }],
+    ['a backslash-folded /admin\\ action route', { actionRoute: '/admin\\' }],
+    ['a dot-segment route resolving to retired /admin/manage', { actionRoute: '/admin/settings/../manage' }],
+  ])('suppresses an attention action pointing at the hub itself — %s (#2526)', async (_label, action) => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        attention: [
+          {
+            key: 'self-link',
+            severity: 'Warning',
+            title: 'Points at the hub',
+            detail: 'A backend item that would send the user back to /admin.',
+            actionLabel: 'Open',
+            ...action,
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-item')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('admin-hub-attention-item').querySelector('a')).toBeNull();
+  });
+
+  // `actionRoute` is untrusted backend payload rendered straight into a link
+  // target. A malformed or compromised payload must make the link disappear, not
+  // navigate off-origin. `startsWith('/')` alone is not enough: a
+  // protocol-relative URL passes it and still leaves the app.
+  it.each([
+    ['a protocol-relative URL', '//evil.test/steal'],
+    ['a backslash protocol-relative URL', '/\\evil.test/steal'],
+    ['an absolute external URL', 'https://evil.test/steal'],
+    ['a javascript: scheme', 'javascript:alert(1)'],
+    ['a data: scheme', 'data:text/html,<script>alert(1)</script>'],
+    ['a mailto: scheme', 'mailto:someone@evil.test'],
+    ['a bare relative path with no leading slash', 'admin/status'],
+    ['an embedded newline', '/admin\nstatus'],
+    ['a literal backslash path separator', '/printers\\evil'],
+    ['malformed percent-encoding', '/printers/%zz'],
+    // Dot-segment resolution can *create* a protocol-relative path from an
+    // app-relative input: ".." pops the segment before an empty segment, so
+    // these normalise to "//evil.test/steal" and navigate off-origin.
+    ['a dot-segment path that normalises to protocol-relative', '/foo/..//evil.test/steal'],
+    ['a dot-segment path normalising to triple-slash', '/foo/..///evil.test/steal'],
+    ['a root-relative dot segment normalising to protocol-relative', '/..//evil.test'],
+    ['an empty segment after a percent-encoded dot segment', '/foo/%2e%2e//evil.test/steal'],
+    // Suffix invariance: a query or hash must not launder a hostile path. The
+    // guard canonicalises the *pathname*, so appending "?x=1" or "#f" to any of
+    // the payloads above must not change the verdict.
+    ['a protocol-relative URL with a query suffix', '//evil.test/steal?x=1'],
+    ['a protocol-relative URL with a hash suffix', '//evil.test/steal#f'],
+    ['a dot-segment protocol-relative path with a query suffix', '/foo/..//evil.test/steal?x=1'],
+    ['a dot-segment protocol-relative path with a hash suffix', '/foo/..//evil.test/steal#f'],
+    ['a backslash protocol-relative URL with a query suffix', '/\\evil.test/steal?x=1'],
+    ['an empty string', ''],
+  ])('drops an unsafe backend action route — %s', async (_label, actionRoute) => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        attention: [
+          {
+            key: 'unsafe-route',
+            severity: 'Warning',
+            title: 'Untrusted target',
+            detail: 'The backend supplied a route that is not an in-app destination.',
+            actionLabel: 'Open',
+            actionRoute,
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-item')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('admin-hub-attention-item').querySelector('a')).toBeNull();
+  });
+
+  it.each([
+    ['a child destination under the hub', '/admin/status'],
+    ['the settings shell', '/admin/settings?tab=general'],
+    ['the worker console', '/admin/workers?workerTab=jobs'],
+    // The naive `startsWith('/admin')` bug would wrongly suppress this: it is a
+    // sibling route whose path merely shares the `/admin` prefix, not a child.
+    ['an unrelated sibling route sharing the /admin prefix', '/admin-something'],
+  ])('keeps a legitimate action route — %s (the self-link guard is exact)', async (_label, actionRoute) => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        attention: [
+          {
+            key: 'child-route',
+            severity: 'Warning',
+            title: 'Worker offline',
+            detail: 'A child destination under /admin is still a valid target.',
+            actionLabel: 'Open',
+            actionRoute,
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-item')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('admin-hub-attention-item').querySelector('a')).toHaveAttribute(
+      'href',
+      actionRoute,
+    );
   });
 
   it('bypasses overview fetch and hides health/attention bands for non-system-settings delegates', async () => {

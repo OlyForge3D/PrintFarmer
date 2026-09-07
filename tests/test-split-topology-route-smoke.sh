@@ -146,6 +146,8 @@ log "Setup step passed: generated split nginx text is correct ($TESTS_PASSED/$TE
 
 # shellcheck source=../scripts/docker-utils.sh
 source "$REPO_ROOT/scripts/docker-utils.sh"
+# shellcheck source=../scripts/build-metadata.sh
+source "$REPO_ROOT/scripts/build-metadata.sh"
 # Base image tags used by the generated compose files' `build.args` (see
 # scripts/docker/compose-templates/*.yml): compose has no `:-default` there,
 # so an unset var becomes an empty --build-arg that silently overrides the
@@ -222,6 +224,11 @@ export ORCA_WORKER_COUNT=1
 # build cost without weakening what this test proves.
 export ALLOW_STUB=true
 export EXTERNAL_ORCA_WORKER_TEMP="$STACK_DIR/.volumes/printfarmer-orcaslicer-temp"
+# Bind every locally built service to the exact source commit under test.
+if ! GIT_SHA="$(resolve_local_build_git_sha "$REPO_ROOT" "${GIT_SHA:-}")"; then
+  exit 1
+fi
+export GIT_SHA
 # The generated compose file's build context/dockerfile default to paths
 # relative to the stack dir itself; point them back at this worktree so
 # `docker compose up --build` builds from real repo sources (see

@@ -148,21 +148,156 @@ describe('Navigation rail sections', () => {
 
     const divider = desktopNav.querySelector('hr[aria-hidden="true"]');
     expect(divider?.nextElementSibling).toHaveAttribute('aria-label', 'Admin');
-    expect(within(desktopNav).getByRole('link', { name: 'Maintenance' })).toHaveAttribute('href', '/maintenance');
     expect(within(desktopNav).getByRole('link', { name: 'Printed Parts' })).toHaveAttribute('href', '/parts-inventory');
     expect(within(desktopNav).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
   });
 
-  it('renders each default desktop nav link once', async () => {
+  // #2526 — the default admin rail is pinned to an exact set, not a count. A
+  // raw length says nothing about *which* destinations own the default surface,
+  // so it cannot catch a swap (one admin duplicate removed, another added).
+  const DEFAULT_ADMIN_RAIL_HREFS = [
+    '/dashboard',
+    '/printers',
+    '/printQueue',
+    '/scheduling',
+    '/slicer',
+    '/spools',
+    '/projects',
+    '/files',
+    '/parts-inventory',
+    '/admin',
+  ];
+
+  it('renders exactly the default desktop nav destinations, each once', async () => {
     const { container } = renderLayout();
     const desktopNav = getDesktopNav(container);
 
     await waitFor(() => {
-      expect(desktopNav.querySelectorAll('a[href]')).toHaveLength(15);
+      expect(desktopNav.querySelector('a[href="/admin"]')).not.toBeNull();
     });
 
     const hrefs = Array.from(desktopNav.querySelectorAll<HTMLAnchorElement>('a[href]')).map((link) => link.getAttribute('href'));
     expect(new Set(hrefs).size).toBe(hrefs.length);
+    expect([...hrefs].sort()).toEqual([...DEFAULT_ADMIN_RAIL_HREFS].sort());
+  });
+
+  // #2526 — every admin destination has exactly one default navigation home.
+  // The Admin Control Center owns these five, so a *default* rail must not
+  // offer a second route to them. User-chosen pinning is separate work (#2527)
+  // and would be an explicit opt-in, not a default entry.
+  it.each([
+    ['Maintenance', '/maintenance'],
+    ['Locations', '/locations'],
+    ['Analytics', '/analytics'],
+    ['Auto-Dispatch', '/auto-dispatch'],
+    ['Catalog', '/catalog'],
+  ])('does not offer %s as a default nav entry — the Admin Control Center owns it', async (label, href) => {
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+
+    await waitFor(() => {
+      expect(desktopNav.querySelector('a[href="/admin"]')).not.toBeNull();
+    });
+
+    // Nowhere in the chrome: neither the desktop rail nor the mobile drawer.
+    expect(container.querySelectorAll(`a[href="${href}"]`)).toHaveLength(0);
+    expect(within(desktopNav).queryByRole('link', { name: label })).not.toBeInTheDocument();
+  });
+
+  it('keeps the Admin entry — the single default home for the destinations removed from the rail — for a delegate with no farm_admin role', () => {
+    // The removed entries were gated on `queue:read` / `catalog:admin` /
+    // `maintenance:admin` / `locations:admin`. Each backs a Control Center hub
+    // tile, so `requiresAnyAccessibleHubTile` must keep /admin reachable for
+    // exactly those users — otherwise removing the rail entry strands them.
+    mockUserRole = 'custom-delegate';
+    mockPermissionOverride = (resource, action) => resource === 'queue' && action === 'read';
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+
+    expect(within(desktopNav).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+    expect(container.querySelectorAll('a[href="/analytics"]')).toHaveLength(0);
+    expect(container.querySelectorAll('a[href="/auto-dispatch"]')).toHaveLength(0);
+  });
+
+  // #2526 — the permission matrix the issue AC calls out. Each row is a user
+  // shape that could previously reach a now-removed rail entry. The Admin
+  // entry (`requiresAnyAccessibleHubTile`) must stay reachable for every shape
+  // that can still reach at least one hub tile, and every removed destination
+  // must be absent from the default chrome regardless of grants — moving a link
+  // must not add a blanket farm_admin gate, and must not strand anyone.
+  it.each([
+    [
+      'a queue:read delegate (Analytics + Auto-Dispatch)',
+      (r: string, a: string) => r === 'queue' && a === 'read',
+      true,
+    ],
+    [
+      'a catalog:admin standalone-only delegate',
+      (r: string, a: string) => r === 'catalog' && a === 'admin',
+      true,
+    ],
+    [
+      'a locations:admin standalone-only delegate',
+      (r: string, a: string) => r === 'locations' && a === 'admin',
+      true,
+    ],
+    [
+      'a maintenance:admin delegate',
+      (r: string, a: string) => r === 'maintenance' && a === 'admin',
+      true,
+    ],
+    [
+      'an any-of delegate holding catalog:admin and maintenance:admin',
+      (r: string, a: string) => (r === 'catalog' || r === 'maintenance') && a === 'admin',
+      true,
+    ],
+    [
+      'a role-restricted user with zero admin grants',
+      () => false,
+      false,
+    ],
+  ])(
+    'keeps the single default home reachable and the duplicates gone for %s',
+    (_label, override, expectsAdminEntry) => {
+      mockUserRole = 'custom-delegate';
+      mockPermissionOverride = override;
+      const { container } = renderLayout();
+      const desktopNav = getDesktopNav(container);
+
+      if (expectsAdminEntry) {
+        expect(within(desktopNav).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+      } else {
+        expect(container.querySelector('a[href="/admin"]')).toBeNull();
+      }
+
+      // No grant shape resurrects a Control-Center-owned destination in the
+      // default chrome (desktop rail or mobile drawer).
+      for (const href of ['/maintenance', '/locations', '/analytics', '/auto-dispatch', '/catalog']) {
+        expect(container.querySelectorAll(`a[href="${href}"]`)).toHaveLength(0);
+      }
+    },
+  );
+
+  it('does not resurrect a removed admin entry from a stored nav preference naming it', async () => {
+    // Legacy automatic ordering (and any pin persisted before the entries were
+    // removed) must not be read as an intentional admin pin (#2526).
+    localStorage.setItem(getNavPreferencesStorageKey('1'), JSON.stringify({
+      version: NAV_PREFERENCES_VERSION,
+      orderedItemIds: ['catalog', 'analytics', 'maintenance', 'overview'],
+      hiddenItemIds: [],
+      pinnedItemIds: ['catalog', 'locations', 'auto-dispatch'],
+    }));
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+
+    await waitFor(() => {
+      expect(desktopNav.querySelector('a[href="/admin"]')).not.toBeNull();
+    });
+
+    for (const href of ['/catalog', '/analytics', '/maintenance', '/locations', '/auto-dispatch']) {
+      expect(container.querySelectorAll(`a[href="${href}"]`)).toHaveLength(0);
+    }
+    expect(desktopNav.querySelector('section[aria-label="Favorites"]')).toBeNull();
   });
 
   it('keeps pinned items out of their original section and hidden items out of the main rail', async () => {
@@ -316,15 +451,15 @@ describe('Navigation rail sections', () => {
     const desktopNav = getDesktopNav(container);
     const desktopRail = desktopNav.parentElement as HTMLElement;
 
-    expect(within(desktopNav).getByRole('link', { name: 'Maintenance' })).toHaveAttribute('href', '/maintenance');
+    expect(within(desktopNav).getByRole('link', { name: 'Printed Parts' })).toHaveAttribute('href', '/parts-inventory');
     expect(within(desktopNav).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
 
     fireEvent.click(within(desktopRail).getByRole('button', { name: 'Customize navigation' }));
 
     const customizePanel = within(desktopNav).getByRole('region', { name: 'Customize navigation' });
-    expect(within(customizePanel).queryByText('Maintenance')).not.toBeInTheDocument();
+    expect(within(customizePanel).queryByText('Printed Parts')).not.toBeInTheDocument();
     expect(within(customizePanel).queryByText('Admin')).not.toBeInTheDocument();
-    expect(within(customizePanel).queryByRole('button', { name: 'Move Maintenance up' })).not.toBeInTheDocument();
+    expect(within(customizePanel).queryByRole('button', { name: 'Move Printed Parts up' })).not.toBeInTheDocument();
     expect(within(customizePanel).queryByRole('button', { name: 'Move Admin down' })).not.toBeInTheDocument();
   });
 

@@ -3,21 +3,46 @@ import { defineConfig } from 'vitest/config';
 import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import tsconfigPaths from 'vite-tsconfig-paths';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
-const buildTime = new Date().toISOString();
+const fullCommitShaPattern = /^[0-9a-f]{40}$/i;
 
-// Prefer the live git short SHA. In container builds the .git directory is absent, so
-// fall back to the VITE_GIT_SHA/GIT_SHA build arg injected by the Docker frontend stage.
-let gitHash = process.env.VITE_GIT_SHA || process.env.GIT_SHA || 'dev';
-try {
-  gitHash = execSync('git rev-parse --short HEAD').toString().trim();
-} catch { /* ignore: git not available (e.g. Docker build) — keep injected VITE_GIT_SHA */ }
+export function resolveGitHash(command: 'build' | 'serve') {
+  const injectedGitHash = process.env.VITE_GIT_SHA || process.env.GIT_SHA;
+  if (injectedGitHash) {
+    if (fullCommitShaPattern.test(injectedGitHash)) {
+      return injectedGitHash.toLowerCase();
+    }
+    if (command === 'build') {
+      throw new Error(
+        'Production builds require VITE_GIT_SHA or GIT_SHA to be a full 40-character commit SHA.',
+      );
+    }
+  }
+
+  try {
+    const repositoryGitHash = execFileSync('git', ['rev-parse', 'HEAD'], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim();
+    if (fullCommitShaPattern.test(repositoryGitHash)) {
+      return repositoryGitHash.toLowerCase();
+    }
+  } catch {
+    // Development servers may run from source archives without Git metadata.
+  }
+
+  if (command === 'build') {
+    throw new Error(
+      'Production builds require a full commit SHA from VITE_GIT_SHA, GIT_SHA, or Git.',
+    );
+  }
+  return 'dev';
+}
 
 // Emit dist/version.json at build time so the deployed frontend commit is queryable
 // (served by nginx at /version.json), mirroring the backend /api/system/version endpoints.
-function emitVersionJson() {
+function emitVersionJson(gitHash: string, buildTime: string) {
   let outDir = 'dist';
   return {
     name: 'printfarmer-version-json',
@@ -26,18 +51,16 @@ function emitVersionJson() {
       outDir = config.build.outDir;
     },
     closeBundle() {
-      try {
-        mkdirSync(outDir, { recursive: true });
-        writeFileSync(
-          resolve(outDir, 'version.json'),
-          JSON.stringify({ service: 'frontend', commit: gitHash, buildTime }, null, 2),
-        );
-        const serviceWorkerPath = resolve(outDir, 'sw.js');
-        const serviceWorker = readFileSync(serviceWorkerPath, 'utf8')
-          .replaceAll('__PRINTFARMER_BUILD_TIME__', buildTime)
-          .replaceAll('__PRINTFARMER_GIT_HASH__', gitHash);
-        writeFileSync(serviceWorkerPath, serviceWorker);
-      } catch { /* non-fatal: version.json is best-effort */ }
+      mkdirSync(outDir, { recursive: true });
+      writeFileSync(
+        resolve(outDir, 'version.json'),
+        JSON.stringify({ service: 'frontend', commit: gitHash, buildTime }, null, 2),
+      );
+      const serviceWorkerPath = resolve(outDir, 'sw.js');
+      const serviceWorker = readFileSync(serviceWorkerPath, 'utf8')
+        .replaceAll('__PRINTFARMER_BUILD_TIME__', buildTime)
+        .replaceAll('__PRINTFARMER_GIT_HASH__', gitHash);
+      writeFileSync(serviceWorkerPath, serviceWorker);
     },
   };
 }
@@ -143,8 +166,8 @@ const MANUAL_CHUNK_GROUPS: Array<[string, string[]]> = [
   ['vendor-datetime', ['date-fns']],
 ];
 
-export default defineConfig({
-  plugins: [react(), tsconfigPaths(), emitVersionJson()],
+const createConfig = (gitHash: string, buildTime: string) => ({
+  plugins: [react(), tsconfigPaths(), emitVersionJson(gitHash, buildTime)],
   logLevel: 'info', // Only show info and above; suppress debug/warnings
   resolve: {
     // Keep an explicit fallback alias mapping for environments where
@@ -261,3 +284,6 @@ export default defineConfig({
     ],
   },
 });
+
+export default defineConfig(({ command }) =>
+  createConfig(resolveGitHash(command), new Date().toISOString()));

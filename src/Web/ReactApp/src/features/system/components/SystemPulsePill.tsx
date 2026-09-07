@@ -347,14 +347,14 @@ export function SystemPulsePill({ onClick, className, compact = false }: SystemP
           size="sm"
           disabled={!usesExternalAction}
           onClick={onClick}
-          title={usesExternalAction ? 'View system status' : 'System status degraded — unable to reach health endpoint'}
+          title={usesExternalAction ? 'View system status' : 'Service health degraded — unable to reach the service health endpoint (system status degraded)'}
           className={clsx(
             'h-8 rounded-sm border text-[11px] font-semibold uppercase tracking-[0.18em]',
             compact ? 'px-2' : 'px-2.5',
             errorTone.buttonClassName,
             className,
           )}
-          aria-label={usesExternalAction ? 'System status degraded, view system status' : 'System status degraded'}
+          aria-label={usesExternalAction ? 'Service health unavailable, system status degraded, view system status' : 'Service health unavailable, system status degraded'}
         >
           <span className={clsx('flex items-center', compact ? 'gap-1.5' : 'gap-2')}>
             <span className={clsx('h-2.5 w-2.5 rounded-full', errorTone.dotClassName)} aria-hidden="true" />
@@ -390,7 +390,7 @@ export function SystemPulsePill({ onClick, className, compact = false }: SystemP
         aria-expanded={usesExternalAction ? undefined : isOpen}
         aria-haspopup={usesExternalAction ? undefined : 'dialog'}
         aria-controls={!usesExternalAction && isOpen ? dialogId : undefined}
-        title={usesExternalAction ? `View system status — ${tone.label}` : `System pulse — ${tone.label}`}
+        title={usesExternalAction ? `View system status — service health ${tone.label}` : `System pulse — service health ${tone.label}`}
         className={clsx(
           'h-8 rounded-sm border text-[11px] font-semibold uppercase tracking-[0.18em] transition-colors',
           compact ? 'px-2' : 'px-2.5',
@@ -408,7 +408,7 @@ export function SystemPulsePill({ onClick, className, compact = false }: SystemP
               though `compact` is a static prop tied to the mobile header
               instance, not to the actual rendered viewport width. */}
           <span className={compact ? 'sr-only md:not-sr-only' : undefined}>System</span>
-          <span className="sr-only">, {tone.label} health</span>
+          <span className="sr-only">, service health {tone.label}</span>
         </span>
       </Button>
 
@@ -436,7 +436,9 @@ export function SystemPulsePill({ onClick, className, compact = false }: SystemP
                   </h2>
                 </div>
                 <p className="mt-1 text-xs text-pf-text-secondary">
-                  Ambient farm health snapshot for host load and service versions.
+                  Service health, host load and service versions. Backend subsystem health
+                  checks are reported separately in the Admin Control Center, so the two can
+                  legitimately disagree.
                 </p>
               </div>
               <Button
@@ -480,7 +482,7 @@ export function SystemPulsePill({ onClick, className, compact = false }: SystemP
                   </span>
                   <div>
                     <p className="text-sm font-medium text-pf-text-primary">Service surface</p>
-                    <p className="text-xs text-pf-text-secondary">Worst state: {tone.label}</p>
+                    <p className="text-xs text-pf-text-secondary">Worst service health: {tone.label}</p>
                   </div>
                 </div>
                 <Badge variant={tone.badgeVariant}>{tone.label}</Badge>
