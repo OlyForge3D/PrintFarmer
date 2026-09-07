@@ -184,7 +184,7 @@ describe('AdminControlCenterPage', () => {
 
     const headings = screen.getAllByRole('heading');
     expect(headings.findIndex((heading) => heading.textContent === 'Needs attention')).toBeLessThan(
-      headings.findIndex((heading) => heading.textContent === 'System health'),
+      headings.findIndex((heading) => heading.textContent === 'System health checks'),
     );
     expect(screen.getByText(/Checked at/i)).toBeInTheDocument();
   });
@@ -218,8 +218,8 @@ describe('AdminControlCenterPage', () => {
 
     const overallBadge = screen.getByTestId('admin-hub-overall-status');
     expect(overallBadge).toHaveAttribute('data-overall-status', 'Degraded');
-    expect(within(overallBadge).getByText(/System Degraded/i)).toBeInTheDocument();
-    expect(within(overallBadge).queryByText(/System Healthy/i)).not.toBeInTheDocument();
+    expect(within(overallBadge).getByText(/Health checks: Degraded/i)).toBeInTheDocument();
+    expect(within(overallBadge).queryByText(/Health checks: Healthy/i)).not.toBeInTheDocument();
   });
 
   it('shows a healthy overall badge when every subsystem is healthy', async () => {
@@ -241,7 +241,38 @@ describe('AdminControlCenterPage', () => {
 
     const overallBadge = screen.getByTestId('admin-hub-overall-status');
     expect(overallBadge).toHaveAttribute('data-overall-status', 'Healthy');
-    expect(within(overallBadge).getByText(/System Healthy/i)).toBeInTheDocument();
+    expect(within(overallBadge).getByText(/Health checks: Healthy/i)).toBeInTheDocument();
+  });
+
+  /**
+   * #2517: the hub's health band and the header's System pill read different
+   * feeds — subsystem health checks (`/api/admin/overview`) versus service
+   * health (`/api/system/info`). Users were reading the two as contradicting
+   * each other. The band must therefore say which feed it speaks for and point
+   * at the other, so a disagreement reads as two domains rather than a bug.
+   */
+  it('states which health feed the band reports and names the other one', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-subsystems')).toBeInTheDocument();
+    });
+
+    expect(
+      screen.getByRole('heading', { name: 'System health checks' }),
+    ).toBeInTheDocument();
+
+    const domainNote = screen.getByTestId('admin-hub-health-domain');
+    expect(domainNote).toHaveTextContent(/admin overview/i);
+    expect(domainNote).toHaveTextContent(/System pill/i);
+    expect(domainNote).toHaveTextContent(/service health/i);
+
+    // The badge must not read as an unqualified whole-system verdict.
+    expect(screen.getByTestId('admin-hub-overall-status')).toHaveTextContent(
+      /^Health checks:/,
+    );
   });
 
   it('does not hardcode the four subsystems — renders whatever arrives (e.g. spoolman)', async () => {
@@ -320,7 +351,7 @@ describe('AdminControlCenterPage', () => {
       expect(screen.getByTestId('admin-hub-attention-clear')).toBeInTheDocument();
     });
     expect(screen.getByTestId('admin-hub-attention-clear')).toHaveTextContent(
-      'Nothing needs your attention — every subsystem is reporting healthy.',
+      'Nothing needs your attention — every subsystem health check is reporting healthy.',
     );
     // An all-clear must not be an illustrated empty state: it used to push the
     // destination grid down by 206px to report that nothing happened.
@@ -348,10 +379,10 @@ describe('AdminControlCenterPage', () => {
     });
 
     expect(screen.getByTestId('admin-hub-attention-clear')).toHaveTextContent(
-      'No attention items were reported. Review system health below for the current status.',
+      'The admin overview reported no attention items. Review the system health checks below for the current status.',
     );
     expect(screen.getByTestId('admin-hub-attention-clear')).not.toHaveTextContent(
-      'every subsystem is reporting healthy',
+      'every subsystem health check is reporting healthy',
     );
   });
 
@@ -367,7 +398,7 @@ describe('AdminControlCenterPage', () => {
     });
 
     expect(screen.getByTestId('admin-hub-attention-clear')).toHaveTextContent(
-      'No attention items were reported. Review system health below for the current status.',
+      'The admin overview reported no attention items. Review the system health checks below for the current status.',
     );
     expect(screen.getByRole('heading', { name: 'No subsystems reported' })).toBeInTheDocument();
   });
