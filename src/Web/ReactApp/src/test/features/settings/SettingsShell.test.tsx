@@ -31,6 +31,9 @@ vi.mock('@/features/notifications/pages/NotificationPreferencesPage', () => ({
   NotificationPreferencesPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="notification-preferences-page" data-embedded={String(embedded)}>Notification Preferences Page</div>,
 }));
 
+import { SettingsSaveRegistryContext } from '@/features/admin/settings/settingsSaveRegistry';
+import React, { useContext } from 'react';
+
 vi.mock('@/features/admin/pages/SettingsPage', () => ({
   SettingsPage: ({
     allowedGroups,
@@ -40,18 +43,34 @@ vi.mock('@/features/admin/pages/SettingsPage', () => ({
     allowedGroups?: string[];
     introText?: string;
     afterContent?: React.ReactNode;
-  }) => (
-    <div>
-      <div
-        data-testid="legacy-settings-page"
-        data-groups={allowedGroups?.join(',') ?? 'all'}
-        data-intro={introText ?? ''}
-      >
-        Legacy Settings Page
+  }) => {
+    const saveRegistry = useContext(SettingsSaveRegistryContext);
+    return (
+      <div>
+        <div
+          data-testid="legacy-settings-page"
+          data-groups={allowedGroups?.join(',') ?? 'all'}
+          data-intro={introText ?? ''}
+        >
+          Legacy Settings Page
+        </div>
+        <button
+          data-testid="make-dirty-btn"
+          onClick={() =>
+            saveRegistry?.registerSection({
+              id: 'test-section',
+              name: 'Test Section',
+              isDirty: true,
+              onSave: async () => {},
+            })
+          }
+        >
+          Make Dirty
+        </button>
+        {afterContent}
       </div>
-      {afterContent}
-    </div>
-  ),
+    );
+  },
 }));
 
 vi.mock('@/features/settings/components/IntegrationSettingsCards', () => ({
@@ -283,14 +302,13 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=profile');
   });
 
-  it('renders one flat nav listing every reachable category, with no scope switcher', () => {
+  it('renders user settings on /settings and grouped system destinations on /admin/settings', () => {
     setAuthRoles(['farm_admin']);
     renderSettings();
 
     const h1s = screen.getAllByRole('heading', { level: 1, name: 'User Settings' });
     expect(h1s.length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('heading', { level: 2, name: 'Profile' })).toBeInTheDocument();
-    expect(screen.queryByText('Configure your farm, hardware, and account')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Search settings/i })).toBeInTheDocument();
 
     // Scope is a property of a category, not a mode to enter first: no radiogroup,
@@ -298,14 +316,38 @@ describe('SettingsShell', () => {
     expect(screen.queryByRole('radiogroup', { name: 'Settings scopes' })).not.toBeInTheDocument();
     expect(screen.queryByRole('radio')).not.toBeInTheDocument();
 
-    // Every destination an admin can reach is visible at once, grouped by scope.
-    for (const label of ['User', 'System']) {
-      expect(screen.getAllByRole('heading', { level: 2, name: label }).length).toBeGreaterThanOrEqual(1);
-    }
-    for (const label of ['Profile', 'General', 'Slicing', 'Hardware', 'Integrations', 'Quotas', 'Users', 'Data']) {
-      expect(getCategoryButton(label)).toBeInTheDocument();
-    }
     expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('renders 8 display groups and direct-leaf destinations on /admin/settings', () => {
+    setAuthRoles(['farm_admin']);
+    renderSettings('/admin/settings?scope=system');
+
+    for (const groupLabel of [
+      'Farm',
+      'Printing & slicing',
+      'Hardware',
+      'Automation & costs',
+      'Integrations',
+      'People & access',
+      'Organization',
+      'System',
+    ]) {
+      expect(screen.getByText(groupLabel)).toBeInTheDocument();
+    }
+
+    for (const destLabel of [
+      'Farm Defaults',
+      'Quotas',
+      'Slicer Defaults',
+      'Printer Groups',
+      'Automation & Costs',
+      'User Accounts',
+      'System Config',
+    ]) {
+      expect(getCategoryButton(destLabel)).toBeInTheDocument();
+    }
+    expect(getCategoryButton('Farm Defaults')).toHaveAttribute('aria-current', 'page');
   });
 
   it('defaults to the User Settings profile category and preferences sub-page', () => {
@@ -315,18 +357,14 @@ describe('SettingsShell', () => {
     expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('switches scope in one click by picking a category from another scope', () => {
-    renderSettings();
+  it('switches to system scope when picking a system destination', () => {
+    renderSettings('/admin/settings?scope=system&tab=farm');
 
-    // Used to take two clicks: pick the System scope, then pick General.
-    fireEvent.click(getCategoryButton('General'));
-
-    expect(getCategoryButton('General')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('heading', { level: 2, name: 'General' })).toHaveFocus();
+    expect(getCategoryButton('Farm Defaults')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'General');
-    expect(screen.getByTestId('farm-settings-section')).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=farm');
   });
 
   it('opens Notifications from its canonical User Settings URL', () => {
@@ -340,12 +378,12 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=notifications');
   });
 
-  it('opens accounts inside the combined configuration workspace', () => {
-    renderSettings('/admin/settings?scope=system&tab=users&sub=accounts');
-    expect(getCategoryButton('Users')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('tab', { name: 'User Accounts' })).toHaveAttribute('aria-selected', 'true');
+  it('opens accounts inside the single-pane configuration workspace', () => {
+    renderSettings('/admin/settings?scope=system&tab=users');
+    expect(getCategoryButton('User Accounts')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('accounts-editor')).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
-    expect(screen.queryByRole('button', { name: 'Operations' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
   });
 
   it('renders passkeys from the existing profile page inside User Settings', () => {
@@ -389,14 +427,12 @@ describe('SettingsShell', () => {
     expect(toast.info).not.toHaveBeenCalled();
   });
 
-  it('filters across scopes and lands on Slicing when searching for slicer', () => {
-    renderSettings('/settings?q=slicer');
+  it('filters destinations and lands on Slicing & profiles when searching for slicer on admin settings', () => {
+    renderSettings('/admin/settings?q=slicer');
 
-    expect(getCategoryButton(/^Slicing/)).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('tab', { name: /^Slicer Profiles/ })).toHaveAttribute('aria-selected', 'true');
+    expect(getCategoryButton('Slicer Defaults')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=slicing');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=profiles');
   });
 
   it('shows empty state when no categories match search', () => {
@@ -413,19 +449,14 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
   });
 
-  it('scopes the nav to farm-wide categories when the route locks the scope', () => {
-    renderSettings('/settings?scope=system');
+  it('renders system display groups and direct-leaf destinations on /admin/settings?scope=system', () => {
+    renderSettings('/admin/settings?scope=system');
 
-    expect(getCategoryButton('General')).toBeInTheDocument();
-    expect(getCategoryButton('Slicing')).toBeInTheDocument();
-    expect(getCategoryButton('Hardware')).toBeInTheDocument();
-    expect(getCategoryButton('Integrations')).toBeInTheDocument();
-    expect(getCategoryButton('Quotas')).toBeInTheDocument();
-
-    // `?scope=system` on /settings is a soft preference, not a route lock — an
-    // admin can still reach the other scopes from the same nav.
-    expect(getCategoryButton('Profile')).toBeInTheDocument();
-    expect(getCategoryButton('Users')).toBeInTheDocument();
+    expect(getCategoryButton('Farm Defaults')).toBeInTheDocument();
+    expect(getCategoryButton('Slicer Defaults')).toBeInTheDocument();
+    expect(getCategoryButton('Printer Groups')).toBeInTheDocument();
+    expect(getCategoryButton('Automation & Costs')).toBeInTheDocument();
+    expect(getCategoryButton('User Accounts')).toBeInTheDocument();
   });
 
   it('hides scopes the user cannot reach', () => {
@@ -440,41 +471,32 @@ describe('SettingsShell', () => {
     expect(screen.queryByRole('heading', { level: 2, name: 'User' })).not.toBeInTheDocument();
   });
 
-  it('opens Slicing on the defaults sub-page inside System Settings', () => {
-    renderSettings('/settings?scope=system&tab=slicing');
+  it('opens Slicing & profiles destination inside System Settings', () => {
+    renderSettings('/admin/settings?scope=system&tab=slicing');
 
-    expect(getCategoryButton('Slicing')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('tab', { name: 'Defaults' })).toHaveAttribute('aria-selected', 'true');
+    expect(getCategoryButton('Slicer Defaults')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'Slicing');
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=slicing');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=defaults');
   });
 
-  it('deep-links to hardware printer groups and renders the mapped page', () => {
-    renderSettings('/settings?scope=system&tab=hardware&sub=printer-groups');
-    expect(getCategoryButton('Hardware')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('tab', { name: 'Printer Groups' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTestId('printer-groups-page')).toHaveAttribute('data-embedded', 'true');
+  it('deep-links to printers under hardware display group and renders the mapped page', () => {
+    renderSettings('/admin/settings?scope=system&tab=printers');
+    expect(getCategoryButton('Printer Groups')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('printer-groups-page')).toBeInTheDocument();
   });
 
-  it('lets a custom (non-farm_admin) role granted only printers:admin reach system scope and that one tab', () => {
-    // #1457 acceptance criterion: a user with a custom role granted a single
-    // resource permission (not the farm_admin role) must actually reach the
-    // matching admin destination, not merely see a nav entry that dead-ends.
+  it('lets a custom (non-farm_admin) role granted only printers:admin reach system scope and the printers destination', () => {
     setAuthRoles(['farm_user']);
     authState.permissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
-    renderSettings('/admin/settings?scope=system&tab=hardware&sub=printer-groups');
+    renderSettings('/admin/settings?scope=system&tab=printers');
 
-    expect(getCategoryButton('Hardware')).toHaveAttribute('aria-current', 'page');
+    expect(getCategoryButton('Printer Groups')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByTestId('printer-groups-page')).toBeInTheDocument();
     expect(screen.queryByText(/don't have permission to view/i)).not.toBeInTheDocument();
   });
 
   it('denies a custom (non-farm_admin) role a specific tab it lacks the requiredPermission for', () => {
-    // Same custom role as above (printers:admin only) is still refused the
-    // Cameras sub-page, which requires cameras:admin — proving
-    // canAccessDestination's per-tab gate, not just the coarser scope gate.
     setAuthRoles(['farm_user']);
     authState.permissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
     renderSettings('/admin/settings?scope=system&tab=hardware&sub=cameras');
@@ -483,92 +505,52 @@ describe('SettingsShell', () => {
     expect(screen.queryByTestId('printer-groups-page')).not.toBeInTheDocument();
   });
 
-  it('hides Hardware sub-tabs the user cannot access, showing only the ones their permission unlocks (#1457, Hicks review)', () => {
-    // A user with printers:admin and nfc_devices:admin reaches Printer
-    // Groups, NFC Devices, and NFC Bindings. Before this fix, SettingsSubTabs
-    // rendered every Hardware sub-page (including Cameras and Custom Fields)
-    // regardless of permission, and the user only learned they lacked access
-    // after clicking one. The sub-tab bar itself must now only list what
-    // canAccessSettingsTab allows.
-    setAuthRoles(['farm_user']);
-    authState.permissionOverride = (resource, action) =>
-      (resource === 'printers' || resource === 'nfc_devices') && action === 'admin';
-    renderSettings('/admin/settings?scope=system&tab=hardware&sub=printer-groups');
-
-    expect(screen.getByRole('tab', { name: /^Printer Groups/ })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /^NFC Devices/ })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /^NFC Bindings/ })).toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: /^Cameras/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: /^Custom Fields/ })).not.toBeInTheDocument();
-  });
-
-
-  it('hides an entire settings category from the sidebar when none of its tabs are reachable (#1457, Hicks review)', () => {
-    // Integrations' only sub-page (`connections`) is gated by
-    // requiredPermissionAnyOf (spoolman/home_assistant/telegram admin). A user
-    // with only printers:admin holds none of those, so the whole Integrations
-    // category must disappear from the sidebar rather than appear and dead-end.
+  it('hides sidebar destinations the user cannot access, showing only unlocked ones', () => {
     setAuthRoles(['farm_user']);
     authState.permissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
-    renderSettings('/admin/settings?scope=system&tab=hardware&sub=printer-groups');
+    renderSettings('/admin/settings?scope=system&tab=printers');
 
-    expect(screen.queryByRole('button', { name: /^Integrations/ })).not.toBeInTheDocument();
+    expect(getCategoryButton('Printer Groups')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Home Assistant' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Telegram' })).not.toBeInTheDocument();
   });
 
-  it('lands a partial-permission user on their first reachable category, not the hardcoded scope default, on a bare tab-less URL (#1457 round-3, Hicks review)', () => {
-    // Before this fix, a bare `/admin/settings` (no `?tab=`) always resolved
-    // to the system scope's hardcoded default category (`general`), which
-    // requires system_settings:admin. A user with only printers:admin can
-    // reach the system scope at all (via Hardware/Printer Groups) but landed
-    // on General anyway and was immediately denied -- the same "reachable
-    // nav, denied content" bug the round-2 fix eliminated for explicit nav
-    // clicks, just reintroduced via the no-tab-param path. The fallback must
-    // pick the first category this user can actually reach (Hardware) instead.
+  it('lands a partial-permission user on their first reachable destination on a bare URL', () => {
     setAuthRoles(['farm_user']);
     authState.permissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
     renderSettings('/admin/settings?scope=system');
 
-    expect(getCategoryButton('Hardware')).toHaveAttribute('aria-current', 'page');
+    expect(getCategoryButton('Printer Groups')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByTestId('printer-groups-page')).toBeInTheDocument();
     expect(screen.queryByText(/don't have permission to view/i)).not.toBeInTheDocument();
   });
 
-  it('shows the Integrations category and its connections tab once the user holds any one of the bundled permissions (#1457)', () => {
-    // Mirrors the `requiredPermissionAnyOf` OR semantics: telegram:admin alone
-    // is enough to unlock `connections`, even without spoolman or
-    // home_assistant admin.
+  it('shows Integrations destinations once the user holds any required permission', () => {
     setAuthRoles(['farm_user']);
     authState.permissionOverride = (resource, action) => resource === 'telegram' && action === 'admin';
-    renderSettings('/admin/settings?scope=system&tab=integrations&sub=connections');
+    renderSettings('/admin/settings?scope=system&tab=telegram');
 
-    expect(getCategoryButton('Integrations')).toHaveAttribute('aria-current', 'page');
+    expect(getCategoryButton('External Services')).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByText(/don't have permission to view/i)).not.toBeInTheDocument();
   });
 
-  it('matches hardware sub-pages in search results', () => {
-    renderSettings('/settings?q= binding ');
-    expect(getCategoryButton(/^Hardware/)).toHaveAttribute('aria-current', 'page');
-    expect(screen.queryByRole('tab', { name: 'Locations' })).not.toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /^NFC Bindings/ })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTestId('nfc-bindings-page')).toHaveAttribute('data-embedded', 'true');
+  it('matches hardware destinations in search results', () => {
+    renderSettings('/admin/settings?q=Printers');
+    expect(getCategoryButton('Printer Groups')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=hardware');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=nfc-bindings');
   });
 
-  it('keeps category-level searches scoped to system settings', () => {
-    renderSettings('/settings?q=hardware');
-    expect(getCategoryButton('Hardware')).toHaveAttribute('aria-current', 'page');
+  it('keeps destination searches scoped to system settings', () => {
+    renderSettings('/admin/settings?q=hardware');
+    expect(getCategoryButton('Printer Groups')).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=hardware');
   });
 
-  it('normalizes stale or incomplete system sub-page params to the rendered destination', () => {
-    renderSettings('/settings?tab=hardware&sub=not-real');
-    expect(getCategoryButton('Hardware')).toHaveAttribute('aria-current', 'page');
+  it('renders direct-leaf destination for system scope', () => {
+    renderSettings('/admin/settings?scope=system&tab=users');
+    expect(getCategoryButton('User Accounts')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=hardware');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=cameras');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=users');
   });
 
   it('normalizes an invalid scope on personal settings', async () => {
@@ -651,6 +633,62 @@ describe('SettingsShell', () => {
     await waitFor(() => {
       expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/login-audit');
     });
+  });
+
+  it('intercepts navigation with Stay/Discard decision modal when a section is dirty', () => {
+    setAuthRoles(['farm_admin']);
+    renderSettings('/admin/settings?scope=system');
+
+    // Currently on Farm Defaults
+    expect(getCategoryButton('Farm Defaults')).toHaveAttribute('aria-current', 'page');
+
+    // Register a dirty section via mock button
+    fireEvent.click(screen.getByTestId('make-dirty-btn'));
+
+    // Attempt to navigate to Quotas
+    fireEvent.click(getCategoryButton('Quotas'));
+
+    // Modal opens asking whether to stay or discard
+    expect(screen.getByRole('dialog', { name: 'Unsaved Changes' })).toBeInTheDocument();
+    expect(screen.getByText(/You have unsaved changes/i)).toBeInTheDocument();
+
+    // Click Stay
+    fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
+
+    // Modal closes and user remains on Farm Defaults
+    expect(screen.queryByRole('dialog', { name: 'Unsaved Changes' })).not.toBeInTheDocument();
+    expect(getCategoryButton('Farm Defaults')).toHaveAttribute('aria-current', 'page');
+
+    // Attempt to navigate to Quotas again
+    fireEvent.click(getCategoryButton('Quotas'));
+    expect(screen.getByRole('dialog', { name: 'Unsaved Changes' })).toBeInTheDocument();
+
+    // Click Discard Changes
+    fireEvent.click(screen.getByRole('button', { name: 'Discard Changes' }));
+
+    // Navigation proceeds to Quotas
+    expect(screen.queryByRole('dialog', { name: 'Unsaved Changes' })).not.toBeInTheDocument();
+    expect(getCategoryButton('Quotas')).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('opens mobile navigation selector and restores focus on Escape key', async () => {
+    setAuthRoles(['farm_admin']);
+    renderSettings('/admin/settings?scope=system');
+
+    const mobileToggle = screen.getByRole('button', { name: /Settings section: Farm Defaults/i });
+    expect(mobileToggle).toHaveAttribute('aria-expanded', 'false');
+
+    mobileToggle.focus();
+    fireEvent.click(mobileToggle);
+
+    expect(mobileToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('navigation', { name: 'Settings categories' })).toBeInTheDocument();
+
+    // Press Escape to close mobile selector and restore focus
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(mobileToggle).toHaveAttribute('aria-expanded', 'false');
+    await waitFor(() => expect(mobileToggle).toHaveFocus());
   });
 });
 

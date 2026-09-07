@@ -399,7 +399,7 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     // Backed by PrinterGroupsController, which uses the `printers` resource, not `printer_groups`.
     requiredRole: null,
     requiredPermission: { resource: 'printers', action: 'admin' },
-    keywords: ['printer', 'group', 'grouping', 'cluster'],
+    keywords: ['printer', 'printers', 'hardware', 'group', 'grouping', 'cluster'],
     isHubTile: true,
   },
   {
@@ -856,6 +856,29 @@ export function getHubGroupedDestinations(access: AdminDestinationAccess): {
     .map((group) => ({
       group,
       destinations: hubDestinations.filter((destination) => destination.group === group.id),
+    }))
+    .filter((entry) => entry.destinations.length > 0);
+}
+
+/**
+ * Get the configuration destinations grouped for Admin Settings navigation.
+ *
+ * Each entry is a `{ group, destinations }` tuple in the canonical display order
+ * defined by `SETTINGS_DISPLAY_GROUPS` (Farm, Printing & slicing, Hardware,
+ * Automation & costs, Integrations, People & access, Organization, System).
+ * Groups with no accessible configuration destinations for the user are omitted.
+ */
+export function getSettingsGroupedDestinations(access: AdminDestinationAccess): {
+  group: (typeof SETTINGS_DISPLAY_GROUPS)[number];
+  destinations: AdminDestination[];
+}[] {
+  const accessible = filterDestinationsByAccess(ADMIN_DESTINATIONS, access);
+  const configDestinations = accessible.filter((destination) => destination.settingsGroup !== undefined);
+
+  return SETTINGS_DISPLAY_GROUPS
+    .map((group) => ({
+      group,
+      destinations: configDestinations.filter((destination) => destination.settingsGroup === group.id),
     }))
     .filter((entry) => entry.destinations.length > 0);
 }

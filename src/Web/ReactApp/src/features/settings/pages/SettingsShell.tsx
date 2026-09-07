@@ -1,6 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
+import {
+  SettingsSaveRegistryContext,
+  type GroupDirtySummary,
+  type GroupSaveActions,
+  type RegisteredSection,
+} from '@/features/admin/settings/settingsSaveRegistry';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import {
   ADMIN_HUB_PARENT,
@@ -299,55 +306,169 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const shouldFocusSectionRef = useRef(false);
   const previousRenderedKeyRef = useRef<string | null>(null);
 
-  const handleCategoryChange = useCallback(
-    (categoryId: string) => {
-      const target = resolveSettingsNavigationTarget(categoryId, undefined, activeScope);
-      const targetCategory = accessibleCategories.find((category) => category.id === target.categoryId);
-      shouldFocusSectionRef.current = true;
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('scope', target.scopeId);
-        next.set('tab', target.categoryId);
-        next.delete('q');
-        next.delete('workerTab');
+  // ── Save Registry & Draft Safety ───────────────────────────────────────────
+  const [dirtyByGroup, setDirtyByGroup] = useState<Record<string, GroupDirtySummary>>({});
+  const [registeredSections, setRegisteredSections] = useState<Record<string, RegisteredSection>>({});
+  const groupActionsRef = useRef(new Map<string, GroupSaveActions>());
+  const registeredSectionsRef = useRef(new Map<string, RegisteredSection>());
 
-        const matchingTargetSubPage = !normalizedQuery || !targetCategory
-          ? undefined
-          : targetCategory.subPages.find((subPage) => (
-              subPage.label.toLowerCase().includes(normalizedQuery)
-              || subPage.keywords.some((keyword) => keyword.includes(normalizedQuery))
-            ));
+  const [showDraftModal, setShowDraftModal] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<(() => void) | null>(null);
 
-        if (matchingTargetSubPage) {
-          next.set('sub', matchingTargetSubPage.id);
-        } else {
-          const defaultSubPage = targetCategory?.subPages[0]?.id;
-          if (defaultSubPage) {
-            next.set('sub', defaultSubPage);
-          } else {
-            next.delete('sub');
-          }
-        }
+  const isDirty = useMemo(
+    () => Object.keys(dirtyByGroup).length > 0 || Object.values(registeredSections).some((s) => s.isDirty),
+    [dirtyByGroup, registeredSections],
+  );
 
+  const publishSummary = useCallback((group: string, summary: GroupDirtySummary | null) => {
+    setDirtyByGroup((prev) => {
+      if (!summary) {
+        if (!prev[group]) return prev;
+        const next = { ...prev };
+        delete next[group];
+        return next;
+      }
+      return { ...prev, [group]: summary };
+    });
+  }, []);
+
+  const publishIssues = useCallback(() => {}, []);
+
+  const registerActions = useCallback((group: string, actions: GroupSaveActions | null) => {
+    if (actions) {
+      groupActionsRef.current.set(group, actions);
+    } else {
+      groupActionsRef.current.delete(group);
+    }
+  }, []);
+
+  const registerSection = useCallback((section: RegisteredSection | null) => {
+    if (section) {
+      registeredSectionsRef.current.set(section.id, section);
+      setRegisteredSections((prev) => ({ ...prev, [section.id]: section }));
+    } else if (section?.id) {
+      registeredSectionsRef.current.delete(section.id);
+      setRegisteredSections((prev) => {
+        const next = { ...prev };
+        delete next[section.id];
         return next;
       });
+    }
+  }, []);
+
+  const saveRegistry = useMemo(
+    () => ({ publishSummary, publishIssues, registerActions, registerSection }),
+    [publishSummary, publishIssues, registerActions, registerSection],
+  );
+
+  const handleDiscardAll = useCallback(() => {
+    for (const actions of groupActionsRef.current.values()) {
+      actions.discard();
+    }
+    for (const section of registeredSectionsRef.current.values()) {
+      section.onDiscard?.();
+    }
+    setDirtyByGroup({});
+    setRegisteredSections({});
+    registeredSectionsRef.current.clear();
+  }, []);
+
+  const handleStay = useCallback(() => {
+    setShowDraftModal(false);
+    setPendingNavigation(null);
+  }, []);
+
+  const handleDiscardAndNavigate = useCallback(() => {
+    setShowDraftModal(false);
+    handleDiscardAll();
+    if (pendingNavigation) {
+      pendingNavigation();
+    }
+    setPendingNavigation(null);
+  }, [handleDiscardAll, pendingNavigation]);
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isDirty]);
+
+  const handleCategoryChange = useCallback(
+    (categoryId: string, explicitSubPageId?: string) => {
+      const doNavigate = () => {
+        const target = resolveSettingsNavigationTarget(categoryId, explicitSubPageId, activeScope);
+        const targetCategory = accessibleCategories.find((category) => category.id === target.categoryId);
+        shouldFocusSectionRef.current = true;
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('scope', target.scopeId);
+          next.set('tab', target.categoryId);
+          next.delete('q');
+          next.delete('workerTab');
+
+          const subToUse = explicitSubPageId ?? target.subPageId;
+          if (subToUse) {
+            next.set('sub', subToUse);
+          } else {
+            const matchingTargetSubPage = !normalizedQuery || !targetCategory
+              ? undefined
+              : targetCategory.subPages.find((subPage) => (
+                  subPage.label.toLowerCase().includes(normalizedQuery)
+                  || subPage.keywords.some((keyword) => keyword.includes(normalizedQuery))
+                ));
+
+            if (matchingTargetSubPage) {
+              next.set('sub', matchingTargetSubPage.id);
+            } else {
+              const defaultSubPage = targetCategory?.subPages[0]?.id;
+              if (defaultSubPage) {
+                next.set('sub', defaultSubPage);
+              } else {
+                next.delete('sub');
+              }
+            }
+          }
+
+          return next;
+        });
+      };
+
+      if (isDirty) {
+        setPendingNavigation(() => doNavigate);
+        setShowDraftModal(true);
+      } else {
+        doNavigate();
+      }
     },
-    [accessibleCategories, activeScope, normalizedQuery, setSearchParams],
+    [accessibleCategories, activeScope, isDirty, normalizedQuery, setSearchParams],
   );
 
   const handleSubPageChange = useCallback(
     (subPageId: string) => {
-      shouldFocusSectionRef.current = true;
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('scope', activeScope);
-        next.set('tab', activeCategory);
-        next.set('sub', subPageId);
-        next.delete('q');
-        return next;
-      });
+      const doNavigate = () => {
+        shouldFocusSectionRef.current = true;
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('scope', activeScope);
+          next.set('tab', activeCategory);
+          next.set('sub', subPageId);
+          next.delete('q');
+          return next;
+        });
+      };
+
+      if (isDirty) {
+        setPendingNavigation(() => doNavigate);
+        setShowDraftModal(true);
+      } else {
+        doNavigate();
+      }
     },
-    [activeCategory, activeScope, setSearchParams],
+    [activeCategory, activeScope, isDirty, setSearchParams],
   );
 
   const { matchingCategoryIds, matchingSubPageIds, firstMatchingSubPageCategoryId, isFiltering } = useMemo(() => {
@@ -491,13 +612,30 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return '';
     }
 
-    const requestedTargetSubPage = resolvedRequestedTarget.categoryId === currentCategory.id
-      ? requestedSubPage
-      : undefined;
-    const requestedSubPageIsValid = requestedSubPage && requestedTargetSubPage
-      && currentCategory.subPages.some((subPage) => subPage.id === requestedTargetSubPage);
+    const accessibleSubPages = accessibleCategories
+      .find((category) => category.id === currentCategory.id)
+      ?.subPages ?? [];
 
-    if (requestedSubPageIsValid) {
+    const isExplicitSubPage = Boolean(requestedSubPage);
+    const requestedTargetSubPage = resolvedRequestedTarget.categoryId === currentCategory.id
+      ? (requestedSubPage ?? resolvedRequestedTarget.subPageId)
+      : undefined;
+
+    const isAccessibleSubPage = requestedTargetSubPage
+      ? accessibleSubPages.some((subPage) => subPage.id === requestedTargetSubPage)
+      : false;
+
+    const isValidSubPage = requestedTargetSubPage
+      ? currentCategory.subPages.some((subPage) => subPage.id === requestedTargetSubPage)
+      : false;
+
+    // If an explicit ?sub= param was in the URL, honour it if valid (even if inaccessible,
+    // so canAccessActiveTab shows permission denied). If no explicit ?sub= was in the URL,
+    // only use the target sub-page if it is accessible to this user; otherwise fall back
+    // to the first accessible sub-page.
+    const canUseRequestedSubPage = requestedTargetSubPage && (isExplicitSubPage ? isValidSubPage : isAccessibleSubPage);
+
+    if (canUseRequestedSubPage && requestedTargetSubPage) {
       if (!isFiltering || matchingCurrentSubPageIds.length === 0 || matchingCurrentSubPageIds.includes(requestedTargetSubPage)) {
         return requestedTargetSubPage;
       }
@@ -507,21 +645,10 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return matchingCurrentSubPageIds[0];
     }
 
-    // Issue 1457 (Hicks round-3 review) — same bare-URL gap as `activeCategory`
-    // above: getDefaultSubPage() picks the category's first-defined sub-page
-    // regardless of permission, so landing on a tab with no explicit `?sub=`
-    // (e.g. `?tab=hardware` alone) could default to a sub-page this user
-    // can't reach and immediately show the "you don't have permission"
-    // screen. Prefer the first sub-page `accessibleCategories` says this user
-    // can reach; only fall back to the unfiltered default if the category
-    // isn't in `accessibleCategories` at all (shouldn't happen for a category
-    // the user is currently viewing) or has no accessible sub-pages.
-    const firstAccessibleSubPage = accessibleCategories
-      .find((category) => category.id === currentCategory.id)
-      ?.subPages[0]?.id;
+    const firstAccessibleSubPage = accessibleSubPages[0]?.id;
 
     return firstAccessibleSubPage ?? getDefaultSubPage(currentCategory.id);
-  }, [accessibleCategories, currentCategory, isFiltering, matchingCurrentSubPageIds, requestedSubPage, resolvedRequestedTarget.categoryId]);
+  }, [accessibleCategories, currentCategory, isFiltering, matchingCurrentSubPageIds, requestedSubPage, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId]);
 
   const hasSubTabs = accessibleCategories.length > 0 && currentCategory.subPages.length >= 2;
   const renderedContentKey = currentCategory.subPages.length === 0
@@ -742,8 +869,8 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     </div>
   );
 
-  const subTabs =
-    !hasNoMatches && visibleSubPages.length > 0 ? (
+  const showSubTabs = !isAdminRoute && effectiveScope !== 'system' && !hasNoMatches && visibleSubPages.length > 0;
+  const subTabs = showSubTabs ? (
       <div className="border-b border-pf-border px-4 pt-4 md:px-6">
         <SettingsSubTabs
           subPages={visibleSubPages}
@@ -758,122 +885,108 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     ) : null;
 
   return (
-    <SettingsHeaderSlotContext.Provider value={headerSlot}>
-      <SettingsFooterSlotContext.Provider value={footerSlot}>
-      <PageTemplate
-        title={pageTitle}
-        subtitle={pageDescription}
-        showHeader
-        fill
-        parent={isAdminRoute ? ADMIN_HUB_PARENT : undefined}
-        actions={headerActions}
-      >
-        {isAdminRoute && standaloneDestinations.length > 0 && (
-          <nav aria-label="Standalone configuration" className="flex flex-wrap gap-3 pb-4">
-            {standaloneDestinations.map((destination) => (
-              <Link
-                key={destination.id}
-                to={destination.path}
-                className="rounded-md border border-pf-border px-3 py-2 text-sm text-pf-text-primary hover:bg-pf-bg-1 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
-              >
-                {destination.label}
-              </Link>
-            ))}
-          </nav>
-        )}
-        <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-md border border-pf-border bg-pf-panel">
-          <div className="relative flex min-h-0 flex-1 flex-col">
-          {hasNoMatches ? (
-            <div className="relative flex flex-1 min-h-0 flex-col">
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                <div className="flex min-h-[60%] items-center justify-center px-4 py-10 md:px-6">
-                  <div className="mx-auto max-w-md rounded-md border border-dashed border-pf-border bg-pf-bg-1 px-6 py-10 text-center">
-                    <p className="text-sm font-medium text-pf-text-primary">No matching settings</p>
-                    <p className="mt-2 text-sm text-pf-text-secondary">
-                      We couldn&apos;t find anything for &ldquo;{query}&rdquo;. Try a broader term like hardware, theme, or users.
+    <SettingsSaveRegistryContext.Provider value={saveRegistry}>
+      <SettingsHeaderSlotContext.Provider value={headerSlot}>
+        <SettingsFooterSlotContext.Provider value={footerSlot}>
+          <PageTemplate
+            title={pageTitle}
+            subtitle={pageDescription}
+            showHeader
+            fill
+            parent={isAdminRoute ? ADMIN_HUB_PARENT : undefined}
+            actions={headerActions}
+          >
+            {isAdminRoute && standaloneDestinations.length > 0 && (
+              <nav aria-label="Standalone configuration" className="flex flex-wrap gap-3 pb-4">
+                {standaloneDestinations.map((destination) => (
+                  <Link
+                    key={destination.id}
+                    to={destination.path}
+                    className="rounded-md border border-pf-border px-3 py-2 text-sm text-pf-text-primary hover:bg-pf-bg-1 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
+                  >
+                    {destination.label}
+                  </Link>
+                ))}
+              </nav>
+            )}
+            <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-md border border-pf-border bg-pf-panel">
+              <div className="relative flex min-h-0 flex-1 flex-col">
+              {hasNoMatches ? (
+                <div className="relative flex flex-1 min-h-0 flex-col">
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                    <div className="flex min-h-[60%] items-center justify-center px-4 py-10 md:px-6">
+                      <div className="mx-auto max-w-md rounded-md border border-dashed border-pf-border bg-pf-bg-1 px-6 py-10 text-center">
+                        <p className="text-sm font-medium text-pf-text-primary">No matching settings</p>
+                        <p className="mt-2 text-sm text-pf-text-secondary">
+                          We couldn&apos;t find anything for &ldquo;{query}&rdquo;. Try a broader term like hardware, theme, or users.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-1 min-h-0 flex-col md:grid md:grid-cols-[13.5rem_minmax(0,1fr)]">
+                  <SettingsSidebar
+                    categories={accessibleCategories}
+                    activeScope={effectiveScope}
+                    activeCategory={effectiveCategory}
+                    activeSubPage={activeSubPage}
+                    availableScopes={availableScopes}
+                    onCategoryChange={handleCategoryChange}
+                    destinationAccess={destinationAccess}
+                    matchingCategoryIds={matchingCategoryIds}
+                    isFiltering={isFiltering}
+                    searchQuery={query}
+                  />
+
+                  <div className="relative flex min-h-0 flex-1 flex-col border-t border-pf-border md:border-t-0 md:border-l md:border-pf-border">
+                    <p className="sr-only" aria-live="polite">
+                      {sectionAnnouncement}
                     </p>
+
+                    <div className="pf-settings-scroll-pane min-h-0 flex-1 overflow-y-auto overscroll-contain">
+                      {subTabs}
+                      <div className="px-4 pb-10 pt-5 md:px-6 md:pb-12 md:pt-6">
+                        <h2
+                          id="settings-content-heading"
+                          ref={sectionHeadingRef}
+                          tabIndex={-1}
+                          className="sr-only focus-visible:not-sr-only focus-visible:mb-4 focus-visible:block focus-visible:w-fit focus-visible:rounded-md focus-visible:text-xl focus-visible:leading-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
+                        >
+                          {isAdminRoute && accessibleCategories.length === 0 ? 'Configuration' : currentCategory.label}
+                        </h2>
+
+                        <SettingsContentTransition key={renderedContentKey} className="relative">
+                          {hasSubTabs ? (
+                            <section role="tabpanel" id={`panel-${activeSubPage}`} aria-labelledby={`tab-${activeSubPage}`}>
+                              {content}
+                            </section>
+                          ) : (
+                            <section aria-labelledby="settings-content-heading">{content}</section>
+                          )}
+                        </SettingsContentTransition>
+                      </div>
+                    </div>
+
+                    <div ref={setFooterSlot} className="shrink-0 empty:hidden" />
                   </div>
                 </div>
+              )}
               </div>
             </div>
-          ) : (
-            <div className="flex flex-1 min-h-0 flex-col md:grid md:grid-cols-[13.5rem_minmax(0,1fr)]">
-              <SettingsSidebar
-                categories={accessibleCategories}
-                activeScope={effectiveScope}
-                activeCategory={effectiveCategory}
-                availableScopes={availableScopes}
-                onCategoryChange={handleCategoryChange}
-                matchingCategoryIds={matchingCategoryIds}
-                isFiltering={isFiltering}
-                searchQuery={query}
-              />
-
-              <div className="relative flex min-h-0 flex-1 flex-col border-t border-pf-border md:border-t-0 md:border-l md:border-pf-border">
-                <p className="sr-only" aria-live="polite">
-                  {sectionAnnouncement}
-                </p>
-
-                <div className="pf-settings-scroll-pane min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                  {subTabs}
-                  <div className="px-4 pb-10 pt-5 md:px-6 md:pb-12 md:pt-6">
-                    {/* Visually redundant: the category name is already the
-                        highlighted rail item two inches to the left, under a
-                        page H1 that names the scope it belongs to. Rendering it
-                        a third time made the content pane open with two stacked
-                        titles before any setting. The proposal's settings
-                        screen goes rail → tabs → bands with no category heading
-                        at all.
-
-                        The element stays in the tree because `aria-labelledby`
-                        and the section-change focus target both point at it,
-                        and it un-hides on `:focus-visible` — not `:focus`.
-                        That distinction is the whole behaviour: the effect
-                        above calls `.focus()` on every category change,
-                        including mouse clicks, so `:focus` would put the 20px
-                        heading straight back where this commit removed it and
-                        then yank the pane up 44px when focus left. On a
-                        programmatically focused `tabindex="-1"` element,
-                        `:focus-visible` matches only when the preceding
-                        interaction was a keypress — exactly the user who needs
-                        to see where focus landed. It also keeps the reveal and
-                        the focus ring on one pseudo-class instead of showing
-                        the heading with no ring on a click. */}
-                    <h2
-                      id="settings-content-heading"
-                      ref={sectionHeadingRef}
-                      tabIndex={-1}
-                      className="sr-only focus-visible:not-sr-only focus-visible:mb-4 focus-visible:block focus-visible:w-fit focus-visible:rounded-md focus-visible:text-xl focus-visible:leading-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
-                    >
-                      {isAdminRoute && accessibleCategories.length === 0 ? 'Configuration' : currentCategory.label}
-                    </h2>
-
-                    <SettingsContentTransition key={renderedContentKey} className="relative">
-                      {hasSubTabs ? (
-                        <section role="tabpanel" id={`panel-${activeSubPage}`} aria-labelledby={`tab-${activeSubPage}`}>
-                          {content}
-                        </section>
-                      ) : (
-                        <section aria-labelledby="settings-content-heading">{content}</section>
-                      )}
-                    </SettingsContentTransition>
-                  </div>
-                </div>
-
-                {/* Docked below the scrollport, not inside it. See
-                    settingsFooterSlotContext for why sticky could never work
-                    here: the pane above is the scrollport, so a bar inside it
-                    is bound by the scrolled content, not the viewport.
-                    `shrink-0` keeps the bar at its natural height while the
-                    pane absorbs the remaining space. */}
-                <div ref={setFooterSlot} className="shrink-0 empty:hidden" />
-              </div>
-            </div>
-          )}
-          </div>
-        </div>
-      </PageTemplate>
-      </SettingsFooterSlotContext.Provider>
-    </SettingsHeaderSlotContext.Provider>
+          </PageTemplate>
+          <ConfirmationModal
+            isOpen={showDraftModal}
+            onCancel={handleStay}
+            onConfirm={handleDiscardAndNavigate}
+            title="Unsaved Changes"
+            message="You have unsaved changes. Do you want to stay on this page or discard your changes?"
+            cancelButtonText="Stay"
+            confirmButtonText="Discard Changes"
+            isDangerous
+          />
+        </SettingsFooterSlotContext.Provider>
+      </SettingsHeaderSlotContext.Provider>
+    </SettingsSaveRegistryContext.Provider>
   );
 };

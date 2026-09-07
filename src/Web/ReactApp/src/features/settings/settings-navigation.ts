@@ -108,6 +108,13 @@ export function getSettingsCategoryIcon(categoryId: string): SettingsCategoryIco
   return SETTINGS_CATEGORY_ICONS[categoryId] ?? GearIcon;
 }
 
+const TAB_SHORTHANDS: Record<string, { categoryId: string; subPageId?: string }> = {
+  printers: { categoryId: 'hardware', subPageId: 'printer-groups' },
+  farm: { categoryId: 'general', subPageId: 'farm' },
+  system: { categoryId: 'general', subPageId: 'system' },
+  automation: { categoryId: 'general', subPageId: 'automation' },
+};
+
 export function resolveSettingsNavigationTarget(
   categoryId?: string | null,
   subPageId?: string | null,
@@ -115,11 +122,20 @@ export function resolveSettingsNavigationTarget(
 ): ResolvedSettingsNavigationTarget {
   const scopedFallback = isSettingsScope(scopeId) ? scopeId : DEFAULT_SCOPE;
 
-  if (categoryId) {
-    const directCategory = getSettingsCategory(categoryId);
+  let targetCat = categoryId;
+  let targetSub = subPageId;
+
+  if (targetCat && TAB_SHORTHANDS[targetCat]) {
+    const shorthand = TAB_SHORTHANDS[targetCat];
+    targetCat = shorthand.categoryId;
+    targetSub = targetSub ?? shorthand.subPageId;
+  }
+
+  if (targetCat) {
+    const directCategory = getSettingsCategory(targetCat);
     if (directCategory) {
-      const resolvedSubPageId = subPageId && directCategory.subPages.some((subPage) => subPage.id === subPageId)
-        ? subPageId
+      const resolvedSubPageId = targetSub && directCategory.subPages.some((subPage) => subPage.id === targetSub)
+        ? targetSub
         : getDefaultSubPage(directCategory.id) || undefined;
 
       return {

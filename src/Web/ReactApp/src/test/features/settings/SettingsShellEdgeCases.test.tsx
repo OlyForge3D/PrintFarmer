@@ -161,7 +161,7 @@ describe('SettingsShell edge cases', () => {
   it('falls back to the first available system tab when the tab param is invalid', () => {
     renderSettings('/settings?scope=system&tab=not-real');
 
-    expect(getCategoryButton('General')).toHaveAttribute('aria-current', 'page');
+    expect(getCategoryButton('Farm Defaults')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'General');
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
@@ -181,8 +181,8 @@ describe('SettingsShell edge cases', () => {
   it('resolves unified configuration deep links that include both tab and sub params', () => {
     renderSettings('/admin/settings?scope=system&tab=users&sub=roles');
 
-    expect(getCategoryButton('Users')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('tab', { name: 'Roles & Permissions' })).toHaveAttribute('aria-selected', 'true');
+    expect(getCategoryButton('Roles & Permissions')).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=users');
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=roles');
