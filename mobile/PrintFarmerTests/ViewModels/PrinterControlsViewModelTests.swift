@@ -56,6 +56,34 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     // MARK: - Tests
 
+    func test_setupCommands_remainBlockedWhilePrintingPausedOrOffline() async throws {
+        for (state, online) in [("printing", true), ("paused", true), ("ready", false)] {
+            var printer = try idlePrinter()
+            printer.state = state
+            printer.isOnline = online
+            let service = MockPrinterService()
+            service.capabilitiesToReturn = Self.fullCaps
+            let model = PrinterControlsViewModel(printerService: service, printer: printer)
+            await model.loadCapabilities()
+
+            await model.preheat(.pla)
+            await model.preheat(.coolDown)
+            await model.homeAll()
+            await model.homeXY()
+            await model.homeZ()
+            await model.jog(axis: "X", distanceMm: 10)
+
+            XCTAssertFalse(model.canControl)
+            XCTAssertNil(model.pendingCommand)
+            XCTAssertNotNil(model.lastError)
+            XCTAssertNil(service.setTemperaturesCalledWith)
+            XCTAssertNil(service.homeCalledWith)
+            XCTAssertNil(service.homeXYCalledWith)
+            XCTAssertNil(service.homeZCalledWith)
+            XCTAssertNil(service.moveCalledWith)
+        }
+    }
+
     func test_loadCapabilities_cachesSecondCallNoFetch() async throws {
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
 
