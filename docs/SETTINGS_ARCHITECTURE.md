@@ -379,9 +379,9 @@ Keyboard handler details:
 
 ## Persistent Workspace Search (#2505)
 
-Admin routes (`/admin/settings` and every route under `AdminPageShell`) render a
-**persistent** search box in the page header — distinct from, and complementary to, the
-modal `Ctrl+K` command palette above. It never opens as an overlay: it's always mounted,
+The admin settings shell (`/admin/settings`) renders a **persistent** search box in its
+page header — distinct from, and complementary to, the modal `Ctrl+K` command palette
+above. It never opens as an overlay: on admin settings routes it's always mounted,
 always focusable, and its results appear as an inline listbox beneath the input.
 
 | | Command Palette (`Ctrl+K`) | Persistent Workspace Search |
