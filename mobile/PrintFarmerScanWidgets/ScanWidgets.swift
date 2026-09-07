@@ -7,7 +7,7 @@ private let scanURL = URL(string: "printfarmer://scan")!
 @main
 struct PrintFarmerScanWidgets: WidgetBundle {
     var body: some Widget {
-        ScannerLockScreenWidget()
+        ScannerWidget()
 
         if #available(iOSApplicationExtension 18.0, *) {
             ScannerControlWidget()
@@ -39,19 +39,48 @@ private struct ScannerTimelineProvider: TimelineProvider {
     }
 }
 
-private struct ScannerLockScreenWidget: Widget {
+private struct ScannerWidgetView: View {
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        Group {
+            if family == .systemSmall {
+                VStack(alignment: .leading, spacing: 4) {
+                    Image(systemName: "barcode.viewfinder")
+                        .font(.system(size: 32, weight: .semibold))
+                        .widgetAccentable()
+
+                    Spacer()
+
+                    Text("Scan")
+                        .font(.headline)
+                    Text("Open PrintFarmer")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            } else {
+                Image(systemName: "barcode.viewfinder")
+                    .widgetAccentable()
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Open PrintFarmer scanner")
+        .widgetURL(scanURL)
+        .containerBackground(.clear, for: .widget)
+    }
+}
+
+private struct ScannerWidget: Widget {
     private let kind = "com.olyforge3d.printfarmer.scan-lock-screen"
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: ScannerTimelineProvider()) { _ in
-            Image(systemName: "barcode.viewfinder")
-                .widgetAccentable()
-                .accessibilityLabel("Open PrintFarmer scanner")
-                .widgetURL(scanURL)
+            ScannerWidgetView()
         }
         .configurationDisplayName("Scan")
         .description("Open PrintFarmer directly to the scanner.")
-        .supportedFamilies([.accessoryCircular])
+        .supportedFamilies([.accessoryCircular, .systemSmall])
     }
 }
 
@@ -61,7 +90,7 @@ private struct ScannerControlWidget: ControlWidget {
 
     var body: some ControlWidgetConfiguration {
         StaticControlConfiguration(kind: kind) {
-            ControlWidgetButton(action: OpenURLIntent(scanURL)) {
+            ControlWidgetButton(action: OpenScannerIntent()) {
                 Label("Scan", systemImage: "barcode.viewfinder")
             }
         }

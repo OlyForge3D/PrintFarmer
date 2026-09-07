@@ -195,6 +195,21 @@ final class AppRouterTests: XCTestCase {
         XCTAssertFalse(ExternalScanRequestStore.consume(userDefaults: defaults))
     }
 
+    func testOpenScannerIntentRequestsForegroundLaunchAndPersistsRequest() async throws {
+        let suiteName = "OpenScannerIntent-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertTrue(OpenScannerIntent.openAppWhenRun)
+        if #available(iOS 26.0, *) {
+            XCTAssertEqual(OpenScannerIntent.supportedModes, .foreground(.immediate))
+        }
+
+        _ = try await OpenScannerIntent().perform(userDefaults: defaults)
+
+        XCTAssertNotNil(ExternalScanRequestStore.pending(userDefaults: defaults))
+    }
+
     func testLegacyBooleanRequestIsUpgradedRatherThanDropped() throws {
         let suiteName = "ExternalScanLegacy-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
