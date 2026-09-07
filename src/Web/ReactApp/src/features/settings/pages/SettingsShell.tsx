@@ -16,6 +16,7 @@ import {
   canAccessSettingsTab,
   getDestinationForTab,
   filterDestinationsByAccess,
+  isPathWithin,
   type AdminDestination,
 } from '@/features/admin/registry/adminDestinations';
 import { ThemeSwitcher } from '@/common/components/ThemeSwitcher';
@@ -252,10 +253,23 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     [destinationAccess],
   );
   const canReachSystemScope = configurationDestinations.length > 0;
+  // Issue 2526 — configuration destinations that render their own page instead
+  // of a `/admin/settings` category (Catalog, Locations, Power Monitors). Their
+  // one default home is the Admin Control Center, so the shell no longer lists
+  // them as a second directory. The exception below is a recovery affordance,
+  // not a directory: a delegate whose only configuration grant is one of these
+  // can still open the settings shell (`canReachSystemScope` is true for them)
+  // but has no category to render, so without a link out they land on an empty
+  // workspace with no way forward.
   const standaloneDestinations = useMemo(
-    () => configurationDestinations.filter((destination) => !destination.path.startsWith('/admin/settings?')),
+    () => configurationDestinations.filter((destination) => !isPathWithin(destination.path, '/admin/settings')),
     [configurationDestinations],
   );
+  const hasEmbeddedSettingsDestination = useMemo(
+    () => configurationDestinations.some((destination) => isPathWithin(destination.path, '/admin/settings')),
+    [configurationDestinations],
+  );
+  const showStandaloneRecoveryLinks = standaloneDestinations.length > 0 && !hasEmbeddedSettingsDestination;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { open: openCommandPalette, registerNavigationGuard } = useCommandPalette();
@@ -1197,7 +1211,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
             parent={isAdminRoute ? ADMIN_HUB_PARENT : undefined}
             actions={headerActions}
           >
-            {isAdminRoute && standaloneDestinations.length > 0 && (
+            {isAdminRoute && showStandaloneRecoveryLinks && (
               <nav aria-label="Standalone configuration" className="flex flex-wrap gap-3 pb-4">
                 {standaloneDestinations.map((destination) => (
                   <Link

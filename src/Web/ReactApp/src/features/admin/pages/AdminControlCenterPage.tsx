@@ -155,6 +155,147 @@ function SubsystemTile({ subsystem }: { subsystem: SubsystemHealthDto }) {
 }
 
 /**
+ * Synthetic origin used only to run the WHATWG URL parser over an app-relative
+ * route. It is never navigated to; `.invalid` is reserved by RFC 2606 precisely
+ * so it can never resolve to a real host.
+ */
+const INTERNAL_ROUTE_ORIGIN = 'https://printfarmer.invalid';
+
+/** Parse an app-relative route against the synthetic origin. `null` if it isn't same-origin. */
+function parseInternalRoute(route: string): URL | null {
+  try {
+    const parsed = new URL(route, INTERNAL_ROUTE_ORIGIN);
+    return parsed.origin === INTERNAL_ROUTE_ORIGIN ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Percent-decode a pathname the way the router does when matching. `null` on malformed encoding. */
+function decodeRoutePathname(pathname: string): string | null {
+  try {
+    return decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reduce a route to the pathname React Router will actually match on, so route
+ * *identity* checks cannot be evaded by an equivalent spelling.
+ *
+ * Normalising by hand is not enough here, because a browser applies full URL
+ * semantics to an href before the router ever sees it: `/foo/../admin` resolves
+ * to `/admin`, `/admin\` folds to `/admin/`, and `/%61dmin` decodes to `/admin`.
+ * A lexical check misses all three and would emit exactly the self-link Issue
+ * 2526 forbids. So delegate to the URL parser — the same algorithm the browser
+ * uses — then decode, fold trailing slashes, and lowercase for the comparison
+ * (React Router matches case-insensitively and treats a trailing slash as
+ * equivalent).
+ */
+function routePathname(route: string): string {
+  const parsed = parseInternalRoute(route);
+  let pathname: string;
+  if (parsed) {
+    pathname = parsed.pathname;
+  } else {
+    // Off-origin or unparseable: it is not an in-app route, so it can never be
+    // an in-app route *identity*. Strip query/hash lexically and let the
+    // comparison fall through to "not a match".
+    const queryOrHash = route.search(/[?#]/);
+    pathname = queryOrHash === -1 ? route : route.slice(0, queryOrHash);
+  }
+  const decoded = decodeRoutePathname(pathname) ?? pathname;
+  const withoutTrailingSlash = decoded.length > 1 ? decoded.replace(/\/+$/, '') : decoded;
+  return withoutTrailingSlash.toLowerCase();
+}
+
+/** `/admin` itself, however spelled — but not `/admin/status` (a legitimate child) or `/admin-something` (an unrelated sibling). */
+function isControlCenterSelfRoute(route: string): boolean {
+  return routePathname(route) === '/admin';
+}
+
+/** `/admin/manage` was retired and is not a registered route; never link to it. */
+function isRetiredManageRoute(route: string): boolean {
+  const pathname = routePathname(route);
+  return pathname === '/admin/manage' || pathname.startsWith('/admin/manage/');
+}
+
+/**
+ * `actionRoute` is untrusted backend payload rendered straight into a link
+ * target, so prove it is an in-app route before it becomes one. Anything that
+ * is not plainly app-relative is dropped rather than sanitised — a malformed or
+ * compromised payload should make the link disappear (a visible failure), never
+ * navigate somewhere unexpected.
+ */
+function canonicalizeInternalRoute(rawRoute: string | null | undefined): string | null {
+  if (!rawRoute) {
+    return null;
+  }
+  const route = rawRoute.trim();
+
+  // Must be app-relative. A single leading slash rejects absolute URLs
+  // ("https://evil.test/x") and non-HTTP schemes ("javascript:alert(1)").
+  if (!route.startsWith('/')) {
+    return null;
+  }
+  // "//evil.test/x" is protocol-relative and navigates off-origin despite the
+  // leading slash; browsers also fold backslashes into slashes, so "/\evil.test"
+  // is the same attack spelled differently.
+  if (route.startsWith('//') || route.startsWith('/\\')) {
+    return null;
+  }
+  // Control characters can be stripped by the browser after our check runs,
+  // changing what the string means. Reject rather than guess.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001F\u007F]/.test(route)) {
+    return null;
+  }
+  // Browsers fold a literal backslash into a path separator for HTTP(S) URLs,
+  // so "/admin\" is really "/admin/". No legitimate in-app route contains one.
+  if (route.includes('\\')) {
+    return null;
+  }
+
+  // Run the browser's own URL algorithm rather than trusting the raw string:
+  // it resolves dot segments ("/foo/../admin" -> "/admin") and re-rejects
+  // anything that escapes to another origin.
+  const parsed = parseInternalRoute(route);
+  if (!parsed) {
+    return null;
+  }
+  // Malformed percent-encoding: we cannot know what the router will match, so drop it.
+  if (decodeRoutePathname(parsed.pathname) === null) {
+    return null;
+  }
+
+  if (isRetiredManageRoute(route) || isControlCenterSelfRoute(route)) {
+    return null;
+  }
+
+  const canonical = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+
+  // Re-validate what is actually emitted, because normalisation can *create* a
+  // hostile route from an app-relative one: dot-segment resolution pops the
+  // segment before an empty segment, so "/foo/..//evil.test/steal" normalises
+  // to the protocol-relative "//evil.test/steal" while still parsing as
+  // same-origin against the synthetic base. Checking only the input would let
+  // that through as an off-origin link.
+  if (!canonical.startsWith('/') || canonical.startsWith('//') || canonical.startsWith('/\\')) {
+    return null;
+  }
+  // Canonicalisation must be a fixed point: if re-parsing the emitted string
+  // yields anything different, it was not canonical and the browser could
+  // resolve it to a route these guards never approved.
+  const reparsed = parseInternalRoute(canonical);
+  if (!reparsed || `${reparsed.pathname}${reparsed.search}${reparsed.hash}` !== canonical) {
+    return null;
+  }
+
+  return canonical;
+}
+
+/**
  * Resolve an attention item's navigation target.
  *
  * The backend emits either a stable `actionDestinationId` (preferred: keeps route
@@ -164,6 +305,11 @@ function SubsystemTile({ subsystem }: { subsystem: SubsystemHealthDto }) {
  * someone renamed a registry entry without updating the backend — we fall back to
  * `actionRoute`, and if that's also missing, the link disappears (visible failure,
  * not a silent broken navigation).
+ *
+ * Returns `null` for a target that resolves to `/admin` itself (Issue 2526): this
+ * page *is* `/admin`, and a hub must not self-link from its own content. That can
+ * arise from a backend item pointing at `admin-home` or emitting `/admin` as a raw
+ * route, so it is a guard rather than an expected path.
  */
 function resolveAttentionActionRoute(
   item: AttentionItemDto,
@@ -172,17 +318,7 @@ function resolveAttentionActionRoute(
     hasPermission: (resource: string, action: string) => boolean;
   },
 ): string | null {
-  const isRetiredManageRoute = (route: string) =>
-    route === '/admin/manage' ||
-    route.startsWith('/admin/manage?') ||
-    route.startsWith('/admin/manage#') ||
-    route.startsWith('/admin/manage/');
-  const fallbackRoute =
-    item.actionRoute &&
-    item.actionRoute.startsWith('/') &&
-    !isRetiredManageRoute(item.actionRoute)
-      ? item.actionRoute
-      : null;
+  const fallbackRoute = canonicalizeInternalRoute(item.actionRoute);
 
   if (item.actionDestinationId) {
     const destination = getDestinationById(item.actionDestinationId);
@@ -190,6 +326,9 @@ function resolveAttentionActionRoute(
       return fallbackRoute;
     }
     if (!canAccessDestination(destination, access)) {
+      return null;
+    }
+    if (isControlCenterSelfRoute(destination.path)) {
       return null;
     }
     return destination.path;
@@ -227,6 +366,22 @@ function AttentionRowFromDto({
   );
 }
 
+/**
+ * Operational destinations the Control Center owns, in display order.
+ *
+ * This list plus `getStandaloneConfigurationDestinations` is the hub's link
+ * composition, and — since #2526 — the *single default home* for every entry in
+ * it. Maintenance, Analytics and Auto-Dispatch previously also had anchored
+ * navbar entries; those were removed, so adding a destination here now means
+ * this page is where users find it.
+ *
+ * `admin-home` is deliberately absent and must stay absent: a hub does not
+ * self-link. It is `kind: 'hub'`, so `getStandaloneConfigurationDestinations`
+ * (which keeps only `kind: 'configuration'`) cannot reintroduce it either, and
+ * `resolveAttentionActionRoute` drops any attention action that resolves to
+ * `/admin`. The global Admin nav entry and child pages' back links to the hub
+ * are separate surfaces and are unaffected.
+ */
 const OPERATIONAL_DESTINATION_IDS = [
   'ops-status',
   'ops-workers',
