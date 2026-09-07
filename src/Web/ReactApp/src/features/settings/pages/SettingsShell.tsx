@@ -16,6 +16,7 @@ import {
   canAccessSettingsTab,
   getDestinationForTab,
   filterDestinationsByAccess,
+  type AdminDestination,
 } from '@/features/admin/registry/adminDestinations';
 import { ThemeSwitcher } from '@/common/components/ThemeSwitcher';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
@@ -250,7 +251,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   );
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { open: openCommandPalette } = useCommandPalette();
+  const { open: openCommandPalette, registerNavigationGuard } = useCommandPalette();
 
   // Callback ref, not useRef: the slot's DOM node has to be a *rendered* value so
   // the context re-renders its consumers once the node exists. A ref mutation
@@ -564,6 +565,15 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     },
     [executeCategoryChange, isDirty, navigate],
   );
+
+  useEffect(() => registerNavigationGuard((href) => {
+    if (!isDirty) {
+      return false;
+    }
+    setPendingNavigation(() => () => navigate(href));
+    setShowDraftModal(true);
+    return true;
+  }), [isDirty, navigate, registerNavigationGuard]);
 
   const { matchingCategoryIds, matchingSubPageIds, firstMatchingSubPageCategoryId, isFiltering } = useMemo(() => {
     if (!normalizedQuery) {

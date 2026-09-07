@@ -12,6 +12,11 @@ export interface CommandPaletteContextValue {
   close: () => void;
   /** True when the palette dialog is currently rendered. */
   isOpen: boolean;
+  /**
+   * Lets an active workspace intercept palette-driven navigation, for example
+   * to protect unsaved drafts before the provider calls react-router navigate().
+   */
+  registerNavigationGuard: (guard: (href: string) => boolean) => () => void;
 }
 
 export const CommandPaletteContext = createContext<CommandPaletteContextValue | null>(null);

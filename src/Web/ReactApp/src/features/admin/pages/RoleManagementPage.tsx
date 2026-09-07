@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, useContext } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useContext, useEffectEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
@@ -400,6 +400,13 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
     });
   };
 
+  const saveDirtyPermissions = useEffectEvent(async () => {
+    await savePermissionsMutation.mutateAsync();
+  });
+  const discardDirtyPermissions = useEffectEvent(() => {
+    grantState.reset();
+  });
+
   useEffect(() => {
     if (!saveRegistry?.registerSection || !selectedRoleId) return;
     const sectionId = `roles-matrix-${selectedRoleId}`;
@@ -408,12 +415,8 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
         id: sectionId,
         name: 'Role Permissions',
         isDirty: true,
-        onSave: async () => {
-          await savePermissionsMutation.mutateAsync();
-        },
-        onDiscard: () => {
-          grantState.reset();
-        },
+        onSave: saveDirtyPermissions,
+        onDiscard: discardDirtyPermissions,
       });
     } else {
       saveRegistry.unregisterSection?.(sectionId);
@@ -421,7 +424,7 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
     return () => {
       saveRegistry.unregisterSection?.(sectionId);
     };
-  }, [saveRegistry, selectedRoleId, grantState.isDirty, grantState.reset, savePermissionsMutation, grantState]);
+  }, [saveRegistry, selectedRoleId, grantState.isDirty]);
 
   // ── Rendering ─────────────────────────────────────────────────────────────
 

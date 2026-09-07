@@ -655,6 +655,26 @@ describe('SettingsShell', () => {
     });
   });
 
+  it('intercepts command palette navigation when a section is dirty', async () => {
+    setAuthRoles(['farm_admin']);
+    renderSettings('/admin/settings?scope=system');
+    fireEvent.click(screen.getByTestId('make-dirty-btn'));
+
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    const paletteSearch = await screen.findByRole('combobox', { name: 'Search settings command palette' });
+    fireEvent.change(paletteSearch, { target: { value: 'login audit' } });
+    fireEvent.keyDown(paletteSearch, { key: 'ArrowDown' });
+    fireEvent.keyDown(paletteSearch, { key: 'Enter' });
+
+    expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Unsaved Changes' })).toBeInTheDocument();
+    expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/settings');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
+    expect(screen.queryByRole('dialog', { name: 'Unsaved Changes' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/settings');
+  });
+
   it('intercepts embedded page dirty state and prompts on navigation', () => {
     setAuthRoles(['farm_admin']);
     renderSettings('/admin/settings?scope=system&tab=users&sub=roles');

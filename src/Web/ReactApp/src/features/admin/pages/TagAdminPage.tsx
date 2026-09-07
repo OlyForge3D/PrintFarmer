@@ -341,6 +341,20 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
     }, [editingTagId, editForm, editingRevision, updateTagMutation]);
 
     const isDirty = createForm.isDirty || editForm.isDirty;
+    const saveDirtyTagSection = useEffectEvent(async () => {
+        if (editForm.isDirty && editingTagId) {
+            await handleSaveEdit();
+        } else if (createForm.isDirty && showNewTagForm) {
+            await createTagMutation.mutateAsync();
+        }
+    });
+    const discardDirtyTagSection = useEffectEvent(() => {
+        if (editForm.isDirty) handleCancelEdit();
+        if (createForm.isDirty) {
+            createForm.reset();
+            setShowNewTagForm(false);
+        }
+    });
 
     useEffect(() => {
         if (!saveRegistry?.registerSection) return;
@@ -350,20 +364,8 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                 id: sectionId,
                 name: 'Tag Management',
                 isDirty: true,
-                onSave: async () => {
-                    if (editForm.isDirty && editingTagId) {
-                        await handleSaveEdit();
-                    } else if (createForm.isDirty && showNewTagForm) {
-                        await createTagMutation.mutateAsync();
-                    }
-                },
-                onDiscard: () => {
-                    if (editForm.isDirty) handleCancelEdit();
-                    if (createForm.isDirty) {
-                        createForm.reset();
-                        setShowNewTagForm(false);
-                    }
-                },
+                onSave: saveDirtyTagSection,
+                onDiscard: discardDirtyTagSection,
             });
         } else {
             saveRegistry.unregisterSection?.(sectionId);
@@ -371,7 +373,7 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
         return () => {
             saveRegistry.unregisterSection?.(sectionId);
         };
-    }, [saveRegistry, isDirty, createForm, editForm, editingTagId, showNewTagForm, handleSaveEdit, createTagMutation, handleCancelEdit]);
+    }, [saveRegistry, isDirty]);
 
     // Reloads the fresh server tag into the edit form's revision baseline so a retry can
     // succeed, without discarding the name/color/description the user already typed.
