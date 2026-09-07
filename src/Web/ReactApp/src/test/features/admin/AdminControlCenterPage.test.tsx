@@ -804,6 +804,13 @@ describe('AdminControlCenterPage', () => {
     ['an embedded newline', '/admin\nstatus'],
     ['a literal backslash path separator', '/printers\\evil'],
     ['malformed percent-encoding', '/printers/%zz'],
+    // Dot-segment resolution can *create* a protocol-relative path from an
+    // app-relative input: ".." pops the segment before an empty segment, so
+    // these normalise to "//evil.test/steal" and navigate off-origin.
+    ['a dot-segment path that normalises to protocol-relative', '/foo/..//evil.test/steal'],
+    ['a dot-segment path normalising to triple-slash', '/foo/..///evil.test/steal'],
+    ['a root-relative dot segment normalising to protocol-relative', '/..//evil.test'],
+    ['an empty segment after a percent-encoded dot segment', '/foo/%2e%2e//evil.test/steal'],
     ['an empty string', ''],
   ])('drops an unsafe backend action route — %s', async (_label, actionRoute) => {
     mockedApiGet.mockResolvedValue({

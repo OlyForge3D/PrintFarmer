@@ -273,10 +273,26 @@ function canonicalizeInternalRoute(rawRoute: string | null | undefined): string 
     return null;
   }
 
-  // Emit exactly what was validated. The parser has already resolved dot
-  // segments, so the emitted href cannot renormalise into a different route
-  // than the one these guards approved.
-  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  const canonical = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+
+  // Re-validate what is actually emitted, because normalisation can *create* a
+  // hostile route from an app-relative one: dot-segment resolution pops the
+  // segment before an empty segment, so "/foo/..//evil.test/steal" normalises
+  // to the protocol-relative "//evil.test/steal" while still parsing as
+  // same-origin against the synthetic base. Checking only the input would let
+  // that through as an off-origin link.
+  if (!canonical.startsWith('/') || canonical.startsWith('//') || canonical.startsWith('/\\')) {
+    return null;
+  }
+  // Canonicalisation must be a fixed point: if re-parsing the emitted string
+  // yields anything different, it was not canonical and the browser could
+  // resolve it to a route these guards never approved.
+  const reparsed = parseInternalRoute(canonical);
+  if (!reparsed || `${reparsed.pathname}${reparsed.search}${reparsed.hash}` !== canonical) {
+    return null;
+  }
+
+  return canonical;
 }
 
 /**
