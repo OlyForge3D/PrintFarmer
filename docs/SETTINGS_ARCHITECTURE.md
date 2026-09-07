@@ -42,14 +42,14 @@ Under `/admin/settings` (`system` scope), settings navigation is organized into 
 
 1. **Farm**: Farm Defaults (`gen-farm`)
 2. **Printing & slicing**: Defaults (`slicing-defaults`), Bed Types (`slicing-bed-types`), Slicer Profiles (`slicing-profiles`)
-3. **Hardware**: Locations (`hw-locations`), Printer Groups (`hw-printer-groups`), Cameras (`hw-cameras`), NFC Devices (`hw-nfc`), NFC Bindings (`hw-nfc-bindings`), Custom Fields (`hw-custom-fields`)
+3. **Hardware**: Locations (`hw-locations`), Printer Groups (`hw-printer-groups`), Cameras (`hw-cameras`), Power Monitors (`hw-power-monitors`), NFC Devices (`hw-nfc`), NFC Bindings (`hw-nfc-bindings`), Custom Fields (`hw-custom-fields`)
 4. **Automation & costs**: Automation & Costs (`auto-costs`)
 5. **Integrations**: External Services (`int-connections`), Webhooks (`int-webhooks`)
 6. **People & access**: User Accounts (`users-accounts`), Roles & Permissions (`users-roles`)
-7. **Organization**: Tags (`data-tags`), Catalog (`data-catalog`)
-8. **System**: System Config (`gen-system`), Quotas (`quotas`)
+7. **Organization**: Tags (`data-tags`), Catalog (`data-catalog`), Quotas (`quotas`)
+8. **System**: System Config (`gen-system`)
 
-In `system` scope, exactly ONE content page is mounted at a time in a single-pane layout. Horizontal sub-tabs and scope switchers are hidden for `system` scope to ensure clean, focused leaf editing. Standalone links (Locations, Catalog, Power Monitors) remain correctly labeled direct links in the admin hub/search surfaces without becoming settings-shell leaves.
+In `system` scope, exactly ONE settings-shell content page is mounted at a time in a single-pane layout. Horizontal sub-tabs and scope switchers are hidden for `system` scope to ensure clean, focused leaf editing. Registry destinations in these groups may instead be standalone direct links: Locations, Catalog, and Power Monitors remain correctly labeled navigation entries in the sidebar, admin hub, and search surfaces without becoming settings-shell content.
 
 ## Mobile Grouped Navigation
 
