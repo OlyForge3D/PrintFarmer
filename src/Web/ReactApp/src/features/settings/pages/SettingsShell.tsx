@@ -35,7 +35,8 @@ import { UserSettingsSection } from '@/features/settings/components/UserSettings
 import { FarmSettingsSection } from '@/features/settings/components/FarmSettingsSection';
 import { TelegramSettingsCard } from '@/features/settings/components/TelegramSettingsCard';
 import { HomeAssistantSettingsCard, SpoolmanSettingsCard } from '@/features/settings/components/IntegrationSettingsCards';
-import { resolveSettingsNavigationTarget } from '@/features/settings/settings-navigation';
+import { WorkspaceSearchResults } from '@/features/settings/components/WorkspaceSearchResults';
+import { resolveSettingsNavigationTarget, withRetainedQuery, type SettingsCommandItem } from '@/features/settings/settings-navigation';
 import {
   DEFAULT_SCOPE,
   SETTINGS_SCOPES,
@@ -266,6 +267,34 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const query = searchParams.get('q') || '';
   const normalizedQuery = query.trim().toLowerCase();
 
+  // GH-2505: distinguish a `q` that the persistent workspace search box itself
+  // just wrote (via its debounced, replace-only commit below) from a `q`
+  // that arrived some other way — a direct link, a bookmark, or browser
+  // back/forward. Typing in the persistent search box must never
+  // auto-navigate a leaf; that's what makes it navigation "chrome" rather
+  // than another mounted settings page. But a `q` present on initial load
+  // still has to drive the pre-existing label-matching auto-navigation
+  // below for backward compatibility with direct `?q=` deep links. Comparing
+  // the live `q` against the last value *we* wrote captures exactly "this
+  // changed only because the box committed a keystroke"; once the URL's `q`
+  // diverges from that (navigate away and back, a fresh deep link, etc.) the
+  // ref and the live query stop matching and auto-navigation resumes.
+  const lastSelfWrittenQueryRef = useRef<string | null>(null);
+  const isSelfAuthoredQuery = lastSelfWrittenQueryRef.current !== null && lastSelfWrittenQueryRef.current === query;
+
+  const commitSearchQuery = useCallback((nextQuery: string) => {
+    lastSelfWrittenQueryRef.current = nextQuery;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (nextQuery) {
+        next.set('q', nextQuery);
+      } else {
+        next.delete('q');
+      }
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
   const isAdminRoute = routeScope === 'system';
 
   const availableScopes = useMemo(() => {
@@ -339,6 +368,51 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     () => Object.keys(dirtyByGroup).length > 0 || Object.values(registeredSections).some((s) => s.isDirty),
     [dirtyByGroup, registeredSections],
   );
+
+  const handleWorkspaceResultSelect = useCallback((item: SettingsCommandItem, queryText: string) => {
+    const doNavigate = () => {
+      if (item.onExecute) {
+        item.onExecute();
+        return;
+      }
+      if (item.href) {
+        // Destination/setting items already carry a fully-qualified path
+        // (including `field=Section.property` for exact field matches, see
+        // `buildSettingCommandItems`); retain the in-progress search text so
+        // the workspace search keeps reflecting it once we land.
+        navigate(withRetainedQuery(item.href, queryText));
+        return;
+      }
+      // Settings-nav (category/sub-page) items carry no `href` — navigate
+      // within the shell exactly like a sidebar/sub-tab click, but as a
+      // *push* (new history entry), per "explicit selection ... adds
+      // destination history" — unlike `executeCategoryChange`'s `replace`.
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('scope', item.scopeId);
+        next.set('tab', item.categoryId);
+        if (item.subPageId) {
+          next.set('sub', item.subPageId);
+        } else {
+          next.delete('sub');
+        }
+        next.delete('field');
+        if (queryText) {
+          next.set('q', queryText);
+        } else {
+          next.delete('q');
+        }
+        return next;
+      });
+    };
+
+    if (isDirty) {
+      setPendingNavigation(() => doNavigate);
+      setShowDraftModal(true);
+      return;
+    }
+    doNavigate();
+  }, [isDirty, navigate, setSearchParams]);
 
   const publishSummary = useCallback((group: string, summary: GroupDirtySummary | null) => {
     setDirtyByGroup((prev) => {
@@ -473,6 +547,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         next.set('scope', target.scopeId);
         next.set('tab', target.categoryId);
         next.delete('q');
+        next.delete('field');
         next.delete('workerTab');
 
         const subToUse = explicitSubPageId ?? target.subPageId;
@@ -526,6 +601,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           next.set('tab', activeCategory);
           next.set('sub', subPageId);
           next.delete('q');
+          next.delete('field');
           return next;
         });
       };
@@ -631,8 +707,25 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     };
   }, [accessibleCategories, normalizedQuery]);
 
+  // GH-2505: `isFiltering` above stays live while the persistent workspace
+  // search box is typed into, so sidebar/sub-tab highlighting keeps working.
+  // Auto-*navigating* off `isFiltering` (switching scope/category/sub-page,
+  // or swapping the whole content pane for a "No matching settings" empty
+  // state) must NOT fire while the mounted leaf has unsaved edits — that
+  // would remount/destroy the dirty editor on every keystroke, which is
+  // exactly what GH-2506's draft-safety boundary exists to prevent. It also
+  // must not fire while `q` only changed because the persistent search box
+  // itself just committed a keystroke (`isSelfAuthoredQuery`) — typing there
+  // must never select a leaf, dirty or not; only a `q` that arrived some
+  // other way (a direct `?q=` deep link, browser back/forward) still drives
+  // this legacy label-matching auto-navigation. Every auto-navigation
+  // decision below is gated on `canAutoNavigate`, not the raw `isFiltering`,
+  // while highlighting-only consumers keep using the raw flag/id lists
+  // unchanged.
+  const canAutoNavigate = isFiltering && !isDirty && !isSelfAuthoredQuery;
+
   const effectiveScope = useMemo(() => {
-    if (!isFiltering || !matchingCategoryIds || matchingCategoryIds.length === 0) {
+    if (!canAutoNavigate || !matchingCategoryIds || matchingCategoryIds.length === 0) {
       return activeScope;
     }
     if (matchingCategoryIds.includes(activeCategory)) {
@@ -642,7 +735,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return getSettingsScopeForCategory(firstMatchingSubPageCategoryId);
     }
     return getSettingsScopeForCategory(matchingCategoryIds[0]);
-  }, [activeCategory, activeScope, firstMatchingSubPageCategoryId, isFiltering, matchingCategoryIds]);
+  }, [activeCategory, activeScope, canAutoNavigate, firstMatchingSubPageCategoryId, matchingCategoryIds]);
 
   const scopeCategories = useMemo(
     () => getSettingsCategoriesForScope(effectiveScope),
@@ -650,7 +743,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   );
 
   const effectiveCategory = useMemo(() => {
-    if (!isFiltering || !matchingCategoryIds || matchingCategoryIds.length === 0) {
+    if (!canAutoNavigate || !matchingCategoryIds || matchingCategoryIds.length === 0) {
       return scopeCategories.some((category) => category.id === activeCategory)
         ? activeCategory
         : getDefaultCategoryForScope(effectiveScope);
@@ -662,7 +755,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
     const firstMatchingCategory = scopeCategories.find((category) => matchingCategoryIds.includes(category.id));
     return firstMatchingCategory?.id ?? scopeCategories[0]?.id ?? getDefaultCategoryForScope(effectiveScope);
-  }, [activeCategory, effectiveScope, isFiltering, matchingCategoryIds, scopeCategories]);
+  }, [activeCategory, canAutoNavigate, effectiveScope, matchingCategoryIds, scopeCategories]);
 
   const currentCategory = useMemo(
     () => scopeCategories.find((category) => category.id === effectiveCategory) ?? scopeCategories[0],
@@ -739,20 +832,26 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     // to the first accessible sub-page.
     const canUseRequestedSubPage = requestedTargetSubPage && (isExplicitSubPage ? isValidSubPage : isAccessibleSubPage);
 
+    // GH-2505: mirror `canAutoNavigate` here — while the mounted leaf is dirty,
+    // treat the sub-page match set as empty so a live-typed query can never
+    // steer `activeSubPage` away from the sub-page already on screen. The
+    // set still feeds SettingsSubTabs highlighting unguarded above.
+    const autoNavigateSubPageIds = canAutoNavigate ? matchingCurrentSubPageIds : [];
+
     if (canUseRequestedSubPage && requestedTargetSubPage) {
-      if (!isFiltering || matchingCurrentSubPageIds.length === 0 || matchingCurrentSubPageIds.includes(requestedTargetSubPage)) {
+      if (!canAutoNavigate || autoNavigateSubPageIds.length === 0 || autoNavigateSubPageIds.includes(requestedTargetSubPage)) {
         return requestedTargetSubPage;
       }
     }
 
-    if (matchingCurrentSubPageIds.length > 0) {
-      return matchingCurrentSubPageIds[0];
+    if (autoNavigateSubPageIds.length > 0) {
+      return autoNavigateSubPageIds[0];
     }
 
     const firstAccessibleSubPage = accessibleSubPages[0]?.id;
 
     return firstAccessibleSubPage ?? getDefaultSubPage(currentCategory.id);
-  }, [accessibleCategories, currentCategory, isFiltering, matchingCurrentSubPageIds, requestedSubPage, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId]);
+  }, [accessibleCategories, canAutoNavigate, currentCategory, matchingCurrentSubPageIds, requestedSubPage, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId]);
 
   const hasSubTabs = accessibleCategories.length > 0 && currentCategory.subPages.length >= 2;
   const renderedContentKey = currentCategory.subPages.length === 0
@@ -793,6 +892,21 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           return next;
         }, { replace: true });
       }
+      return;
+    }
+
+    // GH-2505: never auto-navigate (or strip tab/sub params) while the mounted
+    // leaf has unsaved edits, or while `q` only changed because the
+    // persistent search box itself just committed a keystroke.
+    // `effectiveScope`/`effectiveCategory`/`activeSubPage` are already frozen
+    // to the current values in both cases (see `canAutoNavigate` above), so
+    // every mismatch check below would be false anyway — this early return
+    // just makes that guarantee explicit and skips the "clear tab/sub when
+    // there are no matches" branch, which would otherwise strip an
+    // already-selected tab out from under a dirty editor, or out from under
+    // the user while they're still typing into the persistent search box,
+    // the moment a query stops matching anything by the legacy label match.
+    if (isDirty || isSelfAuthoredQuery) {
       return;
     }
     if (isFiltering && matchingCategoryIds?.length === 0) {
@@ -841,6 +955,8 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, [
     accessibleCategories.length,
     isAdminRoute,
+    isDirty,
+    isSelfAuthoredQuery,
     searchParams,
     activeScope,
     activeSubPage,
@@ -946,15 +1062,28 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const pageTitle = currentScopeMeta?.label ?? 'Settings';
   const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
 
-  const hasNoMatches = accessibleCategories.length > 0 && isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0;
+  const hasNoMatches = accessibleCategories.length > 0 && canAutoNavigate && matchingCategoryIds && matchingCategoryIds.length === 0;
 
   // Page-level actions. The mode toggle arrives by portal from whichever content
   // page owns it (see SettingsHeaderPortal); the palette is always available, so
   // the shell renders it directly. Slot first so the page's own control sits to
   // the left of the shell-wide one.
+  //
+  // The persistent workspace search (GH-2505) is deliberately scoped to the
+  // admin/system settings route only — it's the cross-group/advanced field
+  // search called for by the issue, distinct from the always-global modal
+  // palette button beside it, and personal `/settings` intentionally keeps
+  // its existing (much smaller) navigation surface untouched.
   const headerActions = (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <div ref={setHeaderSlot} className="contents" />
+      {isAdminRoute ? (
+        <WorkspaceSearchResults
+          initialQuery={query}
+          onQueryCommit={commitSearchQuery}
+          onSelect={handleWorkspaceResultSelect}
+        />
+      ) : null}
       <Button
         type="button"
         variant="subtle"

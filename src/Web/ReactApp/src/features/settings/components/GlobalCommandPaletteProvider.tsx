@@ -34,25 +34,14 @@ import {
   type CommandPaletteContextValue,
 } from '@/features/settings/components/commandPaletteContext';
 import {
-  buildAdminDestinationCommandItems,
-  buildSettingCommandItems,
-  buildSettingsCommandItems,
   buildSettingsPath,
   resolveSettingsNavigationTarget,
   type SettingsCommandItem,
 } from '@/features/settings/settings-navigation';
-import {
-  ADMIN_DESTINATIONS,
-  canAccessSettingsTab,
-  filterDestinationsByAccess,
-} from '@/features/admin/registry/adminDestinations';
+import { useSettingsSearchIndex } from '@/features/settings/hooks/useSettingsSearchIndex';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useTheme } from '@/common/hooks/useTheme';
 import { ADMIN_OVERVIEW_QUERY_KEY } from '@/features/admin/hooks/useAdminOverview';
-import {
-  useSettingsGroups,
-  useSettingsMetadata,
-} from '@/features/settings/queries/useSettingsMetadata';
 import {
   LogoutIcon,
   RefreshIcon,
@@ -69,7 +58,7 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
   const navigate = useNavigate();
   const navigationGuardRef = useRef<((href: string) => boolean) | null>(null);
   const queryClient = useQueryClient();
-  const { user, hasRole, hasPermission, logout } = useAuth();
+  const { user, hasPermission, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   // The per-field settings palette (below) spans every settings resource at
   // once — no single `{resource}:action}` permission can represent "any
@@ -120,39 +109,13 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
   }, []);
 
   // Settings metadata is only useful once the user can actually reach admin
-  // settings. Keep the query disabled for signed-out users so we don't fire
-  // a request that will 401.
-  const metadataQuery = useSettingsMetadata({ enabled: Boolean(user) && isOpen });
-  const groupsQuery = useSettingsGroups({ enabled: Boolean(user) && isOpen });
-
-  const accessibleDestinations = useMemo(() => {
-    if (!user) {
-      return [];
-    }
-    return filterDestinationsByAccess(ADMIN_DESTINATIONS, { hasRole, hasPermission });
-  }, [user, hasRole, hasPermission]);
-
-  const destinationItems = useMemo(
-    () => buildAdminDestinationCommandItems(accessibleDestinations),
-    [accessibleDestinations],
-  );
-
-  // The pre-#938 nav items also cover admin scopes (users, data, etc.) — the
-  // admin-destination registry is now the source of truth for admin routes so
-  // filter those out here. User-scope profile items stay because there is no
-  // admin destination for user preferences.
-  const settingsNavItems = useMemo(
-    () => buildSettingsCommandItems().filter((item) => item.scopeId === 'user'),
-    [],
-  );
-
-  const settingFieldItems = useMemo(() => {
-    if (!user || !hasPermission('system_settings', 'admin')) {
-      return [] as SettingsCommandItem[];
-    }
-    return buildSettingCommandItems(metadataQuery.data, groupsQuery.data)
-      .filter((item) => canAccessSettingsTab(item.categoryId, item.subPageId, { hasRole, hasPermission }));
-  }, [user, hasRole, hasPermission, metadataQuery.data, groupsQuery.data]);
+  // settings. Keep the shared index's queries disabled for signed-out users
+  // or while the palette is closed so we don't fire a request that will 401
+  // or fetch in the background — see useSettingsSearchIndex for the gating
+  // rationale, shared verbatim with the workspace search panel (#2505).
+  const { destinationItems, settingsNavItems, settingFieldItems } = useSettingsSearchIndex({
+    enabled: isOpen,
+  });
 
   const actionItems = useMemo<SettingsCommandItem[]>(() => {
     const actions: SettingsCommandItem[] = [];

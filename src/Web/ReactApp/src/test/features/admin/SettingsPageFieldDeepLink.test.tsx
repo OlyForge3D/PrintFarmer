@@ -103,6 +103,15 @@ vi.mock('@/features/admin/components/FailureDetectionStatusCard', () => ({
   FailureDetectionStatusCard: () => React.createElement('div', null, 'FailureDetectionMock'),
 }));
 
+const toastErrorMock = vi.fn();
+vi.mock('sonner', () => ({
+  toast: {
+    error: (...args: unknown[]) => toastErrorMock(...args),
+    success: vi.fn(),
+    info: vi.fn(),
+  },
+}));
+
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 
 async function renderPageWithField(fieldParam?: string) {
@@ -121,6 +130,7 @@ async function renderPageWithField(fieldParam?: string) {
 describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () => {
   beforeEach(() => {
     scrollIntoViewMock.mockReset();
+    toastErrorMock.mockReset();
     saveSettingsMock.mockReset().mockResolvedValue(undefined);
     // JSDOM does not implement scrollIntoView — polyfill so the effect runs.
     Element.prototype.scrollIntoView = scrollIntoViewMock;
@@ -210,5 +220,22 @@ describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () =>
     await waitFor(() => {
       expect(target!.classList.contains('pf-setting-focus')).toBe(true);
     });
+  });
+
+  it('surfaces a toast and leaves the page mounted when the deep-linked field does not resolve (#2505)', async () => {
+    // The workspace search (#2505) can send `?field=` links to a field that
+    // simply doesn't render on this page (stale metadata, a typo, or a field
+    // that lives elsewhere entirely). Nothing should crash, no highlight
+    // should apply, and the user gets a toast instead of silence.
+    await renderPageWithField('NoSuchSection.NoSuchProperty');
+
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledTimes(1));
+    expect(toastErrorMock).toHaveBeenCalledWith(
+      expect.stringContaining('NoSuchSection.NoSuchProperty'),
+    );
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
+    expect(document.querySelector('.pf-setting-focus')).toBeNull();
+    // The page itself stays mounted and usable.
+    expect(screen.getByTestId('settings-mode-controls')).toBeInTheDocument();
   });
 });

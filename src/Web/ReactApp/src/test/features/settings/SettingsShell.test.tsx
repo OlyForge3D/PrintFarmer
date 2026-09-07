@@ -160,6 +160,30 @@ vi.mock('@/hooks/useSlicer', () => ({
   useSlicer: () => ({ isSlicerAvailable: true }),
 }));
 
+// #2505: gives the persistent workspace search a deterministic field result
+// ("Enable System Logging") without hitting a real endpoint. Destination and
+// settings-nav matching (already exercised by the pre-existing `?q=` tests
+// below) come from the static registries and are unaffected by this mock.
+vi.mock('@/features/settings/queries/useSettingsMetadata', () => ({
+  useSettingsMetadata: () => ({
+    data: [{
+      key: 'SystemLog',
+      className: 'SystemLogSettings',
+      group: 'System',
+      properties: [{ name: 'Enabled', type: 'boolean', display: { name: 'Enable System Logging' } }],
+    }],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
+  useSettingsGroups: () => ({
+    data: [{ key: 'System', displayName: 'System', order: 0 }],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
+}));
+
 vi.mock('sonner', () => ({
   toast: {
     info: vi.fn(),
@@ -788,5 +812,110 @@ describe('SettingsShell — footer slot sits below the scrollport (Vasquez #1)',
     expect(
       pane.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+});
+
+describe('SettingsShell — persistent workspace search (#2505)', () => {
+  it('renders the persistent search box on admin routes', () => {
+    renderSettings('/admin/settings');
+    expect(screen.getByRole('combobox', { name: 'Search all settings' })).toBeInTheDocument();
+  });
+
+  it('does not render the persistent search box on personal /settings, preserving personal/system separation', () => {
+    renderSettings('/settings');
+    expect(screen.queryByRole('combobox', { name: 'Search all settings' })).not.toBeInTheDocument();
+  });
+
+  it('typing in the box never itself navigates to a matching leaf, even while not dirty', async () => {
+    renderSettings('/admin/settings?scope=system');
+    expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'General');
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'hardware' } });
+
+    // Past the 200ms debounce, the box's own `q` write lands in the URL...
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('q=hardware'));
+    // ...but the active category must NOT have auto-navigated to Hardware —
+    // this is the "typing must never itself select a leaf" invariant, and it
+    // holds even though nothing is dirty here. (Note: the sidebar's own
+    // legacy keyword filter narrows to matching categories once `q` is set,
+    // so "Farm Defaults" may no longer render as a button at all — the
+    // content pane, not the sidebar button, is the source of truth here.)
+    expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'General');
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=hardware');
+  });
+
+  it('a genuine external ?q= (e.g. a bookmark) still drives legacy auto-navigation on load', () => {
+    // Contrast with the test above: this `q` did not come from the box being
+    // typed into — it was present in the URL before the box ever mounted, so
+    // `isSelfAuthoredQuery` is false and the pre-#2505 auto-nav still applies.
+    renderSettings('/admin/settings?q=slicer');
+    expect(getCategoryButton('Slicer Defaults')).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('explicit selection (Enter) pushes a new history entry and retains the query', async () => {
+    renderSettings('/admin/settings?scope=system');
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'login audit' } });
+
+    const option = await screen.findByRole('option', { name: /Login Audit/i });
+    fireEvent.click(option);
+
+    await waitFor(() => expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/login-audit'));
+  });
+
+  it('explicit selection of a settings-nav item retains q and clears field, landing on the right category', async () => {
+    renderSettings('/admin/settings?scope=system');
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'quotas' } });
+
+    const option = await screen.findByRole('option', { name: /Quotas/i });
+    fireEvent.click(option);
+
+    await waitFor(() => expect(getCategoryButton('Quotas')).toHaveAttribute('aria-current', 'page'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('q=quotas');
+  });
+
+  it('reaches an exact qualified field via the field=Section.property deep link on explicit selection', async () => {
+    renderSettings('/admin/settings?scope=system');
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'enable system logging' } });
+
+    const option = await screen.findByRole('option', { name: /Enable System Logging/i });
+    fireEvent.click(option);
+
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('field=SystemLog.Enabled'));
+  });
+
+  it('prompts Stay/Discard on explicit selection while a section is dirty, and proceeds only on Discard', async () => {
+    renderSettings('/admin/settings?scope=system');
+    fireEvent.click(screen.getByTestId('make-dirty-btn'));
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'login audit' } });
+    const option = await screen.findByRole('option', { name: /Login Audit/i });
+    fireEvent.click(option);
+
+    expect(screen.getByRole('dialog', { name: 'Unsaved Changes' })).toBeInTheDocument();
+    expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/settings');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stay' }));
+    expect(screen.queryByRole('dialog', { name: 'Unsaved Changes' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/settings');
+
+    fireEvent.change(input, { target: { value: 'login audit' } });
+    const optionAgain = await screen.findByRole('option', { name: /Login Audit/i });
+    fireEvent.click(optionAgain);
+    fireEvent.click(screen.getByRole('button', { name: 'Discard Changes' }));
+
+    await waitFor(() => expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/login-audit'));
   });
 });

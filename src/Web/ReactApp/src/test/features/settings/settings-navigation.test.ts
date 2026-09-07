@@ -3,8 +3,16 @@ import {
   buildAdminDestinationCommandItems,
   buildSettingCommandItems,
   buildSettingsPath,
+  getFuzzyMatchIndices,
+  getFuzzyResult,
+  groupRankedResults,
+  KIND_SECTION_ORDER,
+  normalizeSearchQuery,
+  rankSettingsCommandItems,
   resolveSettingsNavigationTarget,
   SETTINGS_GROUP_TO_LOCATION,
+  withRetainedQuery,
+  type SettingsCommandItem,
 } from '@/features/settings/settings-navigation';
 import { SUB_PAGE_ALLOWED_GROUPS } from '@/features/settings/subpage-groups';
 import type { AdminDestination } from '@/features/admin/registry/adminDestinations';
@@ -296,5 +304,136 @@ describe('SETTINGS_GROUP_TO_LOCATION', () => {
         ).toBe(expectedSubPageId);
       }
     }
+  });
+});
+
+function makeItem(overrides: Partial<SettingsCommandItem> = {}): SettingsCommandItem {
+  return {
+    id: 'item-1',
+    kind: 'setting',
+    scopeId: 'system',
+    categoryId: 'general',
+    label: 'System Log',
+    description: 'System log settings',
+    breadcrumb: 'System Settings > General',
+    keywords: ['log'],
+    href: '/admin/settings?scope=system&tab=general',
+    ...overrides,
+  };
+}
+
+describe('withRetainedQuery (#2505)', () => {
+  it('appends q onto a /admin/settings href', () => {
+    expect(withRetainedQuery('/admin/settings?scope=system&tab=general', 'slicer')).toBe(
+      '/admin/settings?scope=system&tab=general&q=slicer',
+    );
+  });
+
+  it('appends q onto a /settings href', () => {
+    expect(withRetainedQuery('/settings?scope=user&tab=profile', 'theme')).toBe(
+      '/settings?scope=user&tab=profile&q=theme',
+    );
+  });
+
+  it('overwrites an existing q param rather than duplicating it', () => {
+    expect(withRetainedQuery('/admin/settings?scope=system&tab=general&q=old', 'new')).toBe(
+      '/admin/settings?scope=system&tab=general&q=new',
+    );
+  });
+
+  it('does not append q onto a standalone destination outside the settings shell', () => {
+    // Standalone admin destinations (e.g. an audit log page) must not leak a
+    // settings search param onto an unrelated surface.
+    expect(withRetainedQuery('/admin/login-audit', 'slicer')).toBe('/admin/login-audit');
+  });
+
+  it('returns the href unchanged when the query is empty', () => {
+    expect(withRetainedQuery('/admin/settings?scope=system&tab=general', '')).toBe(
+      '/admin/settings?scope=system&tab=general',
+    );
+  });
+});
+
+describe('getFuzzyMatchIndices', () => {
+  it('returns an empty array (not null) for an empty query', () => {
+    expect(getFuzzyMatchIndices('System Log', '')).toEqual([]);
+  });
+
+  it('matches a case-insensitive subsequence', () => {
+    expect(getFuzzyMatchIndices('System Log', 'sylog')).toEqual([0, 1, 7, 8, 9]);
+  });
+
+  it('returns null when the query is not a subsequence', () => {
+    expect(getFuzzyMatchIndices('System Log', 'zzz')).toBeNull();
+  });
+});
+
+describe('getFuzzyResult', () => {
+  it('matches on an exact qualified field name using real wire-format casing', () => {
+    // Regression guard for "use actual metadata wire names" (#2505): the
+    // field-scoped item's label/keywords must be reachable by the exact
+    // camelCase wire name the backend serializes, not an invented PascalCase
+    // variant.
+    const item = makeItem({
+      id: 'setting.SystemLog.enabled',
+      label: 'Enabled',
+      breadcrumb: 'System Settings > General > System',
+      keywords: ['systemlog.enabled', 'enabled'],
+    });
+    const result = getFuzzyResult(item, normalizeSearchQuery('systemlog.enabled'));
+    expect(result).not.toBeNull();
+  });
+
+  it('returns null when neither label, breadcrumb, nor keywords match', () => {
+    expect(getFuzzyResult(makeItem(), normalizeSearchQuery('zzz-nomatch'))).toBeNull();
+  });
+
+  it('ranks an exact label match ahead of a breadcrumb-only match', () => {
+    const exact = makeItem({ id: 'exact', label: 'Slicing', breadcrumb: 'Other > Section' });
+    const breadcrumbOnly = makeItem({ id: 'breadcrumb-only', label: 'Unrelated', breadcrumb: 'Slicing > Section' });
+    const query = normalizeSearchQuery('slicing');
+    const exactResult = getFuzzyResult(exact, query);
+    const breadcrumbResult = getFuzzyResult(breadcrumbOnly, query);
+    expect(exactResult).not.toBeNull();
+    expect(breadcrumbResult).not.toBeNull();
+    expect(exactResult!.score).toBeLessThan(breadcrumbResult!.score);
+  });
+});
+
+describe('rankSettingsCommandItems / groupRankedResults', () => {
+  it('drops non-matching items and sorts matches best-first', () => {
+    const items = [
+      makeItem({ id: 'a', label: 'Zebra Settings', breadcrumb: 'Z' }),
+      makeItem({ id: 'b', label: 'Slicing Defaults', breadcrumb: 'S' }),
+      makeItem({ id: 'c', label: 'Completely Unrelated', breadcrumb: 'U', keywords: [] }),
+    ];
+    const ranked = rankSettingsCommandItems(items, 'slicing');
+    expect(ranked.map((result) => result.item.id)).toEqual(['b']);
+  });
+
+  it('respects maxVisible', () => {
+    const items = Array.from({ length: 5 }, (_, index) =>
+      makeItem({ id: `item-${index}`, label: `Slicing ${index}`, breadcrumb: `Slicing ${index}` }));
+    const ranked = rankSettingsCommandItems(items, 'slicing', { maxVisible: 2 });
+    expect(ranked).toHaveLength(2);
+  });
+
+  it('groups results by kind in KIND_SECTION_ORDER, dropping empty sections', () => {
+    const items = [
+      makeItem({ id: 'dest', kind: 'destination', label: 'Slicing Destination', breadcrumb: 'Admin' }),
+      makeItem({ id: 'field', kind: 'setting', label: 'Slicing Field', breadcrumb: 'Settings' }),
+    ];
+    const ranked = rankSettingsCommandItems(items, 'slicing');
+    const grouped = groupRankedResults(ranked);
+    expect(grouped.map((group) => group.kind)).toEqual(['destination', 'setting']);
+    expect(grouped.every((group) => group.results.length > 0)).toBe(true);
+    // Confirms the order tracks KIND_SECTION_ORDER rather than insertion order.
+    const destinationOrderIndex = KIND_SECTION_ORDER.findIndex((entry) => entry.kind === 'destination');
+    const settingOrderIndex = KIND_SECTION_ORDER.findIndex((entry) => entry.kind === 'setting');
+    expect(destinationOrderIndex).toBeLessThan(settingOrderIndex);
+  });
+
+  it('returns an empty list for an empty query with no items matching (a workspace search with no text)', () => {
+    expect(rankSettingsCommandItems([], 'slicing')).toEqual([]);
   });
 });

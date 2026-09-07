@@ -4,10 +4,13 @@ import clsx from 'clsx';
 import { ArrowRightIcon, CloseIcon, SearchIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Input } from '@/common/components/ui';
 import { commandPaletteShortcutLabel } from '@/features/settings/components/commandPaletteShortcut';
+import { HighlightedFuzzyText } from '@/features/settings/components/HighlightedFuzzyText';
 import {
   getSettingsCategoryIcon,
+  groupRankedResults,
+  rankSettingsCommandItems,
+  type FuzzyGroup,
   type SettingsCommandItem,
-  type SettingsCommandItemKind,
 } from '@/features/settings/settings-navigation';
 
 const PREMIUM_TRANSITION_MS = 280;
@@ -35,165 +38,10 @@ interface CommandPaletteProps {
   onSelect: (item: SettingsCommandItem) => void;
 }
 
-interface FuzzyResult {
-  item: SettingsCommandItem;
-  score: number;
-  labelMatches: number[];
-  breadcrumbMatches: number[];
-}
-
-interface FuzzyGroup {
-  kind: SettingsCommandItemKind;
-  label: string;
-  results: FuzzyResult[];
-}
-
-/**
- * Display order and human-readable label for each palette section. Kinds
- * missing from this list still render, but only at the tail of the results in
- * insertion order — the map is authoritative for the visible sections.
- */
-const KIND_SECTION_ORDER: { kind: SettingsCommandItemKind; label: string }[] = [
-  { kind: 'destination', label: 'Places' },
-  { kind: 'settings-nav', label: 'Settings sections' },
-  { kind: 'setting', label: 'Individual settings' },
-  { kind: 'action', label: 'Actions' },
-];
-
-function getItemKind(item: SettingsCommandItem): SettingsCommandItemKind {
-  return item.kind ?? 'settings-nav';
-}
-
-function normalizeQuery(value: string): string {
-  return value.trim().toLowerCase();
-}
-
 function getReducedMotionPreference(): boolean {
   return typeof window !== 'undefined'
     && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
-function getFuzzyMatchIndices(text: string, query: string): number[] | null {
-  if (!query) {
-    return [];
-  }
-
-  const normalizedText = text.toLowerCase();
-  const matches: number[] = [];
-  let searchIndex = 0;
-
-  for (const character of query) {
-    const nextMatch = normalizedText.indexOf(character, searchIndex);
-    if (nextMatch === -1) {
-      return null;
-    }
-
-    matches.push(nextMatch);
-    searchIndex = nextMatch + 1;
-  }
-
-  return matches;
-}
-
-function scoreMatches(matches: number[]): number {
-  if (matches.length === 0) {
-    return 0;
-  }
-
-  const spread = matches[matches.length - 1] - matches[0];
-  let contiguousBonus = 0;
-
-  for (let index = 1; index < matches.length; index += 1) {
-    if (matches[index] === matches[index - 1] + 1) {
-      contiguousBonus += 4;
-    }
-  }
-
-  return spread - contiguousBonus;
-}
-
-function getFuzzyResult(item: SettingsCommandItem, query: string): FuzzyResult | null {
-  if (!query) {
-    return {
-      item,
-      score: 0,
-      labelMatches: [],
-      breadcrumbMatches: [],
-    };
-  }
-
-  const labelMatches = getFuzzyMatchIndices(item.label, query);
-  const breadcrumbMatches = getFuzzyMatchIndices(item.breadcrumb, query);
-  const keywordExactMatch = item.keywords.some((keyword) => keyword.includes(query));
-
-  if (!labelMatches && !breadcrumbMatches && !keywordExactMatch) {
-    return null;
-  }
-
-  let score = 300;
-
-  if (labelMatches) {
-    score -= 180;
-    score += scoreMatches(labelMatches);
-    if (item.label.toLowerCase().includes(query)) {
-      score -= 24;
-    }
-    if (item.label.toLowerCase().startsWith(query)) {
-      score -= 30;
-    }
-  }
-
-  if (breadcrumbMatches) {
-    score -= 70;
-    score += scoreMatches(breadcrumbMatches);
-  }
-
-  if (keywordExactMatch) {
-    score -= 28;
-  }
-
-  if (item.subPageId) {
-    score -= 6;
-  }
-
-  return {
-    item,
-    score,
-    labelMatches: labelMatches ?? [],
-    breadcrumbMatches: breadcrumbMatches ?? [],
-  };
-}
-
-function HighlightedFuzzyText({ text, matches }: { text: string; matches: number[] }) {
-  const matchSet = useMemo(() => new Set(matches), [matches]);
-
-  if (matchSet.size === 0) {
-    return <span className="break-words">{text}</span>;
-  }
-
-  // Wrap the per-character spans in a single containing element rather than
-  // a bare fragment. Call sites render this inside a `flex gap-*` row (e.g.
-  // the label next to the destructive "Confirm" badge); a fragment lets
-  // React flatten every character span directly into that flex container,
-  // so the row's gap gets inserted between each individual character and
-  // overflows the result card on narrow viewports (#1710). Keeping this as
-  // one element makes it exactly one flex item, and `break-words` lets long
-  // unbroken text wrap within the card instead of overflowing it.
-  return (
-    <span className="break-words">
-      {Array.from(text).map((character, index) => (
-        <span
-          key={`${character}-${index}`}
-          className={clsx(
-            matchSet.has(index) && 'rounded-sm bg-pf-accent-bg/45 px-[0.08rem] text-pf-text-primary',
-          )}
-        >
-          {character}
-        </span>
-      ))}
-    </span>
-  );
 }
 
 export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPaletteProps) {
@@ -211,41 +59,12 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const shouldRestoreFocusRef = useRef(true);
 
-  const filteredItems = useMemo(() => {
-    const normalizedQuery = normalizeQuery(query);
-    const results = items
-      .map((item) => getFuzzyResult(item, normalizedQuery))
-      .filter((result): result is FuzzyResult => result !== null)
-      .sort((left, right) => left.score - right.score || left.item.breadcrumb.localeCompare(right.item.breadcrumb));
+  const filteredItems = useMemo(
+    () => rankSettingsCommandItems(items, query, { maxVisible: MAX_VISIBLE_ITEMS }),
+    [items, query],
+  );
 
-    return results.slice(0, MAX_VISIBLE_ITEMS);
-  }, [items, query]);
-
-  const filteredGroups = useMemo<FuzzyGroup[]>(() => {
-    if (filteredItems.length === 0) {
-      return [];
-    }
-    const byKind = new Map<SettingsCommandItemKind, FuzzyResult[]>();
-    for (const result of filteredItems) {
-      const kind = getItemKind(result.item);
-      const bucket = byKind.get(kind) ?? [];
-      bucket.push(result);
-      byKind.set(kind, bucket);
-    }
-
-    const groups: FuzzyGroup[] = [];
-    for (const { kind, label } of KIND_SECTION_ORDER) {
-      const bucket = byKind.get(kind);
-      if (bucket && bucket.length > 0) {
-        groups.push({ kind, label, results: bucket });
-        byKind.delete(kind);
-      }
-    }
-    for (const [kind, bucket] of byKind.entries()) {
-      groups.push({ kind, label: kind, results: bucket });
-    }
-    return groups;
-  }, [filteredItems]);
+  const filteredGroups = useMemo<FuzzyGroup[]>(() => groupRankedResults(filteredItems), [filteredItems]);
 
 
   useEffect(() => {
