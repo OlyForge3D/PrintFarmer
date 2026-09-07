@@ -155,18 +155,58 @@ function SubsystemTile({ subsystem }: { subsystem: SubsystemHealthDto }) {
 }
 
 /**
+ * Synthetic origin used only to run the WHATWG URL parser over an app-relative
+ * route. It is never navigated to; `.invalid` is reserved by RFC 2606 precisely
+ * so it can never resolve to a real host.
+ */
+const INTERNAL_ROUTE_ORIGIN = 'https://printfarmer.invalid';
+
+/** Parse an app-relative route against the synthetic origin. `null` if it isn't same-origin. */
+function parseInternalRoute(route: string): URL | null {
+  try {
+    const parsed = new URL(route, INTERNAL_ROUTE_ORIGIN);
+    return parsed.origin === INTERNAL_ROUTE_ORIGIN ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Percent-decode a pathname the way the router does when matching. `null` on malformed encoding. */
+function decodeRoutePathname(pathname: string): string | null {
+  try {
+    return decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Reduce a route to the pathname React Router will actually match on, so route
  * *identity* checks cannot be evaded by an equivalent spelling.
  *
- * React Router matches case-insensitively and treats a trailing slash as
- * equivalent, so `/ADMIN`, `/admin/` and `/admin?x=1` all land on the same
- * route as `/admin`. Comparing raw strings would let any of those through as a
- * "different" route and produce exactly the self-link Issue 2526 forbids.
+ * Normalising by hand is not enough here, because a browser applies full URL
+ * semantics to an href before the router ever sees it: `/foo/../admin` resolves
+ * to `/admin`, `/admin\` folds to `/admin/`, and `/%61dmin` decodes to `/admin`.
+ * A lexical check misses all three and would emit exactly the self-link Issue
+ * 2526 forbids. So delegate to the URL parser — the same algorithm the browser
+ * uses — then decode, fold trailing slashes, and lowercase for the comparison
+ * (React Router matches case-insensitively and treats a trailing slash as
+ * equivalent).
  */
 function routePathname(route: string): string {
-  const queryOrHash = route.search(/[?#]/);
-  const pathname = queryOrHash === -1 ? route : route.slice(0, queryOrHash);
-  const withoutTrailingSlash = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
+  const parsed = parseInternalRoute(route);
+  let pathname: string;
+  if (parsed) {
+    pathname = parsed.pathname;
+  } else {
+    // Off-origin or unparseable: it is not an in-app route, so it can never be
+    // an in-app route *identity*. Strip query/hash lexically and let the
+    // comparison fall through to "not a match".
+    const queryOrHash = route.search(/[?#]/);
+    pathname = queryOrHash === -1 ? route : route.slice(0, queryOrHash);
+  }
+  const decoded = decodeRoutePathname(pathname) ?? pathname;
+  const withoutTrailingSlash = decoded.length > 1 ? decoded.replace(/\/+$/, '') : decoded;
   return withoutTrailingSlash.toLowerCase();
 }
 
@@ -211,10 +251,32 @@ function canonicalizeInternalRoute(rawRoute: string | null | undefined): string 
   if (/[\u0000-\u001F\u007F]/.test(route)) {
     return null;
   }
+  // Browsers fold a literal backslash into a path separator for HTTP(S) URLs,
+  // so "/admin\" is really "/admin/". No legitimate in-app route contains one.
+  if (route.includes('\\')) {
+    return null;
+  }
+
+  // Run the browser's own URL algorithm rather than trusting the raw string:
+  // it resolves dot segments ("/foo/../admin" -> "/admin") and re-rejects
+  // anything that escapes to another origin.
+  const parsed = parseInternalRoute(route);
+  if (!parsed) {
+    return null;
+  }
+  // Malformed percent-encoding: we cannot know what the router will match, so drop it.
+  if (decodeRoutePathname(parsed.pathname) === null) {
+    return null;
+  }
+
   if (isRetiredManageRoute(route) || isControlCenterSelfRoute(route)) {
     return null;
   }
-  return route;
+
+  // Emit exactly what was validated. The parser has already resolved dot
+  // segments, so the emitted href cannot renormalise into a different route
+  // than the one these guards approved.
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
 
 /**

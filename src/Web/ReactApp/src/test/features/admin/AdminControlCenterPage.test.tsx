@@ -754,6 +754,16 @@ describe('AdminControlCenterPage', () => {
     ['a mixed-case /Admin/ action route', { actionRoute: '/Admin/' }],
     ['a whitespace-padded /admin action route', { actionRoute: '  /admin  ' }],
     ['a repeated-trailing-slash /admin// action route', { actionRoute: '/admin//' }],
+    // A browser applies full URL semantics to an href before the router sees
+    // it, so these three also resolve to /admin. Lexical normalisation misses
+    // every one of them.
+    ['a dot-segment route resolving to /admin', { actionRoute: '/foo/../admin' }],
+    ['a dot-segment route climbing above root', { actionRoute: '/foo/bar/../../admin' }],
+    ['a percent-encoded dot-segment route', { actionRoute: '/foo/%2e%2e/admin' }],
+    ['a percent-encoded /%61dmin action route', { actionRoute: '/%61dmin' }],
+    ['a percent-encoded trailing slash /admin%2f', { actionRoute: '/admin%2f' }],
+    ['a backslash-folded /admin\\ action route', { actionRoute: '/admin\\' }],
+    ['a dot-segment route resolving to retired /admin/manage', { actionRoute: '/admin/settings/../manage' }],
   ])('suppresses an attention action pointing at the hub itself — %s (#2526)', async (_label, action) => {
     mockedApiGet.mockResolvedValue({
       data: makeOverview({
@@ -792,6 +802,8 @@ describe('AdminControlCenterPage', () => {
     ['a mailto: scheme', 'mailto:someone@evil.test'],
     ['a bare relative path with no leading slash', 'admin/status'],
     ['an embedded newline', '/admin\nstatus'],
+    ['a literal backslash path separator', '/printers\\evil'],
+    ['malformed percent-encoding', '/printers/%zz'],
     ['an empty string', ''],
   ])('drops an unsafe backend action route — %s', async (_label, actionRoute) => {
     mockedApiGet.mockResolvedValue({
