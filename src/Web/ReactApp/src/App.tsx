@@ -40,7 +40,8 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { queryClient } from '@/services/queryClient';
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Route, BrowserRouter as Router, Routes, Navigate, useLocation, Outlet } from 'react-router';
+import { Route, Routes, Navigate, useLocation, Outlet } from 'react-router';
+import { AppRouterProvider } from '@/common/router/AppRouterProvider';
 import { Toaster, toast } from 'sonner';
 import { signalRService as harvestSignalRService } from '@/services/harvest-signalr';
 import './App.css';
@@ -423,9 +424,9 @@ function App() {
           <QueryClientProvider client={queryClient}>
             <SlicerUIProvider>
               <SlicerProvider>
-                <Router>
+                <AppRouterProvider>
                   <AuthenticatedAppRoutes />
-                </Router>
+                </AppRouterProvider>
                 <ReactQueryDevtools initialIsOpen={false} />
                 <Toaster position="top-right" richColors />
               </SlicerProvider>
