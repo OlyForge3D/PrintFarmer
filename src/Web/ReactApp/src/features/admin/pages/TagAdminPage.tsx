@@ -278,6 +278,9 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
         setConflictServerTag(null);
     }, [editForm]);
 
+    const { mutateAsync: updateTagMutateAsync } = updateTagMutation;
+    const { mutateAsync: createTagMutateAsync } = createTagMutation;
+
     const handleSaveEdit = useCallback(async () => {
         if (!editingTagId || !editForm.values.name.trim()) {
             return;
@@ -293,7 +296,7 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
 
         setSaveError(null);
         try {
-            await updateTagMutation.mutateAsync({
+            await updateTagMutateAsync({
                 id: editingTagId,
                 dto: {
                     name: editForm.values.name.trim(),
@@ -338,16 +341,16 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
             }
             setSaveError(getErrorMessage(error, 'Failed to update tag'));
         }
-    }, [editingTagId, editForm, editingRevision, updateTagMutation]);
+    }, [editingTagId, editForm, editingRevision, updateTagMutateAsync]);
 
     const isDirty = createForm.isDirty || editForm.isDirty;
     const saveDirtyTagSection = useCallback(async () => {
         if (editForm.isDirty && editingTagId) {
             await handleSaveEdit();
         } else if (createForm.isDirty && showNewTagForm) {
-            await createTagMutation.mutateAsync();
+            await createTagMutateAsync();
         }
-    }, [editForm.isDirty, editingTagId, handleSaveEdit, createForm.isDirty, showNewTagForm, createTagMutation]);
+    }, [editForm.isDirty, editingTagId, handleSaveEdit, createForm.isDirty, showNewTagForm, createTagMutateAsync]);
     const resetCreateForm = createForm.reset;
     const discardDirtyTagSection = useCallback(() => {
         if (editForm.isDirty) handleCancelEdit();

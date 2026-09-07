@@ -400,9 +400,10 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
     });
   };
 
+  const { mutateAsync: savePermissionsMutateAsync } = savePermissionsMutation;
   const saveDirtyPermissions = useCallback(async () => {
-    await savePermissionsMutation.mutateAsync();
-  }, [savePermissionsMutation]);
+    await savePermissionsMutateAsync();
+  }, [savePermissionsMutateAsync]);
   const resetGrantState = grantState.reset;
   const discardDirtyPermissions = useCallback(() => {
     resetGrantState();
