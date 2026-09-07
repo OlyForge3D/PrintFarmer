@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // MARK: - Kind
 
@@ -174,10 +175,15 @@ public enum PrinterRunActionLabels {
         }
     }
 
-    /// VoiceOver hint spoken after the label. Cancel, Stop and Emergency Stop
-    /// each announce that they require confirmation. Emergency Stop also
-    /// announces that it is not a substitute for the physical safety switch —
-    /// the epic pins this language.
+    /// VoiceOver hint spoken after the label. Cancel and Emergency Stop each
+    /// announce that they require confirmation (verified against
+    /// `PrinterDetailViewModel.requestCancel()` and `requestEmergencyStop()`,
+    /// which both flip `showConfirmation`). Emergency Stop also announces
+    /// that it is not a substitute for the physical safety switch — the epic
+    /// pins this language. Stop does **not** promise confirmation because
+    /// `PrinterDetailViewModel.stopPrinter()` dispatches immediately today;
+    /// if the integrator (issue #2522) later adds a confirmation gate for
+    /// Stop, they can update this hint in the same change.
     public static func accessibilityHint(for kind: PrinterRunActionKind) -> String {
         switch kind {
         case .pause:
@@ -187,7 +193,7 @@ public enum PrinterRunActionLabels {
         case .cancel:
             return "Cancels the current print. Requires confirmation."
         case .stop:
-            return "Stops the printer and clears the current job. Requires confirmation."
+            return "Stops the printer and clears the current job."
         case .emergencyStop:
             return "Immediately halts the printer. Requires confirmation. Not a substitute for the physical safety switch."
         }
@@ -195,18 +201,27 @@ public enum PrinterRunActionLabels {
 
     /// Resolved VoiceOver hint for a descriptor.
     ///
-    /// Enabled descriptors return the static per-kind hint above. Disabled
-    /// descriptors return the host-supplied `unavailableReason` (or the
-    /// generic "Unavailable" when the host omits one) so a VoiceOver operator
-    /// hears **why** the button is dimmed. This mirrors the pattern the
-    /// printer controls section adopted in issue #2519 so both surfaces on the
-    /// printer-detail screen (issue #2522) explain disable state the same way.
-    /// Pending descriptors keep the static hint — the "Pending" value already
-    /// announces the in-flight state, and the hint's description of what the
-    /// button will do is still accurate.
+    /// Composition (order matters — evaluate pending BEFORE disabled so a
+    /// pending-and-disabled descriptor keeps the static hint that describes
+    /// what activating the button will do; the "Pending" value already carries
+    /// the in-flight signal, and swapping in a disable reason would drop that
+    /// description):
+    ///
+    ///   1. Pending → static per-kind hint.
+    ///   2. Disabled with a non-empty host reason → the reason (mirrors
+    ///      sibling `PrinterControlsSection` in issue #2519 so both surfaces
+    ///      on the printer-detail screen explain disable state the same way
+    ///      when #2522 embeds them together).
+    ///   3. Disabled without a reason (or empty) → the generic
+    ///      "Unavailable" fallback so VoiceOver never reads a stale enabled
+    ///      hint on a dimmed button.
+    ///   4. Enabled and non-pending → the static per-kind hint.
     public static func resolvedAccessibilityHint(
         for descriptor: PrinterRunActionDescriptor
     ) -> String {
+        if descriptor.isPending {
+            return accessibilityHint(for: descriptor.kind)
+        }
         if !descriptor.isEnabled {
             if let reason = descriptor.unavailableReason, !reason.isEmpty {
                 return reason
@@ -223,6 +238,23 @@ public enum PrinterRunActionLabels {
         for descriptor: PrinterRunActionDescriptor
     ) -> String {
         descriptor.isPending ? "Pending" : ""
+    }
+
+    /// Resolved VoiceOver traits for a descriptor.
+    ///
+    /// Mirrors the sibling pattern used by `HomeSubgroup`, `JogSubgroup` and
+    /// `PreheatSubgroup` in issue #2519: `.updatesFrequently` while a command
+    /// is in flight (so VoiceOver re-reads state as pending resolves),
+    /// otherwise `.isButton`. **Never `.isSelected`** — that trait announces
+    /// a chosen/on state (radio, tab), which on a dimmed destructive action
+    /// like a disabled Emergency Stop would read as "armed" to a VoiceOver
+    /// operator. Disabled state is already conveyed by SwiftUI's own
+    /// `.disabled(...)` modifier (VoiceOver announces "dimmed") plus the
+    /// host reason in the hint.
+    public static func resolvedAccessibilityTraits(
+        for descriptor: PrinterRunActionDescriptor
+    ) -> AccessibilityTraits {
+        descriptor.isPending ? .updatesFrequently : .isButton
     }
 
     /// Stable accessibility identifier used by both UI tests and the host's

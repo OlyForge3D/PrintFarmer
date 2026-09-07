@@ -39,6 +39,25 @@ final class PrinterRunActionPresentationTests: XCTestCase {
         )
         XCTAssertNil(presentation.descriptor(for: .pause),
                      "Paused should NOT expose Pause")
+        // Hicks-flag: assert enabled STATE, not only visibility. A "paused"
+        // fixture that silently shipped disabled Resume/Cancel/Stop would
+        // still pass a visibility-only check but be unusable.
+        for kind in [PrinterRunActionKind.resume, .cancel, .stop, .emergencyStop] {
+            let descriptor = presentation.descriptor(for: kind)
+            XCTAssertNotNil(descriptor, "Paused fixture must expose \(kind)")
+            XCTAssertTrue(
+                descriptor?.isEnabled ?? false,
+                "Paused fixture must expose \(kind) as ENABLED, not just visible"
+            )
+            XCTAssertFalse(
+                descriptor?.isPending ?? true,
+                "Paused fixture must not report \(kind) as pending"
+            )
+            XCTAssertTrue(
+                presentation.shouldFireCallback(for: kind),
+                "Paused fixture must allow \(kind) to fire"
+            )
+        }
     }
 
     // MARK: - Idle fixture
@@ -107,6 +126,16 @@ final class PrinterRunActionPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.visibleKinds, [.pause])
         XCTAssertFalse(presentation.shouldFireCallback(for: .stop))
         XCTAssertFalse(presentation.shouldFireCallback(for: .emergencyStop))
+        // Hicks-flag: assert the surviving visible action is actually
+        // enabled — a limited-permission operator who can still Pause must
+        // hear/see an enabled Pause, not a dimmed one.
+        let pause = presentation.descriptor(for: .pause)
+        XCTAssertNotNil(pause)
+        XCTAssertTrue(
+            pause?.isEnabled ?? false,
+            "Limited-permission fixture must expose Pause as ENABLED"
+        )
+        XCTAssertTrue(presentation.shouldFireCallback(for: .pause))
     }
 
     // MARK: - Duplicate handling
@@ -426,5 +455,143 @@ final class PrinterRunActionPresentationTests: XCTestCase {
             PrinterRunActionLabels.resolvedAccessibilityValue(for: descriptor),
             ""
         )
+    }
+
+    // MARK: - Hint honesty (Cancel / Stop / Emergency Stop confirmation semantics)
+
+    /// Cancel today runs through `PrinterDetailViewModel.requestCancel()`,
+    /// which flips `showConfirmation = true` before dispatching. The hint
+    /// must announce that the confirmation gate exists — a VoiceOver
+    /// operator planning a destructive action deserves to hear "requires
+    /// confirmation" before activating.
+    func test_cancelHint_declaresConfirmation() {
+        let hint = PrinterRunActionLabels.accessibilityHint(for: .cancel)
+        XCTAssertTrue(
+            hint.lowercased().contains("confirmation"),
+            "Cancel hint must announce that confirmation is required: \"\(hint)\""
+        )
+    }
+
+    /// Stop today runs through `PrinterDetailViewModel.stopPrinter()`,
+    /// which dispatches immediately with no confirmation gate. The hint
+    /// must NOT promise a confirmation that the host does not perform —
+    /// a false promise is worse than silence for a VoiceOver operator
+    /// deciding whether it is safe to activate. If the integrator (#2522)
+    /// later adds a confirmation gate for Stop, they can update this hint
+    /// in the same change.
+    func test_stopHint_doesNotFalselyPromiseConfirmation() {
+        let hint = PrinterRunActionLabels.accessibilityHint(for: .stop)
+        XCTAssertFalse(
+            hint.lowercased().contains("confirmation"),
+            "Stop hint must NOT promise confirmation because stopPrinter() dispatches immediately: \"\(hint)\""
+        )
+        // Positive — the hint still describes what Stop does.
+        XCTAssertTrue(
+            hint.lowercased().contains("stops"),
+            "Stop hint must describe the action: \"\(hint)\""
+        )
+    }
+
+    // MARK: - Resolved hint composition — combined pending + disabled
+
+    /// A pending descriptor may also be disabled while the command flushes
+    /// (host might dim it as a defensive measure). Composition must give
+    /// pending precedence: the static hint describes what the button will
+    /// do once the pending resolves, which is the useful thing to
+    /// announce; the disable reason would drop that description while the
+    /// "Pending" value already carries the in-flight signal.
+    func test_resolvedHint_forPendingAndDisabled_keepsStaticHint_notReason() {
+        let descriptor = PrinterRunActionDescriptor(
+            kind: .cancel,
+            isEnabled: false,
+            isPending: true,
+            unavailableReason: "printer offline"
+        )
+        XCTAssertEqual(
+            PrinterRunActionLabels.resolvedAccessibilityHint(for: descriptor),
+            PrinterRunActionLabels.accessibilityHint(for: .cancel),
+            "Pending + disabled must keep the static per-kind hint so the description survives; the disable reason must not overwrite it."
+        )
+        // And the value still announces pending — that is where the
+        // in-flight signal lives.
+        XCTAssertEqual(
+            PrinterRunActionLabels.resolvedAccessibilityValue(for: descriptor),
+            "Pending"
+        )
+    }
+
+    // MARK: - Resolved traits
+
+    /// Every enabled non-pending descriptor must expose plain `.isButton`
+    /// traits — never `.isSelected`, which would announce "chosen/on" on
+    /// what is really just a normal button. Locks in the sibling pattern
+    /// from `HomeSubgroup` / `JogSubgroup` / `PreheatSubgroup` (issue
+    /// #2519) so both surfaces on the printer-detail screen read the same
+    /// to a VoiceOver operator once #2522 integrates.
+    func test_resolvedTraits_forEnabledNonPending_isJustIsButton_notSelected() {
+        for kind in PrinterRunActionKind.allCases {
+            let descriptor = PrinterRunActionDescriptor(kind: kind)
+            let traits = PrinterRunActionLabels.resolvedAccessibilityTraits(for: descriptor)
+            XCTAssertTrue(
+                traits.contains(.isButton),
+                "\(kind): enabled non-pending descriptor must carry .isButton"
+            )
+            XCTAssertFalse(
+                traits.contains(.isSelected),
+                "\(kind): enabled non-pending descriptor must NOT carry .isSelected"
+            )
+            XCTAssertFalse(
+                traits.contains(.updatesFrequently),
+                "\(kind): enabled non-pending descriptor must NOT carry .updatesFrequently"
+            )
+        }
+    }
+
+    /// Pending descriptors must expose `.updatesFrequently` so VoiceOver
+    /// re-reads state as the pending resolves. Must NOT carry `.isSelected`
+    /// — this was the review finding that produced this test.
+    func test_resolvedTraits_forPending_isUpdatesFrequently_notSelected() {
+        let descriptor = PrinterRunActionDescriptor(
+            kind: .cancel,
+            isEnabled: true,
+            isPending: true
+        )
+        let traits = PrinterRunActionLabels.resolvedAccessibilityTraits(for: descriptor)
+        XCTAssertTrue(
+            traits.contains(.updatesFrequently),
+            "Pending descriptor must carry .updatesFrequently so VoiceOver re-reads state"
+        )
+        XCTAssertFalse(
+            traits.contains(.isSelected),
+            "Pending descriptor must NOT carry .isSelected — pending is not chosen"
+        )
+    }
+
+    /// A disabled descriptor is announced as "dimmed" by SwiftUI's own
+    /// `.disabled(...)` modifier plus the host reason in the hint. It must
+    /// NOT carry `.isSelected` — that trait means "chosen/on", which on a
+    /// dimmed destructive action like a disabled Emergency Stop would read
+    /// as "armed" to a VoiceOver operator. This was the review finding.
+    func test_resolvedTraits_forDisabledNonPending_isJustIsButton_notSelected() {
+        for kind in PrinterRunActionKind.allCases {
+            let descriptor = PrinterRunActionDescriptor(
+                kind: kind,
+                isEnabled: false,
+                unavailableReason: "printer offline"
+            )
+            let traits = PrinterRunActionLabels.resolvedAccessibilityTraits(for: descriptor)
+            XCTAssertTrue(
+                traits.contains(.isButton),
+                "\(kind): disabled descriptor must still carry .isButton"
+            )
+            XCTAssertFalse(
+                traits.contains(.isSelected),
+                "\(kind): disabled descriptor must NOT carry .isSelected — a dimmed Emergency Stop reading as 'armed' is a safety concern"
+            )
+            XCTAssertFalse(
+                traits.contains(.updatesFrequently),
+                "\(kind): disabled non-pending descriptor must NOT carry .updatesFrequently"
+            )
+        }
     }
 }

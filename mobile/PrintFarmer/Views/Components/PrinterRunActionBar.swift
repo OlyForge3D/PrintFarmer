@@ -145,7 +145,13 @@ public struct PrinterRunActionBar: View {
     /// can never emit an `onSelect` event. Redraws and page-gesture side
     /// effects can't slip through because SwiftUI only invokes the closure on
     /// actual button activation, and this check filters those.
-    private func fire(_ kind: PrinterRunActionKind) {
+    ///
+    /// Exposed as `internal` (via `@testable import`) so tests can drive the
+    /// gate directly and observe whether `onSelect` fires with the expected
+    /// kind — this closes the "manually appends kind" gap Hicks flagged: the
+    /// test now goes through the same `fire → gate → onSelect` path the
+    /// production button activation does.
+    func fire(_ kind: PrinterRunActionKind) {
         guard presentation.shouldFireCallback(for: kind) else { return }
         onSelect(kind)
     }
@@ -153,10 +159,10 @@ public struct PrinterRunActionBar: View {
     // MARK: - Accessibility helpers
 
     /// Delegates to `PrinterRunActionLabels.resolvedAccessibilityHint(for:)`
-    /// so the composition (static hint when enabled, host-supplied reason when
-    /// disabled) is a pure, unit-testable function that lives with the labels
-    /// helper. This mirrors the disable-reason-as-hint pattern the printer
-    /// controls section adopted in issue #2519.
+    /// so the composition (static hint when enabled or pending, host-supplied
+    /// reason when disabled) is a pure, unit-testable function that lives with
+    /// the labels helper. This mirrors the disable-reason-as-hint pattern the
+    /// printer controls section adopted in issue #2519.
     private func accessibilityHint(for descriptor: PrinterRunActionDescriptor) -> String {
         PrinterRunActionLabels.resolvedAccessibilityHint(for: descriptor)
     }
@@ -166,12 +172,12 @@ public struct PrinterRunActionBar: View {
         PrinterRunActionLabels.resolvedAccessibilityValue(for: descriptor)
     }
 
+    /// Delegates to `PrinterRunActionLabels.resolvedAccessibilityTraits(for:)`
+    /// so the trait composition (`.updatesFrequently` when pending,
+    /// `.isButton` otherwise; never `.isSelected` on disabled or pending, per
+    /// sibling pattern in issue #2519) is a pure, unit-testable function.
     private func traits(for descriptor: PrinterRunActionDescriptor) -> AccessibilityTraits {
-        var traits: AccessibilityTraits = .isButton
-        if !descriptor.isEnabled || descriptor.isPending {
-            traits.insert(.isSelected)
-        }
-        return traits
+        PrinterRunActionLabels.resolvedAccessibilityTraits(for: descriptor)
     }
 }
 
