@@ -713,11 +713,19 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const handleDiscardAndNavigate = useCallback(() => {
     setShowDraftModal(false);
     handleDiscardAll();
+
+    const targetLocation = blocker.target ?? blockedTarget;
+    const previousLocation = `${window.location.pathname}${window.location.search}`;
     let resumed = false;
     if (blocker.state === 'blocked' && blocker.proceed) {
       try {
         blocker.proceed();
-        resumed = true;
+        const nextLocation = `${window.location.pathname}${window.location.search}`;
+        // A stale or released blocker can be a silent no-op even when its handle
+        // still exists. A no-throw does not prove the router actually took the
+        // blocked target, and a different route change is not the same as the
+        // one we were asked to resume. Only the blocked destination counts.
+        resumed = Boolean(targetLocation) && nextLocation === targetLocation;
       } catch {
         // Stale handle: the router released this blocker between the render that
         // captured it and this click. Fall through and navigate by hand.
@@ -737,10 +745,23 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         pendingNavigation();
       }
     }
-    setBlockedTarget(null);
-    setBlockedDelta(null);
-    setPendingNavigation(null);
+
+    if (resumed) {
+      setPendingNavigation(null);
+    }
   }, [blocker, blockedDelta, blockedTarget, handleDiscardAll, navigate, pendingNavigation]);
+
+  const previousLocationRef = useRef<string | null>(null);
+  useEffect(() => {
+    const currentLocation = `${location.pathname}${location.search}`;
+    const hadBlockedFallback = blockedTarget !== null || blockedDelta !== null;
+    if (hadBlockedFallback && previousLocationRef.current && previousLocationRef.current !== currentLocation) {
+      setBlockedTarget(null);
+      setBlockedDelta(null);
+      setPendingNavigation(null);
+    }
+    previousLocationRef.current = currentLocation;
+  }, [blockedDelta, blockedTarget, location.pathname, location.search]);
 
   useEffect(() => {
     if (!isDirty) return;
