@@ -20,7 +20,15 @@ struct PendingExternalScanRequest: Codable, Equatable, Sendable {
 }
 
 enum ExternalScanRequestStore {
+    static let suiteName = "group.com.olyforge3d.printfarmer"
     static let pendingKey = "app.pendingExternalScanRequest"
+
+    static var sharedUserDefaults: UserDefaults {
+        guard let userDefaults = UserDefaults(suiteName: suiteName) else {
+            preconditionFailure("Unable to access scanner App Group \(suiteName)")
+        }
+        return userDefaults
+    }
 
     /// A request that has waited longer than this without reaching authenticated
     /// main content is abandoned rather than replayed into a later session.
@@ -28,7 +36,7 @@ enum ExternalScanRequestStore {
 
     @MainActor
     static func request(
-        userDefaults: UserDefaults = .standard,
+        userDefaults: UserDefaults = sharedUserDefaults,
         now: Date = Date(),
         id: UUID = UUID()
     ) {
@@ -45,7 +53,7 @@ enum ExternalScanRequestStore {
     /// upgraded in place so an in-flight request survives the app update instead
     /// of being silently dropped.
     static func pending(
-        userDefaults: UserDefaults = .standard,
+        userDefaults: UserDefaults = sharedUserDefaults,
         now: Date = Date()
     ) -> PendingExternalScanRequest? {
         if let data = userDefaults.data(forKey: pendingKey) {
@@ -59,7 +67,10 @@ enum ExternalScanRequestStore {
 
     /// Binds a still-waiting request to the identity it was raised against so a
     /// later sign-in to a different server cannot claim it.
-    static func scope(to serverID: UUID?, userDefaults: UserDefaults = .standard) {
+    static func scope(
+        to serverID: UUID?,
+        userDefaults: UserDefaults = sharedUserDefaults
+    ) {
         guard var request = pending(userDefaults: userDefaults),
               request.scopedServerID == nil,
               let serverID else { return }
@@ -68,7 +79,7 @@ enum ExternalScanRequestStore {
     }
 
     @discardableResult
-    static func consume(userDefaults: UserDefaults = .standard) -> Bool {
+    static func consume(userDefaults: UserDefaults = sharedUserDefaults) -> Bool {
         guard pending(userDefaults: userDefaults) != nil else { return false }
         userDefaults.removeObject(forKey: pendingKey)
         return true
@@ -76,7 +87,7 @@ enum ExternalScanRequestStore {
 
     /// Drops the request without routing it — logout, an abandoned login, or a
     /// server/account switch all invalidate the original intent.
-    static func cancel(userDefaults: UserDefaults = .standard) {
+    static func cancel(userDefaults: UserDefaults = sharedUserDefaults) {
         userDefaults.removeObject(forKey: pendingKey)
     }
 
@@ -103,7 +114,7 @@ struct OpenScannerIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult {
-        try await perform(userDefaults: .standard)
+        try await perform(userDefaults: ExternalScanRequestStore.sharedUserDefaults)
     }
 
     @MainActor
@@ -112,7 +123,3 @@ struct OpenScannerIntent: AppIntent {
         return .result()
     }
 }
-
-@available(iOS, introduced: 16.4, obsoleted: 26.0)
-@available(iOSApplicationExtension, unavailable)
-extension OpenScannerIntent: ForegroundContinuableIntent {}

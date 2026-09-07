@@ -994,6 +994,7 @@
 242700000000000000000002 /* ExternalScanRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalScanRouting.swift; sourceTree = "<group>"; };
 3DE83CDE75BC1AAF3EC3AE86 /* PrintFarmerScanWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PrintFarmerScanWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 AA60E6B959E0E195BBAA1D22 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+B67CDDC8FEB03EE83C0232BE /* PrintFarmerScanWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PrintFarmerScanWidgets.entitlements; sourceTree = "<group>"; };
 B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScanWidgets.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -1784,6 +1785,7 @@ FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
 	children = (
 		B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */,
 		AA60E6B959E0E195BBAA1D22 /* Info.plist */,
+		B67CDDC8FEB03EE83C0232BE /* PrintFarmerScanWidgets.entitlements */,
 	);
 	path = PrintFarmerScanWidgets;
 	sourceTree = "<group>";
@@ -2637,6 +2639,7 @@ BE384FCBA3134F794D3F8802 /* PBXTargetDependency */ = {
 	isa = XCBuildConfiguration;
 	buildSettings = {
 		APPLICATION_EXTENSION_API_ONLY = YES;
+		CODE_SIGN_ENTITLEMENTS = PrintFarmerScanWidgets/PrintFarmerScanWidgets.entitlements;
 		CODE_SIGN_STYLE = Automatic;
 		CURRENT_PROJECT_VERSION = 2;
 		DEVELOPMENT_TEAM = ZPKA84F3TY;
@@ -2663,6 +2666,7 @@ BE384FCBA3134F794D3F8802 /* PBXTargetDependency */ = {
 	isa = XCBuildConfiguration;
 	buildSettings = {
 		APPLICATION_EXTENSION_API_ONLY = YES;
+		CODE_SIGN_ENTITLEMENTS = PrintFarmerScanWidgets/PrintFarmerScanWidgets.entitlements;
 		CODE_SIGN_STYLE = Manual;
 		CURRENT_PROJECT_VERSION = 2;
 		DEVELOPMENT_TEAM = ZPKA84F3TY;

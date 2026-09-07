@@ -1,6 +1,5 @@
 import XCTest
 import Observation
-import AppIntents
 @testable import PrintFarmer
 
 /// Tests for shell-aware tab selection, deep-link mapping, and path isolation.
@@ -211,13 +210,49 @@ final class AppRouterTests: XCTestCase {
         XCTAssertNotNil(ExternalScanRequestStore.pending(userDefaults: defaults))
     }
 
-    @available(iOS, introduced: 17.0, obsoleted: 26.0)
-    func testOpenScannerIntentForcesContainingAppExecutionBeforeIOS26() {
-        assertForegroundContinuable(OpenScannerIntent.self)
+    func testExternalScanRequestDefaultsUseSharedAppGroupSuite() throws {
+        let sharedDefaults = try XCTUnwrap(
+            UserDefaults(suiteName: ExternalScanRequestStore.suiteName)
+        )
+        let existingSharedValue = sharedDefaults.object(
+            forKey: ExternalScanRequestStore.pendingKey
+        )
+        let existingStandardValue = UserDefaults.standard.object(
+            forKey: ExternalScanRequestStore.pendingKey
+        )
+        defer {
+            restore(
+                existingSharedValue,
+                forKey: ExternalScanRequestStore.pendingKey,
+                in: sharedDefaults
+            )
+            restore(
+                existingStandardValue,
+                forKey: ExternalScanRequestStore.pendingKey,
+                in: .standard
+            )
+        }
+
+        sharedDefaults.removeObject(forKey: ExternalScanRequestStore.pendingKey)
+        UserDefaults.standard.removeObject(forKey: ExternalScanRequestStore.pendingKey)
+        let requestID = UUID()
+
+        ExternalScanRequestStore.request(id: requestID)
+
+        XCTAssertEqual(
+            ExternalScanRequestStore.pending(userDefaults: sharedDefaults)?.id,
+            requestID
+        )
+        XCTAssertNil(UserDefaults.standard.object(forKey: ExternalScanRequestStore.pendingKey))
     }
 
-    @available(iOS, introduced: 17.0, obsoleted: 26.0)
-    private func assertForegroundContinuable<T: ForegroundContinuableIntent>(_: T.Type) {}
+    private func restore(_ value: Any?, forKey key: String, in defaults: UserDefaults) {
+        if let value {
+            defaults.set(value, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
 
     func testLegacyBooleanRequestIsUpgradedRatherThanDropped() throws {
         let suiteName = "ExternalScanLegacy-\(UUID().uuidString)"

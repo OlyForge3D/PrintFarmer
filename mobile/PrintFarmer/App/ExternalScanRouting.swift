@@ -104,7 +104,7 @@ enum ExternalScanRouting {
         activeServerID: UUID?,
         isShowingMainContent: Bool,
         capabilities: ResolvedSystemCapabilities,
-        userDefaults: UserDefaults = .standard,
+        userDefaults: UserDefaults = ExternalScanRequestStore.sharedUserDefaults,
         now: Date = Date()
     ) {
         switch lifecycleAction(for: event) {
@@ -132,7 +132,7 @@ enum ExternalScanRouting {
         activeServerID: UUID?,
         isShowingMainContent: Bool,
         capabilities: ResolvedSystemCapabilities,
-        userDefaults: UserDefaults = .standard,
+        userDefaults: UserDefaults = ExternalScanRequestStore.sharedUserDefaults,
         now: Date = Date()
     ) {
         let decision = decide(
@@ -160,7 +160,7 @@ enum ExternalScanRouting {
     @MainActor
     static func cancelPending(
         router: AppRouter,
-        userDefaults: UserDefaults = .standard
+        userDefaults: UserDefaults = ExternalScanRequestStore.sharedUserDefaults
     ) {
         ExternalScanRequestStore.cancel(userDefaults: userDefaults)
         router.cancelPendingExternalScan()
