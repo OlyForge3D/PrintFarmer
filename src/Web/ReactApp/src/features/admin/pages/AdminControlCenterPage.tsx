@@ -164,6 +164,11 @@ function SubsystemTile({ subsystem }: { subsystem: SubsystemHealthDto }) {
  * someone renamed a registry entry without updating the backend — we fall back to
  * `actionRoute`, and if that's also missing, the link disappears (visible failure,
  * not a silent broken navigation).
+ *
+ * Returns `null` for a target that resolves to `/admin` itself (#2526): this page
+ * *is* `/admin`, and a hub must not self-link from its own content. That can only
+ * arise from a backend item pointing at `admin-home` or emitting `/admin` as a raw
+ * route, so it is a guard rather than an expected path.
  */
 function resolveAttentionActionRoute(
   item: AttentionItemDto,
@@ -177,10 +182,15 @@ function resolveAttentionActionRoute(
     route.startsWith('/admin/manage?') ||
     route.startsWith('/admin/manage#') ||
     route.startsWith('/admin/manage/');
+  // `/admin` exactly, or `/admin?…` / `/admin#…` — but not `/admin/status`,
+  // which is a legitimate child destination.
+  const isControlCenterSelfRoute = (route: string) =>
+    route === '/admin' || route.startsWith('/admin?') || route.startsWith('/admin#');
   const fallbackRoute =
     item.actionRoute &&
     item.actionRoute.startsWith('/') &&
-    !isRetiredManageRoute(item.actionRoute)
+    !isRetiredManageRoute(item.actionRoute) &&
+    !isControlCenterSelfRoute(item.actionRoute)
       ? item.actionRoute
       : null;
 
@@ -190,6 +200,9 @@ function resolveAttentionActionRoute(
       return fallbackRoute;
     }
     if (!canAccessDestination(destination, access)) {
+      return null;
+    }
+    if (isControlCenterSelfRoute(destination.path)) {
       return null;
     }
     return destination.path;
@@ -227,6 +240,22 @@ function AttentionRowFromDto({
   );
 }
 
+/**
+ * Operational destinations the Control Center owns, in display order.
+ *
+ * This list plus `getStandaloneConfigurationDestinations` is the hub's link
+ * composition, and — since #2526 — the *single default home* for every entry in
+ * it. Maintenance, Analytics and Auto-Dispatch previously also had anchored
+ * navbar entries; those were removed, so adding a destination here now means
+ * this page is where users find it.
+ *
+ * `admin-home` is deliberately absent and must stay absent: a hub does not
+ * self-link. It is `kind: 'hub'`, so `getStandaloneConfigurationDestinations`
+ * (which keeps only `kind: 'configuration'`) cannot reintroduce it either, and
+ * `resolveAttentionActionRoute` drops any attention action that resolves to
+ * `/admin`. The global Admin nav entry and child pages' back links to the hub
+ * are separate surfaces and are unaffected.
+ */
 const OPERATIONAL_DESTINATION_IDS = [
   'ops-status',
   'ops-workers',

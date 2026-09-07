@@ -499,6 +499,43 @@ notes here are:
   tile builder. Adding a new attention item means appending to `AppendAttentionForEntry`
   or `AppendExternalServicesAttention` in the same service.
 
+## One Default Home Per Admin Destination
+
+Every admin destination is reachable from exactly **one** default surface. The Admin
+Control Center at `/admin` is the default home for the whole admin surface, and the
+`Admin` entry in the main navigation rail is the one default link that reaches it.
+
+Consequences, all enforced by tests:
+
+- **The rail carries no second route to a Control Center destination.** Maintenance,
+  Locations, Analytics, Auto-Dispatch and Catalog used to be anchored rail entries *and*
+  hub tiles; the rail entries are gone. `Printed Parts` (`/parts-inventory`) is not an
+  `ADMIN_DESTINATIONS` entry, so the rail is its only home and it stays.
+- **The Control Center never links to itself.** `admin-home` is `kind: 'hub'`, so
+  neither `OPERATIONAL_DESTINATION_IDS` nor `getStandaloneConfigurationDestinations`
+  can render it, `AdminControlCenterPage` passes no `parent` to `PageTemplate`, and
+  `resolveAttentionActionRoute` drops any attention action resolving to `/admin`
+  exactly (a `/admin/...` child route is still a valid target). Child pages linking
+  *back* to the hub are a different surface and are unaffected.
+- **The settings workspace is not a second admin directory.**
+  `getSettingsGroupedDestinations` returns only destinations embedded under
+  `/admin/settings`. Catalog, Locations and Power Monitors carry a `settingsGroup` for
+  classification but render their own pages, so the sidebar no longer lists them.
+- **One authorized exception, and it is a recovery affordance, not a directory.** A
+  delegate whose only configuration grant is one of those standalone destinations can
+  still open the settings shell but has no category to render. `SettingsShell` shows the
+  `Standalone configuration` link strip only for that user — anyone with an embedded
+  settings destination does not see it.
+
+Removing a rail entry must never strand a user. The `Admin` entry is gated on
+`requiresAnyAccessibleHubTile`, so every permission that used to unlock a removed rail
+entry still lights up `/admin`, including custom roles with no `farm_admin`.
+
+Opt-in **pinning** of an admin destination back onto the rail is separate work (#2527).
+A pin is an explicit user choice and is not a default home, so it does not contradict
+this rule. Stored navigation preferences naming a removed entry are filtered out by
+`uniqueKnownIds`, so legacy automatic ordering is never read as an intentional pin.
+
 ## Adding A New Settings Section
 
 The end-to-end steps to expose a new setting in the UI, without touching any React

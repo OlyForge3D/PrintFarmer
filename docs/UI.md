@@ -154,10 +154,35 @@ The metadata-driven pages
 API — no hand-written forms per property. Bespoke sub-pages (Bed Types,
 Cameras, Users, Roles, Tags, Quotas, Slicer Profiles, Webhooks) render existing embedded
 components. Operations use standalone framed pages. Power Monitors, Locations and
-Catalog remain standalone configuration links.
+Catalog remain standalone configuration links, reachable from the Control Center
+only — the settings sidebar does not list them (see below).
 
 For the full architecture, tab-to-group map, save model, Essential mode, and
 palette details, see [SETTINGS_ARCHITECTURE.md](./SETTINGS_ARCHITECTURE.md).
+
+#### One Default Home Per Admin Destination
+
+Every admin destination is reachable from exactly one default surface, and the
+Admin Control Center is that surface for the admin area.
+
+- The main navigation rail has a single `Admin` entry pointing at `/admin`. It
+  carries **no** default entries for Maintenance, Locations, Analytics,
+  Auto-Dispatch or Catalog — those are Control Center destinations. `Printed
+  Parts` (`/parts-inventory`) is not a Control Center destination, so it keeps
+  its rail entry.
+- The `Admin` entry is shown to anyone who can reach at least one hub tile, so
+  a delegate holding only, say, `queue:read` or `catalog:admin` still reaches
+  their destination — nothing is stranded by the removals.
+- The Control Center does not link to itself. Child pages linking *back* to the
+  hub, breadcrumbs, and contextual object actions are different surfaces and are
+  unaffected.
+- The Farm & Admin Settings sidebar lists only settings categories that render
+  inside the shell. The `Standalone configuration` link strip appears solely as a
+  recovery affordance, for a delegate who can open the shell but has no category
+  in it.
+
+Opt-in pinning of an admin destination onto the rail is tracked separately
+(#2527); a user-chosen pin is not a default home.
 
 #### Canonical Admin Routes
 

@@ -65,22 +65,23 @@ const DEFAULT_ORDER_BY_ROLE: Record<NavPreferenceRole, string[]> = {
     'slice-job',
     'filament-inventory',
   ],
+  // #2526 — this is the *default ordering* for the admin role's navbar, not a
+  // record of intentional user pins. Entries for destinations the Admin
+  // Control Center now owns by default (auto-dispatch, locations, analytics,
+  // maintenance, catalog) were removed along with their navbar entries, as
+  // were two ids (`system-settings`, `admin-console`) that had already outlived
+  // their nav items. `uniqueKnownIds` drops unknown ids anyway, so a stale id
+  // here is silent dead weight rather than a visible entry — keep this list in
+  // step with `navigation` in `Layout.tsx`.
   admin: [
     'overview',
     'printers',
     'print-queue',
-    'auto-dispatch',
     'scheduling',
     'files',
     'projects',
     'slice-job',
     'filament-inventory',
-    'locations',
-    'analytics',
-    'maintenance',
-    'catalog',
-    'system-settings',
-    'admin-console',
   ],
 };
 

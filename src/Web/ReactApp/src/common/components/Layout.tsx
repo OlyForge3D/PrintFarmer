@@ -8,7 +8,6 @@ import { Button } from '@/common/components/ui';
 import {
   HomeIcon,
   PrinterIcon,
-  LayersIcon,
   SettingsIcon,
   MenuIcon,
   CloseIcon,
@@ -19,13 +18,9 @@ import {
   EyeOffIcon,
   FolderOpenIcon,
   HistoryIcon,
-  WrenchIcon,
-  TrendingUpIcon,
   AlertIcon,
   ClipboardListIcon,
-  PlayIcon,
   CalendarIcon,
-  LocationIcon,
   PackageIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
@@ -197,65 +192,34 @@ const navigation: NavigationElement[] = [
 
 
   { name: 'Admin', icon: SettingsIcon, isSectionHeader: true },
-  {
-    id: 'maintenance',
-    name: 'Maintenance',
-    href: '/maintenance',
-    icon: WrenchIcon,
-    // MaintenanceController is class-level `[RequirePermission("maintenance", "admin")]` (#1457).
-    requiredPermission: { resource: 'maintenance', action: 'admin' },
-    anchored: true,
-    matches: (pathname) => pathname === '/maintenance' || pathname.endsWith('/maintenance')
-  },
+  // #2526 — one default navigation home per admin destination.
+  //
+  // Maintenance, Locations, Analytics, Auto-Dispatch and Catalog used to sit
+  // here as anchored entries *and* as Admin Control Center tiles, so every one
+  // of them had two default homes. They are registered destinations in
+  // `ADMIN_DESTINATIONS` (`ops-maintenance`, `hw-locations`, `ops-analytics`,
+  // `ops-auto-dispatch`, `data-catalog`), which makes `/admin` their single
+  // default home; the `admin` entry below is the one navbar link that reaches
+  // them. Nothing is stranded: each of those destinations is a hub tile, so
+  // `requiresAnyAccessibleHubTile` keeps the Admin entry visible for exactly
+  // the users whose permissions unlocked the removed link — including
+  // delegates who hold only `queue:read` or `catalog:admin` and no
+  // `farm_admin` role.
+  //
+  // Do not re-add a destination here that the Control Center already owns.
+  // Opt-in user pinning of admin destinations onto this rail is separate work
+  // (#2527) and is deliberately *not* the same thing as a default entry.
   {
     id: 'parts-inventory',
     name: 'Printed Parts',
     href: '/parts-inventory',
     icon: PackageIcon,
     // PartsInventoryController, `[RequirePermission("parts_inventory", "admin")]` (#1457).
+    // Not an `ADMIN_DESTINATIONS` entry, so the navbar is its only default
+    // home — it is not a duplicate and must stay (#2526).
     requiredPermission: { resource: 'parts_inventory', action: 'admin' },
     anchored: true,
     matches: (pathname) => pathname === '/parts-inventory' || pathname.startsWith('/parts-inventory/')
-  },
-  {
-    id: 'locations',
-    name: 'Locations',
-    href: '/locations',
-    icon: LocationIcon,
-    // LocationsController write endpoints require `[RequirePermission("locations", "admin")]` (#1457).
-    requiredPermission: { resource: 'locations', action: 'admin' },
-    anchored: true,
-    matches: (pathname) => pathname.startsWith('/locations')
-  },
-  {
-    id: 'analytics',
-    name: 'Analytics',
-    href: '/analytics',
-    icon: TrendingUpIcon,
-    // Backed by JobQueueAnalyticsController, `[RequirePermission(Queue.Read)]` (#1457).
-    requiredPermission: { resource: 'queue', action: 'read' },
-    anchored: true,
-    matches: (pathname) => pathname.startsWith('/analytics')
-  },
-  {
-    id: 'auto-dispatch',
-    name: 'Auto-Dispatch',
-    href: '/auto-dispatch',
-    icon: PlayIcon,
-    // AutoDispatchController read endpoints require `[RequirePermission(Queue.Read)]` (#1457).
-    requiredPermission: { resource: 'queue', action: 'read' },
-    anchored: true,
-    matches: (pathname) => pathname.startsWith('/auto-dispatch')
-  },
-  {
-    id: 'catalog',
-    name: 'Catalog',
-    href: '/catalog',
-    icon: LayersIcon,
-    // CatalogController is class-level `[RequirePermission("catalog", "admin")]` (#1457).
-    requiredPermission: { resource: 'catalog', action: 'admin' },
-    anchored: true,
-    matches: (pathname) => pathname.startsWith('/catalog')
   },
   {
     id: 'admin',

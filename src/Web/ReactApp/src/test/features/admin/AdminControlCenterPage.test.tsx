@@ -679,6 +679,95 @@ describe('AdminControlCenterPage', () => {
     expect(screen.queryByText('Everything you can manage')).not.toBeInTheDocument();
   });
 
+  it('never links back to itself — a hub has no self-link (#2526)', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-operations')).toBeInTheDocument();
+    });
+
+    // The page *is* /admin. Every destination card, the settings entry point and
+    // the attention actions must point somewhere else. The global Admin nav
+    // entry and child pages' back links live outside this component and are
+    // unaffected.
+    //
+    // Issue 2526 AC requires assertions that distinguish main content from
+    // global navigation. This component renders page content only — the assert
+    // below proves the global rail is genuinely absent from this tree, so the
+    // document-wide anchor scan that follows can only see hub content. The
+    // surviving global Admin entry is asserted separately, against the real
+    // rail, in test/features/navigation/navigation-sections.test.tsx.
+    expect(document.querySelector('nav[aria-label="Main navigation"]')).toBeNull();
+    for (const card of screen.getAllByTestId('admin-hub-destination')) {
+      expect(card.getAttribute('href')).not.toBe('/admin');
+    }
+    const selfLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'))
+      .filter((link) => {
+        const href = link.getAttribute('href') ?? '';
+        return href === '/admin' || href.startsWith('/admin?') || href.startsWith('/admin#');
+      });
+    expect(selfLinks).toHaveLength(0);
+  });
+
+  it.each([
+    ['a destination id that resolves to /admin', { actionDestinationId: 'admin-home' }],
+    ['a raw /admin action route', { actionRoute: '/admin' }],
+    ['a query-suffixed /admin action route', { actionRoute: '/admin?from=attention' }],
+  ])('suppresses an attention action pointing at the hub itself — %s (#2526)', async (_label, action) => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        attention: [
+          {
+            key: 'self-link',
+            severity: 'Warning',
+            title: 'Points at the hub',
+            detail: 'A backend item that would send the user back to /admin.',
+            actionLabel: 'Open',
+            ...action,
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-item')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('admin-hub-attention-item').querySelector('a')).toBeNull();
+  });
+
+  it('keeps a legitimate /admin child action route (the self-link guard is exact)', async () => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        attention: [
+          {
+            key: 'child-route',
+            severity: 'Warning',
+            title: 'Worker offline',
+            detail: 'A child destination under /admin is still a valid target.',
+            actionLabel: 'Open',
+            actionRoute: '/admin/status',
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-item')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('admin-hub-attention-item').querySelector('a')).toHaveAttribute(
+      'href',
+      '/admin/status',
+    );
+  });
+
   it('bypasses overview fetch and hides health/attention bands for non-system-settings delegates', async () => {
     // A delegate who has specific resource permissions (e.g. printers:admin)
     // but not system_settings:admin or farm_admin should not trigger a 403
