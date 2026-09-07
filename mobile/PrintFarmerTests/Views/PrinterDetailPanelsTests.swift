@@ -263,13 +263,21 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(state, .failed("network down"))
     }
 
-    func testCoverageStateMappingAvailableWhenCoveragePresentDespitePriorError() {
-        // A prior transient error must not mask a subsequently succeeded load.
+    func testCoverageStateMappingFailedWhenRetainedCoverageAndLatestRefreshErrored() {
+        // Hicks review finding 9: in the real view model, `commitSuccess`
+        // always clears `lastLoadError`, so `hasCoverage: true` with
+        // `lastLoadError` non-nil can only mean a RETAINED snapshot from an
+        // earlier success plus a LATER canonical refresh that failed via
+        // `commitError` (which never clears `coverage`). That must report
+        // `.failed`, not `.available` — presenting retained data as current
+        // with every action enabled would be dishonest. `.failed` in turn
+        // makes `PrinterFilamentPresentation` mark the printer stale
+        // ("Last confirmed" wording, no enabled actions).
         let state = PrinterDetailFilamentCoverageStateMapping.coverageState(
             featureEnabled: true, isFeatureDisabled: false, isPrinterNotFound: false,
-            hasCoverage: true, lastLoadError: "stale error retained by the view model"
+            hasCoverage: true, lastLoadError: "network down on refresh"
         )
-        XCTAssertEqual(state, .available)
+        XCTAssertEqual(state, .failed("network down on refresh"))
     }
 
     func testCoverageStateMappingLoadingWhenNothingConcludedYet() {

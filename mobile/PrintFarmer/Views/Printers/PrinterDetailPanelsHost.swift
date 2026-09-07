@@ -225,6 +225,20 @@ enum PrinterDetailFilamentActionMapping {
 /// `PrinterFilamentPresentation.CoverageState`. Extracted so the precedence
 /// (capability gate > feature-disabled > not-found > load error > success >
 /// loading) is unit-testable without a live, SignalR-wired view model.
+///
+/// `lastLoadError` takes precedence over `hasCoverage` UNCONDITIONALLY, not
+/// only when coverage is absent (Hicks review finding 9). In the real
+/// `PrinterFilamentCoverageViewModel`, `commitSuccess` always clears
+/// `lastLoadError`, so the only way both are non-nil/true at once is a
+/// *retained* coverage snapshot from an earlier successful load followed by a
+/// LATER canonical refresh that failed via `commitError` — which sets
+/// `lastLoadError` but deliberately never clears `coverage`. Reporting
+/// `.available` in that state would present stale, unconfirmed data as
+/// current with every filament action left enabled. Reporting `.failed`
+/// instead makes `PrinterFilamentPresentation` mark the printer stale (its
+/// `isStale` computation treats any non-`.available`/non-`.disabled` state
+/// with retained `coverage` as stale), which renders the "Last confirmed"
+/// wording and empties `supportedActions`.
 enum PrinterDetailFilamentCoverageStateMapping {
     static func coverageState(
         featureEnabled: Bool,
@@ -236,7 +250,7 @@ enum PrinterDetailFilamentCoverageStateMapping {
         guard featureEnabled else { return .disabled }
         if isFeatureDisabled { return .disabled }
         if isPrinterNotFound { return .unavailable }
-        if let lastLoadError, !hasCoverage { return .failed(lastLoadError) }
+        if let lastLoadError { return .failed(lastLoadError) }
         if hasCoverage { return .available }
         return .loading
     }

@@ -167,4 +167,75 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             "The shared run-action bar (and Emergency Stop within it) must remain reachable on the Controls page without scrolling or an Advanced disclosure"
         )
     }
+
+    // MARK: - Native horizontal swipe (Hicks review finding 11)
+
+    func testSwipeLeftToControlsPageSyncsSelectorAndExcludesStatusFromAccessibility() {
+        guard enableAdvancedPrinterControls() else { return }
+        guard openFirstPrinterDetail() else { return }
+
+        let selector = app.segmentedControls["printer.detail.panel.selector"]
+        XCTAssertTrue(
+            selector.waitForExistence(timeout: 8),
+            "Panel selector must appear once Advanced Printer Controls is enabled for an online printer"
+        )
+
+        let statusPage = app.descendants(matching: .any)["printer.detail.panel.status"]
+        XCTAssertTrue(statusPage.waitForExistence(timeout: 8), "Must start on the Status page")
+
+        // A native horizontal swipe — not a selector tap — must move the
+        // pager exactly like tapping the Controls segment does.
+        statusPage.swipeLeft()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["printer.detail.panel.controls"]
+                .waitForExistence(timeout: 8),
+            "Swiping left over the Status page must reveal the Controls page"
+        )
+        XCTAssertTrue(
+            selector.buttons["Controls"].isSelected,
+            "The selector must sync to Controls after a native swipe, not just after a segment tap"
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)["printer.detail.panel.status"].exists,
+            "The inactive Status page must be excluded from the accessibility tree (accessibilityHidden), not merely scrolled off"
+        )
+    }
+
+    func testSwipeRightBackToStatusPageSyncsSelectorAndExcludesControlsFromAccessibility() {
+        guard enableAdvancedPrinterControls() else { return }
+        guard openFirstPrinterDetail() else { return }
+
+        let selector = app.segmentedControls["printer.detail.panel.selector"]
+        XCTAssertTrue(
+            selector.waitForExistence(timeout: 8),
+            "Panel selector must appear once Advanced Printer Controls is enabled for an online printer"
+        )
+
+        // Reach Controls first via the selector (already covered by
+        // testSelectorTapSwitchesToControlsPageAndBackToStatus), then swipe
+        // back natively so this test isolates the swipe-back behavior.
+        let controlsSegment = selector.buttons["Controls"]
+        XCTAssertTrue(controlsSegment.waitForExistence(timeout: 3))
+        controlsSegment.tap()
+
+        let controlsPage = app.descendants(matching: .any)["printer.detail.panel.controls"]
+        XCTAssertTrue(controlsPage.waitForExistence(timeout: 8), "Must reach the Controls page before swiping back")
+
+        controlsPage.swipeRight()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["printer.detail.panel.status"]
+                .waitForExistence(timeout: 8),
+            "Swiping right over the Controls page must return to the Status page"
+        )
+        XCTAssertTrue(
+            selector.buttons["Status"].isSelected,
+            "The selector must sync back to Status after a native swipe, not just after a segment tap"
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)["printer.detail.panel.controls"].exists,
+            "The inactive Controls page must be excluded from the accessibility tree (accessibilityHidden) once swiped away from"
+        )
+    }
 }

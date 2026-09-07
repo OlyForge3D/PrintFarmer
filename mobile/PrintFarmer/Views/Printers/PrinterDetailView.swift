@@ -15,6 +15,14 @@ struct PrinterDetailView: View {
     // `.status` whenever this view is (re)constructed for a printer/server,
     // matching `viewModel`/`coverageViewModel`'s own per-identity lifetime.
     @State private var selectedPanel: PrinterDetailPanel = .status
+    // Controls owner (issue #2522, Hicks review finding 10): built once
+    // above the pager and observed (never owned) by the Controls page's
+    // content, so toggling `controlsAvailable` — which conditionally
+    // mounts/unmounts the Controls *page* — cannot destroy this object or
+    // its pending/capability state. See `docs/design/printer-controls-section.md`'s
+    // embedding contract: "retain one owner above page visibility... Do not
+    // use the test-only wrapper initializer or create an owner per page."
+    @State private var controlsViewModel: PrinterControlsViewModel?
 
     private let printerId: UUID
 
@@ -318,6 +326,27 @@ struct PrinterDetailView: View {
             status: { statusPage(printer) },
             controls: { controlsPage(printer) }
         )
+        // Owner lives above the pager (Hicks review finding 10): built once
+        // per printer/server target and never torn down merely because the
+        // Controls page's `if controlsAvailable` mount toggles. `.task(id:)`
+        // restarts only if `printer.id` itself changes, and the inner guard
+        // additionally replaces a stale owner rather than trusting `nil`
+        // alone, matching "replace the owner when the real server/printer
+        // target changes."
+        .task(id: printer.id) {
+            if controlsViewModel?.printer.id != printer.id {
+                let vm = PrinterControlsViewModel(printerService: services.printerService, printer: printer)
+                controlsViewModel = vm
+                await vm.loadCapabilities()
+            }
+        }
+        // Forwards every meaningful live snapshot to the owner regardless of
+        // whether the Controls page is currently mounted, so pending
+        // jog/preheat/home commands still resolve — and offline updates
+        // still land — while Controls is offscreen.
+        .onChange(of: PrinterControlsUpdateSignal(printer: printer)) { _, _ in
+            controlsViewModel?.handlePrinterUpdate(printer)
+        }
         .safeAreaInset(edge: .bottom) {
             let presentation = runActionPresentation(for: printer)
             if !presentation.visibleDescriptors.isEmpty {
@@ -382,18 +411,28 @@ struct PrinterDetailView: View {
         }
     }
 
-    /// Controls page (issue #2522): embeds #2521's `PrinterControlsSection`
-    /// directly — no nested "Advanced" navigation link. Only reachable when
-    /// `controlsAvailable(for:)` gates the page in, mirroring the old link's
-    /// visibility rule exactly (`AdvancedPrinterControlsAccess.isEntryVisible`).
-    /// Only jog/preheat/home is gated by the Advanced Printer Controls safety
-    /// preference; the maintenance toggle and NFC tag write live on the
-    /// Status page instead (`setupActionsSection`) so they stay reachable
-    /// independent of that preference, matching prior behavior.
+    /// Controls page (issue #2522): renders #2521's presentation-only
+    /// `PrinterSetupControlsContent` observing the owner built once above the
+    /// pager (`controlsViewModel`, in `printerContent`) — never
+    /// `PrinterControlsSection(printer:printerService:)`, which would
+    /// construct its own `@StateObject` scoped to this conditionally-mounted
+    /// page and lose pending/capability state every time
+    /// `controlsAvailable(for:)` toggles the page off and back on (Hicks
+    /// review finding 10). No nested "Advanced" navigation link. Only
+    /// reachable when `controlsAvailable(for:)` gates the page in, mirroring
+    /// the old link's visibility rule exactly
+    /// (`AdvancedPrinterControlsAccess.isEntryVisible`). Only jog/preheat/home
+    /// is gated by the Advanced Printer Controls safety preference; the
+    /// maintenance toggle and NFC tag write live on the Status page instead
+    /// (`setupActionsSection`) so they stay reachable independent of that
+    /// preference, matching prior behavior.
+    @ViewBuilder
     private func controlsPage(_ printer: Printer) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                PrinterControlsSection(printer: printer, printerService: services.printerService)
+                if let controlsViewModel {
+                    PrinterSetupControlsContent(printer: printer, viewModel: controlsViewModel)
+                }
             }
             .frame(maxWidth: sizeClass == .regular ? 760 : .infinity, alignment: .leading)
             .frame(maxWidth: .infinity)
