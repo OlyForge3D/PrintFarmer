@@ -1,11 +1,12 @@
 import React from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { AdminControlCenterPage } from '@/features/admin/pages/AdminControlCenterPage';
+import { ADMIN_OVERVIEW_QUERY_KEY } from '@/features/admin/hooks/useAdminOverview';
 import {
   ATTENTION_PREVIEW_LIMIT_DESKTOP,
   ATTENTION_PREVIEW_LIMIT_NARROW,
@@ -135,13 +136,16 @@ function renderHub() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
   });
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/admin']}>
-        <AdminControlCenterPage />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  return {
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/admin']}>
+          <AdminControlCenterPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    ),
+    queryClient,
+  };
 }
 
 /**
@@ -168,9 +172,22 @@ function useNarrowViewport() {
 
 async function renderWithAttention(items: AttentionItemDto[]) {
   mockedApiGet.mockResolvedValue({ data: makeOverview(items) });
-  renderHub();
+  const rendered = renderHub();
   await waitFor(() => {
     expect(screen.getByTestId('admin-hub-overall-status')).toBeInTheDocument();
+  });
+  return rendered;
+}
+
+/**
+ * Refetch the way a *background* poll does — no click, so nothing moves DOM
+ * focus. Driving this through the Refresh button instead would move focus onto
+ * that button and mask whatever the panel does with focus of its own.
+ */
+async function backgroundRefresh(queryClient: QueryClient, items: AttentionItemDto[]) {
+  mockedApiGet.mockResolvedValue({ data: makeOverview(items) });
+  await act(async () => {
+    await queryClient.invalidateQueries({ queryKey: ADMIN_OVERVIEW_QUERY_KEY });
   });
 }
 
@@ -368,6 +385,56 @@ describe('Admin Control Center attention bounds (#2517)', () => {
       expect(toggle.tagName).toBe('BUTTON');
       expect(toggle).toHaveAttribute('aria-expanded');
       expect(toggle).toHaveAttribute('aria-controls');
+    });
+
+    it('recovers focus to the panel when a background refresh unmounts the focused row', async () => {
+      const user = userEvent.setup();
+      const { queryClient } = await renderWithAttention(makeAttention(25));
+
+      await user.click(screen.getByTestId('admin-hub-attention-toggle'));
+
+      // Park focus deep in the expanded list, past the preview cap, so the
+      // shrink below is guaranteed to unmount the element holding focus.
+      const rows = screen.getAllByTestId('admin-hub-attention-item');
+      const deepLink = within(rows[rows.length - 1]).getByRole('link');
+      deepLink.focus();
+      expect(deepLink).toHaveFocus();
+
+      // The farm recovers and the next poll returns two items. That unmounts
+      // both the focused row and the toggle, so there is no control left for
+      // the browser to fall back to except <body>.
+      await backgroundRefresh(queryClient, makeAttention(2));
+
+      await waitFor(() => {
+        expect(visibleRowCount()).toBe(2);
+      });
+      expect(screen.queryByTestId('admin-hub-attention-toggle')).not.toBeInTheDocument();
+
+      // Focus must not be dumped at the top of the document.
+      expect(document.body).not.toHaveFocus();
+      expect(screen.getByTestId('admin-hub-attention-panel')).toHaveFocus();
+    });
+
+    it('does not steal focus from elsewhere on the page when the feed shrinks', async () => {
+      const user = userEvent.setup();
+      const { queryClient } = await renderWithAttention(makeAttention(25));
+
+      await user.click(screen.getByTestId('admin-hub-attention-toggle'));
+
+      // The operator is working somewhere else entirely. An automatic feed
+      // change must never yank focus back into the panel — unrequested focus
+      // movement is a worse defect than the one the recovery path fixes.
+      const refresh = screen.getByRole('button', { name: /refresh/i });
+      refresh.focus();
+      expect(refresh).toHaveFocus();
+
+      await backgroundRefresh(queryClient, makeAttention(2));
+
+      await waitFor(() => {
+        expect(visibleRowCount()).toBe(2);
+      });
+      expect(refresh).toHaveFocus();
+      expect(screen.getByTestId('admin-hub-attention-panel')).not.toHaveFocus();
     });
   });
 
@@ -581,6 +648,31 @@ describe('Admin Control Center attention bounds (#2517)', () => {
       expect(
         screen.getByText(/that refresh failed — this may be out of date/i),
       ).toBeInTheDocument();
+    });
+
+    it('marks the health badge itself as cached, not just the notice above it', async () => {
+      await renderThenFailRefresh(makeAttention(4));
+
+      // A user who navigates straight to the status badge must not read a
+      // cached "Healthy" as a live one, so the caveat rides on the badge.
+      const badge = screen.getByTestId('admin-hub-overall-status');
+      expect(badge).toHaveAttribute('data-overall-stale', 'true');
+      expect(badge).toHaveTextContent(/\(cached\)/i);
+    });
+
+    it('drops the cached caveat from the badge once a refresh succeeds', async () => {
+      const user = await renderThenFailRefresh(makeAttention(4));
+
+      mockedApiGet.mockResolvedValue({ data: makeOverview(makeAttention(4)) });
+      await user.click(screen.getByRole('button', { name: /try again/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('admin-hub-overall-status')).toHaveAttribute(
+          'data-overall-stale',
+          'false',
+        );
+      });
+      expect(screen.getByTestId('admin-hub-overall-status')).not.toHaveTextContent(/\(cached\)/i);
     });
 
     it('still shows the hard error when there is no snapshot to fall back on', async () => {

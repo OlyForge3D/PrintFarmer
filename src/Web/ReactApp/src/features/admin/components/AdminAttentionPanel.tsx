@@ -1,4 +1,12 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FocusEvent,
+} from 'react';
 import clsx from 'clsx';
 import { AttentionRow } from '@/common/components/admin';
 import { Button } from '@/common/components/ui';
@@ -183,7 +191,7 @@ export function AdminAttentionPanel({ items, access }: AdminAttentionPanelProps)
   const [isExpanded, setIsExpanded] = useState(false);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const restoreFocusRef = useRef(false);
+  const hasFocusWithinRef = useRef(false);
   const listRegionId = useId();
 
   const previewLimit = isNarrow
@@ -214,6 +222,10 @@ export function AdminAttentionPanel({ items, access }: AdminAttentionPanelProps)
     [items, previewLimit, showAll],
   );
 
+  // Identity of what is currently rendered, so the focus-recovery effect below
+  // runs when rows are added or removed but not on every unrelated re-render.
+  const visibleKeySignature = visibleItems.map((item) => item.key).join('\u0000');
+
   const hiddenErrorCount = useMemo(
     () =>
       showAll
@@ -222,21 +234,50 @@ export function AdminAttentionPanel({ items, access }: AdminAttentionPanelProps)
     [items, previewLimit, showAll],
   );
 
-  // Collapsing unmounts the rows below the cap. If focus was inside them it
-  // would fall back to <body>, dumping a keyboard user at the top of the
-  // document; park it on the control that caused the collapse instead. If a
-  // concurrent update shrank the feed below the cap the toggle is gone, so fall
-  // back to the panel container rather than letting focus escape to <body>.
-  useEffect(() => {
-    if (!isExpanded && restoreFocusRef.current) {
-      restoreFocusRef.current = false;
-      if (toggleRef.current) {
-        toggleRef.current.focus();
-      } else {
-        containerRef.current?.focus();
-      }
+  // Rows unmount for two different reasons: the user collapsed the list, or a
+  // background refresh shrank the feed below the cap (which also resets
+  // `isExpanded` above, unmounting the toggle with it). In both cases, if focus
+  // was inside those rows the browser drops it on <body>, dumping a keyboard
+  // user at the top of the document with no way back.
+  //
+  // Recovery is deliberately conditional on focus having been *inside this
+  // panel*. Moving focus that the user put somewhere else would be unrequested
+  // focus theft — far worse than the bug being fixed — so `hasFocusWithinRef`
+  // gates it, and a real blur to anywhere outside the panel clears that flag.
+  // `document.activeElement` only lands on <body> here when the element holding
+  // focus was removed, which is exactly the case worth repairing.
+  useLayoutEffect(() => {
+    if (!hasFocusWithinRef.current) {
+      return;
     }
-  }, [isExpanded]);
+    const active = document.activeElement;
+    if (active && active !== document.body) {
+      return;
+    }
+    // Prefer the toggle: after a user-initiated collapse it is the control that
+    // caused the change. It is unmounted after a shrink, so fall back to the
+    // panel container, which is focusable precisely for this.
+    const target = toggleRef.current ?? containerRef.current;
+    if (target) {
+      target.focus();
+    } else {
+      hasFocusWithinRef.current = false;
+    }
+  }, [visibleKeySignature, isExpanded]);
+
+  // React's onFocus/onBlur map to focusin/focusout, so these fire for anything
+  // inside the panel. The relatedTarget check keeps the flag set while focus
+  // moves *between* rows, and clears it only on a genuine exit.
+  const handleFocusCapture = useCallback(() => {
+    hasFocusWithinRef.current = true;
+  }, []);
+
+  const handleBlurCapture = useCallback((event: FocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget as Node | null;
+    if (!next || !event.currentTarget.contains(next)) {
+      hasFocusWithinRef.current = false;
+    }
+  }, []);
 
   const isScrollable = overflows && isExpanded;
 
@@ -244,6 +285,8 @@ export function AdminAttentionPanel({ items, access }: AdminAttentionPanelProps)
     <div
       ref={containerRef}
       tabIndex={-1}
+      onFocus={handleFocusCapture}
+      onBlur={handleBlurCapture}
       className="flex flex-col gap-2 focus:outline-none"
       data-testid="admin-hub-attention-panel"
     >
@@ -311,9 +354,6 @@ export function AdminAttentionPanel({ items, access }: AdminAttentionPanelProps)
             }
             data-testid="admin-hub-attention-toggle"
             onClick={() => {
-              if (isExpanded) {
-                restoreFocusRef.current = true;
-              }
               setIsExpanded(!isExpanded);
             }}
             iconRight={

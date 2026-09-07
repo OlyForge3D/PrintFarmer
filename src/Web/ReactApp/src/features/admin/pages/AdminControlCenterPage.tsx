@@ -98,14 +98,25 @@ function presentationForSubsystemStatus(raw: string): StatusPresentation {
 // hub and the settings page cannot drift apart. See
 // `common/components/admin/AttentionRow.tsx`.
 
-function OverallStatusBadge({ status }: { status: string }) {
+function OverallStatusBadge({ status, isStale = false }: { status: string; isStale?: boolean }) {
   const presentation = presentationForSubsystemStatus(status);
   const { Icon } = presentation;
   return (
-    <span data-testid="admin-hub-overall-status" data-overall-status={status}>
+    <span
+      data-testid="admin-hub-overall-status"
+      data-overall-status={status}
+      data-overall-stale={isStale ? 'true' : 'false'}
+    >
       <Badge variant={presentation.badgeVariant} size="sm" className="gap-1.5">
         <Icon className={clsx('h-3.5 w-3.5', presentation.iconClass)} ariaLabel="" />
+        {/*
+          An operator who navigates by badge alone must not read a cached
+          "Healthy" as a live one. The stale caveat rides on the badge itself
+          rather than only on the notice above it, so the qualifier cannot be
+          missed by skipping straight to the status.
+        */}
         Health checks: {presentation.label}
+        {isStale && ' (cached)'}
       </Badge>
     </span>
   );
@@ -437,7 +448,9 @@ export function AdminControlCenterPage() {
           <AdminSection
             caption="System health checks"
             captionId="admin-hub-health-heading"
-            captionAside={data ? <OverallStatusBadge status={data.overallStatus} /> : null}
+            captionAside={
+              data ? <OverallStatusBadge status={data.overallStatus} isStale={isStale} /> : null
+            }
             headerAside={
               data?.checkedAt ? (
                 <p className="text-xs text-pf-text-tertiary">
