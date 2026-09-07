@@ -238,6 +238,18 @@ final class PrinterRunActionBarTests: XCTestCase {
     /// `.accessibility5` Dynamic Type. Same font growth on both sides, so
     /// the delta is pure stacking — a not-stacked layout would produce
     /// approximately the same height for both.
+    ///
+    /// Uses a very wide proposal (1200pt) to explicitly rule out label
+    /// wrapping as an alternative explanation for the height delta. At
+    /// 1200pt each of 3 horizontal primaries gets >= 380pt of width — the
+    /// widest primary label ("Cancel") at `.accessibility5` needs far less
+    /// than that to fit on a single line. So a still-horizontal (regressed)
+    /// layout would yield delta ~= 0 (row height is dominated by the
+    /// tallest button, and no button needs to wrap), while a correctly
+    /// stacked layout yields delta >= 2 * 44 from the two additional 44pt
+    /// rows. Layout branch selection is driven by `isAccessibilitySize`
+    /// from the environment, not by container width, so the wider
+    /// proposal does not itself change which branch runs.
     func test_render_atAccessibilityDynamicType_stacksPrimaries_notSingleRow() {
         let onePrimary = PrinterRunActionPresentation(descriptors: [
             .init(kind: .pause),
@@ -255,18 +267,21 @@ final class PrinterRunActionBarTests: XCTestCase {
         let threeBar = PrinterRunActionBar(presentation: threePrimary) { _ in }
             .environment(\.dynamicTypeSize, .accessibility5)
 
-        let oneSize = contentSize(oneBar)
-        let threeSize = contentSize(threeBar)
+        let wideProposal: CGFloat = 1200
+        let oneSize = contentSize(oneBar, proposedWidth: wideProposal)
+        let threeSize = contentSize(threeBar, proposedWidth: wideProposal)
 
         // Stacked: 3 primary rows each >= 44pt vs 1 primary row of the same
         // font size. Growth from 1 → 3 primaries must be at least 2 * 44
-        // (the two extra rows). A not-stacked (still horizontal) layout
-        // would grow by ~0pt because the row height is dominated by the
-        // tallest button, and all three primaries share the same font.
+        // (the two extra rows). At the wide proposal above, a not-stacked
+        // (still horizontal) layout would grow by ~0pt because the row
+        // height is dominated by the tallest button, all three primaries
+        // share the same font, AND at 1200pt no primary label needs to
+        // wrap — so the wrapping confound Hicks raised is eliminated.
         let extraPrimaryFloor: CGFloat = 2 * 44
         XCTAssertGreaterThanOrEqual(
             threeSize.height - oneSize.height, extraPrimaryFloor,
-            "At .accessibility5, going from 1 → 3 primaries must add at least 2 * 44pt (two stacked rows). One-primary height: \(oneSize.height)pt, three-primary height: \(threeSize.height)pt, delta: \(threeSize.height - oneSize.height)pt"
+            "At .accessibility5 with wide (\(wideProposal)pt) proposal, going from 1 → 3 primaries must add at least 2 * 44pt (two stacked rows). One-primary height: \(oneSize.height)pt, three-primary height: \(threeSize.height)pt, delta: \(threeSize.height - oneSize.height)pt"
         )
     }
 
