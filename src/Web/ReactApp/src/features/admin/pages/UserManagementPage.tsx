@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useEffectEvent, useContext } from 'react';
+import React, { useState, useEffect, useEffectEvent, useContext, useCallback } from 'react';
 import { usePasswordPolicy } from '@/common/hooks/usePasswordPolicy';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
@@ -105,7 +105,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
   const [isCreating, setIsCreating] = useState(false);
   const DEBOUNCE_MS = 450;
 
-  const passwordMeetsPolicyValue = (password: string) => {
+  const passwordMeetsPolicyValue = useCallback((password: string) => {
     if (!passwordPolicy) return true; // don't block while loading
     const p = password;
     if (p.length < passwordPolicy.minLength) return false;
@@ -114,9 +114,12 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     if (passwordPolicy.requireDigit && !/[0-9]/.test(p)) return false;
     if (passwordPolicy.requireSymbol && !/[^A-Za-z0-9]/.test(p)) return false;
     return true;
-  };
+  }, [passwordPolicy]);
 
-  const passwordMeetsPolicy = () => passwordMeetsPolicyValue(newUser.password);
+  const passwordMeetsPolicy = useCallback(
+    () => passwordMeetsPolicyValue(newUser.password),
+    [passwordMeetsPolicyValue, newUser.password],
+  );
 
   // Batched debounced availability checks (single request for username + email)
   useEffect(() => {
@@ -162,7 +165,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     };
   }, [newUser.username, newUser.email, showCreateModal]);
 
-  const validateForm = () => {
+  const validateForm = useCallback(() => {
     const errs: Record<string, string> = {};
     if (!newUser.username.trim()) errs.username = 'Username is required';
     if (!newUser.email.trim()) errs.email = 'Email is required';
@@ -170,9 +173,9 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     if (!newUser.password) errs.password = 'Password is required';
     else if (!passwordMeetsPolicy()) errs.password = 'Password does not meet policy';
     return errs;
-  };
+  }, [newUser, passwordMeetsPolicy]);
 
-  const createUser = async () => {
+  const createUser = useCallback(async () => {
     if (isCreating) return;
     if (usernameStatus === 'taken' || emailStatus === 'taken') return;
     const fieldErrs = validateForm();
@@ -182,7 +185,6 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     }
     setCreateErrors({});
     setIsCreating(true);
-
     try {
       await apiClient.createUser({
         username: newUser.username.trim(),
@@ -217,7 +219,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     } finally {
       setIsCreating(false);
     }
-  };
+  }, [isCreating, usernameStatus, emailStatus, validateForm, newUser, selectedRoleIds, selectedPermissions, createForm]);
 
   const openCreateUser = () => {
     const defaultRole = roles.find(r => r.isSystemRole && r.isActive && !isAdministrativeRole(r));
@@ -246,7 +248,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     }
   };
 
-  const saveSelectedUser = async () => {
+  const saveSelectedUser = useCallback(async () => {
     if (!selectedUser || isSavingUser) return;
     // The backend replaces a user's entire active role set on save (see
     // EfUsersRepository.UpdateUserRolesAsync), so any role name here that fails
@@ -285,9 +287,9 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     } finally {
       setIsSavingUser(false);
     }
-  };
+  }, [selectedUser, isSavingUser, roles, editForm]);
 
-  const savePermissions = async () => {
+  const savePermissions = useCallback(async () => {
     if (!selectedUser || isSavingPermissions) return;
     setIsSavingPermissions(true);
     try {
@@ -312,19 +314,50 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     } finally {
       setIsSavingPermissions(false);
     }
-  };
+  }, [selectedUser, isSavingPermissions, permissionForm, editForm]);
 
   const isDirty = createForm.isDirty || editForm.isDirty || permissionForm.isDirty || passwordForm.isDirty;
-  const saveDirtySection = useEffectEvent(async () => {
+  const saveDirtySection = useCallback(async () => {
     if (editForm.isDirty && showEditModal) {
       await saveSelectedUser();
     } else if (permissionForm.isDirty && showPermissionsModal) {
       await savePermissions();
     } else if (createForm.isDirty && showCreateModal) {
       await createUser();
+    } else if (passwordForm.isDirty && showChangePasswordModal && userToChangePassword) {
+      if (passwordChangeForm.newPassword !== passwordChangeForm.confirmNewPassword) {
+        setChangePasswordError('Password confirmation does not match.');
+        return;
+      }
+      if (!passwordMeetsPolicyValue(passwordChangeForm.newPassword)) {
+        setChangePasswordError('Password does not meet policy requirements.');
+        return;
+      }
+      setIsChangingPassword(true);
+      try {
+        await apiClient.adminChangeUserPassword(
+          userToChangePassword.id,
+          passwordChangeForm.newPassword,
+          passwordChangeForm.confirmNewPassword
+        );
+        adminToast.success(`Password changed for "${userToChangePassword.username}"`);
+        setShowChangePasswordModal(false);
+        setUserToChangePassword(null);
+        passwordForm.markPristine(EMPTY_PASSWORD_FORM);
+        setChangePasswordError(null);
+      } catch (err) {
+        const error = err as { response?: { data?: Record<string, unknown> } };
+        const message = (error.response?.data as Record<string, unknown> | undefined)?.error as string
+          || (error.response?.data as Record<string, unknown> | undefined)?.message as string
+          || 'Failed to change user password';
+        setChangePasswordError(message);
+        adminToast.error(message);
+      } finally {
+        setIsChangingPassword(false);
+      }
     }
-  });
-  const discardDirtySection = useEffectEvent(() => {
+  }, [editForm.isDirty, showEditModal, saveSelectedUser, permissionForm.isDirty, showPermissionsModal, savePermissions, createForm.isDirty, showCreateModal, createUser, passwordForm, showChangePasswordModal, userToChangePassword, passwordChangeForm, passwordMeetsPolicyValue]);
+  const discardDirtySection = useCallback(() => {
     if (editForm.isDirty) {
       editForm.reset();
       setShowEditModal(false);
@@ -341,7 +374,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
       passwordForm.reset();
       setShowChangePasswordModal(false);
     }
-  });
+  }, [editForm, permissionForm, createForm, passwordForm]);
 
   useEffect(() => {
     if (!saveRegistry?.registerSection) return;
@@ -360,7 +393,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     return () => {
       saveRegistry.unregisterSection?.(sectionId);
     };
-  }, [saveRegistry, isDirty]);
+  }, [saveRegistry, isDirty, saveDirtySection, discardDirtySection]);
   const loadUsers = async () => {
     try {
       setLoadError(null);

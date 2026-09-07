@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, useContext, useEffectEvent } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useContext, useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
@@ -400,12 +400,12 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
     });
   };
 
-  const saveDirtyPermissions = useEffectEvent(async () => {
+  const saveDirtyPermissions = useCallback(async () => {
     await savePermissionsMutation.mutateAsync();
-  });
-  const discardDirtyPermissions = useEffectEvent(() => {
+  }, [savePermissionsMutation]);
+  const discardDirtyPermissions = useCallback(() => {
     grantState.reset();
-  });
+  }, [grantState]);
 
   useEffect(() => {
     if (!saveRegistry?.registerSection || !selectedRoleId) return;
@@ -424,7 +424,7 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
     return () => {
       saveRegistry.unregisterSection?.(sectionId);
     };
-  }, [saveRegistry, selectedRoleId, grantState.isDirty]);
+  }, [saveRegistry, selectedRoleId, grantState.isDirty, saveDirtyPermissions, discardDirtyPermissions]);
 
   // ── Rendering ─────────────────────────────────────────────────────────────
 

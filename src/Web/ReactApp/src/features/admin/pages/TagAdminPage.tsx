@@ -341,20 +341,20 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
     }, [editingTagId, editForm, editingRevision, updateTagMutation]);
 
     const isDirty = createForm.isDirty || editForm.isDirty;
-    const saveDirtyTagSection = useEffectEvent(async () => {
+    const saveDirtyTagSection = useCallback(async () => {
         if (editForm.isDirty && editingTagId) {
             await handleSaveEdit();
         } else if (createForm.isDirty && showNewTagForm) {
             await createTagMutation.mutateAsync();
         }
-    });
-    const discardDirtyTagSection = useEffectEvent(() => {
+    }, [editForm.isDirty, editingTagId, handleSaveEdit, createForm.isDirty, showNewTagForm, createTagMutation]);
+    const discardDirtyTagSection = useCallback(() => {
         if (editForm.isDirty) handleCancelEdit();
         if (createForm.isDirty) {
             createForm.reset();
             setShowNewTagForm(false);
         }
-    });
+    }, [editForm, handleCancelEdit, createForm]);
 
     useEffect(() => {
         if (!saveRegistry?.registerSection) return;
@@ -373,7 +373,7 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
         return () => {
             saveRegistry.unregisterSection?.(sectionId);
         };
-    }, [saveRegistry, isDirty]);
+    }, [saveRegistry, isDirty, saveDirtyTagSection, discardDirtyTagSection]);
 
     // Reloads the fresh server tag into the edit form's revision baseline so a retry can
     // succeed, without discarding the name/color/description the user already typed.
