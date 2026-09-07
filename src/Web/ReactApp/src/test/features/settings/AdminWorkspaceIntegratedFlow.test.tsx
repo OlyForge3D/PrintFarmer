@@ -548,7 +548,7 @@ describe('Admin workspace integrated flow (#2507)', () => {
     await waitFor(() => expect(screen.getByLabelText('Retention Days')).toHaveValue(31));
   });
 
-  it.skip('re-enables exact cross-group field search after #2514 merges', async () => {
+  it('keeps exact cross-group field search mounted through query synchronization', async () => {
     renderWorkspace('/admin/settings?scope=system&tab=general&sub=system');
 
     await screen.findByLabelText('Retention Days');
