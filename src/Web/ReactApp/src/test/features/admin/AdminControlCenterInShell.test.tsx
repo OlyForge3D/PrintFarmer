@@ -178,7 +178,15 @@ describe('Admin Control Center in the real app shell (Issue 2526)', () => {
 
     // Global navigation: the Admin entry is the hub's own default home and must
     // survive. It is a separate surface from page content.
-    expect(mainNav!.querySelectorAll(SELF_LINK_SELECTOR).length).toBeGreaterThan(0);
+    //
+    // Issue 2526 AC: "Preserve the global Admin navigation entry ... Assertions
+    // distinguish main content from global navigation." The no-self-link rule is
+    // scoped to *page content*; the rail entry stays a live link, exactly as
+    // every other rail entry does on its own route (it doubles as the rail
+    // collapse toggle), and announces the current location via aria-current.
+    const railAdminLinks = mainNav!.querySelectorAll<HTMLAnchorElement>(SELF_LINK_SELECTOR);
+    expect(railAdminLinks.length).toBeGreaterThan(0);
+    expect(railAdminLinks[0]).toHaveAttribute('aria-current', 'page');
 
     // Main content: zero self-links, including the backend-supplied attention
     // action above, which resolveAttentionActionRoute must have suppressed.

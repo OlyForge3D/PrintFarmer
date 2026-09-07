@@ -155,6 +155,69 @@ function SubsystemTile({ subsystem }: { subsystem: SubsystemHealthDto }) {
 }
 
 /**
+ * Reduce a route to the pathname React Router will actually match on, so route
+ * *identity* checks cannot be evaded by an equivalent spelling.
+ *
+ * React Router matches case-insensitively and treats a trailing slash as
+ * equivalent, so `/ADMIN`, `/admin/` and `/admin?x=1` all land on the same
+ * route as `/admin`. Comparing raw strings would let any of those through as a
+ * "different" route and produce exactly the self-link Issue 2526 forbids.
+ */
+function routePathname(route: string): string {
+  const queryOrHash = route.search(/[?#]/);
+  const pathname = queryOrHash === -1 ? route : route.slice(0, queryOrHash);
+  const withoutTrailingSlash = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
+  return withoutTrailingSlash.toLowerCase();
+}
+
+/** `/admin` itself, however spelled — but not `/admin/status` (a legitimate child) or `/admin-something` (an unrelated sibling). */
+function isControlCenterSelfRoute(route: string): boolean {
+  return routePathname(route) === '/admin';
+}
+
+/** `/admin/manage` was retired and is not a registered route; never link to it. */
+function isRetiredManageRoute(route: string): boolean {
+  const pathname = routePathname(route);
+  return pathname === '/admin/manage' || pathname.startsWith('/admin/manage/');
+}
+
+/**
+ * `actionRoute` is untrusted backend payload rendered straight into a link
+ * target, so prove it is an in-app route before it becomes one. Anything that
+ * is not plainly app-relative is dropped rather than sanitised — a malformed or
+ * compromised payload should make the link disappear (a visible failure), never
+ * navigate somewhere unexpected.
+ */
+function canonicalizeInternalRoute(rawRoute: string | null | undefined): string | null {
+  if (!rawRoute) {
+    return null;
+  }
+  const route = rawRoute.trim();
+
+  // Must be app-relative. A single leading slash rejects absolute URLs
+  // ("https://evil.test/x") and non-HTTP schemes ("javascript:alert(1)").
+  if (!route.startsWith('/')) {
+    return null;
+  }
+  // "//evil.test/x" is protocol-relative and navigates off-origin despite the
+  // leading slash; browsers also fold backslashes into slashes, so "/\evil.test"
+  // is the same attack spelled differently.
+  if (route.startsWith('//') || route.startsWith('/\\')) {
+    return null;
+  }
+  // Control characters can be stripped by the browser after our check runs,
+  // changing what the string means. Reject rather than guess.
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001F\u007F]/.test(route)) {
+    return null;
+  }
+  if (isRetiredManageRoute(route) || isControlCenterSelfRoute(route)) {
+    return null;
+  }
+  return route;
+}
+
+/**
  * Resolve an attention item's navigation target.
  *
  * The backend emits either a stable `actionDestinationId` (preferred: keeps route
@@ -165,8 +228,8 @@ function SubsystemTile({ subsystem }: { subsystem: SubsystemHealthDto }) {
  * `actionRoute`, and if that's also missing, the link disappears (visible failure,
  * not a silent broken navigation).
  *
- * Returns `null` for a target that resolves to `/admin` itself (#2526): this page
- * *is* `/admin`, and a hub must not self-link from its own content. That can only
+ * Returns `null` for a target that resolves to `/admin` itself (Issue 2526): this
+ * page *is* `/admin`, and a hub must not self-link from its own content. That can
  * arise from a backend item pointing at `admin-home` or emitting `/admin` as a raw
  * route, so it is a guard rather than an expected path.
  */
@@ -177,30 +240,7 @@ function resolveAttentionActionRoute(
     hasPermission: (resource: string, action: string) => boolean;
   },
 ): string | null {
-  const isRetiredManageRoute = (route: string) =>
-    route === '/admin/manage' ||
-    route.startsWith('/admin/manage?') ||
-    route.startsWith('/admin/manage#') ||
-    route.startsWith('/admin/manage/');
-  // `/admin` exactly, `/admin/`, or `/admin?…` / `/admin#…` — but not
-  // `/admin/status`, which is a legitimate child destination, and not
-  // `/admin-something`, which is an unrelated sibling route. `/admin/` is
-  // included because React Router normalises it to `/admin`, so a link to it
-  // would still be a self-link.
-  const isControlCenterSelfRoute = (route: string) =>
-    route === '/admin' ||
-    route === '/admin/' ||
-    route.startsWith('/admin?') ||
-    route.startsWith('/admin#') ||
-    route.startsWith('/admin/?') ||
-    route.startsWith('/admin/#');
-  const fallbackRoute =
-    item.actionRoute &&
-    item.actionRoute.startsWith('/') &&
-    !isRetiredManageRoute(item.actionRoute) &&
-    !isControlCenterSelfRoute(item.actionRoute)
-      ? item.actionRoute
-      : null;
+  const fallbackRoute = canonicalizeInternalRoute(item.actionRoute);
 
   if (item.actionDestinationId) {
     const destination = getDestinationById(item.actionDestinationId);

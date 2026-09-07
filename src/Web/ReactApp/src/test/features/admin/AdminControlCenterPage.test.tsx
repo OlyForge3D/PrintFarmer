@@ -747,6 +747,13 @@ describe('AdminControlCenterPage', () => {
     ['a hash-suffixed /admin action route', { actionRoute: '/admin#attention' }],
     ['a trailing-slash /admin/ action route', { actionRoute: '/admin/' }],
     ['a trailing-slash query /admin/?x=1 action route', { actionRoute: '/admin/?x=1' }],
+    // Route *identity* must survive equivalent spellings. React Router matches
+    // case-insensitively and folds a trailing slash, so each of these lands on
+    // /admin and would be a live self-link under a raw string comparison.
+    ['an uppercase /ADMIN action route', { actionRoute: '/ADMIN' }],
+    ['a mixed-case /Admin/ action route', { actionRoute: '/Admin/' }],
+    ['a whitespace-padded /admin action route', { actionRoute: '  /admin  ' }],
+    ['a repeated-trailing-slash /admin// action route', { actionRoute: '/admin//' }],
   ])('suppresses an attention action pointing at the hub itself — %s (#2526)', async (_label, action) => {
     mockedApiGet.mockResolvedValue({
       data: makeOverview({
@@ -758,6 +765,45 @@ describe('AdminControlCenterPage', () => {
             detail: 'A backend item that would send the user back to /admin.',
             actionLabel: 'Open',
             ...action,
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-item')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('admin-hub-attention-item').querySelector('a')).toBeNull();
+  });
+
+  // `actionRoute` is untrusted backend payload rendered straight into a link
+  // target. A malformed or compromised payload must make the link disappear, not
+  // navigate off-origin. `startsWith('/')` alone is not enough: a
+  // protocol-relative URL passes it and still leaves the app.
+  it.each([
+    ['a protocol-relative URL', '//evil.test/steal'],
+    ['a backslash protocol-relative URL', '/\\evil.test/steal'],
+    ['an absolute external URL', 'https://evil.test/steal'],
+    ['a javascript: scheme', 'javascript:alert(1)'],
+    ['a data: scheme', 'data:text/html,<script>alert(1)</script>'],
+    ['a mailto: scheme', 'mailto:someone@evil.test'],
+    ['a bare relative path with no leading slash', 'admin/status'],
+    ['an embedded newline', '/admin\nstatus'],
+    ['an empty string', ''],
+  ])('drops an unsafe backend action route — %s', async (_label, actionRoute) => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        attention: [
+          {
+            key: 'unsafe-route',
+            severity: 'Warning',
+            title: 'Untrusted target',
+            detail: 'The backend supplied a route that is not an in-app destination.',
+            actionLabel: 'Open',
+            actionRoute,
           },
         ],
       }),
