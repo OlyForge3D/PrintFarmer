@@ -100,10 +100,15 @@ struct PrinterSetupControlsContent: View {
                     .foregroundStyle(Color.pfTextPrimary)
             }
             Spacer()
-            Button("Dismiss") { viewModel.dismissError() }
-                .font(.footnote)
-                .buttonStyle(.borderless)
-                .frame(minWidth: 44, minHeight: 44)
+            Button {
+                viewModel.dismissError()
+            } label: {
+                Text("Dismiss")
+                    .font(.footnote)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
         }
         .padding(10)
         .background(Color.pfError.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
