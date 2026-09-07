@@ -8,7 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const fullCommitShaPattern = /^[0-9a-f]{40}$/i;
 
-function resolveGitHash(command: 'build' | 'serve') {
+export function resolveGitHash(command: 'build' | 'serve') {
   const injectedGitHash = process.env.VITE_GIT_SHA || process.env.GIT_SHA;
   if (injectedGitHash) {
     if (fullCommitShaPattern.test(injectedGitHash)) {

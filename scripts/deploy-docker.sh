@@ -69,6 +69,10 @@ DOTNET_MAJOR_VERSION="${SDK_TAG%%-*}"  # Remove everything after first hyphen
 # must be injected explicitly as a build arg. An explicit value supports source archives;
 # otherwise Vite rejects "unknown" before producing an unidentifiable production bundle.
 GIT_SHA="${GIT_SHA:-$(git -C "$SCRIPT_DIR/.." rev-parse HEAD 2>/dev/null || echo "unknown")}"
+if [[ ! "$GIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    print_error "A full 40-character GIT_SHA is required to build identifiable images."
+    exit 1
+fi
 export GIT_SHA
 
 # Default flags

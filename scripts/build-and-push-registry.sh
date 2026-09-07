@@ -19,6 +19,11 @@ fi
 # Full git SHA of the source commit, injected into the worker build so
 # /api/system/version reports the deployed commit (.git is not in the build context).
 GIT_SHA="${GIT_SHA:-$(git -C "$(dirname "$0")/.." rev-parse HEAD 2>/dev/null || echo "unknown")}"
+if [[ ! "$GIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    print_error "A full 40-character GIT_SHA is required to build identifiable images."
+    exit 1
+fi
+export GIT_SHA
 
 # Docker build progress flag (tty=pretty, plain=verbose, auto=smart)
 DOCKER_PROGRESS=${DOCKER_PROGRESS:-tty}

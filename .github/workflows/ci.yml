@@ -185,6 +185,7 @@ jobs:
       - name: Test acceptance provenance preflight
         run: >-
           node --test
+          scripts/ci/tests/test-acceptance-provenance-build-paths.mjs
           scripts/ci/tests/test-verify-acceptance-provenance.mjs
           scripts/ci/tests/test-smoke-daily-validation-stack.mjs
 

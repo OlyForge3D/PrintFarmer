@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { mkdir, writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -77,7 +78,13 @@ async function fetchResponse(url, label, fetchImpl, timeoutMs) {
   let response;
   try {
     response = await fetchImpl(url, {
-      headers: { Accept: label === 'nginx index' ? 'text/html' : 'application/json' },
+      headers: {
+        Accept: label === 'nginx index'
+          ? 'text/html'
+          : label === 'frontend bundle'
+            ? 'application/javascript'
+            : 'application/json',
+      },
       redirect: 'follow',
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -126,6 +133,7 @@ async function resolveBundleUrl(baseUrl, fetchImpl, timeoutMs) {
   if (bundleUrl.origin !== baseUrl.origin) {
     throw new Error('nginx index references its index-*.js bundle on another origin.');
   }
+  await fetchResponse(bundleUrl, 'frontend bundle', fetchImpl, timeoutMs);
   return bundleUrl.href;
 }
 
@@ -270,7 +278,7 @@ async function main() {
 
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
   const evidenceDir = args.evidenceDir
-    ?? path.join(repoRoot, 'src', 'Web', 'ReactApp', 'test-results', 'acceptance-evidence');
+    ?? path.join(repoRoot, 'acceptance-evidence');
   const result = await verifyAcceptanceProvenance({
     ...args,
     evidenceDir,
@@ -282,9 +290,9 @@ async function main() {
 }
 
 const invokedPath = process.argv[1]
-  ? path.resolve(process.argv[1])
+  ? realpathSync(path.resolve(process.argv[1]))
   : undefined;
-if (invokedPath && fileURLToPath(import.meta.url) === invokedPath) {
+if (invokedPath && realpathSync(fileURLToPath(import.meta.url)) === invokedPath) {
   main().catch((error) => {
     console.error(`Acceptance provenance verification failed: ${error.message}`);
     process.exitCode = 1;

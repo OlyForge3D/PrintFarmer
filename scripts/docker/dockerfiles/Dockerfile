@@ -3,12 +3,15 @@
 
 ARG BUILD_VERSION=development
 ARG VCS_REF=unknown
+ARG GIT_SHA=unknown
 ARG SOURCE_REPOSITORY=""
 ARG SOURCE_ARCHIVE_URL=""
 ARG SBOM_URL=""
 
 # Stage 1: Build React application
 FROM node:24-alpine AS react-build
+ARG GIT_SHA
+ENV VITE_GIT_SHA=${GIT_SHA}
 WORKDIR /app
 
 # Copy package files first for better caching
@@ -23,6 +26,7 @@ RUN npm run build
 
 # Stage 2: Build .NET API
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet-build
+ARG GIT_SHA
 WORKDIR /src
 
 # Copy project files for dependency restoration
@@ -50,6 +54,7 @@ COPY src/ ./
 RUN dotnet publish ./api/Farm.Web.Api.csproj \
     -c Release \
     -o /app/publish \
+    -p:GitCommitSha=${GIT_SHA} \
     --no-restore \
     --verbosity minimal
 

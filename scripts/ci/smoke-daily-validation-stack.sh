@@ -97,9 +97,9 @@ if [[ ! "$EXPECTED_ACCEPTANCE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
   log "FAIL: EXPECTED_ACCEPTANCE_SHA must be the full 40-character commit SHA"
   exit 1
 fi
-EXPECTED_ACCEPTANCE_SHA="${EXPECTED_ACCEPTANCE_SHA,,}"
+EXPECTED_ACCEPTANCE_SHA="$(printf '%s' "$EXPECTED_ACCEPTANCE_SHA" | tr '[:upper:]' '[:lower:]')"
 export GIT_SHA="$EXPECTED_ACCEPTANCE_SHA"
-ACCEPTANCE_EVIDENCE_DIR="${ACCEPTANCE_EVIDENCE_DIR:-$REPO_ROOT/src/Web/ReactApp/test-results/acceptance-evidence}"
+ACCEPTANCE_EVIDENCE_DIR="${ACCEPTANCE_EVIDENCE_DIR:-$REPO_ROOT/acceptance-evidence}"
 
 COMPOSE_FILES=(-f "$STACK_DIR/docker-compose.yml")
 if [[ "$USE_REGISTRY" == "true" ]]; then
@@ -209,7 +209,11 @@ wait_for_health "http://localhost:${MOONRAKER_EMULATOR_PAUSED_PORT}/healthz" "Mo
 wait_for_health "http://localhost:${MOONRAKER_EMULATOR_SHUTDOWN_PORT}/healthz" "Moonraker emulator (shutdown)"
 wait_for_health "http://localhost:${HTTP_PORT}/" "nginx-proxy/frontend"
 
-image_digest_args=()
+provenance_args=(
+  --expected-sha "$EXPECTED_ACCEPTANCE_SHA"
+  --base-url "http://localhost:${HTTP_PORT}"
+  --evidence-dir "$ACCEPTANCE_EVIDENCE_DIR"
+)
 for service in api frontend slicer-host printer-discovery orcaslicer-worker moonraker-ready; do
   image_id="$(compose images -q "$service" 2>/dev/null | sed -n '1p' || true)"
   if [[ -z "$image_id" ]]; then
@@ -220,16 +224,12 @@ for service in api frontend slicer-host printer-discovery orcaslicer-worker moon
     image_digest="$(docker image inspect --format '{{ .Id }}' "$image_id" 2>/dev/null || true)"
   fi
   if [[ "$image_digest" =~ ^(sha256:[0-9a-f]{64}|[^[:space:]@]+@sha256:[0-9a-f]{64})$ ]]; then
-    image_digest_args+=(--image-digest "${service}=${image_digest}")
+    provenance_args+=(--image-digest "${service}=${image_digest}")
   fi
 done
 
 log "Verifying acceptance target provenance through the nginx browser origin"
-node "$SCRIPT_DIR/verify-acceptance-provenance.mjs" \
-  --expected-sha "$EXPECTED_ACCEPTANCE_SHA" \
-  --base-url "http://localhost:${HTTP_PORT}" \
-  --evidence-dir "$ACCEPTANCE_EVIDENCE_DIR" \
-  "${image_digest_args[@]}"
+node "$SCRIPT_DIR/verify-acceptance-provenance.mjs" "${provenance_args[@]}"
 log "OK: acceptance target provenance is bound to $EXPECTED_ACCEPTANCE_SHA"
 
 log "Creating an isolated validation administrator and authenticating through the real API"
