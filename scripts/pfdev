@@ -300,7 +300,7 @@ build_image() {
     cd "$REPO_ROOT"
 
     if service_has_build "$compose_service"; then
-        ensure_build_git_sha
+        ensure_build_git_sha || return 1
         # Force cache invalidation by removing the image first
         docker rmi "printfarmer-$compose_service:latest" 2>/dev/null || true
         # Don't use --pull since we use local upgraded base images

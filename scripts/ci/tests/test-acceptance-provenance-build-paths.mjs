@@ -10,13 +10,14 @@ const frontendDockerfile = readFileSync(
   'scripts/docker/dockerfiles/Dockerfile.frontend',
   'utf8',
 );
+const splitTopologySmoke = readFileSync('tests/test-split-topology-route-smoke.sh', 'utf8');
 const publishWorkflow = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
 
 test('pfdev injects a validated full commit before compose builds', () => {
   assert.match(pfdev, /ensure_build_git_sha\(\)/);
   assert.match(pfdev, /git -C "\$REPO_ROOT" rev-parse HEAD/);
   assert.match(pfdev, /\^\[0-9a-fA-F\]\{40\}\$/);
-  assert.match(pfdev, /ensure_build_git_sha[\s\S]*docker compose build --no-cache/);
+  assert.match(pfdev, /ensure_build_git_sha \|\| return 1[\s\S]*docker compose build --no-cache/);
 });
 
 test('deployment build scripts reject missing or non-full commit identities early', () => {
@@ -38,4 +39,10 @@ test('release workflow injects the full source commit into container builds', ()
   assert.match(publishWorkflow, /GIT_SHA=\$\{\{ steps\.gitsha\.outputs\.full \}\}/);
   assert.match(publishWorkflow, /VITE_GIT_SHA=\$\{\{ steps\.gitsha\.outputs\.full \}\}/);
   assert.doesNotMatch(publishWorkflow, /git rev-parse --short HEAD/);
+});
+
+test('live split-topology builds inject the exact commit under test', () => {
+  assert.match(splitTopologySmoke, /git -C "\$REPO_ROOT" rev-parse HEAD/);
+  assert.match(splitTopologySmoke, /GIT_SHA.*\^\[0-9a-fA-F\]\{40\}\$/);
+  assert.match(splitTopologySmoke, /export GIT_SHA[\s\S]*compose up -d --build/);
 });

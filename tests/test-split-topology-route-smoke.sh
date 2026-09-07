@@ -222,6 +222,13 @@ export ORCA_WORKER_COUNT=1
 # build cost without weakening what this test proves.
 export ALLOW_STUB=true
 export EXTERNAL_ORCA_WORKER_TEMP="$STACK_DIR/.volumes/printfarmer-orcaslicer-temp"
+# Bind every locally built service to the exact source commit under test.
+GIT_SHA="${GIT_SHA:-$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)}"
+if [[ ! "$GIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+  log "FAIL: GIT_SHA must be the full 40-character commit SHA"
+  exit 1
+fi
+export GIT_SHA
 # The generated compose file's build context/dockerfile default to paths
 # relative to the stack dir itself; point them back at this worktree so
 # `docker compose up --build` builds from real repo sources (see
