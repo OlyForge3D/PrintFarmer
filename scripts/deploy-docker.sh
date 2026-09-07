@@ -45,6 +45,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/docker-utils.sh"
 source "$SCRIPT_DIR/common-utils.sh"
+# shellcheck source=./build-metadata.sh
+source "$SCRIPT_DIR/build-metadata.sh"
 
 # Consistently invoke Docker Compose with the active environment and compose files.
 # Defining this at script scope keeps verify-only mode equivalent to a full deployment.
@@ -62,13 +64,6 @@ fi
 
 # Extract .NET major version from SDK_TAG for display messages (e.g., "10.0-noble" -> "10.0")
 DOTNET_MAJOR_VERSION="${SDK_TAG%%-*}"  # Remove everything after first hyphen
-
-# Short git SHA of the source commit, embedded into each component's build so the
-# /api/system/version endpoints (and frontend version.json) can report the deployed
-# commit. The .git directory is not copied into the Docker build context, so the SHA
-# must be injected explicitly as a build arg. Falls back to "unknown" outside a repo.
-GIT_SHA=$(git -C "$SCRIPT_DIR/.." rev-parse --short HEAD 2>/dev/null || echo "unknown")
-export GIT_SHA
 
 # Default flags
 DRY_RUN=false
@@ -5526,6 +5521,11 @@ EOF
     elif [ "$DRY_RUN" = "true" ]; then
         print_info "Dry-run mode: skipping image build. (Would run: docker compose build)"
     else
+        if ! GIT_SHA="$(resolve_local_build_git_sha "$REPO_ROOT" "${GIT_SHA:-}")"; then
+            return 1
+        fi
+        export GIT_SHA
+
         # ----- Prepare optional slicer assets ---------------------------------
         # ORCA_ASSET_IMAGE  -> name of a prebuilt assets image (registry or local)
         # ORCA_ASSET_PATH   -> local path containing extracted orcaslicer files (orca7z/ or orcaslicer-dist/)

@@ -6,8 +6,8 @@
     <Version>$(RepoVersion)</Version>
     <InformationalVersion>$(RepoVersion)</InformationalVersion>
     <!--
-      Explicit git short SHA injection for container builds where .git is absent.
-      When GitCommitSha is passed (e.g. `dotnet publish -p:GitCommitSha=abc1234`),
+      Explicit full git SHA injection for container builds where .git is absent.
+      When GitCommitSha is passed,
       embed it in InformationalVersion as `<version>+<sha>` so /api/system/version can
       report the deployed commit. Disable the SDK's SourceRevisionId auto-append in
       that case to avoid a doubled `+sha`. Locally (no GitCommitSha) the SDK still

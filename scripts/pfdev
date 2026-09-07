@@ -26,6 +26,8 @@ DEPLOY_CONFIG_FILE="$REPO_ROOT/.deploy-config"
 CERT_SCRIPT="$REPO_ROOT/scripts/generate-certs.sh"
 CERT_DIR="$REPO_ROOT/deploy/nginx/certs"
 LEGACY_CERT_DIR="$REPO_ROOT/nginx/certs"
+# shellcheck source=./build-metadata.sh
+source "$SCRIPT_DIR/build-metadata.sh"
 
 # Ensure symlink exists for global access
 ensure_symlink() {
@@ -133,6 +135,13 @@ load_deployment_env() {
         source "$DEPLOY_CONFIG_FILE"
         set +a
     fi
+}
+
+ensure_build_git_sha() {
+    if ! GIT_SHA="$(resolve_local_build_git_sha "$REPO_ROOT" "${GIT_SHA:-}")"; then
+        return 1
+    fi
+    export GIT_SHA
 }
 
 check_required_files() {
@@ -289,6 +298,7 @@ build_image() {
     cd "$REPO_ROOT"
 
     if service_has_build "$compose_service"; then
+        ensure_build_git_sha || return 1
         # Force cache invalidation by removing the image first
         docker rmi "printfarmer-$compose_service:latest" 2>/dev/null || true
         # Don't use --pull since we use local upgraded base images

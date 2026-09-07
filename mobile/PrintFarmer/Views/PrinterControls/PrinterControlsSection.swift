@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Composite Printer Controls section. Hosts the three subgroups (Preheat,
-/// Home, Jog), owns the `PrinterControlsViewModel`, and applies the section-
+/// Standalone compatibility owner for `PrinterSetupControlsContent`. Owns
+/// the lazy `PrinterControlsViewModel` and applies the section-
 /// level visibility rules from the v1 design spec (printer-controls-v1.md):
 ///
 /// * Hidden entirely when `printer.isOnline == false`.
@@ -18,7 +18,6 @@ struct PrinterControlsSection: View {
 
     let printer: Printer
     @StateObject private var viewModel: PrinterControlsViewModel
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     /// Production init. `StateObject(wrappedValue:)` takes an `@autoclosure
     /// @escaping` argument, so wrapping the view-model construction directly
@@ -54,13 +53,6 @@ struct PrinterControlsSection: View {
         !printer.isOnline
     }
 
-    private var isPrintingOrPaused: Bool {
-        switch printer.state?.lowercased() {
-        case "printing", "paused": return true
-        default: return false
-        }
-    }
-
     var body: some View {
         // Wrap both the hidden and visible branches so the `.onChange`
         // observer is installed unconditionally. Otherwise a printer going
@@ -73,13 +65,9 @@ struct PrinterControlsSection: View {
         // re-renders triggered by the VM's own `@Published` state cannot
         // re-fire `.onChange` — no update loop.
         ZStack {
-            if Self.isHidden(for: printer) {
-                EmptyView()
-            } else {
-                content
-                    .task { await viewModel.loadCapabilities() }
-            }
+            PrinterSetupControlsContent(printer: printer, viewModel: viewModel)
         }
+        .task { await viewModel.loadCapabilities() }
         // Forward every meaningful live snapshot to the VM so
         // `pendingCommand` clears after jog/preheat/home effects land even
         // when `state` / `isOnline` did not change (position/temp/homing
@@ -91,99 +79,6 @@ struct PrinterControlsSection: View {
         }
     }
 
-    @ViewBuilder
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Controls")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(Color.pfTextPrimary)
-                .accessibilityAddTraits(.isHeader)
-
-            VStack(alignment: .leading, spacing: 0) {
-                if isPrintingOrPaused {
-                    lockoutBanner
-                        .padding(.bottom, 12)
-                }
-
-                if horizontalSizeClass == .regular {
-                    // iPad: Preheat + Home side-by-side (top), Jog full-width (bottom).
-                    HStack(alignment: .top, spacing: 16) {
-                        PreheatSubgroup(viewModel: viewModel)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        HomeSubgroup(viewModel: viewModel)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    Divider()
-                        .background(Color.pfBorder)
-                        .padding(.vertical, 8)
-                    JogSubgroup(viewModel: viewModel)
-                } else {
-                    // Phone: vertical stack with dividers between subgroups.
-                    PreheatSubgroup(viewModel: viewModel)
-                    Divider()
-                        .background(Color.pfBorder)
-                        .padding(.vertical, 8)
-                    HomeSubgroup(viewModel: viewModel)
-                    Divider()
-                        .background(Color.pfBorder)
-                        .padding(.vertical, 8)
-                    JogSubgroup(viewModel: viewModel)
-                }
-
-                if let error = viewModel.lastError {
-                    errorBanner(error)
-                        .padding(.top, 12)
-                }
-            }
-            .padding()
-            .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.pfBorder, lineWidth: 1)
-            )
-        }
-    }
-
-    // MARK: - Banners
-
-    @ViewBuilder
-    private var lockoutBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "lock.fill")
-                .foregroundStyle(Color.pfWarning)
-            Text("Controls are disabled while a print is active.")
-                .font(.footnote)
-                .foregroundStyle(Color.pfTextPrimary)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.pfWarning.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            String(localized: "Controls disabled, print is active.",
-                   comment: "VoiceOver: lockout banner during print")
-        )
-    }
-
-    @ViewBuilder
-    private func errorBanner(_ error: ControlsError) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(Color.pfError)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(error.message)
-                    .font(.footnote)
-                    .foregroundStyle(Color.pfTextPrimary)
-            }
-            Spacer()
-            Button("Dismiss") { viewModel.dismissError() }
-                .font(.footnote)
-                .buttonStyle(.borderless)
-        }
-        .padding(10)
-        .background(Color.pfError.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-        .accessibilityElement(children: .combine)
-    }
 }
 
 // MARK: - Update Signal

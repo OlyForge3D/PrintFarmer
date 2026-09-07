@@ -468,7 +468,11 @@ dotnet build ./farm-web.sln -c Release
 
 ```bash
 # Build image
-docker build -t printfarmer:latest -f Dockerfile.multistage .
+docker build \
+  --build-arg GIT_SHA="$(git rev-parse HEAD)" \
+  -t printfarmer:latest \
+  -f Dockerfile.multistage \
+  .
 
 # Run container
 docker run -p 5245:5245 -p 3000:3000 printfarmer:latest
