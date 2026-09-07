@@ -25,7 +25,14 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { hasAccessibleDestinationWithPrefix, hasAccessibleHubTile } from '@/features/admin/registry/adminDestinations';
+import {
+  canAccessDestination,
+  getDestinationById,
+  hasAccessibleDestinationWithPrefix,
+  hasAccessibleHubTile,
+} from '@/features/admin/registry/adminDestinations';
+import type { AdminDestination } from '@/features/admin/registry/adminDestinations';
+import { useAdminNavPins } from '@/common/contexts/useAdminNavPins';
 import { useSlicer } from '@/hooks/useSlicer';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
 import { hasResolvedQueryData } from '@/common/utils/queryState';
@@ -323,6 +330,7 @@ function groupNavigationItems(items: SectionedNavigationItem[]): NavigationGroup
 export function Layout() {
   const { isConnected } = useSignalRConnection('printer');
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
+  const { pinnedIds: adminPinnedIds } = useAdminNavPins();
   const { isSlicerAvailable } = useSlicer();
   const canRole = useCallback((role: string) => typeof hasRole === 'function' ? hasRole(role) : user?.role === role, [hasRole, user?.role]);
   const canPermission = useCallback((resource: string, action: string) => typeof hasPermission === 'function' ? hasPermission(resource, action) : true, [hasPermission]);
@@ -461,6 +469,21 @@ export function Layout() {
       .filter((item): item is SectionedNavigationItem => Boolean(item)),
     [navigationItemById, resolvedNavPreferences.favoriteItems]
   );
+  const adminPinnedNavigationItems = useMemo<SectionedNavigationItem[]>(() => {
+    if (!isAuthenticated) return [];
+    const access = { hasRole: canRole, hasPermission: canPermission };
+    return adminPinnedIds
+      .map((id) => getDestinationById(id))
+      .filter((destination): destination is AdminDestination => Boolean(destination))
+      .filter((destination) => destination.id !== 'admin-home' && canAccessDestination(destination, access))
+      .map((destination) => ({
+        id: destination.id,
+        name: destination.label,
+        href: destination.path,
+        icon: destination.icon,
+        sectionName: 'Admin',
+      }));
+  }, [adminPinnedIds, canPermission, canRole, isAuthenticated]);
   const regularNavigationItems = useMemo(
     () => resolvedNavPreferences.regularItems
       .map((item) => navigationItemById.get(item.id))
@@ -474,8 +497,10 @@ export function Layout() {
     [navigationItemById, resolvedNavPreferences.hiddenItems]
   );
   const favoriteNavigationGroups = useMemo<NavigationGroup[]>(
-    () => favoriteNavigationItems.length > 0 ? [{ header: FAVORITES_HEADER, items: favoriteNavigationItems }] : [],
-    [favoriteNavigationItems]
+    () => favoriteNavigationItems.length > 0 || adminPinnedNavigationItems.length > 0
+      ? [{ header: FAVORITES_HEADER, items: [...adminPinnedNavigationItems, ...favoriteNavigationItems] }]
+      : [],
+    [adminPinnedNavigationItems, favoriteNavigationItems]
   );
   const navigationGroups = useMemo<NavigationGroup[]>(() => groupNavigationItems(regularNavigationItems), [regularNavigationItems]);
   const allNavigationGroups = useMemo<NavigationGroup[]>(

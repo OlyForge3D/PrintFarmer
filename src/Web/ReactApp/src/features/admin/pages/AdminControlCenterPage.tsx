@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { Link } from 'react-router';
 import { Alert, Badge, Button, Card } from '@/common/components/ui';
@@ -22,11 +22,13 @@ import {
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
   canAccessDestination,
+  ADMIN_DESTINATIONS,
   getDestinationById,
   getStandaloneConfigurationDestinations,
   hasAccessibleDestinationWithPrefix,
   type AdminDestination,
 } from '@/features/admin/registry';
+import { useAdminNavPins } from '@/common/contexts/useAdminNavPins';
 import { AdminAttentionPanel } from '@/features/admin/components/AdminAttentionPanel';
 import { useAdminOverview } from '@/features/admin/hooks/useAdminOverview';
 import {
@@ -297,6 +299,10 @@ function DestinationCard({ destination }: { destination: AdminDestination }) {
  */
 export function AdminControlCenterPage() {
   const { hasRole, hasPermission } = useAuth();
+  const { pinnedIds, setPinned } = useAdminNavPins();
+  const [showPinChooser, setShowPinChooser] = useState(false);
+  const pinChooserButtonRef = useRef<HTMLButtonElement | null>(null);
+  const pinChooserRef = useRef<HTMLDivElement | null>(null);
   const canViewOverview = hasRole('farm_admin') || hasPermission('system_settings', 'admin');
   const { data, isLoading, isError, error, isFetching, refetch } = useAdminOverview({
     enabled: canViewOverview,
@@ -323,6 +329,30 @@ export function AdminControlCenterPage() {
     () => getDashboardDestinations({ hasRole, hasPermission }),
     [hasRole, hasPermission],
   );
+  const eligiblePinDestinations = useMemo(
+    () => ADMIN_DESTINATIONS
+      .filter((destination) => destination.kind !== 'hub')
+      .filter((destination) => canAccessDestination(destination, { hasRole, hasPermission })),
+    [hasPermission, hasRole],
+  );
+
+  useEffect(() => {
+    if (!showPinChooser) return;
+    const focusFrame = window.requestAnimationFrame(() => {
+      pinChooserRef.current?.querySelector<HTMLElement>('button')?.focus();
+    });
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setShowPinChooser(false);
+        pinChooserButtonRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [showPinChooser]);
 
   // The "no operational tools" empty state is only truthful when the whole
   // band is empty — a delegate who reaches Power Monitors but no operational
@@ -332,19 +362,33 @@ export function AdminControlCenterPage() {
     dashboardDestinations.configuration.length > 0 ||
     dashboardDestinations.settings;
 
-  const refreshButton = canViewOverview ? (
-    <Button
-      variant="secondary"
-      size="sm"
-      onClick={() => {
-        void refetch();
-      }}
-      disabled={isFetching}
-      iconLeft={<RefreshIcon className="h-3.5 w-3.5" ariaLabel="" />}
-    >
-      {isFetching ? 'Refreshing…' : 'Refresh'}
-    </Button>
-  ) : null;
+  const refreshButton = (
+    <div className="flex flex-wrap gap-2">
+      <Button
+        ref={pinChooserButtonRef}
+        variant={showPinChooser ? 'secondary' : 'subtle'}
+        size="sm"
+        aria-expanded={showPinChooser}
+        aria-controls="admin-pin-chooser"
+        onClick={() => setShowPinChooser((open) => !open)}
+      >
+        Pin admin links
+      </Button>
+      {canViewOverview && (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            void refetch();
+          }}
+          disabled={isFetching}
+          iconLeft={<RefreshIcon className="h-3.5 w-3.5" ariaLabel="" />}
+        >
+          {isFetching ? 'Refreshing…' : 'Refresh'}
+        </Button>
+      )}
+    </div>
+  );
 
   return (
     <PageTemplate
@@ -359,6 +403,45 @@ export function AdminControlCenterPage() {
       maxWidth="max-w-7xl"
       titleWrap
     >
+      {showPinChooser && (
+        <div
+          ref={pinChooserRef}
+          id="admin-pin-chooser"
+          role="dialog"
+          aria-label="Pin admin links"
+          className="mb-6 rounded-lg border border-pf-border bg-pf-bg-1 p-4"
+        >
+          <div className="mb-3">
+            <h2 className="text-base font-semibold text-pf-text-primary">Pin admin links</h2>
+            <p className="text-sm text-pf-text-secondary">
+              Choose authorized admin destinations to show in your navbar. Pins are saved in this browser for your account.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="list" aria-label="Authorized admin destinations">
+            {eligiblePinDestinations.map((destination) => {
+              const pinned = pinnedIds.includes(destination.id);
+              return (
+                <div key={destination.id} role="listitem" className="flex items-center justify-between gap-3 rounded-md border border-pf-border p-2">
+                  <span className="min-w-0 text-sm text-pf-text-primary">{destination.label}</span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={pinned ? 'secondary' : 'subtle'}
+                    aria-pressed={pinned}
+                    aria-label={`${pinned ? 'Unpin' : 'Pin'} ${destination.label} from navbar`}
+                    onClick={() => setPinned(destination.id, !pinned)}
+                  >
+                    {pinned ? 'Pinned' : 'Pin'}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+          {eligiblePinDestinations.length === 0 && (
+            <p className="text-sm text-pf-text-secondary">No authorized admin destinations are available to pin.</p>
+          )}
+        </div>
+      )}
       <div className="flex flex-col gap-8">
         {/*
           A failed refresh over an existing snapshot keeps that snapshot on

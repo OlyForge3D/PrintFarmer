@@ -85,6 +85,20 @@ describe('navPreferences', () => {
     expect(reset.orderedItemIds.slice(0, 3)).toEqual(['overview', 'print-queue', 'printers']);
   });
 
+  it('preserves explicit admin pins while normalizing regular navbar preferences', () => {
+    const resolved = resolveNavPreferences(items, 'admin', {
+      orderedItemIds: ['overview'],
+      hiddenItemIds: [],
+      pinnedItemIds: [],
+      adminPinnedItemIds: ['ops-analytics', 'ops-analytics', 'retired-destination'],
+    });
+
+    expect(resolved.preferences.adminPinnedItemIds).toEqual([
+      'ops-analytics',
+      'retired-destination',
+    ]);
+  });
+
   it('reorders visible items correctly when there are hidden items', () => {
     const defaults = createDefaultNavPreferences(items, 'operator');
     const hidden = setNavItemHidden(defaults, 'print-queue', true);
