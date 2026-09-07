@@ -923,7 +923,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     if (isDirty || isSelfAuthoredQuery) {
       return;
     }
-    if (isFiltering && matchingCategoryIds?.length === 0) {
+    if (isFiltering && !searchParams.has('field') && matchingCategoryIds?.length === 0) {
       if (requestedCategory === null && requestedSubPage === null) {
         return;
       }

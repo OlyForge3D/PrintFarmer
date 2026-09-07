@@ -1,13 +1,16 @@
 import '@testing-library/jest-dom';
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AdminControlCenterPage } from '@/features/admin/pages/AdminControlCenterPage';
+import { AdminDestinationRoute } from '@/features/admin/components/AdminDestinationRoute';
+import { PowerMonitorSettingsPage } from '@/features/power-monitors/components/PowerMonitorSettingsPage';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
 import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
+import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
 import type { AdminOverviewDto } from '@/types/adminOverview';
 
 const authState = vi.hoisted(() => ({
@@ -33,11 +36,38 @@ const settingsApi = vi.hoisted(() => ({
   saveSettingsValues: vi.fn(),
 }));
 
+const settingsState = vi.hoisted(() => ({
+  values: {
+    SystemLog: { enabled: true, retentionDays: 30 },
+    NetworkDiscovery: { enableDiscovery: true, scanIntervalMinutes: 10 },
+  } as Record<string, Record<string, unknown>>,
+}));
+
 const toastMocks = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
   info: vi.fn(),
   warning: vi.fn(),
+}));
+
+const apiClientMock = vi.hoisted(() => ({
+  getCostTrackingSettings: vi.fn(),
+  updateCostTrackingSettings: vi.fn(),
+  getQuotas: vi.fn(),
+  createQuota: vi.fn(),
+  deleteQuota: vi.fn(),
+  resetExpiredQuotas: vi.fn(),
+}));
+
+const workerServiceMock = vi.hoisted(() => ({
+  getAllWorkers: vi.fn(),
+  getWorkersByStatus: vi.fn(),
+  getWorkerJobs: vi.fn(),
+  disableWorker: vi.fn(),
+  enableWorker: vi.fn(),
+  resetWorker: vi.fn(),
+  deleteWorker: vi.fn(),
+  updateWorkerSlots: vi.fn(),
 }));
 
 vi.mock('@/features/auth/hooks/useAuth', () => ({
@@ -76,6 +106,57 @@ vi.mock('@/features/admin/hooks/useAdminOverview', () => ({
 }));
 
 vi.mock('@/services/settingsApi', () => settingsApi);
+
+vi.mock('@/services/api', () => ({
+  apiClient: apiClientMock,
+}));
+
+vi.mock('@/common/hooks/useApi', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/common/hooks/useApi')>()),
+  usePrintersFast: () => ({ data: [], isLoading: false, isError: false }),
+}));
+
+vi.mock('@/services/workerService', () => ({
+  WorkerStatus: {
+    Online: 'Online',
+    Busy: 'Busy',
+    Offline: 'Offline',
+    Error: 'Error',
+    Draining: 'Draining',
+  },
+  workerService: {
+    ...workerServiceMock,
+    isHeartbeatStale: vi.fn(() => false),
+    calculateUtilization: vi.fn(() => 0),
+    calculateSuccessRate: vi.fn(() => 100),
+    getUptime: vi.fn(() => '1h'),
+  },
+}));
+
+vi.mock('@/services/slicerHubService', () => ({
+  slicerHubService: {
+    start: vi.fn(() => Promise.resolve()),
+    stop: vi.fn(() => Promise.resolve()),
+    onSlicerRegistered: vi.fn(),
+    onSlicerHeartbeat: vi.fn(),
+    onSlicerDeregistered: vi.fn(),
+  },
+}));
+
+vi.mock('@/features/slicer/components/SliceJobsPanel', () => ({
+  SliceJobsPanel: () => <section data-testid="slice-jobs-panel">Slice Jobs Panel</section>,
+}));
+
+vi.mock('@/features/power-monitors/hooks/usePowerMonitors', () => {
+  const idle = { mutateAsync: vi.fn(), isPending: false, mutate: vi.fn() };
+  return {
+    usePowerMonitors: () => ({ data: [], isLoading: false, isError: false }),
+    useCreatePowerMonitor: () => idle,
+    useUpdatePowerMonitor: () => idle,
+    useDeletePowerMonitor: () => idle,
+    useTestPowerMonitorConnection: () => idle,
+  };
+});
 
 vi.mock('sonner', () => ({ toast: toastMocks }));
 
@@ -159,12 +240,6 @@ vi.mock('@/features/admin/pages/RoleManagementPage', () => ({
   ),
 }));
 
-vi.mock('@/features/quotas/pages/QuotaManagementPage', () => ({
-  QuotaManagementPage: ({ embedded }: { embedded?: boolean }) => (
-    <div data-testid="quotas-page" data-embedded={String(embedded)}>Print Quotas</div>
-  ),
-}));
-
 vi.mock('@/features/settings/components/FarmSettingsSection', () => ({
   FarmSettingsSection: () => <div data-testid="farm-settings-section">Farm Settings Section</div>,
 }));
@@ -193,12 +268,6 @@ vi.mock('@/features/profile/pages/PasskeysPage', () => ({
 vi.mock('@/features/notifications/pages/NotificationPreferencesPage', () => ({
   NotificationPreferencesPage: ({ embedded }: { embedded?: boolean }) => (
     <div data-testid="notifications-page" data-embedded={String(embedded)}>Notifications</div>
-  ),
-}));
-
-vi.mock('@/features/slicer/pages/SlicerProfilesPage', () => ({
-  SlicerProfilesPage: ({ embedded }: { embedded?: boolean }) => (
-    <div data-testid="slicer-profiles-page" data-embedded={String(embedded)}>Slicer Profiles</div>
   ),
 }));
 
@@ -273,11 +342,18 @@ function installSettingsApiDefaults() {
     { key: 'System', displayName: 'System', order: 1 },
     { key: 'Networking', displayName: 'Networking', order: 2 },
   ]);
-  settingsApi.fetchSettingsUnified.mockResolvedValue({
+  settingsState.values = {
     SystemLog: { enabled: true, retentionDays: 30 },
     NetworkDiscovery: { enableDiscovery: true, scanIntervalMinutes: 10 },
+  };
+  settingsApi.fetchSettingsUnified.mockImplementation(() => Promise.resolve({
+    SystemLog: { ...settingsState.values.SystemLog },
+    NetworkDiscovery: { ...settingsState.values.NetworkDiscovery },
+  }));
+  settingsApi.saveSettingsValues.mockImplementation((key: string, values: Record<string, unknown>) => {
+    settingsState.values[key] = { ...values };
+    return Promise.resolve();
   });
-  settingsApi.saveSettingsValues.mockResolvedValue(undefined);
 }
 
 function LocationProbe() {
@@ -290,16 +366,13 @@ function LocationProbe() {
   );
 }
 
-function WorkerRouteProbe() {
-  const location = useLocation();
-  const workerTab = new URLSearchParams(location.search).get('workerTab') ?? 'workers';
+function HistoryProbe() {
+  const navigate = useNavigate();
   return (
-    <main>
-      <h1>Workers & Jobs</h1>
-      <button type="button" aria-pressed={workerTab === 'workers'}>Workers</button>
-      <button type="button" aria-pressed={workerTab === 'jobs'}>Jobs</button>
-      <p data-testid="worker-tab">{workerTab}</p>
-    </main>
+    <div>
+      <button type="button" onClick={() => navigate(-1)}>Go back</button>
+      <button type="button" onClick={() => navigate(1)}>Go forward</button>
+    </div>
   );
 }
 
@@ -324,8 +397,15 @@ function renderWorkspace(initialRoute = '/admin') {
             <Route path="/admin" element={<AdminControlCenterPage />} />
             <Route path="/admin/settings" element={<SettingsShell routeScope="system" />} />
             <Route path="/settings" element={<SettingsShell routeScope="user" />} />
-            <Route path="/admin/workers" element={<WorkerRouteProbe />} />
-            <Route path="/admin/power-monitors" element={<SimpleRoute title="Power Monitors" />} />
+            <Route
+              path="/admin/workers"
+              element={(
+                <AdminDestinationRoute destinationId="ops-workers">
+                  <WorkerManagementPage tabQueryParamName="workerTab" embedded />
+                </AdminDestinationRoute>
+              )}
+            />
+            <Route path="/admin/power-monitors" element={<PowerMonitorSettingsPage />} />
             <Route path="/admin/status" element={<SimpleRoute title="System Status" />} />
             <Route path="/admin/login-audit" element={<SimpleRoute title="Login Audit" />} />
             <Route path="/admin/data-management" element={<SimpleRoute title="Data Management" />} />
@@ -333,6 +413,7 @@ function renderWorkspace(initialRoute = '/admin') {
             <Route path="/catalog" element={<SimpleRoute title="Catalog" />} />
           </Routes>
           <LocationProbe />
+          <HistoryProbe />
         </GlobalCommandPaletteProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -342,6 +423,14 @@ function renderWorkspace(initialRoute = '/admin') {
 function grantOnly(...grants: string[]) {
   authState.roles = ['farm_user'];
   authState.grants = new Set(grants);
+}
+
+function fieldInput(section: string, property: string): HTMLInputElement {
+  const input = document.querySelector(`[data-setting-property="${section}.${property}"] input`);
+  if (!(input instanceof HTMLInputElement)) {
+    throw new Error(`Could not find input for ${section}.${property}`);
+  }
+  return input;
 }
 
 async function openSystemSettings() {
@@ -363,6 +452,20 @@ describe('Admin workspace integrated flow (#2507)', () => {
       refetch: vi.fn(),
     };
     installSettingsApiDefaults();
+    apiClientMock.getCostTrackingSettings.mockResolvedValue({ electricityRatePerKwh: 0.12 });
+    apiClientMock.updateCostTrackingSettings.mockResolvedValue(undefined);
+    apiClientMock.getQuotas.mockResolvedValue([]);
+    apiClientMock.createQuota.mockResolvedValue({});
+    apiClientMock.deleteQuota.mockResolvedValue(undefined);
+    apiClientMock.resetExpiredQuotas.mockResolvedValue({ resetCount: 0 });
+    workerServiceMock.getAllWorkers.mockResolvedValue([]);
+    workerServiceMock.getWorkersByStatus.mockResolvedValue([]);
+    workerServiceMock.getWorkerJobs.mockResolvedValue([]);
+    workerServiceMock.disableWorker.mockResolvedValue(undefined);
+    workerServiceMock.enableWorker.mockResolvedValue(undefined);
+    workerServiceMock.resetWorker.mockResolvedValue({ releasedJobs: 0 });
+    workerServiceMock.deleteWorker.mockResolvedValue(undefined);
+    workerServiceMock.updateWorkerSlots.mockResolvedValue(undefined);
     window.localStorage.setItem('pf.settings.mode', 'everything');
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
@@ -375,29 +478,86 @@ describe('Admin workspace integrated flow (#2507)', () => {
     Element.prototype.scrollIntoView = vi.fn();
   });
 
-  it('navigates from dashboard attention to system settings, then exact workspace field search retains history and one page heading', async () => {
+  it('connects dashboard attention, operations, settings, exact cross-group field search, save failure/retry, history, and one heading', async () => {
+    overviewState.result.data = makeOverview({
+      attention: [
+        {
+          key: 'worker-jobs',
+          severity: 'Warning',
+          title: 'Queued worker jobs need review',
+          detail: 'A slicer worker has queued jobs.',
+          actionLabel: 'Open Worker Jobs',
+          actionRoute: '/admin/workers?workerTab=jobs',
+        },
+      ],
+    });
+    let networkAttempts = 0;
+    settingsApi.saveSettingsValues.mockImplementation((key: string, values: Record<string, unknown>) => {
+      if (key === 'NetworkDiscovery') {
+        networkAttempts += 1;
+        if (networkAttempts === 1) {
+          return Promise.reject(new Error('Network discovery save failed'));
+        }
+      }
+      settingsState.values[key] = { ...values };
+      return Promise.resolve();
+    });
+
     renderWorkspace('/admin');
 
     expect(screen.getAllByRole('heading', { level: 1, name: 'Admin Control Center' })).toHaveLength(1);
     expect(screen.getByTestId('admin-hub-attention')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('link', { name: 'Open System Config' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Open Worker Jobs' }));
+
+    await waitFor(() => expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/workers'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('workerTab=jobs');
+    expect(screen.getAllByRole('heading', { level: 1, name: 'Workers & Jobs' })).toHaveLength(1);
+    expect(await screen.findByTestId('slice-jobs-panel')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('link', { name: 'Admin Control Center' }));
+    fireEvent.click(await screen.findByRole('link', { name: /Farm & Admin Settings/i }));
 
     await waitFor(() => expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/settings'));
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=system');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=farm');
     expect(screen.getAllByRole('heading', { level: 1, name: 'Farm & Admin Settings' })).toHaveLength(1);
+    expect(await screen.findByTestId('farm-settings-section')).toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole('button', { name: /System Config/i }));
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('sub=system'));
     await screen.findByLabelText('Retention Days');
 
     const workspaceSearch = screen.getByRole('combobox', { name: 'Search all settings' });
     fireEvent.focus(workspaceSearch);
-    fireEvent.change(workspaceSearch, { target: { value: 'retention days' } });
-    fireEvent.click(await screen.findByRole('option', { name: /Retention Days/i }));
+    fireEvent.change(workspaceSearch, { target: { value: 'scan interval' } });
+    const scanResult = await screen.findByRole('option', { name: /Scan Interval Minutes/i });
+    expect(scanResult).toHaveTextContent('Admin / Networking / Network Discovery');
+    fireEvent.click(scanResult);
 
-    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('field=SystemLog.retentionDays'));
-    expect(screen.getByTestId('location-search')).toHaveTextContent('q=retention+days');
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('field=NetworkDiscovery.scanIntervalMinutes'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('q=scan+interval');
+    await waitFor(() => expect(fieldInput('NetworkDiscovery', 'scanIntervalMinutes')).toHaveValue(10));
     expect(screen.queryByRole('heading', { level: 1, name: 'User Settings' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+
+    fireEvent.change(fieldInput('NetworkDiscovery', 'scanIntervalMinutes'), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to save Network Discovery');
+    expect(screen.getByTestId('admin-save-bar')).toHaveTextContent('1 change in Network Discovery');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
+    await waitFor(() => expect(screen.getByTestId('location-search')).not.toHaveTextContent('field=NetworkDiscovery.scanIntervalMinutes'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=system');
+    expect(screen.getByTestId('location-search')).not.toHaveTextContent('q=scan+interval');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go forward' }));
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('field=NetworkDiscovery.scanIntervalMinutes'));
+    await waitFor(() => expect(fieldInput('NetworkDiscovery', 'scanIntervalMinutes')).toHaveValue(11));
   });
 
   it('keeps delegated destinations, standalone links, quotas, workers jobs, and role-only slicer profiles consistent', async () => {
@@ -406,25 +566,28 @@ describe('Admin workspace integrated flow (#2507)', () => {
     const workersLink = screen.getByRole('link', { name: /Workers & Jobs/i });
     expect(workersLink).toHaveAttribute('href', '/admin/workers?workerTab=jobs');
     fireEvent.click(workersLink);
-    await waitFor(() => expect(screen.getByTestId('worker-tab')).toHaveTextContent('jobs'));
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('workerTab=jobs'));
+    expect(screen.getByTestId('slice-jobs-panel')).toBeInTheDocument();
     workersView.unmount();
 
     grantOnly('power_monitors:admin');
     const powerView = renderWorkspace('/admin');
     expect(screen.getByRole('link', { name: /Power Monitors/i })).toHaveAttribute('href', '/admin/power-monitors');
     expect(screen.queryByRole('link', { name: /Farm & Admin Settings/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('link', { name: /Power Monitors/i }));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Power Monitors' })).toBeInTheDocument();
     powerView.unmount();
 
     grantOnly('quota:admin');
     const quotasView = renderWorkspace('/admin/settings?scope=system');
-    expect(await screen.findByTestId('quotas-page')).toBeInTheDocument();
+    expect(await screen.findByText(/No quotas configured yet/i)).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=quotas');
     quotasView.unmount();
 
     grantOnly('system_settings:admin');
     const profileBoundaryView = renderWorkspace('/admin/settings?tab=slicing&sub=profiles');
     expect(await screen.findByText(/don't have permission to view Slicer Profiles/i)).toBeInTheDocument();
-    expect(screen.queryByTestId('slicer-profiles-page')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 1, name: 'Slicer Profiles' })).not.toBeInTheDocument();
     profileBoundaryView.unmount();
 
     grantOnly();
@@ -461,7 +624,7 @@ describe('Admin workspace integrated flow (#2507)', () => {
     fireEvent.click(await screen.findByRole('option', { name: /Quotas/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Discard Changes' }));
 
-    await waitFor(() => expect(screen.getByTestId('quotas-page')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/No quotas configured yet/i)).toBeInTheDocument());
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=quotas');
   });
 

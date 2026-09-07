@@ -21,7 +21,8 @@ test.describe('monolith smoke: admin workspace', () => {
     await page.getByRole('link', { name: /Workers & Jobs/i }).click();
     await expect(page).toHaveURL(/\/admin\/workers\?workerTab=jobs/);
     await expect(page.getByRole('heading', { level: 1, name: 'Workers & Jobs' })).toHaveCount(1);
-    await expect(page.getByRole('button', { name: 'Jobs', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('button', { name: 'Jobs', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'New Slice Job' })).toBeVisible();
 
     await page.goto('/admin/power-monitors');
     await expect(page.getByRole('heading', { level: 1, name: /Power Monitors/i })).toHaveCount(1);
