@@ -923,7 +923,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     if (isDirty || isSelfAuthoredQuery) {
       return;
     }
-    if (isFiltering && !searchParams.has('field') && matchingCategoryIds?.length === 0) {
+    if (isFiltering && matchingCategoryIds?.length === 0) {
       if (requestedCategory === null && requestedSubPage === null) {
         return;
       }
@@ -1076,11 +1076,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const pageTitle = currentScopeMeta?.label ?? 'Settings';
   const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
 
-  const hasNoMatches = accessibleCategories.length > 0
-    && canAutoNavigate
-    && !searchParams.has('field')
-    && matchingCategoryIds
-    && matchingCategoryIds.length === 0;
+  const hasNoMatches = accessibleCategories.length > 0 && canAutoNavigate && matchingCategoryIds && matchingCategoryIds.length === 0;
 
   // Page-level actions. The mode toggle arrives by portal from whichever content
   // page owns it (see SettingsHeaderPortal); the palette is always available, so
