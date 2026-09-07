@@ -243,7 +243,19 @@ struct PrinterDetailView: View {
             spool: viewModel.effectiveSpoolInfo,
             coverage: coverageViewModel.coverage,
             coverageState: coverageState,
-            isStale: coverageViewModel.isShowingStaleCache,
+            // `PrinterDetailFilamentStaleMapping.isStale`, not the raw
+            // `isShowingStaleCache` flag: the latter is true from the
+            // instant the cache hydrates (before the first canonical load
+            // has even concluded) and, per `commitError`, never clears on a
+            // generic load error, so using it directly would disable every
+            // filament action during ordinary warm-cache hydration and
+            // indefinitely after one transient error. This mirrors the
+            // stale banner above (line ~41) and the truthful-staleness rule
+            // from issue #789.
+            isStale: PrinterDetailFilamentStaleMapping.isStale(
+                isShowingStaleCache: coverageViewModel.isShowingStaleCache,
+                hasConcludedCanonicalLoad: coverageViewModel.hasConcludedCanonicalLoad
+            ),
             supportedActions: PrinterDetailFilamentActionMapping.supportedActions(
                 hasActiveSpool: viewModel.effectiveSpoolInfo?.hasActiveSpool ?? false
             )

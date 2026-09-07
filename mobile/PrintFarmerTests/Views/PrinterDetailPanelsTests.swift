@@ -248,4 +248,35 @@ final class PrinterDetailPanelsTests: XCTestCase {
         )
         XCTAssertEqual(state, .loading)
     }
+
+    // MARK: - Filament staleness mapping (Bishop review finding 6)
+
+    func testFilamentStaleMappingFalseDuringWarmCacheHydrationBeforeConclusion() {
+        // Cache hydrated but the canonical load has not concluded yet — must
+        // NOT disable filament actions during ordinary warm-cache hydration.
+        // This is exactly the bug: passing raw `isShowingStaleCache` here
+        // would return true and empty every supported filament action.
+        XCTAssertFalse(PrinterDetailFilamentStaleMapping.isStale(
+            isShowingStaleCache: true, hasConcludedCanonicalLoad: false
+        ))
+    }
+
+    func testFilamentStaleMappingTrueOnceCanonicalLoadConcludedWithoutClearingCache() {
+        // A concluded pass (including one ending in a generic error, which
+        // never clears `isShowingStaleCache`) that left the cache flag set
+        // must genuinely disable filament actions — the data really is
+        // unconfirmed.
+        XCTAssertTrue(PrinterDetailFilamentStaleMapping.isStale(
+            isShowingStaleCache: true, hasConcludedCanonicalLoad: true
+        ))
+    }
+
+    func testFilamentStaleMappingFalseWhenNotShowingStaleCache() {
+        XCTAssertFalse(PrinterDetailFilamentStaleMapping.isStale(
+            isShowingStaleCache: false, hasConcludedCanonicalLoad: true
+        ))
+        XCTAssertFalse(PrinterDetailFilamentStaleMapping.isStale(
+            isShowingStaleCache: false, hasConcludedCanonicalLoad: false
+        ))
+    }
 }

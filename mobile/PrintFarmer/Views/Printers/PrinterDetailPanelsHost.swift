@@ -229,3 +229,29 @@ enum PrinterDetailFilamentCoverageStateMapping {
         return .loading
     }
 }
+
+// MARK: - Filament staleness mapping (issue #2522, Bishop review finding 6)
+
+/// Pure mirror of `PrinterFilamentCoverageViewModel.isStaleCacheReportable`
+/// (issue #789's truthful-staleness rule), used at the `PrinterDetailView`
+/// wiring point so a unit test can pin the exact boolean the integration
+/// passes into `PrinterFilamentPresentation.isStale` without needing a live,
+/// SignalR-wired view model.
+///
+/// Passing the raw `isShowingStaleCache` flag directly would be wrong: it is
+/// true from the instant a cache hydrates — before the first canonical load
+/// has even concluded — and, per `PrinterFilamentCoverageViewModel
+/// .commitError`, is never cleared by a generic (non-feature-disabled,
+/// non-not-found) load error. Either would disable every filament action
+/// (`PrinterFilamentPresentation` empties `supportedActions` while stale)
+/// during ordinary warm-cache hydration, or indefinitely after one
+/// transient error. Requiring `hasConcludedCanonicalLoad` too matches the
+/// same precondition the stale banner already uses.
+enum PrinterDetailFilamentStaleMapping {
+    static func isStale(
+        isShowingStaleCache: Bool,
+        hasConcludedCanonicalLoad: Bool
+    ) -> Bool {
+        isShowingStaleCache && hasConcludedCanonicalLoad
+    }
+}
