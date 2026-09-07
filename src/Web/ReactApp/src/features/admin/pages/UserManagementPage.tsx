@@ -73,7 +73,9 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
   const [loadError, setLoadError] = useState<unknown>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const editForm = useDirtyState<{ user: User | null }>({ user: null });
+  const resetEditForm = editForm.reset;
   const permissionForm = useDirtyState({ permissions: [] as string[] });
+  const resetPermissionForm = permissionForm.reset;
   const selectedUser = editForm.values.user;
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -88,12 +90,15 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const passwordForm = useDirtyState(EMPTY_PASSWORD_FORM);
   const passwordChangeForm = passwordForm.values;
+  const resetPasswordForm = passwordForm.reset;
+  const markPasswordFormPristine = passwordForm.markPristine;
   const { data: passwordPolicy } = usePasswordPolicy();
   const createForm = useDirtyState({
     user: EMPTY_NEW_USER,
     roleIds: [] as string[],
     permissions: [] as string[],
   });
+  const resetCreateForm = createForm.reset;
   const newUser = createForm.values.user;
   const selectedRoleIds = createForm.values.roleIds;
   const selectedPermissions = createForm.values.permissions;
@@ -343,7 +348,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
         adminToast.success(`Password changed for "${userToChangePassword.username}"`);
         setShowChangePasswordModal(false);
         setUserToChangePassword(null);
-        passwordForm.markPristine(EMPTY_PASSWORD_FORM);
+        markPasswordFormPristine(EMPTY_PASSWORD_FORM);
         setChangePasswordError(null);
       } catch (err) {
         const error = err as { response?: { data?: Record<string, unknown> } };
@@ -356,25 +361,25 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
         setIsChangingPassword(false);
       }
     }
-  }, [editForm.isDirty, showEditModal, saveSelectedUser, permissionForm.isDirty, showPermissionsModal, savePermissions, createForm.isDirty, showCreateModal, createUser, passwordForm, showChangePasswordModal, userToChangePassword, passwordChangeForm, passwordMeetsPolicyValue]);
+  }, [editForm.isDirty, showEditModal, saveSelectedUser, permissionForm.isDirty, showPermissionsModal, savePermissions, createForm.isDirty, showCreateModal, createUser, passwordForm.isDirty, showChangePasswordModal, userToChangePassword, passwordChangeForm, passwordMeetsPolicyValue, markPasswordFormPristine]);
   const discardDirtySection = useCallback(() => {
     if (editForm.isDirty) {
-      editForm.reset();
+      resetEditForm();
       setShowEditModal(false);
     }
     if (permissionForm.isDirty) {
-      permissionForm.reset();
+      resetPermissionForm();
       setShowPermissionsModal(false);
     }
     if (createForm.isDirty) {
-      createForm.reset();
+      resetCreateForm();
       setShowCreateModal(false);
     }
     if (passwordForm.isDirty) {
-      passwordForm.reset();
+      resetPasswordForm();
       setShowChangePasswordModal(false);
     }
-  }, [editForm, permissionForm, createForm, passwordForm]);
+  }, [editForm.isDirty, resetEditForm, permissionForm.isDirty, resetPermissionForm, createForm.isDirty, resetCreateForm, passwordForm.isDirty, resetPasswordForm]);
 
   useEffect(() => {
     if (!saveRegistry?.registerSection) return;

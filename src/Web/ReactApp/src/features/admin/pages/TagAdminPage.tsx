@@ -348,13 +348,14 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
             await createTagMutation.mutateAsync();
         }
     }, [editForm.isDirty, editingTagId, handleSaveEdit, createForm.isDirty, showNewTagForm, createTagMutation]);
+    const resetCreateForm = createForm.reset;
     const discardDirtyTagSection = useCallback(() => {
         if (editForm.isDirty) handleCancelEdit();
         if (createForm.isDirty) {
-            createForm.reset();
+            resetCreateForm();
             setShowNewTagForm(false);
         }
-    }, [editForm, handleCancelEdit, createForm]);
+    }, [editForm.isDirty, handleCancelEdit, createForm.isDirty, resetCreateForm]);
 
     useEffect(() => {
         if (!saveRegistry?.registerSection) return;

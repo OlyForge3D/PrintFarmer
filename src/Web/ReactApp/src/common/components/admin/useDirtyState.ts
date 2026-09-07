@@ -181,7 +181,7 @@ export function useDirtyState<T extends Record<string, unknown>>(
     return () => window.removeEventListener('beforeunload', handler);
   }, [guardUnload, isDirty]);
 
-  return {
+  return useMemo(() => ({
     values,
     setValue,
     setValues,
@@ -193,6 +193,6 @@ export function useDirtyState<T extends Record<string, unknown>>(
     changedKeys,
     changedCount: changedKeys.length,
     original,
-  };
+  }), [values, setValue, setValues, replaceValues, reset, markPristine, acceptKeys, isDirty, changedKeys, original]);
 }
 

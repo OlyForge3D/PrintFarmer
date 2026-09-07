@@ -403,9 +403,10 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
   const saveDirtyPermissions = useCallback(async () => {
     await savePermissionsMutation.mutateAsync();
   }, [savePermissionsMutation]);
+  const resetGrantState = grantState.reset;
   const discardDirtyPermissions = useCallback(() => {
-    grantState.reset();
-  }, [grantState]);
+    resetGrantState();
+  }, [resetGrantState]);
 
   useEffect(() => {
     if (!saveRegistry?.registerSection || !selectedRoleId) return;
