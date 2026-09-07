@@ -842,6 +842,14 @@ describe('AdminControlCenterPage', () => {
     ['a dot-segment path normalising to triple-slash', '/foo/..///evil.test/steal'],
     ['a root-relative dot segment normalising to protocol-relative', '/..//evil.test'],
     ['an empty segment after a percent-encoded dot segment', '/foo/%2e%2e//evil.test/steal'],
+    // Suffix invariance: a query or hash must not launder a hostile path. The
+    // guard canonicalises the *pathname*, so appending "?x=1" or "#f" to any of
+    // the payloads above must not change the verdict.
+    ['a protocol-relative URL with a query suffix', '//evil.test/steal?x=1'],
+    ['a protocol-relative URL with a hash suffix', '//evil.test/steal#f'],
+    ['a dot-segment protocol-relative path with a query suffix', '/foo/..//evil.test/steal?x=1'],
+    ['a dot-segment protocol-relative path with a hash suffix', '/foo/..//evil.test/steal#f'],
+    ['a backslash protocol-relative URL with a query suffix', '/\\evil.test/steal?x=1'],
     ['an empty string', ''],
   ])('drops an unsafe backend action route — %s', async (_label, actionRoute) => {
     mockedApiGet.mockResolvedValue({

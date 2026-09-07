@@ -16,6 +16,10 @@ import {
   canAccessDestination,
   getDestinationById,
 } from '@/features/admin/registry';
+import {
+  canonicalizeInternalRoute,
+  isControlCenterSelfRoute,
+} from '@/features/admin/utils/internalRoute';
 import type { AttentionItemDto } from '@/types/adminOverview';
 
 /**
@@ -77,28 +81,20 @@ interface AttentionAccess {
  * someone renamed a registry entry without updating the backend — we fall back to
  * `actionRoute`, and if that's also missing, the link disappears (visible failure,
  * not a silent broken navigation).
+ *
+ * `actionRoute` is untrusted payload rendered into a link target, so it goes
+ * through `canonicalizeInternalRoute` (#2526) rather than any prefix test local
+ * to this file. A lexical check cannot see that `/foo/..//evil.test/steal` is
+ * app-relative on the way in and protocol-relative on the way out.
+ *
+ * Returns `null` for a target that resolves to `/admin` itself (#2526): this
+ * panel renders *on* `/admin`, and a hub must not self-link from its own content.
  */
 function resolveAttentionActionRoute(
   item: AttentionItemDto,
   access: AttentionAccess,
 ): string | null {
-  const isRetiredManageRoute = (route: string) =>
-    route === '/admin/manage' ||
-    route.startsWith('/admin/manage?') ||
-    route.startsWith('/admin/manage#') ||
-    route.startsWith('/admin/manage/');
-  // A leading slash is not sufficient to prove an internal path: browsers treat
-  // "//evil.example" (and "/\evil.example") as protocol-relative and navigate
-  // off-site. The backend is trusted, but a link target is exactly the kind of
-  // value that must not become an open redirect if that ever stops being true.
-  const isInternalPath = (route: string) =>
-    route.startsWith('/') && !route.startsWith('//') && !route.startsWith('/\\');
-  const fallbackRoute =
-    item.actionRoute &&
-    isInternalPath(item.actionRoute) &&
-    !isRetiredManageRoute(item.actionRoute)
-      ? item.actionRoute
-      : null;
+  const fallbackRoute = canonicalizeInternalRoute(item.actionRoute);
 
   if (item.actionDestinationId) {
     const destination = getDestinationById(item.actionDestinationId);
@@ -106,6 +102,9 @@ function resolveAttentionActionRoute(
       return fallbackRoute;
     }
     if (!canAccessDestination(destination, access)) {
+      return null;
+    }
+    if (isControlCenterSelfRoute(destination.path)) {
       return null;
     }
     return destination.path;
