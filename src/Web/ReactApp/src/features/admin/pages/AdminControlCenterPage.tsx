@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import clsx from 'clsx';
 import { Link } from 'react-router';
-import { Badge, Button, Card } from '@/common/components/ui';
+import { Alert, Badge, Button, Card } from '@/common/components/ui';
 import {
   AdminEmpty,
   AdminError,
@@ -276,9 +276,13 @@ function DestinationCard({ destination }: { destination: AdminDestination }) {
  *    (`/catalog`, `/locations`, `/admin/power-monitors`), plus one Farm & Admin
  *    Settings entry point.
  *
- * The page is fully usable at 430px. Loading uses `AdminLoading`, and a failed
- * overview fetch renders `AdminError` with a working retry — the hub is what an
- * operator opens precisely when things are broken, so its own failure mode matters.
+ * The page is fully usable at 430px. Loading uses `AdminLoading`. Failure is
+ * split in two, because the hub is what an operator opens precisely when things
+ * are broken (#2517):
+ * - **No snapshot at all** — `AdminError` with a working retry.
+ * - **Refresh failed over a snapshot we already have** — keep the last-known
+ *   attention and subsystem state, label it stale, keep its original checked-at
+ *   and offer retry. Never let a stale healthy snapshot read as a live all-clear.
  */
 export function AdminControlCenterPage() {
   const { hasRole, hasPermission } = useAuth();
@@ -286,6 +290,23 @@ export function AdminControlCenterPage() {
   const { data, isLoading, isError, error, isFetching, refetch } = useAdminOverview({
     enabled: canViewOverview,
   });
+
+  // React Query keeps the last successful `data` when a background refetch
+  // fails, so `isError` alone cannot distinguish "we have nothing" from "we
+  // have a snapshot that just went stale". Collapsing the two threw away the
+  // operator's last-known state — including its checked-at — at exactly the
+  // moment they needed it (#2517).
+  const hasSnapshot = data !== undefined;
+  const isHardError = isError && !hasSnapshot;
+  const isStale = isError && hasSnapshot;
+
+  // A stale snapshot must never render as a live all-clear: we cannot claim
+  // nothing needs attention using numbers we failed to refresh.
+  const isAllClear =
+    !isStale &&
+    data?.overallStatus === 'Healthy' &&
+    data.subsystems.length > 0 &&
+    data.subsystems.every((subsystem) => subsystem.status === 'Healthy');
 
   const dashboardDestinations = useMemo(
     () => getDashboardDestinations({ hasRole, hasPermission }),
@@ -328,12 +349,42 @@ export function AdminControlCenterPage() {
       titleWrap
     >
       <div className="flex flex-col gap-8">
+        {/*
+          A failed refresh over an existing snapshot keeps that snapshot on
+          screen, clearly labelled, with retry — rather than blanking both
+          bands and losing the operator's last-known state (#2517).
+        */}
+        {canViewOverview && isStale && (
+          <div role="status" data-testid="admin-hub-stale-notice">
+            <Alert type="warning" title="Showing the last successful check">
+              <p>
+                The admin overview didn&apos;t respond to the latest refresh, so the attention
+                items and health checks below are from{' '}
+                {data?.checkedAt ? formatCheckedAt(data.checkedAt) : 'an earlier check'} and may
+                be out of date. Nothing here has been resolved.
+              </p>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-2"
+                onClick={() => {
+                  void refetch();
+                }}
+                disabled={isFetching}
+                iconLeft={<RefreshIcon className="h-3.5 w-3.5" ariaLabel="" />}
+              >
+                {isFetching ? 'Retrying…' : 'Try again'}
+              </Button>
+            </Alert>
+          </div>
+        )}
+
         {/* ── Band 1: attention ── */}
         {canViewOverview && (
           <AdminSection
             caption="Needs attention"
             captionId="admin-hub-attention-heading"
-            count={isError ? undefined : data?.attention.length}
+            count={isHardError ? undefined : data?.attention.length}
           >
             {isLoading && (
               <AdminLoading
@@ -343,7 +394,7 @@ export function AdminControlCenterPage() {
               />
             )}
 
-            {isError && (
+            {isHardError && (
               <AdminError
                 title="Couldn't load the admin overview"
                 description="The admin overview endpoint didn't respond, so health and attention are unavailable. Your admin destinations below still work."
@@ -354,25 +405,25 @@ export function AdminControlCenterPage() {
               />
             )}
 
-            {!isLoading && !isError && data && data.attention.length === 0 && (
+            {!isLoading && !isHardError && data && data.attention.length === 0 && (
               <p
                 className="flex items-center gap-2 text-sm text-pf-text-secondary"
                 data-testid="admin-hub-attention-clear"
               >
-                {data.overallStatus === 'Healthy' && data.subsystems.length > 0 &&
-                data.subsystems.every((subsystem) => subsystem.status === 'Healthy') ? (
+                {isAllClear ? (
                   <CheckCircleIcon className="h-4 w-4 shrink-0 text-pf-success" ariaLabel="" />
                 ) : (
                   <HelpCircleIcon className="h-4 w-4 shrink-0 text-pf-text-tertiary" ariaLabel="" />
                 )}
-                {data.overallStatus === 'Healthy' && data.subsystems.length > 0 &&
-                data.subsystems.every((subsystem) => subsystem.status === 'Healthy')
+                {isAllClear
                   ? 'Nothing needs your attention — every subsystem health check is reporting healthy.'
-                  : 'The admin overview reported no attention items. Review the system health checks below for the current status.'}
+                  : isStale
+                    ? 'The last successful check reported no attention items, but that refresh failed — this may be out of date.'
+                    : 'The admin overview reported no attention items. Review the system health checks below for the current status.'}
               </p>
             )}
 
-            {!isLoading && !isError && data && data.attention.length > 0 && (
+            {!isLoading && !isHardError && data && data.attention.length > 0 && (
               <AdminAttentionPanel
                 items={data.attention}
                 access={{ hasRole, hasPermission }}
@@ -382,7 +433,7 @@ export function AdminControlCenterPage() {
         )}
 
         {/* ── Band 2: health ── */}
-        {canViewOverview && !isError && (
+        {canViewOverview && !isHardError && (
           <AdminSection
             caption="System health checks"
             captionId="admin-hub-health-heading"
@@ -390,7 +441,7 @@ export function AdminControlCenterPage() {
             headerAside={
               data?.checkedAt ? (
                 <p className="text-xs text-pf-text-tertiary">
-                  Checked at {formatCheckedAt(data.checkedAt)}
+                  {isStale ? 'Last checked at' : 'Checked at'} {formatCheckedAt(data.checkedAt)}
                 </p>
               ) : null
             }

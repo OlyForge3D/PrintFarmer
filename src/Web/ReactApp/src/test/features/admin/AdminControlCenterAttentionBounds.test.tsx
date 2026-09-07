@@ -236,6 +236,10 @@ describe('Admin Control Center attention bounds (#2517)', () => {
       const toggle = screen.getByTestId('admin-hub-attention-toggle');
       expect(toggle).toHaveTextContent('Show fewer');
       expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      // "Show fewer" alone is contextless when a screen reader user reaches it
+      // out of sequence via a controls list; the visible text stays a prefix of
+      // the accessible name so label-in-name still holds.
+      expect(toggle).toHaveAccessibleName('Show fewer attention items');
 
       await user.click(toggle);
       expect(visibleRowCount()).toBe(ATTENTION_PREVIEW_LIMIT_DESKTOP);
@@ -269,9 +273,12 @@ describe('Admin Control Center attention bounds (#2517)', () => {
       expect(region.className).toMatch(/max-h-\[min\(560px,70dvh\)\]/);
 
       // Focusable so a keyboard user can scroll it, and named so a screen
-      // reader user knows what they landed in.
+      // reader user knows what they landed in. `group` rather than `region`:
+      // AdminSection already renders a named <section>, so a nested region
+      // landmark would only pad the screen-reader landmark menu.
       expect(region).toHaveAttribute('tabindex', '0');
-      expect(screen.getByRole('region', { name: `All ${count} attention items` })).toBe(region);
+      expect(screen.getByRole('group', { name: `All ${count} attention items` })).toBe(region);
+      expect(region).not.toHaveAttribute('role', 'region');
     });
 
     it('leaves the collapse control outside the scroll container so it cannot be scrolled away', async () => {
@@ -390,6 +397,202 @@ describe('Admin Control Center attention bounds (#2517)', () => {
 
       expect(visibleRowCount()).toBe(1);
       expect(screen.queryByTestId('admin-hub-attention-toggle')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('severity summary truthfulness', () => {
+    it('summarises an all-Error feed without inventing other severities', async () => {
+      await renderWithAttention(makeAttention(25, 25));
+
+      const summary = screen.getByTestId('admin-hub-attention-summary');
+      expect(summary).toHaveTextContent('25 Errors');
+      expect(summary).not.toHaveTextContent(/Warning/);
+      expect(summary).not.toHaveTextContent(/Info/);
+      expect(screen.getByTestId('admin-hub-attention-hidden-errors')).toHaveTextContent(
+        '22 Errors not shown',
+      );
+    });
+
+    it('summarises an all-Info feed and claims no hidden Errors', async () => {
+      const items = makeAttention(25).map((item) => ({ ...item, severity: 'Info' }));
+      await renderWithAttention(items);
+
+      const summary = screen.getByTestId('admin-hub-attention-summary');
+      expect(summary).toHaveTextContent('25 Info');
+      expect(summary).not.toHaveTextContent(/Error/);
+      expect(
+        screen.queryByTestId('admin-hub-attention-hidden-errors'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('does not fold an unrecognised severity into Info', async () => {
+      // `severity` is typed as `string` precisely because the backend can add
+      // enum members without a frontend release.
+      const items = makeAttention(25).map((item, index) =>
+        index === 0 ? { ...item, severity: 'Catastrophe' } : item,
+      );
+      await renderWithAttention(items);
+
+      // A severity the frontend does not know about must be counted honestly
+      // rather than silently downgraded to the least alarming bucket.
+      expect(screen.getByTestId('admin-hub-attention-summary')).toHaveTextContent(
+        /unknown severity/i,
+      );
+    });
+  });
+
+  describe('resilience to feed changes and hostile data', () => {
+    it('drops back to the preview when an expanded feed shrinks below the cap', async () => {
+      const user = userEvent.setup();
+      await renderWithAttention(makeAttention(25));
+
+      await user.click(screen.getByTestId('admin-hub-attention-toggle'));
+      expect(visibleRowCount()).toBe(25);
+
+      // The farm recovers: the next poll returns two items, below the cap.
+      mockedApiGet.mockResolvedValue({ data: makeOverview(makeAttention(2)) });
+      await user.click(screen.getByRole('button', { name: /refresh/i }));
+
+      await waitFor(() => {
+        expect(visibleRowCount()).toBe(2);
+      });
+      expect(screen.queryByTestId('admin-hub-attention-toggle')).not.toBeInTheDocument();
+
+      // And when it degrades again the panel must come back collapsed, not
+      // silently re-expanded by a stale `isExpanded`.
+      mockedApiGet.mockResolvedValue({ data: makeOverview(makeAttention(25)) });
+      await user.click(screen.getByRole('button', { name: /refresh/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('admin-hub-attention-toggle')).toBeInTheDocument();
+      });
+      expect(visibleRowCount()).toBe(ATTENTION_PREVIEW_LIMIT_DESKTOP);
+      expect(screen.getByTestId('admin-hub-attention-toggle')).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+    });
+
+    it('keeps long unbroken titles and details wrappable so they cannot force horizontal overflow', async () => {
+      const items = makeAttention(4).map((item, index) =>
+        index === 0
+          ? {
+              ...item,
+              title: 'Printer-with-an-extremely-long-unbroken-identifier-0123456789abcdef',
+              detail:
+                'http://printer-02.local:7125/server/info?token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            }
+          : item,
+      );
+      await renderWithAttention(items);
+
+      // `overflow-wrap` is inherited, so asserting it on the row proves the
+      // title and detail can both break. jsdom cannot measure the 320px
+      // viewport itself; this is the property that makes it safe.
+      const row = screen.getAllByTestId('admin-hub-attention-item')[0];
+      expect(row.className).toContain('break-words');
+    });
+
+    it('refuses a protocol-relative action route instead of linking off-site', async () => {
+      const items = makeAttention(1).map((item) => ({
+        ...item,
+        actionDestinationId: undefined,
+        actionRoute: '//evil.example.com/phish',
+      }));
+      await renderWithAttention(items);
+
+      const row = screen.getAllByTestId('admin-hub-attention-item')[0];
+      // The item still renders — the alert is real — but with no link at all
+      // rather than a link that leaves the app.
+      expect(within(row).queryByRole('link')).not.toBeInTheDocument();
+      expect(document.querySelector('a[href^="//evil.example.com"]')).toBeNull();
+    });
+  });
+
+  describe('cached snapshot after a refresh failure', () => {
+    /**
+     * React Query keeps the last successful `data` when a background refetch
+     * fails, so `isError` alone cannot tell "we have nothing" from "we have a
+     * snapshot that just went stale". The hub used to treat both as a hard
+     * error and blank the attention and health bands, throwing away the
+     * operator's last-known state — including its checked-at — at exactly the
+     * moment they needed it. #2517 requires that context be retained.
+     */
+    async function renderThenFailRefresh(items: AttentionItemDto[]) {
+      const user = userEvent.setup();
+      mockedApiGet.mockResolvedValueOnce({ data: makeOverview(items) });
+      renderHub();
+      await waitFor(() => {
+        expect(screen.getByTestId('admin-hub-overall-status')).toBeInTheDocument();
+      });
+
+      mockedApiGet.mockRejectedValue(new Error('overview unavailable'));
+      await user.click(screen.getByRole('button', { name: /refresh/i }));
+      await waitFor(() => {
+        expect(screen.getByTestId('admin-hub-stale-notice')).toBeInTheDocument();
+      });
+      return user;
+    }
+
+    it('keeps the last-known attention items rather than blanking the band', async () => {
+      await renderThenFailRefresh(makeAttention(25, 5));
+
+      expect(visibleRowCount()).toBe(ATTENTION_PREVIEW_LIMIT_DESKTOP);
+      expect(screen.getByTestId('admin-hub-attention-toggle')).toHaveTextContent('Show all 25');
+      expect(screen.getByTestId('admin-hub-attention-hidden-errors')).toBeInTheDocument();
+      // The hard-failure treatment must not fire when we still have a snapshot.
+      expect(screen.queryByText(/couldn't load the admin overview/i)).not.toBeInTheDocument();
+    });
+
+    it('retains the checked-at context and labels it as the last successful check', async () => {
+      await renderThenFailRefresh(makeAttention(4));
+
+      expect(screen.getByText(/last checked at/i)).toBeInTheDocument();
+      expect(screen.getByTestId('admin-hub-subsystems')).toBeInTheDocument();
+      expect(screen.getByTestId('admin-hub-stale-notice')).toHaveTextContent(
+        /may be out of date/i,
+      );
+      expect(screen.getByTestId('admin-hub-stale-notice')).toHaveTextContent(
+        /nothing here has been resolved/i,
+      );
+    });
+
+    it('offers a working retry that restores the live snapshot', async () => {
+      const user = await renderThenFailRefresh(makeAttention(4));
+
+      mockedApiGet.mockResolvedValue({ data: makeOverview(makeAttention(4)) });
+      await user.click(screen.getByRole('button', { name: /try again/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('admin-hub-stale-notice')).not.toBeInTheDocument();
+      });
+      expect(screen.getByText(/^Checked at/i)).toBeInTheDocument();
+    });
+
+    it('never reports an all-clear from a healthy snapshot it could not refresh', async () => {
+      await renderThenFailRefresh([]);
+
+      // The snapshot was Healthy with zero attention items, so the live copy
+      // would have been the reassuring one. A failed refresh must not let that
+      // stand as a current all-clear.
+      expect(
+        screen.queryByText(/every subsystem health check is reporting healthy/i),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByText(/that refresh failed — this may be out of date/i),
+      ).toBeInTheDocument();
+    });
+
+    it('still shows the hard error when there is no snapshot to fall back on', async () => {
+      mockedApiGet.mockRejectedValue(new Error('overview unavailable'));
+      renderHub();
+
+      await waitFor(() => {
+        expect(screen.getByText(/couldn't load the admin overview/i)).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('admin-hub-stale-notice')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('admin-hub-attention-panel')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('admin-hub-subsystems')).not.toBeInTheDocument();
     });
   });
 });

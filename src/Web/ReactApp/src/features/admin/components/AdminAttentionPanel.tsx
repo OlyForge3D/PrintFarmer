@@ -79,9 +79,15 @@ function resolveAttentionActionRoute(
     route.startsWith('/admin/manage?') ||
     route.startsWith('/admin/manage#') ||
     route.startsWith('/admin/manage/');
+  // A leading slash is not sufficient to prove an internal path: browsers treat
+  // "//evil.example" (and "/\evil.example") as protocol-relative and navigate
+  // off-site. The backend is trusted, but a link target is exactly the kind of
+  // value that must not become an open redirect if that ever stops being true.
+  const isInternalPath = (route: string) =>
+    route.startsWith('/') && !route.startsWith('//') && !route.startsWith('/\\');
   const fallbackRoute =
     item.actionRoute &&
-    item.actionRoute.startsWith('/') &&
+    isInternalPath(item.actionRoute) &&
     !isRetiredManageRoute(item.actionRoute)
       ? item.actionRoute
       : null;
@@ -109,6 +115,12 @@ function AttentionRowFromDto({
   const actionRoute = resolveAttentionActionRoute(item, access);
   return (
     <AttentionRow
+      // `overflow-wrap` is inherited, so setting it on the row covers the title
+      // and detail without touching the shared AttentionRow — settings
+      // validation uses the same component and is explicitly out of scope here.
+      // Server details include unbroken tokens (hostnames, URLs) that would
+      // otherwise force horizontal page overflow at 320px.
+      className="break-words"
       severity={item.severity}
       title={item.title}
       detail={item.detail}
@@ -170,6 +182,7 @@ export function AdminAttentionPanel({ items, access }: AdminAttentionPanelProps)
   const isNarrow = useIsMobileBreakpoint();
   const [isExpanded, setIsExpanded] = useState(false);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef(false);
   const listRegionId = useId();
 
@@ -180,8 +193,21 @@ export function AdminAttentionPanel({ items, access }: AdminAttentionPanelProps)
   const overflows = total > previewLimit;
 
   // `isExpanded` is remembered across breakpoint changes, but it only *means*
-  // anything while there is something to expand — otherwise a list that shrank
-  // below the cap would keep rendering as a scroll region with no rows hidden.
+  // anything while there is something to expand. If the feed shrinks below the
+  // cap the toggle unmounts, so a stale `true` would silently re-expand the
+  // panel the moment the feed grows back. Reset on that transition using
+  // React's "adjust state during render" pattern rather than an effect, which
+  // would cost an extra render pass (and is what `set-state-in-effect` warns
+  // about). Keyed on the transition, not on `total`, so an ordinary background
+  // poll that changes the count does not collapse a list the user opened.
+  const [wasOverflowing, setWasOverflowing] = useState(overflows);
+  if (wasOverflowing !== overflows) {
+    setWasOverflowing(overflows);
+    if (!overflows && isExpanded) {
+      setIsExpanded(false);
+    }
+  }
+
   const showAll = !overflows || isExpanded;
   const visibleItems = useMemo(
     () => (showAll ? items : items.slice(0, previewLimit)),
@@ -198,25 +224,40 @@ export function AdminAttentionPanel({ items, access }: AdminAttentionPanelProps)
 
   // Collapsing unmounts the rows below the cap. If focus was inside them it
   // would fall back to <body>, dumping a keyboard user at the top of the
-  // document; park it on the control that caused the collapse instead.
+  // document; park it on the control that caused the collapse instead. If a
+  // concurrent update shrank the feed below the cap the toggle is gone, so fall
+  // back to the panel container rather than letting focus escape to <body>.
   useEffect(() => {
     if (!isExpanded && restoreFocusRef.current) {
       restoreFocusRef.current = false;
-      toggleRef.current?.focus();
+      if (toggleRef.current) {
+        toggleRef.current.focus();
+      } else {
+        containerRef.current?.focus();
+      }
     }
   }, [isExpanded]);
 
   const isScrollable = overflows && isExpanded;
 
   return (
-    <div className="flex flex-col gap-2" data-testid="admin-hub-attention-panel">
+    <div
+      ref={containerRef}
+      tabIndex={-1}
+      className="flex flex-col gap-2 focus:outline-none"
+      data-testid="admin-hub-attention-panel"
+    >
       <div
         id={listRegionId}
         data-testid="admin-hub-attention-region"
         data-attention-scrollable={isScrollable ? 'true' : 'false'}
         {...(isScrollable
           ? {
-              role: 'region',
+              // `group`, not `region`: AdminSection already renders a named
+              // <section>, which is a region landmark. Nesting another one just
+              // pads the screen-reader landmark menu. `group` + aria-label keeps
+              // the scroll container named and keyboard-scrollable without it.
+              role: 'group',
               'aria-label': `All ${pluralize(total, 'attention item')}`,
               tabIndex: 0,
             }
@@ -259,6 +300,15 @@ export function AdminAttentionPanel({ items, access }: AdminAttentionPanelProps)
             size="sm"
             aria-expanded={isExpanded}
             aria-controls={listRegionId}
+            // The visible label is deliberately terse, but "Show fewer" alone
+            // is contextless when a screen reader user reaches it out of
+            // sequence. The visible text is a prefix of this name, so
+            // label-in-name (WCAG 2.5.3) and voice control still hold.
+            aria-label={
+              isExpanded
+                ? 'Show fewer attention items'
+                : `Show all ${pluralize(total, 'attention item')}`
+            }
             data-testid="admin-hub-attention-toggle"
             onClick={() => {
               if (isExpanded) {

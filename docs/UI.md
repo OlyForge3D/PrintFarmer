@@ -141,6 +141,16 @@ disagree, so each states what it measures and points at the other. A "Critical"
 service pill alongside "nothing needs your attention" is a domain difference, not a
 contradiction.
 
+**A failed refresh keeps the last-known snapshot.** React Query retains the last
+successful overview when a background refetch fails, so the hub distinguishes two
+failures. With no snapshot at all it shows the error state and a retry. With a
+snapshot already on screen it keeps the attention items and subsystem tiles,
+labels the band "Last checked at …", and renders a warning notice naming the
+time the data is from plus a "Try again" retry. A stale healthy snapshot never
+renders as a live all-clear — the reassuring "nothing needs your attention"
+message requires a *current* healthy overview, so a failed refresh downgrades it
+to an explicitly non-reassuring message instead.
+
 The final band contains only permission-filtered destinations. **Operations**
 lists the day-to-day shortcuts: System Status, Workers & Jobs (opened on the
 Jobs tab), Login Audit, Data Management, Maintenance, Analytics, and
