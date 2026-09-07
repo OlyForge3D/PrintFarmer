@@ -210,4 +210,48 @@ describe('SystemPulsePill', () => {
       expect(label).not.toHaveClass('sr-only');
     });
   });
+
+  /**
+   * #2517: two health summaries are visible at once and they measure different
+   * things — this pill reports *service* health from `/api/system/info`, while
+   * the Admin Control Center reports *subsystem health checks* from
+   * `/api/admin/overview`. Users read "Critical" here plus "nothing needs your
+   * attention" there as a contradiction. Neither feed is wrong; the labels were.
+   * These assertions pin the disambiguating copy so it cannot silently regress
+   * back to a generic "system health".
+   */
+  describe('health domain labelling (#2517)', () => {
+    it('names the service-health domain in the trigger tooltip and accessible name', () => {
+      render(<SystemPulsePill />);
+
+      const trigger = screen.getByRole('button', { name: /system/i });
+      expect(trigger).toHaveAttribute('title', expect.stringContaining('service health'));
+      // The worst service in the fixture is Critical, so the pill must say so
+      // rather than reporting an unqualified system state.
+      expect(trigger).toHaveAccessibleName(/service health/i);
+    });
+
+    it('tells the reader in the panel that subsystem checks live elsewhere', () => {
+      render(<SystemPulsePill />);
+
+      fireEvent.click(screen.getByRole('button', { name: /system/i }));
+
+      expect(
+        screen.getByText(/Backend subsystem health checks are reported separately/i),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/Worst service health:/i)).toBeInTheDocument();
+    });
+
+    it('scopes the unreachable state to service health while keeping the degraded signal', () => {
+      useQueryMock.mockReturnValue({
+        data: undefined,
+        error: new Error('boom'),
+      } as ReturnType<typeof useQuery>);
+
+      render(<SystemPulsePill />);
+
+      const trigger = screen.getByRole('button', { name: /system status degraded/i });
+      expect(trigger).toHaveAccessibleName(/service health unavailable/i);
+    });
+  });
 });

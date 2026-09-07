@@ -113,12 +113,55 @@ settings keeps its smaller profile category/sub-tab workspace.
 
 The `/admin` Control Center is intentionally attention-first. Authorized
 overview users see the server-ranked **Needs attention** list first, followed by
-a compact **System health** band that preserves the server's overall status,
+a compact **System health checks** band that preserves the server's overall status,
 subsystem statuses, unknown values, and `checkedAt` timestamp. An empty
 attention list only receives the all-clear message when every reported
 subsystem is healthy; an empty or degraded/unknown overview remains explicitly
 non-reassuring. Loading and network-error states include accessible feedback and
 a retry action without hiding the dashboard's usable links.
+
+**Needs attention is bounded, not truncated.** The hub previously rendered every
+attention item, so a farm with a realistic alert volume saw the list take over the
+console and push health and the operational tools below the fold. It now shows a
+preview — 3 items at `sm` and wider, 1 below — with a "Show all N" / "Show fewer"
+disclosure button (`aria-expanded` + `aria-controls`). The bound comes from the item
+count, not a fixed height, so content still reflows at 200% zoom instead of being
+clipped. Expanding reveals every item inside a labelled, focusable scroll region
+capped at `min(560px, 70dvh)`; the collapse button sits outside that region so it can
+never be scrolled away, and collapsing returns focus to it. Collapsing never implies
+resolution: the summary always states the total and severity mix and explicitly calls
+out any **Errors** the preview is hiding. Server ranking (Error > Warning > Info) is
+sliced, never re-sorted.
+
+**Two health summaries, two domains.** The hub's health band reports *subsystem
+health checks* from `/api/admin/overview` (its badge reads "Health checks: …"),
+while the **System pill** in the top bar reports *service health* — versions and host
+load — from `/api/system/info`. These are different feeds and can legitimately
+disagree, so each states what it measures and points at the other. A "Critical"
+service pill alongside "nothing needs your attention" is a domain difference, not a
+contradiction.
+
+**A failed refresh keeps the last-known snapshot.** React Query retains the last
+successful overview when a background refetch fails, so the hub distinguishes two
+failures. With no snapshot at all it shows the error state and a retry. With a
+snapshot already on screen it keeps the attention items and subsystem tiles,
+labels the band "Last checked at …", and renders a warning notice naming the
+time the data is from plus a "Try again" retry. A stale healthy snapshot never
+renders as a live all-clear — the reassuring "nothing needs your attention"
+message requires a *current* healthy overview, so a failed refresh downgrades it
+to an explicitly non-reassuring message instead. The overall status badge itself
+also carries the caveat ("Health checks: Healthy (cached)"), so a user who
+navigates straight to the badge cannot read a cached status as a live one.
+
+**Collapsing never strands keyboard focus.** Rows unmount both when the user
+collapses the list and when a background poll shrinks the feed below the cap
+(which unmounts the toggle too). If focus was inside those rows it would
+otherwise fall to the document body. The panel restores it — to the toggle when
+that still exists, otherwise to the named panel container. Recovery is
+conditional on focus having been inside the panel *and* on the element that held
+it having actually left the document, so a poll can never pull focus away from
+whatever the operator was actually doing, nor from a spot they deliberately
+clicked.
 
 The final band contains only permission-filtered destinations. **Operations**
 lists the day-to-day shortcuts: System Status, Workers & Jobs (opened on the
