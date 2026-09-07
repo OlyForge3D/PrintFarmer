@@ -407,7 +407,7 @@ export function AdminControlCenterPage() {
         <div
           ref={pinChooserRef}
           id="admin-pin-chooser"
-          role="dialog"
+          role="region"
           aria-label="Pin admin links"
           className="mb-6 rounded-lg border border-pf-border bg-pf-bg-1 p-4"
         >

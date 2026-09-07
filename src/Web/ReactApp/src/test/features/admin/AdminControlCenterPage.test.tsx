@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { AdminControlCenterPage } from '@/features/admin/pages/AdminControlCenterPage';
+import { AdminNavPinsProvider } from '@/common/contexts/AdminNavPinsContext';
 import type { AdminOverviewDto } from '@/types/adminOverview';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -127,7 +128,9 @@ function renderHub() {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/admin']}>
-        <AdminControlCenterPage />
+        <AdminNavPinsProvider>
+          <AdminControlCenterPage />
+        </AdminNavPinsProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -138,6 +141,7 @@ function renderHub() {
 describe('AdminControlCenterPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     // Default: authenticated farm_admin.
     // Individual tests override via mockReturnValue.
     mockedUseAuth.mockReturnValue(
@@ -745,6 +749,26 @@ describe('AdminControlCenterPage', () => {
           || href.startsWith('/admin/#');
       });
     expect(selfLinks).toHaveLength(0);
+  });
+
+  it('opens the pin chooser with authorized destinations and restores focus on Escape', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+    const user = userEvent.setup();
+
+    renderHub();
+
+    const launcher = screen.getByRole('button', { name: 'Pin admin links' });
+    await user.click(launcher);
+
+    expect(screen.getByRole('region', { name: 'Pin admin links' })).toBeInTheDocument();
+    const analyticsPin = screen.getByRole('button', { name: 'Pin Analytics from navbar' });
+    expect(analyticsPin).toHaveAttribute('aria-pressed', 'false');
+    await user.click(analyticsPin);
+    expect(analyticsPin).toHaveAttribute('aria-pressed', 'true');
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('region', { name: 'Pin admin links' })).not.toBeInTheDocument();
+    expect(launcher).toHaveFocus();
   });
 
   // #2526 — removing a destination from the navbar is only safe because the hub
