@@ -84,7 +84,27 @@ vi.mock('@/features/admin/pages/UserManagementPage', () => ({
   UserManagementPage: () => <div data-testid="accounts-editor">Accounts editor</div>,
 }));
 vi.mock('@/features/admin/pages/RoleManagementPage', () => ({
-  RoleManagementPage: () => <div data-testid="roles-editor">Roles editor</div>,
+  RoleManagementPage: () => {
+    const saveRegistry = useContext(SettingsSaveRegistryContext);
+    return (
+      <div data-testid="roles-editor">
+        Roles editor
+        <button
+          data-testid="roles-make-dirty-btn"
+          onClick={() =>
+            saveRegistry?.registerSection({
+              id: 'roles-matrix-admin',
+              name: 'Role Permissions',
+              isDirty: true,
+              onSave: async () => {},
+            })
+          }
+        >
+          Make Roles Dirty
+        </button>
+      </div>
+    );
+  },
 }));
 vi.mock('@/features/admin/pages/TagAdminPage', () => ({
   TagAdminPage: () => <div data-testid="tags-editor">Tags editor</div>,
@@ -633,6 +653,29 @@ describe('SettingsShell', () => {
     await waitFor(() => {
       expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/login-audit');
     });
+  });
+
+  it('intercepts embedded page dirty state and prompts on navigation', () => {
+    setAuthRoles(['farm_admin']);
+    renderSettings('/admin/settings?scope=system&tab=users&sub=roles');
+
+    expect(getCategoryButton('Roles & Permissions')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('roles-editor')).toBeInTheDocument();
+
+    // Make embedded page dirty
+    fireEvent.click(screen.getByTestId('roles-make-dirty-btn'));
+
+    // Attempt to navigate to Users
+    fireEvent.click(getCategoryButton('User Accounts'));
+
+    // Modal opens asking whether to stay or discard
+    expect(screen.getByRole('dialog', { name: 'Unsaved Changes' })).toBeInTheDocument();
+
+    // Click Discard
+    fireEvent.click(screen.getByRole('button', { name: 'Discard Changes' }));
+
+    // Navigates successfully
+    expect(getCategoryButton('User Accounts')).toHaveAttribute('aria-current', 'page');
   });
 
   it('intercepts navigation with Stay/Discard decision modal when a section is dirty', () => {

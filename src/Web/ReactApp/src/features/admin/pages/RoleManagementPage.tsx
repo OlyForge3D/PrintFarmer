@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
@@ -12,6 +12,7 @@ import {
   adminToast,
   useDirtyState,
 } from '@/common/components/admin';
+import { SettingsSaveRegistryContext } from '@/features/admin/settings/settingsSaveRegistry';
 import {
   Badge,
   Button,
@@ -118,6 +119,8 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
   const [concurrencyConflict, setConcurrencyConflict] = useState<string | null>(null);
   const [lockoutViolation, setLockoutViolation] = useState<{ message: string; permissions: string[] } | null>(null);
   const [pendingRoleSwitch, setPendingRoleSwitch] = useState<string | null>(null);
+
+  const saveRegistry = useContext(SettingsSaveRegistryContext);
 
   const rolesQuery = useQuery<RoleSummary[]>({
     queryKey: ['admin-roles'],
@@ -396,6 +399,29 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
       syncedBaselineRef.current = result.data;
     });
   };
+
+  useEffect(() => {
+    if (!saveRegistry?.registerSection || !selectedRoleId) return;
+    const sectionId = `roles-matrix-${selectedRoleId}`;
+    if (grantState.isDirty) {
+      saveRegistry.registerSection({
+        id: sectionId,
+        name: 'Role Permissions',
+        isDirty: true,
+        onSave: async () => {
+          await savePermissionsMutation.mutateAsync();
+        },
+        onDiscard: () => {
+          grantState.reset();
+        },
+      });
+    } else {
+      saveRegistry.unregisterSection?.(sectionId);
+    }
+    return () => {
+      saveRegistry.unregisterSection?.(sectionId);
+    };
+  }, [saveRegistry, selectedRoleId, grantState.isDirty, grantState.reset, savePermissionsMutation, grantState]);
 
   // ── Rendering ─────────────────────────────────────────────────────────────
 

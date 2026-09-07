@@ -212,11 +212,15 @@ function DataRouterBlocker({
   onBlockerChange,
 }: {
   shouldBlock: (args: { currentLocation: { pathname: string; search: string }; nextLocation: { pathname: string; search: string } }) => boolean;
-  onBlockerChange: (blocker: ReturnType<typeof useBlocker>) => void;
+  onBlockerChange: (blocker: { state: 'unblocked' | 'blocked'; proceed?: () => void; reset?: () => void }) => void;
 }) {
   const blocker = useBlocker(shouldBlock);
   useEffect(() => {
-    onBlockerChange(blocker);
+    onBlockerChange({
+      state: blocker.state === 'blocked' ? 'blocked' : 'unblocked',
+      proceed: blocker.state === 'blocked' && typeof blocker.proceed === 'function' ? blocker.proceed : undefined,
+      reset: blocker.state === 'blocked' && typeof blocker.reset === 'function' ? blocker.reset : undefined,
+    });
   }, [blocker, onBlockerChange]);
   return null;
 }
@@ -403,7 +407,11 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, []);
 
   const hasDataRouter = Boolean(useContext(UNSAFE_DataRouterContext));
-  const [dataBlocker, setDataBlocker] = useState<ReturnType<typeof useBlocker>>({
+  const [dataBlocker, setDataBlocker] = useState<{
+    state: 'unblocked' | 'blocked';
+    proceed?: () => void;
+    reset?: () => void;
+  }>({
     state: 'unblocked',
     proceed: undefined,
     reset: () => {},
@@ -415,9 +423,13 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     [isDirty],
   );
 
-  const blocker = hasDataRouter
-    ? dataBlocker
-    : ({ state: 'unblocked' as const, proceed: undefined, reset: () => {} });
+  const blocker = useMemo(
+    () =>
+      hasDataRouter
+        ? dataBlocker
+        : ({ state: 'unblocked' as const, proceed: undefined, reset: () => {} }),
+    [hasDataRouter, dataBlocker],
+  );
 
   const isBlocked = blocker.state === 'blocked';
 
