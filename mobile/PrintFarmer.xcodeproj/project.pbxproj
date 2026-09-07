@@ -465,6 +465,7 @@
 		F7060001000000000000A002 /* AttentionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A001 /* AttentionView.swift */; };
 		F7060001000000000000A012 /* ScanFlowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A011 /* ScanFlowView.swift */; };
 		F7060001000000000000A022 /* AdvancedPrinterControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A021 /* AdvancedPrinterControlsView.swift */; };
+		F25210000000000000000002 /* PrinterSetupControlsContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = F25210000000000000000001 /* PrinterSetupControlsContent.swift */; };
 		F7060001000000000000A032 /* SystemCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A031 /* SystemCapabilities.swift */; };
 		F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000A041 /* SystemCapabilitiesService.swift */; };
 		F7060001000000000000B002 /* AppRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7060001000000000000B001 /* AppRouterTests.swift */; };
@@ -904,6 +905,7 @@
 		F7060001000000000000A001 /* AttentionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionView.swift; sourceTree = "<group>"; };
 		F7060001000000000000A011 /* ScanFlowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanFlowView.swift; sourceTree = "<group>"; };
 		F7060001000000000000A021 /* AdvancedPrinterControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedPrinterControlsView.swift; sourceTree = "<group>"; };
+		F25210000000000000000001 /* PrinterSetupControlsContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterSetupControlsContent.swift; sourceTree = "<group>"; };
 		F7060001000000000000A031 /* SystemCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilities.swift; sourceTree = "<group>"; };
 		F7060001000000000000A041 /* SystemCapabilitiesService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemCapabilitiesService.swift; sourceTree = "<group>"; };
 		F7060001000000000000B001 /* AppRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRouterTests.swift; sourceTree = "<group>"; };
@@ -1423,6 +1425,7 @@ B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; incl
 				A3E7287000000000000000A1 /* PrinterControlsSection.swift */,
 				A4C8D9E0123456789ABCD001 /* DisabledControlStyle.swift */,
 				F7060001000000000000A021 /* AdvancedPrinterControlsView.swift */,
+				F25210000000000000000001 /* PrinterSetupControlsContent.swift */,
 			);
 			path = PrinterControls;
 			sourceTree = "<group>";
@@ -2256,6 +2259,7 @@ FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
 				F7060001000000000000A012 /* ScanFlowView.swift in Sources */,
 				F24530000000000000000004 /* ScanPresentationReadiness.swift in Sources */,
 				F7060001000000000000A022 /* AdvancedPrinterControlsView.swift in Sources */,
+				F25210000000000000000002 /* PrinterSetupControlsContent.swift in Sources */,
 				F7060001000000000000A032 /* SystemCapabilities.swift in Sources */,
 				F7060001000000000000A042 /* SystemCapabilitiesService.swift in Sources */,
 				241500000000000000000002 /* FarmShape.swift in Sources */,

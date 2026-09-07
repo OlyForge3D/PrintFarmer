@@ -8,6 +8,54 @@
 
 This spec defines the visual hierarchy, component anatomy, interaction model, accessibility, and edge cases for the **Printer Controls** section that lives inside `PrinterDetailView`. Three subgroups in fixed order: **Preheat → Home → Jog**.
 
+## Embedding contract (#2521)
+
+`Views/PrinterControls/PrinterSetupControlsContent.swift` exports
+`PrinterSetupControlsContent(printer:viewModel:)`. It observes an externally
+owned `PrinterControlsViewModel` and only renders Preheat, Home, Jog, lockout and
+error presentation. It does not create services/models, load capabilities or
+subscribe to updates. `JogSubgroup` likewise no longer loads capabilities;
+its initial capability observation normalizes selection for preloaded limited axes.
+
+`PrinterControlsSection(printer:printerService:)` remains the standalone owner,
+with lazy construction directly inside `StateObject(wrappedValue:)`. The
+`printer:viewModel:` wrapper initializer is test-only. The wrapper loads
+capabilities and forwards `PrinterControlsUpdateSignal` changes outside
+online/offline content, so hiding controls cannot strand an acknowledgement.
+The existing Advanced destination and its feature-disable dismissal are unchanged.
+The double-Advanced navigation is removed by integration issue #2522, not this extraction.
+
+For embedding, retain one owner above page visibility, scoped by registered server
+and printer UUID. The host supplies the scoped service, loads capabilities once,
+and forwards meaningful updates while the Controls page is hidden. Do not use
+the test-only wrapper initializer or create an owner per page. Apply
+`AdvancedPrinterControlsAccess` before exposing the page; this observer does not
+read feature flags. Replace the owner when the real server/printer target changes.
+
+### Effective native operations and gates
+
+| Task | Existing dispatch | Preserved gate/confirmation |
+| --- | --- | --- |
+| Preheat PLA/PETG/ABS | `setTemperatures` | Temperature capability; omit unsupported bed; acknowledge exact supported targets |
+| Cool Down | Same preheat command, 0/0 preset | Shown only with temperature subgroup; unsupported confirmation targets ignored |
+| Home All/XY/Z | `home`, `homeXY`, `homeZ` | Movement + homing capability; matching axes acknowledgement |
+| Jog | `move` | Movement + supported axes; matching-axis position update; existing distances/feedrates |
+
+All operations retain model-wide single-flight and online/idle gating. Printing
+and paused printers keep the explanatory lockout. Unrelated telemetry and
+other-printer updates do not acknowledge pending commands; offline/state changes
+invalidate them. Existing errors, dismissal and retry-by-tapping behavior remain.
+Z-offset, motor disabling and console are not implemented native operations.
+Earlier design proposals below are not evidence of additional command support
+or per-subgroup concurrency.
+
+Normal-width layouts retain the existing phone stack and regular-width columns.
+Accessibility text sizes use a single outer column, including on iPad. Error
+dismissal remains a separately accessible button with a minimum 44-point target.
+The controls snapshot suite includes hosted observer-remount, wrapper-offline,
+retained-owner, preloaded-axis and large-text regressions; model/correlation
+suites continue to exercise native dispatch through mock services.
+
 ---
 
 ## 1. Visual Hierarchy
