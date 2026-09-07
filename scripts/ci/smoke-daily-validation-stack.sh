@@ -89,6 +89,18 @@ if [[ -n "${PRINTFARMER_API_IMAGE:-}" && -n "${PRINTFARMER_FRONTEND_IMAGE:-}" \
   USE_REGISTRY="true"
 fi
 
+EXPECTED_ACCEPTANCE_SHA="${EXPECTED_ACCEPTANCE_SHA:-${GIT_SHA:-}}"
+if [[ -z "$EXPECTED_ACCEPTANCE_SHA" ]]; then
+  EXPECTED_ACCEPTANCE_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+fi
+if [[ ! "$EXPECTED_ACCEPTANCE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+  log "FAIL: EXPECTED_ACCEPTANCE_SHA must be the full 40-character commit SHA"
+  exit 1
+fi
+EXPECTED_ACCEPTANCE_SHA="${EXPECTED_ACCEPTANCE_SHA,,}"
+export GIT_SHA="$EXPECTED_ACCEPTANCE_SHA"
+ACCEPTANCE_EVIDENCE_DIR="${ACCEPTANCE_EVIDENCE_DIR:-$REPO_ROOT/src/Web/ReactApp/test-results/acceptance-evidence}"
+
 COMPOSE_FILES=(-f "$STACK_DIR/docker-compose.yml")
 if [[ "$USE_REGISTRY" == "true" ]]; then
   COMPOSE_FILES+=(-f "$TEMPLATES_DIR/docker-compose.daily-registry.yml")
@@ -196,6 +208,29 @@ wait_for_health "http://localhost:${MOONRAKER_EMULATOR_PRINTING_PORT}/healthz" "
 wait_for_health "http://localhost:${MOONRAKER_EMULATOR_PAUSED_PORT}/healthz" "Moonraker emulator (paused)"
 wait_for_health "http://localhost:${MOONRAKER_EMULATOR_SHUTDOWN_PORT}/healthz" "Moonraker emulator (shutdown)"
 wait_for_health "http://localhost:${HTTP_PORT}/" "nginx-proxy/frontend"
+
+image_digest_args=()
+for service in api frontend slicer-host printer-discovery orcaslicer-worker moonraker-ready; do
+  image_id="$(compose images -q "$service" 2>/dev/null | sed -n '1p' || true)"
+  if [[ -z "$image_id" ]]; then
+    continue
+  fi
+  image_digest="$(docker image inspect --format '{{ index .RepoDigests 0 }}' "$image_id" 2>/dev/null || true)"
+  if [[ ! "$image_digest" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]]; then
+    image_digest="$(docker image inspect --format '{{ .Id }}' "$image_id" 2>/dev/null || true)"
+  fi
+  if [[ "$image_digest" =~ ^(sha256:[0-9a-f]{64}|[^[:space:]@]+@sha256:[0-9a-f]{64})$ ]]; then
+    image_digest_args+=(--image-digest "${service}=${image_digest}")
+  fi
+done
+
+log "Verifying acceptance target provenance through the nginx browser origin"
+node "$SCRIPT_DIR/verify-acceptance-provenance.mjs" \
+  --expected-sha "$EXPECTED_ACCEPTANCE_SHA" \
+  --base-url "http://localhost:${HTTP_PORT}" \
+  --evidence-dir "$ACCEPTANCE_EVIDENCE_DIR" \
+  "${image_digest_args[@]}"
+log "OK: acceptance target provenance is bound to $EXPECTED_ACCEPTANCE_SHA"
 
 log "Creating an isolated validation administrator and authenticating through the real API"
 smoke_admin_username="daily-smoke-admin"

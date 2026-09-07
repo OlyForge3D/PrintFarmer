@@ -16,9 +16,9 @@ if [[ -z "$ORCASLICER_SHA256" ]]; then
     exit 1
 fi
 
-# Short git SHA of the source commit, injected into the worker build so
+# Full git SHA of the source commit, injected into the worker build so
 # /api/system/version reports the deployed commit (.git is not in the build context).
-GIT_SHA=$(git -C "$(dirname "$0")/.." rev-parse --short HEAD 2>/dev/null || echo "unknown")
+GIT_SHA="${GIT_SHA:-$(git -C "$(dirname "$0")/.." rev-parse HEAD 2>/dev/null || echo "unknown")}"
 
 # Docker build progress flag (tty=pretty, plain=verbose, auto=smart)
 DOCKER_PROGRESS=${DOCKER_PROGRESS:-tty}

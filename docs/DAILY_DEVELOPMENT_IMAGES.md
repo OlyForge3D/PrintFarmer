@@ -241,6 +241,24 @@ script (`scripts/ci/smoke-daily-validation-stack.sh`) boots this exact stack whe
 Docker is available and asserts the seeded Moonraker-backend printers and the
 single-worker topology; see
 [`MOONRAKER_EMULATOR_VALIDATION.md`](./MOONRAKER_EMULATOR_VALIDATION.md) for details.
+After the stack is ready, the script verifies `/version.json`,
+`/api/system/version`, and the served `index-*.js` bundle through the nginx browser
+origin. The run aborts before validation activity unless both services report the
+expected full commit SHA. A machine-readable record is written under
+`src/Web/ReactApp/test-results/acceptance-evidence/`.
+
+For a manual Playwright or MCP acceptance pass, run the same preflight first:
+
+```bash
+expected_sha="$(git rev-parse HEAD)"
+node scripts/ci/verify-acceptance-provenance.mjs \
+  --expected-sha "$expected_sha" \
+  --base-url http://localhost:3000
+```
+
+Production frontend builds likewise require a full commit identity. Builds from a
+Git checkout resolve it directly; source-archive and container builds must inject
+`VITE_GIT_SHA` or `GIT_SHA`.
 
 ## Cleanup
 

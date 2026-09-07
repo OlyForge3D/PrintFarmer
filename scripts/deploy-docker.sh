@@ -63,11 +63,12 @@ fi
 # Extract .NET major version from SDK_TAG for display messages (e.g., "10.0-noble" -> "10.0")
 DOTNET_MAJOR_VERSION="${SDK_TAG%%-*}"  # Remove everything after first hyphen
 
-# Short git SHA of the source commit, embedded into each component's build so the
+# Full git SHA of the source commit, embedded into each component's build so the
 # /api/system/version endpoints (and frontend version.json) can report the deployed
 # commit. The .git directory is not copied into the Docker build context, so the SHA
-# must be injected explicitly as a build arg. Falls back to "unknown" outside a repo.
-GIT_SHA=$(git -C "$SCRIPT_DIR/.." rev-parse --short HEAD 2>/dev/null || echo "unknown")
+# must be injected explicitly as a build arg. An explicit value supports source archives;
+# otherwise Vite rejects "unknown" before producing an unidentifiable production bundle.
+GIT_SHA="${GIT_SHA:-$(git -C "$SCRIPT_DIR/.." rev-parse HEAD 2>/dev/null || echo "unknown")}"
 export GIT_SHA
 
 # Default flags

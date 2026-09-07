@@ -12,6 +12,25 @@ test('smoke script defaults to the deterministic harness host ports and probes t
   assert.match(script, /export [^\n]*(?:\\\n[^\n]*)*ConnectionStrings__Default API_PORT SLICER_HOST_PORT HTTP_PORT/);
 });
 
+test('smoke script fails closed on provenance after readiness and before validation activity', () => {
+  assert.match(script, /EXPECTED_ACCEPTANCE_SHA.*\^\[0-9a-fA-F\]\{40\}\$/);
+  assert.match(script, /export GIT_SHA="\$EXPECTED_ACCEPTANCE_SHA"/);
+  assert.match(script, /verify-acceptance-provenance\.mjs/);
+  assert.match(script, /--expected-sha "\$EXPECTED_ACCEPTANCE_SHA"/);
+  assert.match(script, /--base-url "http:\/\/localhost:\$\{HTTP_PORT\}"/);
+  assert.match(script, /--evidence-dir "\$ACCEPTANCE_EVIDENCE_DIR"/);
+
+  const nginxReadyIndex = script.indexOf(
+    'wait_for_health "http://localhost:${HTTP_PORT}/" "nginx-proxy/frontend"',
+  );
+  const provenanceIndex = script.indexOf('verify-acceptance-provenance.mjs');
+  const firstValidationMutationIndex = script.indexOf(
+    'Creating an isolated validation administrator',
+  );
+  assert.ok(nginxReadyIndex >= 0 && nginxReadyIndex < provenanceIndex);
+  assert.ok(provenanceIndex < firstValidationMutationIndex);
+});
+
 test('smoke script is bash-strict and makes Docker-unavailable behavior explicit', () => {
   assert.match(script, /^#!\/usr\/bin\/env bash/);
   assert.match(script, /^set -euo pipefail/m);
