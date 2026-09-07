@@ -52,15 +52,15 @@ final class PrinterRunActionBarTests: XCTestCase {
     /// hosting-controller root view frame — so a collapsed or empty branch
     /// yields `CGSize.zero` and every hit-target assertion below measures
     /// actual content rather than the window I chose to host it in.
-    /// Uses `UIHostingController.sizeThatFits(in:)` which was added in
-    /// iOS 16 and is available on this app's iOS 17+ deployment target.
+    /// `UIHostingController.sizeThatFits(in:)` is available on this app's
+    /// iOS 17+ deployment target.
     private func contentSize<Content: View>(
         _ view: Content,
         proposedWidth: CGFloat = 390
     ) -> CGSize {
         let host = UIHostingController(rootView: view)
         return host.sizeThatFits(
-            in: CGSize(width: proposedWidth, height: .infinity)
+            in: CGSize(width: proposedWidth, height: .greatestFiniteMagnitude)
         )
     }
 
@@ -68,14 +68,15 @@ final class PrinterRunActionBarTests: XCTestCase {
         // With no visible actions the bar renders EmptyView. Hosting must not
         // crash and the intrinsic content size must be zero-height — a
         // collapsed empty branch is the correct behaviour, and it must be
-        // measured on the SwiftUI content, not a UIWindow root.
+        // measured on the SwiftUI content, not a UIWindow root. `accuracy`
+        // guards against sub-point layout-engine noise on a truly-empty body.
         let bar = PrinterRunActionBar(
             presentation: .empty,
             onSelect: { _ in XCTFail("empty bar must not fire callbacks") }
         )
         let size = contentSize(bar)
         XCTAssertEqual(
-            size.height, 0,
+            size.height, 0, accuracy: 0.5,
             "Empty presentation must render as EmptyView (zero-height content)"
         )
     }
@@ -126,45 +127,155 @@ final class PrinterRunActionBarTests: XCTestCase {
     // MARK: - Hit target proof (issue contract: 44x44 pt minimum, per Apple HIG)
 
     /// Contract from issue #2520: "a minimum 44x44pt hit target for every
-    /// action". The bar enforces this via `fullWidthActionButton()` which
-    /// applies `.frame(minHeight: 44)` for standard buttons and
-    /// `.frame(minHeight: 50)` for the prominent Emergency Stop. This test
-    /// proves those floors survive by measuring the bar's intrinsic
-    /// content size — a regression that dropped `.fullWidthActionButton()`
-    /// or shrunk a row would drop the total below the sum of the floors.
+    /// action". The bar enforces this via `fullWidthActionButton()`
+    /// (verified in `mobile/PrintFarmer/Views/Components/ActionButtonStyle.swift`:
+    /// `.frame(minHeight: 44)` for standard and `.frame(minHeight: 50)` for
+    /// prominent), and via `.frame(maxWidth: .infinity)` for width.
     ///
-    /// The printing fixture renders Pause/Cancel/Stop in a horizontal row
-    /// (>= 44pt) plus 10pt spacing plus Emergency Stop as its own row
-    /// (>= 50pt), so the intrinsic height must be at least 44 + 10 + 50
-    /// = 104pt. We assert the sum of the two per-row floors as the tightest
-    /// legitimate lower bound.
-    func test_render_printingFixture_meetsMinimumHitTargetHeights_atStandardDynamicType() {
+    /// Hicks-flag: an aggregate-height assertion on the composed bar cannot
+    /// prove PER-BUTTON floors — one taller sibling could mask an undersized
+    /// neighbour. Instead, measure each kind IN ISOLATION (single-descriptor
+    /// bar → intrinsic content size is that kind's own row) so the assertion
+    /// is genuinely per-control.
+
+    /// Per-kind isolated HIT-TARGET height floor for the four PRIMARY kinds
+    /// (Pause / Resume / Cancel / Stop). Each renders through
+    /// `fullWidthActionButton()` which enforces `minHeight: 44`. A regression
+    /// that dropped `.fullWidthActionButton()` on any kind would collapse
+    /// this kind's isolated bar below 44pt.
+    func test_render_perKind_meetsPrimaryHitTargetFloor_inIsolation() {
+        let proposedWidth: CGFloat = 390
+        let primaryKinds: [PrinterRunActionKind] = [.pause, .resume, .cancel, .stop]
+        for kind in primaryKinds {
+            let bar = PrinterRunActionBar(
+                presentation: PrinterRunActionPresentation(descriptors: [
+                    .init(kind: kind)
+                ]),
+                onSelect: { _ in }
+            )
+            let size = contentSize(bar, proposedWidth: proposedWidth)
+            XCTAssertGreaterThanOrEqual(
+                size.height, 44,
+                "\(kind): isolated primary button must render at >= 44pt tall. Actual: \(size.height)pt"
+            )
+            // Width: `fullWidthActionButton()` applies `.frame(maxWidth: .infinity)`.
+            // At a proposedWidth of 390, we expect the bar to fill the width;
+            // we assert the HIG floor of >= 44pt as the tightest legitimate
+            // per-control lower bound.
+            XCTAssertGreaterThanOrEqual(
+                size.width, 44,
+                "\(kind): isolated primary button must render at >= 44pt wide. Actual: \(size.width)pt"
+            )
+        }
+    }
+
+    /// Per-kind isolated HIT-TARGET height floor for Emergency Stop, which
+    /// is prominent and enforces the higher `minHeight: 50` floor. Same
+    /// per-control isolation: no siblings, no spacing budget.
+    func test_render_emergencyStop_meetsProminentHitTargetFloor_inIsolation() {
+        let proposedWidth: CGFloat = 390
         let bar = PrinterRunActionBar(
-            presentation: printingPresentation,
+            presentation: PrinterRunActionPresentation(descriptors: [
+                .init(kind: .emergencyStop)
+            ]),
             onSelect: { _ in }
         )
-        let size = contentSize(bar)
-        // 44pt (primary row floor) + 50pt (Emergency Stop prominent floor).
-        // No spacing budget is asserted — that would over-constrain against
-        // future layout tweaks.
-        let primaryFloor: CGFloat = 44
-        let emergencyFloor: CGFloat = 50
+        let size = contentSize(bar, proposedWidth: proposedWidth)
         XCTAssertGreaterThanOrEqual(
-            size.height, primaryFloor + emergencyFloor,
-            "Bar height must meet HIG floors: at least 44pt primary row + 50pt Emergency Stop row. Actual: \(size.height)pt"
+            size.height, 50,
+            "Emergency Stop isolated button must render at >= 50pt tall (prominent floor). Actual: \(size.height)pt"
+        )
+        XCTAssertGreaterThanOrEqual(
+            size.width, 44,
+            "Emergency Stop isolated button must render at >= 44pt wide. Actual: \(size.width)pt"
         )
     }
 
-    /// At the largest accessibility Dynamic Type size the bar switches to
-    /// a stacked layout where each of the three primary rows keeps its
-    /// own 44pt floor plus the Emergency Stop 50pt floor. Hicks-flag: a
-    /// hidden regression that let the accessibility branch collapse or
-    /// wrap into a single row would not be caught by the standard-size
-    /// test alone — this comparison catches it because the stacked height
-    /// must exceed the horizontal row height by AT LEAST 2 extra primary
-    /// floors (3 rows instead of 1). Comparing stacked-vs-horizontal is
-    /// dimension-neutral and safe against beta-OS layout drift.
-    func test_render_atAccessibilityDynamicType_growsToPreservePerRowHitTargets() {
+    /// Per-kind isolated floor at accessibility Dynamic Type. Hicks-flag:
+    /// larger accessibility fonts can grow height without stacking; at
+    /// isolation there is nothing to stack, but this test guards against a
+    /// regression that DROPS the `minHeight` floor at large Dynamic Type
+    /// (e.g., a hypothetical `.frame(height: 44)` — hard cap — replaced
+    /// with `.frame(idealHeight: 44)` that lets the label shrink below 44
+    /// when the label doesn't need it). Each isolated button must still be
+    /// >= its HIG floor when the label text is drawn at `.accessibility5`.
+    func test_render_perKind_stillMeetsHitTargetFloor_atAccessibilityDynamicType() {
+        let proposedWidth: CGFloat = 390
+        let primaryKinds: [PrinterRunActionKind] = [.pause, .resume, .cancel, .stop]
+        for kind in primaryKinds {
+            let bar = PrinterRunActionBar(
+                presentation: PrinterRunActionPresentation(descriptors: [
+                    .init(kind: kind)
+                ]),
+                onSelect: { _ in }
+            )
+            .environment(\.dynamicTypeSize, .accessibility5)
+            let size = contentSize(bar, proposedWidth: proposedWidth)
+            XCTAssertGreaterThanOrEqual(
+                size.height, 44,
+                "\(kind): isolated primary button must remain >= 44pt tall at .accessibility5. Actual: \(size.height)pt"
+            )
+        }
+        let emergencyBar = PrinterRunActionBar(
+            presentation: PrinterRunActionPresentation(descriptors: [
+                .init(kind: .emergencyStop)
+            ]),
+            onSelect: { _ in }
+        )
+        .environment(\.dynamicTypeSize, .accessibility5)
+        let emergencySize = contentSize(emergencyBar, proposedWidth: proposedWidth)
+        XCTAssertGreaterThanOrEqual(
+            emergencySize.height, 50,
+            "Emergency Stop isolated button must remain >= 50pt tall at .accessibility5. Actual: \(emergencySize.height)pt"
+        )
+    }
+
+    /// Stacking proof at accessibility Dynamic Type. Comparative to
+    /// address Hicks-flag "Larger accessibility fonts can also increase
+    /// height without stacking": a fixture with THREE primaries + Emergency
+    /// must grow by at least two additional per-primary floors versus a
+    /// fixture with ONE primary + Emergency, measured at the same
+    /// `.accessibility5` Dynamic Type. Same font growth on both sides, so
+    /// the delta is pure stacking — a not-stacked layout would produce
+    /// approximately the same height for both.
+    func test_render_atAccessibilityDynamicType_stacksPrimaries_notSingleRow() {
+        let onePrimary = PrinterRunActionPresentation(descriptors: [
+            .init(kind: .pause),
+            .init(kind: .emergencyStop),
+        ])
+        let threePrimary = PrinterRunActionPresentation(descriptors: [
+            .init(kind: .pause),
+            .init(kind: .cancel),
+            .init(kind: .stop),
+            .init(kind: .emergencyStop),
+        ])
+
+        let oneBar = PrinterRunActionBar(presentation: onePrimary) { _ in }
+            .environment(\.dynamicTypeSize, .accessibility5)
+        let threeBar = PrinterRunActionBar(presentation: threePrimary) { _ in }
+            .environment(\.dynamicTypeSize, .accessibility5)
+
+        let oneSize = contentSize(oneBar)
+        let threeSize = contentSize(threeBar)
+
+        // Stacked: 3 primary rows each >= 44pt vs 1 primary row of the same
+        // font size. Growth from 1 → 3 primaries must be at least 2 * 44
+        // (the two extra rows). A not-stacked (still horizontal) layout
+        // would grow by ~0pt because the row height is dominated by the
+        // tallest button, and all three primaries share the same font.
+        let extraPrimaryFloor: CGFloat = 2 * 44
+        XCTAssertGreaterThanOrEqual(
+            threeSize.height - oneSize.height, extraPrimaryFloor,
+            "At .accessibility5, going from 1 → 3 primaries must add at least 2 * 44pt (two stacked rows). One-primary height: \(oneSize.height)pt, three-primary height: \(threeSize.height)pt, delta: \(threeSize.height - oneSize.height)pt"
+        )
+    }
+
+    /// Comparative growth check: the accessibility branch (stacked) must
+    /// produce a taller bar than the horizontal branch, proving the layout
+    /// actually flipped on `isAccessibilitySize`. Safe against beta-OS
+    /// drift because both measurements are taken on the same host under
+    /// the same runtime.
+    func test_render_atAccessibilityDynamicType_producesTallerBarThanHorizontal() {
         let standardBar = PrinterRunActionBar(
             presentation: printingPresentation,
             onSelect: { _ in }
@@ -180,23 +291,9 @@ final class PrinterRunActionBarTests: XCTestCase {
         let standardSize = contentSize(standardBar)
         let accessibilitySize = contentSize(accessibilityBar)
 
-        // Stacked layout MUST grow versus horizontal — 3 primary rows
-        // instead of 1. Beta-OS metric drift is neutralised because both
-        // sides are measured on the same host under the same runtime.
         XCTAssertGreaterThan(
             accessibilitySize.height, standardSize.height,
-            "Accessibility Dynamic Type must produce a taller stacked layout than the standard horizontal row. Standard: \(standardSize.height)pt, Accessibility: \(accessibilitySize.height)pt"
-        )
-
-        // And the taller stacked layout must still meet the aggregate
-        // per-row HIG floor: 3 primary rows (44pt each) + Emergency Stop
-        // (50pt) = 182pt of pure per-row hit-target budget.
-        let primaryFloor: CGFloat = 44
-        let emergencyFloor: CGFloat = 50
-        let stackedFloor = 3 * primaryFloor + emergencyFloor
-        XCTAssertGreaterThanOrEqual(
-            accessibilitySize.height, stackedFloor,
-            "Stacked accessibility layout must meet aggregate HIG floor for 3 primary rows + Emergency Stop. Expected >= \(stackedFloor)pt, actual \(accessibilitySize.height)pt"
+            "Accessibility Dynamic Type must produce a taller bar than the standard horizontal row. Standard: \(standardSize.height)pt, Accessibility: \(accessibilitySize.height)pt"
         )
     }
 

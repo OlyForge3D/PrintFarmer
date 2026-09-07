@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import PrintFarmer
 
 /// Tests for `PrinterRunActionPresentation` — the immutable contract every
