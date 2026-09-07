@@ -1,5 +1,5 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, useContext } from 'react';
+import { Link, useNavigate, useSearchParams, useBlocker, UNSAFE_DataRouterContext } from 'react-router';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import {
@@ -207,6 +207,20 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'data.tags': <TagAdminPage embedded />,
 };
 
+function DataRouterBlocker({
+  shouldBlock,
+  onBlockerChange,
+}: {
+  shouldBlock: (args: { currentLocation: { pathname: string; search: string }; nextLocation: { pathname: string; search: string } }) => boolean;
+  onBlockerChange: (blocker: ReturnType<typeof useBlocker>) => void;
+}) {
+  const blocker = useBlocker(shouldBlock);
+  useEffect(() => {
+    onBlockerChange(blocker);
+  }, [blocker, onBlockerChange]);
+  return null;
+}
+
 interface SettingsShellProps {
   /** Lock the shell to a specific route-level scope group.
    * - 'user': only user settings (no scope switcher)
@@ -348,7 +362,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       registeredSectionsRef.current.set(section.id, section);
       setRegisteredSections((prev) => ({ ...prev, [section.id]: section }));
     } else {
-      const idToRemove = sectionId;
+      const idToRemove = sectionId || (section as unknown as { id?: string })?.id;
       if (idToRemove) {
         registeredSectionsRef.current.delete(idToRemove);
         setRegisteredSections((prev) => {
@@ -361,9 +375,19 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     }
   }, []);
 
+  const unregisterSection = useCallback((sectionId: string) => {
+    registeredSectionsRef.current.delete(sectionId);
+    setRegisteredSections((prev) => {
+      if (!(sectionId in prev)) return prev;
+      const next = { ...prev };
+      delete next[sectionId];
+      return next;
+    });
+  }, []);
+
   const saveRegistry = useMemo(
-    () => ({ publishSummary, publishIssues, registerActions, registerSection }),
-    [publishSummary, publishIssues, registerActions, registerSection],
+    () => ({ publishSummary, publishIssues, registerActions, registerSection, unregisterSection }),
+    [publishSummary, publishIssues, registerActions, registerSection, unregisterSection],
   );
 
   const handleDiscardAll = useCallback(() => {
@@ -378,19 +402,43 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     registeredSectionsRef.current.clear();
   }, []);
 
+  const hasDataRouter = Boolean(useContext(UNSAFE_DataRouterContext));
+  const [dataBlocker, setDataBlocker] = useState<ReturnType<typeof useBlocker>>({
+    state: 'unblocked',
+    proceed: undefined,
+    reset: () => {},
+  });
+
+  const shouldBlockNav = useCallback(
+    ({ currentLocation, nextLocation }: { currentLocation: { pathname: string; search: string }; nextLocation: { pathname: string; search: string } }) =>
+      isDirty && (currentLocation.pathname + currentLocation.search !== nextLocation.pathname + nextLocation.search),
+    [isDirty],
+  );
+
+  const blocker = hasDataRouter
+    ? dataBlocker
+    : ({ state: 'unblocked' as const, proceed: undefined, reset: () => {} });
+
+  const isBlocked = blocker.state === 'blocked';
+
   const handleStay = useCallback(() => {
+    if (blocker.state === 'blocked' && blocker.reset) {
+      blocker.reset();
+    }
     setShowDraftModal(false);
     setPendingNavigation(null);
-  }, []);
+  }, [blocker]);
 
   const handleDiscardAndNavigate = useCallback(() => {
     setShowDraftModal(false);
     handleDiscardAll();
-    if (pendingNavigation) {
+    if (blocker.state === 'blocked' && blocker.proceed) {
+      blocker.proceed();
+    } else if (pendingNavigation) {
       pendingNavigation();
     }
     setPendingNavigation(null);
-  }, [handleDiscardAll, pendingNavigation]);
+  }, [blocker, handleDiscardAll, pendingNavigation]);
 
   useEffect(() => {
     if (!isDirty) return;
@@ -920,6 +968,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
   return (
     <SettingsSaveRegistryContext.Provider value={saveRegistry}>
+      {hasDataRouter && <DataRouterBlocker shouldBlock={shouldBlockNav} onBlockerChange={setDataBlocker} />}
       <SettingsHeaderSlotContext.Provider value={headerSlot}>
         <SettingsFooterSlotContext.Provider value={footerSlot}>
           <PageTemplate
@@ -937,6 +986,9 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                     key={destination.id}
                     to={destination.path}
                     onClick={(e) => {
+                      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+                        return;
+                      }
                       if (isDirty) {
                         e.preventDefault();
                         setPendingNavigation(() => () => navigate(destination.path));
@@ -1018,7 +1070,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
             </div>
           </PageTemplate>
           <ConfirmationModal
-            isOpen={showDraftModal}
+            isOpen={showDraftModal || isBlocked}
             onCancel={handleStay}
             onConfirm={handleDiscardAndNavigate}
             title="Unsaved Changes"

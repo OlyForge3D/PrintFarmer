@@ -64,10 +64,14 @@ export interface SettingsSaveRegistry {
    */
   registerActions: (group: string, actions: GroupSaveActions | null) => void;
   /**
-   * Register (or with `null`, unregister) an individual section's dirty state
-   * and save/discard callbacks.
+   * Register (or with `null` / `sectionId`, unregister) an individual section's
+   * dirty state and save/discard callbacks.
    */
   registerSection?: (section: RegisteredSection | null, sectionId?: string) => void;
+  /**
+   * Explicitly unregister an individual section by its section ID.
+   */
+  unregisterSection?: (sectionId: string) => void;
 }
 
 /**
