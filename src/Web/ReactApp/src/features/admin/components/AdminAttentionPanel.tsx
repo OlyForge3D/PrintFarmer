@@ -184,14 +184,22 @@ export interface AdminAttentionPanelProps {
   /** Server-ranked items, already in Error > Warning > Info order. */
   items: AttentionItemDto[];
   access: AttentionAccess;
+  /**
+   * Id of the surrounding section heading. The panel container is a focus
+   * target (see the recovery effect below), so it needs an accessible name —
+   * otherwise a screen reader landing there after a shrink announces an
+   * anonymous group instead of "Needs attention".
+   */
+  labelledBy?: string;
 }
 
-export function AdminAttentionPanel({ items, access }: AdminAttentionPanelProps) {
+export function AdminAttentionPanel({ items, access, labelledBy }: AdminAttentionPanelProps) {
   const isNarrow = useIsMobileBreakpoint();
   const [isExpanded, setIsExpanded] = useState(false);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const hasFocusWithinRef = useRef(false);
+  const lastFocusedRef = useRef<Element | null>(null);
   const listRegionId = useId();
 
   const previewLimit = isNarrow
@@ -254,6 +262,16 @@ export function AdminAttentionPanel({ items, access }: AdminAttentionPanelProps)
     if (active && active !== document.body) {
       return;
     }
+    // Focus is on <body> for two very different reasons: the element holding it
+    // was removed (repair that), or the user deliberately clicked dead space
+    // (leave that alone). Distinguish by asking whether the element that last
+    // held focus is still in the document. Checked here rather than at blur
+    // time because a browser fires the removal blur *during* the mutation,
+    // when the node can still report itself connected.
+    const previouslyFocused = lastFocusedRef.current;
+    if (previouslyFocused && previouslyFocused.isConnected) {
+      return;
+    }
     // Prefer the toggle: after a user-initiated collapse it is the control that
     // caused the change. It is unmounted after a shrink, so fall back to the
     // panel container, which is focusable precisely for this.
@@ -266,16 +284,26 @@ export function AdminAttentionPanel({ items, access }: AdminAttentionPanelProps)
   }, [visibleKeySignature, isExpanded]);
 
   // React's onFocus/onBlur map to focusin/focusout, so these fire for anything
-  // inside the panel. The relatedTarget check keeps the flag set while focus
-  // moves *between* rows, and clears it only on a genuine exit.
-  const handleFocusCapture = useCallback(() => {
+  // inside the panel.
+  const handleFocusCapture = useCallback((event: FocusEvent<HTMLDivElement>) => {
     hasFocusWithinRef.current = true;
+    lastFocusedRef.current = event.target as Element | null;
   }, []);
 
   const handleBlurCapture = useCallback((event: FocusEvent<HTMLDivElement>) => {
     const next = event.relatedTarget as Node | null;
-    if (!next || !event.currentTarget.contains(next)) {
+    // Only a move to a node genuinely outside the panel counts as an exit. A
+    // null `relatedTarget` is deliberately *not* treated as one: that is what a
+    // real browser reports when the focused row is removed, firing focusout
+    // synchronously before the layout effect above runs, so clearing here would
+    // suppress the very recovery this flag gates. (jsdom fires no event at all
+    // on removal, so that path is only observable when dispatched explicitly —
+    // the bounds suite does exactly that.) Preserving the flag is safe because
+    // recovery additionally requires focus to be on <body> and the previously
+    // focused node to have left the document.
+    if (next && !event.currentTarget.contains(next)) {
       hasFocusWithinRef.current = false;
+      lastFocusedRef.current = null;
     }
   }, []);
 
@@ -285,6 +313,7 @@ export function AdminAttentionPanel({ items, access }: AdminAttentionPanelProps)
     <div
       ref={containerRef}
       tabIndex={-1}
+      aria-labelledby={labelledBy}
       onFocus={handleFocusCapture}
       onBlur={handleBlurCapture}
       className="flex flex-col gap-2 focus:outline-none"

@@ -436,6 +436,82 @@ describe('Admin Control Center attention bounds (#2517)', () => {
       expect(refresh).toHaveFocus();
       expect(screen.getByTestId('admin-hub-attention-panel')).not.toHaveFocus();
     });
+
+    it('recovers focus when the browser fires focusout on the removed row before the effect runs', async () => {
+      const user = userEvent.setup();
+      const { queryClient } = await renderWithAttention(makeAttention(25));
+
+      await user.click(screen.getByTestId('admin-hub-attention-toggle'));
+
+      const rows = screen.getAllByTestId('admin-hub-attention-item');
+      const deepLink = within(rows[rows.length - 1]).getByRole('link');
+      deepLink.focus();
+
+      // jsdom silently repoints activeElement to <body> when the focused node
+      // is removed and fires *no* focus events. A real browser fires focusout
+      // with a null relatedTarget synchronously during the mutation, before
+      // layout effects run. Dispatch it explicitly so this asserts the
+      // browser's ordering rather than jsdom's convenient omission — the panel
+      // must not read that blur as "the user left" and skip the repair.
+      act(() => {
+        deepLink.dispatchEvent(
+          new FocusEvent('focusout', { bubbles: true, relatedTarget: null }),
+        );
+      });
+
+      await backgroundRefresh(queryClient, makeAttention(2));
+
+      await waitFor(() => {
+        expect(visibleRowCount()).toBe(2);
+      });
+      expect(document.body).not.toHaveFocus();
+      expect(screen.getByTestId('admin-hub-attention-panel')).toHaveFocus();
+    });
+
+    it('leaves focus on the document when the user parked it there and their row survives', async () => {
+      const user = userEvent.setup();
+      const { queryClient } = await renderWithAttention(makeAttention(25));
+
+      await user.click(screen.getByTestId('admin-hub-attention-toggle'));
+
+      // `attention-0` is in every fixture, so it survives the shrink below.
+      const firstLink = within(screen.getAllByTestId('admin-hub-attention-item')[0]).getByRole(
+        'link',
+      );
+      firstLink.focus();
+
+      // Clicking non-focusable page background blurs to <body> with a null
+      // relatedTarget — at blur time that is indistinguishable from a removal,
+      // which is why recovery re-checks whether the node actually left the
+      // document. It did not, so this focus placement is the user's and stands.
+      act(() => {
+        firstLink.dispatchEvent(
+          new FocusEvent('focusout', { bubbles: true, relatedTarget: null }),
+        );
+        firstLink.blur();
+      });
+      expect(document.body).toHaveFocus();
+
+      await backgroundRefresh(queryClient, makeAttention(2));
+
+      await waitFor(() => {
+        expect(visibleRowCount()).toBe(2);
+      });
+      expect(document.body).toHaveFocus();
+      expect(screen.getByTestId('admin-hub-attention-panel')).not.toHaveFocus();
+    });
+
+    it('names the panel container so focus landing there is announced', async () => {
+      await renderWithAttention(makeAttention(4));
+
+      expect(screen.getByTestId('admin-hub-attention-panel')).toHaveAttribute(
+        'aria-labelledby',
+        'admin-hub-attention-heading',
+      );
+      expect(document.getElementById('admin-hub-attention-heading')).toHaveTextContent(
+        /needs attention/i,
+      );
+    });
   });
 
   describe('narrow viewport', () => {

@@ -157,9 +157,11 @@ navigates straight to the badge cannot read a cached status as a live one.
 collapses the list and when a background poll shrinks the feed below the cap
 (which unmounts the toggle too). If focus was inside those rows it would
 otherwise fall to the document body. The panel restores it — to the toggle when
-that still exists, otherwise to the panel container. Recovery is conditional on
-focus having been inside the panel, so a poll can never pull focus away from
-whatever the operator was actually doing.
+that still exists, otherwise to the named panel container. Recovery is
+conditional on focus having been inside the panel *and* on the element that held
+it having actually left the document, so a poll can never pull focus away from
+whatever the operator was actually doing, nor from a spot they deliberately
+clicked.
 
 The final band contains only permission-filtered destinations. **Operations**
 lists the day-to-day shortcuts: System Status, Workers & Jobs (opened on the

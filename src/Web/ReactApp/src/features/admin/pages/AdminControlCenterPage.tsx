@@ -438,6 +438,7 @@ export function AdminControlCenterPage() {
               <AdminAttentionPanel
                 items={data.attention}
                 access={{ hasRole, hasPermission }}
+                labelledBy="admin-hub-attention-heading"
               />
             )}
           </AdminSection>
