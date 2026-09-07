@@ -627,6 +627,55 @@ final class PrinterDetailViewModelTests: XCTestCase {
         )
     }
 
+    /// Hicks review finding 14: a confirmed server-side clear must survive a
+    /// FAILED post-clear `loadPrinter()` refresh. `loadPrinter()`'s failure
+    /// path leaves `printer` untouched, so without an explicit local
+    /// override the pre-clear snapshot's `spoolInfo.hasActiveSpool == true`
+    /// would win in `effectiveSpoolInfo` and resurrect the very assignment
+    /// the server just confirmed cleared.
+    func testClearActiveSpoolAssignmentOverridesStalePrinterSnapshotWhenReloadFails() async throws {
+        let assignedPrinterJSON = """
+        {
+            "id": "660e8400-e29b-41d4-a716-446655440001",
+            "rowVersion": "AQIDBA==",
+            "name": "Ender 3",
+            "backend": "Moonraker",
+            "backendPort": 7125,
+            "inMaintenance": false,
+            "isEnabled": true,
+            "isOnline": true,
+            "spoolInfo": {
+                "hasActiveSpool": true,
+                "activeSpoolId": 42
+            }
+        }
+        """
+        let printer = try TestData.decodePrinter(from: assignedPrinterJSON)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        guard let before = viewModel.effectiveSpoolInfo, before.hasActiveSpool else {
+            XCTFail("Setup: printer must start with an active spool assignment")
+            return
+        }
+
+        // The reload `clearActiveSpoolAssignment()` triggers must fail,
+        // while `setActiveSpool` itself still succeeds.
+        mockService.getHandler = { _ in throw NetworkError.invalidResponse }
+
+        await viewModel.clearActiveSpoolAssignment()
+
+        guard let called = mockService.setActiveSpoolCalledWith else {
+            XCTFail("setActiveSpool must still be called")
+            return
+        }
+        XCTAssertNil(called.spoolId)
+        XCTAssertNil(mockService.unloadFilamentCalledWith)
+        XCTAssertFalse(
+            viewModel.effectiveSpoolInfo?.hasActiveSpool ?? true,
+            "A confirmed server-side clear must not be resurrected by a failed post-clear reload"
+        )
+    }
+
     // MARK: - Destructive Action Confirmation
 
     func testRequestCancelShowsConfirmation() {

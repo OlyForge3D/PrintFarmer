@@ -92,32 +92,42 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertFalse(presentation.visibleKinds.contains(.emergencyStop))
     }
 
-    func testRunActionMappingHidesEveryActionWhenOfflineWhilePrinting() {
-        // The original `actionSection` (which held Pause/Resume/Cancel/Stop
-        // and Emergency Stop together) only rendered at all `if
-        // printer.isOnline`. A printer reporting offline while retaining a
-        // stale `printing` state must not expose Stop (or any other run
-        // action, including Emergency Stop) as if it were still reachable.
+    func testRunActionMappingWhileOfflineAndPrintingKeepsPauseAndCancelButHidesStopAndEmergency() {
+        // Hicks review finding 13: restores parity with the ORIGINAL
+        // `primaryControlsRow` (header), which exposed Pause/Resume/Cancel
+        // purely from print state and the pending guard, with NO online
+        // check at all. Only the original `actionSection`'s Stop and
+        // Emergency Stop lived behind `if printer.isOnline`. A blanket
+        // `isOnline` gate over every descriptor (an earlier revision of
+        // this mapping) was stricter than either original surface for
+        // Pause/Resume/Cancel.
         let presentation = PrinterDetailRunActionMapping.presentation(
             isOnline: false, isPrinting: true, isPaused: false, isPerformingAction: false
         )
-        XCTAssertTrue(presentation.visibleKinds.isEmpty)
+        XCTAssertEqual(presentation.visibleKinds, [.pause, .cancel])
         XCTAssertNil(presentation.descriptor(for: .stop))
-        XCTAssertNil(presentation.descriptor(for: .cancel))
         XCTAssertNil(presentation.descriptor(for: .emergencyStop))
+        XCTAssertTrue(presentation.shouldFireCallback(for: .pause))
+        XCTAssertTrue(presentation.shouldFireCallback(for: .cancel))
         XCTAssertFalse(presentation.shouldFireCallback(for: .stop))
         XCTAssertFalse(presentation.shouldFireCallback(for: .emergencyStop))
     }
 
-    func testRunActionMappingHidesEveryActionWhenOfflineWhilePaused() {
+    func testRunActionMappingWhileOfflineAndPausedKeepsResumeAndCancelButHidesStopAndEmergency() {
         let presentation = PrinterDetailRunActionMapping.presentation(
             isOnline: false, isPrinting: false, isPaused: true, isPerformingAction: false
         )
-        XCTAssertTrue(presentation.visibleKinds.isEmpty)
-        XCTAssertNil(presentation.descriptor(for: .resume))
+        XCTAssertEqual(presentation.visibleKinds, [.resume, .cancel])
         XCTAssertNil(presentation.descriptor(for: .stop))
         XCTAssertNil(presentation.descriptor(for: .emergencyStop))
-        XCTAssertFalse(presentation.shouldFireCallback(for: .resume))
+    }
+
+    func testRunActionMappingWhileOfflineAndPausedResumeAndCancelStillFireCallbacks() {
+        let presentation = PrinterDetailRunActionMapping.presentation(
+            isOnline: false, isPrinting: false, isPaused: true, isPerformingAction: false
+        )
+        XCTAssertTrue(presentation.shouldFireCallback(for: .resume))
+        XCTAssertTrue(presentation.shouldFireCallback(for: .cancel))
         XCTAssertFalse(presentation.shouldFireCallback(for: .stop))
     }
 
@@ -280,12 +290,70 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(state, .failed("network down on refresh"))
     }
 
+    func testCoverageStateMappingFailedWhenFeatureDisabledFlagStaleAfterLaterNetworkError() {
+        // Hicks review finding 12: `commitError` clears neither
+        // `isFeatureDisabled` nor `isPrinterNotFound`, so a sticky
+        // `isFeatureDisabled` left over from an OLDER commit must not
+        // override a LATER network failure. disabled -> network failure
+        // must report `.failed`, not resurrect the stale `.disabled`.
+        let state = PrinterDetailFilamentCoverageStateMapping.coverageState(
+            featureEnabled: true, isFeatureDisabled: true, isPrinterNotFound: false,
+            hasCoverage: false, lastLoadError: "network down after feature-disabled commit"
+        )
+        XCTAssertEqual(state, .failed("network down after feature-disabled commit"))
+    }
+
+    func testCoverageStateMappingFailedWhenNotFoundFlagStaleAfterLaterNetworkError() {
+        // Hicks review finding 12: not-found -> network failure must report
+        // `.failed`, not resurrect the stale `.unavailable`.
+        let state = PrinterDetailFilamentCoverageStateMapping.coverageState(
+            featureEnabled: true, isFeatureDisabled: false, isPrinterNotFound: true,
+            hasCoverage: false, lastLoadError: "network down after not-found commit"
+        )
+        XCTAssertEqual(state, .failed("network down after not-found commit"))
+    }
+
     func testCoverageStateMappingLoadingWhenNothingConcludedYet() {
         let state = PrinterDetailFilamentCoverageStateMapping.coverageState(
             featureEnabled: true, isFeatureDisabled: false, isPrinterNotFound: false,
             hasCoverage: false, lastLoadError: nil
         )
         XCTAssertEqual(state, .loading)
+    }
+
+    // MARK: - Controls owner mapping (Hicks review finding 15)
+
+    func testControlsOwnerMappingSkipsBuildWhenControlsUnavailable() {
+        // Avoid a new capability request for a Status-only visit — the
+        // common case, since Advanced Printer Controls defaults off.
+        XCTAssertFalse(PrinterDetailControlsOwnerMapping.shouldBuildOwner(
+            existingOwnerPrinterID: nil, printerID: UUID(), controlsAvailable: false
+        ))
+    }
+
+    func testControlsOwnerMappingBuildsWhenControlsAvailableAndNoExistingOwner() {
+        let printerID = UUID()
+        XCTAssertTrue(PrinterDetailControlsOwnerMapping.shouldBuildOwner(
+            existingOwnerPrinterID: nil, printerID: printerID, controlsAvailable: true
+        ))
+    }
+
+    func testControlsOwnerMappingRetainsExistingOwnerForSamePrinterEvenWhenAvailableAgain() {
+        // An owner already built for this printer must survive a transition
+        // back to unavailable (offline, or the safety toggle revoked) and
+        // must not be rebuilt just because availability flips back to true.
+        let printerID = UUID()
+        XCTAssertFalse(PrinterDetailControlsOwnerMapping.shouldBuildOwner(
+            existingOwnerPrinterID: printerID, printerID: printerID, controlsAvailable: true
+        ))
+    }
+
+    func testControlsOwnerMappingReplacesOwnerWhenPrinterTargetChanges() {
+        let oldID = UUID()
+        let newID = UUID()
+        XCTAssertTrue(PrinterDetailControlsOwnerMapping.shouldBuildOwner(
+            existingOwnerPrinterID: oldID, printerID: newID, controlsAvailable: true
+        ))
     }
 
     // MARK: - Filament staleness mapping (Bishop review finding 6)

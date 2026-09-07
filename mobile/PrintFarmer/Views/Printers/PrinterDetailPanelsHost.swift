@@ -123,15 +123,16 @@ struct PrinterDetailPanelsHost<Status: View, Controls: View>: View {
 /// without hosting a view or a live view model.
 enum PrinterDetailRunActionMapping {
     /// - Parameters:
-    ///   - isOnline: Printer's current connection state. This is the outer
-    ///     gate for every descriptor: the original `actionSection` (which
-    ///     held Pause/Resume/Cancel/Stop/Emergency Stop together) only
-    ///     rendered at all `if printer.isOnline`, so a printer that reports
-    ///     offline while retaining a stale `printing`/`paused` state must
-    ///     never expose Stop (or any other run action) as if it were still
-    ///     reachable. Emergency Stop is never a special case here — it is
-    ///     gated by the same `isOnline` check as everything else, it is
-    ///     just never additionally gated by `isPerformingAction`.
+    ///   - isOnline: Per-action gate restoring the ORIGINAL, pre-#2522 parity
+    ///     (Hicks review finding 13): the old `primaryControlsRow` (header)
+    ///     exposed Pause/Resume/Cancel purely from `isPrinting`/`isPaused`/
+    ///     `isPerformingAction`, with NO online check at all, while only the
+    ///     old `actionSection`'s Stop and Emergency Stop lived behind `if
+    ///     printer.isOnline`. A blanket `isOnline` gate over every
+    ///     descriptor (an earlier revision of this mapping) was stricter
+    ///     than either original surface for Pause/Resume/Cancel. So: Pause,
+    ///     Resume and Cancel are gated ONLY on print state and the pending
+    ///     guard; Stop and Emergency Stop additionally require `isOnline`.
     ///   - isPrinting: Mirrors `PrinterDetailViewModel.isPrinting`.
     ///   - isPaused: Mirrors `PrinterDetailViewModel.isPaused`.
     ///   - isPerformingAction: Mirrors `PrinterDetailViewModel.isPerformingAction`,
@@ -145,7 +146,6 @@ enum PrinterDetailRunActionMapping {
         isPaused: Bool,
         isPerformingAction: Bool
     ) -> PrinterRunActionPresentation {
-        guard isOnline else { return .empty }
         var descriptors: [PrinterRunActionDescriptor] = []
         if isPrinting {
             descriptors.append(.init(kind: .pause, isEnabled: !isPerformingAction))
@@ -155,9 +155,13 @@ enum PrinterDetailRunActionMapping {
         }
         if isPrinting || isPaused {
             descriptors.append(.init(kind: .cancel, isEnabled: !isPerformingAction))
-            descriptors.append(.init(kind: .stop, isEnabled: !isPerformingAction))
+            if isOnline {
+                descriptors.append(.init(kind: .stop, isEnabled: !isPerformingAction))
+            }
         }
-        descriptors.append(.init(kind: .emergencyStop, isEnabled: true))
+        if isOnline {
+            descriptors.append(.init(kind: .emergencyStop, isEnabled: true))
+        }
         return PrinterRunActionPresentation(descriptors: descriptors)
     }
 }
@@ -223,22 +227,39 @@ enum PrinterDetailFilamentActionMapping {
 
 /// Pure mapping from `PrinterFilamentCoverageViewModel`'s published fields to
 /// `PrinterFilamentPresentation.CoverageState`. Extracted so the precedence
-/// (capability gate > feature-disabled > not-found > load error > success >
+/// (capability gate > load error > feature-disabled > not-found > success >
 /// loading) is unit-testable without a live, SignalR-wired view model.
 ///
-/// `lastLoadError` takes precedence over `hasCoverage` UNCONDITIONALLY, not
-/// only when coverage is absent (Hicks review finding 9). In the real
-/// `PrinterFilamentCoverageViewModel`, `commitSuccess` always clears
-/// `lastLoadError`, so the only way both are non-nil/true at once is a
-/// *retained* coverage snapshot from an earlier successful load followed by a
-/// LATER canonical refresh that failed via `commitError` — which sets
-/// `lastLoadError` but deliberately never clears `coverage`. Reporting
-/// `.available` in that state would present stale, unconfirmed data as
-/// current with every filament action left enabled. Reporting `.failed`
-/// instead makes `PrinterFilamentPresentation` mark the printer stale (its
-/// `isStale` computation treats any non-`.available`/non-`.disabled` state
-/// with retained `coverage` as stale), which renders the "Last confirmed"
-/// wording and empties `supportedActions`.
+/// `lastLoadError` takes precedence over EVERY other ViewModel-sourced flag,
+/// not just `hasCoverage` (Hicks review findings 9 and 12). In the real
+/// `PrinterFilamentCoverageViewModel`, `commitSuccess`, `commitFeatureDisabled`
+/// and `commitNotFound` all clear the other two flags/`lastLoadError` on
+/// commit, but `commitError` clears NONE of `isFeatureDisabled`/
+/// `isPrinterNotFound` — it only sets `lastLoadError`. So whenever
+/// `lastLoadError` is non-nil, it always reflects the single MOST RECENT
+/// commit's outcome; `isFeatureDisabled`/`isPrinterNotFound` being still
+/// `true` alongside it is leftover sticky state from an OLDER commit that a
+/// later network failure did not (and structurally cannot) clear. Only
+/// `featureEnabled` — the live external capability gate, not part of the
+/// ViewModel's commit history — outranks a load error: that one genuinely
+/// describes the current moment, not a stale commit.
+///
+/// Concretely: a printer whose feature was disabled and is later found to
+/// have failed a refresh (disabled → network failure) must report
+/// `.failed`, not `.disabled`; a printer that was not-found and later fails
+/// a refresh (not-found → network failure) must also report `.failed`, not
+/// `.unavailable`. Reporting the stale flag instead would tell the operator
+/// the feature is off, or the printer doesn't exist, when the true, most
+/// recent fact is simply "the last refresh attempt failed."
+///
+/// Retained `hasCoverage` alongside a load error is the remaining case this
+/// precedence protects: reporting `.available` there would present stale,
+/// unconfirmed data as current with every filament action left enabled.
+/// Reporting `.failed` instead makes `PrinterFilamentPresentation` mark the
+/// printer stale (its `isStale` computation treats any
+/// non-`.available`/non-`.disabled` state with retained `coverage` as
+/// stale), which renders the "Last confirmed" wording and empties
+/// `supportedActions`.
 enum PrinterDetailFilamentCoverageStateMapping {
     static func coverageState(
         featureEnabled: Bool,
@@ -248,11 +269,36 @@ enum PrinterDetailFilamentCoverageStateMapping {
         lastLoadError: String?
     ) -> PrinterFilamentPresentation.CoverageState {
         guard featureEnabled else { return .disabled }
+        if let lastLoadError { return .failed(lastLoadError) }
         if isFeatureDisabled { return .disabled }
         if isPrinterNotFound { return .unavailable }
-        if let lastLoadError { return .failed(lastLoadError) }
         if hasCoverage { return .available }
         return .loading
+    }
+}
+
+// MARK: - Controls owner mapping (issue #2522, Hicks review finding 15)
+
+/// Pure decision for whether the persistent Controls owner
+/// (`PrinterControlsViewModel`, hoisted above the pager in
+/// `PrinterDetailView` per finding 10) should be built or replaced.
+///
+/// Construction is gated on `controlsAvailable` so a Status-only visit — the
+/// common case, since Advanced Printer Controls defaults off — never
+/// dispatches a capability request nobody can reach. Once an owner exists
+/// for the CURRENT printer, this always says "no" again even if
+/// `controlsAvailable` is (still or again) `true` — an owner already built
+/// must be retained across a later transition back to unavailable (offline,
+/// or the safety toggle revoked) and forward again once more; this function
+/// only ever authorizes a fresh build, never a teardown.
+enum PrinterDetailControlsOwnerMapping {
+    static func shouldBuildOwner(
+        existingOwnerPrinterID: UUID?,
+        printerID: UUID,
+        controlsAvailable: Bool
+    ) -> Bool {
+        guard controlsAvailable else { return false }
+        return existingOwnerPrinterID != printerID
     }
 }
 

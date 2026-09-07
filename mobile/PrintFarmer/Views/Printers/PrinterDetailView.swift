@@ -319,6 +319,23 @@ struct PrinterDetailView: View {
         )
     }
 
+    /// Builds (or replaces) the persistent Controls owner exactly when
+    /// `PrinterDetailControlsOwnerMapping.shouldBuildOwner` says to (issue
+    /// #2522, Hicks review finding 15): never for a Status-only visit, and
+    /// never a second time for the same printer merely because Controls
+    /// became available again after a temporary offline/toggle-revoked gap.
+    @MainActor
+    private func ensureControlsOwnerIfAvailable(for printer: Printer) async {
+        guard PrinterDetailControlsOwnerMapping.shouldBuildOwner(
+            existingOwnerPrinterID: controlsViewModel?.printer.id,
+            printerID: printer.id,
+            controlsAvailable: controlsAvailable(for: printer)
+        ) else { return }
+        let vm = PrinterControlsViewModel(printerService: services.printerService, printer: printer)
+        controlsViewModel = vm
+        await vm.loadCapabilities()
+    }
+
     private func printerContent(_ printer: Printer) -> some View {
         PrinterDetailPanelsHost(
             selection: $selectedPanel,
@@ -328,17 +345,25 @@ struct PrinterDetailView: View {
         )
         // Owner lives above the pager (Hicks review finding 10): built once
         // per printer/server target and never torn down merely because the
-        // Controls page's `if controlsAvailable` mount toggles. `.task(id:)`
-        // restarts only if `printer.id` itself changes, and the inner guard
-        // additionally replaces a stale owner rather than trusting `nil`
-        // alone, matching "replace the owner when the real server/printer
-        // target changes."
+        // Controls page's `if controlsAvailable` mount toggles.
+        //
+        // Construction (and its `loadCapabilities()` fetch) is gated on
+        // `controlsAvailable(for:)` (Hicks review finding 15): Advanced
+        // Printer Controls defaults off, so a Status-only visit — the
+        // common case — must never dispatch a capability request nobody
+        // can reach. `.task(id:)` covers the case where controls are
+        // already available on first render; `.onChange` covers a LATER
+        // transition to available (the toggle is enabled, or the printer
+        // reconnects) without waiting for `printer.id` to change. Neither
+        // path ever clears `controlsViewModel`, so an owner already built
+        // is retained across a subsequent transition back to unavailable.
         .task(id: printer.id) {
-            if controlsViewModel?.printer.id != printer.id {
-                let vm = PrinterControlsViewModel(printerService: services.printerService, printer: printer)
-                controlsViewModel = vm
-                await vm.loadCapabilities()
-            }
+            await ensureControlsOwnerIfAvailable(for: printer)
+        }
+        .onChange(of: controlsAvailable(for: printer)) { _, isAvailable in
+            guard isAvailable else { return }
+            let task = Task { await ensureControlsOwnerIfAvailable(for: printer) }
+            activeTasks.append(task)
         }
         // Forwards every meaningful live snapshot to the owner regardless of
         // whether the Controls page is currently mounted, so pending

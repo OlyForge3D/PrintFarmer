@@ -519,6 +519,22 @@ final class PrinterDetailViewModel {
             )
             guard isViewActive else { return }
             lastSetSpoolInfo = nil
+            // Confirmed-cleared local override (issue #2522, Hicks review
+            // finding 14): `loadPrinter()` below can itself fail (network
+            // hiccup) without touching `printer` at all, leaving the
+            // PRE-clear snapshot's `spoolInfo.hasActiveSpool == true` in
+            // place. `effectiveSpoolInfo` prioritizes `printer?.spoolInfo`
+            // over `lastSetSpoolInfo` whenever it reports an active spool,
+            // so clearing only `lastSetSpoolInfo` above cannot by itself
+            // prevent a failed refresh from resurrecting the very
+            // assignment the server just confirmed cleared. Mutate the
+            // retained snapshot directly so the clear survives a refresh
+            // failure; a SUCCESSFUL `loadPrinter()` below still overwrites
+            // this with the server's own current truth.
+            if var updatedPrinter = printer, updatedPrinter.spoolInfo?.hasActiveSpool == true {
+                updatedPrinter.spoolInfo = PrinterSpoolInfo(hasActiveSpool: false)
+                printer = updatedPrinter
+            }
             await loadPrinter()
         } catch {
             guard isViewActive else { return }
