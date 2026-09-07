@@ -26,10 +26,15 @@ The settings routes share one engine with route-locked scopes:
 | `/admin/workers` | None | `dispatch-settings:manage` | WorkerManagementPage |
 | `/admin/login-audit` | None | `system_settings:admin` | LoginAuditPage |
 | `/admin/data-management` | None | `data_management:admin` | DataManagementPage |
+| `/admin/power-monitors` | None | `power_monitors:admin` | PowerMonitorSettingsPage |
 
-Operational routes use `AdminDestinationRoute` and `AdminPageShell`. `/admin/settings` operates
-under `system` scope with unified grouped direct-leaf navigation, single-pane mounting (no
-horizontal settings sub-tabs or scope switcher), accessible mobile drawer navigation, in-memory draft transition safety, and single page-level save presentation. Personal `/settings` (`user` scope) remains category and sub-tab workspace navigation.
+Operational routes use `AdminDestinationRoute` and `AdminPageShell`. `/admin/settings`
+operates under `system` scope with unified grouped direct-leaf navigation,
+single-pane mounting (no horizontal settings sub-tabs or scope switcher),
+accessible mobile drawer navigation, persistent cross-group workspace search,
+in-memory draft transition safety, and single page-level save presentation.
+Personal `/settings` (`user` scope) remains a separate profile workspace with
+category and sub-tab navigation.
 
 ## Grouped Direct-Leaf Navigation & Single-Pane Mounting
 
@@ -37,14 +42,14 @@ Under `/admin/settings` (`system` scope), settings navigation is organized into 
 
 1. **Farm**: Farm Defaults (`gen-farm`)
 2. **Printing & slicing**: Defaults (`slicing-defaults`), Bed Types (`slicing-bed-types`), Slicer Profiles (`slicing-profiles`)
-3. **Hardware**: Locations (`hw-locations`), Printer Groups (`hw-printer-groups`), Cameras (`hw-cameras`), NFC Devices (`hw-nfc`), NFC Bindings (`hw-nfc-bindings`), Custom Fields (`hw-custom-fields`), Power Monitors (`hw-power-monitors`)
+3. **Hardware**: Locations (`hw-locations`), Printer Groups (`hw-printer-groups`), Cameras (`hw-cameras`), Power Monitors (`hw-power-monitors`), NFC Devices (`hw-nfc`), NFC Bindings (`hw-nfc-bindings`), Custom Fields (`hw-custom-fields`)
 4. **Automation & costs**: Automation & Costs (`auto-costs`)
 5. **Integrations**: External Services (`int-connections`), Webhooks (`int-webhooks`)
 6. **People & access**: User Accounts (`users-accounts`), Roles & Permissions (`users-roles`)
-7. **Organization**: Tags (`data-tags`), Catalog (`data-catalog`)
-8. **System**: System Config (`gen-system`), Quotas (`quotas`)
+7. **Organization**: Tags (`data-tags`), Catalog (`data-catalog`), Quotas (`quotas`)
+8. **System**: System Config (`gen-system`)
 
-In `system` scope, exactly ONE content page is mounted at a time in a single-pane layout. Horizontal sub-tabs and scope switchers are hidden for `system` scope to ensure clean, focused leaf editing. Standalone links (Locations, Catalog, Power Monitors) remain correctly labeled direct links.
+In `system` scope, exactly ONE settings-shell content page is mounted at a time in a single-pane layout. Horizontal sub-tabs and scope switchers are hidden for `system` scope to ensure clean, focused leaf editing. Registry destinations in these groups may instead be standalone direct links: Locations, Catalog, and Power Monitors remain correctly labeled navigation entries in the sidebar, admin hub, and search surfaces without becoming settings-shell content.
 
 ## Mobile Grouped Navigation
 
@@ -96,9 +101,9 @@ Categories are defined in `SETTINGS_CATEGORIES` (`src/Web/ReactApp/src/features/
   - `slicing` → Defaults, Bed Types, Slicer Profiles
   - `hardware` → Cameras, NFC Devices, Printer Groups, NFC Bindings, Custom Fields
   - `integrations` → External Services, Webhooks
-  - `quotas` (implemented QuotaManagementPage)
-  - `users` -> User Accounts, Roles & Permissions
-  - `data` -> Tags
+  - `quotas` → Print Quotas (`QuotaManagementPage`)
+  - `users` → User Accounts, Roles & Permissions
+  - `data` → Tags
 
 Access is defined once in `ADMIN_DESTINATIONS`: resource permissions, integration
 any-of grants, and the farm_admin-only Slicer Profiles exception. Neither the outlet
@@ -109,13 +114,14 @@ to personal content.
 The registry classifies destinations as hub/configuration/operational, with configuration
 display groups Farm, Printing & slicing, Hardware, Automation & costs, Integrations,
 People & access, Organization and System. Stable IDs, including overview
-`actionDestinationId`, do not change. The group metadata supports downstream presentation;
-it does not replace the intermediate category chrome yet.
+`actionDestinationId`, do not change. These display groups are the admin settings
+navigation; they replace the earlier intermediate category-first admin presentation.
 
 Power Monitors (`/admin/power-monitors`), Locations (`/locations`) and Catalog
 (`/catalog`) stay standalone configuration links. They count toward workspace/hub
-availability even without `isHubTile`. Standalone-only users see their authorized links
-and an honest no-editor state without `tab`, `sub` or `field` editor state.
+availability even without rendering inside the settings shell. Standalone-only
+users see their authorized links and an honest no-editor state without `tab`,
+`sub` or `field` editor state.
 
 Categories/sub-pages that render *metadata-driven* settings (Farm Defaults, System Config,
 Automation & Costs, External Services, Slicing Defaults) do so by mounting `<SettingsPage
@@ -373,9 +379,9 @@ Keyboard handler details:
 
 ## Persistent Workspace Search (#2505)
 
-Admin routes (`/admin/settings` and every route under `AdminPageShell`) render a
-**persistent** search box in the page header — distinct from, and complementary to, the
-modal `Ctrl+K` command palette above. It never opens as an overlay: it's always mounted,
+The admin settings shell (`/admin/settings`) renders a **persistent** search box in its
+page header — distinct from, and complementary to, the modal `Ctrl+K` command palette
+above. It never opens as an overlay: on admin settings routes it's always mounted,
 always focusable, and its results appear as an inline listbox beneath the input.
 
 | | Command Palette (`Ctrl+K`) | Persistent Workspace Search |
@@ -536,7 +542,9 @@ The settings and admin shell routes are:
 
 - `/settings` for user settings.
 - `/admin/settings?tab=<category>&sub=<page>` for system settings.
-- `/admin/status`, `/admin/workers`, `/admin/login-audit`, `/admin/data-management` for operations.
+- `/admin/status`, `/admin/workers`, `/admin/login-audit`, `/admin/data-management`
+  for operations.
+- `/admin/power-monitors` for standalone Power Monitors configuration.
 
 Use additional query parameters only when the destination owns them. For example, the
 canonical slice-job list is
