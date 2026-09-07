@@ -365,7 +365,20 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const registerSection = useCallback((section: RegisteredSection | null, sectionId?: string) => {
     if (section) {
       registeredSectionsRef.current.set(section.id, section);
-      setRegisteredSections((prev) => ({ ...prev, [section.id]: section }));
+      setRegisteredSections((prev) => {
+        const existing = prev[section.id];
+        if (
+          existing &&
+          existing.id === section.id &&
+          existing.name === section.name &&
+          existing.isDirty === section.isDirty &&
+          existing.onSave === section.onSave &&
+          existing.onDiscard === section.onDiscard
+        ) {
+          return prev;
+        }
+        return { ...prev, [section.id]: section };
+      });
     } else {
       const idToRemove = sectionId || (section as unknown as { id?: string })?.id;
       if (idToRemove) {
