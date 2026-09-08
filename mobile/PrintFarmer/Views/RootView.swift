@@ -290,7 +290,7 @@ struct RootView: View {
     /// event. Every `RootView` lifecycle hook that touches a pending external
     /// scan request goes through here so the wiring is one testable path (#2480).
     private func handleExternalScanLifecycle(_ event: ExternalScanRouting.LifecycleEvent) {
-        ExternalScanRouting.apply(
+        ExternalScanRouting.applyFromApp(
             event,
             router: router,
             activeServerID: serverRegistry.activeServerID,
@@ -300,7 +300,7 @@ struct RootView: View {
     }
 
     private func routePendingExternalScan() {
-        ExternalScanRouting.route(
+        ExternalScanRouting.routeFromApp(
             router: router,
             activeServerID: serverRegistry.activeServerID,
             isShowingMainContent: isShowingMainContent,
