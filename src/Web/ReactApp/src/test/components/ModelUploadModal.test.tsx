@@ -63,7 +63,7 @@ describe('ModelUploadModal', () => {
     it('should show progress capped at 95% during network upload', async () => {
       const mockFile = new File(['test content'], 'test.stl', { type: 'model/stl' });
       let progressCallback: ((progress: number) => void) | undefined;
-      let resolveUpload: ((result: { id: string; url: string }) => void) | undefined;
+      let resolveUpload: ((value: { id: string; url: string }) => void) | undefined;
 
       // The 95% cap is a *transient* state: it exists only between the last
       // progress event and the upload promise resolving (which flips the item
@@ -101,10 +101,11 @@ describe('ModelUploadModal', () => {
       fireEvent.click(uploadButton);
 
       // The upload has started once the component has handed us its progress
-      // callback.
+      // callback, invoked with the selected file.
       await waitFor(() => {
-        expect(progressCallback).toBeDefined();
+        expect(slicerService.uploadModel).toHaveBeenCalledWith(mockFile, expect.any(Function));
       });
+      expect(progressCallback).toBeDefined();
 
       // Below the cap the raw progress is displayed verbatim.
       await act(async () => {

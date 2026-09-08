@@ -99,7 +99,9 @@ export function usePageTour({
     setTourSeen(tourId, false);
   }, [tourId]);
 
-  // Auto-start on first visit
+  // Auto-start on first visit. React to `autoStart` flips too so a same-page
+  // deep-link that adds `?field=` after mount can still cancel a pending first-
+  // visit timer before it steals focus from the targeted control.
   useEffect(() => {
     if (!autoStart || hasSeenTour) return;
 
@@ -109,9 +111,7 @@ export function usePageTour({
     }, 500);
 
     return () => clearTimeout(timer);
-    // Only run on mount — intentionally omitting startTour to avoid re-triggers
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [autoStart, hasSeenTour, startTour]);
 
   // Cleanup on unmount
   useEffect(() => {

@@ -93,6 +93,15 @@ describe('WorkspaceSearchResults', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 
+  it('does not emit a debounced self-commit on mount for a URL-seeded query', () => {
+    const onQueryCommit = vi.fn();
+    render(<WorkspaceSearchResults initialQuery="log" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />);
+
+    vi.advanceTimersByTime(250);
+
+    expect(onQueryCommit).not.toHaveBeenCalled();
+  });
+
   it('opens the listbox and ranks matches once focused with a non-empty query', () => {
     render(<WorkspaceSearchResults initialQuery="" onQueryCommit={vi.fn()} onSelect={vi.fn()} />);
 
@@ -114,9 +123,8 @@ describe('WorkspaceSearchResults', () => {
     fireEvent.change(input, { target: { value: 'sy' } });
     fireEvent.change(input, { target: { value: 'sys' } });
 
-    // The initial-mount effect commit (query === initialQuery === '') fires
-    // once immediately on mount; keystrokes so far must not have queued any
-    // further commit yet.
+    // Mount alone is inert; only the local edits above should schedule the
+    // debounced commit.
     expect(onQueryCommit).toHaveBeenCalledTimes(0);
 
     vi.advanceTimersByTime(199);
@@ -125,6 +133,25 @@ describe('WorkspaceSearchResults', () => {
     vi.advanceTimersByTime(1);
     expect(onQueryCommit).toHaveBeenCalledTimes(1);
     expect(onQueryCommit).toHaveBeenCalledWith('sys');
+  });
+
+  it('mirrors live query changes synchronously for explicit shell navigation', () => {
+    const onQueryChange = vi.fn();
+    render(
+      <WorkspaceSearchResults
+        initialQuery=""
+        onQueryChange={onQueryChange}
+        onQueryCommit={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.change(input, { target: { value: 'default' } });
+    expect(onQueryChange).toHaveBeenLastCalledWith('default');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(onQueryChange).toHaveBeenLastCalledWith('');
   });
 
   it('selects the highlighted result on Enter, passing the current input text', () => {
@@ -270,6 +297,25 @@ describe('WorkspaceSearchResults', () => {
     // value already matches) rather than silently reusing dropped tracking.
     rerender(<WorkspaceSearchResults initialQuery="log" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />);
     expect(input).toHaveValue('log');
+  });
+
+  it('does not self-commit an externally synced query just because the box was edited earlier', () => {
+    const onQueryCommit = vi.fn();
+    const { rerender } = render(
+      <WorkspaceSearchResults initialQuery="" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />,
+    );
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.change(input, { target: { value: 'log' } });
+    vi.advanceTimersByTime(200);
+    expect(onQueryCommit).toHaveBeenCalledTimes(1);
+    expect(onQueryCommit).toHaveBeenLastCalledWith('log');
+
+    rerender(<WorkspaceSearchResults initialQuery="printer" onQueryCommit={onQueryCommit} onSelect={vi.fn()} />);
+    expect(input).toHaveValue('printer');
+
+    vi.advanceTimersByTime(200);
+    expect(onQueryCommit).toHaveBeenCalledTimes(1);
   });
 
   it('shows a loading state while the index is fetching', () => {
