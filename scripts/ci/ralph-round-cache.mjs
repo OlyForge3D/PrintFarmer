@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -102,13 +102,29 @@ export async function readRoundCache(scope, options = {}) {
   }
 }
 
-async function acquireLock(lockFile, retries = 40) {
+async function acquireLock(lockFile, { retries = 40, retryMs = 10, staleLockMs = 5 * 60 * 1000 } = {}) {
   for (let attempt = 0; attempt < retries; attempt += 1) {
     try {
-      return await open(lockFile, 'wx');
+      const handle = await open(lockFile, 'wx');
+      await handle.writeFile(JSON.stringify({
+        pid: process.pid,
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + staleLockMs).toISOString(),
+      }));
+      return handle;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      try {
+        const metadata = JSON.parse(await readFile(lockFile, 'utf8'));
+        const expiresAt = Date.parse(metadata.expiresAt);
+        if (!Number.isNaN(expiresAt) && expiresAt < Date.now()) {
+          await rm(lockFile, { force: true });
+          continue;
+        }
+      } catch {
+        // A malformed or unreadable lock is not demonstrably stale.
+      }
+      await new Promise((resolve) => setTimeout(resolve, retryMs));
     }
   }
   throw new RalphCacheError('Another Ralph round still owns the cache lock.', 'LOCK_TIMEOUT');
@@ -118,8 +134,8 @@ export async function writeRoundCache(scope, cache, options = {}) {
   const file = cacheFileForScope(scope, options);
   await mkdir(path.dirname(file), { recursive: true });
   const lockFile = `${file}.lock`;
-  const lock = await acquireLock(lockFile);
-  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  const lock = await acquireLock(lockFile, options);
+  const temp = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await writeFile(temp, `${JSON.stringify(cache)}\n`, { encoding: 'utf8', flag: 'wx' });
     await rename(temp, file);
@@ -136,8 +152,8 @@ function priorityNumber(labels = []) {
   return match ? Number(match.slice(-1)) : 4;
 }
 
-export function orderReadyIssues(issues, edges) {
-  const byNumber = new Map(issues.map((issue) => [issue.number, issue]));
+export function orderReadyIssues(completeIssues, readyIssues, edges) {
+  const byNumber = new Map(completeIssues.map((issue) => [issue.number, issue]));
   const outward = new Map();
   for (const { blocker, blocked } of edges) {
     if (!outward.has(blocker)) outward.set(blocker, new Set());
@@ -155,7 +171,7 @@ export function orderReadyIssues(issues, edges) {
     }
     return result;
   };
-  return issues.map((issue) => {
+  return readyIssues.map((issue) => {
     const unblocks = descendants(issue.number);
     const inheritedPriority = Math.min(
       priorityNumber(issue.labels),
@@ -190,7 +206,14 @@ export function assessCleanupCandidate(candidate = {}, { now = Date.now(), settl
   else if (now - settledAt < settlingMs) reasons.push('settling period has not elapsed');
 
   if (candidate.pr) {
-    if (!['MERGED', 'CLOSED'].includes(candidate.pr.state)) reasons.push('PR is not terminal');
+    if (candidate.pr.state === 'MERGED') {
+      if (candidate.pr.mergeCommitVerifiedOnDevelopment !== true) reasons.push('merge commit is not verified on origin/development');
+      if (candidate.pr.headPreservedAfterMerge !== true) reasons.push('current HEAD preservation after merge is unknown');
+    } else if (candidate.pr.state === 'CLOSED') {
+      if (candidate.finalReport?.closedWithoutMerge !== true) reasons.push('CLOSED WITHOUT MERGE report is absent');
+      if (!candidate.finalReport?.closureReason) reasons.push('closed-without-merge reason is absent');
+      if (candidate.pr.linkedIssueDispositionVerified !== true) reasons.push('linked issue disposition is unverified');
+    } else reasons.push('PR is not terminal');
     if (candidate.pr.commitsAfterMergeKnown !== true) reasons.push('post-merge commit state is unknown');
     else if ((candidate.pr.commitsAfterMerge || []).length > 0) reasons.push('commits were added after PR merge');
   } else if (candidate.noPrDeliverable?.completed !== true || candidate.noPrDeliverable?.verified !== true) {

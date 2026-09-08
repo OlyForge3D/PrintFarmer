@@ -93,6 +93,22 @@ test('serializes concurrent rounds without partial cache content', async () => {
   }
 });
 
+test('reclaims only a lock with demonstrably expired ownership metadata', async () => {
+  const directory = await temporaryDirectory();
+  try {
+    const file = cacheFileForScope(scope, { env: { RALPH_CACHE_DIR: directory } });
+    await writeFile(`${file}.lock`, JSON.stringify({
+      pid: 1, createdAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:01:00Z',
+    }));
+    await writeRoundCache(scope, cache(), {
+      env: { RALPH_CACHE_DIR: directory }, staleLockMs: 1,
+    });
+    assert.equal((await readRoundCache(scope, { env: { RALPH_CACHE_DIR: directory } })).reason, undefined);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('all authorization-adjacent changes invalidate cached conclusions', () => {
   const baseline = cache().comparisons;
   for (const comparisons of [
@@ -119,19 +135,22 @@ test('fails closed for API errors and incomplete pagination', async () => {
     (error) => error instanceof RalphCacheError && error.code === 'INCOMPLETE_DATA');
 });
 
-test('inherits priority, deduplicates transitive unblock count, and rejects cycles', () => {
-  const issues = [
+test('orders READY issues using the complete graph and rejects cycles', () => {
+  const completeIssues = [
     { number: 1, labels: ['priority:p2'], createdAt: '2026-01-02' },
     { number: 2, labels: ['priority:p0'], createdAt: '2026-01-03' },
     { number: 3, labels: ['priority:p1'], createdAt: '2026-01-01' },
   ];
-  const ordered = orderReadyIssues(issues, [
+  const ordered = orderReadyIssues(completeIssues, [completeIssues[0]], [
     { blocker: 1, blocked: 2 }, { blocker: 1, blocked: 3 }, { blocker: 2, blocked: 3 },
   ]);
+  assert.deepEqual(ordered.map((issue) => issue.number), [1]);
   assert.equal(ordered[0].number, 1);
   assert.equal(ordered[0].effectivePriority, 0);
   assert.equal(ordered[0].unblockValue, 2);
-  assert.throws(() => orderReadyIssues(issues, [{ blocker: 1, blocked: 2 }, { blocker: 2, blocked: 1 }]),
+  assert.throws(() => orderReadyIssues(completeIssues, [completeIssues[0]], [
+    { blocker: 1, blocked: 2 }, { blocker: 2, blocked: 1 },
+  ]),
     (error) => error.code === 'DEPENDENCY_CYCLE');
 });
 
@@ -149,7 +168,10 @@ test('cleanup candidates are report-only and fail closed for uncertainty or post
     worktree: { inspected: true, dirty: false, untracked: false },
     finalReport: { workingTreeClean: true, allCommitsPushed: true },
     settledAt: '2026-01-01T00:00:00Z',
-    pr: { state: 'MERGED', commitsAfterMergeKnown: true, commitsAfterMerge: [] },
+    pr: {
+      state: 'MERGED', commitsAfterMergeKnown: true, commitsAfterMerge: [],
+      mergeCommitVerifiedOnDevelopment: true, headPreservedAfterMerge: true,
+    },
   };
   assert.deepEqual(assessCleanupCandidate(safe, { now: Date.parse('2026-01-01T02:00:00Z') }),
     { candidate: true, reasons: [] });
@@ -158,18 +180,49 @@ test('cleanup candidates are report-only and fail closed for uncertainty or post
     { ...safe, worktree: { inspected: true, dirty: false, untracked: true } },
     { ...safe, pr: { state: 'MERGED', commitsAfterMergeKnown: true, commitsAfterMerge: ['abc'] } },
     { ...safe, pr: { state: 'MERGED', commitsAfterMergeKnown: false } },
+    { ...safe, pr: { ...safe.pr, mergeCommitVerifiedOnDevelopment: false } },
+    { ...safe, pr: { ...safe.pr, headPreservedAfterMerge: false } },
+    {
+      ...safe, pr: { state: 'CLOSED', commitsAfterMergeKnown: true, commitsAfterMerge: [] },
+      finalReport: { workingTreeClean: true, allCommitsPushed: true },
+    },
     { ...safe, settledAt: '2026-01-01T01:30:00Z' },
     { ...safe, pr: undefined, noPrDeliverable: { completed: true, verified: false } },
   ]) assert.equal(assessCleanupCandidate(unsafe, { now: Date.parse('2026-01-01T02:00:00Z') }).candidate, false);
+  const closed = {
+    ...safe,
+    pr: { state: 'CLOSED', commitsAfterMergeKnown: true, commitsAfterMerge: [], linkedIssueDispositionVerified: true },
+    finalReport: {
+      workingTreeClean: true, allCommitsPushed: true, closedWithoutMerge: true, closureReason: 'superseded',
+    },
+  };
+  assert.equal(assessCleanupCandidate(closed, { now: Date.parse('2026-01-01T02:00:00Z') }).candidate, true);
 });
 
-test('dispatcher routes to required child policies and retains gates', async () => {
-  const skill = await readFile('.copilot/skills/ralph-loop/SKILL.md', 'utf8');
+test('dispatcher routes only to self-contained policies and retains gates', async () => {
+  const [skill, operations, cleanup, prePr] = await Promise.all([
+    readFile('.copilot/skills/ralph-loop/SKILL.md', 'utf8'),
+    readFile('.copilot/skills/ralph-loop/operations.md', 'utf8'),
+    readFile('.copilot/skills/ralph-loop/cleanup.md', 'utf8'),
+    readFile('.copilot/skills/ralph-loop/implementation-pre-pr.md', 'utf8'),
+  ]);
   for (const reference of [
-    'implementation-pre-pr.md', '.squad/templates/ralph-reference.md', '.github/ralph-reference.md',
+    'implementation-pre-pr.md', '.github/ralph-reference.md',
     'verify-squad-verdict.mjs', 'one round and exits', 'five implementation/analysis slots maximum',
-    'never dispatch, review, or merge it', 'CodeQL completion', 'archive/delete',
+    'never dispatch, review, or merge it', 'CodeQL completion',
     'Before every dispatch, claim, message, review decision, or merge, fetch',
-    'gemini-3.1-pro-preview', 'assessCleanupCandidate', 'not a separate reaper',
+    'gemini-3.1-pro-preview', 'assessCleanupCandidate', 'operations.md', 'cleanup.md',
+    'No named non-workflow test entrypoint', 'test-ralph-round-cache.mjs',
   ]) assert.match(skill, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+  assert.doesNotMatch(skill, /\.squad\/templates\/ralph-reference\.md/i);
+  for (const reference of [
+    'GitHub native', 'dependency prose markers', 'Detect cycles', 'five live',
+  ]) assert.match(operations, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+  for (const reference of [
+    'one Ralph automation', 'delete_item', 'earlier-round children', 'post-merge',
+  ]) assert.match(cleanup, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+  for (const reference of [
+    'documentation-only', 'Workflow/configuration', 'agent-safety-boundary',
+    'Bishop', 'Hicks', 'Vasquez',
+  ]) assert.match(prePr, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
 });

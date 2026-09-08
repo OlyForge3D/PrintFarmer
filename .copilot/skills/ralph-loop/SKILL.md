@@ -34,6 +34,10 @@ sessions/claims/linked PRs, base SHA, verdict comments, checks, CodeQL analyses/
 and policy version. Deep-inspect changed entries and every imminent action; emit compact,
 actionable output using `compactRoundOutput`.
 
+No named non-workflow test entrypoint discovers this helper: existing CI lists Node tests
+explicitly, and this change must not alter live workflows. Preserve manual targeted validation:
+`node --test scripts/ci/tests/test-ralph-round-cache.mjs`.
+
 ## First Actions
 
 1. Fetch `origin`; report local-vs-remote `development` gap. A failed fast-forward update of
@@ -47,9 +51,8 @@ actionable output using `compactRoundOutput`.
 ## Conditional Policies
 
 - **Triage, analysis, epics, dependency graph, priority inheritance, transitive unblocking:**
-  read `.squad/templates/ralph-reference.md`. Native dependency edges are authoritative; resolve
-  live prose markers additionally. Detect cycles, deduplicate descendants, prioritize inherited
-  priority then unblock value, and report cross-platform blockers.
+  read `.copilot/skills/ralph-loop/operations.md`. It is the sole conditional operational
+  authority for these actions; do not read or follow generic `.squad` Ralph templates.
 - **Implementation dispatch and pre-PR requirements:** pass
   `.copilot/skills/ralph-loop/implementation-pre-pr.md` and task-specific acceptance criteria
   in the kickoff—do not paste its policy. Default implementation model is `gpt-5.6-terra`
@@ -63,15 +66,8 @@ actionable output using `compactRoundOutput`.
   heuristic diff equality cannot grant authorization.
 - **Conflicts:** only a fresh targeted review of hand-authored resolution hunks is permitted;
   it must agree across every resolved file. Clean syncs follow the verifier’s carry rules.
-- **Cleanup candidates:** read the reap section of `.squad/templates/ralph-reference.md` and use
-  `assessCleanupCandidate` while reusing that round's session inventory and PR results. This is
-  part of Ralph's one automation, not a separate reaper. Report only; never archive/delete
-  others. `delete_item` needs human confirmation naming each specific session, and
-  `archive_session` cannot reap earlier-round children. Fail closed unless inactivity is proven
-  (age alone is insufficient), tracked/untracked files are clean, clean/pushed attestations hold,
-  the settling period elapsed, post-merge commits are absent/known, and a no-PR deliverable is
-  completed and verified. Verify squash merges against the branch's remote evidence, not commit
-  containment of its feature head.
+- **Cleanup candidates:** read `.copilot/skills/ralph-loop/cleanup.md` and use
+  `assessCleanupCandidate` while reusing that round's session inventory and PR results.
 
 ## Non-Negotiable Gates
 
