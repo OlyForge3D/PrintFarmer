@@ -127,6 +127,29 @@ test('never reclaims an expired lease while its owner is demonstrably alive', as
   }
 });
 
+test('concurrent stale-lock reclaimers cannot remove a replacement generation', async () => {
+  const directory = await temporaryDirectory();
+  try {
+    const file = cacheFileForScope(scope, { env: { RALPH_CACHE_DIR: directory } });
+    await writeFile(`${file}.lock`, JSON.stringify({
+      ownerToken: 'crashed-owner', pid: 1,
+      createdAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:01:00Z',
+    }));
+    await Promise.all([
+      writeRoundCache(scope, cache({ queue: ['#first'] }), {
+        env: { RALPH_CACHE_DIR: directory }, isOwnerAlive: () => false,
+      }),
+      writeRoundCache(scope, cache({ queue: ['#second'] }), {
+        env: { RALPH_CACHE_DIR: directory }, isOwnerAlive: () => false,
+      }),
+    ]);
+    const result = await readRoundCache(scope, { env: { RALPH_CACHE_DIR: directory } });
+    assert.ok(['#first', '#second'].includes(result.cache.conclusions.queue[0]));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('all authorization-adjacent changes invalidate cached conclusions', () => {
   const baseline = cache().comparisons;
   for (const comparisons of [

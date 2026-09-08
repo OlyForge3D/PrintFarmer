@@ -121,6 +121,50 @@ async function releaseLock(lockFile, lock) {
   }
 }
 
+function lockMetadata(staleLockMs) {
+  return {
+    ownerToken: randomUUID(),
+    pid: process.pid,
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + staleLockMs).toISOString(),
+  };
+}
+
+async function reclaimStaleLock(lockFile, isOwnerAlive) {
+  const guardFile = `${lockFile}.reclaim`;
+  let guard;
+  try {
+    guard = await open(guardFile, 'wx');
+    await guard.writeFile(JSON.stringify(lockMetadata(60 * 1000)));
+  } catch (error) {
+    if (error.code === 'EEXIST') return false;
+    throw error;
+  }
+
+  try {
+    const metadata = JSON.parse(await readFile(lockFile, 'utf8'));
+    const expiresAt = Date.parse(metadata.expiresAt);
+    if (
+      typeof metadata.ownerToken === 'string' &&
+      Number.isInteger(metadata.pid) &&
+      !Number.isNaN(expiresAt) &&
+      expiresAt < Date.now() &&
+      isOwnerAlive(metadata.pid) === false
+    ) {
+      // The exclusive guard makes this read/check/remove sequence one reclaim
+      // generation: another contender cannot remove a replacement lock.
+      await rm(lockFile, { force: true });
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  } finally {
+    await guard.close();
+    await rm(guardFile, { force: true });
+  }
+}
+
 async function acquireLock(lockFile, {
   retries = 40, retryMs = 10, staleLockMs = 5 * 60 * 1000, isOwnerAlive = ownerIsAlive,
 } = {}) {
@@ -137,22 +181,7 @@ async function acquireLock(lockFile, {
       return { handle, metadata };
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      try {
-        const metadata = JSON.parse(await readFile(lockFile, 'utf8'));
-        const expiresAt = Date.parse(metadata.expiresAt);
-        if (
-          typeof metadata.ownerToken === 'string' &&
-          Number.isInteger(metadata.pid) &&
-          !Number.isNaN(expiresAt) &&
-          expiresAt < Date.now() &&
-          isOwnerAlive(metadata.pid) === false
-        ) {
-          await rm(lockFile, { force: true });
-          continue;
-        }
-      } catch {
-        // A malformed, unreadable, or live lock is not demonstrably stale.
-      }
+      if (await reclaimStaleLock(lockFile, isOwnerAlive)) continue;
       await new Promise((resolve) => setTimeout(resolve, retryMs));
     }
   }
