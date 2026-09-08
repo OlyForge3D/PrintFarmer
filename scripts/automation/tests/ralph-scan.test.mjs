@@ -111,6 +111,34 @@ test('cross-repository and closed blockers remain explicit and never become read
   assert.match(JSON.stringify(result.blockedEdges), /example\/other#99/);
 });
 
+test('case-insensitive repository identity preserves local dependency ordering', async (t) => {
+  const options = await temporaryOptions(t, {
+    repo: 'olyforge3d/printfarmer',
+    transport: transport({
+      dependencies: { 2: { blockedBy: [{ number: 1, state: 'open', repository_url: 'https://api.github.com/repos/OlyForge3D/PrintFarmer' }] } },
+    }),
+  });
+  const result = await scan(options);
+  assert.deepEqual(result.dependencyOrder, [1, 2]);
+  assert.equal(result.graphFlags.unknown, false);
+});
+
+test('missing CI collection arrays abort before the snapshot advances', async (t) => {
+  const options = await temporaryOptions(t);
+  await scan(options);
+  const stateFile = path.join(options.stateRoot, 'github.com', 'olyforge3d', 'printfarmer', 'workflow-test', 'snapshot.json');
+  const before = await readFile(stateFile, 'utf8');
+  const base = transport();
+  options.transport = {
+    async get(endpoint, options) {
+      if (endpoint.includes('/check-runs?')) return [{}];
+      return base.get(endpoint, options);
+    },
+  };
+  await assert.rejects(() => scan(options), /check_runs returned a non-array/);
+  assert.equal(await readFile(stateFile, 'utf8'), before);
+});
+
 test('a failed collection preserves the last good snapshot and does not emit an empty success', async (t) => {
   const options = await temporaryOptions(t);
   await scan(options);

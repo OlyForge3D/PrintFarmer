@@ -62,7 +62,7 @@ function safeSegment(value) {
 }
 
 function stateDirectory({ stateRoot, repo, workflowId, host = 'github.com' }) {
-  return path.join(stateRoot, safeSegment(host), ...repo.split('/').map(safeSegment), safeSegment(workflowId));
+  return path.join(stateRoot, safeSegment(host), ...repo.toLowerCase().split('/').map(safeSegment), safeSegment(workflowId));
 }
 
 async function ensurePrivateDirectory(directory) {
@@ -168,7 +168,7 @@ async function objectPages(transport, endpoint, listProperty) {
   const merged = [];
   for (const page of pageList) {
     validateObject(page, endpoint);
-    merged.push(...validateArray(page[listProperty] ?? [], `${endpoint}.${listProperty}`));
+    merged.push(...validateArray(page[listProperty], `${endpoint}.${listProperty}`));
   }
   return merged;
 }
@@ -253,7 +253,7 @@ function compactStatus(status) {
 }
 
 function issueReference(repository, number) {
-  return `github.com/${repository}#${number}`;
+  return `github.com/${repository.toLowerCase()}#${number}`;
 }
 
 function referenceFor(raw) {
