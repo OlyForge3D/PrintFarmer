@@ -1529,6 +1529,7 @@ Protected hub routes:
 - `/hubs/printers`: authenticated farm and per-user printer events;
 - `/hubs/slicers`: authenticated owner-scoped slice-job progress;
 - `/hubs/slicer-registry`: farm-administrator-only registry events.
+- `/hubs/nfc`: authenticated, printer-view-scoped NFC scan events.
 
 SignalR clients must authenticate with the same PrintFarmer JWT used for REST:
 
@@ -1565,6 +1566,25 @@ SignalR messages are hints and progress notifications, not authoritative
 state. After reconnect, token refresh, a sequence gap, or process restart,
 clients must refetch the relevant REST resources. A successful automatic
 reconnect does not imply that events sent during the gap were replayed.
+
+### NFC scan subscriptions
+
+`/hubs/nfc` automatically subscribes each connection to printers allowed by its
+printer-group `View` access. Reconnecting reevaluates these permissions.
+`SubscribeToPrinterAsync(printerId)` also checks `View` access and rejects an
+unauthorized subscription with `resource_forbidden`.
+
+Known scans emit `nfctagread` with `{ tagUid, spoolId, spoolName, printerId,
+trayId, readAt }`; unknown scans emit `nfctagunknown` with `{ tagUid, printerId,
+readAt }`. Known-scan `printerId` remains the tag binding's printer; unknown-scan
+`printerId` comes from the registered reader, not a caller-selected audience.
+Farm administrators receive all scans. Scans without a printer scope, or whose
+reader and binding refer to different printers, go only to farm administrators.
+Holding `nfc_devices:admin` alone does not bypass printer-group view restrictions.
+
+Offline reader queues retain each event's original payload and audience scope.
+Reassigning a reader or tag before replay never reroutes an old scan into its new
+printer's audience. These queues remain in-memory and are lost on server restart.
 
 ### Event Formats
 
