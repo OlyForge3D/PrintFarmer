@@ -151,6 +151,9 @@ jobs:
       - name: Resolve pinned iOS simulator destination
         run: ../scripts/ci/resolve-ios-simulator.sh
 
+      - name: Test bounded XCTest runner
+        run: python3 -m unittest discover -s scripts/tests -p 'test_run_tests.py' -v
+
       - name: Reset and boot iOS simulator
         run: |
           xcrun simctl shutdown "$SIMULATOR_UDID" || true
@@ -177,7 +180,7 @@ jobs:
         timeout-minutes: 15
         run: |
           set -o pipefail
-          xcodebuild \
+          python3 scripts/run-tests.py --invocation-timeout 840 -- \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \
@@ -202,6 +205,8 @@ jobs:
           path: |
             mobile/build/TestResults.xcresult
             mobile/build/TestResults.log
+            mobile/build/TestResults.events.jsonl
+            mobile/build/TestResults.timing.json
           retention-days: 7
 
   attention-xcui:
@@ -266,7 +271,7 @@ jobs:
           set -o pipefail
           grep -Fq 'UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge' \
             PrintFarmerUITests/AttentionActionsUITests.swift
-          xcodebuild test \
+          python3 scripts/run-tests.py -- test \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \
@@ -290,6 +295,8 @@ jobs:
           path: |
             mobile/build-${{ matrix.key }}/AttentionActions.xcresult
             mobile/build-${{ matrix.key }}/AttentionActions.log
+            mobile/build-${{ matrix.key }}/AttentionActions.events.jsonl
+            mobile/build-${{ matrix.key }}/AttentionActions.timing.json
           retention-days: 7
 
   xcui-suites:
@@ -374,7 +381,7 @@ jobs:
           if [[ "${{ matrix.suite }}" == "ShiftTasksUITests" ]]; then
             suite_tests+=("-only-testing:PrintFarmerUITests/UIWaitBudgetTests")
           fi
-          xcodebuild test \
+          python3 scripts/run-tests.py -- test \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \
@@ -398,4 +405,6 @@ jobs:
           path: |
             mobile/build-${{ matrix.key }}-${{ matrix.suite }}/${{ matrix.suite }}.xcresult
             mobile/build-${{ matrix.key }}-${{ matrix.suite }}/${{ matrix.suite }}.log
+            mobile/build-${{ matrix.key }}-${{ matrix.suite }}/${{ matrix.suite }}.events.jsonl
+            mobile/build-${{ matrix.key }}-${{ matrix.suite }}/${{ matrix.suite }}.timing.json
           retention-days: 7

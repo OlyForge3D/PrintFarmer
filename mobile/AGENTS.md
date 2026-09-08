@@ -34,7 +34,7 @@ cd mobile
   simulator_udid="$(../scripts/ci/resolve-ios-simulator.sh --udid 2>"$run_dir/destination.log")" ||
     { cat "$run_dir/destination.log" >&2; exit 1; }
   cat "$run_dir/destination.log"
-  xcodebuild test -project PrintFarmer.xcodeproj -scheme PrintFarmer \
+  python3 scripts/run-tests.py -- test -project PrintFarmer.xcodeproj -scheme PrintFarmer \
     -destination "platform=iOS Simulator,id=$simulator_udid" \
     -only-testing:PrintFarmerTests/PrinterControlsSectionSnapshotTests \
     -parallel-testing-enabled NO \
@@ -54,6 +54,15 @@ environmental; investigate XCUI failures separately. Preserve strictness,
 zero-skip expectations and existing PNGs. The
 [snapshot guide](PrintFarmerTests/Views/__Snapshots__/README.md) describes
 intentional baseline changes, not permission to re-record for #2536/#2572.
+
+Use `scripts/run-tests.py` for local/CI simulator invocations. It preserves the
+XCTest watchdog and exit status, disables only automatic verbose simulator
+diagnostics, and gives post-test finalization/restart 120s including a 10s
+interrupt/flush window. The separate invocation ceiling is 1440s (840s in the
+unit CI job). Retain the sibling `.events.jsonl` and `.timing.json` along with
+the `.xcresult` and text log. A forced stop returns 124 and may leave a partial
+bundle; the log/event stream remain usable. See the
+[timeout policy](docs/xcui-timeout-diagnosis.md#runner-finalization-policy-2583).
 
 ## Session Completion
 
