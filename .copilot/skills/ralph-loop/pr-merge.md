@@ -19,6 +19,9 @@ record has only the verifier's stated semantics; diff similarity never grants au
 `CHANGES_REQUESTED`, missing, invalid, unauthenticated, stale, fork, or out-of-scope evidence
 never authorizes a merge. Scheduled Ralph never reviews PRs, never commissions reviewer agents,
 and routes missing or invalid verdicts to the owning implementation session's pre-PR process.
+When a required check fails or the current verdict is `CHANGES_REQUESTED`, notify that owner
+session with the live PR/head SHA and the exact failed check or review feedback; do not merely
+report it in the round summary.
 
 ## Merge And Conflict Safety
 

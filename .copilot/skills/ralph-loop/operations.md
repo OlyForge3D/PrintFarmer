@@ -13,6 +13,23 @@ owner/first-step comment; remove bare `squad` when assigning. Never assign Ralph
 implemented: enumerate native sub-issues plus `epic-child` labels, refresh one progress comment,
 update the checklist, and close only when children and acceptance criteria are complete.
 
+## Authoritative Label Vocabulary
+
+Implementation/analysis owners are `squad:dallas`, `squad:ripley`, `squad:drake`,
+`squad:lambert`, `squad:hudson`, `squad:gorman`, `squad:kane`, `squad:ash`,
+`squad:brett`, `squad:parker`, `squad:newt`, and `squad:copilot`. The reviewers
+`squad:bishop`, `squad:hicks`, and `squad:vasquez`, plus `squad:scribe` and `squad:ralph`, are
+never dispatch owners. The bare `squad` label is a scope marker, not an owner.
+
+The only type labels are `type:feature`, `type:bug`, `type:chore`, `type:docs`,
+`type:spike`, and `type:epic`; the only priority labels are `priority:p0`, `priority:p1`,
+`priority:p2`, and `priority:p3`. Apply exactly one justified owner and priority label; add one
+justified type label when triaging.
+
+Emoji-prefixed duplicate owner labels (for example `squad:⚛️ ripley`) are equivalent to their
+plain form. Count both forms as the same owner, remove duplicate forms when safe, and apply only
+the plain form to new claims. An emoji/plain pair is one owner, not an ownership conflict.
+
 For a non-mobile epic needing decomposition, unmet architecture gate, or under-specified issue,
 apply `status:needs-analysis` and dispatch Dallas for child issues or an issue sign-off—not code.
 Do not re-dispatch a live analysis session. Windows only triages mobile work; it never dispatches,

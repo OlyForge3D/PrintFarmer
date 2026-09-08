@@ -24,7 +24,7 @@
 | 🎨 Newt | Designer (Industrial UI) | .squad/agents/newt/charter.md | Active |
 | 🔍 Bishop | Code Reviewer (Claude Opus 5) | .squad/agents/bishop/charter.md | Active |
 | 🔍 Hicks | Code Reviewer (GPT-5.6 Sol) | .squad/agents/hicks/charter.md | Active |
-| 🔍 Vasquez | Code Reviewer (latest available Gemini Pro) | .squad/agents/vasquez/charter.md | Active |
+| 🔍 Vasquez | Code Reviewer (Gemini 3.8 Flash, user-authorized) | .squad/agents/vasquez/charter.md | Active |
 | ⚛️ Drake | Frontend Dev | .squad/agents/drake/charter.md | Active |
 | 📋 Scribe | Session Logger | .squad/agents/scribe/charter.md | Active |
 | 🔄 Ralph | Work Monitor | — | Active |

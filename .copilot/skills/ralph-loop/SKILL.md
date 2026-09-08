@@ -68,7 +68,7 @@ explicitly, and this change must not alter live workflows. Preserve manual targe
 
 Never implement. Never dispatch mobile work on Windows. Never silently skip an issue. Never
 self-review or invent/substitute a reviewer/model: Bishop `claude-opus-5`, Hicks
-`gpt-5.6-sol`, and Vasquez's newest available Gemini Pro exact ID, each medium; no available
-Gemini Pro is a blocker and never permits Flash fallback.
+`gpt-5.6-sol`, and Vasquez `gemini-3.8-flash` (explicitly user-authorized), each medium;
+an unavailable exact model is a blocker and never permits substitution.
 Reviewers read only and never build, install, or test. End with the compact accounting report
 and exit.

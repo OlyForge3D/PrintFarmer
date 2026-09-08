@@ -18,17 +18,12 @@
 
 Squad supports 18 models across three routing tiers (premium, standard, fast/cheap). These tiers are policy groupings, not verified pricing claims. The coordinator must select the right model for each agent spawn while preserving explicit user preferences.
 
-## Vasquez Reviewer Exception
+## Vasquez User Override
 
-For every Vasquez review, read `.squad/config.json` `reviewerModelPolicies.vasquez` before the normal hierarchy. Resolve the newest currently
-supported Gemini **Pro** model from the runtime's available-model catalog, then pass that exact
-supported ID as `model`. The policy selector is not a model ID: never pass `latest`, a version
-you inferred, or an invented identifier.
-
-Never fall back to Gemini Flash, another Gemini tier, another provider, or an omitted model
-parameter. If no supported Gemini Pro exact ID is available, do not dispatch Vasquez and report
-the reviewer as blocked. This exception overrides `defaultModel`, generic fallback chains, and
-charter preferences only for Vasquez reviews.
+The user explicitly authorizes `gemini-3.8-flash` for every Vasquez review. Resolve this exact
+configured ID from `.squad/config.json` → `agentModelOverrides.vasquez` before the normal
+hierarchy. Do not pass `latest`, infer a Gemini Pro ID, or substitute another model. If this
+exact model is unavailable, do not dispatch Vasquez; report the reviewer as blocked.
 
 ## 5-Layer Model Resolution Hierarchy
 
@@ -66,7 +61,6 @@ Resolution is **first-match-wins** — the highest layer with a value wins.
    - Code, tests, refactoring, prompt architecture → `claude-sonnet-5`
    - Docs, planning, triage, mechanical work → `gpt-5.6-luna`
    - Heavy code generation → `gpt-5.3-codex`
-   - Analytical diversity → `gemini-3.1-pro-preview`
 6. FALLBACK Layer 4: `gpt-5.6-luna`
 7. INCLUDE model in spawn acknowledgment: `🔧 {Name} ({resolved_model}) — {task}`
 
@@ -121,7 +115,7 @@ After resolving the model and including it in the spawn template, this skill is 
 ## Valid Model Catalog
 
 Premium: `gpt-5.6-sol`, `claude-opus-4.8`, `claude-opus-4.7`, `claude-opus-4.6`
-Standard: `claude-sonnet-5`, `gpt-5.6-terra`, `gpt-5.5`, `gpt-5.4`, `gpt-5.3-codex`, `claude-sonnet-4.6`, `claude-sonnet-4.5`, `gemini-3.1-pro-preview`
+Standard: `claude-sonnet-5`, `gpt-5.6-terra`, `gpt-5.5`, `gpt-5.4`, `gpt-5.3-codex`, `claude-sonnet-4.6`, `claude-sonnet-4.5`
 Fast/Cheap policy: `gpt-5.6-luna`, `gemini-3.5-flash`, `claude-haiku-4.5`, `gpt-5.4-mini`, `gpt-5-mini`, `mai-code-1-flash-picker`
 
 Runtime rejection overrides this static catalog.

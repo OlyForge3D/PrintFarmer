@@ -8,12 +8,11 @@
 
 ## Model
 
-- **Required:** the newest runtime-supported Gemini Pro model, resolved to its exact model ID
-  immediately before each review.
-- **Availability:** never use Gemini Flash or another provider as a fallback. If no supported
-  Gemini Pro ID is available, do not dispatch Vasquez; report the reviewer as blocked.
-- **Rationale:** Preserves Gemini Pro analytical diversity in the multi-model review gate without
-  pinning a stale model ID.
+- **Required:** `gemini-3.8-flash`, explicitly authorized by the user for this and future reviews.
+- **Availability:** pass this exact ID only; do not select `latest`, infer a Gemini Pro ID, or
+  substitute another model. If it is unavailable, do not dispatch Vasquez; report the reviewer
+  as blocked.
+- **Rationale:** Preserves the user-authorized Gemini perspective in the multi-model review gate.
 
 ## Responsibilities
 

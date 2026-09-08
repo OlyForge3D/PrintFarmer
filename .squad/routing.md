@@ -39,7 +39,7 @@ If it is absent, follow the normal routing tables below.
 | Architecture, design, scope | Dallas | System design, technical decisions, cross-domain concerns |
 | React, TypeScript, UI, frontend | Ripley | Components, pages, styling, frontend state, SignalR client |
 | C#, .NET, API, database, backend | Lambert | Controllers, EF Core, migrations, backend plugins, SignalR hubs |
-| Code review (pre-commit gate) | Bishop + Hicks + Vasquez | Triple-model review: Claude Opus 5, GPT-5.6 Sol, latest available Gemini Pro — all three review in parallel; must achieve consensus APPROVE before PR creation. If no supported Gemini Pro model is available, report Vasquez blocked; never substitute Flash. **Documentation-only changes take a single reviewer instead — see rule 11.** |
+| Code review (pre-commit gate) | Bishop + Hicks + Vasquez | Triple-model review: Claude Opus 5, GPT-5.6 Sol, Gemini 3.8 Flash (explicitly user-authorized) — all three review in parallel; must achieve consensus APPROVE before PR creation. If that exact model is unavailable, report Vasquez blocked; do not substitute another model. **Documentation-only changes take a single reviewer instead — see rule 11.** |
 | Testing, QA, coverage | Kane | Write tests, find edge cases, run test suites, coverage analysis |
 | Documentation, API docs, user guides, README | Ash | API reference, user docs, changelogs, migration guides, config docs |
 | Research, competitive analysis, features | Brett | Market research, competitor analysis, feature recommendations, trends |

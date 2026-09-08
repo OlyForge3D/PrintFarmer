@@ -492,7 +492,7 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
     'one round and exits', 'five implementation/analysis slots maximum',
     'never dispatch, review, or merge it',
     'Before every dispatch, claim, message, review decision, or merge, fetch',
-    'newest available Gemini Pro exact ID', 'Gemini Pro is a blocker',
+    'Vasquez `gemini-3.8-flash`', 'unavailable exact model is a blocker',
     'assessCleanupCandidate', 'operations.md', 'cleanup.md',
     'No named non-workflow test entrypoint', 'test-ralph-round-cache.mjs',
   ]) assert.match(skill, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
@@ -500,6 +500,8 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
   for (const reference of [
     'GitHub native', 'dependency prose markers', 'Detect cycles', 'five live',
     'fresh eligibility', 'apply claim label and comment', 'verify that exact claim landed',
+    'Authoritative Label Vocabulary', 'squad:lambert', 'type:feature', 'priority:p0',
+    'Emoji-prefixed duplicate owner labels', 'plain form',
   ]) assert.match(operations, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   for (const reference of [
     'one Ralph automation', 'delete_item', 'earlier-round children', 'post-merge',
@@ -514,6 +516,7 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
   for (const reference of [
     'verify-squad-verdict.mjs', 'CodeQL', 'match-head-commit', 'hand-authored conflict',
     'never reviews PRs', 'never commissions reviewer agents', 'owning implementation session',
+    'required check fails', 'CHANGES_REQUESTED', 'exact failed check or review feedback',
   ]) assert.match(prMerge, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   assert.doesNotMatch(prMerge, /\.squad\/templates\/ralph-reference\.md/i);
   for (const reference of [
@@ -522,7 +525,7 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
   ]) assert.match(terminal, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
 });
 
-test('Vasquez resolves only a current supported Gemini Pro exact ID', async () => {
+test('Vasquez uses the user-authorized exact Gemini Flash model', async () => {
   const [configText, registryText, charter, modelSkill, modelReference, templateReference] = await Promise.all([
     readFile('.squad/config.json', 'utf8'),
     readFile('.squad/casting/registry.json', 'utf8'),
@@ -533,18 +536,15 @@ test('Vasquez resolves only a current supported Gemini Pro exact ID', async () =
   ]);
   const config = JSON.parse(configText);
   const registry = JSON.parse(registryText);
-  assert.deepEqual(config.reviewerModelPolicies.vasquez, {
-    provider: 'gemini',
-    capability: 'pro',
-    selection: 'newest-supported-exact-id',
-    onUnavailable: 'block-and-report',
-  });
-  assert.equal(config.agentModelOverrides.vasquez, undefined);
+  assert.equal(config.reviewerModelPolicies, undefined);
+  assert.equal(config.agentModelOverrides.vasquez, 'gemini-3.8-flash');
+  assert.equal(config.agentModelOverrides.hicks, 'gpt-5.6-sol');
   assert.equal(registry.find((agent) => agent.persistent_name === 'Vasquez').model, undefined);
   for (const guidance of [charter, modelSkill, modelReference, templateReference]) {
-    assert.match(guidance, /Gemini Pro/i);
-    assert.match(guidance, /exact (model )?ID/i);
-    assert.match(guidance, /never\s+(use |pass )?Gemini Flash|never\s+fall back to Gemini Flash/i);
+    assert.match(guidance, /gemini-3\.8-flash/i);
+    assert.match(guidance, /exact\s+(configured\s+)?(model\s+)?ID|pass this exact ID/i);
+    assert.match(guidance, /do not pass `latest`|do not select `latest`/i);
     assert.match(guidance, /do not dispatch Vasquez|reviewer as blocked|report the reviewer blocked/i);
+    assert.doesNotMatch(guidance, /gemini-3\.1/i);
   }
 });
