@@ -39,6 +39,51 @@ server switching, and real-time updates via SignalR.
 
 4. Build and run on a simulator or device (iOS 17+).
 
+## Testing
+
+Use **iOS 26.5 (23F77)**, the unchanged-snapshot default supported by
+[the original evidence](https://github.com/OlyForge3D/PrintFarmer/issues/2536#issuecomment-5573657441).
+Install it in Xcode Settings > Components and create an available iPhone
+simulator. The shared resolver requires Python 3, rejects beta/unapproved
+builds even in fallbacks, and works without `GITHUB_ENV`.
+From the repository root:
+
+```bash
+cd mobile
+(
+  set -euo pipefail
+  mkdir -p build
+  run_dir="$(mktemp -d "$PWD/build/snapshots.XXXXXX")"
+  xcodebuild -version | tee "$run_dir/xcode.log"
+  git rev-parse HEAD | tee "$run_dir/commit.log"
+  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
+  xcrun simctl list devices available -j > "$run_dir/devices.json"
+  simulator_udid="$(../scripts/ci/resolve-ios-simulator.sh --udid 2>"$run_dir/destination.log")" ||
+    { cat "$run_dir/destination.log" >&2; exit 1; }
+  cat "$run_dir/destination.log"
+  xcodebuild test -scheme PrintFarmer \
+    -destination "platform=iOS Simulator,id=$simulator_udid" \
+    -only-testing:PrintFarmerTests/PrinterControlsSectionSnapshotTests \
+    -parallel-testing-enabled NO \
+    -resultBundlePath "$run_dir/Snapshots.xcresult" \
+    2>&1 | tee "$run_dir/test.log"
+)
+```
+
+The shared test plan enables XCTest watchdogs. Isolated timeout investigations
+use a 60-second allowance without capping longer adjacent tests; see the
+[XCUI timeout policy and evidence ledger](docs/xcui-timeout-diagnosis.md).
+
+Use `-only-testing:PrintFarmerTests` for all unit tests, or explicitly select
+`PrintFarmerUITests/<Suite>` for XCUI. See [agent testing guidance](AGENTS.md#simulator-testing)
+for iPad-host runs; each family needs separate unchanged-reference evidence.
+To diagnose environmental drift, compare identical tests/reference blobs under
+identical pinned Xcode/runtime/build, family, scale and locale; do not assume
+every failure is environmental or conflate XCUI failures with image drift.
+Keep snapshot strictness, skip policy and PNGs unchanged. The
+[snapshot guide](PrintFarmerTests/Views/__Snapshots__/README.md) is not
+authorization to re-record baselines for #2536/#2572.
+
 ## Server Configuration
 
 The app supports multiple registered PrintFarmer backend servers. Server

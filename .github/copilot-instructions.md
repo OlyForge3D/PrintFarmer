@@ -96,13 +96,45 @@ API integration:
   installs migrate into the registry on first launch.
 - The mobile app consumes the same `/api/*` JSON contract as the React frontend — camelCase property names, string enums (see Serialization Rules below). Do not introduce mobile-only DTOs unless absolutely required; extend the shared API instead.
 
-Common commands (run from `mobile/`):
+Common commands (start at the repository root). The shared resolver approves
+only iOS 26.5 (23F77); install it in Xcode Settings > Components and create an
+available matching simulator. It fails before tests if no approved destination
+exists. Python 3 is required; no GitHub Actions state is needed locally.
 
 ```bash
-xcodebuild -scheme PrintFarmer -destination 'platform=iOS Simulator,name=iPhone 15' build
-xcodebuild test -scheme PrintFarmer -destination 'platform=iOS Simulator,name=iPhone 15'
+cd mobile
+(
+  set -euo pipefail
+  mkdir -p build
+  run_dir="$(mktemp -d "$PWD/build/unit-tests.XXXXXX")"
+  xcodebuild -version | tee "$run_dir/xcode.log"
+  git rev-parse HEAD | tee "$run_dir/commit.log"
+  xcrun simctl list runtimes -j > "$run_dir/runtimes.json"
+  xcrun simctl list devices available -j > "$run_dir/devices.json"
+  simulator_udid="$(../scripts/ci/resolve-ios-simulator.sh --udid 2>"$run_dir/destination.log")" ||
+    { cat "$run_dir/destination.log" >&2; exit 1; }
+  cat "$run_dir/destination.log"
+  xcodebuild test -scheme PrintFarmer \
+    -destination "platform=iOS Simulator,id=$simulator_udid" \
+    -only-testing:PrintFarmerTests -parallel-testing-enabled NO \
+    -resultBundlePath "$run_dir/UnitTests.xcresult" \
+    2>&1 | tee "$run_dir/test.log"
+)
+```
+
+For release packaging, separately run:
+
+```bash
+cd mobile
 fastlane beta   # release pipeline
 ```
+
+For focused snapshots select
+`-only-testing:PrintFarmerTests/PrinterControlsSectionSnapshotTests`; for XCUI
+select `-only-testing:PrintFarmerUITests/<Suite>`. See
+[mobile testing guidance](../mobile/AGENTS.md#simulator-testing) for separate
+iPhone/iPad evidence and environmental-drift diagnosis. Do not re-record PNGs,
+loosen strictness or add skips to compensate for runtime drift.
 
 Test suites: `PrintFarmerTests` (unit) and `PrintFarmerUITests` (UI). The app has its own `mobile/squad.config.ts` and `mobile/AGENTS.md` for agent guidance, and shares the consolidated release pipeline with the main app. See `mobile/README.md` for full setup details.
 
