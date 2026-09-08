@@ -26,11 +26,12 @@ vi.mock('@/common/hooks/useSystemCapabilities', () => ({
   }),
 }));
 
+import { ADMIN_HUB_ROUTE_STATE } from '@/features/admin/utils/adminHubParentState';
 import { PartsInventoryPage } from '../pages/PartsInventoryPage';
 
-function renderAt(path: string) {
+function renderAt(path: string, state?: typeof ADMIN_HUB_ROUTE_STATE) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter initialEntries={state ? [{ pathname: path, state }] : [path]}>
       <Routes>
         <Route path="/parts-inventory" element={<PartsInventoryPage />} />
         <Route path="/parts-inventory/:tabId" element={<PartsInventoryPage />} />
@@ -67,5 +68,17 @@ describe('PartsInventoryPage', () => {
   it('uses "Printed Parts" heading distinct from maintenance components', () => {
     renderAt('/parts-inventory/skus');
     expect(screen.getByRole('heading', { name: /Printed Parts/i })).toBeInTheDocument();
+  });
+
+  it('shows the Admin Control Center parent when entered from the Admin Control Center', () => {
+    renderAt('/parts-inventory/skus', ADMIN_HUB_ROUTE_STATE);
+
+    expect(screen.getByRole('link', { name: 'Admin Control Center' })).toHaveAttribute('href', '/admin');
+  });
+
+  it('does not show the Admin Control Center parent during direct navigation', () => {
+    renderAt('/parts-inventory/skus');
+
+    expect(screen.queryByRole('link', { name: 'Admin Control Center' })).not.toBeInTheDocument();
   });
 });
