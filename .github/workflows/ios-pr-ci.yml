@@ -364,6 +364,10 @@ jobs:
         timeout-minutes: 25
         run: |
           set -o pipefail
+          suite_tests=("-only-testing:PrintFarmerUITests/${{ matrix.suite }}")
+          if [[ "${{ matrix.suite }}" == "ShiftTasksUITests" ]]; then
+            suite_tests+=("-only-testing:PrintFarmerUITests/UIWaitBudgetTests")
+          fi
           xcodebuild test \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
@@ -374,7 +378,7 @@ jobs:
             -clonedSourcePackagesDirPath "build-${{ matrix.key }}-${{ matrix.suite }}/SourcePackages" \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
-            -only-testing:PrintFarmerUITests/${{ matrix.suite }} \
+            "${suite_tests[@]}" \
             -parallel-testing-enabled NO \
             -disable-concurrent-destination-testing \
             -resultBundlePath "build-${{ matrix.key }}-${{ matrix.suite }}/${{ matrix.suite }}.xcresult" \

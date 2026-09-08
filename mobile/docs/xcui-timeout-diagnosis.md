@@ -9,16 +9,30 @@ The original result bundle named at line 4667 is no longer present. That log
 contains test summaries, not the failing XCUI activity, source location, or
 diagnostic stacks. None of those missing details is inferred below.
 
-| Duration | Full test identity (`PrintFarmerUITests/`) | Historical failure site/message | Runtime/toolchain | Classification | Disposition |
-| --- | --- | --- | --- | --- | --- |
-| 339.100s | `ShiftTasksUITests/testP7DismissClearsOnlyCurrentErrorWithoutTaskMutation` | Unavailable; source report says query timeout | iPhone 17 clone 3, iOS 27.0 beta per source PR; Xcode 26.6 per source PR | Unresolved | [Owned follow-up #2577](https://github.com/OlyForge3D/PrintFarmer/issues/2577) |
-| 337.731s | `ShiftTasksFailedRefreshUITests/testFailedStateHostsRefreshableScrollContainerAndRecoversCanonically` | Unavailable; source report says query timeout | iPhone 17 clone 5, same source run | Unresolved | [Owned follow-up #2578](https://github.com/OlyForge3D/PrintFarmer/issues/2578) |
-| 314.184s | `OperatorShellUITests/testAdvancedControlsGatedBehindPrinterDetail` | Unavailable; source report says query timeout | iPhone 17 clone 1, same source run | Unresolved | [Owned follow-up #2579](https://github.com/OlyForge3D/PrintFarmer/issues/2579) |
+| Duration | Full test identity (`PrintFarmerUITests/`) | Historical failure site/message | Runtime/toolchain | Evidence | Classification | Disposition |
+| --- | --- | --- | --- | --- | --- | --- |
+| 339.100s | `ShiftTasksUITests/testP7DismissClearsOnlyCurrentErrorWithoutTaskMutation` | Unavailable; reported query timeout | iPhone 17 clone 3, iOS 27 beta, Xcode 26.6 per source PR | [Retained excerpt](#retained-historical-excerpt) | Unresolved | [Owned follow-up #2577](https://github.com/OlyForge3D/PrintFarmer/issues/2577) |
+| 337.731s | `ShiftTasksFailedRefreshUITests/testFailedStateHostsRefreshableScrollContainerAndRecoversCanonically` | Unavailable; reported query timeout | iPhone 17 clone 5, same source run | [Retained excerpt](#retained-historical-excerpt) | Unresolved | [Owned follow-up #2578](https://github.com/OlyForge3D/PrintFarmer/issues/2578) |
+| 314.184s | `OperatorShellUITests/testAdvancedControlsGatedBehindPrinterDetail` | Unavailable; reported query timeout | iPhone 17 clone 1, same source run | [Retained excerpt](#retained-historical-excerpt) | Unresolved | [Owned follow-up #2579](https://github.com/OlyForge3D/PrintFarmer/issues/2579) |
 
 Neighboring *passing* tests took 277-323 seconds in the same parallel run. This is
 consistent with shared runner/runtime trouble, but neither establishes contention
 nor rules out an app main-thread stall. Without the missing activities/stacks,
 the historical cases cannot be classified as infrastructure defects.
+
+### Retained historical excerpt
+
+Verbatim summaries from `/tmp/gorman-2519-test.log`, preserved as
+`historical-gorman-2519-test.log` in the artifact directory below:
+
+```text
+Test case 'ShiftTasksUITests.testP7DismissClearsOnlyCurrentErrorWithoutTaskMutation()' failed on 'Clone 3 of iPhone 17 - PrintFarmerUITests-Runner (80495)' (339.100 seconds)
+Test case 'ShiftTasksFailedRefreshUITests.testFailedStateHostsRefreshableScrollContainerAndRecoversCanonically()' failed on 'Clone 5 of iPhone 17 - PrintFarmerUITests-Runner (82525)' (337.731 seconds)
+Test case 'OperatorShellUITests.testAdvancedControlsGatedBehindPrinterDetail()' failed on 'Clone 1 of iPhone 17 - PrintFarmerUITests-Runner (79404)' (314.184 seconds)
+```
+
+SHA-256 of the complete retained log:
+`24c081539c8dcbebc18c0ebc1fb1ffa573b51b54b07e96092208b783fc7b2f0d`.
 
 ### Pinned reproduction
 
@@ -103,6 +117,92 @@ Diagnostics attach only locally held operation/timing/identifier strings.
 Fake-clock regressions cover aggregate budget consumption, in-flight overrun,
 and zero-budget behavior. The XCTest watchdog, not this polling logic, bounds
 an operation that has already entered a blocking remote accessibility call.
+
+### After-correction evidence
+
+`diagnostic-after-2573.xcresult` again records the deliberately stalled test
+failing at **60.000s**. The missing-destination probe fails with the actual
+identifier and a local attachment at **2.0038s helper elapsed / 4.078s total**,
+without starting another helper query after expiry. The compact full-root
+regression passes in 33.271s.
+
+**Process-level timing is not 60s.** This second invocation subsequently logs
+`Failure collecting diagnostics from simulator: Timed out after 600.0 seconds
+while waiting for a response from the invoked process`. Total testing/runner
+time is **731.991s**, versus 97.349s of reported test durations: 634.642s of
+startup, diagnostics, restart, and teardown overhead. Whole invocation time
+including build is 749.138s. Exit status remains 65. The independent collector
+tail is owned by [#2583](https://github.com/OlyForge3D/PrintFarmer/issues/2583);
+the 25-minute CI step ceiling remains a separate process backstop.
+
+### Synchronized-head adjacent validation
+
+After committing, fetched and merged `origin/development` at
+`0e4a41702302431623cdcb837b2f1a05781d59f0`, producing implementation-validation
+head `e5959d0873879fb676ff01e440dff1bd159bfc67`. Both destinations were checked by
+the merged shared resolver against iOS 26.5 build 23F77.
+
+| Destination / bundle | Passed | Failed | Skipped | Evidence |
+| --- | --- | --- | --- | --- |
+| iPhone 17 / `final-iphone-2573.xcresult` | 13 | 0 | 0 | All ShiftTasks cases, original timeout selectors, adjacent account/Attention/root chrome, and all three budget regressions |
+| iPad Pro 11-inch (M5) / `final-ipad-2573.xcresult` | 12 | 1 | 0 | Same original timeout/ShiftTasks and budget coverage, sidebar/root chrome; leading-edge gesture assertion fails |
+| Unchanged development / `baseline-ipad-gesture-2573.xcresult` | 0 | 1 | 0 | Same leading-edge assertion reproduces without any branch helper changes |
+
+The iPad is `014FF738-9D3B-4261-B00E-D7A1E5B16E33`. Its full SimpleShellChrome
+case passed in **63.862s**, demonstrating why a blanket 60-second suite limit
+would be incorrect. The isolated three cases retain their scoped 60s allowances.
+
+The iPad failure is
+`JobDetailIPadNavigationUITests/testIPadLeadingEdgeRevealKeepsVisibleSidebarOpen`,
+line 45: `The leading-edge gesture must reveal the collapsed iPad sidebar`.
+Changed source fails in 20.554s; a clean `git archive` export of the unchanged
+development commit on the **same device/runtime** fails in 21.212s with the
+same assertion. Show Sidebar was present, unlike #2576's startup-splash failure.
+Gesture coordinates are unchanged. This separate baseline issue remains owned
+and open in [#2582](https://github.com/OlyForge3D/PrintFarmer/issues/2582); the iPad
+run is **not green**.
+
+The first after-harness attempt had 9 passes and a new cold-compact enumeration
+failure: waiting for a nonexistent iPad toggle consumed the entire shared
+budget before rechecking the tab bar. The corrected helper reserves a short
+toggle probe within the same deadline. This was fixed, not skipped.
+The initial fake-clock class was accidentally nested and undiscovered; it was
+moved to top level. Final `.xcresult` trees explicitly contain each case once,
+with Passed and a positive execution duration on **both devices**:
+
+- `UIWaitBudgetTests/testCompositeOperationsShareOneDeadline`
+- `UIWaitBudgetTests/testInFlightOverrunDoesNotStartAnotherQueryOrDiagnostic`
+- `UIWaitBudgetTests/testZeroBudgetNeverStartsRemoteWork`
+
+Shared scheme/plan resolution, both test targets, enabled timeouts, and unchanged
+general 600s allowance were also checked from the XML/JSON and with
+`xcodebuild -showTestPlans`. No snapshot references, skips, assertions, or
+service-retry behavior were relaxed.
+
+The existing `ShiftTasksUITests` CI matrix invocations also select
+`UIWaitBudgetTests`, so the new regression class is executed persistently on
+both device families rather than merely compiled. No extra matrix jobs were
+added. The actual workflow shell body was exercised with a stubbed `xcodebuild`
+for ShiftTasks and OperatorShell: suite selection remains intact, only ShiftTasks
+gets the budget selector, logs are retained, and exit codes 0 and 42 propagate
+through `tee` unchanged.
+
+### Retained artifacts
+
+Local artifacts live outside the worktree, in the Copilot session
+`370ca864-1fd0-48e7-87da-c53c9d2938b4/files` under `~/.copilot/session-state/`.
+Each named run retains both `.log` and `.xcresult`; this is local evidence, not
+a claim that bundles were uploaded to GitHub:
+
+- `before-recovery-2573`: unchanged-harness focused reproduction.
+- `diagnostic-before-2573`: original composite helper and watchdog probes.
+- `after-fixed-2573`: the disclosed 9-pass / 1-failure intermediate run.
+- `diagnostic-after-2573`: corrected missing query, stall, and compact readiness.
+- `final-iphone-2573`, `final-ipad-2573`: synchronized-head adjacent runs.
+- `baseline-ipad-gesture-2573`: unchanged-source comparison.
+
+Original SwiftPM/build-failure logs and JSON test trees are retained too.
+CI publishes text logs alongside result bundles for future diagnosable failures.
 
 ### Scope exclusions
 
