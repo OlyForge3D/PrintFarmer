@@ -197,6 +197,7 @@ async function reclaimObservedGeneration(lockFile, observed, options, suffix) {
         const metadata = lockMetadata(options.staleLockMs);
         await handle.writeFile(JSON.stringify(metadata));
         holds.push({ file: holdFile, handle, metadata });
+        await options.hooks?.afterAncestorHoldAcquired?.(staleTarget.file, staleTarget.generation);
       } catch (error) {
         if (handle) {
           await handle.close();
@@ -273,20 +274,31 @@ async function reclaimStaleLock(lockFile, options) {
 
 async function acquireLock(lockFile, {
   retries = 40, retryMs = 10, staleLockMs = 5 * 60 * 1000, isOwnerAlive = ownerIsAlive,
-  hooks, writeGuardMetadata,
+  hooks, writeGuardMetadata, writeLockMetadata,
 } = {}) {
   for (let attempt = 0; attempt < retries; attempt += 1) {
+    let handle;
     try {
-      const handle = await open(lockFile, 'wx');
+      handle = await open(lockFile, 'wx');
       const metadata = {
         ownerToken: randomUUID(),
         pid: process.pid,
         createdAt: new Date().toISOString(),
         expiresAt: new Date(Date.now() + staleLockMs).toISOString(),
       };
-      await handle.writeFile(JSON.stringify(metadata));
+      await (writeLockMetadata || ((file, value) => file.writeFile(value)))(
+        handle,
+        JSON.stringify(metadata),
+      );
       return { handle, metadata };
     } catch (error) {
+      if (handle) {
+        try {
+          await rm(lockFile, { force: true });
+        } finally {
+          await handle.close();
+        }
+      }
       if (error.code !== 'EEXIST') throw error;
       if (await reclaimStaleLock(lockFile, {
         isOwnerAlive, hooks, writeGuardMetadata, staleLockMs,

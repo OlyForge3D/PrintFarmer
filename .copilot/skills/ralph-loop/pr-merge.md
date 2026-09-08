@@ -17,7 +17,8 @@ to the owning session. `strict: false` means `BEHIND` alone is not a blocker.
 Only the verifier's current-SHA `REVIEWED`/`APPROVED` evidence can proceed. A carried base-sync
 record has only the verifier's stated semantics; diff similarity never grants authorization.
 `CHANGES_REQUESTED`, missing, invalid, unauthenticated, stale, fork, or out-of-scope evidence
-never authorizes a merge. Do not commission reviewers for valid pre-PR records.
+never authorizes a merge. Scheduled Ralph never reviews PRs, never commissions reviewer agents,
+and routes missing or invalid verdicts to the owning implementation session's pre-PR process.
 
 ## Merge And Conflict Safety
 

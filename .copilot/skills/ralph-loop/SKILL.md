@@ -40,8 +40,8 @@ explicitly, and this change must not alter live workflows. Preserve manual targe
 
 ## First Actions
 
-1. Fetch `origin`; report local-vs-remote `development` gap. A failed fast-forward update of
-   local `development` is report-only. `strict: false`: `BEHIND` alone is not a blocker.
+1. Fetch `origin`; report the local-vs-remote `development` gap without changing any checkout.
+   `strict: false`: `BEHIND` alone is not a blocker.
 2. Collect every open issue and PR with complete pagination. Account for each open issue as
    dispatched, in-flight, awaiting-analysis, blocked (name each open blocker), epic-tracking,
    deferred-to-macOS-Ralph, or unaccounted.

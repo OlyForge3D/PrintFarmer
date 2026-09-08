@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import {
@@ -122,6 +122,22 @@ test('never reclaims an expired lease while its owner is demonstrably alive', as
     await assert.rejects(() => writeRoundCache(scope, cache(), {
       env: { RALPH_CACHE_DIR: directory }, retries: 1, isOwnerAlive: () => true,
     }), (error) => error.code === 'LOCK_TIMEOUT');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('cleans up a newly created lock when primary metadata persistence fails', async () => {
+  const directory = await temporaryDirectory();
+  try {
+    const file = cacheFileForScope(scope, { env: { RALPH_CACHE_DIR: directory } });
+    await assert.rejects(() => writeRoundCache(scope, cache(), {
+      env: { RALPH_CACHE_DIR: directory },
+      writeLockMetadata: async () => { throw new Error('simulated lock write failure'); },
+    }), /simulated lock write failure/);
+    assert.equal(await readFile(`${file}.lock`, 'utf8').then(() => true, () => false), false);
+    await writeRoundCache(scope, cache(), { env: { RALPH_CACHE_DIR: directory } });
+    assert.equal((await readRoundCache(scope, { env: { RALPH_CACHE_DIR: directory } })).reason, undefined);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -265,20 +281,28 @@ test('a coordinated second writer cannot overlap or remove a live replaced ances
     await writeFile(`${file}.lock.reclaim`, JSON.stringify(stale));
     await writeFile(claim, JSON.stringify(stale));
     let secondWriter;
+    let holdObserved = false;
     await assert.rejects(() => writeRoundCache(scope, cache(), {
       env: { RALPH_CACHE_DIR: directory }, retries: 1, isOwnerAlive: () => false,
       hooks: {
+        afterAncestorHoldAcquired: async (ancestor, generation) => {
+          if (!ancestor.endsWith('.reclaim')) return;
+          const hold = `${ancestor}.hold.${encodeURIComponent(generation)}`;
+          await assert.rejects(open(hold, 'wx'), (error) => error.code === 'EEXIST');
+          holdObserved = true;
+          secondWriter = writeRoundCache(scope, cache({ queue: ['#second'] }), {
+            env: { RALPH_CACHE_DIR: directory }, retries: 1, isOwnerAlive: () => false,
+          });
+          await assert.rejects(secondWriter, (error) => error.code === 'LOCK_TIMEOUT');
+        },
         afterAncestorValidated: async (ancestor) => {
           if (ancestor.endsWith('.reclaim')) {
             await writeFile(ancestor, JSON.stringify(replacement));
-            secondWriter = writeRoundCache(scope, cache({ queue: ['#second'] }), {
-              env: { RALPH_CACHE_DIR: directory }, retries: 1, isOwnerAlive: () => false,
-            });
-            await assert.rejects(secondWriter, (error) => error.code === 'LOCK_TIMEOUT');
           }
         },
       },
     }), (error) => error.code === 'LOCK_TIMEOUT');
+    assert.equal(holdObserved, true);
     assert.ok(secondWriter);
     assert.equal(
       JSON.parse(await readFile(`${file}.lock.reclaim`, 'utf8')).ownerToken,
@@ -488,6 +512,7 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
   assert.doesNotMatch(prePr, /Workflow\/configuration|agent-safety-boundary/i);
   for (const reference of [
     'verify-squad-verdict.mjs', 'CodeQL', 'match-head-commit', 'hand-authored conflict',
+    'never reviews PRs', 'never commissions reviewer agents', 'owning implementation session',
   ]) assert.match(prMerge, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   assert.doesNotMatch(prMerge, /\.squad\/templates\/ralph-reference\.md/i);
   for (const reference of [
