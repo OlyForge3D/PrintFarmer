@@ -869,6 +869,12 @@ describe('AdminControlCenterPage', () => {
 
     expect(screen.getByText('Moved Analytics to position 1 of 2.')).toBeInTheDocument();
 
+    // Verify the drag path actually reordered the pinned rows (not just the
+    // announcement text) — Analytics must now render before Workers & Jobs.
+    const [reorderedFirstRow, reorderedSecondRow] = within(destinationList).getAllByRole('listitem');
+    expect(within(reorderedFirstRow).getByText('Analytics')).toBeInTheDocument();
+    expect(within(reorderedSecondRow).getByText('Workers & Jobs')).toBeInTheDocument();
+
     // Let the announcement's own clear-after-1500ms timeout fire inside this
     // test (rather than leaking into a later one) so the state update it
     // causes is captured by act().
