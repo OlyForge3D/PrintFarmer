@@ -18,9 +18,9 @@ permissions:
   contents: read
 
 env:
-  # Prefer a stable, explicit simulator over the newest available runtime/model.
+  # Preferences only order devices/runtimes; the resolver enforces build approval.
   IOS_SIMULATOR_DEVICE_PREFERENCE: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
-  IOS_SIMULATOR_RUNTIME_PREFERENCE: iOS 26.4,iOS 26.5
+  IOS_SIMULATOR_RUNTIME_PREFERENCE: iOS 26.5
 
 jobs:
   # ---------------------------------------------------------------------------
