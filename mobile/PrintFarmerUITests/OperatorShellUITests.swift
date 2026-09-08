@@ -271,12 +271,15 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         }
 
         // Discovering the destination does not grant command access.
-        XCTAssertTrue(
-            app.segmentedControls["printer.detail.panel.selector"].exists,
-            "Controls remains discoverable with the per-server safety toggle off"
-        )
-        app.segmentedControls["printer.detail.panel.selector"].buttons["Controls"].tap()
-        XCTAssertTrue(app.otherElements["printer.detail.controls.unavailable"].waitForExistence(timeout: 5))
+        // Retain #2579's activity evidence that the guards did not return early.
+        XCTContext.runActivity(named: "final safety assertions (#2579)") { _ in
+            XCTAssertTrue(
+                app.segmentedControls["printer.detail.panel.selector"].exists,
+                "Controls remains discoverable with the per-server safety toggle off"
+            )
+            app.segmentedControls["printer.detail.panel.selector"].buttons["Controls"].tap()
+            XCTAssertTrue(app.otherElements["printer.detail.controls.unavailable"].waitForExistence(timeout: 5))
+        }
     }
 
     private func openAccount(

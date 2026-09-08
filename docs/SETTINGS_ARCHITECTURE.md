@@ -570,8 +570,8 @@ Consequences, all enforced by tests:
 
 - **The rail carries no second route to a Control Center destination.** Maintenance,
   Locations, Analytics, Auto-Dispatch and Catalog used to be anchored rail entries *and*
-  hub tiles; the rail entries are gone. `Printed Parts` (`/parts-inventory`) is not an
-  `ADMIN_DESTINATIONS` entry, so the rail is its only home and it stays.
+  hub tiles; the rail entries are gone. Printed Parts (`/parts-inventory`) is also an
+  `ADMIN_DESTINATIONS` hub tile, so it follows the same one-default-home rule.
 - **The Control Center never links to itself.** `admin-home` is `kind: 'hub'`, so
   neither `OPERATIONAL_DESTINATION_IDS` nor `getStandaloneConfigurationDestinations`
   can render it, `AdminControlCenterPage` passes no `parent` to `PageTemplate`, and

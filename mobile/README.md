@@ -61,7 +61,7 @@ cd mobile
   simulator_udid="$(../scripts/ci/resolve-ios-simulator.sh --udid 2>"$run_dir/destination.log")" ||
     { cat "$run_dir/destination.log" >&2; exit 1; }
   cat "$run_dir/destination.log"
-  xcodebuild test -scheme PrintFarmer \
+  python3 scripts/run-tests.py -- test -scheme PrintFarmer \
     -destination "platform=iOS Simulator,id=$simulator_udid" \
     -only-testing:PrintFarmerTests/PrinterControlsSectionSnapshotTests \
     -parallel-testing-enabled NO \
@@ -73,6 +73,10 @@ cd mobile
 The shared test plan enables XCTest watchdogs. Isolated timeout investigations
 use a 60-second allowance without capping longer adjacent tests; see the
 [XCUI timeout policy and evidence ledger](docs/xcui-timeout-diagnosis.md).
+The shared local/CI runner separately bounds post-test finalization/restart at
+120s and disables automatic verbose simulator diagnostics. Preserve the
+`.events.jsonl` and `.timing.json` siblings with each result bundle and log;
+reported test duration is distinct from collection/teardown overhead.
 
 Use `-only-testing:PrintFarmerTests` for all unit tests, or explicitly select
 `PrintFarmerUITests/<Suite>` for XCUI. See [agent testing guidance](AGENTS.md#simulator-testing)
