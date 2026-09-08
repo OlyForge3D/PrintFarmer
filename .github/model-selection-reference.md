@@ -4,6 +4,12 @@
 
 Before spawning an agent, determine which model to use. Check these layers in order — first match wins:
 
+**Vasquez user override:** The user explicitly authorizes `gemini-3.8-flash` for every Vasquez
+review. Resolve this exact configured ID from `.squad/config.json` →
+`agentModelOverrides.vasquez` before the normal layers. Do not pass `latest`, infer a Gemini Pro
+ID, or substitute another model. If this exact model is unavailable, do not dispatch Vasquez;
+report the reviewer blocked.
+
 **Layer 0 — Persistent Config (`.squad/config.json`):** On session start, read `.squad/config.json`. If `agentModelOverrides.{agentName}` exists, use that model for this specific agent. Otherwise, if `defaultModel` exists, use it for ALL agents. This layer survives across sessions — the user set it once and it sticks.
 
 - **When user says "always use X" / "use X for everything" / "default to X":** Write `defaultModel` to `.squad/config.json`. Acknowledge: `✅ Model preference saved: {model} — all future sessions will use this until changed.`
@@ -42,7 +48,6 @@ Before spawning an agent, determine which model to use. Check these layers in or
 - **Use premium (`gpt-5.6-sol`):** architecture proposals, reviewer gates, security audits, complex multi-agent coordination
 - **Use fast/cheap (`gpt-5.6-luna`):** typo fixes, renames, boilerplate, scaffolding, changelogs, version bumps
 - **Use the heavy code specialist (`gpt-5.3-codex`):** large multi-file refactors, complex implementation from specification, heavy code generation
-- **Use analytical diversity (`gemini-3.1-pro-preview`):** reviews where an independent perspective helps, especially after a rejection
 
 **Layer 4 — Default:** If nothing else matched, use `gpt-5.6-luna`.
 
@@ -90,7 +95,7 @@ If the fallback chain is exhausted, omit the `model` parameter entirely.
 🎨 Redfoot (claude-opus-4.8 · visual) — designing color system
 📋 Scribe (gpt-5.6-luna · fast) — logging session
 ⚡ Keaton (gpt-5.6-sol · architecture) — reviewing proposal
-🧪 Vasquez (gemini-3.1-pro-preview · analytical diversity) — independently reviewing implementation
+🧪 Vasquez (gemini-3.8-flash · user-authorized) — independently reviewing implementation
 ```
 
 Include a tier annotation only when the model was bumped or a specialist was chosen. Default-tier spawns just show the model name.
@@ -106,7 +111,7 @@ Reasoning effort is resolved independently **after** the model is selected. Chec
 - **Code reviewers:**
   - Bishop (`claude-opus-5`): reasoning effort `medium`
   - Hicks (`gpt-5.6-sol`): reasoning effort `medium`
-  - Vasquez (`gemini-3.1-pro-preview`): reasoning effort `medium`
+  - Vasquez (`gemini-3.8-flash`, user-authorized): reasoning effort `medium`
 
 These overrides are automatically resolved when spawning. Work continues until verified and mandatory gates pass. Unavoidable platform/provider hard limits still apply.
 
@@ -123,7 +128,7 @@ Model IDs and reasoning effort are separate parameters. Never encode effort into
 **Valid models (current platform catalog):**
 
 Premium: `gpt-5.6-sol`, `claude-opus-4.8`, `claude-opus-4.7`, `claude-opus-4.6`
-Standard: `claude-sonnet-5`, `gpt-5.6-terra`, `gpt-5.5`, `gpt-5.4`, `gpt-5.3-codex`, `claude-sonnet-4.6`, `claude-sonnet-4.5`, `gemini-3.1-pro-preview`
+Standard: `claude-sonnet-5`, `gpt-5.6-terra`, `gpt-5.5`, `gpt-5.4`, `gpt-5.3-codex`, `claude-sonnet-4.6`, `claude-sonnet-4.5`
 Fast/Cheap policy: `gpt-5.6-luna`, `gemini-3.5-flash`, `claude-haiku-4.5`, `gpt-5.4-mini`, `gpt-5-mini`, `mai-code-1-flash-picker`
 
 These are routing tiers, not verified pricing claims. Runtime rejection overrides the static catalog.

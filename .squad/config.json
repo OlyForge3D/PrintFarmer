@@ -11,8 +11,8 @@
     "parker": "gpt-6-astra",
     "newt": "claude-opus-4.7-xhigh",
     "bishop": "claude-opus-5",
-    "hicks": "gpt-6-astra",
-    "vasquez": "gemini-3.1-pro-preview"
+    "hicks": "gpt-5.6-sol",
+    "vasquez": "gemini-3.8-flash"
   },
   "agentReasoningEffortOverrides": {
     "dallas": "max",
