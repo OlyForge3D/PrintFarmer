@@ -60,6 +60,12 @@ public class NfcHub(
             throw new HubException("resource_forbidden");
         }
 
+        if (PrintFarmerPermissions.IsFarmAdmin(Context.User!))
+        {
+            // Administrators already receive every scan through their exclusive group.
+            return;
+        }
+
         await Groups.AddToGroupAsync(
             Context.ConnectionId, AuthorizedHubGroups.Printer(id), Context.ConnectionAborted);
     }

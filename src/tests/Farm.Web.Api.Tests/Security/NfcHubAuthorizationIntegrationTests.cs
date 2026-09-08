@@ -1,4 +1,4 @@
-using System.Net.Http;
+﻿using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Channels;
 using Farm.Infrastructure.Data;
@@ -203,34 +203,50 @@ public sealed class NfcHubAuthorizationIntegrationTests : IAsyncLifetime, IDispo
             db.Roles.Add(new Role { Id = roleId, Name = $"nfc-role-{roleId}", DisplayName = "NFC viewer", IsActive = true });
             db.Users.Add(new User
             {
-                Id = userId, Username = $"nfc-{userId}", Email = $"{userId}@example.test",
-                PasswordHash = "test-hash", IsActive = true
+                Id = userId,
+                Username = $"nfc-{userId}",
+                Email = $"{userId}@example.test",
+                PasswordHash = "test-hash",
+                IsActive = true
             });
             db.UserRoles.Add(new UserRole { Id = Guid.NewGuid(), UserId = userId, RoleId = roleId, IsActive = true });
             db.PrinterGroupAccesses.Add(new PrinterGroupAccess
             {
-                Id = Guid.NewGuid(), PrinterGroupId = groupId, RoleId = roleId,
+                Id = Guid.NewGuid(),
+                PrinterGroupId = groupId,
+                RoleId = roleId,
                 AccessLevel = PrinterGroupAccessLevel.View
             });
             db.Printers.Add(new Printer
             {
-                Id = printerId, Name = $"NFC printer {printerId}", ServerUrl = $"http://nfc-{printerId}",
-                ManufacturerId = manufacturerId, ModelId = modelId, PrinterGroupId = groupId,
-                IsEnabled = true, IsAvailable = true
+                Id = printerId,
+                Name = $"NFC printer {printerId}",
+                ServerUrl = $"http://nfc-{printerId}",
+                ManufacturerId = manufacturerId,
+                ModelId = modelId,
+                PrinterGroupId = groupId,
+                IsEnabled = true,
+                IsAvailable = true
             });
         }
 
         db.NfcDevices.Add(new NfcDevice
         {
-            Id = fixture.Device, Name = "NFC reader", PrinterId = fixture.FirstPrinter,
+            Id = fixture.Device,
+            Name = "NFC reader",
+            PrinterId = fixture.FirstPrinter,
             LastHeartbeat = offline ? DateTime.UtcNow.AddMinutes(-10) : DateTime.UtcNow
         });
         if (known)
         {
             db.NfcTagBindings.Add(new NfcTagBinding
             {
-                Id = Guid.NewGuid(), TagUid = "NFC-ISOLATION", SpoolId = 42,
-                SpoolName = "Restricted spool", PrinterId = fixture.FirstPrinter, TrayId = "A1"
+                Id = Guid.NewGuid(),
+                TagUid = "NFC-ISOLATION",
+                SpoolId = 42,
+                SpoolName = "Restricted spool",
+                PrinterId = fixture.FirstPrinter,
+                TrayId = "A1"
             });
         }
         await db.SaveChangesAsync();
