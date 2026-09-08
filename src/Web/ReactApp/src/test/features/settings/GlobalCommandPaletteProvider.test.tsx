@@ -11,7 +11,6 @@ import { MemoryRouter, useLocation } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
 import { useCommandPalette } from '@/features/settings/components/commandPaletteContext';
-import { ADMIN_HUB_ROUTE_STATE } from '@/features/admin/utils/adminHubParentState';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 
 const authState: {
