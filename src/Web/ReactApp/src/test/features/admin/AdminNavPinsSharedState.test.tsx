@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router';
@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 import { Layout } from '@/common/components/Layout';
 import { AdminControlCenterPage } from '@/features/admin/pages/AdminControlCenterPage';
+import { AdminDestinationRoute } from '@/features/admin/components/AdminDestinationRoute';
 import { AdminNavPinsProvider } from '@/common/contexts/AdminNavPinsContext';
 import { useAdminNavPins } from '@/common/contexts/useAdminNavPins';
 import { getNavPreferencesStorageKey, saveNavPreferences, NAV_PREFERENCES_VERSION } from '@/common/utils/navPreferences';
@@ -132,6 +133,12 @@ function shellElement(queryClient: QueryClient) {
           <Routes>
             <Route element={<Layout />}>
               <Route path="/admin" element={<AdminControlCenterPage />} />
+              <Route path="/admin/workers" element={
+                <AdminDestinationRoute destinationId="ops-workers">
+                  <div>Workers page body</div>
+                </AdminDestinationRoute>
+              }
+              />
             </Route>
           </Routes>
         </AdminNavPinsProvider>
@@ -200,15 +207,19 @@ describe('Admin nav pins: shared state across Control Center and Layout (Issue 2
       expect(screen.getByTestId('admin-hub-operations')).toBeInTheDocument();
     });
 
-    // Nothing pinned yet: no Favorites section, no Workers & Jobs navbar link.
-    expect(screen.queryByRole('region', { name: 'Favorites' })).not.toBeInTheDocument();
+    // Nothing pinned yet: no extra Admin destination entry beyond the default
+    // anchored Admin rail items.
+    expect(screen.queryByRole('link', { name: 'Workers & Jobs' })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Pin admin links' }));
     await user.click(screen.getByRole('button', { name: 'Pin Workers & Jobs from navbar' }));
 
-    // Same tab, no reload: Layout's navbar must reflect the pin immediately.
+    // Same tab, no reload: Layout's navbar must reflect the pin immediately,
+    // inside the existing Admin section rather than a top-level Favorites rail.
     const pinnedLink = await screen.findByRole('link', { name: 'Workers & Jobs' });
-    expect(screen.getByRole('region', { name: 'Favorites' })).toBeInTheDocument();
+    const adminRail = screen.getByRole('region', { name: 'Admin' });
+    expect(within(adminRail).getByRole('link', { name: 'Workers & Jobs' })).toBe(pinnedLink);
+    expect(screen.queryByRole('region', { name: 'Favorites' })).not.toBeInTheDocument();
 
     // The regression under test: Layout must resolve the same override the
     // dashboard's own Workers & Jobs card uses (`?workerTab=jobs`), not the
@@ -358,5 +369,42 @@ describe('Admin nav pins: shared state across Control Center and Layout (Issue 2
 
     // The admin pin must survive a reset of the *regular* navbar preferences.
     expect(screen.getByRole('link', { name: 'Analytics' })).toBeInTheDocument();
+  });
+
+  it('shows a per-page pin control on admin destination routes and adds the link under Admin immediately', async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/admin/workers']}>
+          <AdminNavPinsProvider>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route
+                  path="/admin/workers"
+                  element={(
+                    <AdminDestinationRoute destinationId="ops-workers">
+                      <div>Workers page body</div>
+                    </AdminDestinationRoute>
+                  )}
+                />
+              </Route>
+            </Routes>
+          </AdminNavPinsProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const pagePinButton = screen.getByRole('button', { name: 'Pin Workers & Jobs from navbar' });
+    expect(pagePinButton).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(pagePinButton);
+
+    expect(pagePinButton).toHaveAttribute('aria-pressed', 'true');
+    const adminRail = screen.getByRole('region', { name: 'Admin' });
+    expect(within(adminRail).getByRole('link', { name: 'Workers & Jobs' })).toHaveAttribute('href', '/admin/workers?workerTab=jobs');
   });
 });

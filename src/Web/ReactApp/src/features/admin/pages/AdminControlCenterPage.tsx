@@ -13,7 +13,9 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import {
   AlertCircleIcon,
   AlertIcon,
+  ArrowDownIcon,
   ArrowRightIcon,
+  ArrowUpIcon,
   CheckCircleIcon,
   HelpCircleIcon,
   HomeIcon,
@@ -30,13 +32,17 @@ import {
   type AdminDestination,
 } from '@/features/admin/registry';
 import { useAdminNavPins } from '@/common/contexts/useAdminNavPins';
+import { getNavMoveFocusTarget } from '@/common/utils/navPreferences';
 import { AdminAttentionPanel } from '@/features/admin/components/AdminAttentionPanel';
 import { useAdminOverview } from '@/features/admin/hooks/useAdminOverview';
+import { ADMIN_HUB_ROUTE_STATE } from '@/features/admin/utils/adminHubParentState';
 import {
   isKnownSubsystemStatus,
   type KnownSubsystemStatus,
   type SubsystemHealthDto,
 } from '@/types/adminOverview';
+
+type MoveButtonDirection = 'up' | 'down';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Status presentation
@@ -239,6 +245,7 @@ function DestinationCard({ destination }: { destination: AdminDestination }) {
   return (
     <Link
       to={destination.path}
+      state={ADMIN_HUB_ROUTE_STATE}
       className="group block h-full rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent"
       data-testid="admin-hub-destination"
       data-destination-id={destination.id}
@@ -296,10 +303,12 @@ function DestinationCard({ destination }: { destination: AdminDestination }) {
  */
 export function AdminControlCenterPage() {
   const { hasRole, hasPermission } = useAuth();
-  const { pinnedIds, setPinned } = useAdminNavPins();
+  const { pinnedIds, setPinned, movePinned } = useAdminNavPins();
   const [showPinChooser, setShowPinChooser] = useState(false);
   const pinChooserButtonRef = useRef<HTMLButtonElement | null>(null);
   const pinChooserRef = useRef<HTMLDivElement | null>(null);
+  const pinMoveButtonRefs = useRef(new Map<string, { up: HTMLButtonElement | null; down: HTMLButtonElement | null; row: HTMLElement | null }>());
+  const pendingPinMoveFocusRef = useRef<{ destinationId: string; direction: MoveButtonDirection } | null>(null);
   const canViewOverview = hasRole('farm_admin') || hasPermission('system_settings', 'admin');
   const { data, isLoading, isError, error, isFetching, refetch } = useAdminOverview({
     enabled: canViewOverview,
@@ -332,6 +341,28 @@ export function AdminControlCenterPage() {
       .filter((destination) => canAccessDestination(destination, { hasRole, hasPermission })),
     [hasPermission, hasRole],
   );
+  const orderedPinnedDestinations = useMemo(
+    () => pinnedIds
+      .map((id) => getDestinationById(id))
+      .filter((destination): destination is AdminDestination => Boolean(destination))
+      .filter((destination) => destination.kind !== 'hub' && canAccessDestination(destination, { hasRole, hasPermission })),
+    [hasPermission, hasRole, pinnedIds],
+  );
+  const orderedPinnedIds = useMemo(
+    () => orderedPinnedDestinations.map((destination) => destination.id),
+    [orderedPinnedDestinations],
+  );
+  const pinPositionById = useMemo(
+    () => new Map(orderedPinnedIds.map((id, index) => [id, index])),
+    [orderedPinnedIds],
+  );
+  const pinChooserDestinations = useMemo(() => {
+    const pinnedDestinationIds = new Set(orderedPinnedIds);
+    return [
+      ...orderedPinnedDestinations,
+      ...eligiblePinDestinations.filter((destination) => !pinnedDestinationIds.has(destination.id)),
+    ];
+  }, [eligiblePinDestinations, orderedPinnedDestinations, orderedPinnedIds]);
 
   useEffect(() => {
     if (!showPinChooser) return;
@@ -350,6 +381,17 @@ export function AdminControlCenterPage() {
       window.removeEventListener('keydown', onKeyDown);
     };
   }, [showPinChooser]);
+
+  useEffect(() => {
+    const pendingFocus = pendingPinMoveFocusRef.current;
+    if (!pendingFocus) {
+      return;
+    }
+
+    const moveRefs = pinMoveButtonRefs.current.get(pendingFocus.destinationId);
+    getNavMoveFocusTarget(moveRefs, pendingFocus.direction)?.focus();
+    pendingPinMoveFocusRef.current = null;
+  }, [orderedPinnedIds]);
 
   // The "no operational tools" empty state is only truthful when the whole
   // band is empty — a delegate who reaches Power Monitors but no operational
@@ -411,25 +453,83 @@ export function AdminControlCenterPage() {
           <div className="mb-3">
             <h2 className="text-base font-semibold text-pf-text-primary">Pin admin links</h2>
             <p className="text-sm text-pf-text-secondary">
-              Choose authorized admin destinations to show in your navbar. Pins are saved in this browser for your account.
+              Choose authorized admin destinations to show in your navbar. Pinned links stay in the order shown and are saved in this browser for your account.
             </p>
           </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="list" aria-label="Authorized admin destinations">
-            {eligiblePinDestinations.map((destination) => {
-              const pinned = pinnedIds.includes(destination.id);
+          <div className="space-y-2" role="list" aria-label="Authorized admin destinations">
+            {pinChooserDestinations.map((destination) => {
+              const pinPosition = pinPositionById.get(destination.id);
+              const pinned = pinPosition !== undefined;
               return (
-                <div key={destination.id} role="listitem" className="flex items-center justify-between gap-3 rounded-md border border-pf-border p-2">
-                  <span className="min-w-0 text-sm text-pf-text-primary">{destination.label}</span>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={pinned ? 'secondary' : 'subtle'}
-                    aria-pressed={pinned}
-                    aria-label={`${pinned ? 'Unpin' : 'Pin'} ${destination.label} from navbar`}
-                    onClick={() => setPinned(destination.id, !pinned)}
-                  >
-                    {pinned ? 'Pinned' : 'Pin'}
-                  </Button>
+                <div
+                  key={destination.id}
+                  ref={(node) => {
+                    const current = pinMoveButtonRefs.current.get(destination.id) ?? { up: null, down: null, row: null };
+                    current.row = node;
+                    pinMoveButtonRefs.current.set(destination.id, current);
+                  }}
+                  role="listitem"
+                  tabIndex={-1}
+                  className="rounded-md border border-pf-border p-2"
+                >
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0 w-full">
+                      <span className="block break-words text-sm font-medium text-pf-text-primary">{destination.label}</span>
+                      <span className="block break-words text-xs text-pf-text-secondary">{destination.description}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1">
+                      {pinned ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="subtle"
+                            size="sm"
+                            className="h-8 w-8 px-0"
+                            aria-label={`Move ${destination.label} up`}
+                            disabled={pinPosition === 0}
+                            ref={(node) => {
+                              const current = pinMoveButtonRefs.current.get(destination.id) ?? { up: null, down: null, row: null };
+                              current.up = node;
+                              pinMoveButtonRefs.current.set(destination.id, current);
+                            }}
+                            onClick={() => {
+                              pendingPinMoveFocusRef.current = { destinationId: destination.id, direction: 'up' };
+                              movePinned(destination.id, (pinPosition ?? 0) - 1, orderedPinnedIds);
+                            }}
+                            iconCenter={<ArrowUpIcon className="h-4 w-4" />}
+                          />
+                          <Button
+                            type="button"
+                            variant="subtle"
+                            size="sm"
+                            className="h-8 w-8 px-0"
+                            aria-label={`Move ${destination.label} down`}
+                            disabled={pinPosition === orderedPinnedIds.length - 1}
+                            ref={(node) => {
+                              const current = pinMoveButtonRefs.current.get(destination.id) ?? { up: null, down: null, row: null };
+                              current.down = node;
+                              pinMoveButtonRefs.current.set(destination.id, current);
+                            }}
+                            onClick={() => {
+                              pendingPinMoveFocusRef.current = { destinationId: destination.id, direction: 'down' };
+                              movePinned(destination.id, (pinPosition ?? 0) + 1, orderedPinnedIds);
+                            }}
+                            iconCenter={<ArrowDownIcon className="h-4 w-4" />}
+                          />
+                        </>
+                      ) : null}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={pinned ? 'secondary' : 'subtle'}
+                        aria-pressed={pinned}
+                        aria-label={`${pinned ? 'Unpin' : 'Pin'} ${destination.label} from navbar`}
+                        onClick={() => setPinned(destination.id, !pinned)}
+                      >
+                        {pinned ? 'Pinned' : 'Pin'}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               );
             })}

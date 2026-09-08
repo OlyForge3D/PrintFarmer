@@ -155,3 +155,5 @@ Files I now know cold:
 - Assumed HTTP body `{ code, detail? }`, surfaced by `apiClient` at `error.data`; reason values are `no_profiles_for_model` and `alias_matched_no_profiles`.
 - Because Phase 1 removes the clone success callback, the Phase 0 `customProfiles` invalidation line has no surviving site in the combined end state; Phase 3 must invalidate all four approved family-related keys.
 - Validation: build passed; React suite passed once (463 files / 5,135 tests); lint passed with one pre-existing warning in untouched `SlicerWorkspace.tsx`.
+
+- 2026-09-08: ACC breadcrumb needs nav-state origin gating everywhere; nav-pin UX shipped per-page pin + Admin grouping/reorder. PR #2586.

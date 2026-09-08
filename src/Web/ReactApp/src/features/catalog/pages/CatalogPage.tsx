@@ -8,6 +8,7 @@ import { ExtrudersCatalog } from '@/features/catalog/components/ExtrudersCatalog
 import { ToolheadsCatalog } from '@/features/catalog/components/ToolheadsCatalog';
 import { NozzlesCatalog } from '@/features/catalog/components/NozzlesCatalog';
 import { FilamentsCatalog } from '@/features/catalog/components/FilamentsCatalog';
+import { useAdminHubParent } from '@/features/admin/utils/adminHubParentState';
 
 type CatalogTab = 'printers' | 'hotends' | 'extruders' | 'toolheads' | 'nozzles' | 'filaments';
 
@@ -23,6 +24,7 @@ type CatalogTab = 'printers' | 'hotends' | 'extruders' | 'toolheads' | 'nozzles'
  * - Nozzles: Nozzle models and specifications
  */
 export function CatalogPage() {
+  const adminHubParent = useAdminHubParent();
   const [activeTab, setActiveTab] = useState<CatalogTab>('printers');
 
   return (
@@ -30,6 +32,7 @@ export function CatalogPage() {
       title="Catalog"
       subtitle="Manage printer manufacturers, models, and components"
       icon={DatabaseIcon}
+      parent={adminHubParent}
     >
       <Tabs
         activeTab={activeTab}

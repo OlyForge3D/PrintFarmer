@@ -7,6 +7,7 @@ import { ADMIN_HUB_PARENT } from '@/features/admin/registry/adminDestinations';
 import { Button, FormField, Input, Select, Toggle, Badge } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { DeleteIcon, EditIcon, PlusIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
+import { AdminNavPinButton } from '@/features/admin/components/AdminNavPinButton';
 import { usePrintersFast } from '@/common/hooks/useApi';
 import {
   usePowerMonitors,
@@ -182,10 +183,13 @@ export function PowerMonitorSettingsPage() {
       icon={SettingsIcon}
       parent={ADMIN_HUB_PARENT}
       titleActions={
-        <Button variant="primary" onClick={openCreate}>
-          <PlusIcon className="w-4 h-4 mr-1" />
-          Add Monitor
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <AdminNavPinButton destinationId="hw-power-monitors" />
+          <Button variant="primary" onClick={openCreate}>
+            <PlusIcon className="w-4 h-4 mr-1" />
+            Add Monitor
+          </Button>
+        </div>
       }
     >
       {/* Farm-wide fallback rate */}

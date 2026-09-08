@@ -10,6 +10,7 @@ import { StatisticsDashboardContent } from '@/features/statistics/pages/Statisti
 import { CostDashboardContent } from '@/features/statistics/pages/CostDashboardPage';
 import { AnalyticsDashboardContent } from '@/features/analytics/pages/AnalyticsDashboardPage';
 import { ExportMenu } from '@/features/analytics/components/ExportMenu';
+import { useAdminHubParent } from '@/features/admin/utils/adminHubParentState';
 
 const DEFAULT_PERIOD: TimePeriodFilterValue = { type: 'preset', days: 30 };
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
@@ -119,6 +120,7 @@ function AnalyticsMetricCard({ label, value, source, loading, hasError = false }
 }
 
 export function AnalyticsHubPage() {
+  const adminHubParent = useAdminHubParent();
   const [period, setPeriod] = useState<TimePeriodFilterValue>(DEFAULT_PERIOD);
   const [searchParams, setSearchParams] = useSearchParams();
   const requestedLens = searchParams.get('lens');
@@ -214,6 +216,7 @@ export function AnalyticsHubPage() {
       title="Analytics"
       subtitle="One place for production health, cost visibility, and fleet insight."
       icon={TrendingUpIcon}
+      parent={adminHubParent}
       actions={
         <div className="flex items-center gap-3">
           <TimePeriodFilter value={period} onChange={setPeriod} />

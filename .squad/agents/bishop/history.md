@@ -138,3 +138,7 @@ Process learning: a fully-green suite again hid nothing critical here, but the w
 - **Key finding:** The cascade fix is valid, but `ModelFiltersBar` selected pills fail contrast and need on-branch correction.
 - **Process note:** The branch stayed byte-identical to `c7f7e574f`; no PR was opened.
 
+
+### 2026-09-08 — PR #2586 review (admin breadcrumb/nav-pin UX)
+- **Verdict:** ✅ APPROVE.
+- **Learning:** When a breadcrumb depends on navigation origin, audit every consumer of the shared shell contract; route-level checks alone can miss a still-mounted shell like `SettingsShell.tsx`.

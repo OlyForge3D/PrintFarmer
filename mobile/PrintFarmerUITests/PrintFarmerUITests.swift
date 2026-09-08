@@ -1,5 +1,93 @@
 import XCTest
 
+/// Stops starting remote work after one monotonic deadline. An in-flight XCUI
+/// query still needs XCTest's enabled per-test watchdog to interrupt a stall.
+@MainActor
+final class UIWaitBudget {
+    private let now: () -> TimeInterval
+    private let started: TimeInterval
+    private let deadline: TimeInterval
+    private(set) var lastOperation = "none"
+
+    init(timeout: TimeInterval, now: @escaping () -> TimeInterval = {
+        ProcessInfo.processInfo.systemUptime
+    }) {
+        self.now = now
+        started = now()
+        deadline = started + max(0, timeout)
+    }
+
+    var remaining: TimeInterval { max(0, deadline - now()) }
+    var diagnostic: String {
+        "elapsed=\(now() - started)s; last operation=\(lastOperation); remaining=\(remaining)s"
+    }
+
+    func perform<T>(_ operation: String, _ body: () -> T) -> T? {
+        guard remaining > 0 else { return nil }
+        lastOperation = operation
+        let result = body()
+        return remaining > 0 ? result : nil
+    }
+
+    func exists(_ element: XCUIElement, named identifier: String) -> Bool {
+        perform("exists: \(identifier)") { element.exists } == true
+    }
+
+    func waitFor(
+        _ element: XCUIElement,
+        named identifier: String,
+        upTo timeout: TimeInterval
+    ) -> Bool {
+        let stepDeadline = now() + min(timeout, remaining)
+        while now() < stepDeadline {
+            if exists(element, named: identifier) { return true }
+            pause(upTo: min(0.2, stepDeadline - now()))
+        }
+        return false
+    }
+
+    func pause(upTo interval: TimeInterval = 0.2) {
+        let delay = min(interval, remaining)
+        if delay > 0 {
+            RunLoop.current.run(until: Date().addingTimeInterval(delay))
+        }
+    }
+}
+
+@MainActor
+final class UIWaitBudgetTests: XCTestCase {
+    func testCompositeOperationsShareOneDeadline() {
+        var clock: TimeInterval = 10
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        XCTAssertEqual(budget.perform("initial wait") { clock += 2; return true }, true)
+        XCTAssertEqual(budget.remaining, 3)
+        XCTAssertEqual(budget.perform("sidebar wait") { clock += 2; return true }, true)
+        XCTAssertEqual(budget.remaining, 1)
+        clock += 1
+        var called = false
+        XCTAssertNil(budget.perform("late fallback") { called = true; return true })
+        XCTAssertFalse(called)
+    }
+
+    func testInFlightOverrunDoesNotStartAnotherQueryOrDiagnostic() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 2, now: { clock })
+        XCTAssertNil(budget.perform("slow query") { clock = 3; return true })
+        var queryCount = 0
+        XCTAssertNil(budget.perform("fallback") { queryCount += 1 })
+        XCTAssertTrue(budget.diagnostic.contains("last operation=slow query"))
+        XCTAssertEqual(queryCount, 0)
+    }
+
+    func testZeroBudgetNeverStartsRemoteWork() {
+        let budget = UIWaitBudget(timeout: 0)
+        var called = false
+        XCTAssertNil(budget.perform("query") { called = true })
+        XCTAssertFalse(called)
+        XCTAssertEqual(budget.lastOperation, "none")
+    }
+}
+
 struct RenderedShellRoot {
     enum Surface {
         case tabBar
@@ -14,6 +102,26 @@ struct RenderedShellRoot {
         identifier.isEmpty ? title : identifier
     }
 }
+
+#if PFARM_TIMEOUT_DIAGNOSTICS
+/// Opt-in failing probes; never compiled into ordinary local or CI test runs.
+@MainActor
+final class QueryTimeoutDiagnosticUITests: PrintFarmerUITestCase {
+    func testDeliberateRunnerStall() {
+        executionTimeAllowance = 60
+        print("TIMEOUT_PROBE: blocking the runner for 300s; XCTest must interrupt at 60s")
+        Thread.sleep(forTimeInterval: 300)
+        XCTFail("XCTest watchdog did not interrupt the deliberately stalled runner")
+    }
+
+    func testMissingShellDestination() {
+        let start = ProcessInfo.processInfo.systemUptime
+        print("TIMEOUT_PROBE: missing shell start uptime=\(start); budget=2s")
+        _ = shellDestinationButton(tabIdentifier: "tab.timeout-probe-missing", timeout: 2)
+        XCTFail("Deliberately missing shell destination")
+    }
+}
+#endif
 
 /// Base class for all PrintFarmer UI tests.
 ///
@@ -51,8 +159,10 @@ class PrintFarmerUITestCase: XCTestCase {
 
     /// Wait for an element to exist with a timeout.
     func waitForElement(_ element: XCUIElement, timeout: TimeInterval = 5) {
-        let exists = element.waitForExistence(timeout: timeout)
-        XCTAssertTrue(exists, "Expected element \(element) to exist within \(timeout)s")
+        let budget = UIWaitBudget(timeout: timeout)
+        let exists = budget.waitFor(element, named: "requested element", upTo: timeout)
+        // Interpolating XCUIElement on failure resolves its remote description.
+        XCTAssertTrue(exists, "Expected element within \(timeout)s; \(budget.diagnostic)")
     }
 
     /// Dismiss any system alert (e.g., notification permission).
@@ -71,42 +181,59 @@ class PrintFarmerUITestCase: XCTestCase {
     /// (iPhone) or when the sidebar is already visible.
     @discardableResult
     func revealSidebarIfCollapsed(timeout: TimeInterval = 3) -> Bool {
+        revealSidebarIfCollapsed(budget: UIWaitBudget(timeout: timeout), toggleWait: timeout)
+    }
+
+    private func revealSidebarIfCollapsed(budget: UIWaitBudget, toggleWait: TimeInterval) -> Bool {
         let sidebar = app.buttons
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
             .firstMatch
-        if sidebar.exists {
+        if budget.exists(sidebar, named: "sidebar.*") {
             return true
         }
         let labels = ["Sidebar", "Toggle Sidebar", "Show Sidebar"]
         let toggle = app.buttons
             .matching(NSPredicate(format: "label IN %@", labels))
             .firstMatch
-        guard toggle.waitForExistence(timeout: timeout) else {
+        guard budget.waitFor(toggle, named: "sidebar toggle", upTo: toggleWait) else {
             return false
         }
-        toggle.tap()
-        if sidebar.waitForExistence(timeout: timeout) {
+        guard budget.perform("tap sidebar toggle", {
+            toggle.tap()
+            return true
+        }) == true else {
+            return false
+        }
+        if budget.waitFor(sidebar, named: "sidebar.*", upTo: min(1, budget.remaining)) {
             return true
         }
 
         // On a cold iPad launch the native toggle can consume its first tap
         // without opening. Only use the alternate gesture if it still says
         // Show Sidebar; never blindly toggle again and close a visible sidebar.
-        guard app.buttons["Show Sidebar"].exists else {
+        guard budget.exists(app.buttons["Show Sidebar"], named: "Show Sidebar") else {
             return false
         }
-        return revealSidebarFromLeadingEdge(timeout: timeout)
+        return revealSidebarFromLeadingEdge(budget: budget)
     }
 
     @discardableResult
     func revealSidebarFromLeadingEdge(timeout: TimeInterval = 3) -> Bool {
-        let window = app.windows.firstMatch
-        let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
-        let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5))
-        start.press(forDuration: 0.1, thenDragTo: end)
-        return app.buttons
+        revealSidebarFromLeadingEdge(budget: UIWaitBudget(timeout: timeout))
+    }
+
+    private func revealSidebarFromLeadingEdge(budget: UIWaitBudget) -> Bool {
+        guard budget.perform("leading-edge sidebar gesture", {
+            let window = app.windows.firstMatch
+            let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+            let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5))
+            start.press(forDuration: 0.1, thenDragTo: end)
+            return true
+        }) == true else { return false }
+        let sidebar = app.buttons
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
-            .firstMatch.waitForExistence(timeout: timeout)
+            .firstMatch
+        return budget.waitFor(sidebar, named: "sidebar.*", upTo: budget.remaining)
     }
 
     /// Adaptive locator for a shell destination using its shipped identifier.
@@ -121,13 +248,15 @@ class PrintFarmerUITestCase: XCTestCase {
     ///   - tabIdentifier: The compact tab identifier (e.g. `tab.attention`).
     ///     The matching iPad identifier is derived as `sidebar.attention`.
     ///   - timeout: Maximum time to wait for either surface.
-    /// - Returns: The located `XCUIElement`. Callers should assert
-    ///   `.exists` on the returned element so the failure message
-    ///   describes both surfaces explicitly.
+    /// - Returns: The located `XCUIElement`. Failure is recorded here without
+    ///   resolving another remote element or hierarchy after the deadline.
     func shellDestinationButton(
         tabIdentifier: String,
-        timeout: TimeInterval = 5
+        timeout: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line
     ) -> XCUIElement {
+        let budget = UIWaitBudget(timeout: timeout)
         let tabButton = app.tabBars.buttons[tabIdentifier]
         let tabElement = app.tabBars.descendants(matching: .any)
             .matching(identifier: tabIdentifier)
@@ -138,43 +267,49 @@ class PrintFarmerUITestCase: XCTestCase {
             with: "sidebar."
         )
         let sidebar = app.buttons[sidebarIdentifier]
-        if tabButton.waitForExistence(timeout: min(1, timeout)) {
+        if budget.waitFor(tabButton, named: tabIdentifier, upTo: min(1, timeout)) {
             return tabButton
         }
-        if tabElement.exists {
+        if budget.exists(tabElement, named: "\(tabIdentifier) descendant") {
             return tabElement
         }
-        if tabLabel.exists {
+        if budget.exists(tabLabel, named: "\(tabIdentifier) title fallback") {
             recordTabIdentifierCompatibilityFallback(tabIdentifier)
             return tabLabel
         }
-        if sidebar.exists {
+        if budget.exists(sidebar, named: sidebarIdentifier) {
             return sidebar
         }
 
-        _ = revealSidebarIfCollapsed(timeout: min(3, timeout))
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if tabButton.exists { return tabButton }
-            if tabElement.exists { return tabElement }
-            if tabLabel.exists {
+        _ = revealSidebarIfCollapsed(budget: budget, toggleWait: 1)
+        while budget.remaining > 0 {
+            if budget.exists(tabButton, named: tabIdentifier) { return tabButton }
+            if budget.exists(tabElement, named: "\(tabIdentifier) descendant") { return tabElement }
+            if budget.exists(tabLabel, named: "\(tabIdentifier) title fallback") {
                 recordTabIdentifierCompatibilityFallback(tabIdentifier)
                 return tabLabel
             }
-            if sidebar.exists { return sidebar }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            if budget.exists(sidebar, named: sidebarIdentifier) { return sidebar }
+            budget.pause()
         }
-        if sidebar.exists {
-            return sidebar
-        }
-        if tabElement.exists {
-            return tabElement
-        }
-        if tabLabel.exists {
-            recordTabIdentifierCompatibilityFallback(tabIdentifier)
-            return tabLabel
-        }
+        recordQueryFailure(
+            "Missing \(tabIdentifier) or \(sidebarIdentifier); \(budget.diagnostic)",
+            file: file,
+            line: line
+        )
         return tabButton
+    }
+
+    private func recordQueryFailure(
+        _ message: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let attachment = XCTAttachment(string: message)
+        attachment.name = "Bounded query diagnostic"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        XCTFail(message, file: file, line: line)
     }
 
     private func recordTabIdentifierCompatibilityFallback(_ identifier: String) {
@@ -219,51 +354,50 @@ class PrintFarmerUITestCase: XCTestCase {
     }
 
     func renderedShellRoots(timeout: TimeInterval = 8) -> [RenderedShellRoot] {
-        revealSidebarIfCollapsed()
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            let tabButtons = app.tabBars.firstMatch.buttons.allElementsBoundByIndex
-                .filter(\.exists)
+        let budget = UIWaitBudget(timeout: timeout)
+        while budget.remaining > 0 {
+            let tabButtons = budget.perform("enumerate tab buttons") {
+                app.tabBars.firstMatch.buttons.allElementsBoundByIndex
+            } ?? []
             if !tabButtons.isEmpty {
-                return tabButtons.map {
-                    RenderedShellRoot(
-                        title: $0.label,
-                        identifier: $0.identifier,
-                        surface: .tabBar
-                    )
-                }
+                return shellRoots(tabButtons, surface: .tabBar, budget: budget)
             }
 
-            revealSidebarIfCollapsed()
-            let sidebarButtons = app.buttons
-                .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
-                .allElementsBoundByIndex
-                .filter(\.exists)
+            // A cold compact shell may still be loading. A missing iPad toggle
+            // must not consume the budget before we inspect the tab bar again.
+            _ = revealSidebarIfCollapsed(budget: budget, toggleWait: 0.5)
+            let sidebarButtons = budget.perform("enumerate sidebar buttons") {
+                app.buttons
+                    .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
+                    .allElementsBoundByIndex
+            } ?? []
             if !sidebarButtons.isEmpty {
                 var identifiers = Set<String>()
-                return sidebarButtons.compactMap {
-                    guard identifiers.insert($0.identifier).inserted else { return nil }
-                    return RenderedShellRoot(
-                        title: $0.label,
-                        identifier: $0.identifier,
-                        surface: .sidebar
-                    )
+                return shellRoots(sidebarButtons, surface: .sidebar, budget: budget).filter {
+                    identifiers.insert($0.identifier).inserted
                 }
             }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            budget.pause()
         }
+        recordQueryFailure("No rendered shell roots; \(budget.diagnostic)")
+        return []
+    }
 
-        return app.buttons
-            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
-            .allElementsBoundByIndex
-            .filter(\.exists)
-            .map {
-                RenderedShellRoot(
-                    title: $0.label,
-                    identifier: $0.identifier,
-                    surface: .sidebar
-                )
+    private func shellRoots(
+        _ buttons: [XCUIElement],
+        surface: RenderedShellRoot.Surface,
+        budget: UIWaitBudget
+    ) -> [RenderedShellRoot] {
+        var roots: [RenderedShellRoot] = []
+        for button in buttons {
+            guard let title = budget.perform("read root label", { button.label }),
+                  let identifier = budget.perform("read root identifier", { button.identifier }) else {
+                recordQueryFailure("Incomplete rendered shell roots; \(budget.diagnostic)")
+                return []
             }
+            roots.append(RenderedShellRoot(title: title, identifier: identifier, surface: surface))
+        }
+        return roots
     }
 
     func selectRoot(_ root: RenderedShellRoot) {

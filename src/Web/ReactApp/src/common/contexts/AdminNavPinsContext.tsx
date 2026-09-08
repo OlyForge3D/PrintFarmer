@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
+  getAdminPinnedItemIds,
   getNavPreferencesStorageKey,
   loadNavPreferences,
+  NAV_PREFERENCES_VERSION,
+  moveAdminNavItem,
   subscribeToNavPreferences,
   saveNavPreferences,
-  NAV_PREFERENCES_VERSION,
+  setAdminNavItemPinned,
   type NavPreferences,
 } from '@/common/utils/navPreferences';
 import { AdminNavPinsContext } from '@/common/contexts/adminNavPinsContextValue';
@@ -29,34 +32,39 @@ export function AdminNavPinsProvider({ children }: { children: ReactNode }) {
     return subscribeToNavPreferences(storageKey, () => setVersion((current) => current + 1));
   }, [storageKey]);
 
+  const resolveStoredPreferences = useCallback((existing?: Partial<NavPreferences> | null): NavPreferences => ({
+    version: existing?.version ?? NAV_PREFERENCES_VERSION,
+    orderedItemIds: existing?.orderedItemIds ?? [],
+    hiddenItemIds: existing?.hiddenItemIds ?? [],
+    pinnedItemIds: existing?.pinnedItemIds ?? [],
+    ...existing,
+    adminPinnedItemIds: getAdminPinnedItemIds(existing),
+  }), []);
+
   const pinnedIds = useMemo(() => {
     const preferences = loadNavPreferences(storageKey);
-    return Array.isArray(preferences?.adminPinnedItemIds) ? [...new Set(preferences.adminPinnedItemIds)] : [];
+    return getAdminPinnedItemIds(preferences);
     // `version` is intentionally a dependency purely to invalidate this memo
     // when preferences change; its value is never read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey, version]);
 
   const setPinned = useCallback((destinationId: string, pinned: boolean) => {
-    const existing = loadNavPreferences(storageKey);
-    const current = Array.isArray(existing?.adminPinnedItemIds) ? [...new Set(existing.adminPinnedItemIds)] : [];
-    const nextIds = pinned
-      ? [...new Set([...current, destinationId])]
-      : current.filter((id) => id !== destinationId);
-    const next: NavPreferences = {
-      version: NAV_PREFERENCES_VERSION,
-      orderedItemIds: existing?.orderedItemIds ?? [],
-      hiddenItemIds: existing?.hiddenItemIds ?? [],
-      pinnedItemIds: existing?.pinnedItemIds ?? [],
-      ...existing,
-      adminPinnedItemIds: nextIds,
-    };
+    const existing = resolveStoredPreferences(loadNavPreferences(storageKey));
+    const next = setAdminNavItemPinned(existing, destinationId, pinned);
     saveNavPreferences(storageKey, next);
     setVersion((current) => current + 1);
-  }, [storageKey]);
+  }, [resolveStoredPreferences, storageKey]);
+
+  const movePinned = useCallback((destinationId: string, targetIndex: number, orderedPinnedIds?: readonly string[]) => {
+    const existing = resolveStoredPreferences(loadNavPreferences(storageKey));
+    const next = moveAdminNavItem(existing, destinationId, targetIndex, orderedPinnedIds);
+    saveNavPreferences(storageKey, next);
+    setVersion((current) => current + 1);
+  }, [resolveStoredPreferences, storageKey]);
 
   return (
-    <AdminNavPinsContext.Provider value={{ pinnedIds, setPinned }}>
+    <AdminNavPinsContext.Provider value={{ pinnedIds, setPinned, movePinned }}>
       {children}
     </AdminNavPinsContext.Provider>
   );

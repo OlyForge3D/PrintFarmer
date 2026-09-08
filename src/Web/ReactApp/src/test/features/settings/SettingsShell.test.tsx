@@ -257,7 +257,10 @@ function GoToQuotasProbe() {
   );
 }
 
-function renderSettings(initialRoute = '/settings', routeScope: 'user' | 'system' | undefined = initialRoute.startsWith('/admin/settings') ? 'system' : undefined) {
+function renderSettings(
+  initialRoute = '/settings',
+  routeScope: 'user' | 'system' | undefined = initialRoute.startsWith('/admin/settings') ? 'system' : undefined,
+) {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialRoute]}>
@@ -470,6 +473,13 @@ describe('SettingsShell', () => {
       expect(getCategoryButton(destLabel)).toBeInTheDocument();
     }
     expect(getCategoryButton('Farm Defaults')).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('renders the "Admin Control Center" breadcrumb on /admin/settings even without ACC-origin nav state (deep link, refresh, or bookmarked URL) — unlike other dual-purpose admin pages, there is no non-admin equivalent at this route, so the way back must always be present', () => {
+    setAuthRoles(['farm_admin']);
+    renderSettings('/admin/settings?scope=system&tab=general&sub=system');
+
+    expect(screen.getByRole('link', { name: /admin control center/i })).toBeInTheDocument();
   });
 
   it('defaults to the User Settings profile category and preferences sub-page', () => {

@@ -51,6 +51,7 @@ import {
   PrinterUptimeChart,
 } from '../components';
 import { MaintenanceReport } from '../components/MaintenanceReport';
+import { useAdminHubParent } from '@/features/admin/utils/adminHubParentState';
 
 // ──────────────────────── Summary Stat Card ────────────────────────
 
@@ -83,6 +84,7 @@ const MAIN_TAB_IDS = ['dashboard', 'schedule', 'library', 'inventory', 'analytic
 type MainTabId = (typeof MAIN_TAB_IDS)[number];
 
 export function MaintenanceDashboardPage() {
+  const adminHubParent = useAdminHubParent();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
@@ -150,6 +152,7 @@ export function MaintenanceDashboardPage() {
       title="Maintenance"
       subtitle={`Fleet maintenance command center${overdueCount > 0 ? ` · ${overdueCount} overdue` : ''}${dueSoonCount > 0 ? ` · ${dueSoonCount} due soon` : ''}`}
       icon={WrenchIcon}
+      parent={adminHubParent}
       actions={
         <Button
           variant="secondary"

@@ -1,15 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createDefaultNavPreferences,
+  getAdminPinnedItemIds,
   getNavMoveFocusTarget,
   getNavPreferencesStorageKey,
   groupNavItemsByResolvedOrder,
   loadNavPreferences,
+  moveAdminNavItem,
   moveNavItem,
   NAV_PREFERENCES_VERSION,
   NAV_PREFERENCES_UPDATED_EVENT,
   resolveNavPreferences,
   saveNavPreferences,
+  setAdminNavItemPinned,
   setNavItemHidden,
   setNavItemPinned,
   subscribeToNavPreferences,
@@ -113,6 +116,31 @@ describe('navPreferences', () => {
     });
 
     expect(resolved.preferences.adminPinnedItemIds).toBeUndefined();
+  });
+
+  it('preserves admin pin order while deduplicating repeated ids', () => {
+    expect(getAdminPinnedItemIds({
+      adminPinnedItemIds: ['ops-workers', 'ops-analytics', 'ops-workers', 'ops-status'],
+    })).toEqual(['ops-workers', 'ops-analytics', 'ops-status']);
+  });
+
+  it('reorders admin pinned destinations and persists the new order through localStorage', () => {
+    const storageKey = getNavPreferencesStorageKey('user-admin-pins');
+    const base = setAdminNavItemPinned(setAdminNavItemPinned(createDefaultNavPreferences(items, 'admin'), 'ops-analytics', true), 'ops-workers', true);
+    const reordered = moveAdminNavItem(base, 'ops-workers', 0);
+
+    saveNavPreferences(storageKey, reordered);
+
+    expect(loadNavPreferences(storageKey)?.adminPinnedItemIds).toEqual(['ops-workers', 'ops-analytics']);
+  });
+
+  it('reorders only the visible admin pins when stale stored ids remain hidden from the UI', () => {
+    const moved = moveAdminNavItem({
+      ...createDefaultNavPreferences(items, 'admin'),
+      adminPinnedItemIds: ['ops-workers', 'retired-destination', 'ops-analytics'],
+    }, 'ops-workers', 1, ['ops-workers', 'ops-analytics']);
+
+    expect(moved.adminPinnedItemIds).toEqual(['ops-analytics', 'retired-destination', 'ops-workers']);
   });
 
   it('fails safe to no admin pins when stored JSON is malformed', () => {

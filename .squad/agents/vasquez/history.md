@@ -98,3 +98,7 @@ Participated in multi-round trio review cycle. Key learnings:
 - **Key finding:** A11y review held the line on selected-pill contrast; hover repaint behavior also needs correction.
 - **Process note:** Two earlier overreach claims were withdrawn and should not be re-raised.
 
+
+### 2026-09-08 — PR #2586 review (admin breadcrumb/nav-pin UX)
+- **Verdict:** ❌ REQUEST_CHANGES → ✅ APPROVE after fix.
+- **Learning:** If origin-sensitive UI is corrected with a shared hook, verify the hook is used in every remaining shell and page consumer before approving; one unconditional fallback can reintroduce the same bug in a different surface.

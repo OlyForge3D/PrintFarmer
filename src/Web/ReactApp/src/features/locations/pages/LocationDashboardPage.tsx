@@ -23,6 +23,7 @@ import {
   isActiveJob,
 } from '@/features/locations/hooks/useLocationDashboard';
 import type { Location, LocationSubtreePrinter, LocationTreeNode } from '@/types/api';
+import { useAdminHubParent } from '@/features/admin/utils/adminHubParentState';
 
 function toLocation(node: LocationTreeNode): Location {
   return {
@@ -105,6 +106,7 @@ function StatLine({ label, value, variant = 'default' }: { label: string; value:
 }
 
 export const LocationDashboardPage: React.FC = () => {
+  const adminHubParent = useAdminHubParent();
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
   const [manageMode, setManageMode] = useState(false);
   const [createToken, setCreateToken] = useState(0);
@@ -145,7 +147,7 @@ export const LocationDashboardPage: React.FC = () => {
 
   if (treeLoading) {
     return (
-      <PageTemplate title="Locations" icon={LocationIcon}>
+      <PageTemplate title="Locations" icon={LocationIcon} parent={adminHubParent}>
         <div className="flex items-center justify-center py-12" role="status" aria-label="Loading locations">
           <Spinner size="lg" />
         </div>
@@ -155,7 +157,7 @@ export const LocationDashboardPage: React.FC = () => {
 
   if (treeError) {
     return (
-      <PageTemplate title="Locations" icon={LocationIcon}>
+      <PageTemplate title="Locations" icon={LocationIcon} parent={adminHubParent}>
         <div className="rounded-lg border border-pf-error bg-pf-error-bg p-4 text-pf-error">
           Failed to load locations: {String(treeError)}
         </div>
@@ -168,6 +170,7 @@ export const LocationDashboardPage: React.FC = () => {
       title="Locations"
       subtitle={selectedPath}
       icon={LocationIcon}
+      parent={adminHubParent}
       actions={isFarmAdmin ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button

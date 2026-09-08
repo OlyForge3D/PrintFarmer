@@ -8,6 +8,7 @@ export type {
 export {
   ADMIN_DESTINATIONS,
   ADMIN_DESTINATION_GROUPS,
+  ADMIN_HUB_PARENT,
   canAccessDestination,
   canAccessSettingsTab,
   filterDestinationsByAccess,

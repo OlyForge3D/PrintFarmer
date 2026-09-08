@@ -15,6 +15,7 @@ import {
 import type { AutoDispatchDetailedStatus } from '@/types/api';
 import clsx from 'clsx';
 import { FilamentOverrideModal } from '@/features/printers/components/FilamentOverrideModal';
+import { useAdminHubParent } from '@/features/admin/utils/adminHubParentState';
 
 /* ── Inline keyframe styles (injected once) ──────────────────────────── */
 const COMMAND_CENTER_STYLES = `
@@ -144,6 +145,7 @@ function FarmStatusBar({ stats, globalEnabled }: { stats: FarmStats; globalEnabl
 /* ── Main Dashboard Page ─────────────────────────────────────────────── */
 
 export function AutoDispatchDashboardPage() {
+  const adminHubParent = useAdminHubParent();
   const { data: status, isLoading, error } = useAutoDispatchGlobalStatus();
   const readyFlow = useAutoDispatchReadyFlow();
   const skipMutation = useSkipNextJob();
@@ -246,7 +248,7 @@ export function AutoDispatchDashboardPage() {
 
   if (isLoading) {
     return (
-      <PageTemplate title="Auto-Dispatch" icon={PlayIcon}>
+      <PageTemplate title="Auto-Dispatch" icon={PlayIcon} parent={adminHubParent}>
         <div className="flex justify-center py-12"><Spinner size="lg" /></div>
       </PageTemplate>
     );
@@ -254,7 +256,7 @@ export function AutoDispatchDashboardPage() {
 
   if (error) {
     return (
-      <PageTemplate title="Auto-Dispatch" icon={PlayIcon}>
+      <PageTemplate title="Auto-Dispatch" icon={PlayIcon} parent={adminHubParent}>
         <div className="p-4 text-pf-error">Failed to load auto-dispatch status: {error instanceof Error ? error.message : String(error)}</div>
       </PageTemplate>
     );
@@ -268,6 +270,7 @@ export function AutoDispatchDashboardPage() {
       title="Auto-Dispatch"
       subtitle="Farm queue control and ready-gate monitoring"
       icon={PlayIcon}
+      parent={adminHubParent}
       actions={
         <div className="flex items-center gap-3">
           <span className={clsx(

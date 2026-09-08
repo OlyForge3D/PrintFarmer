@@ -35,6 +35,7 @@ import {
 } from '@/features/settings/components/commandPaletteContext';
 import {
   buildSettingsPath,
+  getItemKind,
   resolveSettingsNavigationTarget,
   type SettingsCommandItem,
 } from '@/features/settings/settings-navigation';
@@ -42,6 +43,7 @@ import { useSettingsSearchIndex } from '@/features/settings/hooks/useSettingsSea
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useTheme } from '@/common/hooks/useTheme';
 import { ADMIN_OVERVIEW_QUERY_KEY } from '@/features/admin/hooks/useAdminOverview';
+import { ADMIN_HUB_ROUTE_STATE } from '@/features/admin/utils/adminHubParentState';
 import {
   LogoutIcon,
   RefreshIcon,
@@ -217,7 +219,12 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
         href = buildSettingsPath({ ...resolved });
       }
       if (!navigationGuardRef.current?.(href)) {
-        navigate(href);
+        navigate(
+          href,
+          getItemKind(item) === 'destination'
+            ? { state: ADMIN_HUB_ROUTE_STATE }
+            : undefined,
+        );
       }
       close();
     },

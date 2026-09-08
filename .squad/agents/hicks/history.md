@@ -141,3 +141,7 @@ Participated in multi-round trio review cycle. Key learnings:
 - **Key finding:** The caller sweep validated the cascade path, but selected-pill hover/contrast regressions are still branch-introduced.
 - **Process note:** The ComponentMaintenanceTracker concern was confirmed pre-existing and not gating.
 
+
+### 2026-09-08 — PR #2586 review (admin breadcrumb/nav-pin UX)
+- **Verdict:** ✅ APPROVE.
+- **Learning:** A normalized admin URL can drop route state on non-canonical test paths, so regression tests for origin-driven UI should use the same canonical links the product emits.
