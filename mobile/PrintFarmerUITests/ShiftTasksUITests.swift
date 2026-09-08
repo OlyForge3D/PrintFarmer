@@ -109,6 +109,7 @@ final class ShiftTasksUITests: ShiftTasksUITestBase {
     }
 
     func testP7DismissClearsOnlyCurrentErrorWithoutTaskMutation() {
+        executionTimeAllowance = 60
         openTasksDestination()
         let row = app.otherElements["shiftTasks.row.info.\(taskID)"]
         XCTAssertTrue(row.waitForExistence(timeout: 8))
@@ -275,6 +276,7 @@ final class ShiftTasksFailedRefreshUITests: ShiftTasksUITestBase {
     }
 
     func testFailedStateHostsRefreshableScrollContainerAndRecoversCanonically() {
+        executionTimeAllowance = 60
         openTasksDestination()
 
         // The terminal `.failed` state renders inside a genuine refreshable

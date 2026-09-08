@@ -70,6 +70,10 @@ cd mobile
 )
 ```
 
+The shared test plan enables XCTest watchdogs. Isolated timeout investigations
+use a 60-second allowance without capping longer adjacent tests; see the
+[XCUI timeout policy and evidence ledger](docs/xcui-timeout-diagnosis.md).
+
 Use `-only-testing:PrintFarmerTests` for all unit tests, or explicitly select
 `PrintFarmerUITests/<Suite>` for XCUI. See [agent testing guidance](AGENTS.md#simulator-testing)
 for iPad-host runs; each family needs separate unchanged-reference evidence.
