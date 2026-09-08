@@ -260,11 +260,10 @@ function GoToQuotasProbe() {
 function renderSettings(
   initialRoute = '/settings',
   routeScope: 'user' | 'system' | undefined = initialRoute.startsWith('/admin/settings') ? 'system' : undefined,
-  initialState?: unknown,
 ) {
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[{ pathname: initialRoute.split('?')[0], search: initialRoute.split('?')[1] ? `?${initialRoute.split('?')[1]}` : undefined, state: initialState }]}>
+      <MemoryRouter initialEntries={[initialRoute]}>
         <GlobalCommandPaletteProvider>
           <SettingsShell routeScope={routeScope} />
         </GlobalCommandPaletteProvider>
@@ -476,16 +475,9 @@ describe('SettingsShell', () => {
     expect(getCategoryButton('Farm Defaults')).toHaveAttribute('aria-current', 'page');
   });
 
-  it('does not render the "Admin Control Center" breadcrumb when /admin/settings is reached without ACC origin state (e.g. deep link, refresh, or normal nav)', () => {
+  it('renders the "Admin Control Center" breadcrumb on /admin/settings even without ACC-origin nav state (deep link, refresh, or bookmarked URL) — unlike other dual-purpose admin pages, there is no non-admin equivalent at this route, so the way back must always be present', () => {
     setAuthRoles(['farm_admin']);
     renderSettings('/admin/settings?scope=system&tab=general&sub=system');
-
-    expect(screen.queryByRole('link', { name: /admin control center/i })).not.toBeInTheDocument();
-  });
-
-  it('renders the "Admin Control Center" breadcrumb when /admin/settings is reached via ACC-origin navigation state', () => {
-    setAuthRoles(['farm_admin']);
-    renderSettings('/admin/settings?scope=system&tab=general&sub=system', 'system', { pageParent: 'admin-control-center' });
 
     expect(screen.getByRole('link', { name: /admin control center/i })).toBeInTheDocument();
   });

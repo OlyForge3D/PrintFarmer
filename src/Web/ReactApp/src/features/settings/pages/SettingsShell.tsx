@@ -10,6 +10,7 @@ import {
 } from '@/features/admin/settings/settingsSaveRegistry';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import {
+  ADMIN_HUB_PARENT,
   ADMIN_DESTINATIONS,
   canAccessDestination,
   canAccessSettingsTab,
@@ -38,7 +39,6 @@ import { HomeAssistantSettingsCard, SpoolmanSettingsCard } from '@/features/sett
 import { WorkspaceSearchResults } from '@/features/settings/components/WorkspaceSearchResults';
 import { resolveSettingsNavigationTarget, withRetainedQuery, type SettingsCommandItem } from '@/features/settings/settings-navigation';
 import { useSettingsSearchIndex } from '@/features/settings/hooks/useSettingsSearchIndex';
-import { useAdminHubParent } from '@/features/admin/utils/adminHubParentState';
 import {
   DEFAULT_SCOPE,
   SETTINGS_SCOPES,
@@ -405,7 +405,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, [query]);
 
   const isAdminRoute = routeScope === 'system';
-  const adminHubParent = useAdminHubParent();
   const fieldSearchIndex = useSettingsSearchIndex({
     enabled: isAdminRoute && Boolean(requestedField),
   });
@@ -1723,7 +1722,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
             subtitle={pageDescription}
             showHeader
             fill
-            parent={isAdminRoute ? adminHubParent : undefined}
+            parent={isAdminRoute ? ADMIN_HUB_PARENT : undefined}
             actions={headerActions}
           >
             {isAdminRoute && showStandaloneRecoveryLinks && (
