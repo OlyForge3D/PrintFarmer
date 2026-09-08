@@ -1,10 +1,12 @@
-﻿using Farm.Infrastructure;
+﻿using System.Security.Claims;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Tests.Builders;
@@ -26,6 +28,8 @@ namespace Farm.Infrastructure.Tests.Dispatch;
 /// </summary>
 public class DispatchScorerPerToolLoadoutTests : IDisposable
 {
+    private static readonly ClaimsPrincipal Admin = new(
+        new ClaimsIdentity([new Claim(ClaimTypes.Role, "farm_admin")], "Test"));
     private readonly SqliteConnection _connection;
     private readonly AppDbContext _context;
     private readonly Guid _folderId = Guid.NewGuid();
@@ -453,8 +457,9 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
         await _context.SaveChangesAsync();
 
         FilamentFallbackGroupService fallback =
-            new(_context, NullLogger<FilamentFallbackGroupService>.Instance);
+            new(_context, NullLogger<FilamentFallbackGroupService>.Instance, new QueueResourceAuthorizationService(_context));
         await fallback.CreateAsync(
+            Admin,
             printer.Id,
             new CreateFilamentFallbackGroupRequest("PLA chain", "PLA", null, [t0.Id, t1.Id]),
             CancellationToken.None);
@@ -515,8 +520,9 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
         await _context.SaveChangesAsync();
 
         FilamentFallbackGroupService fallback =
-            new(_context, NullLogger<FilamentFallbackGroupService>.Instance);
+            new(_context, NullLogger<FilamentFallbackGroupService>.Instance, new QueueResourceAuthorizationService(_context));
         await fallback.CreateAsync(
+            Admin,
             printer.Id,
             new CreateFilamentFallbackGroupRequest("PLA chain", "PLA", null, [t0.Id, t1.Id]),
             CancellationToken.None);
@@ -550,8 +556,9 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
         await _context.SaveChangesAsync();
 
         FilamentFallbackGroupService fallback =
-            new(_context, NullLogger<FilamentFallbackGroupService>.Instance);
+            new(_context, NullLogger<FilamentFallbackGroupService>.Instance, new QueueResourceAuthorizationService(_context));
         await fallback.CreateAsync(
+            Admin,
             printer.Id,
             new CreateFilamentFallbackGroupRequest("PLA chain", "PLA", null, [t0.Id, t1.Id, t2.Id]),
             CancellationToken.None);
@@ -608,7 +615,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
                 CoverageFor(second.Id, (0, 10.0), (1, 20.0)).Printers.Single(),
             ],
             DateTime.UtcNow);
-        Mock<IFilamentFallbackGroupService> fallback = new(MockBehavior.Strict);
+        Mock<IFilamentFallbackGroupResolver> fallback = new(MockBehavior.Strict);
         fallback
             .Setup(service => service.GetAvailableFallbacksAsync(
                 It.IsAny<IEnumerable<Guid>>(),
@@ -692,8 +699,9 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
         await _context.SaveChangesAsync();
 
         FilamentFallbackGroupService fallback =
-            new(_context, NullLogger<FilamentFallbackGroupService>.Instance);
+            new(_context, NullLogger<FilamentFallbackGroupService>.Instance, new QueueResourceAuthorizationService(_context));
         await fallback.CreateAsync(
+            Admin,
             printer.Id,
             new CreateFilamentFallbackGroupRequest("PLA chain", "PLA", null, [t0.Id, t1.Id, t2.Id]),
             CancellationToken.None);
@@ -762,8 +770,9 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
         await _context.SaveChangesAsync();
 
         FilamentFallbackGroupService fallback =
-            new(_context, NullLogger<FilamentFallbackGroupService>.Instance);
+            new(_context, NullLogger<FilamentFallbackGroupService>.Instance, new QueueResourceAuthorizationService(_context));
         await fallback.CreateAsync(
+            Admin,
             printer.Id,
             new CreateFilamentFallbackGroupRequest("PLA chain", "PLA", null, [t0.Id, t1.Id, t2.Id]),
             CancellationToken.None);

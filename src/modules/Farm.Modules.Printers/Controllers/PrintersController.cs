@@ -1234,7 +1234,7 @@ public class PrintersController(
         // see fallback config.
         IReadOnlyList<Farm.Infrastructure.Dtos.FilamentFallbackGroupDto> fallbackGroups =
             multiSlotFallbackEnabled
-                ? await fallbackGroupService.ListForPrinterAsync(id, ct)
+                ? await fallbackGroupService.ListForPrinterAsync(User, id, ct)
                 : [];
 
         string? rowVersion = p.RowVersion is { Length: > 0 }

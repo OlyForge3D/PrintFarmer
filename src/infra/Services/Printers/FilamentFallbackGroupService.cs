@@ -1,9 +1,11 @@
 ﻿using System.Data.Common;
 using System.Reflection;
+using System.Security.Claims;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Logging;
+using Farm.Infrastructure.Services.Queue;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -15,17 +17,22 @@ namespace Farm.Infrastructure.Services.Printers;
 /// Reuses the existing <see cref="Toolhead"/> hierarchy rather than introducing a
 /// duplicate slot model.
 /// </summary>
+/// <remarks>
+/// Caller-facing operations require printer-group View access and throw
+/// <see cref="KeyNotFoundException"/> for missing or inaccessible printers.
+/// Configuration endpoints also enforce their existing mutation permission.
+/// </remarks>
 public interface IFilamentFallbackGroupService
 {
-    Task<IReadOnlyList<FilamentFallbackGroupDto>> ListForPrinterAsync(Guid printerId, CancellationToken ct);
+    Task<IReadOnlyList<FilamentFallbackGroupDto>> ListForPrinterAsync(ClaimsPrincipal principal, Guid printerId, CancellationToken ct);
 
-    Task<FilamentFallbackGroupDto?> GetAsync(Guid printerId, Guid groupId, CancellationToken ct);
+    Task<FilamentFallbackGroupDto?> GetAsync(ClaimsPrincipal principal, Guid printerId, Guid groupId, CancellationToken ct);
 
-    Task<FilamentFallbackGroupDto> CreateAsync(Guid printerId, CreateFilamentFallbackGroupRequest request, CancellationToken ct);
+    Task<FilamentFallbackGroupDto> CreateAsync(ClaimsPrincipal principal, Guid printerId, CreateFilamentFallbackGroupRequest request, CancellationToken ct);
 
-    Task<FilamentFallbackGroupDto> UpdateAsync(Guid printerId, Guid groupId, UpdateFilamentFallbackGroupRequest request, CancellationToken ct);
+    Task<FilamentFallbackGroupDto> UpdateAsync(ClaimsPrincipal principal, Guid printerId, Guid groupId, UpdateFilamentFallbackGroupRequest request, CancellationToken ct);
 
-    Task DeleteAsync(Guid printerId, Guid groupId, CancellationToken ct);
+    Task DeleteAsync(ClaimsPrincipal principal, Guid printerId, Guid groupId, CancellationToken ct);
 
     /// <summary>
     /// Attempts to find a same-printer toolhead (physical dock or MMU/AMS gate) configured as
@@ -47,21 +54,33 @@ public interface IFilamentFallbackGroupService
     /// (filament-coverage vs multi-slot-fallback); the read-only API endpoint gives the
     /// resolver a production caller in the meantime.
     /// </remarks>
+    /// <param name="principal">Caller whose printer-group access must be checked.</param>
     /// <param name="printerId">Owning printer.</param>
     /// <param name="sourceToolheadId">The toolhead that ran out; excluded from the search.</param>
     /// <param name="materialType">Material required to keep printing (case-insensitive).</param>
     /// <param name="ct">Cancellation token.</param>
     Task<AvailableFallbackMember?> FindAvailableFallbackAsync(
+        ClaimsPrincipal principal,
         Guid printerId,
         Guid sourceToolheadId,
         string materialType,
         CancellationToken ct);
 
     /// <summary>
-    /// Loads configured fallback chains for all candidate printers in one database query.
-    /// Results are keyed by printer, source toolhead, and normalized material so dispatch
-    /// scoring can reuse the same ordered chain without issuing per-printer/per-tool queries.
+    /// Loads configured fallback chains after authorizing every candidate printer.
+    /// A missing or inaccessible candidate rejects the entire request, without returning
+    /// partial results. Results are keyed by printer, source toolhead, and normalized material.
     /// </summary>
+    Task<IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution>>
+        GetAvailableFallbacksAsync(ClaimsPrincipal principal, IEnumerable<Guid> printerIds, CancellationToken ct);
+}
+
+/// <summary>
+/// Trusted background-only fallback resolution for dispatch and runout evaluation.
+/// HTTP callers must use <see cref="IFilamentFallbackGroupService"/> with their principal.
+/// </summary>
+public interface IFilamentFallbackGroupResolver
+{
     Task<IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution>>
         GetAvailableFallbacksAsync(IEnumerable<Guid> printerIds, CancellationToken ct);
 }
@@ -122,10 +141,13 @@ public sealed class FilamentFallbackGroupValidationException(string message) : I
 
 public sealed class FilamentFallbackGroupService(
     AppDbContext db,
-    ILogger<FilamentFallbackGroupService> logger) : IFilamentFallbackGroupService
+    ILogger<FilamentFallbackGroupService> logger,
+    IQueueResourceAuthorizationService resourceAuthorization) : IFilamentFallbackGroupService, IFilamentFallbackGroupResolver
 {
-    public async Task<IReadOnlyList<FilamentFallbackGroupDto>> ListForPrinterAsync(Guid printerId, CancellationToken ct)
+    public async Task<IReadOnlyList<FilamentFallbackGroupDto>> ListForPrinterAsync(ClaimsPrincipal principal, Guid printerId, CancellationToken ct)
     {
+        await EnsurePrinterAccessAsync(principal, printerId, ct);
+
         List<FilamentFallbackGroup> groups = await db.FilamentFallbackGroups
             .AsNoTracking()
             .Where(g => g.PrinterId == printerId)
@@ -138,8 +160,10 @@ public sealed class FilamentFallbackGroupService(
         return [.. groups.Select(MapGroup)];
     }
 
-    public async Task<FilamentFallbackGroupDto?> GetAsync(Guid printerId, Guid groupId, CancellationToken ct)
+    public async Task<FilamentFallbackGroupDto?> GetAsync(ClaimsPrincipal principal, Guid printerId, Guid groupId, CancellationToken ct)
     {
+        await EnsurePrinterAccessAsync(principal, printerId, ct);
+
         FilamentFallbackGroup? group = await db.FilamentFallbackGroups
             .AsNoTracking()
             .Include(g => g.Members.OrderBy(m => m.Position))
@@ -149,8 +173,9 @@ public sealed class FilamentFallbackGroupService(
         return group is null ? null : MapGroup(group);
     }
 
-    public async Task<FilamentFallbackGroupDto> CreateAsync(Guid printerId, CreateFilamentFallbackGroupRequest request, CancellationToken ct)
+    public async Task<FilamentFallbackGroupDto> CreateAsync(ClaimsPrincipal principal, Guid printerId, CreateFilamentFallbackGroupRequest request, CancellationToken ct)
     {
+        await EnsurePrinterAccessAsync(principal, printerId, ct);
         ArgumentNullException.ThrowIfNull(request);
         ValidateBasic(request.Name, request.MaterialType, request.ToolheadIds);
 
@@ -225,11 +250,12 @@ public sealed class FilamentFallbackGroupService(
             printerId,
             group.Members.Count);
 
-        return (await GetAsync(printerId, group.Id, ct))!;
+        return (await GetAsync(principal, printerId, group.Id, ct))!;
     }
 
-    public async Task<FilamentFallbackGroupDto> UpdateAsync(Guid printerId, Guid groupId, UpdateFilamentFallbackGroupRequest request, CancellationToken ct)
+    public async Task<FilamentFallbackGroupDto> UpdateAsync(ClaimsPrincipal principal, Guid printerId, Guid groupId, UpdateFilamentFallbackGroupRequest request, CancellationToken ct)
     {
+        await EnsurePrinterAccessAsync(principal, printerId, ct);
         ArgumentNullException.ThrowIfNull(request);
         ValidateBasic(request.Name, request.MaterialType, request.ToolheadIds);
 
@@ -299,6 +325,9 @@ public sealed class FilamentFallbackGroupService(
             });
         }
 
+        // Replacement members have assigned keys; explicitly add them rather than letting
+        // change detection treat them as updates to existing rows.
+        db.FilamentFallbackGroupMembers.AddRange(group.Members);
         await SaveChangesTranslatingUniqueViolationsAsync(trimmedName, printerId, ct);
         logger.LogInformation(
             "Updated filament fallback group {GroupId} on printer {PrinterId} (members={Count}).",
@@ -306,11 +335,13 @@ public sealed class FilamentFallbackGroupService(
             printerId,
             group.Members.Count);
 
-        return (await GetAsync(printerId, group.Id, ct))!;
+        return (await GetAsync(principal, printerId, group.Id, ct))!;
     }
 
-    public async Task DeleteAsync(Guid printerId, Guid groupId, CancellationToken ct)
+    public async Task DeleteAsync(ClaimsPrincipal principal, Guid printerId, Guid groupId, CancellationToken ct)
     {
+        await EnsurePrinterAccessAsync(principal, printerId, ct);
+
         FilamentFallbackGroup? group = await db.FilamentFallbackGroups
             .FirstOrDefaultAsync(g => g.PrinterId == printerId && g.Id == groupId, ct);
         if (group is null)
@@ -324,18 +355,26 @@ public sealed class FilamentFallbackGroupService(
     }
 
     public async Task<AvailableFallbackMember?> FindAvailableFallbackAsync(
+        ClaimsPrincipal principal,
         Guid printerId,
         Guid sourceToolheadId,
         string materialType,
         CancellationToken ct)
     {
+        await EnsurePrinterAccessAsync(principal, printerId, ct);
+        if (!await db.Toolheads.AsNoTracking()
+            .AnyAsync(t => t.PrinterId == printerId && t.Id == sourceToolheadId, ct))
+        {
+            throw new KeyNotFoundException("Toolhead not found.");
+        }
+
         if (string.IsNullOrWhiteSpace(materialType))
         {
             return null;
         }
 
         IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution> resolutions =
-            await GetAvailableFallbacksAsync([printerId], ct).ConfigureAwait(false);
+            await GetAvailableFallbacksCoreAsync([printerId], ct).ConfigureAwait(false);
         FilamentFallbackLookupKey key =
             FilamentFallbackLookupKey.Create(printerId, sourceToolheadId, materialType);
         _ = resolutions.TryGetValue(key, out FilamentFallbackResolution? resolution);
@@ -357,7 +396,38 @@ public sealed class FilamentFallbackGroupService(
     }
 
     public async Task<IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution>>
-        GetAvailableFallbacksAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
+        GetAvailableFallbacksAsync(ClaimsPrincipal principal, IEnumerable<Guid> printerIds, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        ArgumentNullException.ThrowIfNull(printerIds);
+        Guid[] candidateIds = [.. printerIds.Distinct()];
+        foreach (Guid printerId in candidateIds)
+        {
+            await EnsurePrinterAccessAsync(principal, printerId, ct);
+        }
+
+        return await GetAvailableFallbacksCoreAsync(candidateIds, ct);
+    }
+
+    Task<IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution>>
+        IFilamentFallbackGroupResolver.GetAvailableFallbacksAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
+        => GetAvailableFallbacksCoreAsync(printerIds, ct);
+
+    private async Task EnsurePrinterAccessAsync(ClaimsPrincipal principal, Guid printerId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+
+        // Check existence even for administrators, whose authorization check bypasses ACL lookup.
+        if (principal.Identity?.IsAuthenticated != true ||
+            !await resourceAuthorization.CanAccessPrinterAsync(principal, printerId, PrinterGroupAccessLevel.View, ct) ||
+            !await db.Printers.AsNoTracking().AnyAsync(p => p.Id == printerId, ct))
+        {
+            throw new KeyNotFoundException("Printer not found.");
+        }
+    }
+
+    private async Task<IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution>>
+        GetAvailableFallbacksCoreAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(printerIds);
 
