@@ -799,6 +799,127 @@ final class PrinterDetailViewModelTests: XCTestCase {
         )
     }
 
+    // MARK: - Generalized action authority: sibling actions, concurrency,
+    // ABA (Frost directive following Hicks/Bishop review findings 24/25)
+    //
+    // `bindToolheadSpool`'s `ActionAuthority` (epoch + service identity,
+    // `defer`-based busy cleanup) is now the SHARED implementation every
+    // `printerService`-dispatching, `isPerformingAction`-tracking sibling
+    // action uses: `ejectFilament`, `clearActiveSpoolAssignment`,
+    // `setActiveSpool`, `loadSpoolById` (private, exercised via NFC scan),
+    // and `performAction` (pause/resume/cancel/stop/emergencyStop). The two
+    // tests below prove the generalization on a DIFFERENT sibling action
+    // than the ones already covered above, and prove the specific hazard a
+    // single-action epoch check cannot by itself rule out: two sibling
+    // actions racing concurrently must not clobber each other's busy state.
+
+    /// ABA on a sibling action, not `bindToolheadSpool`: `setActiveSpool`
+    /// deactivates then REACTIVATES before its network await resolves.
+    func testSetActiveSpoolSkipsRefreshAfterDeactivateReactivateABAMidFlight() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        // `setActiveSpool` requires `viewModel.printer` to already carry a
+        // non-empty `rowVersion` (via `reviewedPrinterRowVersion()`) before
+        // it can dispatch at all — without this, the ABA hook below would
+        // never fire.
+        await viewModel.loadPrinter()
+        let baselineGetPrinterCallCount = mockService.getPrinterCallCount
+
+        mockService.beforeSetActiveSpool = { [weak viewModel] in
+            await MainActor.run {
+                viewModel?.isViewActive = false
+                viewModel?.isViewActive = true
+            }
+        }
+
+        await viewModel.setActiveSpool(makeSpool())
+
+        XCTAssertNotNil(mockService.setActiveSpoolCalledWith, "The in-flight request itself must still fire")
+        XCTAssertEqual(
+            mockService.getPrinterCallCount, baselineGetPrinterCallCount,
+            "A stale call surviving a deactivate/reactivate ABA cycle must not refresh the reactivated session"
+        )
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "The reactivated session must not be stranded with a busy flag the retired call no longer owns"
+        )
+    }
+
+    /// Concurrent sibling actions: `bindToolheadSpool` (operation A, against
+    /// the OLD service) is still in flight when a `configure(printerService:)`
+    /// hot-swap occurs — a lifecycle event unrelated to A itself — and
+    /// `setActiveSpool` (operation B, against the NEW service) starts and is
+    /// ALSO still in flight when A's stale, now-authority-less network call
+    /// finally resolves. A's stale completion must not clear
+    /// `isPerformingAction` out from under B, which still legitimately owns
+    /// it; only B's own completion may do so.
+    func testStaleOperationCompletionDoesNotClobberConcurrentSiblingActionsBusyState() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        let newService = MockPrinterService()
+        newService.printerToReturn = printer
+
+        // `setActiveSpool` (operation B, below) requires `viewModel.printer`
+        // to already carry a non-empty `rowVersion` before it can dispatch
+        // at all — without this, B's mock hook would never fire and this
+        // test would hang forever waiting on `bEntered`.
+        await viewModel.loadPrinter()
+        let baselineOldServiceGetPrinterCallCount = mockService.getPrinterCallCount
+
+        let aEntered = ShiftTaskResultGate<Void>()
+        let aRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeBindToolheadSpool = {
+            await aEntered.succeed(())
+            _ = try? await aRelease.wait()
+        }
+
+        let aTask = Task { await viewModel.bindToolheadSpool(makeSpool(id: 1), at: 0) }
+        _ = try await aEntered.wait()
+        XCTAssertTrue(viewModel.isPerformingAction, "Setup: operation A must be genuinely in flight")
+
+        // An unrelated lifecycle event: the server is hot-swapped WHILE A is
+        // still suspended in its network await. This revokes A's authority
+        // and — per the existing transition-based reset — clears the busy
+        // flag for whatever session is current now, exactly as findings
+        // 24/25 already require.
+        viewModel.configure(printerService: newService)
+        XCTAssertFalse(viewModel.isPerformingAction)
+
+        let bEntered = ShiftTaskResultGate<Void>()
+        let bRelease = ShiftTaskResultGate<Void>()
+        newService.beforeSetActiveSpool = {
+            await bEntered.succeed(())
+            _ = try? await bRelease.wait()
+        }
+
+        let bTask = Task { await viewModel.setActiveSpool(makeSpool(id: 2)) }
+        _ = try await bEntered.wait()
+        XCTAssertTrue(viewModel.isPerformingAction, "Setup: operation B must be genuinely in flight")
+
+        // Release A. Its stale completion must detect it lost authority
+        // (the epoch moved on when B's host service was reconfigured above)
+        // and must NOT clear B's busy flag.
+        await aRelease.succeed(())
+        await aTask.value
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Operation A's stale, authority-less completion must not clobber operation B's busy state while B is still genuinely in flight"
+        )
+        XCTAssertEqual(
+            mockService.getPrinterCallCount, baselineOldServiceGetPrinterCallCount,
+            "Operation A must not refresh through the retired old service"
+        )
+
+        // Release B. Its own, still-current completion must clear the flag.
+        await bRelease.succeed(())
+        await bTask.value
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "Operation B's own legitimate completion must clear the busy flag it still owns"
+        )
+        XCTAssertEqual(newService.getPrinterCallCount, 1, "Operation B must refresh through the service it actually targeted")
+    }
+
     // MARK: - Pull-to-refresh transition-during-refresh (issue #2522, Hicks
     // review finding 23)
 

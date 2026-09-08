@@ -210,64 +210,25 @@ final class PrinterDetailViewModel {
     }
 
     /// Guided-swap toolhead bind (issue #2522, Hicks review findings 20 and
-    /// 24).
+    /// 24, Bishop review finding 25 — see `ActionAuthority` above for the
+    /// shared implementation every sibling `printerService` action uses).
     ///
     /// Dispatched from an unstructured `.sheet` completion closure in
     /// `PrinterDetailView`, not a `.task` the view's `onDisappear` can rely
     /// on cancelling promptly — `activeTasks.forEach { $0.cancel() }` is
     /// cooperative and this method has an uncancellable network await in
-    /// the middle of it. Captures the exact `printerService` identity AND
-    /// `actionLifecycleEpoch` this call targets before that await.
-    ///
-    /// The epoch closes an ABA gap a boolean `isViewActive` check and a
-    /// service-identity check cannot close alone (finding 24): the view can
-    /// deactivate and then REACTIVATE — or `configure(printerService:)` can
-    /// be called again with an instance that happens to compare equal —
-    /// before this bind's network await resolves, at which point
-    /// `isViewActive` reads `true` again and identity matches again, so a
-    /// check against only those two would wrongly conclude this stale call
-    /// still owns the CURRENT session. `actionLifecycleEpoch` is bumped on
-    /// every activation-state transition and every service reconfiguration
-    /// (see `isViewActive`'s `didSet` and `configure(printerService:)`) and
-    /// never returns to an old value, so comparing it here always detects
-    /// the ABA sequence regardless of what the other two read at the
-    /// moment `hasAuthority()` runs.
-    ///
-    /// "Clear busy only if the operation owns it" (Bishop review finding
-    /// 25): busy-state cleanup is a `defer`, not one of the scattered
-    /// `guard hasAuthority() else { return }` tail checks that gate
-    /// `loadPrinter()`/`actionError`. Those two are RESULT/REFRESH
-    /// authority — whether this call's outcome may still be applied — and
-    /// are a separate concern from busy-state cleanup, which must run
-    /// exactly once on every exit path (success, a thrown error, OR an
-    /// early return via one of those same guards) regardless of which path
-    /// was taken. Before this `defer`, "the method returns without
-    /// clearing the busy latch" on some exit paths was possible if a
-    /// future change added a return point upstream of the old, unguarded
-    /// tail reset. The `defer` still checks `hasAuthority()` itself — it
-    /// only clears the flag for the operation that still owns it — because
-    /// the SAME lifecycle transition that revoked authority (`isViewActive`
-    /// didSet / `configure(printerService:)`) already reset it once for
-    /// whatever session is current now; an unconditional clear here could
-    /// otherwise stomp a NEWER legitimate call's busy state in the narrow
-    /// window between that reset and this stale call's own completion.
+    /// the middle of it.
     func bindToolheadSpool(_ spool: SpoolmanSpool, at toolheadIndex: Int) async {
         guard isViewActive else { return }
         guard let printerService else {
             actionError = "Printer service not available."
             return
         }
-        let authorityEpoch = actionLifecycleEpoch
-        let authorityServiceIdentity = Self.identity(printerService)
-        func hasAuthority() -> Bool {
-            isViewActive
-                && actionLifecycleEpoch == authorityEpoch
-                && Self.identity(self.printerService) == authorityServiceIdentity
-        }
+        let authority = beginActionAuthority(for: printerService)
         isPerformingAction = true
         actionError = nil
         defer {
-            if hasAuthority() {
+            if hasActionAuthority(authority) {
                 isPerformingAction = false
             }
         }
@@ -278,10 +239,10 @@ final class PrinterDetailViewModel {
                 request: ToolheadSpoolBindRequest(spoolId: spool.id),
                 idempotencyKey: UUID().uuidString
             )
-            guard hasAuthority() else { return }
+            guard hasActionAuthority(authority) else { return }
             await loadPrinter()
         } catch {
-            guard hasAuthority() else { return }
+            guard hasActionAuthority(authority) else { return }
             actionError = error.localizedDescription
         }
     }
@@ -543,8 +504,14 @@ final class PrinterDetailViewModel {
             print("⚠️ loadSpoolById: printerService is nil")
             return
         }
+        let authority = beginActionAuthority(for: printerService)
         isPerformingAction = true
         actionError = nil
+        defer {
+            if hasActionAuthority(authority) {
+                isPerformingAction = false
+            }
+        }
         do {
             let rowVersion = try reviewedPrinterRowVersion()
             print("📡 loadSpoolById: printer=\(printerId) spool=\(id)")
@@ -553,7 +520,7 @@ final class PrinterDetailViewModel {
                 spoolId: id,
                 reviewedRowVersion: rowVersion
             )
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             print("✅ loadSpoolById: success")
             lastSetSpoolInfo = PrinterSpoolInfo(
                 hasActiveSpool: true,
@@ -561,36 +528,38 @@ final class PrinterDetailViewModel {
             )
             await loadPrinter()
         } catch {
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             print("❌ loadSpoolById failed: \(error)")
             actionError = error.localizedDescription
         }
-        guard isViewActive else { return }
-        isPerformingAction = false
     }
 
     func ejectFilament() async {
         guard isViewActive else { return }
         guard let printerService else { return }
+        let authority = beginActionAuthority(for: printerService)
         isPerformingAction = true
         actionError = nil
+        defer {
+            if hasActionAuthority(authority) {
+                isPerformingAction = false
+            }
+        }
         do {
             _ = try await printerService.setActiveSpool(
                 printerId: printerId,
                 spoolId: nil,
                 reviewedRowVersion: try reviewedPrinterRowVersion()
             )
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             _ = try await printerService.unloadFilament(printerId: printerId)
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             lastSetSpoolInfo = nil
             await loadPrinter()
         } catch {
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             actionError = error.localizedDescription
         }
-        guard isViewActive else { return }
-        isPerformingAction = false
     }
 
     /// Assignment-only clear (issue #2522 / #2519 integration contract).
@@ -605,15 +574,21 @@ final class PrinterDetailViewModel {
     func clearActiveSpoolAssignment() async {
         guard isViewActive else { return }
         guard let printerService else { return }
+        let authority = beginActionAuthority(for: printerService)
         isPerformingAction = true
         actionError = nil
+        defer {
+            if hasActionAuthority(authority) {
+                isPerformingAction = false
+            }
+        }
         do {
             _ = try await printerService.setActiveSpool(
                 printerId: printerId,
                 spoolId: nil,
                 reviewedRowVersion: try reviewedPrinterRowVersion()
             )
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             lastSetSpoolInfo = nil
             // Confirmed-cleared local override (issue #2522, Hicks review
             // finding 14): `loadPrinter()` below can itself fail (network
@@ -633,11 +608,9 @@ final class PrinterDetailViewModel {
             }
             await loadPrinter()
         } catch {
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             actionError = error.localizedDescription
         }
-        guard isViewActive else { return }
-        isPerformingAction = false
     }
 
     func setActiveSpool(_ spool: SpoolmanSpool) async {
@@ -647,8 +620,14 @@ final class PrinterDetailViewModel {
             print("⚠️ setActiveSpool: printerService is nil")
             return
         }
+        let authority = beginActionAuthority(for: printerService)
         isPerformingAction = true
         actionError = nil
+        defer {
+            if hasActionAuthority(authority) {
+                isPerformingAction = false
+            }
+        }
         do {
             let rowVersion = try reviewedPrinterRowVersion()
             print("📡 setActiveSpool: printer=\(printerId) spool=\(spool.id)")
@@ -657,7 +636,7 @@ final class PrinterDetailViewModel {
                 spoolId: spool.id,
                 reviewedRowVersion: rowVersion
             )
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             print("✅ setActiveSpool: success")
             lastSetSpoolInfo = PrinterSpoolInfo(
                 hasActiveSpool: true,
@@ -672,12 +651,10 @@ final class PrinterDetailViewModel {
             )
             await loadPrinter()
         } catch {
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             print("❌ setActiveSpool failed: \(error)")
             actionError = error.localizedDescription
         }
-        guard isViewActive else { return }
-        isPerformingAction = false
     }
 
     func loadPrinter() async {
@@ -1002,6 +979,56 @@ final class PrinterDetailViewModel {
 
     private static func identical<T>(_ lhs: T?, _ rhs: T?) -> Bool {
         identity(lhs) == identity(rhs)
+    }
+
+    // MARK: - Action authority (issue #2522, Hicks/Bishop review findings
+    // 24/25, generalized to every sibling `printerService`-dispatching
+    // action)
+    //
+    // Every method below that dispatches a mutation through `printerService`
+    // and tracks it via `isPerformingAction` shares the SAME two risks
+    // `bindToolheadSpool` was first hardened against:
+    //
+    //   * ABA (finding 24): a boolean `isViewActive` check alone cannot
+    //     distinguish "this call's original activation window is still
+    //     current" from "the view deactivated and REACTIVATED — or
+    //     `configure(printerService:)` ran again with an instance that
+    //     happens to compare identical — before this call's uncancellable
+    //     network await resolved". `actionLifecycleEpoch` (bumped on every
+    //     activation-state transition and every service reconfiguration,
+    //     and never returning to an old value) closes this for any caller
+    //     that captures it before an await and compares it again after.
+    //   * Operation-owned busy state (finding 25): `isPerformingAction`
+    //     must be cleared for the operation that owns it via `defer`, not a
+    //     tail line a future added return path could bypass, and only for
+    //     the SAME session that set it — a lifecycle transition already
+    //     resets it once for whatever session is current now (see
+    //     `isViewActive`'s `didSet` / `configure(printerService:)`), so an
+    //     unconditional clear from a stale, retired call could otherwise
+    //     stomp a NEWER concurrent operation's busy state.
+    //
+    // `ActionAuthority` and the two functions below are the single, shared
+    // implementation of that pattern so every sibling action states it
+    // identically rather than re-deriving its own copy.
+    private struct ActionAuthority {
+        let epoch: UInt64
+        let serviceIdentity: ObjectIdentifier?
+    }
+
+    /// Captures the CURRENT action authority. Call once, before the first
+    /// `await` a dispatching method performs.
+    private func beginActionAuthority(for printerService: any PrinterServiceProtocol) -> ActionAuthority {
+        ActionAuthority(epoch: actionLifecycleEpoch, serviceIdentity: Self.identity(printerService))
+    }
+
+    /// Whether the CURRENT state still matches a previously captured
+    /// authority — i.e. whether the operation that captured it still owns
+    /// the current session. Re-evaluate this after every `await`, and in a
+    /// `defer` for busy-state cleanup.
+    private func hasActionAuthority(_ authority: ActionAuthority) -> Bool {
+        isViewActive
+            && actionLifecycleEpoch == authority.epoch
+            && Self.identity(printerService) == authority.serviceIdentity
     }
 
 #if DEBUG
@@ -2075,22 +2102,28 @@ final class PrinterDetailViewModel {
 
     // MARK: - Private
 
+    /// Shared dispatch for pause/resume/cancel/stop/emergencyStop (issue
+    /// #2522, Hicks/Bishop review findings 24/25 — see `ActionAuthority`
+    /// above).
     private func performAction(_ action: @escaping (any PrinterServiceProtocol) async throws -> Void) async {
         guard isViewActive else { return }
         guard let printerService else { return }
+        let authority = beginActionAuthority(for: printerService)
         isPerformingAction = true
         actionError = nil
+        defer {
+            if hasActionAuthority(authority) {
+                isPerformingAction = false
+            }
+        }
 
         do {
             try await action(printerService)
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             await loadPrinter()
         } catch {
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             actionError = error.localizedDescription
         }
-
-        guard isViewActive else { return }
-        isPerformingAction = false
     }
 }
