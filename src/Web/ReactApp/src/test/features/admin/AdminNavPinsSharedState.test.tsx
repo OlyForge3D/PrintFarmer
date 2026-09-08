@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from '@/common/components/Layout';
 import { AdminControlCenterPage } from '@/features/admin/pages/AdminControlCenterPage';
 import { AdminNavPinsProvider } from '@/common/contexts/AdminNavPinsContext';
+import { useAdminNavPins } from '@/common/contexts/useAdminNavPins';
 import { getNavPreferencesStorageKey, saveNavPreferences, NAV_PREFERENCES_VERSION } from '@/common/utils/navPreferences';
 import type { AdminOverviewDto } from '@/types/adminOverview';
 
@@ -126,6 +127,7 @@ function shellElement(queryClient: QueryClient) {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={['/admin']}>
         <AdminNavPinsProvider>
+          <NavPinsRenderProbe />
           <Routes>
             <Route element={<Layout />}>
               <Route path="/admin" element={<AdminControlCenterPage />} />
@@ -135,6 +137,22 @@ function shellElement(queryClient: QueryClient) {
       </MemoryRouter>
     </QueryClientProvider>
   );
+}
+
+// Records `pinnedIds` on every render of a real consumer inside the real
+// `AdminNavPinsProvider`. `screen`-based assertions taken after `rerender()`
+// only see the DOM once React Testing Library's `act()` wrapper has flushed
+// every effect, which hides a stale-then-corrected render that a real browser
+// would paint for one frame. This probe observes every render pass, including
+// ones `act()` flushes before an assertion could otherwise see them, so it can
+// prove no render — not just the final one — ever exposed another
+// principal's pins.
+let pinsRenderLog: string[][] = [];
+
+function NavPinsRenderProbe() {
+  const { pinnedIds } = useAdminNavPins();
+  pinsRenderLog.push(pinnedIds);
+  return null;
 }
 
 function renderShell() {
@@ -160,6 +178,7 @@ function seedPins(userId: string, ids: string[]) {
 describe('Admin nav pins: shared state across Control Center and Layout (Issue 2527)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    pinsRenderLog = [];
     mockUserId = 'user-1';
     mockUserRole = 'farm_admin';
     mockPermissionOverride = null;
@@ -198,6 +217,10 @@ describe('Admin nav pins: shared state across Control Center and Layout (Issue 2
     expect(dashboardCard).not.toBeNull();
     expect(pinnedLink).toHaveAttribute('href', dashboardCard!.getAttribute('href'));
     expect(pinnedLink).toHaveAttribute('href', '/admin/workers?workerTab=jobs');
+
+    // Accessibility: a navbar link must never contain a nested interactive
+    // button (found earlier in this epic as a real defect elsewhere).
+    expect(pinnedLink.querySelector('button')).toBeNull();
   });
 
   it('renders no pins for a new principal even transiently, when switching accounts', async () => {
@@ -209,12 +232,20 @@ describe('Admin nav pins: shared state across Control Center and Layout (Issue 2
       expect(screen.getByTestId('admin-hub-operations')).toBeInTheDocument();
     });
     expect(await screen.findByRole('link', { name: 'Analytics' })).toBeInTheDocument();
+    // Sanity: the probe actually observed user-1's pin before the switch, so
+    // the assertion below is testing something real rather than vacuously
+    // passing because the pin never rendered at all.
+    expect(pinsRenderLog.some((ids) => ids.includes('ops-analytics'))).toBe(true);
+    const switchLogIndex = pinsRenderLog.length;
 
     // Switch principal — user-2 has never pinned anything.
     mockUserId = 'user-2';
     rerender(shellElement(new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } } })));
 
-    // No transient frame may show user-1's "Analytics" pin under user-2.
+    // No transient frame may show user-1's "Analytics" pin under user-2 — not
+    // just the final, post-effect DOM (see NavPinsRenderProbe above), but
+    // *every* render this context produced from the moment the switch began.
+    expect(pinsRenderLog.slice(switchLogIndex).every((ids) => !ids.includes('ops-analytics'))).toBe(true);
     expect(screen.queryByRole('region', { name: 'Favorites' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Analytics' })).not.toBeInTheDocument();
   });
