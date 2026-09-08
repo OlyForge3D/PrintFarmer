@@ -20,6 +20,7 @@ import { hasResolvedQueryData } from '@/common/utils/queryState';
 // Hooks & Utils
 import { useUnifiedLogging } from '@/common/hooks/useUnifiedLogging';
 import { QueueRealtimeBridge } from '@/common/components/QueueRealtimeBridge';
+import { AdminNavPinsProvider } from '@/common/contexts/AdminNavPinsContext';
 
 // Services
 import { assetService } from '@/services/assetService';
@@ -425,7 +426,9 @@ function App() {
             <SlicerUIProvider>
               <SlicerProvider>
                 <AppRouterProvider>
-                  <AuthenticatedAppRoutes />
+                  <AdminNavPinsProvider>
+                    <AuthenticatedAppRoutes />
+                  </AdminNavPinsProvider>
                 </AppRouterProvider>
                 <ReactQueryDevtools initialIsOpen={false} />
                 <Toaster position="top-right" richColors />

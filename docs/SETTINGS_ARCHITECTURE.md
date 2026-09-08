@@ -77,6 +77,12 @@ hosted unchanged as a descendant of a single splat route. Composing with plain
 `BrowserRouter` silently disables this guard and lets drafts be discarded without
 a prompt — the defect behind issue 2525.
 
+The Admin Control Center's **Pin admin links** chooser adds explicit, authorized
+admin destinations to the same navbar Favorites rail. Pins are stored only in
+browser-local `pf_nav_preferences_v1:${userId}` state as stable registry IDs;
+they are never defaults, shared across devices, or treated as permission grants.
+Layout and the chooser share live state, so pinning updates the navbar immediately.
+
 Two react-router behaviours the implementation has to absorb:
 - **Blocked state is transient.** React Router resets *every* blocker to idle
   whenever any navigation completes, and the shell self-navigates constantly

@@ -1,5 +1,6 @@
 export const NAV_PREFERENCES_VERSION = 1;
 export const NAV_PREFERENCES_STORAGE_KEY = 'pf_nav_preferences_v1';
+export const NAV_PREFERENCES_UPDATED_EVENT = 'pf-nav-preferences-updated';
 
 export type NavPreferenceRole = 'admin' | 'operator' | 'guest';
 
@@ -15,6 +16,8 @@ export interface NavPreferences {
   orderedItemIds: string[];
   hiddenItemIds: string[];
   pinnedItemIds: string[];
+  /** Stable admin destination IDs explicitly pinned by this user. */
+  adminPinnedItemIds?: string[];
 }
 
 export interface ResolvedNavPreferences {
@@ -149,6 +152,9 @@ export function normalizeNavPreferences(
     ],
     hiddenItemIds: uniqueKnownIds(preferences?.hiddenItemIds ?? [], knownIds),
     pinnedItemIds: uniqueKnownIds(preferences?.pinnedItemIds ?? [], knownIds),
+    ...(Array.isArray(preferences?.adminPinnedItemIds)
+      ? { adminPinnedItemIds: [...new Set(preferences.adminPinnedItemIds)] }
+      : {}),
   }, items);
 }
 
@@ -197,6 +203,11 @@ export function loadNavPreferences(storageKey: string, storage: Storage = localS
 export function saveNavPreferences(storageKey: string, preferences: NavPreferences, storage: Storage = localStorage) {
   try {
     storage.setItem(storageKey, JSON.stringify(preferences));
+    if (storage === localStorage && typeof window !== 'undefined') {
+      queueMicrotask(() => {
+        window.dispatchEvent(new CustomEvent(NAV_PREFERENCES_UPDATED_EVENT, { detail: { storageKey } }));
+      });
+    }
   } catch (error) {
     console.warn('Unable to save navigation preferences.', error);
   }

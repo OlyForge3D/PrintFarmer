@@ -25,7 +25,15 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { hasAccessibleDestinationWithPrefix, hasAccessibleHubTile } from '@/features/admin/registry/adminDestinations';
+import {
+  canAccessDestination,
+  getDestinationById,
+  resolveDestinationPath,
+  hasAccessibleDestinationWithPrefix,
+  hasAccessibleHubTile,
+} from '@/features/admin/registry/adminDestinations';
+import type { AdminDestination } from '@/features/admin/registry/adminDestinations';
+import { useAdminNavPins } from '@/common/contexts/useAdminNavPins';
 import { useSlicer } from '@/hooks/useSlicer';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
 import { hasResolvedQueryData } from '@/common/utils/queryState';
@@ -52,6 +60,7 @@ import {
   loadNavPreferences,
   moveNavItem,
   normalizeNavPreferences,
+  NAV_PREFERENCES_UPDATED_EVENT,
   resolveNavPreferences,
   saveNavPreferences,
   setNavItemHidden,
@@ -323,6 +332,7 @@ function groupNavigationItems(items: SectionedNavigationItem[]): NavigationGroup
 export function Layout() {
   const { isConnected } = useSignalRConnection('printer');
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
+  const { pinnedIds: adminPinnedIds } = useAdminNavPins();
   const { isSlicerAvailable } = useSlicer();
   const canRole = useCallback((role: string) => typeof hasRole === 'function' ? hasRole(role) : user?.role === role, [hasRole, user?.role]);
   const canPermission = useCallback((resource: string, action: string) => typeof hasPermission === 'function' ? hasPermission(resource, action) : true, [hasPermission]);
@@ -387,6 +397,17 @@ export function Layout() {
 
   useEffect(() => {
     setStoredNavPreferences(loadNavPreferences(navPreferencesStorageKey));
+  }, [navPreferencesStorageKey]);
+
+  useEffect(() => {
+    const refresh = (event: Event) => {
+      const detail = (event as CustomEvent<{ storageKey?: string }>).detail;
+      if (!detail?.storageKey || detail.storageKey === navPreferencesStorageKey) {
+        setStoredNavPreferences(loadNavPreferences(navPreferencesStorageKey));
+      }
+    };
+    window.addEventListener(NAV_PREFERENCES_UPDATED_EVENT, refresh);
+    return () => window.removeEventListener(NAV_PREFERENCES_UPDATED_EVENT, refresh);
   }, [navPreferencesStorageKey]);
 
   const navPreferenceRole = useMemo<NavPreferenceRole>(() => {
@@ -461,6 +482,21 @@ export function Layout() {
       .filter((item): item is SectionedNavigationItem => Boolean(item)),
     [navigationItemById, resolvedNavPreferences.favoriteItems]
   );
+  const adminPinnedNavigationItems = useMemo<SectionedNavigationItem[]>(() => {
+    if (!isAuthenticated) return [];
+    const access = { hasRole: canRole, hasPermission: canPermission };
+    return adminPinnedIds
+      .map((id) => getDestinationById(id))
+      .filter((destination): destination is AdminDestination => Boolean(destination))
+      .filter((destination) => destination.id !== 'admin-home' && canAccessDestination(destination, access))
+      .map((destination) => ({
+        id: destination.id,
+        name: destination.label,
+        href: resolveDestinationPath(destination),
+        icon: destination.icon,
+        sectionName: 'Admin',
+      }));
+  }, [adminPinnedIds, canPermission, canRole, isAuthenticated]);
   const regularNavigationItems = useMemo(
     () => resolvedNavPreferences.regularItems
       .map((item) => navigationItemById.get(item.id))
@@ -474,8 +510,10 @@ export function Layout() {
     [navigationItemById, resolvedNavPreferences.hiddenItems]
   );
   const favoriteNavigationGroups = useMemo<NavigationGroup[]>(
-    () => favoriteNavigationItems.length > 0 ? [{ header: FAVORITES_HEADER, items: favoriteNavigationItems }] : [],
-    [favoriteNavigationItems]
+    () => favoriteNavigationItems.length > 0 || adminPinnedNavigationItems.length > 0
+      ? [{ header: FAVORITES_HEADER, items: [...adminPinnedNavigationItems, ...favoriteNavigationItems] }]
+      : [],
+    [adminPinnedNavigationItems, favoriteNavigationItems]
   );
   const navigationGroups = useMemo<NavigationGroup[]>(() => groupNavigationItems(regularNavigationItems), [regularNavigationItems]);
   const allNavigationGroups = useMemo<NavigationGroup[]>(
@@ -493,7 +531,13 @@ export function Layout() {
   }, [navPreferenceItems, navPreferenceRole, navPreferencesStorageKey]);
 
   const resetNavPreferences = useCallback(() => {
-    const defaults = createDefaultNavPreferences(navPreferenceItems, navPreferenceRole);
+    const existing = loadNavPreferences(navPreferencesStorageKey);
+    const defaults = {
+      ...createDefaultNavPreferences(navPreferenceItems, navPreferenceRole),
+      ...(Array.isArray(existing?.adminPinnedItemIds)
+        ? { adminPinnedItemIds: [...new Set(existing.adminPinnedItemIds)] }
+        : {}),
+    };
     saveNavPreferences(navPreferencesStorageKey, defaults);
     setStoredNavPreferences(defaults);
     setShowHiddenNavigation(false);
@@ -504,7 +548,12 @@ export function Layout() {
       return item.matches(location.pathname);
     }
 
-    return location.pathname === item.href || location.pathname.startsWith(`${item.href}/`);
+    const target = new URL(item.href, window.location.origin);
+    if (target.search) {
+      return location.pathname === target.pathname && location.search === target.search;
+    }
+
+    return location.pathname === target.pathname || location.pathname.startsWith(`${target.pathname}/`);
   };
 
   const handleLogout = async () => {
