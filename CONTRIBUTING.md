@@ -76,7 +76,7 @@ dotnet test ./farm-web.sln -c Debug --settings ./vstest.runsettings --blame-hang
 
 # Frontend tests
 cd ./Web/ReactApp
-npm run test:run
+npm run test:coverage
 ```
 
 ## Code style and formatting

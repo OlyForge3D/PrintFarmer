@@ -265,7 +265,7 @@ interface SettingsShellProps {
 }
 
 export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
-  const { hasRole, hasPermission } = useAuth();
+  const { hasRole, hasPermission, isLoading: isAuthLoading } = useAuth();
   // Passed to adminDestinations.ts helpers so scope/tab access checks share the
   // exact same permission semantics as the Control Center hub and nav (issue 1457).
   const destinationAccess = useMemo(() => ({ hasRole, hasPermission }), [hasRole, hasPermission]);
@@ -1362,6 +1362,9 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, [activeSubPageLabel, currentCategory.label, currentScopeMeta, hasSubTabs]);
 
   useEffect(() => {
+    if (isAuthLoading) {
+      return;
+    }
     if (isResumePending) {
       return;
     }
@@ -1445,6 +1448,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, [
     accessibleCategories.length,
     isAdminRoute,
+    isAuthLoading,
     isDirty,
     isResumePending,
     isSelfAuthoredQuery,
@@ -1512,14 +1516,18 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     [activeSubPage, currentCategory],
   );
   const canAccessActiveTab = useMemo(() => {
+    if (isAdminRoute && isAuthLoading) return false;
     if (isAdminRoute && accessibleCategories.length === 0) return false;
     if (!activeTabDestination) {
       return true;
     }
     return canAccessDestination(activeTabDestination, destinationAccess);
-  }, [accessibleCategories.length, activeTabDestination, destinationAccess, isAdminRoute]);
+  }, [accessibleCategories.length, activeTabDestination, destinationAccess, isAdminRoute, isAuthLoading]);
 
   const content = useMemo(() => {
+    if (isAdminRoute && isAuthLoading) {
+      return <TabLoader />;
+    }
     if (isAdminRoute && accessibleCategories.length === 0) {
       return (
         <SettingsSection>
@@ -1552,7 +1560,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <p className="text-sm">Content not found for {renderedContentKey}</p>
       </div>
     );
-  }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, isAdminRoute, renderedContentKey]);
+  }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, isAdminRoute, isAuthLoading, renderedContentKey]);
 
   const pageTitle = currentScopeMeta?.label ?? 'Settings';
   const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
