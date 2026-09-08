@@ -51,7 +51,7 @@ public class NfcTagService(
 
         bool deviceIsOnline = device.LastHeartbeat.HasValue &&
             DateTime.UtcNow - device.LastHeartbeat.Value < HeartbeatTimeout;
-        Guid? audiencePrinterId = binding?.PrinterId ?? device.PrinterId;
+        Guid? audiencePrinterId = binding is null ? device.PrinterId : binding.PrinterId;
         if (binding?.PrinterId is Guid boundPrinterId &&
             device.PrinterId is Guid devicePrinterId && boundPrinterId != devicePrinterId)
         {

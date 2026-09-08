@@ -1580,6 +1580,8 @@ readAt }`. Known-scan `printerId` remains the tag binding's printer; unknown-sca
 `printerId` comes from the registered reader, not a caller-selected audience.
 Farm administrators receive all scans. Scans without a printer scope, or whose
 reader and binding refer to different printers, go only to farm administrators.
+In particular, a known tag with no binding printer stays admin-only even when
+scanned by a reader assigned to a printer.
 Holding `nfc_devices:admin` alone does not bypass printer-group view restrictions.
 
 Offline reader queues retain each event's original payload and audience scope.

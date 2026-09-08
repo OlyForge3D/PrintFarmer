@@ -91,11 +91,14 @@ public sealed class NfcHubAuthorizationIntegrationTests : IAsyncLifetime, IDispo
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task ProcessTagReadAsync_UnscopedOrConflictingResources_OnlyFarmAdminReceives(bool conflict, bool offline)
+    [InlineData(false, false, false)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, true)]
+    [InlineData(false, false, true)]
+    [InlineData(false, true, true)]
+    public async Task ProcessTagReadAsync_UnscopedOrConflictingResources_OnlyFarmAdminReceives(
+        bool conflict, bool offline, bool assignedReader)
     {
         ScanFixture fixture = await SeedAsync(known: true, offline);
         await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
@@ -103,7 +106,7 @@ public sealed class NfcHubAuthorizationIntegrationTests : IAsyncLifetime, IDispo
             AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             NfcTagBinding binding = await db.NfcTagBindings.SingleAsync(b => b.TagUid == "NFC-ISOLATION");
             binding.PrinterId = conflict ? fixture.SecondPrinter : null;
-            if (!conflict)
+            if (!assignedReader)
             {
                 NfcDevice device = await db.NfcDevices.SingleAsync(d => d.Id == fixture.Device);
                 device.PrinterId = null;
