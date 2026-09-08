@@ -1772,10 +1772,11 @@ describe('NewSliceJobPage', () => {
       // viewer can load it fine via the bearer-token-attached apiClient.
       const fetchSpy = vi.fn();
       vi.stubGlobal('fetch', fetchSpy);
+      const modelData = await threeMfBuffer();
 
       await renderAndOpenUrlTab();
 
-      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: await threeMfBuffer() } as never);
+      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: modelData } as never);
 
       fireEvent.change(screen.getByLabelText('File URL'), {
         target: { value: '/api/3d-models/file/model-3d-1' },
@@ -1808,10 +1809,11 @@ describe('NewSliceJobPage', () => {
       // .3mf, so a wrong/default detection would produce 'stl' here.
       const fetchSpy = vi.fn();
       vi.stubGlobal('fetch', fetchSpy);
+      const modelData = await threeMfBuffer();
 
       await renderAndOpenUrlTab();
 
-      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: await threeMfBuffer() } as never);
+      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: modelData } as never);
 
       fireEvent.change(screen.getByLabelText('File URL'), {
         target: { value: '/api/3d-models/file/model-3d-1' },
