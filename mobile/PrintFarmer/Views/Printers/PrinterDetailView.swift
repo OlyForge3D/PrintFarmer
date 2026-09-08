@@ -1155,7 +1155,7 @@ struct PrinterDetailView: View {
 
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
 
-                VStack(alignment: .trailing, spacing: 6) {
+                VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 6) {
                     HStack(spacing: 6) {
                         if printer.obicoEnabled {
                             Image(systemName: "shield.checkered")
@@ -1220,12 +1220,13 @@ struct PrinterDetailView: View {
                 let isHomed = normalized.contains(axis)
                 Text(axis.uppercased())
                     .font(.caption2.weight(.bold))
-                    .frame(width: 18, height: 18)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
                     .background(
-                        isHomed ? Color.green.opacity(0.85) : Color.black.opacity(0.3),
+                        isHomed ? Color.pfSuccess.opacity(0.12) : Color.pfBackgroundTertiary,
                         in: Capsule()
                     )
-                    .foregroundStyle(.white)
+                    .foregroundStyle(isHomed ? Color.pfSuccess : Color.pfTextSecondary)
                     .accessibilityLabel("\(axis.uppercased()) axis \(isHomed ? "homed" : "not homed")")
             }
         }

@@ -153,7 +153,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         app.terminate()
         app.launchArguments += [
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
-            "-AppleInterfaceStyle", "Dark"
+            "-pf_theme_mode", "dark"
         ]
         app.launch()
         openFirstPrinterDetail()
