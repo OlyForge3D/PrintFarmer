@@ -1560,7 +1560,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <p className="text-sm">Content not found for {renderedContentKey}</p>
       </div>
     );
-  }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, isAdminRoute, renderedContentKey]);
+  }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, isAdminRoute, isAuthLoading, renderedContentKey]);
 
   const pageTitle = currentScopeMeta?.label ?? 'Settings';
   const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
