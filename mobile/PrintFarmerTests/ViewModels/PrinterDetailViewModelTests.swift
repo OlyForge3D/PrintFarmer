@@ -1260,6 +1260,53 @@ final class PrinterDetailViewModelTests: XCTestCase {
         )
     }
 
+    /// Hicks review finding: the local `printer.spoolInfo` reconciliation
+    /// above must be GATED on `hasActionAuthority`, not unconditional. If
+    /// `configure(printerService:)` hot-swaps mid-flight, a NEWER session
+    /// may already have published its OWN active-spool truth (e.g. via a
+    /// fresh `loadPrinter()`/live update) between eject's assignment-clear
+    /// leg succeeding (against the OLD, now-retired service) and this
+    /// point. The retired eject must not overwrite that with stale
+    /// "cleared" state.
+    func testEjectFilamentDoesNotOverwriteReplacementServicesPublishedSpoolStateAfterHotSwap() async throws {
+        let printer = try TestData.decodePrinter(from: Self.assignedPrinterJSON)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        guard let before = viewModel.effectiveSpoolInfo, before.hasActiveSpool else {
+            XCTFail("Setup: printer must start with an active spool assignment")
+            return
+        }
+
+        let newService = MockPrinterService()
+        newService.printerToReturn = printer
+        mockService.beforeSetActiveSpool = { [weak viewModel] in
+            await MainActor.run {
+                guard let viewModel else { return }
+                // The replacement session hot-swaps in and publishes its
+                // OWN active spool — simulating a fresh loadPrinter()/live
+                // update that completed for the NEW session WHILE the
+                // retired eject (targeting the OLD service) was still
+                // suspended in its own network call.
+                viewModel.configure(printerService: newService)
+                if var updatedPrinter = viewModel.printer {
+                    updatedPrinter.spoolInfo = PrinterSpoolInfo(hasActiveSpool: true, activeSpoolId: 99)
+                    viewModel.printer = updatedPrinter
+                }
+            }
+        }
+
+        await viewModel.ejectFilament()
+
+        XCTAssertEqual(
+            viewModel.effectiveSpoolInfo?.activeSpoolId, 99,
+            "A retired eject must not overwrite the replacement session's own published spool state"
+        )
+        XCTAssertTrue(
+            viewModel.effectiveSpoolInfo?.hasActiveSpool ?? false,
+            "The replacement session's active spool must remain visible, not clobbered by the retired eject's stale clear"
+        )
+    }
+
     // MARK: - actionError Observability (Hicks review finding — the
     // #2400 `@Observable` trap)
 

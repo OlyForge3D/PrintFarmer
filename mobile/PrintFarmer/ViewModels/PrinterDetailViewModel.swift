@@ -681,16 +681,33 @@ final class PrinterDetailViewModel {
             // cleared server-side the moment the call above succeeds, so
             // the local snapshot must be reconciled RIGHT HERE — before any
             // of the early returns below (Emergency Stop preemption, an
-            // unload failure, or a lost `hasActionAuthority`) and before
-            // `loadPrinter()`, which can itself fail without touching
-            // `printer` at all. Without this, any of those paths left the
-            // UI showing an assigned spool the server no longer has
-            // recorded, exactly the same stale-resurrection hazard finding
-            // 14 already fixed for the assignment-only clear path.
-            lastSetSpoolInfo = nil
-            if var updatedPrinter = printer, updatedPrinter.spoolInfo?.hasActiveSpool == true {
-                updatedPrinter.spoolInfo = PrinterSpoolInfo(hasActiveSpool: false)
-                printer = updatedPrinter
+            // unload failure) and before `loadPrinter()`, which can itself
+            // fail without touching `printer` at all. Without this, any of
+            // those paths left the UI showing an assigned spool the server
+            // no longer has recorded, exactly the same stale-resurrection
+            // hazard finding 14 already fixed for the assignment-only
+            // clear path.
+            //
+            // GATED on `hasActionAuthority` (a later Hicks review finding):
+            // if `configure(printerService:)` hot-swapped mid-flight, a
+            // NEWER session may already have established its OWN
+            // `printer.spoolInfo` truth (e.g. via its own `loadPrinter()`
+            // or a live SignalR update) between this leg's success and this
+            // point. A retired eject targeting the OLD service must not
+            // overwrite that with stale "cleared" state — this is a purely
+            // LOCAL-STATE concern, deliberately separate from the physical
+            // unload leg below, which still dispatches UNCONDITIONALLY
+            // regardless of authority (Bishop review finding, separately):
+            // the physical operation must always reach the printer once
+            // the assignment is already cleared, but the LOCAL UI model
+            // must only be touched by the operation that still owns the
+            // current session.
+            if hasActionAuthority(authority) {
+                lastSetSpoolInfo = nil
+                if var updatedPrinter = printer, updatedPrinter.spoolInfo?.hasActiveSpool == true {
+                    updatedPrinter.spoolInfo = PrinterSpoolInfo(hasActiveSpool: false)
+                    printer = updatedPrinter
+                }
             }
             // Safety precedence (issue #2522, Vasquez review finding —
             // CRITICAL): Emergency Stop is an intentional safety override
