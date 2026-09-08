@@ -63,7 +63,8 @@ import type { LoadedModel, BedConfig } from '@/features/slicer/components/viewer
 import type { BufferGeometry } from 'three';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 import { buildSlicerViewerModelUrl, getSlicerViewerFileType } from '@/features/slicer/utils/model-file-utils';
-import { loadModelArrayBuffer, isAuthenticatedModelUrl } from '@/common/utils/authenticatedModelUrl';
+import { loadModelResponse, isAuthenticatedModelUrl } from '@/common/utils/authenticatedModelUrl';
+import { validateModelResponse } from '@/features/slicer/utils/validate-model-response';
 import { buildSlicePayloadModels, resolveModel3DId, modelTransformJson, diffProcessOverrides } from '@/features/slicer/utils/slicePayload';
 import { validateOrcaPrintSettings } from '@/features/slicer/utils/slicerSettingsValidation';
 import { readOrcaBundle } from '@/features/slicer/utils/orcaBundleLoader';
@@ -725,6 +726,29 @@ export const NewSliceJobPage: React.FC = () => {
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   // Multi-model bed state — accumulates models added via the "+" button
   const [bedModels, setBedModels] = useState<LoadedModel[]>([]);
+  const importedViewerUrls = useRef(new Set<string>());
+  const urlImportController = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const urls = importedViewerUrls.current;
+    urlImportController.current = controller;
+    return () => {
+      controller.abort();
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      urls.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    const activeUrls = new Set(bedModels.map((model) => model.viewerUrl));
+    importedViewerUrls.current.forEach((url) => {
+      if (!activeUrls.has(url)) {
+        URL.revokeObjectURL(url);
+        importedViewerUrls.current.delete(url);
+      }
+    });
+  }, [bedModels]);
 
   // Track which model is selected on the 3D bed (for TransformControls)
   const [selectedBedModelId, setSelectedBedModelId] = useState<string | null>(null);
@@ -2234,14 +2258,14 @@ export const NewSliceJobPage: React.FC = () => {
   // path. Previously this just stashed the URL/name in state and did
   // nothing else — no request was ever sent, nothing was added to the bed,
   // and the plate silently stayed at 0 objects (issue #1910). Now it
-  // actively verifies the URL is reachable before adding it to the bed, and
+  // validates downloaded model content before adding it to the bed, and
   // surfaces the outcome via toast either way.
   //
-  // Reachability is checked via `loadModelArrayBuffer` rather than a bare
+  // The response is fetched via `loadModelResponse` rather than a bare
   // `fetch`: a server-relative `/api/3d-models/file/{id}` path is one of the
   // API's authenticated file endpoints (see `AuthenticatedModelSource` /
   // #1711), so an unauthenticated request would always 401 even though the
-  // viewer can load it fine. `loadModelArrayBuffer` attaches the bearer
+  // viewer can load it fine. `loadModelResponse` attaches the bearer
   // token for those endpoints and falls back to a plain fetch otherwise.
   const handleUrlModelSubmit = useCallback((url: string, fileName: string) => {
     // Relative server paths (e.g. "/api/3d-models/file/...") are resolved
@@ -2249,6 +2273,7 @@ export const NewSliceJobPage: React.FC = () => {
     // model URLs are (see handleWorkspaceModelsReplace); absolute http(s)
     // URLs are used as-is.
     const resolvedUrl = url.startsWith('/') ? `${getApiBaseUrl()}${url.replace(/^\/api/, '')}` : url;
+    const signal = urlImportController.current?.signal;
     const toastId = toast.loading(`Fetching "${fileName}"…`);
 
     // When the URL points at a stored model by id (e.g.
@@ -2282,9 +2307,15 @@ export const NewSliceJobPage: React.FC = () => {
         .catch(() => undefined)
       : Promise.resolve(undefined);
 
-    void Promise.all([loadModelArrayBuffer(resolvedUrl), matchedModelPromise])
-      .then(([, matchedModel]) => {
+    void Promise.all([loadModelResponse(resolvedUrl, signal), matchedModelPromise])
+      .then(async ([response, matchedModel]) => {
+        if (signal?.aborted) return;
         const fileType = getSlicerViewerFileType(matchedModel?.originalFileName || matchedModel?.fileName || fileName);
+        await validateModelResponse(response.data, fileType, response.contentType);
+        if (signal?.aborted) return;
+        // Render exactly the validated bytes, not a second potentially different response.
+        const viewerUrl = URL.createObjectURL(new Blob([response.data]));
+        importedViewerUrls.current.add(viewerUrl);
 
         setSelectedModelId('');
         setModelFileUrl(resolvedUrl);
@@ -2302,7 +2333,7 @@ export const NewSliceJobPage: React.FC = () => {
             // is exactly what issue #1973 fixed.
             libraryModelId: matchedModel?.id,
             url: resolvedUrl,
-            viewerUrl: resolvedUrl,
+            viewerUrl,
             fileName,
             fileType,
             position: [offset, 0, 0] as [number, number, number],
@@ -2314,6 +2345,7 @@ export const NewSliceJobPage: React.FC = () => {
         toast.success(`Added "${fileName}" from URL.`, { id: toastId });
       })
       .catch((err: unknown) => {
+        if (signal?.aborted) return;
         toast.error(`Could not load model from URL: ${getErrorMessage(err, 'the file could not be reached')}`, { id: toastId });
       });
   }, [qc]);

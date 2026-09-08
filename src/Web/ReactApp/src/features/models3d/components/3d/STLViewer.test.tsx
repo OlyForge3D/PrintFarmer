@@ -80,6 +80,7 @@ describe('STLViewer Component', () => {
     apiClientGetMock.mockReset();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
+      headers: new Headers({ 'content-type': 'application/octet-stream' }),
       arrayBuffer: vi.fn().mockResolvedValue(createMinimalBinaryStl()),
     }));
   });

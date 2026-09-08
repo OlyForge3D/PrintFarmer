@@ -14,7 +14,7 @@ vi.mock('@/common/utils/apiUrlHelpers', () => ({
   getApiBaseUrl: vi.fn(() => '/api'),
 }));
 
-import { isAuthenticatedModelUrl, loadModelArrayBuffer } from './authenticatedModelUrl';
+import { isAuthenticatedModelUrl, loadModelArrayBuffer, loadModelResponse } from './authenticatedModelUrl';
 
 /**
  * Regression coverage for #1711: after uploading a model and selecting it
@@ -58,6 +58,22 @@ describe('authenticatedModelUrl', () => {
   });
 
   describe('loadModelArrayBuffer', () => {
+    it('retains content type for authenticated model response validation', async () => {
+      apiClientGetMock.mockResolvedValue({ data: new ArrayBuffer(4), headers: { 'content-type': 'application/json' } });
+      expect((await loadModelResponse('/api/3d-models/file/model-123')).contentType).toBe('application/json');
+    });
+
+    it('retains content type for public model response validation', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response('{}', { headers: { 'content-type': 'application/json' } }),
+      );
+      try {
+        expect((await loadModelResponse('https://example.com/manifest.json')).contentType).toBe('application/json');
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    });
+
     it('fetches authenticated model URLs through apiClient so the bearer token is attached', async () => {
       const data = new ArrayBuffer(4);
       apiClientGetMock.mockResolvedValue({ data });

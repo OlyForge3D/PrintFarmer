@@ -81,6 +81,7 @@ describe('STLPreviewModal Component', () => {
     apiClientGetMock.mockReset();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
+      headers: new Headers({ 'content-type': 'application/octet-stream' }),
       blob: vi.fn().mockResolvedValue(new Blob([createMinimalBinaryStl()])),
       arrayBuffer: vi.fn().mockResolvedValue(createMinimalBinaryStl()),
     }));
