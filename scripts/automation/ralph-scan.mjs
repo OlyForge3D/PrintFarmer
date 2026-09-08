@@ -328,17 +328,21 @@ function isEligibleSuggestion(issue) {
     !issue.requiresSemanticReview;
 }
 
-function topologicalOrder(repo, issues, edges) {
+export function topologicalOrder(repo, issues, edges) {
   const indexed = new Map(issues.map((issue) => [issueReference(repo, issue.number), issue]));
   const incoming = new Map(issues.map((issue) => [issueReference(repo, issue.number), 0]));
   const next = new Map(issues.map((issue) => [issueReference(repo, issue.number), []]));
   const blockedEdges = [];
   const externallyBlocked = new Set();
+  const uncertainTargets = new Set();
+  let suppressReadiness = false;
   let unknown = false;
   for (const edge of edges) {
     if (edge.unknown || !edge.state) {
       unknown = true;
       blockedEdges.push(edge);
+      if (indexed.has(edge.blocked)) uncertainTargets.add(edge.blocked);
+      else suppressReadiness = true;
       continue;
     }
     if (edge.state === 'closed') {
@@ -347,6 +351,8 @@ function topologicalOrder(repo, issues, edges) {
     if (edge.state !== 'open') {
       unknown = true;
       blockedEdges.push(edge);
+      if (indexed.has(edge.blocked)) uncertainTargets.add(edge.blocked);
+      else suppressReadiness = true;
       continue;
     }
     blockedEdges.push(edge);
@@ -362,7 +368,9 @@ function topologicalOrder(repo, issues, edges) {
     (indexed.get(left).createdAt || '').localeCompare(indexed.get(right).createdAt || '') ||
     indexed.get(left).number - indexed.get(right).number;
   const orderedRoots = [...incoming.keys()].filter((key) => incoming.get(key) === 0).sort(compare);
-  const initialReady = orderedRoots.filter((key) => !externallyBlocked.has(key));
+  const initialReady = suppressReadiness
+    ? []
+    : orderedRoots.filter((key) => !externallyBlocked.has(key) && !uncertainTargets.has(key));
   const ready = [...orderedRoots];
   const order = [];
   while (ready.length) {
@@ -381,7 +389,10 @@ function topologicalOrder(repo, issues, edges) {
     .map((key) => indexed.get(key))
     .filter(isEligibleSuggestion)
     .map((issue) => issue.number);
-  return { order, currentlyUnblocked, suggestions, blockedEdges, cyclic: order.length !== issues.length, unknown };
+  return {
+    order, currentlyUnblocked, suggestions, blockedEdges,
+    cyclic: order.length !== issues.length, unknown, suppressReadiness,
+  };
 }
 
 async function readSessions(file) {
@@ -539,7 +550,7 @@ export async function scan(options) {
         currentlyUnblocked: graph.currentlyUnblocked, totalAccounted: snapshot.issues.length,
       },
       dependencyOrder: graph.order, blockedEdges,
-      graphFlags: { cyclic: graph.cyclic, unknown: graph.unknown },
+      graphFlags: { cyclic: graph.cyclic, unknown: graph.unknown, readinessSuppressed: graph.suppressReadiness },
       prs: { attention: snapshot.prs.map((pr) => ({ number: pr.number, draft: pr.draft, headSha: pr.headSha })), detailArtifact: prArtifact },
       sessions: { ...snapshot.sessions, requiresLiveEnumerationBeforeDispatchOrReap: snapshot.sessions.availability !== 'provided' },
       security: snapshot.security,

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { acquireLock, scan } from '../ralph-scan.mjs';
+import { acquireLock, scan, topologicalOrder } from '../ralph-scan.mjs';
 
 function issue(number, overrides = {}) {
   return {
@@ -270,6 +270,38 @@ test('closed outgoing targets are not reported as active blocking edges', async 
   });
   const result = await scan(options);
   assert.equal(result.blockedEdges.length, 0);
+});
+
+test('unknown-state and malformed blockers suppress only their identifiable target from immediate suggestions', async (t) => {
+  const unknownState = await temporaryOptions(t, {
+    transport: transport({
+      dependencies: { 2: { blockedBy: [{ number: 99, state: 'unknown', repository_url: 'https://api.github.com/repos/example/other' }] } },
+    }),
+  });
+  const unknownResult = await scan(unknownState);
+  assert.equal(unknownResult.graphFlags.unknown, true);
+  assert.deepEqual(unknownResult.issues.currentlyUnblocked, [1]);
+  assert.deepEqual(unknownResult.issues.readyUnresolved, [1]);
+
+  const malformed = await temporaryOptions(t, {
+    transport: transport({ dependencies: { 2: { blockedBy: [{ number: 99, state: 'open' }] } } }),
+  });
+  const malformedResult = await scan(malformed);
+  assert.equal(malformedResult.graphFlags.unknown, true);
+  assert.deepEqual(malformedResult.issues.currentlyUnblocked, [1]);
+  assert.deepEqual(malformedResult.issues.readyUnresolved, [1]);
+});
+
+test('an unknown edge without an identifiable blocked target suppresses all immediate readiness', () => {
+  const graph = topologicalOrder('OlyForge3D/PrintFarmer', [
+    { number: 1, state: 'open', labels: [], assignees: [], createdAt: '2026-01-01T00:00:00Z' },
+    { number: 2, state: 'open', labels: [], assignees: [], createdAt: '2026-01-02T00:00:00Z' },
+  ], [{ unknown: true, blocker: 'github.com/example/other#99', blocked: undefined }]);
+  assert.equal(graph.unknown, true);
+  assert.equal(graph.suppressReadiness, true);
+  assert.deepEqual(graph.order, [1, 2]);
+  assert.deepEqual(graph.currentlyUnblocked, []);
+  assert.deepEqual(graph.suggestions, []);
 });
 
 test('symlinked state namespace components are rejected before observation writes', async (t) => {
