@@ -147,7 +147,7 @@ test('unavailable CodeQL evidence remains unknown instead of passing as clean', 
     transport: {
       async get(endpoint, options) {
         if (endpoint.includes('/code-scanning/alerts?')) {
-          throw Object.assign(new Error('forbidden'), { code: 'GITHUB_ERROR' });
+          throw Object.assign(new Error('forbidden'), { code: 'GITHUB_DENIED' });
         }
         return base.get(endpoint, options);
       },

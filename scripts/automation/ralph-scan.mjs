@@ -135,7 +135,9 @@ export function createGhTransport() {
           encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, windowsHide: true,
         }));
       } catch (error) {
-        fail(`GitHub read failed for ${endpoint}: ${error.stderr?.trim() || error.message}`, 'GITHUB_ERROR');
+        const detail = error.stderr?.trim() || error.message;
+        const unavailable = /\b(403|404)\b/.test(detail) && !/rate limit/i.test(detail);
+        fail(`GitHub read failed for ${endpoint}: ${detail}`, unavailable ? 'GITHUB_DENIED' : 'GITHUB_ERROR');
       }
       try {
         return JSON.parse(output);
@@ -250,14 +252,23 @@ function compactStatus(status) {
   })).sort((left, right) => left.id - right.id);
 }
 
-function dependencyEdge(raw, blocked) {
+function issueReference(repository, number) {
+  return `github.com/${repository}#${number}`;
+}
+
+function referenceFor(raw) {
   validateObject(raw, 'dependency');
   const repository = raw.repository_url?.split('/repos/')[1];
-  const number = raw.number;
-  if (!repository || !Number.isSafeInteger(number)) {
+  if (!repository || !Number.isSafeInteger(raw.number)) return undefined;
+  return issueReference(repository, raw.number);
+}
+
+function dependencyEdge(blocker, blocked) {
+  const blockerReference = referenceFor(blocker);
+  if (!blockerReference || !blocked) {
     return { blocked, unknown: true, reason: 'dependency-shape' };
   }
-  return { blocker: `${repository}#${number}`, blocked: `github.com/${blocked}`, state: raw.state ?? 'unknown' };
+  return { blocker: blockerReference, blocked, state: blocker.state ?? 'unknown' };
 }
 
 function changeReasons(previous, current, fields) {
@@ -265,10 +276,10 @@ function changeReasons(previous, current, fields) {
   return fields.filter((field) => digest(previous[field]) !== digest(current[field]));
 }
 
-function topologicalOrder(issues, edges) {
-  const indexed = new Map(issues.map((issue) => [`github.com/${issue.number}`, issue]));
-  const incoming = new Map(issues.map((issue) => [`github.com/${issue.number}`, 0]));
-  const next = new Map(issues.map((issue) => [`github.com/${issue.number}`, []]));
+function topologicalOrder(repo, issues, edges) {
+  const indexed = new Map(issues.map((issue) => [issueReference(repo, issue.number), issue]));
+  const incoming = new Map(issues.map((issue) => [issueReference(repo, issue.number), 0]));
+  const next = new Map(issues.map((issue) => [issueReference(repo, issue.number), []]));
   const blockedEdges = [];
   let unknown = false;
   for (const edge of edges) {
@@ -324,7 +335,7 @@ async function securityState(transport, repo) {
       rule: alert.rule?.id ?? '', severity: alert.rule?.security_severity_level ?? '',
     })).sort((left, right) => left.number - right.number) };
   } catch (error) {
-    if (error.code !== 'GITHUB_ERROR') throw error;
+    if (error.code !== 'GITHUB_DENIED') throw error;
     return { availability: 'unknown', reason: 'code-scanning-unavailable', alerts: [] };
   }
 }
@@ -340,8 +351,11 @@ export async function collectSnapshot({ repo, workflowId, sessionsFile, transpor
       pages(transport, `/repos/${repo}/issues/${number}/dependencies/blocking?per_page=100`),
     ]);
     return compactIssue(issue, {
-      blockedBy: blockedBy.map((entry) => dependencyEdge(entry, `${repo}#${number}`)),
-      blocking: blocking.map((entry) => dependencyEdge(entry, `${repo}#${number}`)),
+      blockedBy: blockedBy.map((entry) => dependencyEdge(entry, issueReference(repo, number))),
+      blocking: blocking.map((entry) => dependencyEdge(
+        { ...issue, repository_url: `https://api.github.com/repos/${repo}`, number },
+        referenceFor(entry),
+      )),
     });
   });
   const prs = await mapLimit(prListing, async (pr) => {
@@ -390,21 +404,21 @@ export async function scan(options) {
       if (!snapshot.prs.some((item) => item.number === priorPr.number)) {
         changedPrs.push({ id: prKey(priorPr), reasons: ['removed-terminal-lookup-candidate'] });
       }
-      for (const priorIssue of prior.snapshot?.snapshot.issues ?? []) {
-        if (!snapshot.issues.some((item) => item.number === priorIssue.number)) {
-          changedIssues.push({ id: issueKey(priorIssue), reasons: ['removed-terminal-lookup-candidate'] });
-        }
+    }
+    for (const priorIssue of prior.snapshot?.snapshot.issues ?? []) {
+      if (!snapshot.issues.some((item) => item.number === priorIssue.number)) {
+        changedIssues.push({ id: issueKey(priorIssue), reasons: ['removed-terminal-lookup-candidate'] });
       }
     }
     const edges = snapshot.issues.flatMap((issue) => issue.dependencies.blockedBy);
-    const graph = topologicalOrder(snapshot.issues, edges);
+    const graph = topologicalOrder(snapshot.repo, snapshot.issues, edges);
     const artifactDirectory = path.join(directory, 'artifacts');
     await ensurePrivateDirectory(artifactDirectory);
     const issueArtifact = writeArtifactPath(artifactDirectory, 'issues', snapshot.issues);
     const prArtifact = writeArtifactPath(artifactDirectory, 'prs', snapshot.prs);
     await Promise.all([
-      writeFile(issueArtifact, `${JSON.stringify(snapshot.issues)}\n`, { mode: 0o600 }),
-      writeFile(prArtifact, `${JSON.stringify(snapshot.prs)}\n`, { mode: 0o600 }),
+      writeSnapshotAtomically(issueArtifact, snapshot.issues),
+      writeSnapshotAtomically(prArtifact, snapshot.prs),
     ]);
     const output = {
       schemaVersion, complete: true, baseline: prior.baseline,
@@ -420,7 +434,7 @@ export async function scan(options) {
       prs: { attention: snapshot.prs.map((pr) => ({ number: pr.number, draft: pr.draft, headSha: pr.headSha })), detailArtifact: prArtifact },
       sessions: { ...snapshot.sessions, requiresLiveEnumerationBeforeDispatchOrReap: snapshot.sessions.availability !== 'provided' },
       security: snapshot.security,
-      artifacts: { stateDirectory, issueInventory: issueArtifact, prDetails: prArtifact },
+      artifacts: { stateDirectory: directory, issueInventory: issueArtifact, prDetails: prArtifact },
       api: { pagination: 'complete-rest-pages', boundedConcurrency: maxConcurrency },
     };
     await writeSnapshotAtomically(stateFile, { schemaVersion, snapshot });
