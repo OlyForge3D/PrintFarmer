@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, useSearchParams } from 'react-router';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -105,6 +105,7 @@ vi.mock('@/features/admin/components/FailureDetectionStatusCard', () => ({
 }));
 
 const toastErrorMock = vi.fn();
+let rafQueue: FrameRequestCallback[] = [];
 vi.mock('sonner', () => ({
   toast: {
     error: (...args: unknown[]) => toastErrorMock(...args),
@@ -116,6 +117,19 @@ vi.mock('sonner', () => ({
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 
 async function renderPageWithField(fieldParam?: string) {
+  return renderPageWithFieldOptions(fieldParam);
+}
+
+async function flushAnimationFrames(frameCount = 40) {
+  await act(async () => {
+    for (let i = 0; i < frameCount && rafQueue.length > 0; i += 1) {
+      const callback = rafQueue.shift();
+      callback?.(performance.now());
+    }
+  });
+}
+
+async function renderPageWithFieldOptions(fieldParam?: string, options?: { flushFrames?: boolean }) {
   const entry = fieldParam ? `/?field=${encodeURIComponent(fieldParam)}` : '/';
   const result = render(
     <MemoryRouter initialEntries={[entry]}>
@@ -125,6 +139,9 @@ async function renderPageWithField(fieldParam?: string) {
   await waitFor(() => {
     expect(screen.getByTestId('settings-mode-controls')).toBeInTheDocument();
   });
+  if (options?.flushFrames !== false) {
+    await flushAnimationFrames();
+  }
   return result;
 }
 
@@ -147,18 +164,21 @@ describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () =>
     toastErrorMock.mockReset();
     saveSettingsMock.mockReset().mockResolvedValue(undefined);
     usePageTourMock.mockClear();
+    rafQueue = [];
     // JSDOM does not implement scrollIntoView — polyfill so the effect runs.
     Element.prototype.scrollIntoView = scrollIntoViewMock;
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
       value: matchMediaMock,
     });
-    // Deep-link scrolling runs inside requestAnimationFrame; JSDOM ships a
-    // trivial version but be explicit so the callback runs immediately.
+    // Queue RAF callbacks explicitly so tests can observe the initial focus
+    // pass separately from a later repair pass when the focused control is
+    // replaced and the browser drops focus onto <body>.
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
-      cb(performance.now());
-      return 0;
+      rafQueue.push(cb);
+      return rafQueue.length;
     });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined);
     window.localStorage.clear();
   });
 
@@ -261,6 +281,7 @@ describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () =>
     await waitFor(() => {
       expect(screen.getByTestId('settings-mode-controls')).toBeInTheDocument();
     });
+    await flushAnimationFrames();
 
     const targetInput = document.querySelector<HTMLInputElement>('[data-setting-property="CatalogUpdates.autoApply"] input');
     expect(targetInput).toBeTruthy();
@@ -271,6 +292,7 @@ describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () =>
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear field' }));
     fireEvent.click(screen.getByRole('button', { name: 'Restore field' }));
+    await flushAnimationFrames();
 
     await waitFor(() => expect(scrollIntoViewMock).toHaveBeenCalledTimes(2));
     await waitFor(() => {
@@ -288,17 +310,34 @@ describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () =>
     await waitFor(() => {
       expect(screen.getByTestId('settings-mode-controls')).toBeInTheDocument();
     });
+    await flushAnimationFrames();
 
     const targetInput = document.querySelector<HTMLInputElement>('[data-setting-property="CatalogUpdates.autoApply"] input');
     expect(targetInput).toBeTruthy();
     await waitFor(() => expect(scrollIntoViewMock).toHaveBeenCalledTimes(1));
 
     fireEvent.click(screen.getByRole('button', { name: 'Update query' }));
+    await flushAnimationFrames();
 
     await waitFor(() => {
       expect((document.activeElement as HTMLElement | null)?.id).toBe('CatalogUpdates.autoApply');
     });
     expect(scrollIntoViewMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reclaims focus when the deep-linked control blurs back to body during the focus window (#2556)', async () => {
+    await renderPageWithField('CatalogUpdates.autoApply');
+
+    const targetInput = document.querySelector<HTMLInputElement>('[data-setting-property="CatalogUpdates.autoApply"] input');
+    expect(targetInput).toBeTruthy();
+    expect(targetInput).toHaveFocus();
+
+    targetInput!.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    await waitFor(() => {
+      expect(targetInput).toHaveFocus();
+    });
   });
 
   it('surfaces a toast and leaves the page mounted when the deep-linked field does not resolve (#2505)', async () => {
@@ -308,7 +347,7 @@ describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () =>
     // should apply, and the user gets a toast instead of silence.
     await renderPageWithField('NoSuchSection.NoSuchProperty');
 
-    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledTimes(1), { timeout: 5000 });
     expect(toastErrorMock).toHaveBeenCalledWith(
       expect.stringContaining('NoSuchSection.NoSuchProperty'),
     );

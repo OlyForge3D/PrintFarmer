@@ -79,6 +79,9 @@ interface SettingsPageProps {
 type SectionValues = Record<string, SettingValue>;
 type GroupValues = Record<string, SectionValues>;
 
+const FIELD_DEEP_LINK_FOCUS_WINDOW_MS = 4000;
+const FIELD_DEEP_LINK_RETRY_DELAY_MS = 100;
+
 /**
  * Per-section allowlist of property names to render inside a `GroupSaveBlock`.
  * The map is authoritative for *rendering only* — save and validation always
@@ -859,7 +862,54 @@ export function SettingsPage({
       return;
     }
 
-    const raf = window.requestAnimationFrame(() => {
+    let activationClosed = false;
+    let hasFocusedTarget = false;
+    let scrolledTarget: HTMLElement | null = null;
+    let mutationObserver: MutationObserver | null = null;
+    let completionTimer = 0;
+    let focusRepairTimer = 0;
+    let retryTimer = 0;
+    let scrollHighlightTimer = 0;
+    const disposeActivation = () => {
+      if (activationClosed) {
+        return;
+      }
+      activationClosed = true;
+      window.clearTimeout(completionTimer);
+      window.clearTimeout(focusRepairTimer);
+      window.clearTimeout(retryTimer);
+      mutationObserver?.disconnect();
+      document.removeEventListener('focusout', scheduleBodyFocusRepair, true);
+    };
+    const finishActivation = () => {
+      handledFieldActivationRef.current = fieldParam;
+      disposeActivation();
+    };
+    const scheduleBodyFocusRepair = () => {
+      if (activationClosed || focusRepairTimer !== 0) {
+        return;
+      }
+      focusRepairTimer = window.setTimeout(() => {
+        focusRepairTimer = 0;
+        if (!activationClosed && document.activeElement === document.body) {
+          tryActivate();
+        }
+      }, 0);
+    };
+    const scheduleRetry = (delayMs = FIELD_DEEP_LINK_RETRY_DELAY_MS) => {
+      if (activationClosed || retryTimer !== 0) {
+        return;
+      }
+      retryTimer = window.setTimeout(() => {
+        retryTimer = 0;
+        tryActivate();
+      }, delayMs);
+    };
+
+    const tryActivate = () => {
+      if (activationClosed) {
+        return;
+      }
       // The attribute value is quoted, so only backslashes and quotes need
       // escaping. CSS.escape is for bare identifiers and would mangle the dot
       // separator in a qualified `Section.Property` key.
@@ -877,23 +927,71 @@ export function SettingsPage({
         const control = target.querySelector<HTMLElement>(
           'input, select, textarea, button, [tabindex]:not([tabindex="-1"])',
         );
-        if (control) {
-          control.focus({ preventScroll: true });
-        } else {
+        const focusTarget = control ?? target;
+        if (!control) {
           target.setAttribute('tabindex', '-1');
-          target.focus({ preventScroll: true });
         }
-        const prefersReducedMotion = typeof window.matchMedia === 'function'
-          && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        target.scrollIntoView({
-          block: 'center',
-          behavior: prefersReducedMotion ? 'auto' : 'smooth',
-        });
-        target.classList.add('pf-setting-focus');
-        window.setTimeout(() => {
-          target.classList.remove('pf-setting-focus');
-        }, 2000);
-      } else {
+
+        const activeElement = document.activeElement;
+        const shouldClaimInitialFocus = !hasFocusedTarget;
+        const shouldRepairBodyFocus = hasFocusedTarget && activeElement === document.body;
+        if ((shouldClaimInitialFocus && activeElement !== focusTarget) || shouldRepairBodyFocus) {
+          focusTarget.focus({ preventScroll: true });
+        }
+
+        if (scrolledTarget !== target) {
+          const prefersReducedMotion = typeof window.matchMedia === 'function'
+            && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          target.scrollIntoView({
+            block: 'center',
+            behavior: prefersReducedMotion ? 'auto' : 'smooth',
+          });
+          target.classList.add('pf-setting-focus');
+          window.clearTimeout(scrollHighlightTimer);
+          scrollHighlightTimer = window.setTimeout(() => {
+            target.classList.remove('pf-setting-focus');
+          }, 2000);
+          scrolledTarget = target;
+        }
+
+        const focusStable = document.activeElement === focusTarget;
+        if (focusStable) {
+          hasFocusedTarget = true;
+        }
+        const focusMovedElsewhere = hasFocusedTarget
+          && document.activeElement !== null
+          && document.activeElement !== document.body
+          && document.activeElement !== focusTarget;
+        if (focusMovedElsewhere) {
+          finishActivation();
+          return;
+        }
+        scheduleRetry();
+        return;
+      }
+
+      scheduleRetry();
+    };
+
+    if (typeof MutationObserver !== 'undefined') {
+      mutationObserver = new MutationObserver(() => {
+        scheduleBodyFocusRepair();
+        if (!hasFocusedTarget || document.activeElement === document.body) {
+          scheduleRetry(0);
+        }
+      });
+      mutationObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+    }
+
+    document.addEventListener('focusout', scheduleBodyFocusRepair, true);
+    completionTimer = window.setTimeout(() => {
+      if (activationClosed) {
+        return;
+      }
+      if (!scrolledTarget) {
         // #2505: a qualified field link can fail to resolve — stale metadata,
         // a typo carried over from an older link, or (now that the workspace
         // search can reach fields on other admin pages) a field that simply
@@ -903,11 +1001,13 @@ export function SettingsPage({
         // remains inspectable, and nothing crashes.
         toast.error(`Couldn't find the "${fieldParam}" setting on this page.`);
       }
-      handledFieldActivationRef.current = fieldParam;
-    });
+      finishActivation();
+    }, FIELD_DEEP_LINK_FOCUS_WINDOW_MS);
+    tryActivate();
 
     return () => {
-      window.cancelAnimationFrame(raf);
+      disposeActivation();
+      window.clearTimeout(scrollHighlightTimer);
     };
   }, [fieldParam, loading]);
 
