@@ -255,12 +255,43 @@ rowVersion; never fetch a newer revision merely to retry an old confirmation.
 
 `Printer` already exposes optional measured temperatures, targets, XYZ position
 and `homedAxes`. `getDetails` now also projects optional `zOffsetMm`,
-`lastZOffsetCalibrationAt` and `rowVersion`. These values stay unknown when
-absent. These envelopes do not establish per-printer travel/temperature limits
-or a material-specific safe extrusion temperature. The control owner must not
-use a target as a measurement or invent limits from web defaults. UI feedrates
+`lastZOffsetCalibrationAt`, `rowVersion` and nested `capabilities` with optional
+catalog/configuration maxima (`maxBuildVolumeX/Y/Z`, `maxHotendTemp`,
+`maxBedTemp`, `hasHeatedBed`). These values stay unknown when absent. Build
+volume is not live firmware travel bounds or proof of a zero-based origin;
+catalog heater maxima are not a material-specific safe extrusion temperature.
+The control owner must not use a target as a measurement or invent limits from web defaults. UI feedrates
 expressed in mm/s convert to mm/min once **before** calling the service.
 Native presets remain PLA 200/60, PETG 240/80 and ABS 240/100.
+
+The shared operation flags are `supportsRelativeMovement`,
+`supportsAbsoluteMovement`, `supportsDisableMotors`, `supportsExtrusion`,
+`supportsZOffset`, `supportsZOffsetFirmwareSave`, `supportsHoming`,
+`supportsHomingXY`, `supportsHomingZ`, `supportsHotendTemperature`,
+`supportsBedTemperature`, and `supportsFilamentLoad/Unload/Change`.
+Native `supportsMovement` and `supportsTemperatureControl` are compatibility
+aliases for relative movement and hotend targets. `supportedAxes` normalizes
+the server's lowercase axes to native uppercase, without implying they are homed.
+
+Current implementation evidence is deliberately narrower than legacy flags:
+
+| Backend | Proven shared commands |
+| --- | --- |
+| Moonraker | All/XY/Z home, hotend/bed targets, bounded extrusion, motor release, database-only Z-offset. |
+| OctoPrint | All/XY home, hotend/bed targets, database-only Z-offset; Z-only home requires matching derived/configured backend ports. |
+| PrusaLink | All/XY home, database-only Z-offset; Z-only home and heater targets require matching derived/configured backend ports. |
+| FlashForge | Database-only Z-offset; heater targets require matching derived/configured ports and an actual temperature-control client. |
+| SDCP / unknown | Database-only Z-offset; no inferred physical-command support. |
+
+These flags also require the concrete typed backend clients; permission and
+runtime readiness remain separate. Movement is currently unavailable: the
+Moonraker implementation combines mode and move on one G-code line, other
+absolute-move implementations are stubs, and relative routes omit credentials
+required by some backends. Firmware Z-offset persistence is not proven by
+`SET_GCODE_OFFSET` / `SAVE_CONFIG` or generic `M851` / `M500` transport.
+Physical-filament macros are not enabled without installed per-printer macro
+evidence. These prerequisites are recorded in #2597 / #2593; the typed native
+methods do not invent support or silently issue substitute commands.
 
 ### Advanced Printer Controls
 

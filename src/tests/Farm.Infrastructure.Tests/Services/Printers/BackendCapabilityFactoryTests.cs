@@ -38,6 +38,33 @@ public class BackendCapabilityFactoryTests
     #region Tests for Capability Detection
 
     [Fact]
+    public void TryGetGcodeExecutionClientTyped_PrintControlsOnly_ReturnsFalse()
+    {
+        var client = new Mock<IBackendClient>();
+        client.As<ISupportsControlOperations>();
+        var clients = new Mock<IBackendClientFactory>();
+        clients.Setup(factory => factory.GetClient(It.IsAny<PrinterBackend>())).Returns(client.Object);
+        var factory = new BackendCapabilityFactory(clients.Object, _mockLogger.Object);
+
+        Assert.False(factory.TryGetGcodeExecutionClientTyped(PrinterBackend.Moonraker, out ISupportsGcodeExecution? gcode));
+        Assert.Null(gcode);
+    }
+
+    [Fact]
+    public void TryGetGcodeExecutionClientTyped_ActualCommandInterface_ReturnsTypedClient()
+    {
+        var client = new Mock<IBackendClient>();
+        ISupportsGcodeExecution expected = client.As<ISupportsGcodeExecution>().Object;
+        var clients = new Mock<IBackendClientFactory>();
+        clients.Setup(factory => factory.GetClient(It.IsAny<PrinterBackend>())).Returns(client.Object);
+        var factory = new BackendCapabilityFactory(clients.Object, _mockLogger.Object);
+
+        Assert.True(factory.TryGetGcodeExecutionClientTyped(PrinterBackend.Moonraker, out ISupportsGcodeExecution? gcode));
+        Assert.Same(expected, gcode);
+        Assert.False(factory.TryGetGcodeExecutionClientTyped(PrinterBackend.Unknown, out _));
+    }
+
+    [Fact]
     public void Moonraker_ClientShouldImplementISupportsFileList()
     {
         // Arrange - Get the Moonraker client

@@ -34,12 +34,18 @@ final class PrinterServiceFallbackTests: XCTestCase {
     func testDetailsIncludesReviewedCalibrationWithoutInventingUnknownValues() async throws {
         mockAPIClient.stubResponse(json: """
         {"id":"\(printerId)","name":"MK4","backend":"PrusaLink",
-         "rowVersion":"AQIDBA==","zOffsetMm":0,"lastZOffsetCalibrationAt":"2026-09-08T10:00:00Z"}
+         "rowVersion":"AQIDBA==","zOffsetMm":0,"lastZOffsetCalibrationAt":"2026-09-08T10:00:00Z",
+         "capabilities":{"maxHotendTemp":280,"maxBedTemp":110,"maxBuildVolumeX":250}}
         """)
         let details = try await printerService.getDetails(id: printerId)
         XCTAssertEqual(details.rowVersion, "AQIDBA==")
         XCTAssertEqual(details.zOffsetMm, 0)
         XCTAssertNotNil(details.lastZOffsetCalibrationAt)
+        XCTAssertEqual(details.capabilities?.maxHotendTemp, 280)
+        XCTAssertEqual(details.capabilities?.maxBedTemp, 110)
+        XCTAssertEqual(details.capabilities?.maxBuildVolumeX, 250)
+        XCTAssertNil(details.capabilities?.maxBuildVolumeY)
+        XCTAssertNil(details.capabilities?.hasHeatedBed)
         mockAPIClient.stubResponse(json: """
         {"id":"\(printerId)","name":"MK4","backend":"PrusaLink"}
         """)
@@ -47,6 +53,7 @@ final class PrinterServiceFallbackTests: XCTestCase {
         XCTAssertNil(unknown.rowVersion)
         XCTAssertNil(unknown.zOffsetMm)
         XCTAssertNil(unknown.lastZOffsetCalibrationAt)
+        XCTAssertNil(unknown.capabilities)
     }
 
     func testCapabilityRefreshDoesNotReusePrinterIDAcrossServersOrConfigurationChanges() async throws {

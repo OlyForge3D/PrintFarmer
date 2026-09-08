@@ -15,11 +15,13 @@ struct PrinterBackendCapabilities: Codable, Equatable, Sendable {
     var supportsExtrusion: Bool = false
     var supportsZOffset: Bool = false
     var supportsZOffsetFirmwareSave: Bool = false
-    var supportsHomeXY: Bool = false
-    var supportsHomeZ: Bool = false
+    var supportsHomingXY: Bool = false
+    var supportsHomingZ: Bool = false
     var supportsFilamentLoad: Bool = false
     var supportsFilamentUnload: Bool = false
     var supportsFilamentChange: Bool = false
+    var supportsRelativeMovement: Bool { supportsMovement }
+    var supportsHotendTemperature: Bool { supportsTemperatureControl }
 
     /// Keep the old entry point for callers, but never enable actuation from it.
     static func fallback(for backend: PrinterBackend) -> PrinterBackendCapabilities {
@@ -39,15 +41,15 @@ extension PrinterBackendCapabilities {
             supportsBedTemperature: wire.supportsBedTemperature == true,
             supportsFanControl: false,
             supportsHoming: wire.supportsHoming == true,
-            supportedAxes: (wire.supportedAxes ?? []).filter { ["X", "Y", "Z"].contains($0) }
+            supportedAxes: (wire.supportedAxes ?? []).map { $0.uppercased() }.filter { ["X", "Y", "Z"].contains($0) }
         )
         supportsAbsoluteMovement = wire.supportsAbsoluteMovement == true
         supportsDisableMotors = wire.supportsDisableMotors == true
         supportsExtrusion = wire.supportsExtrusion == true
         supportsZOffset = wire.supportsZOffset == true
         supportsZOffsetFirmwareSave = wire.supportsZOffsetFirmwareSave == true
-        supportsHomeXY = wire.supportsHomeXY == true
-        supportsHomeZ = wire.supportsHomeZ == true
+        supportsHomingXY = wire.supportsHomingXY == true
+        supportsHomingZ = wire.supportsHomingZ == true
         supportsFilamentLoad = wire.supportsFilamentLoad == true
         supportsFilamentUnload = wire.supportsFilamentUnload == true
         supportsFilamentChange = wire.supportsFilamentChange == true
@@ -82,8 +84,8 @@ struct PrinterBackendCapabilitiesWireDto: Codable, Sendable {
     let supportsZOffset: Bool?
     let supportsZOffsetFirmwareSave: Bool?
     let supportsHoming: Bool?
-    let supportsHomeXY: Bool?
-    let supportsHomeZ: Bool?
+    let supportsHomingXY: Bool?
+    let supportsHomingZ: Bool?
     let supportsHotendTemperature: Bool?
     let supportsBedTemperature: Bool?
     let supportsFilamentLoad: Bool?

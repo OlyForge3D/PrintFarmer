@@ -681,6 +681,45 @@ final class PrinterServiceTests: XCTestCase {
         XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
     }
 
+    func testCancelledBeforeDispatchDoesNotActuate() async throws {
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        let service = try XCTUnwrap(printerService)
+        let pending = Task {
+            await barrier.arriveAndWait()
+            return try await service.disableMotors(printerId: TestData.testUUID)
+        }
+        await barrier.waitUntilArrived()
+        pending.cancel()
+        barrier.release()
+        do {
+            _ = try await pending.value
+            XCTFail("Cancelled command must not be sent")
+        } catch is CancellationError {}
+        XCTAssertTrue(mockAPIClient.capturedRequests.isEmpty)
+    }
+
+    func testStalePhysicalResponseCannotAcknowledgeNewServer() async throws {
+        let generation = ActiveServerGeneration()
+        let client = APIClient(baseURL: TestData.testBaseURL, session: mockAPIClient.urlSession, serverGeneration: generation)
+        let service = PrinterService(apiClient: client)
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        mockAPIClient.asyncRequestHandler = { request in
+            await barrier.arriveAndWait()
+            return (TestData.httpResponse(url: request.url, statusCode: 200), Data(TestJSON.commandSuccess.utf8))
+        }
+        let pending = Task { try await service.disableMotors(printerId: TestData.testUUID) }
+        await barrier.waitUntilArrived()
+        generation.advance()
+        barrier.release()
+        do {
+            _ = try await pending.value
+            XCTFail("Old server response must not acknowledge new control state")
+        } catch NetworkError.staleServerResponse {}
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+    }
+
     func testControlBoundariesAndDatabaseOnlySave() async throws {
         mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
         for (distance, feedrate) in [(-100.0, 1), (100.0, 6000)] {

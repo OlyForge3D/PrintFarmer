@@ -160,6 +160,7 @@ actor PrinterService: PrinterServiceProtocol {
     }
 
     func unloadFilament(printerId: UUID, toolheadIndex: Int?) async throws -> FilamentUnloadResult {
+        try Task.checkCancellation()
         if let toolheadIndex, toolheadIndex < 0 {
             throw PrinterControlError.invalidRequest("Toolhead index must be nonnegative.")
         }
@@ -227,6 +228,7 @@ actor PrinterService: PrinterServiceProtocol {
     }
 
     func moveTo(printerId: UUID, x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async throws -> CommandResult {
+        try Task.checkCancellation()
         guard [x, y, z].contains(where: { $0 != nil }),
               [x, y, z].compactMap({ $0 }).allSatisfy(\.isFinite),
               feedrateMmMin.map({ $0 > 0 }) ?? true else {
@@ -237,6 +239,7 @@ actor PrinterService: PrinterServiceProtocol {
     }
 
     func extrude(printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int) async throws -> CommandResult {
+        try Task.checkCancellation()
         guard distanceMm.isFinite, distanceMm != 0, abs(distanceMm) <= 100,
               (1...6000).contains(feedrateMmPerMinute) else {
             throw PrinterControlError.invalidRequest("Extrusion requires a nonzero distance within -100...100 mm and feedrate 1...6000 mm/min.")
@@ -246,10 +249,12 @@ actor PrinterService: PrinterServiceProtocol {
     }
 
     func disableMotors(printerId: UUID) async throws -> CommandResult {
-        try await apiClient.post("/api/printers/\(printerId)/disable-motors")
+        try Task.checkCancellation()
+        return try await apiClient.post("/api/printers/\(printerId)/disable-motors")
     }
 
     func saveZOffset(printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String) async throws -> CommandResult {
+        try Task.checkCancellation()
         guard offsetMm.isFinite, (-5...5).contains(offsetMm),
               !reviewedRowVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               reviewedRowVersion != "*",

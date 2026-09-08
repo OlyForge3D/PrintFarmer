@@ -168,6 +168,7 @@ struct PrinterDetails: Codable, Identifiable, Sendable, Equatable {
     let rowVersion: String?
     let zOffsetMm: Double?
     let lastZOffsetCalibrationAt: Date?
+    let capabilities: PrinterHardwareCapabilities?
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -184,6 +185,7 @@ struct PrinterDetails: Codable, Identifiable, Sendable, Equatable {
         rowVersion = try c.decodeIfPresent(String.self, forKey: .rowVersion)
         zOffsetMm = try c.decodeIfPresent(Double.self, forKey: .zOffsetMm)
         lastZOffsetCalibrationAt = try c.decodeIfPresent(Date.self, forKey: .lastZOffsetCalibrationAt)
+        capabilities = try c.decodeIfPresent(PrinterHardwareCapabilities.self, forKey: .capabilities)
     }
 
     init(
@@ -198,7 +200,8 @@ struct PrinterDetails: Codable, Identifiable, Sendable, Equatable {
         supportsPerToolAttribution: Bool = false,
         rowVersion: String? = nil,
         zOffsetMm: Double? = nil,
-        lastZOffsetCalibrationAt: Date? = nil
+        lastZOffsetCalibrationAt: Date? = nil,
+        capabilities: PrinterHardwareCapabilities? = nil
     ) {
         self.id = id
         self.name = name
@@ -212,11 +215,23 @@ struct PrinterDetails: Codable, Identifiable, Sendable, Equatable {
         self.rowVersion = rowVersion
         self.zOffsetMm = zOffsetMm
         self.lastZOffsetCalibrationAt = lastZOffsetCalibrationAt
+        self.capabilities = capabilities
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, backend, hasMmu, manufacturerName, modelName
         case toolheads, fallbackGroups, supportsPerToolAttribution
-        case rowVersion, zOffsetMm, lastZOffsetCalibrationAt
+        case rowVersion, zOffsetMm, lastZOffsetCalibrationAt, capabilities
     }
+}
+
+/// Catalog/configuration data from the shared PrinterCapabilitiesDto, not live
+/// firmware travel bounds, safe extrusion temperature, or installed-hardware proof.
+struct PrinterHardwareCapabilities: Codable, Sendable, Equatable {
+    let maxBuildVolumeX: Double?
+    let maxBuildVolumeY: Double?
+    let maxBuildVolumeZ: Double?
+    let maxHotendTemp: Int?
+    let maxBedTemp: Int?
+    let hasHeatedBed: Bool?
 }

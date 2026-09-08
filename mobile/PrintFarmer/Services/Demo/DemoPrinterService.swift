@@ -214,7 +214,7 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
             supportsHoming: true, supportedAxes: ["X", "Y", "Z"],
             supportsAbsoluteMovement: true, supportsDisableMotors: true,
             supportsExtrusion: true, supportsZOffset: true,
-            supportsZOffsetFirmwareSave: false, supportsHomeXY: true, supportsHomeZ: true,
+            supportsZOffsetFirmwareSave: false, supportsHomingXY: true, supportsHomingZ: true,
             supportsFilamentLoad: true, supportsFilamentUnload: true, supportsFilamentChange: true
         )
     }

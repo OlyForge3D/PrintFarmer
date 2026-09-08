@@ -175,10 +175,10 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
         {"printerId":"\(TestData.testUUID)","backend":"FutureBackend",
          "supportsRelativeMovement":true,"supportsAbsoluteMovement":true,
          "supportsHotendTemperature":true,"supportsBedTemperature":false,
-         "supportsHoming":false,"supportsHomeXY":true,"supportsHomeZ":false,
+         "supportsHoming":false,"supportsHomingXY":true,"supportsHomingZ":false,
          "supportsExtrusion":true,"supportsDisableMotors":true,
          "supportsFilamentLoad":true,"supportsFilamentUnload":true,"supportsFilamentChange":false,
-         "supportsZOffset":true,"supportsZOffsetFirmwareSave":false,"supportedAxes":["X","Y","E"]}
+         "supportsZOffset":true,"supportsZOffsetFirmwareSave":false,"supportedAxes":["x","y","e"]}
         """.utf8)
         let wire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
         let caps = PrinterBackendCapabilities(wire: wire)
@@ -189,8 +189,8 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
         XCTAssertTrue(caps.supportsTemperatureControl)
         XCTAssertFalse(caps.supportsBedTemperature)
         XCTAssertFalse(caps.supportsHoming)
-        XCTAssertTrue(caps.supportsHomeXY)
-        XCTAssertFalse(caps.supportsHomeZ)
+        XCTAssertTrue(caps.supportsHomingXY)
+        XCTAssertFalse(caps.supportsHomingZ)
         XCTAssertTrue(caps.supportsZOffset)
         XCTAssertFalse(caps.supportsZOffsetFirmwareSave)
         XCTAssertTrue(caps.supportsFilamentLoad)
