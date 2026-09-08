@@ -4,7 +4,6 @@ import Foundation
 
 actor PrinterService: PrinterServiceProtocol {
     private let apiClient: APIClient
-    private var capabilitiesCache: [UUID: PrinterBackendCapabilities] = [:]
 
     init(apiClient: APIClient) {
         self.apiClient = apiClient
@@ -156,7 +155,16 @@ actor PrinterService: PrinterServiceProtocol {
     }
 
     func unloadFilament(printerId: UUID) async throws -> CommandResult {
-        try await apiClient.post("/api/printers/\(printerId)/filament-unload")
+        let result = try await unloadFilament(printerId: printerId, toolheadIndex: nil)
+        return CommandResult(success: result.success, message: result.message)
+    }
+
+    func unloadFilament(printerId: UUID, toolheadIndex: Int?) async throws -> FilamentUnloadResult {
+        if let toolheadIndex, toolheadIndex < 0 {
+            throw PrinterControlError.invalidRequest("Toolhead index must be nonnegative.")
+        }
+        let query = toolheadIndex.map { "?toolheadIndex=\($0)" } ?? ""
+        return try await apiClient.post("/api/printers/\(printerId)/filament-unload\(query)")
     }
 
     func changeFilament(printerId: UUID) async throws -> CommandResult {
@@ -165,59 +173,43 @@ actor PrinterService: PrinterServiceProtocol {
 
     // MARK: - Capabilities
 
-    /// Returns merged backend capabilities for the given printer.
-    ///
-    /// Fetches `/api/printers/{id}/backend-capabilities` and overlays the
-    /// authoritative `supportsMovement` / `supportsTemperatureControl` values
-    /// onto the static fallback derived from the wire DTO's `backend` field.
-    /// Falls back to the static table when the endpoint is unavailable.
-    /// Results are cached in-memory keyed by `printerId`.
+    /// Fetch fresh evidence, not a permanent printer-ID-only cache: IDs may
+    /// repeat across registered servers and backend configuration can change.
     func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
-        if let cached = capabilitiesCache[printerId] {
-            return cached
-        }
-
-        let merged: PrinterBackendCapabilities
+        try Task.checkCancellation()
         do {
             let wire: PrinterBackendCapabilitiesWireDto = try await apiClient.get(
                 "/api/printers/\(printerId)/backend-capabilities"
             )
-            let backend = wire.backend ?? .unknown
-            let base = PrinterBackendCapabilities.fallback(for: backend)
-            merged = PrinterBackendCapabilities(
-                supportsMovement: wire.supportsMovement ?? base.supportsMovement,
-                supportsTemperatureControl: wire.supportsTemperatureControl ?? base.supportsTemperatureControl,
-                supportsBedTemperature: base.supportsBedTemperature,
-                supportsFanControl: base.supportsFanControl,
-                supportsHoming: base.supportsHoming,
-                supportedAxes: base.supportedAxes
-            )
+            try Task.checkCancellation()
+            guard wire.printerId == printerId else { throw NetworkError.invalidResponse }
+            return PrinterBackendCapabilities(wire: wire)
         } catch let error as NetworkError {
-            // Endpoint missing or printer unknown to capabilities service:
-            // derive from the printer's backend type.
             switch error {
-            case .notFound, .serverError:
-                let printer = try await get(id: printerId)
-                merged = PrinterBackendCapabilities.fallback(for: printer.backend)
+            case .notFound:
+                return .fallback(for: .unknown)
             default:
                 throw error
             }
         }
-
-        capabilitiesCache[printerId] = merged
-        return merged
     }
 
     // MARK: - Temperature & Motion Controls
 
     func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws {
         let body = SetTemperaturesRequest(hotend: hotend, bed: bed)
-        try await apiClient.postVoid("/api/printers/\(printerId)/temps", body: body)
+        let result: CommandResult = try await apiClient.post("/api/printers/\(printerId)/temps", body: body)
+        try requireAccepted(result)
     }
 
     func home(printerId: UUID, axes: [String]) async throws {
+        let selected = Set(axes.map { $0.uppercased() })
+        guard selected == ["X", "Y", "Z"] || selected == ["X", "Y"] || selected == ["Z"] else {
+            throw PrinterControlError.invalidRequest("Home supports All, XY or Z only.")
+        }
         let path = PrinterService.homePath(forAxes: axes, printerId: printerId)
-        try await apiClient.postVoid(path)
+        let result: CommandResult = try await apiClient.post(path)
+        try requireAccepted(result)
     }
 
     func homeXY(printerId: UUID) async throws {
@@ -230,7 +222,49 @@ actor PrinterService: PrinterServiceProtocol {
 
     func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws {
         let body = MovePrinterRequest(axis: axis, distanceMm: distanceMm, feedrateMmMin: feedrateMmMin)
-        try await apiClient.postVoid("/api/printers/\(printerId)/move", body: body)
+        let result: CommandResult = try await apiClient.post("/api/printers/\(printerId)/move", body: body)
+        try requireAccepted(result)
+    }
+
+    func moveTo(printerId: UUID, x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async throws -> CommandResult {
+        guard [x, y, z].contains(where: { $0 != nil }),
+              [x, y, z].compactMap({ $0 }).allSatisfy(\.isFinite),
+              feedrateMmMin.map({ $0 > 0 }) ?? true else {
+            throw PrinterControlError.invalidRequest("Provide a finite coordinate and a positive feedrate.")
+        }
+        let body = MoveToPrinterRequest(x: x, y: y, z: z, f: feedrateMmMin)
+        return try await apiClient.post("/api/printers/\(printerId)/moveto", body: body)
+    }
+
+    func extrude(printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int) async throws -> CommandResult {
+        guard distanceMm.isFinite, distanceMm != 0, abs(distanceMm) <= 100,
+              (1...6000).contains(feedrateMmPerMinute) else {
+            throw PrinterControlError.invalidRequest("Extrusion requires a nonzero distance within -100...100 mm and feedrate 1...6000 mm/min.")
+        }
+        let body = ExtrudeFilamentRequest(distanceMm: distanceMm, feedrateMmPerMinute: feedrateMmPerMinute)
+        return try await apiClient.post("/api/printers/\(printerId)/extrude", body: body)
+    }
+
+    func disableMotors(printerId: UUID) async throws -> CommandResult {
+        try await apiClient.post("/api/printers/\(printerId)/disable-motors")
+    }
+
+    func saveZOffset(printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String) async throws -> CommandResult {
+        guard offsetMm.isFinite, (-5...5).contains(offsetMm),
+              !reviewedRowVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              reviewedRowVersion != "*",
+              !reviewedRowVersion.contains(where: { $0 == "\"" || $0.isNewline }) else {
+            throw PrinterControlError.invalidRequest("A bounded offset and reviewed printer rowVersion are required.")
+        }
+        return try await apiClient.post(
+            "/api/printers/\(printerId)/z-offset",
+            body: ZOffsetSaveRequest(offsetMm: offsetMm, saveToFirmware: saveToFirmware),
+            headers: preconditionHeaders(reviewedRowVersion)
+        )
+    }
+
+    private func requireAccepted(_ result: CommandResult) throws {
+        guard result.success else { throw PrinterControlError.rejected(result.message) }
     }
 
     /// Routes a home request to the correct backend endpoint based on the axes set.
@@ -370,8 +404,46 @@ struct MovePrinterRequest: Encodable {
         case "X": try container.encode(distanceMm, forKey: .x)
         case "Y": try container.encode(distanceMm, forKey: .y)
         case "Z": try container.encode(distanceMm, forKey: .z)
-        default: try container.encode(distanceMm, forKey: .x)
+        default: throw PrinterControlError.invalidRequest("Movement axis must be X, Y or Z.")
         }
+
         try container.encode(Double(feedrateMmMin), forKey: .f)
+    }
+}
+
+struct MoveToPrinterRequest: Encodable, Sendable {
+    let x: Double?
+    let y: Double?
+    let z: Double?
+    let f: Int?
+}
+
+struct ExtrudeFilamentRequest: Encodable, Sendable {
+    let distanceMm: Double
+    let feedrateMmPerMinute: Int
+}
+
+struct ZOffsetSaveRequest: Encodable, Sendable {
+    let offsetMm: Double
+    let saveToFirmware: Bool
+}
+
+struct FilamentUnloadResult: Codable, Sendable {
+    let success: Bool
+    let message: String?
+    let spoolId: Int?
+    let material: String?
+    let residualWeightG: Double?
+}
+
+enum PrinterControlError: LocalizedError, Sendable {
+    case invalidRequest(String)
+    case rejected(String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidRequest(let message): message
+        case .rejected(let message): message ?? "The printer rejected the command."
+        }
     }
 }

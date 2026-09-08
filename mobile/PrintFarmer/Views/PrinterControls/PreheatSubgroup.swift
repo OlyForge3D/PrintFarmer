@@ -524,6 +524,11 @@ private final class PreheatSubgroupPreviewService: PrinterServiceProtocol, @unch
     func homeXY(printerId: UUID) async throws {}
     func homeZ(printerId: UUID) async throws {}
     func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws {}
+    func moveTo(printerId: UUID, x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async throws -> CommandResult { throw NetworkError.notFound }
+    func extrude(printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int) async throws -> CommandResult { throw NetworkError.notFound }
+    func disableMotors(printerId: UUID) async throws -> CommandResult { throw NetworkError.notFound }
+    func saveZOffset(printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String) async throws -> CommandResult { throw NetworkError.notFound }
+    func unloadFilament(printerId: UUID, toolheadIndex: Int?) async throws -> FilamentUnloadResult { throw NetworkError.notFound }
 
     func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities { capabilities }
 

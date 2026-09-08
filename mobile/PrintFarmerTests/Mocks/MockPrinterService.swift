@@ -1,6 +1,19 @@
 import Foundation
 @testable import PrintFarmer
 
+extension PrinterBackendCapabilities {
+    /// Test-only evidence: never use a production backend-name fallback as a fixture.
+    static func supportedFixture(for backend: PrinterBackend) -> PrinterBackendCapabilities {
+        let supported = backend != .sdcp && backend != .unknown
+        return PrinterBackendCapabilities(
+            supportsMovement: supported, supportsTemperatureControl: supported,
+            supportsBedTemperature: supported && backend != .flashForge,
+            supportsFanControl: supported && backend != .flashForge,
+            supportsHoming: supported, supportedAxes: supported ? ["X", "Y", "Z"] : []
+        )
+    }
+}
+
 final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var printersToReturn: [Printer] = []
     var printerToReturn: Printer?
@@ -56,6 +69,12 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var homeXYCalledWith: UUID?
     var homeZCalledWith: UUID?
     var moveCalledWith: (printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int)?
+    var moveToCalledWith: (printerId: UUID, x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?)?
+    var extrudeCalledWith: (printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int)?
+    var disableMotorsCalledWith: UUID?
+    var saveZOffsetCalledWith: (printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String)?
+    var unloadFilamentToolheadIndex: Int?
+    var unloadResultToReturn: FilamentUnloadResult?
 
     func list(includeDisabled: Bool = false) async throws -> [Printer] {
         listPrintersCalled = true
@@ -215,13 +234,45 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         return commandResultToReturn
     }
 
+    func unloadFilament(printerId: UUID, toolheadIndex: Int?) async throws -> FilamentUnloadResult {
+        unloadFilamentToolheadIndex = toolheadIndex
+        let result = try await unloadFilament(printerId: printerId)
+        return unloadResultToReturn ?? FilamentUnloadResult(
+            success: result.success, message: result.message, spoolId: nil, material: nil, residualWeightG: nil
+        )
+    }
+
+    func moveTo(printerId: UUID, x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async throws -> CommandResult {
+        moveToCalledWith = (printerId, x, y, z, feedrateMmMin)
+        if let error = errorToThrow { throw error }
+        return commandResultToReturn
+    }
+
+    func extrude(printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int) async throws -> CommandResult {
+        extrudeCalledWith = (printerId, distanceMm, feedrateMmPerMinute)
+        if let error = errorToThrow { throw error }
+        return commandResultToReturn
+    }
+
+    func disableMotors(printerId: UUID) async throws -> CommandResult {
+        disableMotorsCalledWith = printerId
+        if let error = errorToThrow { throw error }
+        return commandResultToReturn
+    }
+
+    func saveZOffset(printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String) async throws -> CommandResult {
+        saveZOffsetCalledWith = (printerId, offsetMm, saveToFirmware, reviewedRowVersion)
+        if let error = errorToThrow { throw error }
+        return commandResultToReturn
+    }
+
     var capabilitiesToReturn: PrinterBackendCapabilities?
     var getBackendCapabilitiesCalledWith: UUID?
 
     func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
         getBackendCapabilitiesCalledWith = printerId
         if let error = errorToThrow { throw error }
-        return capabilitiesToReturn ?? PrinterBackendCapabilities.fallback(for: .moonraker)
+        return capabilitiesToReturn ?? PrinterBackendCapabilities.supportedFixture(for: .moonraker)
     }
 
     var beforeSetTemperatures: (@Sendable () async -> Void)?
@@ -290,6 +341,12 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         homeXYCalledWith = nil
         homeZCalledWith = nil
         moveCalledWith = nil
+        moveToCalledWith = nil
+        extrudeCalledWith = nil
+        disableMotorsCalledWith = nil
+        saveZOffsetCalledWith = nil
+        unloadFilamentToolheadIndex = nil
+        unloadResultToReturn = nil
         spoolsToReturn = []
         getDetailsCalledWith = nil
         detailsToReturn = nil

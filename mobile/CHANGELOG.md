@@ -6,6 +6,11 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Added
 
+- **Typed Essential control transport** — Added absolute XYZ movement, signed
+  extrusion/retraction, motor release and reviewed-revision Z-offset requests,
+  plus detailed filament-unload inventory responses and calibration read data.
+  This is the networking prerequisite; corresponding UI is delivered separately.
+
 - **Adaptive compact navigation** — iPhone operators can use a focused Simple
   shell (Attention · Farm · Inventory · Oversight) or a Floor/Oversight
   two-mode shell (Floor: Attention · Farm · Tasks · Inventory; Oversight:
@@ -50,6 +55,11 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   support on iPhone and iPad.
 
 ### Changed
+
+- Native control capability fallback no longer infers physical-command support
+  from a backend name. Explicit per-operation server evidence is required;
+  older servers without that evidence leave commands unavailable. Heater,
+  homing and relative-move responses now surface rejected command results.
 
 - **BREAKING: Scan is no longer a top-level tab.** Scanning is an input method,
   and every scan entry point has been re-homed deliberately:

@@ -1,19 +1,8 @@
 import Foundation
 
-/// Capabilities exposed by a printer's backend implementation.
-///
-/// Surfaces the subset of operations the controls UI needs to gate (movement,
-/// temperature control, fan, homing, supported axes) in a single shape that's
-/// independent of the wire DTO. Booleans here are AND of:
-///   - what the backend (`PrinterBackend`) is capable of in PrintFarmer's plugin
-///     model, and
-///   - what the live `/api/printers/{id}/backend-capabilities` endpoint reports
-///     for fields that overlap.
-///
-/// The wire DTO (`PrinterBackendCapabilitiesDto`) currently exposes
-/// `supportsMovement` and `supportsTemperatureControl`; the remaining fields
-/// (`supportsBedTemperature`, `supportsFanControl`, `supportsHoming`,
-/// `supportedAxes`) are derived from a static lookup keyed by `printer.backend`.
+/// Explicit server evidence for commands, NOT a hardware-presence inventory.
+/// False means unavailable or unknown; it does not prove that a heater/axis
+/// is physically absent. A backend name or a generic control flag is not proof.
 struct PrinterBackendCapabilities: Codable, Equatable, Sendable {
     let supportsMovement: Bool
     let supportsTemperatureControl: Bool
@@ -21,57 +10,55 @@ struct PrinterBackendCapabilities: Codable, Equatable, Sendable {
     let supportsFanControl: Bool
     let supportsHoming: Bool
     let supportedAxes: [String]
+    var supportsAbsoluteMovement: Bool = false
+    var supportsDisableMotors: Bool = false
+    var supportsExtrusion: Bool = false
+    var supportsZOffset: Bool = false
+    var supportsZOffsetFirmwareSave: Bool = false
+    var supportsHomeXY: Bool = false
+    var supportsHomeZ: Bool = false
+    var supportsFilamentLoad: Bool = false
+    var supportsFilamentUnload: Bool = false
+    var supportsFilamentChange: Bool = false
 
-    /// Static fallback table keyed by `PrinterBackend`. Used when the backend
-    /// endpoint is unavailable, returns 404, or doesn't surface a given field.
+    /// Keep the old entry point for callers, but never enable actuation from it.
     static func fallback(for backend: PrinterBackend) -> PrinterBackendCapabilities {
-        switch backend {
-        case .moonraker, .prusaLink, .octoPrint:
-            return PrinterBackendCapabilities(
-                supportsMovement: true,
-                supportsTemperatureControl: true,
-                supportsBedTemperature: true,
-                supportsFanControl: true,
-                supportsHoming: true,
-                supportedAxes: ["X", "Y", "Z"]
-            )
-        case .flashForge:
-            return PrinterBackendCapabilities(
-                supportsMovement: true,
-                supportsTemperatureControl: true,
-                supportsBedTemperature: false,
-                supportsFanControl: false,
-                supportsHoming: true,
-                supportedAxes: ["X", "Y", "Z"]
-            )
-        case .sdcp:
-            return PrinterBackendCapabilities(
-                supportsMovement: false,
-                supportsTemperatureControl: false,
-                supportsBedTemperature: false,
-                supportsFanControl: false,
-                supportsHoming: false,
-                supportedAxes: []
-            )
-        case .unknown:
-            return PrinterBackendCapabilities(
-                supportsMovement: false,
-                supportsTemperatureControl: false,
-                supportsBedTemperature: false,
-                supportsFanControl: false,
-                supportsHoming: false,
-                supportedAxes: []
-            )
-        }
+        PrinterBackendCapabilities(
+            supportsMovement: false, supportsTemperatureControl: false,
+            supportsBedTemperature: false, supportsFanControl: false,
+            supportsHoming: false, supportedAxes: []
+        )
+    }
+}
+
+extension PrinterBackendCapabilities {
+    init(wire: PrinterBackendCapabilitiesWireDto) {
+        self.init(
+            supportsMovement: wire.supportsRelativeMovement == true,
+            supportsTemperatureControl: wire.supportsHotendTemperature == true,
+            supportsBedTemperature: wire.supportsBedTemperature == true,
+            supportsFanControl: false,
+            supportsHoming: wire.supportsHoming == true,
+            supportedAxes: (wire.supportedAxes ?? []).filter { ["X", "Y", "Z"].contains($0) }
+        )
+        supportsAbsoluteMovement = wire.supportsAbsoluteMovement == true
+        supportsDisableMotors = wire.supportsDisableMotors == true
+        supportsExtrusion = wire.supportsExtrusion == true
+        supportsZOffset = wire.supportsZOffset == true
+        supportsZOffsetFirmwareSave = wire.supportsZOffsetFirmwareSave == true
+        supportsHomeXY = wire.supportsHomeXY == true
+        supportsHomeZ = wire.supportsHomeZ == true
+        supportsFilamentLoad = wire.supportsFilamentLoad == true
+        supportsFilamentUnload = wire.supportsFilamentUnload == true
+        supportsFilamentChange = wire.supportsFilamentChange == true
     }
 }
 
 // MARK: - Wire DTO
 
 /// Mirrors backend `PrinterBackendCapabilitiesDto`. Decoded from
-/// `/api/printers/{id}/backend-capabilities`. Only the two overlapping fields
-/// (`supportsMovement`, `supportsTemperatureControl`) are consumed; other
-/// boolean flags are decoded for forward compatibility but ignored here.
+/// `/api/printers/{id}/backend-capabilities`. Optional operation flags allow
+/// old servers to decode without optimistically enabling physical commands.
 struct PrinterBackendCapabilitiesWireDto: Codable, Sendable {
     let printerId: UUID
     let printerName: String?
@@ -88,4 +75,19 @@ struct PrinterBackendCapabilitiesWireDto: Codable, Sendable {
     let supportsPrinterInformation: Bool?
     let supportsHistory: Bool?
     let supportsFilamentControl: Bool?
+    let supportsRelativeMovement: Bool?
+    let supportsAbsoluteMovement: Bool?
+    let supportsDisableMotors: Bool?
+    let supportsExtrusion: Bool?
+    let supportsZOffset: Bool?
+    let supportsZOffsetFirmwareSave: Bool?
+    let supportsHoming: Bool?
+    let supportsHomeXY: Bool?
+    let supportsHomeZ: Bool?
+    let supportsHotendTemperature: Bool?
+    let supportsBedTemperature: Bool?
+    let supportsFilamentLoad: Bool?
+    let supportsFilamentUnload: Bool?
+    let supportsFilamentChange: Bool?
+    let supportedAxes: [String]?
 }

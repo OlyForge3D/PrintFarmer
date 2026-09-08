@@ -22,9 +22,9 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
     // MARK: - Capability fixtures (per backend)
 
-    private static let moonrakerCaps = PrinterBackendCapabilities.fallback(for: .moonraker)
-    private static let flashForgeCaps = PrinterBackendCapabilities.fallback(for: .flashForge)
-    private static let sdcpCaps = PrinterBackendCapabilities.fallback(for: .sdcp)
+    private static let moonrakerCaps = PrinterBackendCapabilities.supportedFixture(for: .moonraker)
+    private static let flashForgeCaps = PrinterBackendCapabilities.supportedFixture(for: .flashForge)
+    private static let sdcpCaps = PrinterBackendCapabilities.supportedFixture(for: .sdcp)
 
     // MARK: - Printer fixture (force state to idle so the section renders)
 
