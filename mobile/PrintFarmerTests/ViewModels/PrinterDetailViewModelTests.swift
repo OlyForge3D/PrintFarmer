@@ -1307,6 +1307,53 @@ final class PrinterDetailViewModelTests: XCTestCase {
         )
     }
 
+    /// Bishop review finding: `lastSetSpoolInfo` (this view model's OWN
+    /// internal optimistic-state cache, never written by a replacement
+    /// service and never reset by a refresh) must be cleared
+    /// UNCONDITIONALLY, not gated on `hasActionAuthority` like
+    /// `printer.spoolInfo` correctly is. A STALE `lastSetSpoolInfo` left
+    /// over from an earlier successful assignment, if not cleared by a
+    /// hot-swapped eject, would resurface once the REPLACEMENT session's
+    /// own refresh reports `hasActiveSpool: false` — `effectiveSpoolInfo`
+    /// falls through to `lastSetSpoolInfo ?? printer?.spoolInfo` in exactly
+    /// that case.
+    func testEjectFilamentClearsStaleLastSetSpoolInfoEvenAfterHotSwapWhenReplacementPublishesCleared() async throws {
+        let printer = try TestData.decodePrinter(from: Self.assignedPrinterJSON)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+
+        // Establish a STALE `lastSetSpoolInfo` via a normal, successful
+        // assignment BEFORE the hot-swap below — `setActiveSpool` sets it
+        // internally on success.
+        await viewModel.setActiveSpool(makeSpool(id: 7))
+        guard let staleBefore = viewModel.effectiveSpoolInfo, staleBefore.hasActiveSpool else {
+            XCTFail("Setup: a stale lastSetSpoolInfo must be recorded before the hot-swap")
+            return
+        }
+
+        let newService = MockPrinterService()
+        newService.printerToReturn = printer
+        mockService.beforeSetActiveSpool = { [weak viewModel] in
+            await MainActor.run {
+                guard let viewModel else { return }
+                viewModel.configure(printerService: newService)
+                // The replacement session's own refresh concludes there is
+                // NO active spool.
+                if var updatedPrinter = viewModel.printer {
+                    updatedPrinter.spoolInfo = PrinterSpoolInfo(hasActiveSpool: false)
+                    viewModel.printer = updatedPrinter
+                }
+            }
+        }
+
+        await viewModel.ejectFilament()
+
+        XCTAssertFalse(
+            viewModel.effectiveSpoolInfo?.hasActiveSpool ?? true,
+            "A stale lastSetSpoolInfo from before the hot-swap must not resurrect an active spool once the replacement session reports none"
+        )
+    }
+
     // MARK: - actionError Observability (Hicks review finding — the
     // #2400 `@Observable` trap)
 

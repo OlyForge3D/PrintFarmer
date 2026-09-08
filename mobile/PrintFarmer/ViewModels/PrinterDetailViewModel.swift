@@ -688,22 +688,38 @@ final class PrinterDetailViewModel {
             // hazard finding 14 already fixed for the assignment-only
             // clear path.
             //
-            // GATED on `hasActionAuthority` (a later Hicks review finding):
-            // if `configure(printerService:)` hot-swapped mid-flight, a
-            // NEWER session may already have established its OWN
-            // `printer.spoolInfo` truth (e.g. via its own `loadPrinter()`
-            // or a live SignalR update) between this leg's success and this
-            // point. A retired eject targeting the OLD service must not
-            // overwrite that with stale "cleared" state — this is a purely
-            // LOCAL-STATE concern, deliberately separate from the physical
-            // unload leg below, which still dispatches UNCONDITIONALLY
-            // regardless of authority (Bishop review finding, separately):
-            // the physical operation must always reach the printer once
-            // the assignment is already cleared, but the LOCAL UI model
-            // must only be touched by the operation that still owns the
-            // current session.
+            // `lastSetSpoolInfo = nil` is UNCONDITIONAL — a later Bishop
+            // review finding. It is this view model's own internal
+            // optimistic-state cache, never written by a replacement
+            // service and never reset by a refresh; a retired eject
+            // clearing ONLY its own prior optimistic guess can never harm a
+            // replacement session, because `effectiveSpoolInfo` always
+            // prefers `printer?.spoolInfo` whenever THAT reports an active
+            // spool. But leaving a STALE `lastSetSpoolInfo` behind is
+            // actively harmful: if the replacement session's own refresh
+            // later reports `hasActiveSpool: false`, `effectiveSpoolInfo`
+            // falls through to `lastSetSpoolInfo ?? printer?.spoolInfo` and
+            // would resurrect this retired eject's now-cleared spool.
+            //
+            // `printer.spoolInfo`'s mutation below stays GATED on
+            // `hasActionAuthority` (a separate, earlier Hicks review
+            // finding): if `configure(printerService:)` hot-swapped
+            // mid-flight, a NEWER session may already have established its
+            // OWN `printer.spoolInfo` truth (e.g. via its own
+            // `loadPrinter()` or a live SignalR update) between this leg's
+            // success and this point, and a retired eject targeting the OLD
+            // service must not overwrite that — unlike `lastSetSpoolInfo`,
+            // `printer` IS written by a replacement session, so clearing it
+            // unconditionally here could genuinely clobber that session's
+            // legitimate state. This is deliberately separate from the
+            // physical unload leg below, which still dispatches
+            // UNCONDITIONALLY regardless of authority (Bishop review
+            // finding, separately): the physical operation must always
+            // reach the printer once the assignment is already cleared, but
+            // only the operation that still owns the current session may
+            // touch the replacement-session-writable `printer` model.
+            lastSetSpoolInfo = nil
             if hasActionAuthority(authority) {
-                lastSetSpoolInfo = nil
                 if var updatedPrinter = printer, updatedPrinter.spoolInfo?.hasActiveSpool == true {
                     updatedPrinter.spoolInfo = PrinterSpoolInfo(hasActiveSpool: false)
                     printer = updatedPrinter
