@@ -1,7 +1,10 @@
-﻿using Farm.Infrastructure;
+﻿using System.Security.Claims;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.NfcDevices;
+using Farm.Infrastructure.Services.Queue;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -25,7 +28,16 @@ public class NfcDeviceServiceAuthenticationTests
     }
 
     private static NfcDeviceService CreateService(AppDbContext db) =>
-        new(db, NullLogger<NfcDeviceService>.Instance);
+        new(db, NullLogger<NfcDeviceService>.Instance,
+            new NfcManagementAuthorization(
+                new HttpContextAccessor
+                {
+                    HttpContext = new DefaultHttpContext
+                    {
+                        User = new ClaimsPrincipal(new ClaimsIdentity(
+                            [new Claim(ClaimTypes.Role, "farm_admin")], "Test"))
+                    }
+                }, new QueueResourceAuthorizationService(db), db));
 
     // ─── Scenario 1: scan with no device credential ─────────────────────────
 
@@ -250,6 +262,13 @@ public class NfcDeviceServiceAuthenticationTests
     private static async Task<NfcDeviceApprovalResultDto> ApproveNewDeviceAsync(
         AppDbContext db, NfcDeviceService service, Guid printerId)
     {
+        db.Printers.Add(new Farm.Infrastructure.Domain.Printer
+        {
+            Id = printerId,
+            Name = "NFC test printer",
+            ServerUrl = "http://nfc-test"
+        });
+        await db.SaveChangesAsync();
         NfcDeviceHeartbeatDto heartbeat = new() { PrinterId = printerId.ToString(), Ip = "10.0.0.1" };
         (NfcDeviceDto? pending, _) = await service.ProcessHeartbeatAsync(heartbeat, presentedToken: null, CancellationToken.None);
         pending.Should().NotBeNull();

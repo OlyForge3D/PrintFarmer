@@ -11,36 +11,40 @@ namespace Farm.Infrastructure.Services.NfcDevices;
 public class NfcDeviceService(
     AppDbContext db,
     ILogger<NfcDeviceService> logger,
+    NfcManagementAuthorization authorization,
     INfcTagService? nfcTagService = null) : INfcDeviceService
 {
     private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromMinutes(3);
 
     public async Task<NfcDeviceDto[]> GetAllAsync(CancellationToken ct)
     {
+        authorization.EnsureAdmin();
         var now = DateTime.UtcNow;
         var devices = await db.NfcDevices
             .Include(d => d.Printer)
             .OrderBy(d => d.Name)
             .ToArrayAsync(ct);
 
-        return devices.Select(d => MapToDto(d, now)).ToArray();
+        var allowed = await authorization.FilterPrinterIdsAsync(
+            devices.Where(d => d.PrinterId.HasValue).Select(d => d.PrinterId!.Value).Distinct().ToArray(), ct);
+        return devices.Where(d => !d.PrinterId.HasValue || allowed.Contains(d.PrinterId.Value))
+            .Select(d => MapToDto(d, now)).ToArray();
     }
 
     public async Task<NfcDeviceDto?> GetByIdAsync(Guid id, CancellationToken ct)
     {
+        authorization.EnsureAdmin();
         var device = await db.NfcDevices
             .Include(d => d.Printer)
             .FirstOrDefaultAsync(d => d.Id == id, ct);
 
-        return device is null ? null : MapToDto(device, DateTime.UtcNow);
+        return device is null || !await authorization.CanAccessPrinterAsync(device.PrinterId, ct)
+            ? null : MapToDto(device, DateTime.UtcNow);
     }
 
     public async Task<NfcDeviceDto> CreateAsync(CreateNfcDeviceDto dto, CancellationToken ct)
     {
-        if (dto.PrinterId.HasValue && !await db.Printers.AnyAsync(p => p.Id == dto.PrinterId.Value, ct))
-        {
-            throw new ArgumentException($"Printer with ID {dto.PrinterId} not found.");
-        }
+        await authorization.EnsurePrinterAsync(dto.PrinterId, ct);
 
         var device = new NfcDevice
         {
@@ -62,20 +66,17 @@ public class NfcDeviceService(
 
     public async Task<NfcDeviceDto?> UpdateAsync(Guid id, UpdateNfcDeviceDto dto, CancellationToken ct)
     {
+        authorization.EnsureAdmin();
         var device = await db.NfcDevices.FindAsync([id], ct);
-        if (device is null)
+        if (device is null || !await authorization.CanAccessPrinterAsync(device.PrinterId, ct))
         {
             return null;
         }
 
+        await authorization.EnsurePrinterAsync(dto.PrinterId, ct);
         if (dto.Name is not null)
         {
             device.Name = dto.Name;
-        }
-
-        if (dto.PrinterId.HasValue && !await db.Printers.AnyAsync(p => p.Id == dto.PrinterId.Value, ct))
-        {
-            throw new ArgumentException($"Printer with ID {dto.PrinterId} not found.");
         }
 
         device.PrinterId = dto.PrinterId;
@@ -89,8 +90,9 @@ public class NfcDeviceService(
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct)
     {
+        authorization.EnsureAdmin();
         var device = await db.NfcDevices.FindAsync([id], ct);
-        if (device is null)
+        if (device is null || !await authorization.CanAccessPrinterAsync(device.PrinterId, ct))
         {
             return false;
         }
@@ -103,8 +105,9 @@ public class NfcDeviceService(
 
     public async Task<NfcDeviceApprovalResultDto?> ApproveAsync(Guid id, CancellationToken ct)
     {
+        authorization.EnsureAdmin();
         var device = await db.NfcDevices.FindAsync([id], ct);
-        if (device is null)
+        if (device is null || !await authorization.CanAccessPrinterAsync(device.PrinterId, ct))
         {
             return null;
         }
@@ -251,6 +254,11 @@ public class NfcDeviceService(
 
     public async Task<NfcScanHistoryDto[]> GetScanHistoryAsync(Guid deviceId, int limit, int offset, CancellationToken ct)
     {
+        if (await GetByIdAsync(deviceId, ct) is null)
+        {
+            return [];
+        }
+
         return await db.NfcScanEvents
             .Where(s => s.NfcDeviceId == deviceId)
             .OrderByDescending(s => s.ScannedAt)

@@ -51,6 +51,18 @@ Under `/admin/settings` (`system` scope), settings navigation is organized into 
 
 In `system` scope, exactly ONE settings-shell content page is mounted at a time in a single-pane layout. Horizontal sub-tabs and scope switchers are hidden for `system` scope to ensure clean, focused leaf editing. Registry destinations in these groups may instead be standalone direct links: Locations, Catalog, and Power Monitors remain correctly labeled navigation entries in the sidebar, admin hub, and search surfaces without becoming settings-shell content.
 
+## NFC Management Authorization
+
+NFC Devices and NFC Bindings management APIs require `nfc_devices:admin`
+(also held implicitly by `farm_admin`) for reads, history, linking, CRUD, and
+device approval. Services additionally require `Manage` access to associated
+printer groups. Reassignments check both the current and destination printers;
+unassigned devices and bindings remain farm-level NFC administration resources.
+Collections omit inaccessible records; per-ID access returns the same 404 as a
+missing record. Linking or assigning an inaccessible or missing printer returns
+a uniform 403 without changing records. Firmware heartbeat and scan routes retain
+their separate device-token authentication contract.
+
 ## Mobile Grouped Navigation
 
 Mobile navigation renders a labeled grouped dropdown control (`<nav aria-label="Settings categories">`) containing all accessible display groups and leaves:
