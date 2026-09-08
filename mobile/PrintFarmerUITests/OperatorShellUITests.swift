@@ -293,6 +293,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
     // MARK: - Advanced controls gating (Farm → printer → Controls page)
 
     func testAdvancedControlsGatedBehindPrinterDetail() {
+        executionTimeAllowance = 60
         let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 5)
         guard farm.exists else { return }
         farm.tap()
