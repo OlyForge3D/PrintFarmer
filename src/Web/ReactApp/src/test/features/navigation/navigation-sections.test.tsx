@@ -153,13 +153,16 @@ describe('Navigation rail sections', () => {
 
     const divider = desktopNav.querySelector('hr[aria-hidden="true"]');
     expect(divider?.nextElementSibling).toHaveAttribute('aria-label', 'Admin');
-    expect(within(desktopNav).getByRole('link', { name: 'Printed Parts' })).toHaveAttribute('href', '/parts-inventory');
     expect(within(desktopNav).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
   });
 
   // #2526 — the default admin rail is pinned to an exact set, not a count. A
   // raw length says nothing about *which* destinations own the default surface,
   // so it cannot catch a swap (one admin duplicate removed, another added).
+  //
+  // Printed Parts (`parts-inventory`) moved off this default set in #2588: it
+  // is a normal, user-pinnable `ADMIN_DESTINATIONS` entry now, so it only
+  // shows up here once a user opts in via the ACC "Pin admin links" panel.
   const DEFAULT_ADMIN_RAIL_HREFS = [
     '/dashboard',
     '/printers',
@@ -169,7 +172,6 @@ describe('Navigation rail sections', () => {
     '/spools',
     '/projects',
     '/files',
-    '/parts-inventory',
     '/admin',
   ];
 
@@ -190,12 +192,16 @@ describe('Navigation rail sections', () => {
   // The Admin Control Center owns these five, so a *default* rail must not
   // offer a second route to them. User-chosen pinning is separate work (#2527)
   // and would be an explicit opt-in, not a default entry.
+  //
+  // Printed Parts joined this set in #2588 — it too is now Control-Center-owned
+  // and only reachable via the rail after an explicit admin pin.
   it.each([
     ['Maintenance', '/maintenance'],
     ['Locations', '/locations'],
     ['Analytics', '/analytics'],
     ['Auto-Dispatch', '/auto-dispatch'],
     ['Catalog', '/catalog'],
+    ['Printed Parts', '/parts-inventory'],
   ])('does not offer %s as a default nav entry — the Admin Control Center owns it', async (label, href) => {
     const { container } = renderLayout();
     const desktopNav = getDesktopNav(container);
@@ -330,7 +336,7 @@ describe('Navigation rail sections', () => {
       orderedItemIds: [],
       hiddenItemIds: [],
       pinnedItemIds: [],
-      adminPinnedItemIds: ['ops-workers', 'ops-analytics'],
+      adminPinnedItemIds: ['parts-inventory', 'ops-workers', 'ops-analytics'],
     }));
     const { container } = renderLayout();
     const desktopNav = getDesktopNav(container);
@@ -342,13 +348,13 @@ describe('Navigation rail sections', () => {
     expect(within(desktopNav).queryByRole('region', { name: 'Favorites' })).not.toBeInTheDocument();
 
     const adminSection = within(desktopNav).getByRole('region', { name: 'Admin' });
-    expect(within(adminSection).getByRole('link', { name: 'Printed Parts' })).toHaveAttribute('href', '/parts-inventory');
     expect(within(adminSection).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+    expect(within(adminSection).getByRole('link', { name: 'Printed Parts' })).toHaveAttribute('href', '/parts-inventory');
     expect(within(adminSection).getByRole('link', { name: 'Workers & Jobs' })).toHaveAttribute('href', '/admin/workers?workerTab=jobs');
     expect(within(adminSection).getByRole('link', { name: 'Analytics' })).toHaveAttribute('href', '/analytics');
 
     const adminLinks = within(adminSection).getAllByRole('link').map((link) => link.textContent?.trim());
-    expect(adminLinks).toEqual(['Printed Parts', 'Admin', 'Workers & Jobs', 'Analytics']);
+    expect(adminLinks).toEqual(['Admin', 'Printed Parts', 'Workers & Jobs', 'Analytics']);
   });
 
   it('updates desktop and mobile ordering from another tab without a remount', async () => {
@@ -558,20 +564,17 @@ describe('Navigation rail sections', () => {
     expect(within(inventoryRow as HTMLElement).getByText('Printers').className).not.toContain('truncate');
   });
 
-  it('excludes anchored Admin links from customize controls while keeping them in the rail', () => {
+  it('excludes the anchored Admin link from customize controls while keeping it in the rail', () => {
     const { container } = renderLayout();
     const desktopNav = getDesktopNav(container);
     const desktopRail = desktopNav.parentElement as HTMLElement;
 
-    expect(within(desktopNav).getByRole('link', { name: 'Printed Parts' })).toHaveAttribute('href', '/parts-inventory');
     expect(within(desktopNav).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
 
     fireEvent.click(within(desktopRail).getByRole('button', { name: 'Customize navigation' }));
 
     const customizePanel = within(desktopNav).getByRole('region', { name: 'Customize navigation' });
-    expect(within(customizePanel).queryByText('Printed Parts')).not.toBeInTheDocument();
     expect(within(customizePanel).queryByText('Admin')).not.toBeInTheDocument();
-    expect(within(customizePanel).queryByRole('button', { name: 'Move Printed Parts up' })).not.toBeInTheDocument();
     expect(within(customizePanel).queryByRole('button', { name: 'Move Admin down' })).not.toBeInTheDocument();
   });
 

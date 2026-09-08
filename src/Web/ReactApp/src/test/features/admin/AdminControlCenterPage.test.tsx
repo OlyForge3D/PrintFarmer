@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
@@ -726,9 +726,10 @@ describe('AdminControlCenterPage', () => {
     });
 
     const cards = screen.getAllByTestId('admin-hub-destination');
-    // 7 operational + 3 standalone configuration (Catalog, Locations, Power
-    // Monitors) + 1 Farm & Admin Settings entry point.
-    expect(cards.length).toBe(11);
+    // 8 operational (including Printed Parts, #2588) + 3 standalone
+    // configuration (Catalog, Locations, Power Monitors) + 1 Farm & Admin
+    // Settings entry point.
+    expect(cards.length).toBe(12);
     // Every card links somewhere absolute.
     for (const card of cards) {
       expect(card.getAttribute('href')).toMatch(/^\//);
@@ -835,6 +836,90 @@ describe('AdminControlCenterPage', () => {
     expect(within(secondRow).getByText('Analytics')).toBeInTheDocument();
   });
 
+  it('announces reorder moves in an aria-live region for both button and drag reordering', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+    const user = userEvent.setup();
+
+    renderHub();
+
+    await user.click(screen.getByRole('button', { name: 'Pin admin links' }));
+    await user.click(screen.getByRole('button', { name: 'Pin Analytics from navbar' }));
+    await user.click(screen.getByRole('button', { name: 'Pin Workers & Jobs from navbar' }));
+
+    await user.click(screen.getByRole('button', { name: 'Move Analytics down' }));
+    expect(screen.getByText('Moved Analytics to position 2 of 2.')).toBeInTheDocument();
+
+    const destinationList = screen.getByRole('list', { name: 'Authorized admin destinations' });
+    const [firstRow, secondRow] = within(destinationList).getAllByRole('listitem');
+    expect(within(firstRow).getByText('Workers & Jobs')).toBeInTheDocument();
+
+    // Simulate a drag of the second (now bottom) pinned row onto the first —
+    // this drives the same movePin/announce path as the up/down buttons.
+    // Each event is flushed separately so the component re-renders between
+    // them, mirroring how real drag events land on separate ticks.
+    act(() => {
+      fireEvent.dragStart(secondRow);
+    });
+    act(() => {
+      fireEvent.dragOver(firstRow);
+    });
+    act(() => {
+      fireEvent.drop(firstRow);
+    });
+
+    expect(screen.getByText('Moved Analytics to position 1 of 2.')).toBeInTheDocument();
+
+    // Verify the drag path actually reordered the pinned rows (not just the
+    // announcement text) — Analytics must now render before Workers & Jobs.
+    const [reorderedFirstRow, reorderedSecondRow] = within(destinationList).getAllByRole('listitem');
+    expect(within(reorderedFirstRow).getByText('Analytics')).toBeInTheDocument();
+    expect(within(reorderedSecondRow).getByText('Workers & Jobs')).toBeInTheDocument();
+
+    // Let the announcement's own clear-after-1500ms timeout fire inside this
+    // test (rather than leaking into a later one) so the state update it
+    // causes is captured by act().
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1600));
+    });
+  });
+
+  it('marks pinned rows as draggable with an accessible label and leaves unpinned rows non-draggable', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+    const user = userEvent.setup();
+
+    renderHub();
+
+    await user.click(screen.getByRole('button', { name: 'Pin admin links' }));
+    await user.click(screen.getByRole('button', { name: 'Pin Analytics from navbar' }));
+
+    const pinnedRow = screen.getByRole('listitem', { name: 'Analytics, draggable to reorder' });
+    expect(pinnedRow).toHaveAttribute('draggable', 'true');
+
+    const unpinnedRow = within(screen.getByRole('list', { name: 'Authorized admin destinations' }))
+      .getByText('Workers & Jobs')
+      .closest('[role="listitem"]') as HTMLElement;
+    expect(unpinnedRow).toHaveAttribute('draggable', 'false');
+    expect(unpinnedRow).not.toHaveAttribute('aria-label');
+  });
+
+  it('offers Printed Parts as a pinnable, reorderable admin destination rather than a static navbar link (#2588)', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+    const user = userEvent.setup();
+
+    renderHub();
+
+    await user.click(screen.getByRole('button', { name: 'Pin admin links' }));
+    const partsPin = screen.getByRole('button', { name: 'Pin Printed Parts from navbar' });
+    expect(partsPin).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(partsPin);
+    expect(partsPin).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('listitem', { name: 'Printed Parts, draggable to reorder' })).toBeInTheDocument();
+
+    await user.click(partsPin);
+    expect(partsPin).toHaveAttribute('aria-pressed', 'false');
+  });
+
   // #2526 — removing a destination from the navbar is only safe because the hub
   // actually owns it. This is the positive half of that contract: if a tile ever
   // disappears from the hub, the destination is stranded with no default home.
@@ -844,6 +929,10 @@ describe('AdminControlCenterPage', () => {
     ['Locations', '/locations'],
     ['Catalog', '/catalog'],
     ['Auto-Dispatch', '/auto-dispatch'],
+    // Printed Parts stopped being a statically-anchored navbar entry and
+    // joined the pinnable operational destinations; like its siblings above
+    // it still needs exactly one default home on the hub.
+    ['Printed Parts', '/parts-inventory'],
   ])('owns %s as its single default home (#2526)', async (_label, href) => {
     mockedApiGet.mockResolvedValue({ data: makeOverview() });
 
