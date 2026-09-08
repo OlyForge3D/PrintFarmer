@@ -3,7 +3,6 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -96,11 +95,19 @@ async function ensurePrivateDirectory(directory, root) {
   }
 }
 
-export async function readPriorSnapshot(file) {
+export async function readPriorSnapshot(file, expected) {
   try {
     const source = await readFile(file, 'utf8');
     const snapshot = JSON.parse(source);
-    if (snapshot.schemaVersion !== schemaVersion || !snapshot.snapshot || typeof snapshot.snapshot !== 'object') {
+    const stored = snapshot.snapshot;
+    if (
+      snapshot.schemaVersion !== schemaVersion || !stored || typeof stored !== 'object' ||
+      stored.repo?.toLowerCase() !== expected.repo.toLowerCase() ||
+      stored.workflowId !== expected.workflowId ||
+      !Array.isArray(stored.issues) || !Array.isArray(stored.prs) ||
+      !stored.security || typeof stored.security !== 'object' ||
+      !stored.sessions || typeof stored.sessions !== 'object'
+    ) {
       fail(`Prior state at ${file} has an incompatible schema.`, 'STATE_INCOMPATIBLE');
     }
     return { snapshot, baseline: 'existing' };
@@ -152,7 +159,7 @@ function validateObject(value, context) {
 export function createGhTransport() {
   return {
     async get(endpoint, { paginate = false } = {}) {
-      const args = ['api'];
+      const args = ['api', '--hostname', 'github.com'];
       if (paginate) args.push('--paginate', '--slurp');
       args.push(endpoint);
       let output;
@@ -238,6 +245,10 @@ function compactIssue(issue, dependencies) {
   return {
     number: issue.number, state: issue.state, title: issue.title ?? '', bodyHash: digest(issue.body ?? ''),
     updatedAt: issue.updated_at ?? '', createdAt: issue.created_at ?? '', labels: labels(issue),
+    assignees: validateArray(issue.assignees ?? [], `issue #${issue.number} assignees`)
+      .map((assignee) => assignee?.login).filter(Boolean).sort(),
+    scope: { mobile: 'unknown', requiresAgentDecision: true },
+    requiresSemanticReview: hasTextualBlocker(issue),
     isPullRequest: Boolean(issue.pull_request), dependencies,
   };
 }
@@ -302,20 +313,43 @@ function changeReasons(previous, current, fields) {
   return fields.filter((field) => digest(previous[field]) !== digest(current[field]));
 }
 
+function hasTextualBlocker(issue) {
+  return /\b(blocked by|depends on|waiting on|after)\b/i.test(issue.body ?? '');
+}
+
+function isEligibleSuggestion(issue) {
+  const blockedLabels = /(^|:)(in-progress|needs-analysis|epic|reviewer-only)(:|$)/i;
+  const reviewerOwner = /^squad:.*\b(bishop|hicks|vasquez)\b/i;
+  return !issue.assignees.length &&
+    !issue.labels.some((label) => blockedLabels.test(label) || reviewerOwner.test(label)) &&
+    !issue.requiresSemanticReview;
+}
+
 function topologicalOrder(repo, issues, edges) {
   const indexed = new Map(issues.map((issue) => [issueReference(repo, issue.number), issue]));
   const incoming = new Map(issues.map((issue) => [issueReference(repo, issue.number), 0]));
   const next = new Map(issues.map((issue) => [issueReference(repo, issue.number), []]));
   const blockedEdges = [];
+  const externallyBlocked = new Set();
   let unknown = false;
   for (const edge of edges) {
-    if (edge.unknown || !indexed.has(edge.blocked) || !indexed.has(edge.blocker)) {
+    if (edge.unknown || !edge.state) {
       unknown = true;
       blockedEdges.push(edge);
       continue;
     }
+    if (edge.state === 'closed') {
+      continue;
+    }
     if (edge.state !== 'open') {
+      unknown = true;
       blockedEdges.push(edge);
+      continue;
+    }
+    blockedEdges.push(edge);
+    if (!indexed.has(edge.blocked) || !indexed.has(edge.blocker)) {
+      if (indexed.has(edge.blocked)) externallyBlocked.add(edge.blocked);
+      else unknown = true;
       continue;
     }
     incoming.set(edge.blocked, incoming.get(edge.blocked) + 1);
@@ -324,7 +358,9 @@ function topologicalOrder(repo, issues, edges) {
   const compare = (left, right) => priority(indexed.get(left)) - priority(indexed.get(right)) ||
     (indexed.get(left).createdAt || '').localeCompare(indexed.get(right).createdAt || '') ||
     indexed.get(left).number - indexed.get(right).number;
-  const ready = [...incoming.keys()].filter((key) => incoming.get(key) === 0).sort(compare);
+  const orderedRoots = [...incoming.keys()].filter((key) => incoming.get(key) === 0).sort(compare);
+  const initialReady = orderedRoots.filter((key) => !externallyBlocked.has(key));
+  const ready = [...orderedRoots];
   const order = [];
   while (ready.length) {
     const key = ready.shift();
@@ -337,7 +373,12 @@ function topologicalOrder(repo, issues, edges) {
       }
     }
   }
-  return { order, blockedEdges, cyclic: order.length !== issues.length, unknown };
+  const currentlyUnblocked = initialReady.map((key) => indexed.get(key).number);
+  const suggestions = initialReady
+    .map((key) => indexed.get(key))
+    .filter(isEligibleSuggestion)
+    .map((issue) => issue.number);
+  return { order, currentlyUnblocked, suggestions, blockedEdges, cyclic: order.length !== issues.length, unknown };
 }
 
 async function readSessions(file) {
@@ -367,14 +408,27 @@ async function securityState(transport, repo) {
 }
 
 export async function collectSnapshot({ repo, workflowId, sessionsFile, transport = createGhTransport() }) {
-  const issueListing = await pages(transport, `/repos/${repo}/issues?state=open&per_page=100`);
-  const prListing = await pages(transport, `/repos/${repo}/pulls?state=open&per_page=100`);
+  const metrics = { rootCalls: 0, paginatedRequests: 0, paginationPages: 0, responseBytes: 0 };
+  const measuredTransport = {
+    async get(endpoint, options = {}) {
+      const response = await transport.get(endpoint, options);
+      metrics.rootCalls += 1;
+      if (options.paginate) {
+        metrics.paginatedRequests += 1;
+        metrics.paginationPages += Array.isArray(response) ? response.length : 0;
+      }
+      metrics.responseBytes += Buffer.byteLength(JSON.stringify(response));
+      return response;
+    },
+  };
+  const issueListing = await pages(measuredTransport, `/repos/${repo}/issues?state=open&per_page=100`);
+  const prListing = await pages(measuredTransport, `/repos/${repo}/pulls?state=open&per_page=100`);
   const issues = issueListing.filter((issue) => !issue.pull_request);
   const issueDetails = await mapLimit(issues, async (issue) => {
     const number = issue.number;
     const [blockedBy, blocking] = await Promise.all([
-      pages(transport, `/repos/${repo}/issues/${number}/dependencies/blocked_by?per_page=100`),
-      pages(transport, `/repos/${repo}/issues/${number}/dependencies/blocking?per_page=100`),
+      pages(measuredTransport, `/repos/${repo}/issues/${number}/dependencies/blocked_by?per_page=100`),
+      pages(measuredTransport, `/repos/${repo}/issues/${number}/dependencies/blocking?per_page=100`),
     ]);
     return compactIssue(issue, {
       blockedBy: blockedBy.map((entry) => dependencyEdge(entry, issueReference(repo, number))),
@@ -387,20 +441,20 @@ export async function collectSnapshot({ repo, workflowId, sessionsFile, transpor
   const prs = await mapLimit(prListing, async (pr) => {
     const sha = pr.head?.sha;
     const [comments, reviews, checks, status] = await Promise.all([
-      pages(transport, `/repos/${repo}/issues/${pr.number}/comments?per_page=100`),
-      pages(transport, `/repos/${repo}/pulls/${pr.number}/reviews?per_page=100`),
-      objectPages(transport, `/repos/${repo}/commits/${sha}/check-runs?per_page=100`, 'check_runs'),
-      objectPages(transport, `/repos/${repo}/commits/${sha}/status?per_page=100`, 'statuses'),
+      pages(measuredTransport, `/repos/${repo}/issues/${pr.number}/comments?per_page=100`),
+      pages(measuredTransport, `/repos/${repo}/pulls/${pr.number}/reviews?per_page=100`),
+      objectPages(measuredTransport, `/repos/${repo}/commits/${sha}/check-runs?per_page=100`, 'check_runs'),
+      objectPages(measuredTransport, `/repos/${repo}/commits/${sha}/status?per_page=100`, 'statuses'),
     ]);
     return compactPr(pr, compactTimeline(reviews, 'reviews'), compactTimeline(comments, 'comments'),
       compactChecks({ check_runs: checks }), compactStatus({ statuses: status }));
   });
-  const security = await securityState(transport, repo);
+  const security = await securityState(measuredTransport, repo);
   const sessions = await readSessions(sessionsFile);
   return {
     repo, workflowId, collectedAt: new Date().toISOString(),
     issues: issueDetails.sort((left, right) => left.number - right.number),
-    prs: prs.sort((left, right) => left.number - right.number), security, sessions,
+    prs: prs.sort((left, right) => left.number - right.number), security, sessions, api: metrics,
   };
 }
 
@@ -422,13 +476,13 @@ export async function scan(options) {
   const release = await acquireLock(path.join(directory, 'scan.lock'));
   try {
     const stateFile = path.join(directory, 'snapshot.json');
-    const prior = await readPriorSnapshot(stateFile);
+    const prior = await readPriorSnapshot(stateFile, options);
     const snapshot = await collectSnapshot(options);
     const issueMap = new Map((prior.snapshot?.snapshot.issues ?? []).map((item) => [issueKey(item), item]));
     const prMap = new Map((prior.snapshot?.snapshot.prs ?? []).map((item) => [prKey(item), item]));
     const changedIssues = snapshot.issues.map((item) => ({
       id: issueKey(item), reasons: changeReasons(issueMap.get(issueKey(item)), item,
-        ['state', 'title', 'bodyHash', 'updatedAt', 'labels', 'dependencies']),
+        ['state', 'title', 'bodyHash', 'updatedAt', 'labels', 'assignees', 'scope', 'dependencies']),
     })).filter((item) => item.reasons.length);
     const changedPrs = snapshot.prs.map((item) => ({
       id: prKey(item), reasons: changeReasons(prMap.get(prKey(item)), item,
@@ -462,14 +516,17 @@ export async function scan(options) {
         security: changeReasons(prior.snapshot?.snapshot.security, snapshot.security, ['availability', 'alerts']),
         sessions: changeReasons(prior.snapshot?.snapshot.sessions, snapshot.sessions, ['availability', 'fingerprint', 'active']),
       },
-      issues: { inventoryArtifact: issueArtifact, readyUnresolved: graph.order, totalAccounted: snapshot.issues.length },
+      issues: {
+        inventoryArtifact: issueArtifact, readyUnresolved: graph.suggestions,
+        currentlyUnblocked: graph.currentlyUnblocked, totalAccounted: snapshot.issues.length,
+      },
       dependencyOrder: graph.order, blockedEdges: graph.blockedEdges,
       graphFlags: { cyclic: graph.cyclic, unknown: graph.unknown },
       prs: { attention: snapshot.prs.map((pr) => ({ number: pr.number, draft: pr.draft, headSha: pr.headSha })), detailArtifact: prArtifact },
       sessions: { ...snapshot.sessions, requiresLiveEnumerationBeforeDispatchOrReap: snapshot.sessions.availability !== 'provided' },
       security: snapshot.security,
       artifacts: { stateDirectory: directory, issueInventory: issueArtifact, prDetails: prArtifact },
-      api: { pagination: 'complete-rest-pages', boundedConcurrency: maxConcurrency },
+      api: { ...snapshot.api, pagination: 'complete-rest-pages', boundedConcurrency: maxConcurrency },
     };
     await writeSnapshotAtomically(stateFile, { schemaVersion, snapshot });
     return output;

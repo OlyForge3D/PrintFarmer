@@ -76,11 +76,15 @@ test('initial and stable scans retain all unresolved issues and drafts', async (
   const second = await scan(options);
   assert.equal(first.baseline, 'initial');
   assert.deepEqual(first.dependencyOrder, [1, 2]);
+  assert.deepEqual(first.issues.readyUnresolved, [1]);
+  assert.equal(first.blockedEdges.length, 1);
   assert.equal(first.prs.attention[0].draft, true);
   assert.equal(second.baseline, 'existing');
-  assert.equal(second.issues.readyUnresolved.length, 2);
+  assert.deepEqual(second.issues.readyUnresolved, [1]);
   assert.equal(second.counts.changedIssues, 0);
   assert.equal(second.counts.changedPrs, 0);
+  assert.ok(second.api.rootCalls > 0);
+  assert.ok(second.api.paginationPages >= second.api.paginatedRequests);
 });
 
 test('reviews, comment edits, CI reruns, and CodeQL state changes invalidate a PR observation', async (t) => {
@@ -100,15 +104,23 @@ test('reviews, comment edits, CI reruns, and CodeQL state changes invalidate a P
   assert.deepEqual(result.changedItems.security, ['alerts']);
 });
 
-test('cross-repository and closed blockers remain explicit and never become ready evidence', async (t) => {
+test('open external blockers block while closed external blockers satisfy without uncertainty', async (t) => {
   const options = await temporaryOptions(t, {
     transport: transport({
-      dependencies: { 2: { blockedBy: [{ number: 99, state: 'closed', repository_url: 'https://api.github.com/repos/example/other' }] } },
+      dependencies: { 2: { blockedBy: [{ number: 99, state: 'open', repository_url: 'https://api.github.com/repos/example/other' }] } },
     }),
   });
   const result = await scan(options);
-  assert.equal(result.graphFlags.unknown, true);
+  assert.equal(result.graphFlags.unknown, false);
   assert.match(JSON.stringify(result.blockedEdges), /example\/other#99/);
+  assert.deepEqual(result.issues.readyUnresolved, [1]);
+  options.transport = transport({
+    dependencies: { 2: { blockedBy: [{ number: 99, state: 'closed', repository_url: 'https://api.github.com/repos/example/other' }] } },
+  });
+  const closed = await scan(options);
+  assert.equal(closed.graphFlags.unknown, false);
+  assert.equal(closed.blockedEdges.length, 0);
+  assert.deepEqual(closed.issues.readyUnresolved, [1, 2]);
 });
 
 test('case-insensitive repository identity preserves local dependency ordering', async (t) => {
@@ -121,6 +133,28 @@ test('case-insensitive repository identity preserves local dependency ordering',
   const result = await scan(options);
   assert.deepEqual(result.dependencyOrder, [1, 2]);
   assert.equal(result.graphFlags.unknown, false);
+});
+
+test('assigned, in-progress, reviewer-owned, epic, and textual blockers are not suggestions', async (t) => {
+  const options = await temporaryOptions(t, {
+    transport: transport({
+      issues: [
+        issue(1, { assignees: [{ login: 'owner' }] }),
+        issue(2, { labels: [{ name: 'in-progress' }] }),
+        issue(3, { labels: [{ name: 'squad: bishop' }] }),
+        issue(4, { labels: [{ name: 'epic' }] }),
+        issue(5, { body: 'Blocked by a vendor decision.' }),
+        issue(6),
+      ],
+    }),
+  });
+  const result = await scan(options);
+  assert.deepEqual(result.issues.readyUnresolved, [6]);
+  assert.equal(result.issues.totalAccounted, 6);
+  const records = JSON.parse(await readFile(result.issues.inventoryArtifact, 'utf8'));
+  assert.deepEqual(records[0].assignees, ['owner']);
+  assert.equal(records[4].requiresSemanticReview, true);
+  assert.equal(records[0].scope.mobile, 'unknown');
 });
 
 test('missing CI collection arrays abort before the snapshot advances', async (t) => {
@@ -194,6 +228,17 @@ test('corrupt snapshots are retained for diagnosis and require an explicit rebas
   await assert.rejects(() => scan(options), /Prior state is corrupt/);
   const files = await (await import('node:fs/promises')).readdir(directory);
   assert.ok(files.some((file) => file.startsWith('snapshot.json.corrupt-')));
+});
+
+test('incompatible prior identity and snapshot collections fail before delta processing', async (t) => {
+  const options = await temporaryOptions(t);
+  const directory = path.join(options.stateRoot, 'github.com', 'olyforge3d', 'printfarmer', 'workflow-test');
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, 'snapshot.json'), JSON.stringify({
+    schemaVersion: 1,
+    snapshot: { repo: 'other/repo', workflowId: 'wrong', issues: [], prs: [], security: {}, sessions: {} },
+  }));
+  await assert.rejects(() => scan(options), /incompatible schema/);
 });
 
 test('symlinked state namespace components are rejected before observation writes', async (t) => {

@@ -4,7 +4,7 @@
 automation runtime. Copy the file outside a checkout if desired: it uses only
 the Node standard library and an authenticated `gh` CLI. It never runs Git,
 creates labels or comments, claims work, merges, deletes, or writes inside the
-repository.
+repository. GitHub requests are explicitly pinned to the `github.com` host.
 
 ### Invocation
 
@@ -26,6 +26,18 @@ Stdout is one compact JSON document. Its stable top-level keys are
 collection completed and the snapshot advanced atomically; any nonzero result
 preserves the preceding good snapshot.
 
+`dependencyOrder` is the full topological future sequence. By contrast,
+`issues.currentlyUnblocked` and `issues.readyUnresolved` only describe work
+without known open native/external blockers; `readyUnresolved` further excludes
+assigned, in-progress, needs-analysis, epic, reviewer-owned, and textual-only
+blocker candidates. All open blocking edges remain in `blockedEdges`. These
+fields are suggestions for an agent to assess, never authority to act.
+
+`api` reports actual collection volume: `rootCalls` is the number of GitHub API
+requests, `paginatedRequests` is the subset using pagination, `paginationPages`
+is the returned HTTP-page count, and `responseBytes` is the normalized JSON
+response size. It distinguishes request count from paginated page count.
+
 ### Private state and artifacts
 
 The state namespace is:
@@ -41,8 +53,9 @@ artifacts or stale state: the deployment owner chooses retention and performs
 any targeted cleanup outside a running scan.
 
 The issue artifact accounts for every open non-PR issue, including unlabeled
-and mechanically ambiguous entries. Readiness is a suggestion only; it is not
-authority to claim or act. Open drafts, review/comment changes, status and
+and mechanically ambiguous entries. Each issue retains assignment and a
+mobile-scope `unknown`/agent-decision flag; the scanner never infers mobile
+scope from member identity. Open drafts, review/comment changes, status and
 check reruns, dependency changes, security-alert availability, and supplied
 session fingerprints are observed in the delta. Code-scanning API denial or
 absence is emitted as `security.availability: "unknown"`, never success.
