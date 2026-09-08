@@ -262,6 +262,16 @@ test('open outgoing cross-repository edges remain in the reported blocking inven
   assert.match(JSON.stringify(result.blockedEdges), /example\/other#99/);
 });
 
+test('closed outgoing targets are not reported as active blocking edges', async (t) => {
+  const options = await temporaryOptions(t, {
+    transport: transport({
+      dependencies: { 1: { blocking: [{ number: 99, state: 'closed', repository_url: 'https://api.github.com/repos/example/other' }] } },
+    }),
+  });
+  const result = await scan(options);
+  assert.equal(result.blockedEdges.length, 0);
+});
+
 test('symlinked state namespace components are rejected before observation writes', async (t) => {
   const options = await temporaryOptions(t);
   const parent = path.join(options.stateRoot, 'github.com', 'olyforge3d', 'printfarmer');

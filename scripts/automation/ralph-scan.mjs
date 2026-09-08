@@ -303,12 +303,12 @@ function referenceFor(raw) {
   return issueReference(repository, raw.number);
 }
 
-function dependencyEdge(blocker, blocked) {
+function dependencyEdge(blocker, blocked, blockingState = blocker.state) {
   const blockerReference = referenceFor(blocker);
   if (!blockerReference || !blocked) {
     return { blocked, unknown: true, reason: 'dependency-shape' };
   }
-  return { blocker: blockerReference, blocked, state: blocker.state ?? 'unknown' };
+  return { blocker: blockerReference, blocked, state: blockingState ?? 'unknown' };
 }
 
 function changeReasons(previous, current, fields) {
@@ -438,6 +438,7 @@ export async function collectSnapshot({ repo, workflowId, sessionsFile, transpor
       blocking: blocking.map((entry) => dependencyEdge(
         { ...issue, repository_url: `https://api.github.com/repos/${repo}`, number },
         referenceFor(entry),
+        entry.state,
       )),
     });
   });
@@ -515,7 +516,7 @@ export async function scan(options) {
     const graph = topologicalOrder(snapshot.repo, snapshot.issues, incomingEdges);
     const blockedEdges = uniqueEdges([
       ...graph.blockedEdges,
-      ...observedEdges.filter((edge) => edge.unknown || edge.state === 'open' || !edge.state),
+      ...observedEdges.filter((edge) => edge.unknown || edge.state !== 'closed'),
     ]);
     const artifactDirectory = path.join(directory, 'artifacts');
     await ensurePrivateDirectory(artifactDirectory, physicalRoot);
