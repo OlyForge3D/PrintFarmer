@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.NfcDevices;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Web.Api.Tests.TestInfrastructure;
@@ -42,7 +43,7 @@ public sealed class NfcTagServiceLifetimeTests : IDisposable
             .Returns(Task.CompletedTask);
 
         var hubClientsMock = new Mock<IHubClients>();
-        hubClientsMock.Setup(c => c.All).Returns(clientProxyMock.Object);
+        hubClientsMock.Setup(c => c.Group(AuthorizedHubGroups.Administrators)).Returns(clientProxyMock.Object);
 
         var hubMock = new Mock<IHubContext<NfcHub>>();
         hubMock.Setup(h => h.Clients).Returns(hubClientsMock.Object);

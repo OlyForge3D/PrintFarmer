@@ -7,7 +7,7 @@ namespace Farm.Web.Api.Tests.Security;
 /// authenticated connection to a farm-wide group, and <c>MaintenanceResolutionNotifier</c>
 /// broadcast maintenance-completion events via <c>Clients.All</c> — both bypassing the
 /// <c>maintenance:admin</c> gate enforced on the equivalent REST endpoints. This test scans every
-/// SignalR hub / hub-context consumer under <c>src/api</c> and <c>src/modules</c> (module
+/// SignalR hub / hub-context consumer under <c>src/api</c>, <c>src/infra</c> and <c>src/modules</c> (module
 /// assemblies extracted by the module-decomposition epic #2019, starting with the
 /// <c>MaintenanceHub</c> move in #2037) for <c>Clients.All</c> so this class of authorization
 /// bypass cannot silently reintroduce, no matter which assembly the hub lives in.
@@ -35,6 +35,12 @@ public sealed class NoClientsAllArchitectureTests
         // The allowlist key is relative to whichever scan root (src/api or src/modules) the file
         // is found under, so the module-relative path replaces the old api-relative one.
         "Farm.Modules.Inventory/Controllers/FilamentFallbackGroupsController.cs",
+
+        // Pre-existing infrastructure broadcasts, unrelated to the NFC isolation fix (#2533).
+        // Attention aggregates farm-wide notifications; filament coverage falls back to a
+        // farm-wide refresh when no printer is provided. Do not expand NFC's scope to fix these.
+        "Services/Attention/AttentionBroadcaster.cs",
+        "Services/Spoolman/FilamentCoverageBroadcaster.cs",
     };
 
     private static string FindRepoRoot()
@@ -57,7 +63,7 @@ public sealed class NoClientsAllArchitectureTests
         throw new InvalidOperationException("Repository root (.git) not found from current directory.");
     }
 
-    [Fact(DisplayName = "Presubmit: no SignalR hub or hub-context consumer in src/api or src/modules calls Clients.All")]
+    [Fact(DisplayName = "Presubmit: no unallowlisted SignalR broadcast in src/api, src/infra or src/modules calls Clients.All")]
     public void NoClientsAllBroadcastsInApi()
     {
         string repoRoot = FindRepoRoot();
@@ -70,6 +76,7 @@ public sealed class NoClientsAllArchitectureTests
         string[] scanRoots =
         [
             Path.Join(repoRoot, "src", "api"),
+            Path.Join(repoRoot, "src", "infra"),
             Path.Join(repoRoot, "src", "modules"),
         ];
 
@@ -94,6 +101,7 @@ public sealed class NoClientsAllArchitectureTests
                 }
 
                 string content = File.ReadAllText(file);
+                content = Regex.Replace(content, @"//[^\r\n]*", "");
                 if (!clientsAllPattern.IsMatch(content))
                 {
                     continue;
@@ -110,7 +118,7 @@ public sealed class NoClientsAllArchitectureTests
 
         Assert.True(
             offenders.Count == 0,
-            "The following files under src/api or src/modules broadcast via Clients.All, " +
+            "The following files under src/api, src/infra or src/modules broadcast via Clients.All, " +
             "bypassing per-group authorization (see issue #1966). Scope the broadcast to an " +
             "explicit, authorized group (e.g. Clients.Group(...) / Clients.Groups(...)), or add " +
             $"a justified entry to {nameof(Allowlist)} if a genuine exception applies. Offenders: " +

@@ -290,8 +290,11 @@ describe('SetupWizard first-run Spoolman bootstrap', () => {
  * no request was sent. The account step's validation errors were computed
  * but rendered from a disconnected `useActionState` action that was never
  * dispatched, so the UI always displayed an empty error set.
+ *
+ * #2529 — native email constraint validation intercepted submission before
+ * this inline validation could report invalid email and password states.
  */
-describe('SetupWizard account step validation (#2365)', () => {
+describe('SetupWizard account step validation (#2365, #2529)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuthState.isAuthenticated = false;
@@ -342,6 +345,52 @@ describe('SetupWizard account step validation (#2365)', () => {
     await waitFor(() => expect(usernameInput).toHaveFocus());
     expect(screen.queryByText('First name is required')).not.toBeInTheDocument();
     expect(screen.queryByText('Last name is required')).not.toBeInTheDocument();
+    expect(mockCreateInitialAdmin).not.toHaveBeenCalled();
+  });
+
+  it('shows an inline error for an invalid email instead of relying on native validation', async () => {
+    render(<SetupWizard onComplete={vi.fn()} />);
+    await screen.findByText('Initial configuration wizard');
+
+    fireEvent.change(screen.getByLabelText(/First Name/, { selector: 'input' }), { target: { value: 'Ada' } });
+    fireEvent.change(screen.getByLabelText(/Last Name/, { selector: 'input' }), { target: { value: 'Lovelace' } });
+    fireEvent.change(screen.getByLabelText(/Username/, { selector: 'input' }), { target: { value: 'admin' } });
+    const emailInput = screen.getByLabelText(/Email/, { selector: 'input' });
+    fireEvent.change(emailInput, { target: { value: 'invalid-email' } });
+    fireEvent.change(screen.getByLabelText(/^Password/, { selector: 'input' }), { target: { value: 'password123' } });
+    fireEvent.change(screen.getByLabelText(/Confirm Password/, { selector: 'input' }), { target: { value: 'password123' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Admin & Continue' }));
+
+    await waitFor(() => expect(emailInput).toHaveFocus());
+    expect(emailInput).toHaveAttribute('aria-invalid', 'true');
+    expect(emailInput).toHaveAttribute('aria-describedby', 'email-error');
+    expect(screen.getByText('Invalid email address')).toHaveAttribute('id', 'email-error');
+    expect(mockCreateInitialAdmin).not.toHaveBeenCalled();
+  });
+
+  it('shows inline errors for a short password and mismatched confirmation', async () => {
+    render(<SetupWizard onComplete={vi.fn()} />);
+    await screen.findByText('Initial configuration wizard');
+
+    fireEvent.change(screen.getByLabelText(/First Name/, { selector: 'input' }), { target: { value: 'Ada' } });
+    fireEvent.change(screen.getByLabelText(/Last Name/, { selector: 'input' }), { target: { value: 'Lovelace' } });
+    fireEvent.change(screen.getByLabelText(/Username/, { selector: 'input' }), { target: { value: 'admin' } });
+    fireEvent.change(screen.getByLabelText(/Email/, { selector: 'input' }), { target: { value: 'admin@example.com' } });
+    const passwordInput = screen.getByLabelText(/^Password/, { selector: 'input' });
+    const confirmPasswordInput = screen.getByLabelText(/Confirm Password/, { selector: 'input' });
+    fireEvent.change(passwordInput, { target: { value: 'short' } });
+    fireEvent.change(confirmPasswordInput, { target: { value: 'mismatch' } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create Admin & Continue' }));
+
+    await waitFor(() => expect(passwordInput).toHaveFocus());
+    expect(passwordInput).toHaveAttribute('aria-invalid', 'true');
+    expect(passwordInput).toHaveAttribute('aria-describedby', 'password-error');
+    expect(screen.getByText('Min 8 characters', { selector: '#password-error' })).toBeInTheDocument();
+    expect(confirmPasswordInput).toHaveAttribute('aria-invalid', 'true');
+    expect(confirmPasswordInput).toHaveAttribute('aria-describedby', 'confirmPassword-error');
+    expect(screen.getByText('Passwords do not match')).toHaveAttribute('id', 'confirmPassword-error');
     expect(mockCreateInitialAdmin).not.toHaveBeenCalled();
   });
 
