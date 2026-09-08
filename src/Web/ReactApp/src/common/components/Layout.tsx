@@ -21,7 +21,6 @@ import {
   AlertIcon,
   ClipboardListIcon,
   CalendarIcon,
-  PackageIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -203,33 +202,26 @@ const navigation: NavigationElement[] = [
   { name: 'Admin', icon: SettingsIcon, isSectionHeader: true },
   // #2526 — one default navigation home per admin destination.
   //
-  // Maintenance, Locations, Analytics, Auto-Dispatch and Catalog used to sit
-  // here as anchored entries *and* as Admin Control Center tiles, so every one
-  // of them had two default homes. They are registered destinations in
-  // `ADMIN_DESTINATIONS` (`ops-maintenance`, `hw-locations`, `ops-analytics`,
-  // `ops-auto-dispatch`, `data-catalog`), which makes `/admin` their single
-  // default home; the `admin` entry below is the one navbar link that reaches
-  // them. Nothing is stranded: each of those destinations is a hub tile, so
-  // `requiresAnyAccessibleHubTile` keeps the Admin entry visible for exactly
-  // the users whose permissions unlocked the removed link — including
-  // delegates who hold only `queue:read` or `catalog:admin` and no
-  // `farm_admin` role.
+  // Maintenance, Locations, Analytics, Auto-Dispatch, Catalog and Printed
+  // Parts used to sit here as anchored entries *and* as Admin Control Center
+  // tiles, so every one of them had two default homes. They are registered
+  // destinations in `ADMIN_DESTINATIONS` (`ops-maintenance`, `hw-locations`,
+  // `ops-analytics`, `ops-auto-dispatch`, `data-catalog`, `parts-inventory`),
+  // which makes `/admin` their single default home; the `admin` entry below
+  // is the one navbar link that reaches them. Nothing is stranded: each of
+  // those destinations is a hub tile, so `requiresAnyAccessibleHubTile` keeps
+  // the Admin entry visible for exactly the users whose permissions unlocked
+  // the removed link — including delegates who hold only `queue:read` or
+  // `catalog:admin` and no `farm_admin` role.
+  //
+  // Printed Parts (`parts-inventory`) moved into this same pattern (#2588):
+  // it is a normal, user-pinnable `ADMIN_DESTINATIONS` entry now, pinned or
+  // unpinned from the Admin Control Center's "Pin admin links" panel like any
+  // other admin shortcut, rather than a statically anchored rail entry.
   //
   // Do not re-add a destination here that the Control Center already owns.
-  // Opt-in user pinning of admin destinations onto this rail is separate work
-  // (#2527) and is deliberately *not* the same thing as a default entry.
-  {
-    id: 'parts-inventory',
-    name: 'Printed Parts',
-    href: '/parts-inventory',
-    icon: PackageIcon,
-    // PartsInventoryController, `[RequirePermission("parts_inventory", "admin")]` (#1457).
-    // Not an `ADMIN_DESTINATIONS` entry, so the navbar is its only default
-    // home — it is not a duplicate and must stay (#2526).
-    requiredPermission: { resource: 'parts_inventory', action: 'admin' },
-    anchored: true,
-    matches: (pathname) => pathname === '/parts-inventory' || pathname.startsWith('/parts-inventory/')
-  },
+  // User pinning of admin destinations onto this rail happens exclusively via
+  // `adminPinnedItemIds` (see `AdminNavPinsContext`), not a hard-coded entry.
   {
     id: 'admin',
     name: 'Admin',

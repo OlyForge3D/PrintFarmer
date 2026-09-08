@@ -24,6 +24,7 @@ import {
   LayersIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
+import { useAdminHubParent } from '@/features/admin/utils/adminHubParentState';
 import { PartsTab } from '../components/PartsTab';
 import { BinsTab } from '../components/BinsTab';
 import { MappingsTab } from '../components/MappingsTab';
@@ -49,6 +50,7 @@ function readSavedTab(): TabId {
 export function PartsInventoryPage() {
   const navigate = useNavigate();
   const { tabId } = useParams<{ tabId?: string }>();
+  const adminHubParent = useAdminHubParent();
 
   // URL is the single source of truth; if none supplied fall back to saved / default.
   const activeTab: TabId = isTabId(tabId) ? tabId : readSavedTab();
@@ -114,6 +116,7 @@ export function PartsInventoryPage() {
       title="Printed Parts Inventory"
       subtitle={subtitle}
       icon={PackageIcon}
+      parent={adminHubParent}
     >
       {!featureStatusKnown ? (
         <div className="flex items-center gap-2 py-8 justify-center text-pf-text-secondary">

@@ -32,7 +32,7 @@ const ROLE_GATED_WITHOUT_PERMISSION = new Set(['admin-home', 'slicing-profiles']
 describe('adminDestinations — permission gating (#1457)', () => {
   it('classifies every destination without losing stable IDs or creating a second path registry', () => {
     const groups = new Set(SETTINGS_DISPLAY_GROUPS.map((group) => group.id));
-    expect(ADMIN_DESTINATIONS).toHaveLength(28);
+    expect(ADMIN_DESTINATIONS).toHaveLength(29);
     for (const destination of ADMIN_DESTINATIONS) {
       if (destination.kind === 'configuration') {
         expect(destination.settingsGroup && groups.has(destination.settingsGroup)).toBe(true);
@@ -40,7 +40,7 @@ describe('adminDestinations — permission gating (#1457)', () => {
         expect(destination.settingsGroup).toBeUndefined();
       }
     }
-    expect(ADMIN_DESTINATIONS.filter((destination) => destination.kind === 'operational')).toHaveLength(7);
+    expect(ADMIN_DESTINATIONS.filter((destination) => destination.kind === 'operational')).toHaveLength(8);
   });
 
   it.each(['power_monitors', 'locations', 'catalog'])('counts standalone %s access toward useful admin navigation', (resource) => {
