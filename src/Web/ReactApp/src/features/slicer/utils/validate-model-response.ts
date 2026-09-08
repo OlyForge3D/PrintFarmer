@@ -15,10 +15,10 @@ function assertMesh(geometry: BufferGeometry): void {
     if (!Number.isFinite(coordinate)) {
       throw new Error(INVALID_MODEL_MESSAGE);
     }
-    if (geometry.index) {
-      for (const index of geometry.index.array) {
-        if (index >= positions.count) throw new Error(INVALID_MODEL_MESSAGE);
-      }
+  }
+  if (geometry.index) {
+    for (const index of geometry.index.array) {
+      if (index >= positions.count) throw new Error(INVALID_MODEL_MESSAGE);
     }
   }
 }

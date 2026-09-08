@@ -5,6 +5,23 @@ import { BufferGeometry } from 'three';
 import { validateModelResponse } from '@/features/slicer/utils/validate-model-response';
 import { asciiPly, binaryStl, modelTextBuffer, threeMfBuffer } from '@/features/slicer/utils/__tests__/model-response-fixtures';
 
+const indexedPly = `ply
+format ascii 1.0
+element vertex 4
+property float x
+property float y
+property float z
+element face 2
+property list uchar int vertex_indices
+end_header
+0 0 0
+1 0 0
+1 1 0
+0 1 0
+3 0 1 2
+3 0 2 3
+`;
+
 describe('validateModelResponse', () => {
   afterEach(() => vi.restoreAllMocks());
 
@@ -60,6 +77,46 @@ describe('validateModelResponse', () => {
 
   it('preserves PLY models', async () => {
     await expect(validateModelResponse(modelTextBuffer(asciiPly), 'ply', 'text/plain')).resolves.toBeUndefined();
+  });
+
+  it('scans coordinates and indices only once for multi-triangle indexed meshes', async () => {
+    const data = modelTextBuffer(indexedPly);
+    const geometry = new PLYLoader().parse(data);
+    const positions = geometry.getAttribute('position');
+    const indices = geometry.getIndex();
+    if (!indices) throw new Error('Expected indexed PLY fixture');
+    expect(positions.count).toBe(4);
+    expect(Array.from(indices.array)).toEqual([0, 1, 2, 0, 2, 3]);
+
+    vi.spyOn(PLYLoader.prototype, 'parse').mockReturnValueOnce(geometry);
+    // Count passes rather than wall-clock time so nested scans fail deterministically.
+    const coordinatePasses = vi.spyOn(positions.array, Symbol.iterator);
+    const indexPasses = vi.spyOn(indices.array, Symbol.iterator);
+    const dispose = vi.spyOn(geometry, 'dispose');
+
+    await expect(validateModelResponse(data, 'ply')).resolves.toBeUndefined();
+
+    expect(coordinatePasses).toHaveBeenCalledOnce();
+    expect(indexPasses).toHaveBeenCalledOnce();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it.each(['coordinate', 'index'])('rejects an invalid final %s in an indexed mesh and disposes it', async (invalidValue) => {
+    const data = modelTextBuffer(indexedPly);
+    const geometry = new PLYLoader().parse(data);
+    const positions = geometry.getAttribute('position');
+    const indices = geometry.getIndex();
+    if (!indices) throw new Error('Expected indexed PLY fixture');
+    if (invalidValue === 'coordinate') {
+      positions.array[positions.array.length - 1] = NaN;
+    } else {
+      indices.array[indices.array.length - 1] = positions.count;
+    }
+    vi.spyOn(PLYLoader.prototype, 'parse').mockReturnValueOnce(geometry);
+    const dispose = vi.spyOn(geometry, 'dispose');
+
+    await expect(validateModelResponse(data, 'ply')).rejects.toThrow('valid 3D model');
+    expect(dispose).toHaveBeenCalledOnce();
   });
 
   it('preserves binary PLY models', async () => {
