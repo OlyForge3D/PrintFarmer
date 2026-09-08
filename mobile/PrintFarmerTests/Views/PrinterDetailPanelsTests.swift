@@ -10,16 +10,134 @@ import SwiftUI
 @MainActor
 final class PrinterDetailPanelsTests: XCTestCase {
 
+    func testControlsReflowRetainsSelectedJogAxisAndDistance() async throws {
+        var printer = try TestData.decodePrinter(from: TestJSON.printer)
+        printer.isOnline = true
+        printer.state = "idle"
+        let service = MockPrinterService()
+        service.capabilitiesToReturn = PrinterBackendCapabilities(
+            supportsMovement: true, supportsTemperatureControl: true,
+            supportsBedTemperature: true, supportsFanControl: true,
+            supportsHoming: true, supportedAxes: ["X", "Y", "Z"]
+        )
+        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        service.getBackendCapabilitiesCalledWith = nil
+
+        func content(width: CGFloat, size: DynamicTypeSize) -> some View {
+            PrinterSetupControlsContent(
+                printer: printer, viewModel: model,
+                usesColumns: PrinterDetailLayout.usesColumns(width: width, dynamicTypeSize: size)
+            )
+            .frame(width: width)
+            .environment(\.horizontalSizeClass, .regular)
+            .environment(\.dynamicTypeSize, size)
+        }
+        let controller = UIHostingController(rootView: AnyView(content(width: 900, size: .large)))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 1100, height: 1400))
+        window.rootViewController = controller
+        window.isHidden = false
+        defer { window.isHidden = true }
+
+        func settle() async throws {
+            try await Task.sleep(for: .milliseconds(100))
+            controller.view.setNeedsLayout()
+            controller.view.layoutIfNeeded()
+        }
+        func segmentedControls(in view: UIView) -> [UISegmentedControl] {
+            (view as? UISegmentedControl).map { [$0] }
+                ?? view.subviews.flatMap { segmentedControls(in: $0) }
+        }
+        func pickers() throws -> (axis: UISegmentedControl, step: UISegmentedControl) {
+            let controls = segmentedControls(in: controller.view)
+            return (
+                try XCTUnwrap(controls.first { $0.titleForSegment(at: 0) == "X" }),
+                try XCTUnwrap(controls.first { $0.titleForSegment(at: 0) == "0.1" })
+            )
+        }
+        try await settle()
+        let initial = try pickers()
+        initial.axis.selectedSegmentIndex = 2
+        initial.axis.sendActions(for: .valueChanged)
+        initial.step.selectedSegmentIndex = 2
+        initial.step.sendActions(for: .valueChanged)
+        try await settle()
+
+        let layouts: [(CGFloat, DynamicTypeSize)] = [
+            (700, .large), (900, .large), (900, .accessibility3), (900, .large)
+        ]
+        for (width, size) in layouts {
+            controller.rootView = AnyView(content(width: width, size: size))
+            try await settle()
+            let current = try pickers()
+            XCTAssertEqual(current.axis.selectedSegmentIndex, 2, "Reflow must preserve selected Z")
+            XCTAssertEqual(current.step.selectedSegmentIndex, 2, "Reflow must preserve selected 10 mm")
+        }
+        XCTAssertNil(service.moveCalledWith)
+        XCTAssertNil(service.getBackendCapabilitiesCalledWith)
+    }
+
+    func testDetailColumnsRequireUsableWidthAndNonAccessibilityText() {
+        XCTAssertTrue(PrinterDetailLayout.usesColumns(width: 1024, dynamicTypeSize: .large))
+        XCTAssertTrue(PrinterDetailLayout.usesColumns(width: 760, dynamicTypeSize: .xxxLarge))
+        XCTAssertFalse(PrinterDetailLayout.usesColumns(width: 759, dynamicTypeSize: .large))
+        XCTAssertFalse(PrinterDetailLayout.usesColumns(width: 375, dynamicTypeSize: .large))
+        XCTAssertFalse(PrinterDetailLayout.usesColumns(width: 1366, dynamicTypeSize: .accessibility1))
+        XCTAssertFalse(PrinterDetailLayout.usesColumns(width: 1366, dynamicTypeSize: .accessibility5))
+    }
+
+    func testTemperatureMeasurementNeverSubstitutesTarget() {
+        let reading = PrinterDetailTemperatureReading(measured: 24, target: 200, isOnline: true)
+        XCTAssertEqual(reading.measuredText, Double(24).temperatureFormatted)
+        XCTAssertEqual(reading.targetText, Double(200).temperatureFormatted)
+        let missing = PrinterDetailTemperatureReading(measured: nil, target: 200, isOnline: true)
+        XCTAssertEqual(missing.measuredText, "Unavailable")
+        XCTAssertEqual(missing.targetText, Double(200).temperatureFormatted)
+    }
+
+    func testOfflineTemperaturesDoNotPresentRetainedValuesAsLive() {
+        let reading = PrinterDetailTemperatureReading(measured: 210, target: 220, isOnline: false)
+        XCTAssertEqual(reading.measuredText, "Unavailable")
+        XCTAssertEqual(reading.targetText, "Unknown")
+    }
+
+    func testMissingHardwareTelemetryIsNotZeroOrInferredHardwareAbsence() {
+        let reading = PrinterDetailTemperatureReading(measured: nil, target: nil, isOnline: true)
+        XCTAssertEqual(reading.measuredText, "Unavailable")
+        XCTAssertEqual(reading.targetText, "Unknown")
+        let heaterOff = PrinterDetailTemperatureReading(measured: 0, target: 0, isOnline: true)
+        XCTAssertEqual(heaterOff.measuredText, Double(0).temperatureFormatted)
+        XCTAssertEqual(heaterOff.targetText, "Off")
+        let invalid = PrinterDetailTemperatureReading(measured: .nan, target: .infinity, isOnline: true)
+        XCTAssertEqual(invalid.measuredText, "Unavailable")
+        XCTAssertEqual(invalid.targetText, "Unknown")
+    }
+
+    func testEmergencyAndRoutinePresentationsPartitionWithoutChangingGates() {
+        let presentation = PrinterDetailRunActionMapping.presentation(
+            isOnline: true, isPrinting: true, isPaused: false,
+            isPerformingAction: true, pendingKinds: [.pause]
+        )
+        XCTAssertEqual(presentation.routineActions.visibleKinds, [.pause, .cancel, .stop])
+        XCTAssertEqual(presentation.emergencyAction.visibleKinds, [.emergencyStop])
+        XCTAssertEqual(
+            presentation.routineActions.descriptor(for: .pause),
+            presentation.descriptor(for: .pause)
+        )
+        XCTAssertTrue(presentation.emergencyAction.shouldFireCallback(for: .emergencyStop))
+        XCTAssertFalse(presentation.routineActions.shouldFireCallback(for: .emergencyStop))
+    }
+
     // MARK: - Panel availability / safe selection
 
-    func testAvailablePanelsIncludesControlsOnlyWhenAvailable() {
+    func testAvailablePanelsAlwaysIncludesControlsRegardlessOfAuthorization() {
         XCTAssertEqual(
             PrinterDetailPanelsHost<EmptyView, EmptyView>.availablePanels(controlsAvailable: true),
-            [.status, .controls]
+            [.overview, .controls]
         )
         XCTAssertEqual(
             PrinterDetailPanelsHost<EmptyView, EmptyView>.availablePanels(controlsAvailable: false),
-            [.status]
+            [.overview, .controls]
         )
     }
 
@@ -31,34 +149,32 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(resolved, .controls)
     }
 
-    func testResolvedSelectionFallsBackToStatusWhenControlsRevoked() {
-        // Mirrors the epic's "if revoked while selected, return safely to
-        // Status without a stranded page" acceptance criterion.
+    func testResolvedSelectionRetainsControlsWhenAccessRevoked() {
         let resolved = PrinterDetailPanelsHost<EmptyView, EmptyView>.resolvedSelection(
             current: .controls,
             controlsAvailable: false
         )
-        XCTAssertEqual(resolved, .status)
+        XCTAssertEqual(resolved, .controls)
     }
 
     func testResolvedSelectionLeavesStatusUnaffectedByControlsAvailability() {
         XCTAssertEqual(
             PrinterDetailPanelsHost<EmptyView, EmptyView>.resolvedSelection(
-                current: .status, controlsAvailable: true
+                current: .overview, controlsAvailable: true
             ),
-            .status
+            .overview
         )
         XCTAssertEqual(
             PrinterDetailPanelsHost<EmptyView, EmptyView>.resolvedSelection(
-                current: .status, controlsAvailable: false
+                current: .overview, controlsAvailable: false
             ),
-            .status
+            .overview
         )
     }
 
     func testPanelAccessibilityIdentifiersMatchEpicReservation() {
-        // Reserved by epic #2518: printer.detail.panel.selector / .status / .controls.
-        XCTAssertEqual(PrinterDetailPanel.status.accessibilityIdentifier, "printer.detail.panel.status")
+        // Reserved by epic #2518: printer.detail.panel.selector / .overview / .controls.
+        XCTAssertEqual(PrinterDetailPanel.overview.accessibilityIdentifier, "printer.detail.panel.overview")
         XCTAssertEqual(PrinterDetailPanel.controls.accessibilityIdentifier, "printer.detail.panel.controls")
     }
 
@@ -85,11 +201,16 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(presentation.visibleKinds, [.emergencyStop])
     }
 
-    func testRunActionMappingNeverShowsEmergencyStopWhenOfflineAndIdle() {
+    func testRunActionMappingExplainsUnavailableEmergencyStopWhenOffline() {
         let presentation = PrinterDetailRunActionMapping.presentation(
             isOnline: false, isPrinting: false, isPaused: false, isPerformingAction: false
         )
-        XCTAssertFalse(presentation.visibleKinds.contains(.emergencyStop))
+        XCTAssertTrue(presentation.visibleKinds.contains(.emergencyStop))
+        XCTAssertFalse(presentation.shouldFireCallback(for: .emergencyStop))
+        XCTAssertEqual(
+            presentation.descriptor(for: .emergencyStop)?.unavailableReason,
+            "Printer is offline. Use the physical safety switch if needed."
+        )
     }
 
     func testRunActionMappingWhileOfflineAndPrintingKeepsPauseAndCancelButHidesStopAndEmergency() {
@@ -104,9 +225,9 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let presentation = PrinterDetailRunActionMapping.presentation(
             isOnline: false, isPrinting: true, isPaused: false, isPerformingAction: false
         )
-        XCTAssertEqual(presentation.visibleKinds, [.pause, .cancel])
+        XCTAssertEqual(presentation.visibleKinds, [.pause, .cancel, .emergencyStop])
         XCTAssertNil(presentation.descriptor(for: .stop))
-        XCTAssertNil(presentation.descriptor(for: .emergencyStop))
+        XCTAssertEqual(presentation.descriptor(for: .emergencyStop)?.isEnabled, false)
         XCTAssertTrue(presentation.shouldFireCallback(for: .pause))
         XCTAssertTrue(presentation.shouldFireCallback(for: .cancel))
         XCTAssertFalse(presentation.shouldFireCallback(for: .stop))
@@ -117,9 +238,9 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let presentation = PrinterDetailRunActionMapping.presentation(
             isOnline: false, isPrinting: false, isPaused: true, isPerformingAction: false
         )
-        XCTAssertEqual(presentation.visibleKinds, [.resume, .cancel])
+        XCTAssertEqual(presentation.visibleKinds, [.resume, .cancel, .emergencyStop])
         XCTAssertNil(presentation.descriptor(for: .stop))
-        XCTAssertNil(presentation.descriptor(for: .emergencyStop))
+        XCTAssertEqual(presentation.descriptor(for: .emergencyStop)?.isEnabled, false)
     }
 
     func testRunActionMappingWhileOfflineAndPausedResumeAndCancelStillFireCallbacks() {
@@ -366,7 +487,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
     // MARK: - Controls owner mapping (Hicks review finding 15)
 
     func testControlsOwnerMappingSkipsBuildWhenControlsUnavailable() {
-        // Avoid a new capability request for a Status-only visit — the
+        // Avoid a new capability request for a Overview-only visit — the
         // common case, since Advanced Printer Controls defaults off.
         XCTAssertFalse(PrinterDetailControlsOwnerMapping.shouldBuildOwner(
             existingOwnerPrinterID: nil, printerID: UUID(), controlsAvailable: false
@@ -420,13 +541,13 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     func testCameraForegroundTrueOnlyWhenSceneActiveAndStatusSelected() {
         XCTAssertTrue(PrinterDetailCameraLifecycleMapping.isForeground(
-            scenePhase: .active, selectedPanel: .status
+            scenePhase: .active, selectedPanel: .overview
         ))
     }
 
     func testCameraNotForegroundWhenControlsSelectedEvenIfSceneActive() {
         // The exact regression this mapping fixes: native `TabView` paging
-        // keeps Status mounted alongside Controls for swipe animation, so
+        // keeps Overview mounted alongside Controls for swipe animation, so
         // `scenePhase == .active` alone is not sufficient once Controls is
         // the page actually on screen.
         XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
@@ -436,10 +557,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     func testCameraNotForegroundWhenSceneInactiveOrBackgroundedEvenOnStatusPage() {
         XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
-            scenePhase: .inactive, selectedPanel: .status
+            scenePhase: .inactive, selectedPanel: .overview
         ))
         XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
-            scenePhase: .background, selectedPanel: .status
+            scenePhase: .background, selectedPanel: .overview
         ))
     }
 }

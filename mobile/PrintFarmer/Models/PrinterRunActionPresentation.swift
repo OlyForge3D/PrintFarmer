@@ -116,6 +116,14 @@ public struct PrinterRunActionPresentation: Sendable, Equatable, Hashable {
         visibleDescriptors.map(\.kind)
     }
 
+    public var routineActions: PrinterRunActionPresentation {
+        .init(descriptors: visibleDescriptors.filter { $0.kind != .emergencyStop })
+    }
+
+    public var emergencyAction: PrinterRunActionPresentation {
+        .init(descriptors: visibleDescriptors.filter { $0.kind == .emergencyStop })
+    }
+
     // MARK: Callback gating
 
     /// Whether tapping `kind` right now should fire the host's `onSelect`.

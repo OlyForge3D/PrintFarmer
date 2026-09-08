@@ -23,24 +23,18 @@ with lazy construction directly inside `StateObject(wrappedValue:)`. The
 capabilities and forwards `PrinterControlsUpdateSignal` changes outside
 online/offline content, so hiding controls cannot strand an acknowledgement.
 
-**Integration status (#2522, shipped):** `PrinterDetailView` now embeds
-`PrinterControlsSection` directly as the Controls page of a two-page
-Status/Controls host (`PrinterDetailPanelsHost`), reached via a segmented
-selector or a horizontal swipe — not via a nested `NavigationLink`. The
-previous inline "Advanced" disclosure containing a further "Advanced" link
-(double-Advanced navigation) is removed; `AdvancedPrinterControlsAccess
-.isEntryVisible` still gates the Controls page's existence exactly as it
-gated the old link, so the safety-toggle/offline-printer behavior is
-unchanged. The standalone `AdvancedPrinterControlsView` destination and its
-`AppDestination.advancedPrinterControls` route remain in the codebase
-unmodified (still a valid direct destination type) but printer detail no
-longer routes through them.
+**Essential integration (#2594):** `PrinterDetailView` embeds the presentation-only
+`PrinterSetupControlsContent` in an always-discoverable Overview/Controls pager.
+`AdvancedPrinterControlsAccess.isEntryVisible` gates command content and owner
+construction, not destination existence. An offline/disabled visit explains
+the restriction without loading capabilities, enabling a setting or dispatching
+commands. The settings link uses the existing `AppDestination.settings` route.
 
 For embedding, retain one owner above page visibility, scoped by registered server
 and printer UUID. The host supplies the scoped service, loads capabilities once,
 and forwards meaningful updates while the Controls page is hidden. Do not use
 the test-only wrapper initializer or create an owner per page. Apply
-`AdvancedPrinterControlsAccess` before exposing the page; this observer does not
+`AdvancedPrinterControlsAccess` before exposing command content; this observer does not
 read feature flags. Replace the owner when the real server/printer target changes.
 
 ### Effective native operations and gates
@@ -60,7 +54,10 @@ Z-offset, motor disabling and console are not implemented native operations.
 Earlier design proposals below are not evidence of additional command support
 or per-subgroup concurrency.
 
-Normal-width layouts retain the existing phone stack and regular-width columns.
+The detail host supplies `usesColumns` from its actual available width (at least
+760 points), not device identity. Thermal work occupies the leading column and
+Home/Jog share the supporting column; this leaves a composition seam for later
+material tools without introducing a new command owner. Narrow layouts stack.
 Accessibility text sizes use a single outer column, including on iPad. Error
 dismissal remains a separately accessible button with a minimum 44-point target.
 The controls snapshot suite includes hosted observer-remount, wrapper-offline,
@@ -71,7 +68,12 @@ suites continue to exercise native dispatch through mock services.
 
 ## 1. Visual Hierarchy
 
-The section sits inside `PrinterDetailView` as a single SwiftUI `VStack` with three `GroupBox`-style subgroups separated by 16pt vertical spacing. The whole section is **conditionally rendered** — when `printer.isOnline == false`, the entire `ControlsSection` view returns `EmptyView()`. No placeholder, no greyed shell.
+The command section is conditionally rendered: offline or preference-disabled
+detail pages show an explanation instead. The following original subgroup
+specification governs controls, not destination discoverability. Overview now
+places identity, paired measured/target temperatures and material/current job
+first. The compact labeled Emergency Stop is above both pages, independent of
+routine actions beside Current Job, and retains confirmation and a 44-point floor.
 
 ```
 PrinterDetailView (existing)

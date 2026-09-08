@@ -169,10 +169,9 @@ final class PrinterRunActionBarTests: XCTestCase {
         }
     }
 
-    /// Per-kind isolated HIT-TARGET height floor for Emergency Stop, which
-    /// is prominent and enforces the higher `minHeight: 50` floor. Same
-    /// per-control isolation: no siblings, no spacing budget.
-    func test_render_emergencyStop_meetsProminentHitTargetFloor_inIsolation() {
+    /// The compact top action retains the HIG floor without stretching to
+    /// fill the page width. No siblings can mask its own target size.
+    func test_render_emergencyStop_meetsCompactHitTargetFloor_inIsolation() {
         let proposedWidth: CGFloat = 390
         let bar = PrinterRunActionBar(
             presentation: PrinterRunActionPresentation(descriptors: [
@@ -182,13 +181,14 @@ final class PrinterRunActionBarTests: XCTestCase {
         )
         let size = contentSize(bar, proposedWidth: proposedWidth)
         XCTAssertGreaterThanOrEqual(
-            size.height, 50,
-            "Emergency Stop isolated button must render at >= 50pt tall (prominent floor). Actual: \(size.height)pt"
+            size.height, 44,
+            "Emergency Stop isolated button must render at >= 44pt tall. Actual: \(size.height)pt"
         )
         XCTAssertGreaterThanOrEqual(
             size.width, 44,
             "Emergency Stop isolated button must render at >= 44pt wide. Actual: \(size.width)pt"
         )
+        XCTAssertLessThan(size.width, proposedWidth, "Emergency Stop must not be a full-width slab")
     }
 
     /// Per-kind isolated floor at accessibility Dynamic Type. Hicks-flag:
@@ -225,8 +225,8 @@ final class PrinterRunActionBarTests: XCTestCase {
         .environment(\.dynamicTypeSize, .accessibility5)
         let emergencySize = contentSize(emergencyBar, proposedWidth: proposedWidth)
         XCTAssertGreaterThanOrEqual(
-            emergencySize.height, 50,
-            "Emergency Stop isolated button must remain >= 50pt tall at .accessibility5. Actual: \(emergencySize.height)pt"
+            emergencySize.height, 44,
+            "Emergency Stop isolated button must remain >= 44pt tall at .accessibility5. Actual: \(emergencySize.height)pt"
         )
     }
 
