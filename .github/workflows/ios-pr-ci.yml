@@ -372,6 +372,12 @@ jobs:
         run: |
           set -o pipefail
           suite_tests=("-only-testing:PrintFarmerUITests/${{ matrix.suite }}")
+          if [[ "${{ matrix.suite }}" == "OperatorShellUITests" ]]; then
+            suite_tests+=(
+              "-only-testing:PrintFarmerUITests/OperatorFeatureVisibilityUITests/testDisabledDestinationsAreAbsentAndFarmIsSelected"
+              "-only-testing:PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations"
+            )
+          fi
           if [[ "${{ matrix.suite }}" == "ShiftTasksUITests" ]]; then
             suite_tests+=("-only-testing:PrintFarmerUITests/UIWaitBudgetTests")
           fi

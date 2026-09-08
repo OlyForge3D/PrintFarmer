@@ -54,64 +54,12 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         )
     }
 
-    func testTabBarShowsFourOperatorDestinations() {
-        // Operator shell must present a navigation container: iPhone
-        // TabView bottom bar OR iPad NavigationSplitView sidebar.
-        let tabBar = app.tabBars.firstMatch
-        let sidebarAttention = app.buttons["sidebar.attention"]
-        let hasTabBar = tabBar.waitForExistence(timeout: 3)
-        let hasSidebar = hasTabBar ? false : sidebarAttention.waitForExistence(timeout: 3)
-        if !hasTabBar && !hasSidebar {
-            revealSidebarIfCollapsed()
-        }
-        XCTAssertTrue(
-            hasTabBar || sidebarAttention.exists,
-            "Operator shell must expose either a compact tab bar or an iPad sidebar"
+    func testSimpleShellShowsCapabilityEnabledOperatorDestinations() {
+        assertOperatorDestinations(
+            compact: ["Attention", "Farm", "Tasks", "Inventory", "Oversight"],
+            floor: ["attention", "farm", "tasks", "inventory"],
+            expectsCompactModeControl: false
         )
-
-        let expectedDestinations = hasTabBar
-            ? [
-                "tab.attention",
-                "tab.farm",
-                "tab.inventory",
-                "tab.oversight"
-            ]
-            : [
-                "tab.attention",
-                "tab.farm",
-                "tab.inventory",
-                "tab.overview",
-                "tab.fleet",
-                "tab.jobs",
-                "tab.upkeep",
-                "tab.reports"
-            ]
-        for identifier in expectedDestinations {
-            let button = shellDestinationButton(
-                tabIdentifier: identifier,
-                timeout: 8
-            )
-            XCTAssertTrue(
-                button.exists,
-                "The active shell must expose \(identifier) or its iPad sidebar counterpart"
-            )
-        }
-
-        if hasTabBar {
-            XCTAssertFalse(compactTabExists(tabIdentifier: "tab.tasks"))
-            XCTAssertFalse(compactTabExists(tabIdentifier: "tab.scan"))
-        } else {
-            XCTAssertTrue(app.staticTexts["sidebar.section.floor"].exists)
-            XCTAssertTrue(app.staticTexts["sidebar.section.oversight"].exists)
-            XCTAssertEqual(
-                app.segmentedControls
-                    .matching(identifier: "navigation.modeControl")
-                    .count,
-                0,
-                "The expanded iPad sidebar must render no Floor/Oversight control"
-            )
-            XCTAssertFalse(app.buttons["sidebar.oversight"].exists)
-        }
     }
 
     func testRetiredTabsAreNotVisible() {
@@ -408,6 +356,12 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
         XCTAssertTrue(farm.exists)
         XCTAssertTrue(farm.isSelected)
 
+        assertOperatorDestinations(
+            compact: ["Farm", "Inventory", "Oversight"],
+            floor: ["farm", "inventory"],
+            expectsCompactModeControl: false
+        )
+
         revealSidebarIfCollapsed()
         XCTAssertFalse(compactTabExists(tabIdentifier: "tab.attention"))
         XCTAssertFalse(app.buttons["sidebar.attention"].exists)
@@ -587,37 +541,66 @@ final class TwoModesOperatorShellUITests: PrintFarmerUITestCase {
         ["--uitesting-two-modes"]
     }
 
-    func testFloorModeShowsRequiredCompactDestinations() throws {
-        try requireCompactAdaptiveShell()
-
-        XCTAssertTrue(
-            app.segmentedControls["navigation.modeControl"]
-                .waitForExistence(timeout: 8)
+    func testFloorModeShowsRequiredCompactDestinations() {
+        assertOperatorDestinations(
+            compact: ["Attention", "Farm", "Tasks", "Inventory"],
+            floor: ["attention", "farm", "tasks", "inventory"],
+            expectsCompactModeControl: true
         )
-        XCTAssertEqual(
-            app.segmentedControls
-                .matching(identifier: "navigation.modeControl")
-                .count,
-            1,
-            "Two-modes Floor roots must render exactly one Floor/Oversight control"
-        )
+    }
+}
 
-        for identifier in [
-            "tab.attention",
-            "tab.farm",
-            "tab.tasks",
-            "tab.inventory"
-        ] {
-            let destination = shellDestinationButton(
-                tabIdentifier: identifier,
-                timeout: 8
+@MainActor
+private extension PrintFarmerUITestCase {
+    func assertOperatorDestinations(
+        compact expectedTitles: [String],
+        floor expectedFloor: [String],
+        expectsCompactModeControl: Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let roots = renderedShellRoots()
+        let evidence = XCTAttachment(string: """
+            Launch arguments: \(app.launchArguments)
+            Rendered roots: \(roots.map { "\($0.identifier): \($0.title)" })
+            \(app.debugDescription)
+            """)
+        evidence.name = "Operator shell navigation contract"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+
+        XCTAssertFalse(roots.isEmpty, "The operator navigation must render", file: file, line: line)
+        if app.tabBars.firstMatch.exists {
+            // Native SwiftUI tabs can expose titles without tab.* identifiers.
+            // Compare every rendered button, not a filtered expected subset.
+            XCTAssertEqual(roots.count, expectedTitles.count, file: file, line: line)
+            XCTAssertEqual(roots.map(\.title), expectedTitles, file: file, line: line)
+            XCTAssertEqual(
+                app.segmentedControls.matching(identifier: "navigation.modeControl").count,
+                expectsCompactModeControl ? 1 : 0,
+                file: file,
+                line: line
             )
-            XCTAssertTrue(
-                destination.exists,
-                "Two-modes Floor must expose \(identifier)"
+        } else {
+            let expected = (expectedFloor + ["overview", "fleet", "jobs", "upkeep", "reports"])
+                .map { "sidebar.\($0)" }
+            XCTAssertEqual(roots.map(\.identifier), expected, file: file, line: line)
+            XCTAssertTrue(app.staticTexts["sidebar.section.floor"].exists, file: file, line: line)
+            XCTAssertTrue(app.staticTexts["sidebar.section.oversight"].exists, file: file, line: line)
+            XCTAssertFalse(app.buttons["sidebar.oversight"].exists, file: file, line: line)
+            XCTAssertEqual(
+                app.segmentedControls.matching(identifier: "navigation.modeControl").count,
+                0,
+                "The expanded iPad sidebar must not render a Floor/Oversight control",
+                file: file,
+                line: line
             )
         }
-        XCTAssertFalse(compactTabExists(tabIdentifier: "tab.oversight"))
+
+        for retired in ["notifications", "settings", "scan"] {
+            XCTAssertFalse(compactTabExists(tabIdentifier: "tab.\(retired)"), file: file, line: line)
+            XCTAssertFalse(app.buttons["sidebar.\(retired)"].exists, file: file, line: line)
+        }
     }
 }
 
