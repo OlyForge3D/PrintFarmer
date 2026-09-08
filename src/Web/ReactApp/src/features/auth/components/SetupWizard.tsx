@@ -517,7 +517,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // Remove duplicate addNetworkRange, updateNetworkRange, removeNetworkRange below (keep only top-level)
   // ...existing code...
   const renderAccountStep = () => (
-    <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); nextFromAccount(); }}>
+    <form className="space-y-6" noValidate onSubmit={(e) => { e.preventDefault(); nextFromAccount(); }}>
       {/* Name Fields */}
       <div className="grid grid-cols-2 gap-4">
         <div>
