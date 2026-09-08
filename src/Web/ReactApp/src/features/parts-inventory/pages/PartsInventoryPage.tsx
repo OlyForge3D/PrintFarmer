@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Tabs, Badge, Alert, Spinner } from '@/common/components/ui';
 import {
@@ -49,6 +49,7 @@ function readSavedTab(): TabId {
 
 export function PartsInventoryPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { tabId } = useParams<{ tabId?: string }>();
   const adminHubParent = useAdminHubParent();
 
@@ -58,9 +59,9 @@ export function PartsInventoryPage() {
   // If no tabId in URL, redirect to the resolved default so the URL always matches state.
   useEffect(() => {
     if (!isTabId(tabId)) {
-      navigate(`/parts-inventory/${activeTab}`, { replace: true });
+      navigate(`/parts-inventory/${activeTab}`, { replace: true, state: location.state });
     }
-  }, [tabId, activeTab, navigate]);
+  }, [tabId, activeTab, navigate, location.state]);
 
   // Persist active tab whenever the URL changes to a valid tab.
   useEffect(() => {
@@ -72,9 +73,9 @@ export function PartsInventoryPage() {
   const handleTabChange = useCallback(
     (nextId: string) => {
       if (!isTabId(nextId)) return;
-      navigate(`/parts-inventory/${nextId}`, { replace: true });
+      navigate(`/parts-inventory/${nextId}`, { replace: true, state: location.state });
     },
-    [navigate]
+    [navigate, location.state]
   );
 
   // System capabilities are fetched once (staleTime/gcTime: Infinity) and

@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../components/PartsTab', () => ({
@@ -29,9 +29,16 @@ vi.mock('@/common/hooks/useSystemCapabilities', () => ({
 import { ADMIN_HUB_ROUTE_STATE } from '@/features/admin/utils/adminHubParentState';
 import { PartsInventoryPage } from '../pages/PartsInventoryPage';
 
+function LocationPath() {
+  const location = useLocation();
+
+  return <output data-testid="location-path">{location.pathname}</output>;
+}
+
 function renderAt(path: string, state?: typeof ADMIN_HUB_ROUTE_STATE) {
   return render(
     <MemoryRouter initialEntries={state ? [{ pathname: path, state }] : [path]}>
+      <LocationPath />
       <Routes>
         <Route path="/parts-inventory" element={<PartsInventoryPage />} />
         <Route path="/parts-inventory/:tabId" element={<PartsInventoryPage />} />
@@ -70,10 +77,20 @@ describe('PartsInventoryPage', () => {
     expect(screen.getByRole('heading', { name: /Printed Parts/i })).toBeInTheDocument();
   });
 
-  it('shows the Admin Control Center parent when entered from the Admin Control Center', () => {
-    renderAt('/parts-inventory/skus', ADMIN_HUB_ROUTE_STATE);
+  it("preserves the Admin Control Center parent through the hub redirect and tab changes", async () => {
+    renderAt("/parts-inventory", ADMIN_HUB_ROUTE_STATE);
 
-    expect(screen.getByRole('link', { name: 'Admin Control Center' })).toHaveAttribute('href', '/admin');
+    await waitFor(() => {
+      expect(screen.getByTestId("location-path")).toHaveTextContent("/parts-inventory/skus");
+    });
+    expect(screen.getByRole("link", { name: "Admin Control Center" })).toHaveAttribute("href", "/admin");
+
+    fireEvent.click(screen.getByRole("tab", { name: /Bins/ }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location-path")).toHaveTextContent("/parts-inventory/bins");
+    });
+    expect(screen.getByRole("link", { name: "Admin Control Center" })).toHaveAttribute("href", "/admin");
   });
 
   it('does not show the Admin Control Center parent during direct navigation', () => {
