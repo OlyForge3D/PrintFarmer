@@ -14,6 +14,7 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Quota;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.Tags;
+using Farm.Infrastructure.Settings;
 using Farm.Modules.Gcode.DTOs;
 using Farm.Slicer.Module.Dtos;
 using Farm.Web.Api.Services;
@@ -949,7 +950,16 @@ public class GcodeFilesController(
             return BadRequest("allowedExtensions is required");
         }
 
-        uploadSettings.UpdateAllowedExtensions(req.AllowedExtensions);
+        var normalizedSettings = new GcodeUploadSettings
+        {
+            AllowedExtensions = req.AllowedExtensions.ToList(),
+        };
+        if (normalizedSettings.AllowedExtensions.Count == 0)
+        {
+            return BadRequest("At least one allowed extension is required");
+        }
+
+        uploadSettings.UpdateAllowedExtensions(normalizedSettings.AllowedExtensions);
         return NoContent();
     }
 

@@ -124,6 +124,7 @@ public sealed class GcodeFilesControllerSettingsTests : IAsyncLifetime, IDisposa
     [InlineData("{}")]
     [InlineData("{\"allowedExtensions\":null}")]
     [InlineData("{\"allowedExtensions\":[]}")]
+    [InlineData("{\"allowedExtensions\":[\"\",\"  \",null]}")]
     [InlineData("null")]
     [InlineData("{")]
     public async Task UpdateSettings_AuthorizedCallerWithInvalidBody_Returns400WithoutChangingSettings(string body)
