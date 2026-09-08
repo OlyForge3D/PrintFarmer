@@ -61,7 +61,7 @@ Frontend:
 cd src/Web/ReactApp
 npm install
 npm run build
-npm run test:run 2>&1 | tee /tmp/printfarmer-react-test.log
+npm run test:coverage 2>&1 | tee /tmp/printfarmer-react-coverage.log
 npm run lint
 ```
 
