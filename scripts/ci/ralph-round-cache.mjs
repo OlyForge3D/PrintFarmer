@@ -157,31 +157,45 @@ async function staleLock(lockFile, { isOwnerAlive, staleLockMs }) {
   }
 }
 
-async function reclaimObservedGeneration(lockFile, observed, options, suffix, depth = 0) {
-  const claimFile = `${lockFile}.${suffix}.${encodeURIComponent(observed.generation)}`;
+async function reclaimObservedGeneration(lockFile, observed, options, suffix) {
+  const staleTargets = [];
+  let targetFile = lockFile;
+  let target = observed;
   let claim;
-  try {
-    claim = await open(claimFile, 'wx');
-  } catch (error) {
-    if (error.code === 'EEXIST' && depth < 2) {
-      const orphan = await staleLock(claimFile, options);
-      if (orphan && await reclaimObservedGeneration(claimFile, orphan, options, 'recover', depth + 1)) {
-        return reclaimObservedGeneration(lockFile, observed, options, suffix, depth);
+  for (;;) {
+    staleTargets.push({ file: targetFile, generation: target.generation });
+    const claimFile = `${targetFile}.${suffix}.${encodeURIComponent(target.generation)}`;
+    try {
+      const handle = await open(claimFile, 'wx');
+      const metadata = lockMetadata(options.staleLockMs);
+      try {
+        await handle.writeFile(JSON.stringify(metadata));
+      } catch (error) {
+        await handle.close();
+        await rm(claimFile, { force: true });
+        throw error;
       }
-      return false;
+      claim = { file: claimFile, handle, metadata };
+      break;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      const orphan = await staleLock(claimFile, options);
+      if (!orphan) return false;
+      targetFile = claimFile;
+      target = orphan;
+      suffix = 'recover';
     }
-    throw error;
   }
   try {
     await options.hooks?.afterRecoveryClaimAcquired?.(lockFile, observed);
-    await claim.writeFile(JSON.stringify(lockMetadata(options.staleLockMs)));
-    const current = await staleLock(lockFile, options);
-    if (current?.generation !== observed.generation) return false;
-    await rm(lockFile, { force: true });
+    for (const staleTarget of staleTargets.reverse()) {
+      const current = await staleLock(staleTarget.file, options);
+      if (current?.generation !== staleTarget.generation) return false;
+      await rm(staleTarget.file, { force: true });
+    }
     return true;
   } finally {
-    await claim.close();
-    await rm(claimFile, { force: true });
+    await releaseLock(claim.file, claim);
   }
 }
 

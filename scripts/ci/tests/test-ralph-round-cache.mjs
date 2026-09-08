@@ -293,6 +293,33 @@ test('recovers an orphaned generation recovery claim without deleting a replacem
   }
 });
 
+test('unwinds three or more interrupted stale recovery claims without a depth limit', async () => {
+  const directory = await temporaryDirectory();
+  try {
+    const file = cacheFileForScope(scope, { env: { RALPH_CACHE_DIR: directory } });
+    const old = new Date('2026-01-01T00:00:00Z').toISOString();
+    const main = { ownerToken: 'dead-main', pid: 1, createdAt: old, expiresAt: old };
+    const guard = { ownerToken: 'dead-guard', pid: 1, createdAt: old, expiresAt: old };
+    const claim1 = `${file}.lock.reclaim.recover.token%3Adead-guard`;
+    const claim2 = `${claim1}.recover.token%3Aorphan-1`;
+    const claim3 = `${claim2}.recover.token%3Aorphan-2`;
+    await writeFile(`${file}.lock`, JSON.stringify(main));
+    await writeFile(`${file}.lock.reclaim`, JSON.stringify(guard));
+    await writeFile(claim1, JSON.stringify({ ...guard, ownerToken: 'orphan-1' }));
+    await writeFile(claim2, JSON.stringify({ ...guard, ownerToken: 'orphan-2' }));
+    await writeFile(claim3, JSON.stringify({ ...guard, ownerToken: 'orphan-3' }));
+    await writeRoundCache(scope, cache(), {
+      env: { RALPH_CACHE_DIR: directory }, staleLockMs: 1, isOwnerAlive: () => false, retries: 12,
+    });
+    assert.equal((await readRoundCache(scope, { env: { RALPH_CACHE_DIR: directory } })).reason, undefined);
+    for (const claim of [claim1, claim2, claim3]) {
+      assert.equal(await readFile(claim, 'utf8').then(() => true, () => false), false);
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('all authorization-adjacent changes invalidate cached conclusions', () => {
   const baseline = cache().comparisons;
   for (const comparisons of [
