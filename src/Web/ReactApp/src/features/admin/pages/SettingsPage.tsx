@@ -859,7 +859,12 @@ export function SettingsPage({
       return;
     }
 
+    let settleRaf: number | undefined;
     const raf = window.requestAnimationFrame(() => {
+      // Wait for the settings shell and its field controls to settle before
+      // assigning focus. Shell effects can otherwise replace the active
+      // element after this page's initial render frame.
+      settleRaf = window.requestAnimationFrame(() => {
       // The attribute value is quoted, so only backslashes and quotes need
       // escaping. CSS.escape is for bare identifiers and would mangle the dot
       // separator in a qualified `Section.Property` key.
@@ -877,9 +882,10 @@ export function SettingsPage({
         // Qualified field links map directly to the control IDs emitted by
         // SettingsPagelet. Prefer that exact association over a descendant
         // search, which can select auxiliary controls in the field row.
-        const control = fieldParam.includes('.')
+        const control = (fieldParam.includes('.')
           ? document.getElementById(fieldParam)
-          : target.querySelector<HTMLElement>(
+          : null)
+          ?? target.querySelector<HTMLElement>(
             'input, select, textarea, button, [tabindex]:not([tabindex="-1"])',
           );
         if (control) {
@@ -909,10 +915,14 @@ export function SettingsPage({
         toast.error(`Couldn't find the "${fieldParam}" setting on this page.`);
       }
       handledFieldActivationRef.current = fieldParam;
+      });
     });
 
     return () => {
       window.cancelAnimationFrame(raf);
+      if (settleRaf !== undefined) {
+        window.cancelAnimationFrame(settleRaf);
+      }
     };
   }, [fieldParam, loading]);
 
