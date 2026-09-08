@@ -241,6 +241,27 @@ test('incompatible prior identity and snapshot collections fail before delta pro
   await assert.rejects(() => scan(options), /incompatible schema/);
 });
 
+test('malformed prior issue and PR identities fail before terminal candidates can be fabricated', async (t) => {
+  const options = await temporaryOptions(t);
+  const directory = path.join(options.stateRoot, 'github.com', 'olyforge3d', 'printfarmer', 'workflow-test');
+  await mkdir(directory, { recursive: true });
+  await writeFile(path.join(directory, 'snapshot.json'), JSON.stringify({
+    schemaVersion: 1,
+    snapshot: { repo: options.repo, workflowId: options.workflowId, issues: [{}], prs: [], security: {}, sessions: {} },
+  }));
+  await assert.rejects(() => scan(options), /incompatible schema/);
+});
+
+test('open outgoing cross-repository edges remain in the reported blocking inventory', async (t) => {
+  const options = await temporaryOptions(t, {
+    transport: transport({
+      dependencies: { 1: { blocking: [{ number: 99, state: 'open', repository_url: 'https://api.github.com/repos/example/other' }] } },
+    }),
+  });
+  const result = await scan(options);
+  assert.match(JSON.stringify(result.blockedEdges), /example\/other#99/);
+});
+
 test('symlinked state namespace components are rejected before observation writes', async (t) => {
   const options = await temporaryOptions(t);
   const parent = path.join(options.stateRoot, 'github.com', 'olyforge3d', 'printfarmer');

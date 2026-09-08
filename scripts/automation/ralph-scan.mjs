@@ -100,11 +100,14 @@ export async function readPriorSnapshot(file, expected) {
     const source = await readFile(file, 'utf8');
     const snapshot = JSON.parse(source);
     const stored = snapshot.snapshot;
+    const validItems = (items) => Array.isArray(items) && items.every((item) =>
+      item && typeof item === 'object' && Number.isSafeInteger(item.number) && item.number > 0,
+    );
     if (
       snapshot.schemaVersion !== schemaVersion || !stored || typeof stored !== 'object' ||
       stored.repo?.toLowerCase() !== expected.repo.toLowerCase() ||
       stored.workflowId !== expected.workflowId ||
-      !Array.isArray(stored.issues) || !Array.isArray(stored.prs) ||
+      !validItems(stored.issues) || !validItems(stored.prs) ||
       !stored.security || typeof stored.security !== 'object' ||
       !stored.sessions || typeof stored.sessions !== 'object'
     ) {
@@ -462,6 +465,13 @@ function writeArtifactPath(directory, kind, value) {
   return path.join(directory, `${kind}-${digest(value).slice(0, 16)}.json`);
 }
 
+function uniqueEdges(edges) {
+  return [...new Map(edges.map((edge) => [
+    `${edge.blocker ?? ''}|${edge.blocked ?? ''}|${edge.state ?? ''}|${edge.reason ?? ''}`,
+    edge,
+  ])).values()];
+}
+
 export async function scan(options) {
   const configuredRoot = path.resolve(options.stateRoot);
   await mkdir(configuredRoot, { recursive: true, mode: 0o700 });
@@ -498,8 +508,15 @@ export async function scan(options) {
         changedIssues.push({ id: issueKey(priorIssue), reasons: ['removed-terminal-lookup-candidate'] });
       }
     }
-    const edges = snapshot.issues.flatMap((issue) => issue.dependencies.blockedBy);
-    const graph = topologicalOrder(snapshot.repo, snapshot.issues, edges);
+    const incomingEdges = snapshot.issues.flatMap((issue) => issue.dependencies.blockedBy);
+    const observedEdges = uniqueEdges(snapshot.issues.flatMap((issue) => [
+      ...issue.dependencies.blockedBy, ...issue.dependencies.blocking,
+    ]));
+    const graph = topologicalOrder(snapshot.repo, snapshot.issues, incomingEdges);
+    const blockedEdges = uniqueEdges([
+      ...graph.blockedEdges,
+      ...observedEdges.filter((edge) => edge.unknown || edge.state === 'open' || !edge.state),
+    ]);
     const artifactDirectory = path.join(directory, 'artifacts');
     await ensurePrivateDirectory(artifactDirectory, physicalRoot);
     const issueArtifact = writeArtifactPath(artifactDirectory, 'issues', snapshot.issues);
@@ -520,7 +537,7 @@ export async function scan(options) {
         inventoryArtifact: issueArtifact, readyUnresolved: graph.suggestions,
         currentlyUnblocked: graph.currentlyUnblocked, totalAccounted: snapshot.issues.length,
       },
-      dependencyOrder: graph.order, blockedEdges: graph.blockedEdges,
+      dependencyOrder: graph.order, blockedEdges,
       graphFlags: { cyclic: graph.cyclic, unknown: graph.unknown },
       prs: { attention: snapshot.prs.map((pr) => ({ number: pr.number, draft: pr.draft, headSha: pr.headSha })), detailArtifact: prArtifact },
       sessions: { ...snapshot.sessions, requiresLiveEnumerationBeforeDispatchOrReap: snapshot.sessions.availability !== 'provided' },
