@@ -10,6 +10,73 @@ import SwiftUI
 @MainActor
 final class PrinterDetailPanelsTests: XCTestCase {
 
+    func testControlsReflowRetainsSelectedJogAxisAndDistance() async throws {
+        var printer = try TestData.decodePrinter(from: TestJSON.printer)
+        printer.isOnline = true
+        printer.state = "idle"
+        let service = MockPrinterService()
+        service.capabilitiesToReturn = PrinterBackendCapabilities(
+            supportsMovement: true, supportsTemperatureControl: true,
+            supportsBedTemperature: true, supportsFanControl: true,
+            supportsHoming: true, supportedAxes: ["X", "Y", "Z"]
+        )
+        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        service.getBackendCapabilitiesCalledWith = nil
+
+        func content(width: CGFloat, size: DynamicTypeSize) -> some View {
+            PrinterSetupControlsContent(
+                printer: printer, viewModel: model,
+                usesColumns: PrinterDetailLayout.usesColumns(width: width, dynamicTypeSize: size)
+            )
+            .frame(width: width)
+            .environment(\.horizontalSizeClass, .regular)
+            .environment(\.dynamicTypeSize, size)
+        }
+        let controller = UIHostingController(rootView: AnyView(content(width: 900, size: .large)))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 1100, height: 1400))
+        window.rootViewController = controller
+        window.isHidden = false
+        defer { window.isHidden = true }
+
+        func settle() async throws {
+            try await Task.sleep(for: .milliseconds(100))
+            controller.view.setNeedsLayout()
+            controller.view.layoutIfNeeded()
+        }
+        func segmentedControls(in view: UIView) -> [UISegmentedControl] {
+            (view as? UISegmentedControl).map { [$0] }
+                ?? view.subviews.flatMap { segmentedControls(in: $0) }
+        }
+        func pickers() throws -> (axis: UISegmentedControl, step: UISegmentedControl) {
+            let controls = segmentedControls(in: controller.view)
+            return (
+                try XCTUnwrap(controls.first { $0.titleForSegment(at: 0) == "X" }),
+                try XCTUnwrap(controls.first { $0.titleForSegment(at: 0) == "0.1" })
+            )
+        }
+        try await settle()
+        let initial = try pickers()
+        initial.axis.selectedSegmentIndex = 2
+        initial.axis.sendActions(for: .valueChanged)
+        initial.step.selectedSegmentIndex = 2
+        initial.step.sendActions(for: .valueChanged)
+        try await settle()
+
+        let layouts: [(CGFloat, DynamicTypeSize)] = [
+            (700, .large), (900, .large), (900, .accessibility3), (900, .large)
+        ]
+        for (width, size) in layouts {
+            controller.rootView = AnyView(content(width: width, size: size))
+            try await settle()
+            let current = try pickers()
+            XCTAssertEqual(current.axis.selectedSegmentIndex, 2, "Reflow must preserve selected Z")
+            XCTAssertEqual(current.step.selectedSegmentIndex, 2, "Reflow must preserve selected 10 mm")
+        }
+        XCTAssertNil(service.moveCalledWith)
+        XCTAssertNil(service.getBackendCapabilitiesCalledWith)
+    }
+
     func testDetailColumnsRequireUsableWidthAndNonAccessibilityText() {
         XCTAssertTrue(PrinterDetailLayout.usesColumns(width: 1024, dynamicTypeSize: .large))
         XCTAssertTrue(PrinterDetailLayout.usesColumns(width: 760, dynamicTypeSize: .xxxLarge))

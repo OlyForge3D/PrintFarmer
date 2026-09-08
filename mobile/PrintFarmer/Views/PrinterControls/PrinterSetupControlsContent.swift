@@ -36,27 +36,22 @@ struct PrinterSetupControlsContent: View {
                         .padding(.bottom, 12)
                 }
 
-                if (usesColumns ?? (horizontalSizeClass == .regular)) && !dynamicTypeSize.isAccessibilitySize {
-                    HStack(alignment: .top, spacing: 16) {
-                        PreheatSubgroup(viewModel: viewModel)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        VStack(alignment: .leading, spacing: 12) {
-                            HomeSubgroup(viewModel: viewModel)
-                            Divider()
-                            JogSubgroup(viewModel: viewModel)
-                        }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                } else {
+                let columns = (usesColumns ?? (horizontalSizeClass == .regular))
+                    && !dynamicTypeSize.isAccessibilitySize
+                let layout = columns
+                    ? AnyLayout(HStackLayout(alignment: .top, spacing: 16))
+                    : AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
+                // Keep Jog's axis/distance state when width or text size reflows.
+                layout {
                     PreheatSubgroup(viewModel: viewModel)
-                    Divider()
-                        .background(Color.pfBorder)
-                        .padding(.vertical, 8)
-                    HomeSubgroup(viewModel: viewModel)
-                    Divider()
-                        .background(Color.pfBorder)
-                        .padding(.vertical, 8)
-                    JogSubgroup(viewModel: viewModel)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 12) {
+                        HomeSubgroup(viewModel: viewModel)
+                        Divider()
+                            .background(Color.pfBorder)
+                        JogSubgroup(viewModel: viewModel)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 if let error = viewModel.lastError {

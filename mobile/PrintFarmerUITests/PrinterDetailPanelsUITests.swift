@@ -142,7 +142,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             XCTAssertTrue(temperatures.waitForExistence(timeout: 5))
             XCTAssertLessThan(temperatures.frame.minY, app.otherElements["printer.detail.job"].frame.minY)
             XCTAssertTrue(app.buttons["printer.detail.control.emergencyStop"].isHittable)
-            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = "Essential Overview \(orientation == .portrait ? "portrait" : "landscape")"
             screenshot.lifetime = .keepAlways
             add(screenshot)
@@ -166,7 +166,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             XCTAssertGreaterThanOrEqual(emergency.frame.height, 44)
             XCTAssertGreaterThanOrEqual(emergency.frame.width, 44)
             XCTAssertEqual(emergency.label, "Emergency stop printer")
-            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = "Essential \(title) accessibility text"
             screenshot.lifetime = .keepAlways
             add(screenshot)
