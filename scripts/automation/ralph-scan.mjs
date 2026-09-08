@@ -455,7 +455,7 @@ export async function collectSnapshot({ repo, workflowId, sessionsFile, transpor
       blocking: blocking.map((entry) => dependencyEdge(
         { ...issue, repository_url: `https://api.github.com/repos/${repo}`, number },
         referenceFor(entry),
-        entry.state,
+        entry.state ?? 'unknown',
       )),
     });
   });

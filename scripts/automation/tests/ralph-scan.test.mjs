@@ -318,6 +318,20 @@ test('outgoing unknown edges participate in scan-level immediate readiness suppr
   assert.deepEqual(result.dependencyOrder, [1, 2]);
 });
 
+test('outgoing edge with missing target state suppresses its identifiable target', async (t) => {
+  const options = await temporaryOptions(t, {
+    transport: transport({
+      dependencies: { 1: { blocking: [{ number: 2, repository_url: 'https://api.github.com/repos/OlyForge3D/PrintFarmer' }] } },
+    }),
+  });
+  const result = await scan(options);
+  assert.equal(result.graphFlags.unknown, true);
+  assert.equal(result.graphFlags.readinessSuppressed, false);
+  assert.deepEqual(result.issues.currentlyUnblocked, [1]);
+  assert.deepEqual(result.issues.readyUnresolved, [1]);
+  assert.deepEqual(result.dependencyOrder, [1, 2]);
+});
+
 test('symlinked state namespace components are rejected before observation writes', async (t) => {
   const options = await temporaryOptions(t);
   const parent = path.join(options.stateRoot, 'github.com', 'olyforge3d', 'printfarmer');
