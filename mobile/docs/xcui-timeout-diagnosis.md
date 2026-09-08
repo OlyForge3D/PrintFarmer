@@ -187,6 +187,43 @@ bundles and text logs. An exceptional forced stop can leave a partial bundle;
 raw logs, stream and timing JSON are still retained/uploaded with `if: always()`.
 This does not promise Xcode can finish a valid bundle after a hard kill.
 
+#### Finalization validation
+
+Validated runner code at `2edca220baaf6957df62dc3807bc3ffce833dc2e` after
+fetching and integrating `origin/development`
+(`d0330781cbb4d1cd28934b7494a83cdd90d0dd19`, already an ancestor).
+Xcode 26.6 (17F113), iOS 26.5 (23F77), isolated iPhone 17:
+
+| Measurement | Result |
+| --- | --- |
+| Deliberate stall | **60.000s**, genuine execution-allowance failure |
+| Missing destination | **2.004s helper / 4.154s test**, both identifiers and `remaining=0.0s` retained |
+| Compact shell / fake-clock budget regressions | **4 passed**, no skips |
+| Whole invocation / reported tests | **116.349s / 99.238s** |
+| Non-test overhead / observed post-last-test tail | **17.110s / 1.254s** |
+| Native / wrapper exit | **65 / 65**, no forced termination or repeated tests |
+
+`verified.xcresult` is readable and contains all six selected tests exactly
+once. The missing-query log proceeds from the local `Bounded query diagnostic`
+attachment to failure and teardown without another custom remote query.
+The three fake-clock budget tests also pass, including the in-flight overrun
+and zero-budget cases. No `Failure collecting diagnostics from simulator`
+occurs. This proves the policy on the deliberate probes, not a resolution of
+the historical app/query issues.
+
+The focused standard-library suite
+`python3 -m unittest discover -s scripts/tests -p 'test_run_tests.py' -v`
+passes **17 tests**, including actual CI shell snippets, original exit-code
+propagation through `tee`, active-body separation, graceful/hard finalization,
+descendant cleanup, cancellation, malformed streams and artifact retention.
+An initial real invocation caught duplicate Xcode flags before tests started;
+that defect was corrected and regression-tested, not retried around.
+
+Evidence is local under `mobile/build/issue-2583/`: `verified.log`,
+`verified.xcresult`, `verified.events.jsonl`, `verified.timing.json`,
+`verified-summary.json`, `verified-tests.json`, and `runner-tests-final.log`.
+Preserve these before removing the worktree; they were not uploaded to GitHub.
+
 ### Synchronized-head adjacent validation
 
 After committing, fetched and merged `origin/development` at
