@@ -63,17 +63,19 @@ describe('ModelUploadModal', () => {
     it('should show progress capped at 95% during network upload', async () => {
       const mockFile = new File(['test content'], 'test.stl', { type: 'model/stl' });
       let progressCallback: ((progress: number) => void) | undefined;
+      let resolveUpload: ((result: { id: string; url: string }) => void) | undefined;
 
-      // Mock uploadModel to capture progress callback
-      vi.mocked(slicerService.uploadModel).mockImplementation((file, onProgress) => {
+      // The 95% cap is a *transient* state: it exists only between the last
+      // progress event and the upload promise resolving (which flips the item
+      // to "✓ Done"). Driving that window with real timers made the assertion
+      // race the completion update — under coverage instrumentation the two
+      // React updates coalesced into a single render and "95%" was never
+      // committed to the DOM at all (issue #2546). The test now owns both the
+      // progress events and the completion, so the window is deterministic.
+      vi.mocked(slicerService.uploadModel).mockImplementation((_file, onProgress) => {
         progressCallback = onProgress;
         return new Promise((resolve) => {
-          // Simulate progress updates
-          setTimeout(() => progressCallback?.(50), 10);
-          setTimeout(() => progressCallback?.(100), 20);
-          setTimeout(() => {
-            resolve({ id: 'test-id', url: 'test-url' });
-          }, 100);
+          resolveUpload = resolve;
         });
       });
 
@@ -98,11 +100,33 @@ describe('ModelUploadModal', () => {
       const uploadButton = screen.getByRole('button', { name: /upload 1 file/i });
       fireEvent.click(uploadButton);
 
-      // Wait for progress updates - should cap at 95%
+      // The upload has started once the component has handed us its progress
+      // callback.
       await waitFor(() => {
-        const progressText = screen.getByText(/95%/);
-        expect(progressText).toBeInTheDocument();
-      }, { timeout: 2000 });
+        expect(progressCallback).toBeDefined();
+      });
+
+      // Below the cap the raw progress is displayed verbatim.
+      await act(async () => {
+        progressCallback?.(50);
+      });
+      expect(screen.getByText('50%')).toBeInTheDocument();
+
+      // At/above the cap the display is clamped to 95% while the backend is
+      // still processing — the upload promise has deliberately not resolved.
+      await act(async () => {
+        progressCallback?.(100);
+      });
+      expect(screen.getByText('95%')).toBeInTheDocument();
+
+      // Only backend completion may take the item past the cap.
+      await act(async () => {
+        resolveUpload?.({ id: 'test-id', url: 'test-url' });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('✓ Done')).toBeInTheDocument();
+      });
     });
 
     it('should only show success toast after backend completes processing', async () => {
