@@ -573,6 +573,992 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertEqual(mockService.stopCalledWith, TestData.testUUID)
     }
 
+    // MARK: - Filament Assignment (issue #2522, Vasquez review finding 7)
+
+    /// `clearActiveSpoolAssignment()` must be assignment-only: it dispatches
+    /// `setActiveSpool(spoolId: nil, ...)` and must NEVER also dispatch the
+    /// physical `unloadFilament()` POST — that combined behavior belongs
+    /// exclusively to `ejectFilament()`, reachable separately with distinct,
+    /// truthful wording ("Eject Filament").
+    func testClearActiveSpoolAssignmentClearsAssignmentWithoutPhysicalUnload() async throws {
+        // Uses `printerMinimal`, not the default fixture: it carries a
+        // non-empty `rowVersion`, required by `reviewedPrinterRowVersion()`
+        // before either service call can dispatch.
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+
+        await viewModel.clearActiveSpoolAssignment()
+
+        guard let called = mockService.setActiveSpoolCalledWith else {
+            XCTFail("setActiveSpool must be called")
+            return
+        }
+        XCTAssertEqual(called.printerId, TestData.testUUID)
+        XCTAssertNil(called.spoolId, "Assignment-only clear must pass a nil spoolId")
+        XCTAssertNil(
+            mockService.unloadFilamentCalledWith,
+            "Assignment-only clear must never dispatch a physical unload"
+        )
+        XCTAssertNil(viewModel.actionError)
+        XCTAssertFalse(viewModel.isPerformingAction)
+    }
+
+    /// `ejectFilament()` itself is unchanged and still performs the combined
+    /// operation — this pins that its behavior did NOT silently change while
+    /// `clearActiveSpoolAssignment()` was split out.
+    func testEjectFilamentStillClearsAssignmentAndPhysicallyUnloads() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+
+        await viewModel.ejectFilament()
+
+        guard let called = mockService.setActiveSpoolCalledWith else {
+            XCTFail("setActiveSpool must be called")
+            return
+        }
+        XCTAssertEqual(called.printerId, TestData.testUUID)
+        XCTAssertNil(called.spoolId)
+        XCTAssertEqual(
+            mockService.unloadFilamentCalledWith,
+            TestData.testUUID,
+            "Eject must still dispatch the physical unload"
+        )
+    }
+
+    /// Shared fixture for tests that need a printer starting WITH an active
+    /// spool assignment (used by both `clearActiveSpoolAssignment` and
+    /// `ejectFilament`'s stale-snapshot-override regression tests).
+    private static let assignedPrinterJSON = """
+    {
+        "id": "660e8400-e29b-41d4-a716-446655440001",
+        "rowVersion": "AQIDBA==",
+        "name": "Ender 3",
+        "backend": "Moonraker",
+        "backendPort": 7125,
+        "inMaintenance": false,
+        "isEnabled": true,
+        "isOnline": true,
+        "spoolInfo": {
+            "hasActiveSpool": true,
+            "activeSpoolId": 42
+        }
+    }
+    """
+
+    /// Hicks review finding 14: a confirmed server-side clear must survive a
+    /// FAILED post-clear `loadPrinter()` refresh. `loadPrinter()`'s failure
+    /// path leaves `printer` untouched, so without an explicit local
+    /// override the pre-clear snapshot's `spoolInfo.hasActiveSpool == true`
+    /// would win in `effectiveSpoolInfo` and resurrect the very assignment
+    /// the server just confirmed cleared.
+    func testClearActiveSpoolAssignmentOverridesStalePrinterSnapshotWhenReloadFails() async throws {
+        let printer = try TestData.decodePrinter(from: Self.assignedPrinterJSON)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        guard let before = viewModel.effectiveSpoolInfo, before.hasActiveSpool else {
+            XCTFail("Setup: printer must start with an active spool assignment")
+            return
+        }
+
+        // The reload `clearActiveSpoolAssignment()` triggers must fail,
+        // while `setActiveSpool` itself still succeeds.
+        mockService.getHandler = { _ in throw NetworkError.invalidResponse }
+
+        await viewModel.clearActiveSpoolAssignment()
+
+        guard let called = mockService.setActiveSpoolCalledWith else {
+            XCTFail("setActiveSpool must still be called")
+            return
+        }
+        XCTAssertNil(called.spoolId)
+        XCTAssertNil(mockService.unloadFilamentCalledWith)
+        XCTAssertFalse(
+            viewModel.effectiveSpoolInfo?.hasActiveSpool ?? true,
+            "A confirmed server-side clear must not be resurrected by a failed post-clear reload"
+        )
+    }
+
+    // MARK: - Guided-swap toolhead bind retired-session protection
+    // (issue #2522, Hicks review finding 20)
+
+    private func makeSpool(id: Int = 42) -> SpoolmanSpool {
+        SpoolmanSpool(
+            id: id,
+            name: "PLA Spool",
+            material: "PLA",
+            colorHex: "#000000",
+            inUse: false,
+            filamentName: nil,
+            vendor: "TestVendor",
+            registeredAt: nil,
+            firstUsedAt: nil,
+            lastUsedAt: nil,
+            remainingWeightG: 750.0,
+            initialWeightG: 1000.0,
+            usedWeightG: 250.0,
+            spoolWeightG: 200.0,
+            remainingLengthMm: nil,
+            usedLengthMm: nil,
+            location: nil,
+            lotNumber: nil,
+            archived: false,
+            price: nil,
+            comment: nil,
+            hasNfcTag: nil,
+            usedPercent: nil,
+            remainingPercent: nil
+        )
+    }
+
+    /// Navigation-away: the view tears down (`isViewActive = false`, as
+    /// `PrinterDetailView.onDisappear` does) WHILE the bind request is still
+    /// in flight. The retired session must not still refresh the printer
+    /// once the request completes, and the deactivation itself must clear
+    /// `isPerformingAction` rather than leaving it stuck `true` forever on a
+    /// view model nobody is observing anymore.
+    func testBindToolheadSpoolSkipsRefreshAfterViewTornDownMidFlight() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        mockService.beforeBindToolheadSpool = { [weak viewModel] in
+            await MainActor.run { viewModel?.isViewActive = false }
+        }
+
+        await viewModel.bindToolheadSpool(makeSpool(), at: 0)
+
+        XCTAssertEqual(mockService.bindToolheadSpoolCalls.count, 1, "The in-flight request itself must still fire")
+        XCTAssertEqual(
+            mockService.getPrinterCallCount, 0,
+            "A torn-down session must not refresh the printer after the bind completes"
+        )
+        XCTAssertFalse(viewModel.isPerformingAction)
+    }
+
+    /// ABA (issue #2522, Hicks review finding 24): the view deactivates
+    /// THEN REACTIVATES — a materially different session — before the bind
+    /// request's uncancellable network await resolves. A boolean-only
+    /// `isViewActive` check would see `true` again at completion time and
+    /// wrongly conclude this stale call still owns the current session;
+    /// `actionLifecycleEpoch` (bumped on every activation-state transition)
+    /// must still detect it and skip both the refresh and any busy-flag
+    /// mutation — the reactivation transition itself is what already reset
+    /// `isPerformingAction` for the NEW session, not this stale call's own
+    /// tail check.
+    func testBindToolheadSpoolSkipsRefreshAfterDeactivateReactivateABAMidFlight() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        mockService.beforeBindToolheadSpool = { [weak viewModel] in
+            await MainActor.run {
+                viewModel?.isViewActive = false
+                viewModel?.isViewActive = true
+            }
+        }
+
+        await viewModel.bindToolheadSpool(makeSpool(), at: 0)
+
+        XCTAssertEqual(mockService.bindToolheadSpoolCalls.count, 1)
+        XCTAssertEqual(
+            mockService.getPrinterCallCount, 0,
+            "A stale call surviving a deactivate/reactivate ABA cycle must not refresh the reactivated session"
+        )
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "The reactivated session must not be stranded with a busy flag the retired call no longer owns"
+        )
+    }
+
+    /// Same-UUID/different-server: `configure(printerService:)` reassigns a
+    /// DIFFERENT service instance for the SAME view (a supported, tested
+    /// scenario elsewhere in this view model — server reconnect/hot-swap)
+    /// WHILE the bind request against the OLD service is still in flight.
+    /// The stale request's completion must not refresh through either the
+    /// old (retired) or the newly reconfigured service, and the
+    /// reconfiguration itself must clear `isPerformingAction` for the new
+    /// session rather than leaving it stuck `true` (issue #2522, Hicks
+    /// review finding 24 — "service replacement busy cleanup").
+    func testBindToolheadSpoolSkipsRefreshAfterServiceReconfiguredMidFlight() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        let newService = MockPrinterService()
+        newService.printerToReturn = printer
+        mockService.beforeBindToolheadSpool = { [weak viewModel] in
+            await MainActor.run { viewModel?.configure(printerService: newService) }
+        }
+
+        await viewModel.bindToolheadSpool(makeSpool(), at: 0)
+
+        XCTAssertEqual(mockService.bindToolheadSpoolCalls.count, 1)
+        XCTAssertEqual(
+            mockService.getPrinterCallCount, 0,
+            "The retired old service must not be refreshed after a mid-flight reconfigure"
+        )
+        XCTAssertEqual(
+            newService.getPrinterCallCount, 0,
+            "The new service must not be refreshed on behalf of an operation it never targeted"
+        )
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "The reconfigured session must not be stranded with a busy flag the retired call no longer owns"
+        )
+    }
+
+    // MARK: - Generalized action authority: sibling actions, concurrency,
+    // ABA (Frost directive following Hicks/Bishop review findings 24/25)
+    //
+    // `bindToolheadSpool`'s `ActionAuthority` (epoch + service identity,
+    // `defer`-based busy cleanup) is now the SHARED implementation every
+    // `printerService`-dispatching, `isPerformingAction`-tracking sibling
+    // action uses: `ejectFilament`, `clearActiveSpoolAssignment`,
+    // `setActiveSpool`, `loadSpoolById` (private, exercised via NFC scan),
+    // and `performAction` (pause/resume/cancel/stop/emergencyStop). The two
+    // tests below prove the generalization on a DIFFERENT sibling action
+    // than the ones already covered above, and prove the specific hazard a
+    // single-action epoch check cannot by itself rule out: two sibling
+    // actions racing concurrently must not clobber each other's busy state.
+
+    /// ABA on a sibling action, not `bindToolheadSpool`: `setActiveSpool`
+    /// deactivates then REACTIVATES before its network await resolves.
+    func testSetActiveSpoolSkipsRefreshAfterDeactivateReactivateABAMidFlight() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        // `setActiveSpool` requires `viewModel.printer` to already carry a
+        // non-empty `rowVersion` (via `reviewedPrinterRowVersion()`) before
+        // it can dispatch at all — without this, the ABA hook below would
+        // never fire.
+        await viewModel.loadPrinter()
+        let baselineGetPrinterCallCount = mockService.getPrinterCallCount
+
+        mockService.beforeSetActiveSpool = { [weak viewModel] in
+            await MainActor.run {
+                viewModel?.isViewActive = false
+                viewModel?.isViewActive = true
+            }
+        }
+
+        await viewModel.setActiveSpool(makeSpool())
+
+        XCTAssertNotNil(mockService.setActiveSpoolCalledWith, "The in-flight request itself must still fire")
+        XCTAssertEqual(
+            mockService.getPrinterCallCount, baselineGetPrinterCallCount,
+            "A stale call surviving a deactivate/reactivate ABA cycle must not refresh the reactivated session"
+        )
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "The reactivated session must not be stranded with a busy flag the retired call no longer owns"
+        )
+    }
+
+    /// Concurrent sibling actions: `bindToolheadSpool` (operation A, against
+    /// the OLD service) is still in flight when a `configure(printerService:)`
+    /// hot-swap occurs — a lifecycle event unrelated to A itself — and
+    /// `setActiveSpool` (operation B, against the NEW service) starts and is
+    /// ALSO still in flight when A's stale, now-authority-less network call
+    /// finally resolves. A's stale completion must not clear
+    /// `isPerformingAction` out from under B, which still legitimately owns
+    /// it; only B's own completion may do so.
+    func testStaleOperationCompletionDoesNotClobberConcurrentSiblingActionsBusyState() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        let newService = MockPrinterService()
+        newService.printerToReturn = printer
+
+        // `setActiveSpool` (operation B, below) requires `viewModel.printer`
+        // to already carry a non-empty `rowVersion` before it can dispatch
+        // at all — without this, B's mock hook would never fire and this
+        // test would hang forever waiting on `bEntered`.
+        await viewModel.loadPrinter()
+        let baselineOldServiceGetPrinterCallCount = mockService.getPrinterCallCount
+
+        let aEntered = ShiftTaskResultGate<Void>()
+        let aRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeBindToolheadSpool = {
+            await aEntered.succeed(())
+            _ = try? await aRelease.wait()
+        }
+
+        let aTask = Task { await viewModel.bindToolheadSpool(makeSpool(id: 1), at: 0) }
+        _ = try await aEntered.wait()
+        XCTAssertTrue(viewModel.isPerformingAction, "Setup: operation A must be genuinely in flight")
+
+        // An unrelated lifecycle event: the server is hot-swapped WHILE A is
+        // still suspended in its network await. This revokes A's RESULT/
+        // REFRESH authority, but must NOT touch busy-state tracking — A's
+        // own token remains held until A's own completion releases it, so
+        // busy correctly stays `true` straight through this reconfigure
+        // (a later Hicks review round: an earlier revision force-cleared
+        // the shared boolean here, which is exactly the same hazard the
+        // per-operation token set now replaces).
+        viewModel.configure(printerService: newService)
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "A's own outstanding token must keep busy true across an unrelated reconfigure, not be reset by the transition itself"
+        )
+
+        let bEntered = ShiftTaskResultGate<Void>()
+        let bRelease = ShiftTaskResultGate<Void>()
+        newService.beforeSetActiveSpool = {
+            await bEntered.succeed(())
+            _ = try? await bRelease.wait()
+        }
+
+        let bTask = Task { await viewModel.setActiveSpool(makeSpool(id: 2)) }
+        _ = try await bEntered.wait()
+        XCTAssertTrue(viewModel.isPerformingAction, "Setup: operation B must be genuinely in flight")
+
+        // Release A. Its stale completion must detect it lost RESULT/REFRESH
+        // authority (the epoch moved on when B's host service was
+        // reconfigured above) and skip refreshing — but releasing A's OWN
+        // token must not clear B's separate token.
+        await aRelease.succeed(())
+        await aTask.value
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Operation A's own token release must not clobber operation B's separate token while B is still genuinely in flight"
+        )
+        XCTAssertEqual(
+            mockService.getPrinterCallCount, baselineOldServiceGetPrinterCallCount,
+            "Operation A must not refresh through the retired old service"
+        )
+
+        // Release B. Its own, still-current completion must clear the flag.
+        await bRelease.succeed(())
+        await bTask.value
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "Operation B's own legitimate completion must clear the busy flag it still owns"
+        )
+        XCTAssertEqual(newService.getPrinterCallCount, 1, "Operation B must refresh through the service it actually targeted")
+    }
+
+    /// Same-service, SAME epoch Emergency Stop overlap (Hicks review
+    /// finding: per-operation busy identity) — completion order 1: the
+    /// ordinary filament action (`setActiveSpool`) finishes FIRST while
+    /// Emergency Stop is still in flight. Deliberately does NOT reconfigure
+    /// or deactivate between the two: `ActionAuthority`'s epoch/service
+    /// identity are IDENTICAL for both calls, so only the per-operation
+    /// token set can tell them apart. `setActiveSpool`'s own completion
+    /// must not clear busy while Emergency Stop — a materially different,
+    /// still-outstanding operation against the exact same session — is
+    /// still genuinely in flight.
+    func testSameServiceEmergencyStopOverlapFilamentActionCompletesFirstKeepsBusyUntilEmergencyStopCompletes() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+
+        let spoolEntered = ShiftTaskResultGate<Void>()
+        let spoolRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeSetActiveSpool = {
+            await spoolEntered.succeed(())
+            _ = try? await spoolRelease.wait()
+        }
+        let spoolTask = Task { await viewModel.setActiveSpool(makeSpool(id: 1)) }
+        _ = try await spoolEntered.wait()
+        XCTAssertTrue(viewModel.isPerformingAction, "Setup: the filament action must be genuinely in flight")
+
+        let stopEntered = ShiftTaskResultGate<Void>()
+        let stopRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeEmergencyStop = {
+            await stopEntered.succeed(())
+            _ = try? await stopRelease.wait()
+        }
+        viewModel.requestEmergencyStop()
+        let stopTask = Task { await viewModel.confirmAction() }
+        _ = try await stopEntered.wait()
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Setup: Emergency Stop must ALSO be genuinely in flight, overlapping the filament action"
+        )
+
+        // Complete the filament action FIRST. Ordinary/filament actions and
+        // Emergency Stop must both stay disabled (busy) throughout, since
+        // Emergency Stop is still outstanding.
+        await spoolRelease.succeed(())
+        await spoolTask.value
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "The filament action's own completion must not clear busy while Emergency Stop is still genuinely in flight"
+        )
+
+        // Complete Emergency Stop. Only NOW may busy clear.
+        await stopRelease.succeed(())
+        await stopTask.value
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "Busy must clear once every overlapping operation has completed"
+        )
+    }
+
+    /// Same scenario, REVERSED completion order: Emergency Stop finishes
+    /// FIRST while the ordinary filament action is still in flight.
+    func testSameServiceEmergencyStopOverlapEmergencyStopCompletesFirstKeepsBusyUntilFilamentActionCompletes() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+
+        let spoolEntered = ShiftTaskResultGate<Void>()
+        let spoolRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeSetActiveSpool = {
+            await spoolEntered.succeed(())
+            _ = try? await spoolRelease.wait()
+        }
+        let spoolTask = Task { await viewModel.setActiveSpool(makeSpool(id: 1)) }
+        _ = try await spoolEntered.wait()
+        XCTAssertTrue(viewModel.isPerformingAction, "Setup: the filament action must be genuinely in flight")
+
+        let stopEntered = ShiftTaskResultGate<Void>()
+        let stopRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeEmergencyStop = {
+            await stopEntered.succeed(())
+            _ = try? await stopRelease.wait()
+        }
+        viewModel.requestEmergencyStop()
+        let stopTask = Task { await viewModel.confirmAction() }
+        _ = try await stopEntered.wait()
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Setup: Emergency Stop must ALSO be genuinely in flight, overlapping the filament action"
+        )
+
+        // Complete Emergency Stop FIRST this time. Busy must stay true: the
+        // filament action is still genuinely outstanding.
+        await stopRelease.succeed(())
+        await stopTask.value
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Emergency Stop's own completion must not clear busy while the filament action is still genuinely in flight"
+        )
+
+        // Complete the filament action. Only NOW may busy clear.
+        await spoolRelease.succeed(())
+        await spoolTask.value
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "Busy must clear once every overlapping operation has completed"
+        )
+    }
+
+    /// Bishop review: same-service, same-epoch Pause + Emergency Stop
+    /// overlap — a DIFFERENT `performAction`-routed pair than the filament-
+    /// action tests above, both dispatched via `performAction` itself.
+    /// Completion order 1: Pause finishes FIRST while Emergency Stop is
+    /// still in flight.
+    func testSameServicePauseAndEmergencyStopOverlapPauseCompletesFirstKeepsBusyUntilEmergencyStopCompletes() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+
+        let pauseEntered = ShiftTaskResultGate<Void>()
+        let pauseRelease = ShiftTaskResultGate<Void>()
+        mockService.beforePause = {
+            await pauseEntered.succeed(())
+            _ = try? await pauseRelease.wait()
+        }
+        let pauseTask = Task { await viewModel.pausePrinter() }
+        _ = try await pauseEntered.wait()
+        XCTAssertTrue(viewModel.isPerformingAction, "Setup: Pause must be genuinely in flight")
+
+        let stopEntered = ShiftTaskResultGate<Void>()
+        let stopRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeEmergencyStop = {
+            await stopEntered.succeed(())
+            _ = try? await stopRelease.wait()
+        }
+        viewModel.requestEmergencyStop()
+        let stopTask = Task { await viewModel.confirmAction() }
+        _ = try await stopEntered.wait()
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Setup: Emergency Stop must ALSO be genuinely in flight, overlapping Pause"
+        )
+
+        await pauseRelease.succeed(())
+        await pauseTask.value
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Pause's own completion must not clear busy while Emergency Stop is still genuinely in flight"
+        )
+
+        await stopRelease.succeed(())
+        await stopTask.value
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "Busy must clear once every overlapping operation has completed"
+        )
+    }
+
+    /// Same scenario, REVERSED completion order: Emergency Stop finishes
+    /// FIRST while Pause is still in flight.
+    func testSameServicePauseAndEmergencyStopOverlapEmergencyStopCompletesFirstKeepsBusyUntilPauseCompletes() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+
+        let pauseEntered = ShiftTaskResultGate<Void>()
+        let pauseRelease = ShiftTaskResultGate<Void>()
+        mockService.beforePause = {
+            await pauseEntered.succeed(())
+            _ = try? await pauseRelease.wait()
+        }
+        let pauseTask = Task { await viewModel.pausePrinter() }
+        _ = try await pauseEntered.wait()
+        XCTAssertTrue(viewModel.isPerformingAction, "Setup: Pause must be genuinely in flight")
+
+        let stopEntered = ShiftTaskResultGate<Void>()
+        let stopRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeEmergencyStop = {
+            await stopEntered.succeed(())
+            _ = try? await stopRelease.wait()
+        }
+        viewModel.requestEmergencyStop()
+        let stopTask = Task { await viewModel.confirmAction() }
+        _ = try await stopEntered.wait()
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Setup: Emergency Stop must ALSO be genuinely in flight, overlapping Pause"
+        )
+
+        await stopRelease.succeed(())
+        await stopTask.value
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Emergency Stop's own completion must not clear busy while Pause is still genuinely in flight"
+        )
+
+        await pauseRelease.succeed(())
+        await pauseTask.value
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "Busy must clear once every overlapping operation has completed"
+        )
+    }
+
+    // MARK: - Eject physical-unload safety (Bishop review finding)
+
+    /// The physical unload leg of `ejectFilament()` must ALWAYS complete
+    /// once the assignment-clear leg has already succeeded, even if this
+    /// call's result/refresh authority is lost BETWEEN the two legs (a
+    /// deactivate/reactivate ABA cycle here) — never silently skipped.
+    func testEjectFilamentCompletesPhysicalUnloadEvenAfterAuthorityLostBetweenLegs() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        // `ejectFilament`'s first leg requires `viewModel.printer` to
+        // already carry a non-empty `rowVersion` before it can dispatch at
+        // all — without this it throws before the mock hook below ever
+        // fires.
+        await viewModel.loadPrinter()
+        mockService.beforeUnloadFilament = { [weak viewModel] in
+            await MainActor.run {
+                viewModel?.isViewActive = false
+                viewModel?.isViewActive = true
+            }
+        }
+
+        await viewModel.ejectFilament()
+
+        XCTAssertNotNil(mockService.setActiveSpoolCalledWith, "The assignment-clear leg must have fired")
+        XCTAssertEqual(
+            mockService.unloadFilamentCalledWith, TestData.testUUID,
+            "The physical unload leg must still complete despite authority loss between the two legs"
+        )
+    }
+
+    /// If the physical unload leg itself fails AFTER the assignment was
+    /// already cleared, that must be surfaced as an explicit error — never
+    /// silently swallowed — regardless of this call's own result/refresh
+    /// authority.
+    func testEjectFilamentSurfacesExplicitErrorWhenPhysicalUnloadFailsAfterAssignmentCleared() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        mockService.unloadFilamentErrorToThrow = NetworkError.invalidResponse
+
+        await viewModel.ejectFilament()
+
+        XCTAssertNotNil(mockService.setActiveSpoolCalledWith, "The assignment-clear leg must have fired and succeeded")
+        XCTAssertEqual(mockService.unloadFilamentCalledWith, TestData.testUUID, "The physical unload leg must still have been attempted")
+        let error = try XCTUnwrap(viewModel.actionError)
+        XCTAssertTrue(
+            error.contains("assignment cleared"),
+            "The error must explicitly say the assignment was already cleared, not just that the unload failed: \(error)"
+        )
+    }
+
+    /// Safety precedence (issue #2522, Vasquez review finding — CRITICAL):
+    /// Emergency Stop, engaged BETWEEN eject's two legs (right as the
+    /// assignment-clear leg resolves, simulated via the mock hook below,
+    /// before the physical-unload leg would otherwise dispatch), must
+    /// preempt the physical unload rather than letting it proceed — never
+    /// silently: the operator must still see an explicit message.
+    func testEjectFilamentSkipsPhysicalUnloadWhenEmergencyStopEngagedBetweenLegs() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        mockService.beforeSetActiveSpool = { [weak viewModel] in
+            await MainActor.run { viewModel?.engageEmergencyStopSafetyOverrideForTesting() }
+        }
+
+        await viewModel.ejectFilament()
+
+        XCTAssertNotNil(mockService.setActiveSpoolCalledWith, "The assignment-clear leg must still have fired and succeeded")
+        XCTAssertNil(
+            mockService.unloadFilamentCalledWith,
+            "The physical unload must NOT be sent once Emergency Stop has been engaged"
+        )
+        let error = try XCTUnwrap(viewModel.actionError)
+        XCTAssertTrue(
+            error.contains("Emergency Stop"),
+            "The error must explicitly name Emergency Stop as the reason the unload was withheld, not silently return: \(error)"
+        )
+    }
+
+    /// Bishop review finding (parity with `clearActiveSpoolAssignment()`'s
+    /// own Hicks review finding 14 fix): the assignment is ALREADY cleared
+    /// server-side once the first leg succeeds, so the local
+    /// `printer.spoolInfo` snapshot must be reconciled immediately — before
+    /// Emergency Stop preempts the physical unload — not left showing an
+    /// assigned spool the server no longer has recorded.
+    func testEjectFilamentOverridesStalePrinterSnapshotWhenEmergencyStopPreemptsUnload() async throws {
+        let printer = try TestData.decodePrinter(from: Self.assignedPrinterJSON)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        guard let before = viewModel.effectiveSpoolInfo, before.hasActiveSpool else {
+            XCTFail("Setup: printer must start with an active spool assignment")
+            return
+        }
+        mockService.beforeSetActiveSpool = { [weak viewModel] in
+            await MainActor.run { viewModel?.engageEmergencyStopSafetyOverrideForTesting() }
+        }
+
+        await viewModel.ejectFilament()
+
+        XCTAssertFalse(
+            viewModel.effectiveSpoolInfo?.hasActiveSpool ?? true,
+            "The local snapshot must show the assignment cleared even though Emergency Stop preempted the physical unload"
+        )
+    }
+
+    /// Same parity fix, different early-return path: the physical unload
+    /// leg itself fails AFTER the assignment was already cleared. The local
+    /// snapshot must still be reconciled, not left showing a stale
+    /// assignment.
+    func testEjectFilamentOverridesStalePrinterSnapshotWhenPhysicalUnloadFails() async throws {
+        let printer = try TestData.decodePrinter(from: Self.assignedPrinterJSON)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        guard let before = viewModel.effectiveSpoolInfo, before.hasActiveSpool else {
+            XCTFail("Setup: printer must start with an active spool assignment")
+            return
+        }
+        mockService.unloadFilamentErrorToThrow = NetworkError.invalidResponse
+
+        await viewModel.ejectFilament()
+
+        XCTAssertFalse(
+            viewModel.effectiveSpoolInfo?.hasActiveSpool ?? true,
+            "The local snapshot must show the assignment cleared even though the physical unload leg failed"
+        )
+    }
+
+    /// Hicks review finding: the local `printer.spoolInfo` reconciliation
+    /// above must be GATED on `hasActionAuthority`, not unconditional. If
+    /// `configure(printerService:)` hot-swaps mid-flight, a NEWER session
+    /// may already have published its OWN active-spool truth (e.g. via a
+    /// fresh `loadPrinter()`/live update) between eject's assignment-clear
+    /// leg succeeding (against the OLD, now-retired service) and this
+    /// point. The retired eject must not overwrite that with stale
+    /// "cleared" state.
+    func testEjectFilamentDoesNotOverwriteReplacementServicesPublishedSpoolStateAfterHotSwap() async throws {
+        let printer = try TestData.decodePrinter(from: Self.assignedPrinterJSON)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        guard let before = viewModel.effectiveSpoolInfo, before.hasActiveSpool else {
+            XCTFail("Setup: printer must start with an active spool assignment")
+            return
+        }
+
+        let newService = MockPrinterService()
+        newService.printerToReturn = printer
+        mockService.beforeSetActiveSpool = { [weak viewModel] in
+            await MainActor.run {
+                guard let viewModel else { return }
+                // The replacement session hot-swaps in and publishes its
+                // OWN active spool — simulating a fresh loadPrinter()/live
+                // update that completed for the NEW session WHILE the
+                // retired eject (targeting the OLD service) was still
+                // suspended in its own network call.
+                viewModel.configure(printerService: newService)
+                if var updatedPrinter = viewModel.printer {
+                    updatedPrinter.spoolInfo = PrinterSpoolInfo(hasActiveSpool: true, activeSpoolId: 99)
+                    viewModel.printer = updatedPrinter
+                }
+            }
+        }
+
+        await viewModel.ejectFilament()
+
+        XCTAssertEqual(
+            viewModel.effectiveSpoolInfo?.activeSpoolId, 99,
+            "A retired eject must not overwrite the replacement session's own published spool state"
+        )
+        XCTAssertTrue(
+            viewModel.effectiveSpoolInfo?.hasActiveSpool ?? false,
+            "The replacement session's active spool must remain visible, not clobbered by the retired eject's stale clear"
+        )
+    }
+
+    /// Bishop review finding: `lastSetSpoolInfo` (this view model's OWN
+    /// internal optimistic-state cache, never written by a replacement
+    /// service and never reset by a refresh) must be cleared
+    /// UNCONDITIONALLY, not gated on `hasActionAuthority` like
+    /// `printer.spoolInfo` correctly is. A STALE `lastSetSpoolInfo` left
+    /// over from an earlier successful assignment, if not cleared by a
+    /// hot-swapped eject, would resurface once the REPLACEMENT session's
+    /// own refresh reports `hasActiveSpool: false` — `effectiveSpoolInfo`
+    /// falls through to `lastSetSpoolInfo ?? printer?.spoolInfo` in exactly
+    /// that case.
+    func testEjectFilamentClearsStaleLastSetSpoolInfoEvenAfterHotSwapWhenReplacementPublishesCleared() async throws {
+        let printer = try TestData.decodePrinter(from: Self.assignedPrinterJSON)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+
+        // Establish a STALE `lastSetSpoolInfo` via a normal, successful
+        // assignment BEFORE the hot-swap below — `setActiveSpool` sets it
+        // internally on success.
+        await viewModel.setActiveSpool(makeSpool(id: 7))
+        guard let staleBefore = viewModel.effectiveSpoolInfo, staleBefore.hasActiveSpool else {
+            XCTFail("Setup: a stale lastSetSpoolInfo must be recorded before the hot-swap")
+            return
+        }
+
+        let newService = MockPrinterService()
+        newService.printerToReturn = printer
+        mockService.beforeSetActiveSpool = { [weak viewModel] in
+            await MainActor.run {
+                guard let viewModel else { return }
+                viewModel.configure(printerService: newService)
+                // The replacement session's own refresh concludes there is
+                // NO active spool.
+                if var updatedPrinter = viewModel.printer {
+                    updatedPrinter.spoolInfo = PrinterSpoolInfo(hasActiveSpool: false)
+                    viewModel.printer = updatedPrinter
+                }
+            }
+        }
+
+        await viewModel.ejectFilament()
+
+        XCTAssertFalse(
+            viewModel.effectiveSpoolInfo?.hasActiveSpool ?? true,
+            "A stale lastSetSpoolInfo from before the hot-swap must not resurrect an active spool once the replacement session reports none"
+        )
+    }
+
+    // MARK: - actionError Observability (Hicks review finding — the
+    // #2400 `@Observable` trap)
+
+    /// `operationErrorMessages`/`operationErrorOrder` (which
+    /// `actionError`'s computed getter reads) must NOT be
+    /// `@ObservationIgnored`, or SwiftUI would never re-evaluate
+    /// `actionError` on a path that mutates nothing else observable
+    /// alongside it. `markPrinterReady()`'s missing-status early return is
+    /// exactly such a path: it sets an error and returns BEFORE ever
+    /// calling `beginBusyToken()`, so `activeActionTokens` — which IS
+    /// tracked, and whose own mutation is what incidentally masked this bug
+    /// on every OTHER sibling action's error path — never changes here at
+    /// all. The failing pass leaves every other observable property
+    /// untouched, so the invalidation below can only have come from the
+    /// error storage itself.
+    func testActionErrorObservationInvalidatesOnSetWithoutAnyBusyTokenChange() async throws {
+        let invalidated = expectation(description: "actionError observation fired on set")
+        withObservationTracking {
+            _ = viewModel.actionError
+        } onChange: {
+            invalidated.fulfill()
+        }
+
+        await viewModel.markPrinterReady()
+
+        await fulfillment(of: [invalidated], timeout: 2)
+        XCTAssertEqual(viewModel.actionError, "Refresh the auto-dispatch status before confirming.")
+    }
+
+    /// Same trap, the clearing direction: dismissing the alert
+    /// (`viewModel.actionError = nil`) must also invalidate Observation.
+    func testActionErrorObservationInvalidatesOnClear() async throws {
+        await viewModel.markPrinterReady()
+        XCTAssertNotNil(viewModel.actionError, "precondition: an error is already recorded")
+
+        let invalidated = expectation(description: "actionError observation fired on clear")
+        withObservationTracking {
+            _ = viewModel.actionError
+        } onChange: {
+            invalidated.fulfill()
+        }
+
+        viewModel.actionError = nil
+
+        await fulfillment(of: [invalidated], timeout: 2)
+        XCTAssertNil(viewModel.actionError)
+    }
+
+    // MARK: - Concurrent error preservation (Hicks review finding: a single
+    // shared `actionError` let two concurrent operations silently clobber
+    // each other's error message)
+
+    /// Both eject AND Emergency Stop are genuinely concurrent and BOTH
+    /// fail. Completion order 1: eject completes FIRST. Emergency Stop's
+    /// own error, set when it completes SECOND, must not be lost, and it
+    /// must not clobber eject's own error either.
+    func testConcurrentFailingEjectAndEmergencyStopPreserveBothErrorsWhenEjectCompletesFirst() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        // Eject's first leg (`setActiveSpool`) fails via the shared
+        // `errorToThrow`; Emergency Stop fails via its OWN dedicated error
+        // so the two produce DISTINGUISHABLE messages.
+        mockService.errorToThrow = NetworkError.invalidResponse
+        mockService.emergencyStopErrorToThrow = ShiftTaskProofError.forced("Emergency Stop rejected by printer")
+
+        let ejectEntered = ShiftTaskResultGate<Void>()
+        let ejectRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeSetActiveSpool = {
+            await ejectEntered.succeed(())
+            _ = try? await ejectRelease.wait()
+        }
+        let ejectTask = Task { await viewModel.ejectFilament() }
+        _ = try await ejectEntered.wait()
+
+        let stopEntered = ShiftTaskResultGate<Void>()
+        let stopRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeEmergencyStop = {
+            await stopEntered.succeed(())
+            _ = try? await stopRelease.wait()
+        }
+        viewModel.requestEmergencyStop()
+        let stopTask = Task { await viewModel.confirmAction() }
+        _ = try await stopEntered.wait()
+
+        // Eject completes FIRST.
+        await ejectRelease.succeed(())
+        await ejectTask.value
+        let afterEject = try XCTUnwrap(viewModel.actionError)
+        XCTAssertTrue(
+            afterEject.contains("Invalid server response"),
+            "Eject's own error must be visible immediately after it completes: \(afterEject)"
+        )
+
+        // Emergency Stop completes SECOND — must not clobber eject's error.
+        await stopRelease.succeed(())
+        await stopTask.value
+        let combined = try XCTUnwrap(viewModel.actionError)
+        XCTAssertTrue(
+            combined.contains("Invalid server response"),
+            "Eject's error must survive Emergency Stop completing second: \(combined)"
+        )
+        XCTAssertTrue(
+            combined.contains("Emergency Stop rejected by printer"),
+            "Emergency Stop's own error must also be present, not lost: \(combined)"
+        )
+    }
+
+    /// Same scenario, REVERSED completion order: Emergency Stop completes
+    /// FIRST. Eject's own error, set when it completes SECOND, must not be
+    /// lost, and it must not clobber Emergency Stop's error either.
+    func testConcurrentFailingEjectAndEmergencyStopPreserveBothErrorsWhenEmergencyStopCompletesFirst() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        mockService.errorToThrow = NetworkError.invalidResponse
+        mockService.emergencyStopErrorToThrow = ShiftTaskProofError.forced("Emergency Stop rejected by printer")
+
+        let ejectEntered = ShiftTaskResultGate<Void>()
+        let ejectRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeSetActiveSpool = {
+            await ejectEntered.succeed(())
+            _ = try? await ejectRelease.wait()
+        }
+        let ejectTask = Task { await viewModel.ejectFilament() }
+        _ = try await ejectEntered.wait()
+
+        let stopEntered = ShiftTaskResultGate<Void>()
+        let stopRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeEmergencyStop = {
+            await stopEntered.succeed(())
+            _ = try? await stopRelease.wait()
+        }
+        viewModel.requestEmergencyStop()
+        let stopTask = Task { await viewModel.confirmAction() }
+        _ = try await stopEntered.wait()
+
+        // Emergency Stop completes FIRST this time.
+        await stopRelease.succeed(())
+        await stopTask.value
+        let afterStop = try XCTUnwrap(viewModel.actionError)
+        XCTAssertTrue(
+            afterStop.contains("Emergency Stop rejected by printer"),
+            "Emergency Stop's own error must be visible immediately after it completes: \(afterStop)"
+        )
+
+        // Eject completes SECOND — must not clobber Emergency Stop's error.
+        await ejectRelease.succeed(())
+        await ejectTask.value
+        let combined = try XCTUnwrap(viewModel.actionError)
+        XCTAssertTrue(
+            combined.contains("Emergency Stop rejected by printer"),
+            "Emergency Stop's error must survive eject completing second: \(combined)"
+        )
+        XCTAssertTrue(
+            combined.contains("Invalid server response"),
+            "Eject's own error must also be present, not lost: \(combined)"
+        )
+    }
+
+    // MARK: - Pull-to-refresh transition-during-refresh (issue #2522, Hicks
+    // review finding 23)
+
+    /// `PrinterDetailViewLifecycle.refresh` must re-evaluate its caller's
+    /// CURRENT page/scene state when it finally applies
+    /// `setSnapshotPollingAllowed`, not a value captured before its
+    /// `loadPrinter()` await — a pull-to-refresh can leave that await in
+    /// flight for a while, long enough for the operator to switch from the
+    /// Status page (foreground for the camera) to Controls (not) or back.
+    func testRefreshAppliesSnapshotPollingStateAsOfCompletionNotAsOfStart() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        let gate = ShiftTaskResultGate<Printer>()
+        let script = ScriptedCanonicalResult<Printer>([.gated(gate)])
+        mockService.getHandler = { _ in try await script.next() }
+        let coverageViewModel = PrinterFilamentCoverageViewModel(printerId: TestData.testUUID)
+
+        // Mirrors `PrinterDetailView.isStatusPageForeground` at the moment
+        // refresh STARTS: the Status page is foreground, so polling should
+        // resume once refresh concludes — UNLESS the operator switches away
+        // before it does, below.
+        var isStatusPageForegroundNow = true
+
+        let refreshTask = Task {
+            await PrinterDetailViewLifecycle.refresh(
+                viewModel: viewModel,
+                coverageViewModel: coverageViewModel,
+                refreshCoverage: false,
+                snapshotPollingAllowed: { isStatusPageForegroundNow }
+            )
+        }
+        await script.waitForCallCount(1)
+
+        // The operator switches to the Controls page while `loadPrinter()`'s
+        // network request is still in flight.
+        isStatusPageForegroundNow = false
+
+        await gate.succeed(printer)
+        await refreshTask.value
+
+        XCTAssertFalse(
+            viewModel.isSnapshotPollingActive,
+            "Refresh must apply the CURRENT (post-switch) page state, not the state captured when refresh started"
+        )
+    }
+
     // MARK: - Destructive Action Confirmation
 
     func testRequestCancelShowsConfirmation() {

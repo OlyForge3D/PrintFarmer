@@ -22,8 +22,19 @@ with lazy construction directly inside `StateObject(wrappedValue:)`. The
 `printer:viewModel:` wrapper initializer is test-only. The wrapper loads
 capabilities and forwards `PrinterControlsUpdateSignal` changes outside
 online/offline content, so hiding controls cannot strand an acknowledgement.
-The existing Advanced destination and its feature-disable dismissal are unchanged.
-The double-Advanced navigation is removed by integration issue #2522, not this extraction.
+
+**Integration status (#2522, shipped):** `PrinterDetailView` now embeds
+`PrinterControlsSection` directly as the Controls page of a two-page
+Status/Controls host (`PrinterDetailPanelsHost`), reached via a segmented
+selector or a horizontal swipe — not via a nested `NavigationLink`. The
+previous inline "Advanced" disclosure containing a further "Advanced" link
+(double-Advanced navigation) is removed; `AdvancedPrinterControlsAccess
+.isEntryVisible` still gates the Controls page's existence exactly as it
+gated the old link, so the safety-toggle/offline-printer behavior is
+unchanged. The standalone `AdvancedPrinterControlsView` destination and its
+`AppDestination.advancedPrinterControls` route remain in the codebase
+unmodified (still a valid direct destination type) but printer detail no
+longer routes through them.
 
 For embedding, retain one owner above page visibility, scoped by registered server
 and printer UUID. The host supplies the scoped service, loads capabilities once,

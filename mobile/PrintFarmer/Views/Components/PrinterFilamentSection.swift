@@ -72,6 +72,16 @@ struct PrinterFilamentSection: View {
             if let index = row.index {
                 Text("T\(index)").font(.caption).foregroundStyle(.secondary)
             }
+            // Retained toolhead detail (issue #2522, Hicks review finding
+            // 21): the pre-#2522 `toolheadSlotRow` this section replaced
+            // showed nozzle diameter per slot; carried through
+            // `PrinterFilamentPresentation.Row.nozzleDiameter` so it isn't
+            // lost.
+            if let nozzleDiameter = row.nozzleDiameter {
+                Text("\(nozzleDiameter, specifier: "%.1f") mm nozzle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if row.isCoverageOnly {
                 Text("Coverage-only slot; current assignment unavailable").font(.caption)
             } else {
