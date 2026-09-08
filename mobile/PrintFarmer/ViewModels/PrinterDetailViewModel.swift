@@ -233,14 +233,24 @@ final class PrinterDetailViewModel {
     /// the ABA sequence regardless of what the other two read at the
     /// moment `hasAuthority()` runs.
     ///
-    /// "Clear busy only if the operation owns it": `isPerformingAction` is
-    /// reset to `false` at the tail ONLY when `hasAuthority()` still holds.
-    /// A retired call that loses authority never touches it — the epoch
-    /// bump that revoked its authority already reset it once for the NEW
-    /// session (see `isViewActive`'s `didSet` / `configure`), so a stale
-    /// completion resetting it again would be redundant at best and, if a
-    /// newer legitimate call had since set it back to `true`, would
-    /// incorrectly clear busy state that call still owns.
+    /// "Clear busy only if the operation owns it" (Bishop review finding
+    /// 25): busy-state cleanup is a `defer`, not one of the scattered
+    /// `guard hasAuthority() else { return }` tail checks that gate
+    /// `loadPrinter()`/`actionError`. Those two are RESULT/REFRESH
+    /// authority — whether this call's outcome may still be applied — and
+    /// are a separate concern from busy-state cleanup, which must run
+    /// exactly once on every exit path (success, a thrown error, OR an
+    /// early return via one of those same guards) regardless of which path
+    /// was taken. Before this `defer`, "the method returns without
+    /// clearing the busy latch" on some exit paths was possible if a
+    /// future change added a return point upstream of the old, unguarded
+    /// tail reset. The `defer` still checks `hasAuthority()` itself — it
+    /// only clears the flag for the operation that still owns it — because
+    /// the SAME lifecycle transition that revoked authority (`isViewActive`
+    /// didSet / `configure(printerService:)`) already reset it once for
+    /// whatever session is current now; an unconditional clear here could
+    /// otherwise stomp a NEWER legitimate call's busy state in the narrow
+    /// window between that reset and this stale call's own completion.
     func bindToolheadSpool(_ spool: SpoolmanSpool, at toolheadIndex: Int) async {
         guard isViewActive else { return }
         guard let printerService else {
@@ -256,6 +266,11 @@ final class PrinterDetailViewModel {
         }
         isPerformingAction = true
         actionError = nil
+        defer {
+            if hasAuthority() {
+                isPerformingAction = false
+            }
+        }
         do {
             _ = try await printerService.bindToolheadSpool(
                 printerId: printerId,
@@ -269,8 +284,6 @@ final class PrinterDetailViewModel {
             guard hasAuthority() else { return }
             actionError = error.localizedDescription
         }
-        guard hasAuthority() else { return }
-        isPerformingAction = false
     }
 
     /// Injects the job and maintenance services used by the F7 operator
