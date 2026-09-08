@@ -26,6 +26,7 @@ import {
   getDestinationById,
   getStandaloneConfigurationDestinations,
   hasAccessibleDestinationWithPrefix,
+  resolveDestinationPath,
   type AdminDestination,
 } from '@/features/admin/registry';
 import { useAdminNavPins } from '@/common/contexts/useAdminNavPins';
@@ -211,11 +212,7 @@ function getDashboardDestinations(
     .map((id) => getDestinationById(id))
     .filter((destination): destination is AdminDestination => Boolean(destination))
     .filter((destination) => canAccessDestination(destination, access))
-    .map((destination) =>
-      destination.id === 'ops-workers'
-        ? { ...destination, path: '/admin/workers?workerTab=jobs' }
-        : destination,
-    );
+    .map((destination) => ({ ...destination, path: resolveDestinationPath(destination) }));
 
   // Configuration destinations that live outside the /admin/settings shell
   // (`/catalog`, `/locations`, `/admin/power-monitors`) get their own cards.

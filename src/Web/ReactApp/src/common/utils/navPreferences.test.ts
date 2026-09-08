@@ -99,6 +99,29 @@ describe('navPreferences', () => {
     ]);
   });
 
+  it('drops a corrupt (non-array) adminPinnedItemIds instead of throwing or inventing pins', () => {
+    const resolved = resolveNavPreferences(items, 'admin', {
+      orderedItemIds: ['overview'],
+      hiddenItemIds: [],
+      pinnedItemIds: [],
+      // Simulates hand-edited or version-skewed localStorage content.
+      adminPinnedItemIds: 'ops-analytics' as unknown as string[],
+    });
+
+    expect(resolved.preferences.adminPinnedItemIds).toBeUndefined();
+  });
+
+  it('fails safe to no admin pins when stored JSON is malformed', () => {
+    const storageKey = getNavPreferencesStorageKey('user-corrupt');
+    localStorage.setItem(storageKey, '{not valid json');
+
+    const loaded = loadNavPreferences(storageKey);
+    expect(loaded).toBeNull();
+
+    const resolved = resolveNavPreferences(items, 'admin', loaded);
+    expect(resolved.preferences.adminPinnedItemIds ?? []).toEqual([]);
+  });
+
   it('reorders visible items correctly when there are hidden items', () => {
     const defaults = createDefaultNavPreferences(items, 'operator');
     const hidden = setNavItemHidden(defaults, 'print-queue', true);

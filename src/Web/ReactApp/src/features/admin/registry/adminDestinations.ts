@@ -743,6 +743,31 @@ export function getDestinationById(id: string): AdminDestination | undefined {
 }
 
 /**
+ * Per-destination path overrides applied wherever a destination resolves to
+ * a navigable href — dashboard cards, the pin chooser, and pinned navbar
+ * links must all agree on the same canonical deep link for a given
+ * destination id. Keep this the single place such overrides live; do not
+ * duplicate a destination-specific path rewrite in a page or component.
+ *
+ * `ops-workers` deep-links to the Jobs tab of the Workers page rather than
+ * its default tab, matching the dashboard's operational card.
+ */
+const DESTINATION_PATH_OVERRIDES: Readonly<Record<string, string>> = {
+  'ops-workers': '/admin/workers?workerTab=jobs',
+};
+
+/**
+ * Resolve the canonical navigable path for a destination, applying any
+ * registered override. Every surface that turns a destination into a link
+ * (dashboard cards, the pin chooser's eligible list, pinned navbar items)
+ * must call this instead of reading `destination.path` directly, so a pin
+ * always lands on the same target the destination's own card would use.
+ */
+export function resolveDestinationPath(destination: AdminDestination): string {
+  return DESTINATION_PATH_OVERRIDES[destination.id] ?? destination.path;
+}
+
+/**
  * Get all destinations belonging to a single group, preserving registry order.
  */
 export function getDestinationsByGroup(group: AdminDestinationGroup): AdminDestination[] {

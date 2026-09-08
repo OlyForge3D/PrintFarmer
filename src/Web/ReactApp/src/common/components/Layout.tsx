@@ -28,6 +28,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
   canAccessDestination,
   getDestinationById,
+  resolveDestinationPath,
   hasAccessibleDestinationWithPrefix,
   hasAccessibleHubTile,
 } from '@/features/admin/registry/adminDestinations';
@@ -491,7 +492,7 @@ export function Layout() {
       .map((destination) => ({
         id: destination.id,
         name: destination.label,
-        href: destination.path,
+        href: resolveDestinationPath(destination),
         icon: destination.icon,
         sectionName: 'Admin',
       }));

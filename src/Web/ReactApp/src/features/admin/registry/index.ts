@@ -17,4 +17,5 @@ export {
   getStandaloneConfigurationDestinations,
   hasAccessibleDestinationWithPrefix,
   isPathWithin,
+  resolveDestinationPath,
 } from './adminDestinations';
