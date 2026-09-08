@@ -256,6 +256,13 @@ gh workflow run testflight-beta.yml -f environment=internal
 The workflow creates and pushes the next `v1.0-beta.N` tag from the latest beta
 tag series unless `marketing_version` or `beta_number` inputs are supplied.
 
+The workflow uses manual App Store signing through fastlane match. Before
+triggering a beta after changing target entitlements, confirm the Apple
+Developer Portal App IDs and match profiles were updated for every capability
+and bundle ID. The release checklist contains the App Groups/profile mismatch
+runbook for the main app and scan-widget extension:
+[`docs/IOS_BETA_RELEASE_CHECKLIST.md`](../docs/IOS_BETA_RELEASE_CHECKLIST.md#troubleshooting-app-groups-provisioning-failures).
+
 The canonical tag-based method is:
 
 ```bash

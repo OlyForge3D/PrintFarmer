@@ -147,6 +147,29 @@ Do NOT use if:
 ### Issue: Keychain timeout during long builds
 **Solution:** Increase timeout in `set-keychain-settings` (default 21600 = 6 hours).
 
+### Issue: Provisioning profile is missing an entitlement
+
+**Symptom:** `xcodebuild archive` fails with errors such as:
+
+```text
+Provisioning profile "match AppStore com.olyforge3d.printfarmer.ios.scan-widgets" doesn't include the App Groups capability.
+... doesn't support the group.com.olyforge3d.printfarmer App Group.
+... doesn't include the com.apple.security.application-groups entitlement.
+```
+
+**Solution:** Treat this as portal/profile drift, not a keychain problem. First
+update the Apple Developer Portal App IDs for every affected bundle ID so their
+capabilities match the target `.entitlements` files. Then regenerate App Store
+match profiles locally without `--readonly` and with `--force` for both the main
+app and widget identifiers. CI's readonly `fastlane match appstore` step can
+install existing profiles only; it cannot repair stale profiles. See
+[`docs/IOS_BETA_RELEASE_CHECKLIST.md`](../../../docs/IOS_BETA_RELEASE_CHECKLIST.md#troubleshooting-app-groups-provisioning-failures)
+for the PrintFarmer runbook and local command.
+
+**Do not:** use `match nuke` or `mobile/scripts/rotate-match-password.sh` for a
+normal profile refresh, and do not add a global `url.*.insteadOf` Git rewrite
+with an embedded token. Use `gh auth setup-git` for local GitHub credentials.
+
 ## Testing Checklist
 
 - [ ] YAML syntax is valid (`python3 -c "import yaml; yaml.safe_load(open('workflow.yml'))"`)

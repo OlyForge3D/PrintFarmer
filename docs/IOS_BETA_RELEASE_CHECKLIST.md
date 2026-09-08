@@ -87,14 +87,27 @@ Record pass/fail here before proceeding:
 - [ ] Bundle identifier is `com.olyforge3d.printfarmer.ios` in
   `PRODUCT_BUNDLE_IDENTIFIER` (both Debug/Release app-target configs) and
   matches `ExportOptions.plist` and `Matchfile`'s `app_identifier`.
-- [ ] Apple Developer Portal App ID `com.olyforge3d.printfarmer.ios` has the
-  **Push Notifications** capability enabled (portal-side; not tracked in this
-  repo) so the provisioning profile pulled by `fastlane match` actually
-  authorizes push. A build can compile and archive successfully with the
-  entitlement present in source yet still be rejected/silently non-functional
-  for push if the portal capability or profile is stale — re-run
-  `fastlane match appstore` (not `--readonly`) after enabling the capability
-  so `PrintFarmerApp-certificates` picks up a regenerated profile.
+- [ ] Apple Developer Portal capabilities match every entitlement before
+  archiving. The app target (`com.olyforge3d.printfarmer.ios`) requires
+  **App Groups**, **Push Notifications**, and **NFC Tag Reading** because
+  `mobile/PrintFarmer/PrintFarmer.entitlements` declares
+  `com.apple.security.application-groups`, `aps-environment`, and NFC `TAG`
+  formats. The widget target
+  (`com.olyforge3d.printfarmer.ios.scan-widgets`) requires **App Groups**
+  because `mobile/PrintFarmerScanWidgets/PrintFarmerScanWidgets.entitlements`
+  declares the same `group.com.olyforge3d.printfarmer` App Group. Capabilities
+  are portal-side state and are not tracked in this repo.
+- [ ] App Store provisioning profiles in the fastlane-match certificates repo
+  were regenerated after the latest entitlement or portal capability change.
+  A source entitlement can compile successfully but still fail during
+  `xcodebuild archive` if the portal App ID or match profile is stale. CI uses
+  `fastlane match appstore --readonly` in both
+  `.github/workflows/testflight-beta.yml` and
+  `.github/workflows/consolidated-release.yml`, so it can install existing
+  profiles but cannot create or repair them. Re-run `fastlane match appstore`
+  locally without `--readonly`, and with `--force`, after enabling a new
+  portal capability so `PrintFarmerApp-certificates` stores regenerated
+  profiles for both bundle IDs.
 - [ ] `DEVELOPMENT_TEAM = ZPKA84F3TY` matches `ExportOptions.plist`'s
   `teamID` and the `fastlane match` team.
 - [ ] TestFlight signing: `testflight-beta.yml` uses
@@ -106,6 +119,85 @@ Record pass/fail here before proceeding:
   before dispatching.
 - [ ] `./scripts/verify-marketing-version.sh` passes for the target tag (CI
   already gates this in both `ios-pr-ci.yml` and `testflight-beta.yml`).
+
+### Troubleshooting App Groups provisioning failures
+
+Run 34237740963 failed during `xcodebuild archive` with this signing error:
+
+```text
+mobile/PrintFarmer.xcodeproj: error: Provisioning profile "match AppStore com.olyforge3d.printfarmer.ios.scan-widgets" doesn't include the App Groups capability. (in target 'PrintFarmerScanWidgets')
+... doesn't support the group.com.olyforge3d.printfarmer App Group.
+... doesn't include the com.apple.security.application-groups entitlement.
+```
+
+Root cause: commit `36538ac6b5` added App Groups entitlements to both the app
+and widget targets, but the App Store provisioning profiles stored in
+`https://github.com/OlyForge3D/PrintFarmerApp-certificates.git` were not
+regenerated afterward. The Apple Developer Portal App IDs also lacked the
+App Groups capability, so regenerating profiles before fixing the portal would
+still have produced profiles without the entitlement.
+`mobile/ExportOptions.plist` uses manual signing for team `ZPKA84F3TY` and
+expects profiles named `match AppStore <bundle-id>` for both bundle IDs, so the
+archive cannot fall back to an automatically repaired profile.
+
+Fix this in order:
+
+1. In Apple Developer Portal for team `ZPKA84F3TY`, ensure App Group
+   `group.com.olyforge3d.printfarmer` exists under **Identifiers → App Groups**.
+2. Edit App ID `com.olyforge3d.printfarmer.ios`, enable **App Groups**,
+   configure it with `group.com.olyforge3d.printfarmer`, save, and confirm the
+   warning that existing profiles will be invalidated. Do not untick its
+   existing **Push Notifications** or **NFC Tag Reading** capabilities.
+3. Edit App ID `com.olyforge3d.printfarmer.ios.scan-widgets`, enable
+   **App Groups**, configure it with the same group, save, and confirm the
+   profile invalidation warning.
+4. From `mobile/`, regenerate App Store match profiles locally:
+
+   ```bash
+   export MATCH_GIT_URL="https://github.com/OlyForge3D/PrintFarmerApp-certificates.git"
+   export FASTLANE_USER="<apple-id-email>"
+   read -rs "MATCH_PASSWORD?Match passphrase: " && export MATCH_PASSWORD && echo
+
+   fastlane match appstore \
+     --force \
+     --git_url "$MATCH_GIT_URL" \
+     --app_identifier "com.olyforge3d.printfarmer.ios,com.olyforge3d.printfarmer.ios.scan-widgets"
+   ```
+
+5. Re-dispatch the internal beta workflow after the regenerated profiles are
+   committed to the match repo:
+
+   ```bash
+   gh workflow run testflight-beta.yml \
+     --repo OlyForge3D/PrintFarmer \
+     --ref development \
+     -f environment=internal
+   ```
+
+Important gotchas:
+
+- `MATCH_GIT_URL` and `MATCH_PASSWORD` are CI secrets and are not set in a
+  local shell. If `MATCH_GIT_URL` is empty, fastlane can treat the next flag as
+  the clone URL and fail with a misleading sequence like
+  `git clone --app_identifier ...`, `error: unknown option 'app_identifier'`,
+  then "Error cloning certificates repo". Export the URL explicitly first.
+- Omit `--readonly` and add `--force`. `--force` regenerates provisioning
+  profiles only; it does not revoke the distribution certificate. Certificate
+  revocation is `match nuke` / `mobile/scripts/rotate-match-password.sh`, which
+  is a separate destructive operation.
+- `--force` requires Apple portal authentication (`FASTLANE_USER` plus 2FA) and
+  an App Manager or Admin role. CI's readonly path never needed that portal
+  write access.
+- Do not fix certificates-repo git authentication with a global
+  `url.*.insteadOf` rewrite containing a token. `mobile/scripts/rotate-match-password.sh`
+  documents that stale rewrite pattern because it hijacks every
+  `https://github.com/` git operation on the machine. Use `gh auth setup-git`
+  instead.
+- Any time a target's `.entitlements` gains a new capability, update the
+  Apple Developer Portal App ID and regenerate the match profiles before the
+  next release build. Otherwise the archive fails with a profile/entitlement
+  mismatch. The consolidated release workflow uses the same readonly match call
+  and has the same exposure as `testflight-beta.yml`.
 
 ## 4. Server configuration and health checks for push delivery
 
