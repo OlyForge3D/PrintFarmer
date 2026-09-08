@@ -173,3 +173,29 @@ export function compactRoundOutput({ changed = [], deferred = [], blocked = [], 
   const list = (items) => items.length ? items.join(',') : '—';
   return `changed:${list(changed)} ready:${list(ready)} blocked:${list(blocked)} macOS:${list(deferred)}`;
 }
+
+export function assessCleanupCandidate(candidate = {}, { now = Date.now(), settlingMs = 60 * 60 * 1000 } = {}) {
+  const reasons = [];
+  if (candidate.session?.active !== false) reasons.push('session activity is active or unknown');
+  if (!candidate.worktree?.inspected) reasons.push('worktree state is unknown');
+  else {
+    if (candidate.worktree.dirty) reasons.push('worktree has tracked changes');
+    if (candidate.worktree.untracked) reasons.push('worktree has untracked files');
+  }
+  if (candidate.finalReport?.workingTreeClean !== true) reasons.push('clean-worktree attestation is absent');
+  if (candidate.finalReport?.allCommitsPushed !== true) reasons.push('pushed-commits attestation is absent');
+
+  const settledAt = new Date(candidate.settledAt).getTime();
+  if (!candidate.settledAt || Number.isNaN(settledAt)) reasons.push('settling period is unknown');
+  else if (now - settledAt < settlingMs) reasons.push('settling period has not elapsed');
+
+  if (candidate.pr) {
+    if (!['MERGED', 'CLOSED'].includes(candidate.pr.state)) reasons.push('PR is not terminal');
+    if (candidate.pr.commitsAfterMergeKnown !== true) reasons.push('post-merge commit state is unknown');
+    else if ((candidate.pr.commitsAfterMerge || []).length > 0) reasons.push('commits were added after PR merge');
+  } else if (candidate.noPrDeliverable?.completed !== true || candidate.noPrDeliverable?.verified !== true) {
+    reasons.push('no-PR deliverable is incomplete or unverified');
+  }
+
+  return { candidate: reasons.length === 0, reasons };
+}

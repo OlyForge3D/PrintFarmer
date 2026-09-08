@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   RalphCacheError,
+  assessCleanupCandidate,
   cacheFileForScope,
   collectPaginated,
   compactRoundOutput,
@@ -142,13 +143,33 @@ test('reports compact unchanged and changed fixture output', () => {
   assert.ok(changed.length < 80);
 });
 
+test('cleanup candidates are report-only and fail closed for uncertainty or post-merge work', () => {
+  const safe = {
+    session: { active: false },
+    worktree: { inspected: true, dirty: false, untracked: false },
+    finalReport: { workingTreeClean: true, allCommitsPushed: true },
+    settledAt: '2026-01-01T00:00:00Z',
+    pr: { state: 'MERGED', commitsAfterMergeKnown: true, commitsAfterMerge: [] },
+  };
+  assert.deepEqual(assessCleanupCandidate(safe, { now: Date.parse('2026-01-01T02:00:00Z') }),
+    { candidate: true, reasons: [] });
+  for (const unsafe of [
+    { ...safe, session: { active: true } },
+    { ...safe, worktree: { inspected: true, dirty: false, untracked: true } },
+    { ...safe, pr: { state: 'MERGED', commitsAfterMergeKnown: true, commitsAfterMerge: ['abc'] } },
+    { ...safe, pr: { state: 'MERGED', commitsAfterMergeKnown: false } },
+    { ...safe, settledAt: '2026-01-01T01:30:00Z' },
+    { ...safe, pr: undefined, noPrDeliverable: { completed: true, verified: false } },
+  ]) assert.equal(assessCleanupCandidate(unsafe, { now: Date.parse('2026-01-01T02:00:00Z') }).candidate, false);
+});
+
 test('dispatcher routes to required child policies and retains gates', async () => {
   const skill = await readFile('.copilot/skills/ralph-loop/SKILL.md', 'utf8');
   for (const reference of [
     'implementation-pre-pr.md', '.squad/templates/ralph-reference.md', '.github/ralph-reference.md',
     'verify-squad-verdict.mjs', 'one round and exits', 'five implementation/analysis slots maximum',
-    'never dispatch, review, or merge it', 'CodeQL completion', 'archive/delete others',
+    'never dispatch, review, or merge it', 'CodeQL completion', 'archive/delete',
     'Before every dispatch, claim, message, review decision, or merge, fetch',
-    'gemini-3.1-pro-preview',
+    'gemini-3.1-pro-preview', 'assessCleanupCandidate', 'not a separate reaper',
   ]) assert.match(skill, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
 });

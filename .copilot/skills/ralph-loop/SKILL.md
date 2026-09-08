@@ -63,9 +63,15 @@ actionable output using `compactRoundOutput`.
   heuristic diff equality cannot grant authorization.
 - **Conflicts:** only a fresh targeted review of hand-authored resolution hunks is permitted;
   it must agree across every resolved file. Clean syncs follow the verifier’s carry rules.
-- **Reap:** read the reap section of `.squad/templates/ralph-reference.md`. Report only; never
-  archive/delete others or nominate dirty/unpushed sessions. Verify squash merges against the
-  branch's remote evidence, not commit containment of its feature head.
+- **Cleanup candidates:** read the reap section of `.squad/templates/ralph-reference.md` and use
+  `assessCleanupCandidate` while reusing that round's session inventory and PR results. This is
+  part of Ralph's one automation, not a separate reaper. Report only; never archive/delete
+  others. `delete_item` needs human confirmation naming each specific session, and
+  `archive_session` cannot reap earlier-round children. Fail closed unless inactivity is proven
+  (age alone is insufficient), tracked/untracked files are clean, clean/pushed attestations hold,
+  the settling period elapsed, post-merge commits are absent/known, and a no-PR deliverable is
+  completed and verified. Verify squash merges against the branch's remote evidence, not commit
+  containment of its feature head.
 
 ## Non-Negotiable Gates
 
