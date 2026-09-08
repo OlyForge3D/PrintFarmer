@@ -80,8 +80,11 @@ def validate_arguments(arguments):
     for option, expected in (
         ("-parallel-testing-enabled", "NO"), ("-test-timeouts-enabled", "YES"),
     ):
-        if any(value != expected for value in option_values(arguments, option)):
+        values = option_values(arguments, option)
+        if len(values) > 1 or any(value != expected for value in values):
             raise ValueError(f"{option} must be {expected}")
+    if arguments.count("-disable-concurrent-destination-testing") > 1:
+        raise ValueError("-disable-concurrent-destination-testing may appear only once")
     destinations = option_values(arguments, "-destination")
     if len(destinations) != 1:
         raise ValueError("Specify exactly one resolved iOS Simulator destination")
@@ -113,11 +116,15 @@ def run(arguments, invocation_timeout=1440, finalization_timeout=120,
     command = [
         executable, *arguments,
         "-collect-test-diagnostics", "never",
-        "-test-timeouts-enabled", "YES",
-        "-parallel-testing-enabled", "NO",
-        "-disable-concurrent-destination-testing",
         "-resultStreamPath", str(stream_path),
     ]
+    for option, value in (
+        ("-test-timeouts-enabled", "YES"), ("-parallel-testing-enabled", "NO"),
+    ):
+        if option not in arguments:
+            command.extend((option, value))
+    if "-disable-concurrent-destination-testing" not in arguments:
+        command.append("-disable-concurrent-destination-testing")
     print(
         f"IOS_RUNNER: verbose simulator collection=never; post-test/restart budget="
         f"{finalization_timeout}s; invocation budget={invocation_timeout}s "

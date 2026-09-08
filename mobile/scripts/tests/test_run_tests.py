@@ -71,6 +71,9 @@ class RunnerTests(unittest.TestCase):
             "import json, os, signal, subprocess, sys, time\n"
             "from pathlib import Path\n"
             "args=sys.argv[1:]\n"
+            "for flag in ('-parallel-testing-enabled', '-test-timeouts-enabled', "
+            "'-disable-concurrent-destination-testing'):\n"
+            "    if args.count(flag)>1: sys.exit(64)\n"
             "bundle=Path(args[args.index('-resultBundlePath')+1])\n"
             "bundle.mkdir()\n"
             "(bundle/'arguments.json').write_text(json.dumps(args))\n"
@@ -123,13 +126,20 @@ class RunnerTests(unittest.TestCase):
         return code, summary
 
     def test_success_retains_selection_watchdog_and_artifacts(self):
-        self.arguments += ["-only-testing:PrintFarmerUITests/UIWaitBudgetTests"]
+        self.arguments += [
+            "-only-testing:PrintFarmerUITests/UIWaitBudgetTests",
+            "-parallel-testing-enabled", "NO", "-test-timeouts-enabled", "YES",
+            "-disable-concurrent-destination-testing",
+        ]
         code, summary = self.invoke("success")
         self.assertEqual(code, 0)
         args = json.loads((self.bundle / "arguments.json").read_text())
         self.assertIn("-only-testing:PrintFarmerUITests/UIWaitBudgetTests", args)
         self.assertEqual(args[args.index("-collect-test-diagnostics") + 1], "never")
         self.assertEqual(args[args.index("-test-timeouts-enabled") + 1], "YES")
+        for option in ("-parallel-testing-enabled", "-test-timeouts-enabled",
+                       "-disable-concurrent-destination-testing"):
+            self.assertEqual(args.count(option), 1)
         self.assertEqual(summary["reported_test_seconds"], 0.05)
         self.assertAlmostEqual(summary["invocation_seconds"],
                                summary["reported_test_seconds"] +
