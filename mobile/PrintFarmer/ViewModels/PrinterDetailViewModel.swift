@@ -39,6 +39,17 @@ final class PrinterDetailViewModel {
     /// (`hasActionAuthority`) still holds — removing your own token can
     /// never affect a sibling operation's separate token.
     private var activeActionTokens: Set<UUID> = []
+    /// Which run-action kinds (pause/resume/cancel/stop/emergencyStop) are
+    /// CURRENTLY dispatched and awaiting a result (issue #2522, Vasquez
+    /// review finding: `PrinterDetailRunActionMapping.presentation` never
+    /// populated `isPending` on any descriptor, so `PrinterRunActionBar`'s
+    /// own re-entrant-tap guard — which keys off `isPending`, not
+    /// `isEnabled` — never actually engaged, and VoiceOver never announced
+    /// a "Pending" value/hint on the button genuinely in flight). Threaded
+    /// into `PrinterDetailView.runActionPresentation(for:)` so the mapping
+    /// can mark exactly the in-flight kind(s) as pending, not merely
+    /// disabled.
+    var pendingRunActionKinds: Set<PrinterRunActionKind> = []
     var showConfirmation = false
     var pendingAction: DestructiveAction?
     var actionError: String?
@@ -572,6 +583,7 @@ final class PrinterDetailViewModel {
         guard isViewActive else { return }
         guard let printerService else { return }
         let authority = beginActionAuthority(for: printerService)
+        let capturedEmergencyStopEpoch = emergencyStopEngagedEpoch
         actionError = nil
         defer { endBusyToken(authority.busyToken) }
         do {
@@ -580,6 +592,21 @@ final class PrinterDetailViewModel {
                 spoolId: nil,
                 reviewedRowVersion: try reviewedPrinterRowVersion()
             )
+            // Safety precedence (issue #2522, Vasquez review finding —
+            // CRITICAL): Emergency Stop is an intentional safety override
+            // and must be able to preempt this already-in-flight eject
+            // BEFORE it sends the physical unload command — continuing to
+            // command motor movement after an Emergency Stop has been
+            // engaged is exactly the hazard that override exists to
+            // prevent. This is deliberately a SEPARATE check from
+            // `hasActionAuthority` below: ordinary lifecycle noise (view
+            // deactivate/reactivate, a service reconfigure) must NOT skip
+            // the physical unload (Bishop review finding — a real, distinct
+            // hazard of its own), but Emergency Stop specifically must.
+            guard !hasEmergencyStopEngagedSince(capturedEmergencyStopEpoch) else {
+                actionError = "Spool assignment cleared, but the physical unload was not sent because Emergency Stop was engaged."
+                return
+            }
             do {
                 _ = try await printerService.unloadFilament(printerId: printerId)
             } catch {
@@ -1098,7 +1125,50 @@ final class PrinterDetailViewModel {
         activeActionTokens.remove(token)
     }
 
+    // MARK: - Emergency Stop safety precedence (issue #2522, Vasquez review
+    // finding — CRITICAL)
+    //
+    // Distinct from `actionLifecycleEpoch`: that one is about SESSION
+    // identity (view lifecycle transitions / service reconfiguration) and
+    // gates RESULT/REFRESH authority for a retired session, but must NOT by
+    // itself prevent an already-in-flight multi-step physical mutation
+    // (`ejectFilament`'s second, physical-unload leg) from completing —
+    // Bishop's review separately established that silently skipping a
+    // physical unload after its assignment-clear leg already succeeded is
+    // its own real safety hazard. Emergency Stop is different: it is an
+    // INTENTIONAL safety override that MUST be able to preempt any other
+    // in-flight action's continuation to its next physical step, so it
+    // gets its own, dedicated, monotonic signal rather than overloading
+    // the general lifecycle epoch (which would conflate "ordinary
+    // lifecycle noise" with "Emergency Stop was just engaged" and make the
+    // two findings impossible to satisfy simultaneously with one epoch).
+    @ObservationIgnored private var emergencyStopEngagedEpoch: UInt64 = 0
+
+    /// Bumped the moment Emergency Stop is confirmed — synchronously,
+    /// before its own network dispatch even starts — so any OTHER
+    /// concurrently in-flight multi-step action can observe it as early as
+    /// possible.
+    private func engageEmergencyStopSafetyOverride() {
+        emergencyStopEngagedEpoch &+= 1
+    }
+
+    /// Whether Emergency Stop has been engaged since a multi-step action
+    /// captured `emergencyStopEngagedEpoch` at its own start. A multi-step
+    /// action must check this before dispatching its NEXT physical step.
+    private func hasEmergencyStopEngagedSince(_ capturedEpoch: UInt64) -> Bool {
+        emergencyStopEngagedEpoch != capturedEpoch
+    }
+
 #if DEBUG
+    /// Issue #2522, Vasquez review finding: exposes
+    /// `engageEmergencyStopSafetyOverride()` for tests that need to
+    /// simulate Emergency Stop firing at an EXACT point mid-flight (e.g.
+    /// between `ejectFilament`'s two legs) without driving the full
+    /// `requestEmergencyStop()`/`confirmAction()` round trip.
+    func engageEmergencyStopSafetyOverrideForTesting() {
+        engageEmergencyStopSafetyOverride()
+    }
+
     func beginCanonicalLoadForTesting() -> CanonicalLoadWaiter? {
         guard canLoadPrinter else { return nil }
         return beginCanonicalLoad()
@@ -1645,15 +1715,15 @@ final class PrinterDetailViewModel {
     // MARK: - Actions
 
     func pausePrinter() async {
-        await performAction { _ = try await $0.pause(id: self.printerId) }
+        await performAction(.pause) { _ = try await $0.pause(id: self.printerId) }
     }
 
     func resumePrinter() async {
-        await performAction { _ = try await $0.resume(id: self.printerId) }
+        await performAction(.resume) { _ = try await $0.resume(id: self.printerId) }
     }
 
     func stopPrinter() async {
-        await performAction { _ = try await $0.stop(id: self.printerId) }
+        await performAction(.stop) { _ = try await $0.stop(id: self.printerId) }
     }
 
     func requestCancel() {
@@ -1674,13 +1744,19 @@ final class PrinterDetailViewModel {
 
         switch action {
         case .cancelPrint:
-            await performAction { _ = try await $0.cancel(id: self.printerId) }
+            await performAction(.cancel) { _ = try await $0.cancel(id: self.printerId) }
             guard isViewActive else { return }
             #if os(iOS)
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
             #endif
         case .emergencyStop:
-            await performAction { _ = try await $0.emergencyStop(id: self.printerId) }
+            // Safety precedence (issue #2522, Vasquez review finding —
+            // CRITICAL): engage the safety override BEFORE dispatching, so
+            // any OTHER already-in-flight multi-step action (e.g.
+            // `ejectFilament`) observes it as early as possible and does
+            // not proceed to its next physical step.
+            engageEmergencyStopSafetyOverride()
+            await performAction(.emergencyStop) { _ = try await $0.emergencyStop(id: self.printerId) }
             guard isViewActive else { return }
             #if os(iOS)
             UINotificationFeedbackGenerator().notificationOccurred(.error)
@@ -2170,13 +2246,23 @@ final class PrinterDetailViewModel {
 
     /// Shared dispatch for pause/resume/cancel/stop/emergencyStop (issue
     /// #2522, Hicks/Bishop review findings 24/25 — see `ActionAuthority`
-    /// above).
-    private func performAction(_ action: @escaping (any PrinterServiceProtocol) async throws -> Void) async {
+    /// above; Vasquez review finding — threads `kind` into
+    /// `pendingRunActionKinds` so `PrinterDetailRunActionMapping.presentation`
+    /// can mark exactly the in-flight kind as `isPending`, not merely
+    /// disabled).
+    private func performAction(
+        _ kind: PrinterRunActionKind,
+        _ action: @escaping (any PrinterServiceProtocol) async throws -> Void
+    ) async {
         guard isViewActive else { return }
         guard let printerService else { return }
         let authority = beginActionAuthority(for: printerService)
         actionError = nil
-        defer { endBusyToken(authority.busyToken) }
+        pendingRunActionKinds.insert(kind)
+        defer {
+            endBusyToken(authority.busyToken)
+            pendingRunActionKinds.remove(kind)
+        }
 
         do {
             try await action(printerService)

@@ -140,27 +140,49 @@ enum PrinterDetailRunActionMapping {
     ///     to Pause/Resume/Cancel/Stop. Emergency Stop deliberately ignores
     ///     this input — it must never be blanket-disabled because another
     ///     action is pending (epic #2518 acceptance criterion).
+    ///   - pendingKinds: Mirrors `PrinterDetailViewModel.pendingRunActionKinds`
+    ///     (issue #2522, Vasquez review finding). Every descriptor previously
+    ///     used the `isPending` default of `false` unconditionally, so
+    ///     `PrinterRunActionBar`'s own re-entrant-tap guard — which keys off
+    ///     `isPending`, not `isEnabled` — never actually engaged, and
+    ///     VoiceOver never announced a "Pending" value/hint on the specific
+    ///     button genuinely in flight. Each descriptor now marks itself
+    ///     `isPending` exactly when ITS OWN kind is a member of this set —
+    ///     including Emergency Stop, whose `isEnabled` stays unconditionally
+    ///     `true` (per the acceptance criterion above) but whose `isPending`
+    ///     must still reflect its OWN in-flight state.
     static func presentation(
         isOnline: Bool,
         isPrinting: Bool,
         isPaused: Bool,
-        isPerformingAction: Bool
+        isPerformingAction: Bool,
+        pendingKinds: Set<PrinterRunActionKind> = []
     ) -> PrinterRunActionPresentation {
         var descriptors: [PrinterRunActionDescriptor] = []
         if isPrinting {
-            descriptors.append(.init(kind: .pause, isEnabled: !isPerformingAction))
+            descriptors.append(.init(
+                kind: .pause, isEnabled: !isPerformingAction, isPending: pendingKinds.contains(.pause)
+            ))
         }
         if isPaused {
-            descriptors.append(.init(kind: .resume, isEnabled: !isPerformingAction))
+            descriptors.append(.init(
+                kind: .resume, isEnabled: !isPerformingAction, isPending: pendingKinds.contains(.resume)
+            ))
         }
         if isPrinting || isPaused {
-            descriptors.append(.init(kind: .cancel, isEnabled: !isPerformingAction))
+            descriptors.append(.init(
+                kind: .cancel, isEnabled: !isPerformingAction, isPending: pendingKinds.contains(.cancel)
+            ))
             if isOnline {
-                descriptors.append(.init(kind: .stop, isEnabled: !isPerformingAction))
+                descriptors.append(.init(
+                    kind: .stop, isEnabled: !isPerformingAction, isPending: pendingKinds.contains(.stop)
+                ))
             }
         }
         if isOnline {
-            descriptors.append(.init(kind: .emergencyStop, isEnabled: true))
+            descriptors.append(.init(
+                kind: .emergencyStop, isEnabled: true, isPending: pendingKinds.contains(.emergencyStop)
+            ))
         }
         return PrinterRunActionPresentation(descriptors: descriptors)
     }

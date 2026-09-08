@@ -598,7 +598,8 @@ struct PrinterDetailView: View {
             isOnline: printer.isOnline,
             isPrinting: viewModel.isPrinting,
             isPaused: viewModel.isPaused,
-            isPerformingAction: viewModel.isPerformingAction
+            isPerformingAction: viewModel.isPerformingAction,
+            pendingKinds: viewModel.pendingRunActionKinds
         )
     }
 

@@ -150,6 +150,48 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertTrue(presentation.shouldFireCallback(for: .emergencyStop))
     }
 
+    // MARK: - isPending threading (issue #2522, Vasquez review finding)
+
+    func testRunActionMappingMarksOnlyTheInFlightKindAsPending() {
+        let presentation = PrinterDetailRunActionMapping.presentation(
+            isOnline: true, isPrinting: true, isPaused: false, isPerformingAction: true,
+            pendingKinds: [.pause]
+        )
+        XCTAssertEqual(presentation.descriptor(for: .pause)?.isPending, true)
+        XCTAssertEqual(presentation.descriptor(for: .cancel)?.isPending, false)
+        XCTAssertEqual(presentation.descriptor(for: .stop)?.isPending, false)
+        XCTAssertEqual(presentation.descriptor(for: .emergencyStop)?.isPending, false)
+    }
+
+    func testRunActionMappingMarksEmergencyStopPendingWhileItselfInFlightEvenThoughAlwaysEnabled() {
+        // Epic #2518's "never blanket-disable Emergency Stop" acceptance
+        // criterion is about `isEnabled`, not `isPending` — the button must
+        // still announce its OWN in-flight state and reject re-entrant taps
+        // while genuinely dispatched.
+        let presentation = PrinterDetailRunActionMapping.presentation(
+            isOnline: true, isPrinting: true, isPaused: false, isPerformingAction: true,
+            pendingKinds: [.emergencyStop]
+        )
+        let emergencyStop = presentation.descriptor(for: .emergencyStop)
+        XCTAssertEqual(emergencyStop?.isEnabled, true)
+        XCTAssertEqual(emergencyStop?.isPending, true)
+        XCTAssertFalse(
+            presentation.shouldFireCallback(for: .emergencyStop),
+            "A pending Emergency Stop must reject a re-entrant tap even though isEnabled stays true"
+        )
+    }
+
+    func testRunActionMappingDefaultsToNoPendingKindsWhenOmitted() {
+        // The `pendingKinds` parameter defaults to empty so every call site
+        // written before this parameter existed keeps compiling with
+        // unchanged behavior.
+        let presentation = PrinterDetailRunActionMapping.presentation(
+            isOnline: true, isPrinting: true, isPaused: false, isPerformingAction: false
+        )
+        XCTAssertEqual(presentation.descriptor(for: .pause)?.isPending, false)
+        XCTAssertEqual(presentation.descriptor(for: .emergencyStop)?.isPending, false)
+    }
+
     // MARK: - Filament action mapping
 
     func testFilamentSupportedActionsWithoutActiveSpoolOffersSetAndScanNFC() {

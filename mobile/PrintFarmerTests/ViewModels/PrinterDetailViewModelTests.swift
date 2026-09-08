@@ -1180,6 +1180,34 @@ final class PrinterDetailViewModelTests: XCTestCase {
         )
     }
 
+    /// Safety precedence (issue #2522, Vasquez review finding — CRITICAL):
+    /// Emergency Stop, engaged BETWEEN eject's two legs (right as the
+    /// assignment-clear leg resolves, simulated via the mock hook below,
+    /// before the physical-unload leg would otherwise dispatch), must
+    /// preempt the physical unload rather than letting it proceed — never
+    /// silently: the operator must still see an explicit message.
+    func testEjectFilamentSkipsPhysicalUnloadWhenEmergencyStopEngagedBetweenLegs() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        mockService.beforeSetActiveSpool = { [weak viewModel] in
+            await MainActor.run { viewModel?.engageEmergencyStopSafetyOverrideForTesting() }
+        }
+
+        await viewModel.ejectFilament()
+
+        XCTAssertNotNil(mockService.setActiveSpoolCalledWith, "The assignment-clear leg must still have fired and succeeded")
+        XCTAssertNil(
+            mockService.unloadFilamentCalledWith,
+            "The physical unload must NOT be sent once Emergency Stop has been engaged"
+        )
+        let error = try XCTUnwrap(viewModel.actionError)
+        XCTAssertTrue(
+            error.contains("Emergency Stop"),
+            "The error must explicitly name Emergency Stop as the reason the unload was withheld, not silently return: \(error)"
+        )
+    }
+
     // MARK: - Pull-to-refresh transition-during-refresh (issue #2522, Hicks
     // review finding 23)
 
