@@ -195,6 +195,65 @@ final class AppRouterTests: XCTestCase {
         XCTAssertFalse(ExternalScanRequestStore.consume(userDefaults: defaults))
     }
 
+    func testOpenScannerIntentRequestsForegroundLaunchAndPersistsRequest() async throws {
+        let suiteName = "OpenScannerIntent-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        XCTAssertTrue(OpenScannerIntent.openAppWhenRun)
+        if #available(iOS 26.0, *) {
+            XCTAssertEqual(OpenScannerIntent.supportedModes, .foreground(.immediate))
+        }
+
+        _ = try await OpenScannerIntent().perform(userDefaults: defaults)
+
+        XCTAssertNotNil(ExternalScanRequestStore.pending(userDefaults: defaults))
+    }
+
+    func testExternalScanRequestDefaultsUseSharedAppGroupSuite() throws {
+        let sharedDefaults = try XCTUnwrap(
+            UserDefaults(suiteName: ExternalScanRequestStore.suiteName)
+        )
+        let existingSharedValue = sharedDefaults.object(
+            forKey: ExternalScanRequestStore.pendingKey
+        )
+        let existingStandardValue = UserDefaults.standard.object(
+            forKey: ExternalScanRequestStore.pendingKey
+        )
+        defer {
+            restore(
+                existingSharedValue,
+                forKey: ExternalScanRequestStore.pendingKey,
+                in: sharedDefaults
+            )
+            restore(
+                existingStandardValue,
+                forKey: ExternalScanRequestStore.pendingKey,
+                in: .standard
+            )
+        }
+
+        sharedDefaults.removeObject(forKey: ExternalScanRequestStore.pendingKey)
+        UserDefaults.standard.removeObject(forKey: ExternalScanRequestStore.pendingKey)
+        let requestID = UUID()
+
+        ExternalScanRequestStore.request(id: requestID)
+
+        XCTAssertEqual(
+            ExternalScanRequestStore.pending(userDefaults: sharedDefaults)?.id,
+            requestID
+        )
+        XCTAssertNil(UserDefaults.standard.object(forKey: ExternalScanRequestStore.pendingKey))
+    }
+
+    private func restore(_ value: Any?, forKey key: String, in defaults: UserDefaults) {
+        if let value {
+            defaults.set(value, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
     func testLegacyBooleanRequestIsUpgradedRatherThanDropped() throws {
         let suiteName = "ExternalScanLegacy-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
@@ -214,6 +273,144 @@ final class AppRouterTests: XCTestCase {
         )
         XCTAssertEqual(ExternalScanRequestStore.pending(userDefaults: defaults)?.id, upgraded.id)
         XCTAssertTrue(ExternalScanRequestStore.consume(userDefaults: defaults))
+    }
+
+    func testLegacyRequestMigratesItsCompletePayloadIntoSharedDefaults() throws {
+        let legacySuiteName = "ExternalScanLegacySource-\(UUID().uuidString)"
+        let sharedSuiteName = "ExternalScanSharedDestination-\(UUID().uuidString)"
+        let legacyDefaults = try XCTUnwrap(UserDefaults(suiteName: legacySuiteName))
+        let sharedDefaults = try XCTUnwrap(UserDefaults(suiteName: sharedSuiteName))
+        defer {
+            legacyDefaults.removePersistentDomain(forName: legacySuiteName)
+            sharedDefaults.removePersistentDomain(forName: sharedSuiteName)
+        }
+
+        let requestID = UUID()
+        let requestedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        ExternalScanRequestStore.request(
+            userDefaults: legacyDefaults,
+            now: requestedAt,
+            id: requestID
+        )
+        ExternalScanRequestStore.scope(to: originServerId, userDefaults: legacyDefaults)
+        let expected = try XCTUnwrap(
+            ExternalScanRequestStore.pending(userDefaults: legacyDefaults)
+        )
+
+        ExternalScanRouting.migrateLegacyPendingRequest(
+            from: legacyDefaults,
+            to: sharedDefaults,
+            now: requestedAt.addingTimeInterval(1)
+        )
+
+        XCTAssertEqual(
+            ExternalScanRequestStore.pending(userDefaults: sharedDefaults),
+            expected
+        )
+        XCTAssertNil(legacyDefaults.object(forKey: ExternalScanRequestStore.pendingKey))
+    }
+
+    func testLegacyMigrationPreservesANewerSharedRequest() throws {
+        let legacySuiteName = "ExternalScanOlderLegacy-\(UUID().uuidString)"
+        let sharedSuiteName = "ExternalScanNewerShared-\(UUID().uuidString)"
+        let legacyDefaults = try XCTUnwrap(UserDefaults(suiteName: legacySuiteName))
+        let sharedDefaults = try XCTUnwrap(UserDefaults(suiteName: sharedSuiteName))
+        defer {
+            legacyDefaults.removePersistentDomain(forName: legacySuiteName)
+            sharedDefaults.removePersistentDomain(forName: sharedSuiteName)
+        }
+
+        ExternalScanRequestStore.request(
+            userDefaults: legacyDefaults,
+            now: Date(timeIntervalSince1970: 1_700_000_000),
+            id: UUID()
+        )
+        let sharedRequestID = UUID()
+        ExternalScanRequestStore.request(
+            userDefaults: sharedDefaults,
+            now: Date(timeIntervalSince1970: 1_700_000_100),
+            id: sharedRequestID
+        )
+        ExternalScanRequestStore.scope(to: originServerId, userDefaults: sharedDefaults)
+        let expected = try XCTUnwrap(
+            ExternalScanRequestStore.pending(userDefaults: sharedDefaults)
+        )
+
+        ExternalScanRouting.migrateLegacyPendingRequest(
+            from: legacyDefaults,
+            to: sharedDefaults
+        )
+
+        XCTAssertEqual(
+            ExternalScanRequestStore.pending(userDefaults: sharedDefaults),
+            expected
+        )
+        XCTAssertEqual(expected.id, sharedRequestID)
+        XCTAssertNil(legacyDefaults.object(forKey: ExternalScanRequestStore.pendingKey))
+    }
+
+    func testLegacyBooleanDoesNotOverwriteAnExistingSharedRequest() throws {
+        let legacySuiteName = "ExternalScanBooleanLegacy-\(UUID().uuidString)"
+        let sharedSuiteName = "ExternalScanExistingShared-\(UUID().uuidString)"
+        let legacyDefaults = try XCTUnwrap(UserDefaults(suiteName: legacySuiteName))
+        let sharedDefaults = try XCTUnwrap(UserDefaults(suiteName: sharedSuiteName))
+        defer {
+            legacyDefaults.removePersistentDomain(forName: legacySuiteName)
+            sharedDefaults.removePersistentDomain(forName: sharedSuiteName)
+        }
+        legacyDefaults.set(true, forKey: ExternalScanRequestStore.pendingKey)
+        let sharedRequestID = UUID()
+        ExternalScanRequestStore.request(
+            userDefaults: sharedDefaults,
+            now: Date(timeIntervalSince1970: 1_700_000_000),
+            id: sharedRequestID
+        )
+
+        ExternalScanRouting.migrateLegacyPendingRequest(
+            from: legacyDefaults,
+            to: sharedDefaults,
+            now: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+
+        XCTAssertEqual(
+            ExternalScanRequestStore.pending(userDefaults: sharedDefaults)?.id,
+            sharedRequestID
+        )
+        XCTAssertNil(legacyDefaults.object(forKey: ExternalScanRequestStore.pendingKey))
+    }
+
+    func testAppRoutingMigratesLegacyBooleanBeforeReadingSharedDefaults() throws {
+        let legacySuiteName = "ExternalScanLegacyBoolean-\(UUID().uuidString)"
+        let sharedSuiteName = "ExternalScanBooleanShared-\(UUID().uuidString)"
+        let legacyDefaults = try XCTUnwrap(UserDefaults(suiteName: legacySuiteName))
+        let sharedDefaults = try XCTUnwrap(UserDefaults(suiteName: sharedSuiteName))
+        defer {
+            legacyDefaults.removePersistentDomain(forName: legacySuiteName)
+            sharedDefaults.removePersistentDomain(forName: sharedSuiteName)
+        }
+        legacyDefaults.set(true, forKey: ExternalScanRequestStore.pendingKey)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        ExternalScanRouting.routeFromApp(
+            router: AppRouter(),
+            activeServerID: originServerId,
+            isShowingMainContent: false,
+            capabilities: capabilities,
+            legacyUserDefaults: legacyDefaults,
+            sharedUserDefaults: sharedDefaults,
+            now: now
+        )
+
+        let migrated = try XCTUnwrap(
+            ExternalScanRequestStore.pending(userDefaults: sharedDefaults)
+        )
+        XCTAssertEqual(
+            migrated.requestedAt.timeIntervalSince1970,
+            now.timeIntervalSince1970,
+            accuracy: 1
+        )
+        XCTAssertEqual(migrated.scopedServerID, originServerId)
+        XCTAssertNil(legacyDefaults.object(forKey: ExternalScanRequestStore.pendingKey))
     }
 
     // MARK: - RootView lifecycle wiring (#2480)
