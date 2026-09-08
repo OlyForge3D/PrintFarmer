@@ -874,9 +874,14 @@ export function SettingsPage({
         : `[data-setting-property$=".${escapedField}"]`;
       const target = document.querySelector<HTMLElement>(selector);
       if (target) {
-        const control = target.querySelector<HTMLElement>(
-          'input, select, textarea, button, [tabindex]:not([tabindex="-1"])',
-        );
+        // Qualified field links map directly to the control IDs emitted by
+        // SettingsPagelet. Prefer that exact association over a descendant
+        // search, which can select auxiliary controls in the field row.
+        const control = fieldParam.includes('.')
+          ? document.getElementById(fieldParam)
+          : target.querySelector<HTMLElement>(
+            'input, select, textarea, button, [tabindex]:not([tabindex="-1"])',
+          );
         if (control) {
           control.focus({ preventScroll: true });
         } else {
