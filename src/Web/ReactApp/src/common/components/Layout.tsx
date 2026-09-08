@@ -60,7 +60,7 @@ import {
   loadNavPreferences,
   moveNavItem,
   normalizeNavPreferences,
-  NAV_PREFERENCES_UPDATED_EVENT,
+  subscribeToNavPreferences,
   resolveNavPreferences,
   saveNavPreferences,
   setNavItemHidden,
@@ -400,14 +400,9 @@ export function Layout() {
   }, [navPreferencesStorageKey]);
 
   useEffect(() => {
-    const refresh = (event: Event) => {
-      const detail = (event as CustomEvent<{ storageKey?: string }>).detail;
-      if (!detail?.storageKey || detail.storageKey === navPreferencesStorageKey) {
-        setStoredNavPreferences(loadNavPreferences(navPreferencesStorageKey));
-      }
-    };
-    window.addEventListener(NAV_PREFERENCES_UPDATED_EVENT, refresh);
-    return () => window.removeEventListener(NAV_PREFERENCES_UPDATED_EVENT, refresh);
+    return subscribeToNavPreferences(navPreferencesStorageKey, () => {
+      setStoredNavPreferences(loadNavPreferences(navPreferencesStorageKey));
+    });
   }, [navPreferencesStorageKey]);
 
   const navPreferenceRole = useMemo<NavPreferenceRole>(() => {

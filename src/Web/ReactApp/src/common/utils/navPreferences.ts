@@ -213,6 +213,30 @@ export function saveNavPreferences(storageKey: string, preferences: NavPreferenc
   }
 }
 
+/** Subscribe to this user's same-tab writes and cross-tab localStorage changes. */
+export function subscribeToNavPreferences(storageKey: string, onChange: () => void): () => void {
+  const handleUpdated = (event: Event) => {
+    const detail = (event as CustomEvent<{ storageKey?: string }>).detail;
+    if (!detail?.storageKey || detail.storageKey === storageKey) {
+      onChange();
+    }
+  };
+  const handleStorage = (event: StorageEvent) => {
+    // A null key means localStorage.clear(); sessionStorage is unrelated.
+    if (event.storageArea === localStorage && (event.key === storageKey || event.key === null)) {
+      // Consumers reload the latest stored value, without writing or rebroadcasting.
+      onChange();
+    }
+  };
+
+  window.addEventListener(NAV_PREFERENCES_UPDATED_EVENT, handleUpdated);
+  window.addEventListener('storage', handleStorage);
+  return () => {
+    window.removeEventListener(NAV_PREFERENCES_UPDATED_EVENT, handleUpdated);
+    window.removeEventListener('storage', handleStorage);
+  };
+}
+
 export function groupNavItemsByResolvedOrder<T extends NavPreferenceItem>(items: readonly T[]): NavPreferenceGroup<T>[] {
   const groups: NavPreferenceGroup<T>[] = [];
 

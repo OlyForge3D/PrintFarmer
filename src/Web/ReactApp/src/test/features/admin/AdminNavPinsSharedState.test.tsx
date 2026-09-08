@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router';
@@ -10,6 +10,7 @@ import { AdminControlCenterPage } from '@/features/admin/pages/AdminControlCente
 import { AdminNavPinsProvider } from '@/common/contexts/AdminNavPinsContext';
 import { useAdminNavPins } from '@/common/contexts/useAdminNavPins';
 import { getNavPreferencesStorageKey, saveNavPreferences, NAV_PREFERENCES_VERSION } from '@/common/utils/navPreferences';
+import { createStorageEvent } from '@/test/utils/storage-event';
 import type { AdminOverviewDto } from '@/types/adminOverview';
 
 /**
@@ -223,6 +224,57 @@ describe('Admin nav pins: shared state across Control Center and Layout (Issue 2
     expect(pinnedLink.querySelector('button')).toBeNull();
   });
 
+  it('syncs remote admin pin additions and removals across the provider and Layout', async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await screen.findByTestId('admin-hub-operations');
+    await user.click(screen.getByRole('button', { name: 'Pin admin links' }));
+    const storageKey = getNavPreferencesStorageKey('user-1');
+
+    for (const pinned of [true, false]) {
+      const newValue = JSON.stringify({
+        version: NAV_PREFERENCES_VERSION,
+        orderedItemIds: ['files', 'overview'],
+        hiddenItemIds: ['projects'],
+        pinnedItemIds: [],
+        adminPinnedItemIds: pinned ? ['ops-workers'] : [],
+      });
+      // Only a native event: the same-tab save helper must not mask a failure.
+      localStorage.setItem(storageKey, newValue);
+      fireEvent(window, createStorageEvent({ key: storageKey, newValue }));
+
+      expect(pinsRenderLog.at(-1)).toEqual(pinned ? ['ops-workers'] : []);
+      expect(screen.getByRole('button', { name: `${pinned ? 'Unpin' : 'Pin'} Workers & Jobs from navbar` }))
+        .toBeInTheDocument();
+      if (pinned) {
+        expect(screen.getByRole('link', { name: 'Workers & Jobs' })).toHaveAttribute('href', '/admin/workers?workerTab=jobs');
+      } else {
+        expect(screen.queryByRole('link', { name: 'Workers & Jobs' })).not.toBeInTheDocument();
+      }
+      expect(screen.queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
+    }
+  });
+
+  it.each(['remove', 'clear', 'malformed'])('clears admin pins in every consumer on remote %s', async (reset) => {
+    seedPins('user-1', ['ops-analytics']);
+    renderShell();
+    await screen.findByTestId('admin-hub-operations');
+    expect(screen.getByRole('link', { name: 'Analytics' })).toBeInTheDocument();
+    const storageKey = getNavPreferencesStorageKey('user-1');
+
+    if (reset === 'clear') localStorage.clear();
+    else if (reset === 'remove') localStorage.removeItem(storageKey);
+    else localStorage.setItem(storageKey, '{invalid json');
+    fireEvent(window, createStorageEvent({
+      key: reset === 'clear' ? null : storageKey,
+      newValue: localStorage.getItem(storageKey),
+    }));
+
+    expect(pinsRenderLog.at(-1)).toEqual([]);
+    expect(screen.queryByRole('link', { name: 'Analytics' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Favorites' })).not.toBeInTheDocument();
+  });
+
   it('renders no pins for a new principal even transiently, when switching accounts', async () => {
     seedPins('user-1', ['ops-analytics']);
 
@@ -247,6 +299,25 @@ describe('Admin nav pins: shared state across Control Center and Layout (Issue 2
     // *every* render this context produced from the moment the switch began.
     expect(pinsRenderLog.slice(switchLogIndex).every((ids) => !ids.includes('ops-analytics'))).toBe(true);
     expect(screen.queryByRole('region', { name: 'Favorites' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Analytics' })).not.toBeInTheDocument();
+
+    // The subscription must move to the new principal's key as well.
+    const renderCount = pinsRenderLog.length;
+    fireEvent(window, createStorageEvent({ key: getNavPreferencesStorageKey('user-1') }));
+    expect(pinsRenderLog).toHaveLength(renderCount);
+
+    const storageKey = getNavPreferencesStorageKey('user-2');
+    const newValue = JSON.stringify({
+      version: NAV_PREFERENCES_VERSION,
+      orderedItemIds: [],
+      hiddenItemIds: [],
+      pinnedItemIds: [],
+      adminPinnedItemIds: ['ops-workers'],
+    });
+    localStorage.setItem(storageKey, newValue);
+    fireEvent(window, createStorageEvent({ key: storageKey, newValue }));
+    expect(pinsRenderLog.at(-1)).toEqual(['ops-workers']);
+    expect(screen.getByRole('link', { name: 'Workers & Jobs' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Analytics' })).not.toBeInTheDocument();
   });
 
