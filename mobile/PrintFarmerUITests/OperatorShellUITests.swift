@@ -274,14 +274,23 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         // With the per-server toggle off, the Controls page (and its
         // selector) must be entirely omitted — not merely collapsed behind
         // a disclosure — so there is zero "Advanced" surface to reach.
-        XCTAssertFalse(
-            app.segmentedControls["printer.detail.panel.selector"].exists,
-            "Controls page selector must be omitted while the per-server safety toggle is off"
-        )
-        XCTAssertFalse(
-            app.descendants(matching: .any)["printer.detail.panel.controls"].exists,
-            "Controls page must be omitted while the per-server safety toggle is off"
-        )
+        //
+        // The activity below is causal evidence that the final safety
+        // assertions were actually reached (not short-circuited by any of
+        // the three guards above). It carries no assertion of its own — a
+        // pass without this activity in the .xcresult indicates an early
+        // return; a pass with it demonstrates the interlock was verified.
+        // Recovers historical evidence for issue #2579.
+        XCTContext.runActivity(named: "final safety assertions (#2579)") { _ in
+            XCTAssertFalse(
+                app.segmentedControls["printer.detail.panel.selector"].exists,
+                "Controls page selector must be omitted while the per-server safety toggle is off"
+            )
+            XCTAssertFalse(
+                app.descendants(matching: .any)["printer.detail.panel.controls"].exists,
+                "Controls page must be omitted while the per-server safety toggle is off"
+            )
+        }
     }
 
     private func openAccount(
