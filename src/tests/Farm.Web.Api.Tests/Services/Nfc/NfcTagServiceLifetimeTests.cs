@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.NfcDevices;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Web.Api.Tests.TestInfrastructure;
@@ -34,6 +35,7 @@ public sealed class NfcTagServiceLifetimeTests : IDisposable
     public async Task OfflineQueue_PersistsAcrossScopes_WhenServiceIsSingleton()
     {
         var deviceId = Guid.NewGuid();
+        var printerId = Guid.NewGuid();
         var readAt = DateTime.UtcNow;
 
         var clientProxyMock = new Mock<IClientProxy>();
@@ -42,7 +44,9 @@ public sealed class NfcTagServiceLifetimeTests : IDisposable
             .Returns(Task.CompletedTask);
 
         var hubClientsMock = new Mock<IHubClients>();
-        hubClientsMock.Setup(c => c.All).Returns(clientProxyMock.Object);
+        hubClientsMock
+            .Setup(c => c.Group(AuthorizedHubGroups.Printer(printerId)))
+            .Returns(clientProxyMock.Object);
 
         var hubMock = new Mock<IHubContext<NfcHub>>();
         hubMock.Setup(h => h.Clients).Returns(hubClientsMock.Object);
@@ -83,7 +87,12 @@ public sealed class NfcTagServiceLifetimeTests : IDisposable
         await using (var requestScope1 = provider.CreateAsyncScope())
         {
             firstRequestService = requestScope1.ServiceProvider.GetRequiredService<INfcTagService>();
-            await firstRequestService.ProcessTagReadAsync("AA:BB:CC:DD", deviceId, null, readAt, CancellationToken.None);
+            await firstRequestService.ProcessTagReadAsync(
+                "AA:BB:CC:DD",
+                deviceId,
+                printerId,
+                readAt,
+                CancellationToken.None);
         }
 
         INfcTagService secondRequestService;

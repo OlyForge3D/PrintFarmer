@@ -1,5 +1,10 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services.Queue;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.SignalR;
@@ -11,12 +16,34 @@ namespace Farm.Infrastructure.Services.SignalR;
 /// consistent with the other farm hubs (PrinterHub, HarvestHub, MaintenanceHub).
 /// </summary>
 [Authorize]
-public class NfcHub(ILogger<NfcHub> logger) : Hub
+public class NfcHub(
+    AppDbContext db,
+    IQueueResourceAuthorizationService resourceAuthorization,
+    ILogger<NfcHub> logger) : Hub
 {
-    public override Task OnConnectedAsync()
+    public override async Task OnConnectedAsync()
     {
+        Guid[] printerIds = await db.Printers
+            .AsNoTracking()
+            .Select(printer => printer.Id)
+            .ToArrayAsync(Context.ConnectionAborted);
+        IReadOnlySet<Guid> accessiblePrinterIds =
+            await resourceAuthorization.FilterAccessiblePrinterIdsAsync(
+                Context.User!,
+                printerIds,
+                PrinterGroupAccessLevel.View,
+                Context.ConnectionAborted);
+
+        foreach (Guid printerId in accessiblePrinterIds)
+        {
+            await Groups.AddToGroupAsync(
+                Context.ConnectionId,
+                AuthorizedHubGroups.Printer(printerId),
+                Context.ConnectionAborted);
+        }
+
         logger.LogDebug("Client connected to NfcHub: {ConnectionId}", Context.ConnectionId);
-        return base.OnConnectedAsync();
+        await base.OnConnectedAsync();
     }
 
     public override Task OnDisconnectedAsync(Exception? exception)

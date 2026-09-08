@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -59,14 +60,16 @@ public class NfcTagService(
 
             if (deviceIsOnline)
             {
-                await hub.Clients.All.SendAsync(NfcHubEvents.TagRead, payload, ct);
+                await BroadcastAsync(NfcHubEvents.TagRead, payload, printerId ?? binding.PrinterId, ct);
                 logger.LogInformation(
                     "nfctagread: tag {TagUid} → spool {SpoolId} (device {DeviceId})",
                     LogSanitizer.Sanitize(tagUid), binding.SpoolId, nfcDeviceId);
             }
             else
             {
-                EnqueueOffline(nfcDeviceId, new PendingNfcEvent(NfcHubEvents.TagRead, payload));
+                EnqueueOffline(
+                    nfcDeviceId,
+                    new PendingNfcEvent(NfcHubEvents.TagRead, payload, printerId ?? binding.PrinterId));
                 logger.LogDebug(
                     "Device {DeviceId} offline — queued nfctagread for tag {TagUid}",
                     nfcDeviceId, LogSanitizer.Sanitize(tagUid));
@@ -78,14 +81,14 @@ public class NfcTagService(
 
             if (deviceIsOnline)
             {
-                await hub.Clients.All.SendAsync(NfcHubEvents.TagUnknown, payload, ct);
+                await BroadcastAsync(NfcHubEvents.TagUnknown, payload, printerId, ct);
                 logger.LogInformation(
                     "nfctagunknown: tag {TagUid} has no binding (device {DeviceId})",
                     LogSanitizer.Sanitize(tagUid), nfcDeviceId);
             }
             else
             {
-                EnqueueOffline(nfcDeviceId, new PendingNfcEvent(NfcHubEvents.TagUnknown, payload));
+                EnqueueOffline(nfcDeviceId, new PendingNfcEvent(NfcHubEvents.TagUnknown, payload, printerId));
                 logger.LogDebug(
                     "Device {DeviceId} offline — queued nfctagunknown for tag {TagUid}",
                     nfcDeviceId, LogSanitizer.Sanitize(tagUid));
@@ -215,8 +218,27 @@ public class NfcTagService(
 
         while (queue.TryDequeue(out var evt))
         {
-            await hub.Clients.All.SendAsync(evt.EventName, evt.Payload, ct);
+            await BroadcastAsync(evt.EventName, evt.Payload, evt.PrinterId, ct);
         }
+    }
+
+    private async Task BroadcastAsync(
+        string eventName,
+        object payload,
+        Guid? printerId,
+        CancellationToken ct)
+    {
+        if (printerId is null)
+        {
+            logger.LogWarning(
+                "NFC event {EventName} was not broadcast because it has no printer resource scope.",
+                eventName);
+            return;
+        }
+
+        await hub.Clients
+            .Group(AuthorizedHubGroups.Printer(printerId.Value))
+            .SendAsync(eventName, payload, ct);
     }
 
     private static async Task<bool> IsDeviceOnlineAsync(AppDbContext db, Guid nfcDeviceId, CancellationToken ct)
@@ -292,5 +314,5 @@ public class NfcTagService(
         return false;
     }
 
-    private sealed record PendingNfcEvent(string EventName, object Payload);
+    private sealed record PendingNfcEvent(string EventName, object Payload, Guid? PrinterId);
 }
