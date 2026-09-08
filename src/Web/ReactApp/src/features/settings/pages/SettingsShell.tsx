@@ -981,8 +981,8 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       // `blockedTargetIndex` set would leave `isResumePending` permanently
       // true for the rest of the shell's lifetime (nothing else can clear
       // it), wedging every replace-guarded effect (the search-query commit,
-      // #2517 canonicalization) for the whole session, not just this one
-      // resume attempt.
+      // the canonicalization effect from issue 2517) for the whole session,
+      // not just this one resume attempt.
       replay(resumeAttempt);
       setResumeAttempt(null);
       setBlockedTarget(null);
