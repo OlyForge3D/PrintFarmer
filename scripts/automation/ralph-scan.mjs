@@ -2,7 +2,7 @@
 
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -77,9 +77,23 @@ function stateDirectory({ stateRoot, repo, workflowId, host = 'github.com' }) {
   return directory;
 }
 
-async function ensurePrivateDirectory(directory) {
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  await chmod(directory, 0o700);
+async function ensurePrivateDirectory(directory, root) {
+  const relative = path.relative(root, directory);
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    fail('State namespace escapes its physical root.', 'ARGUMENT_ERROR');
+  }
+  let current = root;
+  for (const segment of relative ? relative.split(path.sep) : []) {
+    current = path.join(current, segment);
+    await mkdir(current, { mode: 0o700 }).catch((error) => {
+      if (error.code !== 'EEXIST') throw error;
+    });
+    const metadata = await lstat(current);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+      fail(`State namespace component is not a real directory: ${current}`, 'STATE_PATH_UNSAFE');
+    }
+    await chmod(current, 0o700);
+  }
 }
 
 export async function readPriorSnapshot(file) {
@@ -395,8 +409,16 @@ function writeArtifactPath(directory, kind, value) {
 }
 
 export async function scan(options) {
-  const directory = stateDirectory(options);
-  await ensurePrivateDirectory(directory);
+  const configuredRoot = path.resolve(options.stateRoot);
+  await mkdir(configuredRoot, { recursive: true, mode: 0o700 });
+  const physicalRoot = await realpath(configuredRoot);
+  const rootMetadata = await lstat(physicalRoot);
+  if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
+    fail(`State root is not a real directory: ${configuredRoot}`, 'STATE_PATH_UNSAFE');
+  }
+  await chmod(physicalRoot, 0o700);
+  const directory = stateDirectory({ ...options, stateRoot: physicalRoot });
+  await ensurePrivateDirectory(directory, physicalRoot);
   const release = await acquireLock(path.join(directory, 'scan.lock'));
   try {
     const stateFile = path.join(directory, 'snapshot.json');
@@ -425,7 +447,7 @@ export async function scan(options) {
     const edges = snapshot.issues.flatMap((issue) => issue.dependencies.blockedBy);
     const graph = topologicalOrder(snapshot.repo, snapshot.issues, edges);
     const artifactDirectory = path.join(directory, 'artifacts');
-    await ensurePrivateDirectory(artifactDirectory);
+    await ensurePrivateDirectory(artifactDirectory, physicalRoot);
     const issueArtifact = writeArtifactPath(artifactDirectory, 'issues', snapshot.issues);
     const prArtifact = writeArtifactPath(artifactDirectory, 'prs', snapshot.prs);
     await Promise.all([

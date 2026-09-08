@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -194,4 +194,14 @@ test('corrupt snapshots are retained for diagnosis and require an explicit rebas
   await assert.rejects(() => scan(options), /Prior state is corrupt/);
   const files = await (await import('node:fs/promises')).readdir(directory);
   assert.ok(files.some((file) => file.startsWith('snapshot.json.corrupt-')));
+});
+
+test('symlinked state namespace components are rejected before observation writes', async (t) => {
+  const options = await temporaryOptions(t);
+  const parent = path.join(options.stateRoot, 'github.com', 'olyforge3d', 'printfarmer');
+  const outside = await mkdtemp(path.join(os.tmpdir(), 'ralph-scan-outside-'));
+  t.after(() => rm(outside, { recursive: true, force: true }));
+  await mkdir(parent, { recursive: true });
+  await symlink(outside, path.join(parent, 'workflow-test'));
+  await assert.rejects(() => scan(options), /not a real directory/);
 });
