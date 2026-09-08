@@ -104,19 +104,9 @@ final class PrinterControlsViewModel: ObservableObject {
     func preheat(_ preset: PreheatPreset) async {
         let caps = capabilities ?? PrinterBackendCapabilities.fallback(for: printer.backend)
 
-        // Values actually sent to the backend:
-        //   * coolDown always sends 0/0 (safe even if the backend ignores bed).
-        //   * A preset's hotend requires temperature control (gated below).
-        //   * A preset's bed is silently dropped when bed control is unsupported.
-        let sentHotend: Double?
-        let sentBed: Double?
-        if preset == .coolDown {
-            sentHotend = 0
-            sentBed = 0
-        } else {
-            sentHotend = preset.hotend
-            sentBed = caps.supportsBedTemperature ? preset.bed : nil
-        }
+        // Cool-down uses the same evidence and omission rules as heating.
+        let sentHotend: Double? = caps.supportsTemperatureControl ? preset.hotend : nil
+        let sentBed: Double? = caps.supportsBedTemperature ? preset.bed : nil
 
         // Confirmation targets carried on the pending command. A setpoint the
         // backend can't drive is `nil` so we treat it as already satisfied and
@@ -133,11 +123,9 @@ final class PrinterControlsViewModel: ObservableObject {
         guard beginCommand(command) else { return }
         defer { endCommand(command) }
 
-        if preset != .coolDown {
-            guard caps.supportsTemperatureControl else {
-                setError(command: command, message: "Temperature control is unavailable without confirmed backend support.", isRetryable: false)
-                return
-            }
+        guard caps.supportsTemperatureControl else {
+            setError(command: command, message: "Temperature control is unavailable without confirmed backend support.", isRetryable: false)
+            return
         }
 
         do {

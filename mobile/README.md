@@ -222,7 +222,9 @@ the view to Status rather than stranding it on a page that no longer exists.
 ### Native control transport contract
 
 The typed networking prerequisite for Essential controls is implemented in
-`PrinterServiceProtocol` and `PrinterService`. UI composition is delivered
+`PrinterServiceProtocol` and `PrinterService`, together with safety corrections
+to the existing Preheat and Home controls and a visible capability-read retry.
+The new absolute-move, extrusion, motor-release and calibration UI is delivered
 separately. All paths below are relative to `/api/printers/{printerId}`.
 
 | Native method | POST route | Request / response |
@@ -247,6 +249,12 @@ server generation fence rejects stale in-flight responses.
 Homing visibility and dispatch use independent All/XY/Z evidence, not jogging
 support. A failed capability read remains unknown and shows a read-only retry
 affordance; it is not cached as permanent unsupported state.
+Preheat, including Cool Down, stays hidden and refuses dispatch until hotend
+support is confirmed. Cool Down omits an unconfirmed bed just like heating
+presets; unknown support never permits a speculative 0/0 command. Missing bed
+support is described as unavailable control, not physically absent hardware.
+Demo mode advertises no physical or persistence capabilities: its no-op commands
+are not backend support evidence.
 
 Control requests are never replayed automatically. Errors (including 409, 412,
 428 and uncertain firmware-save 503) propagate through existing APIClient

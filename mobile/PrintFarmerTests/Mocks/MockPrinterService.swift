@@ -2,17 +2,19 @@ import Foundation
 @testable import PrintFarmer
 
 extension PrinterBackendCapabilities {
-    /// Test-only evidence: never use a production backend-name fallback as a fixture.
-    static func supportedFixture(for backend: PrinterBackend) -> PrinterBackendCapabilities {
-        let supported = backend != .sdcp && backend != .unknown
-        return PrinterBackendCapabilities(
-            supportsMovement: supported, supportsTemperatureControl: supported,
-            supportsBedTemperature: supported && backend != .flashForge,
-            supportsFanControl: supported && backend != .flashForge,
-            supportsHoming: supported, supportedAxes: supported ? ["X", "Y", "Z"] : [],
-            supportsHomingXY: supported, supportsHomingZ: supported
-        )
-    }
+    /// Synthetic all-controls layout/dispatch fixture, not a backend support claim.
+    static let allControlsFixture = PrinterBackendCapabilities(
+        supportsMovement: true, supportsTemperatureControl: true,
+        supportsBedTemperature: true, supportsFanControl: true,
+        supportsHoming: true, supportedAxes: ["X", "Y", "Z"],
+        supportsHomingXY: true, supportsHomingZ: true
+    )
+
+    static let hotendOnlyFixture = PrinterBackendCapabilities(
+        supportsMovement: false, supportsTemperatureControl: true,
+        supportsBedTemperature: false, supportsFanControl: false,
+        supportsHoming: false, supportedAxes: []
+    )
 }
 
 final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
@@ -277,7 +279,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         getBackendCapabilitiesCallCount += 1
         if let hook = beforeGetBackendCapabilities { await hook() }
         if let error = errorToThrow { throw error }
-        return capabilitiesToReturn ?? PrinterBackendCapabilities.supportedFixture(for: .moonraker)
+        return capabilitiesToReturn ?? PrinterBackendCapabilities.fallback(for: .unknown)
     }
 
     var beforeSetTemperatures: (@Sendable () async -> Void)?

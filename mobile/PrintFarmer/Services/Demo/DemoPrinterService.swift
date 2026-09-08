@@ -208,15 +208,8 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
         guard printers.contains(where: { $0.id == printerId }) else { throw NetworkError.notFound }
-        return PrinterBackendCapabilities(
-            supportsMovement: true, supportsTemperatureControl: true,
-            supportsBedTemperature: true, supportsFanControl: false,
-            supportsHoming: true, supportedAxes: ["X", "Y", "Z"],
-            supportsAbsoluteMovement: true, supportsDisableMotors: true,
-            supportsExtrusion: true, supportsZOffset: true,
-            supportsZOffsetFirmwareSave: false, supportsHomingXY: true, supportsHomingZ: true,
-            supportsFilamentLoad: true, supportsFilamentUnload: true, supportsFilamentChange: true
-        )
+        // Demo command no-ops do not establish backend or persistence support.
+        return PrinterBackendCapabilities.fallback(for: .unknown)
     }
 
     func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws {

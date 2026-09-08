@@ -24,15 +24,9 @@ struct PreheatSubgroup: View {
     /// Fixed display order matching the UX spec.
     static let presets: [PreheatPreset] = [.pla, .petg, .abs, .coolDown]
 
-    /// Whether the entire subgroup should render. Hidden when the printer has
-    /// no temperature control at all (e.g. an SDCP printer reports
-    /// `supportsTemperatureControl == false`).
+    /// Presets require explicit hotend-control evidence, including Cool Down.
     static func isVisible(capabilities: PrinterBackendCapabilities?) -> Bool {
-        // Fail open: if capabilities haven't loaded yet, render the subgroup —
-        // the ViewModel will fail the command with a clear error if the
-        // backend really doesn't support it.
-        guard let caps = capabilities else { return true }
-        return caps.supportsTemperatureControl
+        capabilities?.supportsTemperatureControl == true
     }
 
     var body: some View {
@@ -51,7 +45,7 @@ struct PreheatSubgroup: View {
                 .accessibilityAddTraits(.isHeader)
 
             if viewModel.capabilities?.supportsBedTemperature == false {
-                Text("Hotend only — printer has no heated bed.")
+                Text("Hotend only — bed temperature control is unavailable.")
                     .font(.caption)
                     .foregroundStyle(Color.pfTextSecondary)
             }
@@ -266,7 +260,9 @@ private extension PreheatPreset {
     func a11yHint(hasBed: Bool) -> String {
         switch self {
         case .coolDown:
-            return String(localized: "Sets hotend and bed to 0 degrees.", comment: "VoiceOver: Cool Down idle hint")
+            return hasBed
+                ? String(localized: "Sets hotend and bed to 0 degrees.", comment: "VoiceOver: Cool Down idle hint")
+                : String(localized: "Sets hotend to 0 degrees.", comment: "VoiceOver: Cool Down hotend-only hint")
         case .pla, .petg, .abs:
             if hasBed {
                 return String(localized: "Sets hotend to \(Int(hotend)) degrees, bed to \(Int(bed)) degrees.", comment: "VoiceOver: preheat idle hint with bed")

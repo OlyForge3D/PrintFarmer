@@ -39,10 +39,21 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
         XCTAssertEqual(a, b)
     }
 
-    func testEquatable_differentBackends_areNotEqual() {
-        let moonraker = PrinterBackendCapabilities.supportedFixture(for: .moonraker)
-        let sdcp = PrinterBackendCapabilities.fallback(for: .sdcp)
-        XCTAssertNotEqual(moonraker, sdcp)
+    func testEquatable_differentEvidence_isNotEqual() {
+        XCTAssertNotEqual(
+            PrinterBackendCapabilities.allControlsFixture,
+            PrinterBackendCapabilities.fallback(for: .unknown)
+        )
+    }
+
+    func testDemoAndDefaultMockDoNotAdvertiseNoOpControls() async throws {
+        let demo = DemoPrinterService()
+        for printer in try await demo.list(includeDisabled: false) {
+            let caps = try await demo.getBackendCapabilities(printerId: printer.id)
+            XCTAssertEqual(caps, .fallback(for: .unknown))
+        }
+        let mockCaps = try await MockPrinterService().getBackendCapabilities(printerId: UUID())
+        XCTAssertEqual(mockCaps, .fallback(for: .unknown))
     }
     // MARK: - Wire DTO Decoder Fixtures
 

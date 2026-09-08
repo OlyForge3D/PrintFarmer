@@ -178,12 +178,49 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(vm.lastError, "Dropping the bed value must not surface as an error")
     }
 
-    func test_coolDown_sendsZeroZero_evenWhenBedUnsupported() async throws {
+    func test_coolDown_omitsBedWhenSupportIsUnconfirmed() async throws {
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.flashForgeCaps)
         await vm.loadCapabilities()
 
         await vm.preheat(.coolDown)
 
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 0)
+        XCTAssertNil(mockService.setTemperaturesCalledWith?.bed)
+    }
+
+    func test_allThermalPresetsRejectUnknownAndDeniedSupportWithoutDispatch() async throws {
+        for preset in PreheatSubgroup.presets {
+            let vm = try makeViewModel(printer: idlePrinter())
+            await vm.preheat(preset)
+            XCTAssertNil(mockService.setTemperaturesCalledWith)
+            XCTAssertNotNil(vm.lastError)
+            XCTAssertNil(vm.pendingCommand)
+
+            mockService.capabilitiesToReturn = .fallback(for: .unknown)
+            await vm.loadCapabilities()
+            await vm.preheat(preset)
+            XCTAssertNil(mockService.setTemperaturesCalledWith)
+            XCTAssertNotNil(vm.lastError)
+            XCTAssertNil(vm.pendingCommand)
+        }
+    }
+
+    func test_failedCapabilityReadBlocksCooldownUntilSuccessfulRetry() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        mockService.errorToThrow = NetworkError.serverError(503)
+        await vm.loadCapabilities()
+        XCTAssertNotNil(vm.capabilityLoadError)
+        XCTAssertFalse(PreheatSubgroup.isVisible(capabilities: vm.capabilities))
+        await vm.preheat(.coolDown)
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertNil(vm.pendingCommand)
+
+        mockService.errorToThrow = nil
+        await vm.loadCapabilities()
+        XCTAssertNil(vm.capabilityLoadError)
+        XCTAssertTrue(PreheatSubgroup.isVisible(capabilities: vm.capabilities))
+        XCTAssertNil(mockService.setTemperaturesCalledWith, "Capability retry must not replay cooldown")
+        await vm.preheat(.coolDown)
         XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 0)
         XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, 0)
     }

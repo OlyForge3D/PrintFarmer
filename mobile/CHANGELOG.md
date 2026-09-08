@@ -9,7 +9,11 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 - **Typed Essential control transport** — Added absolute XYZ movement, signed
   extrusion/retraction, motor release and reviewed-revision Z-offset requests,
   plus detailed filament-unload inventory responses and calibration read data.
-  This is the networking prerequisite; corresponding UI is delivered separately.
+  New-operation UI is delivered separately. Existing controls now gate Home
+  All/XY/Z independently, show a read-only Retry after capability-read failures,
+  and hide/block Preheat and Cool Down without confirmed support. Cool Down
+  omits an unconfirmed bed rather than sending speculative zero targets.
+  Demo controls no longer advertise support based on no-op command methods.
 
 - **Adaptive compact navigation** — iPhone operators can use a focused Simple
   shell (Attention · Farm · Inventory · Oversight) or a Floor/Oversight
