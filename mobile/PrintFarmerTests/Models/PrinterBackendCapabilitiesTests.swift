@@ -87,37 +87,40 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
         XCTAssertEqual(dto.supportsCamera, true)
     }
 
-    // Partial-support fixture: FlashForge backend — movement and hotend temp supported,
-    // but fan control, file management, and camera are absent.
-    func testWireDto_partialSupport_flashForge() throws {
-        let json = Data("""
-        {
-            "printerId": "550e8400-e29b-41d4-a716-446655440000",
-            "printerName": "FlashForge Adventurer 5M",
-            "backend": "FlashForge",
-            "supportsMovement": true,
-            "supportsTemperatureControl": true,
-            "supportsCamera": false,
-            "supportsFileDownload": false,
-            "supportsFileList": false,
-            "supportsFileUpload": false,
-            "supportsStartPrint": false,
-            "supportsControlOperations": false,
-            "supportsFileMetadata": false,
-            "supportsPrinterInformation": false,
-            "supportsHistory": false,
-            "supportsFilamentControl": false
+    func testWireDto_flashForge_heatersRequirePairedRouteProof_withoutMovementOrHoming() throws {
+        for heatersProven in [false, true] {
+            let json = Data("""
+            {
+                "printerId": "550e8400-e29b-41d4-a716-446655440000",
+                "printerName": "FlashForge Adventurer 5M",
+                "backend": "FlashForge",
+                "supportsMovement": false,
+                "supportsTemperatureControl": true,
+                "supportsRelativeMovement": false,
+                "supportsAbsoluteMovement": false,
+                "supportsHoming": false,
+                "supportsHomingXY": false,
+                "supportsHomingZ": false,
+                "supportsHotendTemperature": \(heatersProven),
+                "supportsBedTemperature": \(heatersProven),
+                "supportedAxes": []
+            }
+            """.utf8)
+            let dto = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
+            XCTAssertEqual(dto.backend, .flashForge)
+            XCTAssertEqual(dto.supportsMovement, false)
+            let caps = PrinterBackendCapabilities(wire: dto)
+            XCTAssertFalse(caps.supportsMovement)
+            XCTAssertFalse(caps.supportsAbsoluteMovement)
+            XCTAssertFalse(caps.supportsHoming)
+            XCTAssertFalse(caps.supportsHomingXY)
+            XCTAssertFalse(caps.supportsHomingZ)
+            XCTAssertTrue(caps.supportedAxes.isEmpty)
+            XCTAssertEqual(caps.supportsTemperatureControl, heatersProven,
+                           "Legacy temperature metadata alone does not prove route support")
+            XCTAssertEqual(caps.supportsBedTemperature, heatersProven,
+                           "Current FlashForge route proves both heaters together")
         }
-        """.utf8)
-        let dto = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
-        XCTAssertEqual(dto.backend, .flashForge)
-        XCTAssertEqual(dto.supportsMovement, true,
-                       "FlashForge supports movement (cartesian homing)")
-        XCTAssertEqual(dto.supportsTemperatureControl, true,
-                       "FlashForge supports hotend temp control")
-        XCTAssertEqual(dto.supportsControlOperations, false,
-                       "FlashForge does not expose fan/control operations")
-        XCTAssertEqual(dto.supportsCamera, false)
     }
 
     // Resin fixture: SDCP/Elegoo backend — supportsMovement=false, supportsTemperatureControl=false.

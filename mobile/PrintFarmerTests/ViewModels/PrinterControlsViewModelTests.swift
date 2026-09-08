@@ -46,15 +46,8 @@ final class PrinterControlsViewModelTests: XCTestCase {
         supportsHomingXY: true, supportsHomingZ: true
     )
 
-    private static let flashForgeCaps = PrinterBackendCapabilities(
-        supportsMovement: true,
-        supportsTemperatureControl: true,
-        supportsBedTemperature: false,
-        supportsFanControl: false,
-        supportsHoming: true,
-        supportedAxes: ["X", "Y", "Z"],
-        supportsHomingXY: true, supportsHomingZ: true
-    )
+    // Synthetic field-omission case, not a FlashForge backend profile.
+    private static let hotendOnlyCaps = PrinterBackendCapabilities.hotendOnlyFixture
 
     // MARK: - Tests
 
@@ -167,8 +160,8 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(vm.lastError)
     }
 
-    func test_preheatPETG_onFlashForge_dropsBedSilently() async throws {
-        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.flashForgeCaps)
+    func test_preheatPETG_withExplicitHotendOnlyEvidence_omitsBed() async throws {
+        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.hotendOnlyCaps)
         await vm.loadCapabilities()
 
         await vm.preheat(.petg)
@@ -179,7 +172,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
     }
 
     func test_coolDown_omitsBedWhenSupportIsUnconfirmed() async throws {
-        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.flashForgeCaps)
+        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.hotendOnlyCaps)
         await vm.loadCapabilities()
 
         await vm.preheat(.coolDown)
