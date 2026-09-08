@@ -43,6 +43,9 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var beforeBindToolheadSpool: (@Sendable () async -> Void)?
     var beforeSetActiveSpool: (@Sendable () async -> Void)?
     var beforeEmergencyStop: (@Sendable () async -> Void)?
+    var beforeUnloadFilament: (@Sendable () async -> Void)?
+    var unloadFilamentErrorToThrow: Error?
+    var beforePause: (@Sendable () async -> Void)?
     var listAvailableSpoolsCalledWith: UUID?
     var loadFilamentCalledWith: UUID?
     var unloadFilamentCalledWith: UUID?
@@ -118,6 +121,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     }
 
     func pause(id: UUID) async throws -> CommandResult {
+        if let hook = beforePause { await hook() }
         pauseCalledWith = id
         if let error = errorToThrow { throw error }
         return commandResultToReturn
@@ -196,7 +200,9 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     }
 
     func unloadFilament(printerId: UUID) async throws -> CommandResult {
+        if let hook = beforeUnloadFilament { await hook() }
         unloadFilamentCalledWith = printerId
+        if let error = unloadFilamentErrorToThrow { throw error }
         if let error = errorToThrow { throw error }
         return commandResultToReturn
     }

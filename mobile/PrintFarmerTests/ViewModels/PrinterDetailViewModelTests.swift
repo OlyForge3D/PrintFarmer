@@ -1034,6 +1034,152 @@ final class PrinterDetailViewModelTests: XCTestCase {
         )
     }
 
+    /// Bishop review: same-service, same-epoch Pause + Emergency Stop
+    /// overlap — a DIFFERENT `performAction`-routed pair than the filament-
+    /// action tests above, both dispatched via `performAction` itself.
+    /// Completion order 1: Pause finishes FIRST while Emergency Stop is
+    /// still in flight.
+    func testSameServicePauseAndEmergencyStopOverlapPauseCompletesFirstKeepsBusyUntilEmergencyStopCompletes() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+
+        let pauseEntered = ShiftTaskResultGate<Void>()
+        let pauseRelease = ShiftTaskResultGate<Void>()
+        mockService.beforePause = {
+            await pauseEntered.succeed(())
+            _ = try? await pauseRelease.wait()
+        }
+        let pauseTask = Task { await viewModel.pausePrinter() }
+        _ = try await pauseEntered.wait()
+        XCTAssertTrue(viewModel.isPerformingAction, "Setup: Pause must be genuinely in flight")
+
+        let stopEntered = ShiftTaskResultGate<Void>()
+        let stopRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeEmergencyStop = {
+            await stopEntered.succeed(())
+            _ = try? await stopRelease.wait()
+        }
+        viewModel.requestEmergencyStop()
+        let stopTask = Task { await viewModel.confirmAction() }
+        _ = try await stopEntered.wait()
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Setup: Emergency Stop must ALSO be genuinely in flight, overlapping Pause"
+        )
+
+        await pauseRelease.succeed(())
+        await pauseTask.value
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Pause's own completion must not clear busy while Emergency Stop is still genuinely in flight"
+        )
+
+        await stopRelease.succeed(())
+        await stopTask.value
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "Busy must clear once every overlapping operation has completed"
+        )
+    }
+
+    /// Same scenario, REVERSED completion order: Emergency Stop finishes
+    /// FIRST while Pause is still in flight.
+    func testSameServicePauseAndEmergencyStopOverlapEmergencyStopCompletesFirstKeepsBusyUntilPauseCompletes() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+
+        let pauseEntered = ShiftTaskResultGate<Void>()
+        let pauseRelease = ShiftTaskResultGate<Void>()
+        mockService.beforePause = {
+            await pauseEntered.succeed(())
+            _ = try? await pauseRelease.wait()
+        }
+        let pauseTask = Task { await viewModel.pausePrinter() }
+        _ = try await pauseEntered.wait()
+        XCTAssertTrue(viewModel.isPerformingAction, "Setup: Pause must be genuinely in flight")
+
+        let stopEntered = ShiftTaskResultGate<Void>()
+        let stopRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeEmergencyStop = {
+            await stopEntered.succeed(())
+            _ = try? await stopRelease.wait()
+        }
+        viewModel.requestEmergencyStop()
+        let stopTask = Task { await viewModel.confirmAction() }
+        _ = try await stopEntered.wait()
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Setup: Emergency Stop must ALSO be genuinely in flight, overlapping Pause"
+        )
+
+        await stopRelease.succeed(())
+        await stopTask.value
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Emergency Stop's own completion must not clear busy while Pause is still genuinely in flight"
+        )
+
+        await pauseRelease.succeed(())
+        await pauseTask.value
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "Busy must clear once every overlapping operation has completed"
+        )
+    }
+
+    // MARK: - Eject physical-unload safety (Bishop review finding)
+
+    /// The physical unload leg of `ejectFilament()` must ALWAYS complete
+    /// once the assignment-clear leg has already succeeded, even if this
+    /// call's result/refresh authority is lost BETWEEN the two legs (a
+    /// deactivate/reactivate ABA cycle here) — never silently skipped.
+    func testEjectFilamentCompletesPhysicalUnloadEvenAfterAuthorityLostBetweenLegs() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        // `ejectFilament`'s first leg requires `viewModel.printer` to
+        // already carry a non-empty `rowVersion` before it can dispatch at
+        // all — without this it throws before the mock hook below ever
+        // fires.
+        await viewModel.loadPrinter()
+        mockService.beforeUnloadFilament = { [weak viewModel] in
+            await MainActor.run {
+                viewModel?.isViewActive = false
+                viewModel?.isViewActive = true
+            }
+        }
+
+        await viewModel.ejectFilament()
+
+        XCTAssertNotNil(mockService.setActiveSpoolCalledWith, "The assignment-clear leg must have fired")
+        XCTAssertEqual(
+            mockService.unloadFilamentCalledWith, TestData.testUUID,
+            "The physical unload leg must still complete despite authority loss between the two legs"
+        )
+    }
+
+    /// If the physical unload leg itself fails AFTER the assignment was
+    /// already cleared, that must be surfaced as an explicit error — never
+    /// silently swallowed — regardless of this call's own result/refresh
+    /// authority.
+    func testEjectFilamentSurfacesExplicitErrorWhenPhysicalUnloadFailsAfterAssignmentCleared() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        mockService.unloadFilamentErrorToThrow = NetworkError.invalidResponse
+
+        await viewModel.ejectFilament()
+
+        XCTAssertNotNil(mockService.setActiveSpoolCalledWith, "The assignment-clear leg must have fired and succeeded")
+        XCTAssertEqual(mockService.unloadFilamentCalledWith, TestData.testUUID, "The physical unload leg must still have been attempted")
+        let error = try XCTUnwrap(viewModel.actionError)
+        XCTAssertTrue(
+            error.contains("assignment cleared"),
+            "The error must explicitly say the assignment was already cleared, not just that the unload failed: \(error)"
+        )
+    }
+
     // MARK: - Pull-to-refresh transition-during-refresh (issue #2522, Hicks
     // review finding 23)
 

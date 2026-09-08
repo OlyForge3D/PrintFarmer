@@ -548,6 +548,26 @@ final class PrinterDetailViewModel {
         }
     }
 
+    /// Physical eject: clears the active-spool assignment, then physically
+    /// unloads the filament — two SEPARATE network legs against
+    /// `printerService`.
+    ///
+    /// Safety (Bishop review finding): once the FIRST leg
+    /// (`setActiveSpool(spoolId: nil, ...)`) succeeds, the assignment is
+    /// ALREADY cleared server-side. Gating the SECOND leg
+    /// (`unloadFilament`) behind this call's RESULT/REFRESH authority — as
+    /// an earlier revision did — could silently skip the physical unload
+    /// if that authority was lost between the two legs (a deactivate/
+    /// reactivate ABA cycle, or a service reconfigure, mid-flight),
+    /// leaving a printer that is STILL PHYSICALLY LOADED with no assignment
+    /// recorded for it — a materially worse, silent state than either leg
+    /// failing outright. The physical unload therefore always dispatches
+    /// against the CAPTURED `printerService` local (stable regardless of
+    /// any later `configure(printerService:)` reassigning `self
+    /// .printerService`), never gated by `hasActionAuthority`, and any
+    /// failure of that leg is surfaced explicitly rather than swallowed —
+    /// this call must never silently return once the assignment has
+    /// already been cleared.
     func ejectFilament() async {
         guard isViewActive else { return }
         guard let printerService else { return }
@@ -560,8 +580,16 @@ final class PrinterDetailViewModel {
                 spoolId: nil,
                 reviewedRowVersion: try reviewedPrinterRowVersion()
             )
-            guard hasActionAuthority(authority) else { return }
-            _ = try await printerService.unloadFilament(printerId: printerId)
+            do {
+                _ = try await printerService.unloadFilament(printerId: printerId)
+            } catch {
+                // The assignment clear above already succeeded. The
+                // operator must know the printer may still be physically
+                // loaded despite that, regardless of whether this call's
+                // own result/refresh authority has since been lost.
+                actionError = "Spool assignment cleared, but the physical unload failed: \(error.localizedDescription)"
+                return
+            }
             guard hasActionAuthority(authority) else { return }
             lastSetSpoolInfo = nil
             await loadPrinter()
