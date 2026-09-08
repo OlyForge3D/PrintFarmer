@@ -103,8 +103,24 @@ final class PrinterDetailViewModel {
         /// could still do so through the property's public setter).
         case untracked
     }
-    @ObservationIgnored private var operationErrorMessages: [OperationErrorSource: String] = [:]
-    @ObservationIgnored private var operationErrorOrder: [OperationErrorSource] = []
+    /// Issue #2522, Hicks review finding: these two must NOT be
+    /// `@ObservationIgnored`. `actionError`'s computed getter reads them
+    /// directly, and SwiftUI's `.alert(isPresented: .constant(viewModel
+    /// .actionError != nil))` depends on Observation tracking that read.
+    /// Several call sites — `prepareReadyConfirmation()`,
+    /// `markPrinterReady()`'s early-return guard, and `toggleMaintenance()`
+    /// — mutate ONLY these two properties on their error path (no
+    /// `activeActionTokens`/busy-token change happens alongside them, which
+    /// is what masked this on every OTHER sibling action's error path: that
+    /// property IS tracked, so its own mutation incidentally forced the
+    /// same view body to re-evaluate and pick up the new `actionError`
+    /// value too). Marking these `@ObservationIgnored` (an earlier revision
+    /// did, copying the pattern from the OTHER, genuinely-internal epoch
+    /// counters in this file that are never read by a UI-facing computed
+    /// property) meant those three paths' alerts could silently fail to
+    /// redraw at all.
+    private var operationErrorMessages: [OperationErrorSource: String] = [:]
+    private var operationErrorOrder: [OperationErrorSource] = []
 
     /// Records (or replaces) the error message for one sibling action.
     private func setOperationError(_ message: String, source: OperationErrorSource) {

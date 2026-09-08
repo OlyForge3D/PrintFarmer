@@ -1260,6 +1260,54 @@ final class PrinterDetailViewModelTests: XCTestCase {
         )
     }
 
+    // MARK: - actionError Observability (Hicks review finding — the
+    // #2400 `@Observable` trap)
+
+    /// `operationErrorMessages`/`operationErrorOrder` (which
+    /// `actionError`'s computed getter reads) must NOT be
+    /// `@ObservationIgnored`, or SwiftUI would never re-evaluate
+    /// `actionError` on a path that mutates nothing else observable
+    /// alongside it. `markPrinterReady()`'s missing-status early return is
+    /// exactly such a path: it sets an error and returns BEFORE ever
+    /// calling `beginBusyToken()`, so `activeActionTokens` — which IS
+    /// tracked, and whose own mutation is what incidentally masked this bug
+    /// on every OTHER sibling action's error path — never changes here at
+    /// all. The failing pass leaves every other observable property
+    /// untouched, so the invalidation below can only have come from the
+    /// error storage itself.
+    func testActionErrorObservationInvalidatesOnSetWithoutAnyBusyTokenChange() async throws {
+        let invalidated = expectation(description: "actionError observation fired on set")
+        withObservationTracking {
+            _ = viewModel.actionError
+        } onChange: {
+            invalidated.fulfill()
+        }
+
+        await viewModel.markPrinterReady()
+
+        await fulfillment(of: [invalidated], timeout: 2)
+        XCTAssertEqual(viewModel.actionError, "Refresh the auto-dispatch status before confirming.")
+    }
+
+    /// Same trap, the clearing direction: dismissing the alert
+    /// (`viewModel.actionError = nil`) must also invalidate Observation.
+    func testActionErrorObservationInvalidatesOnClear() async throws {
+        await viewModel.markPrinterReady()
+        XCTAssertNotNil(viewModel.actionError, "precondition: an error is already recorded")
+
+        let invalidated = expectation(description: "actionError observation fired on clear")
+        withObservationTracking {
+            _ = viewModel.actionError
+        } onChange: {
+            invalidated.fulfill()
+        }
+
+        viewModel.actionError = nil
+
+        await fulfillment(of: [invalidated], timeout: 2)
+        XCTAssertNil(viewModel.actionError)
+    }
+
     // MARK: - Concurrent error preservation (Hicks review finding: a single
     // shared `actionError` let two concurrent operations silently clobber
     // each other's error message)
