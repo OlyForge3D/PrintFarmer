@@ -70,7 +70,7 @@ From `mobile/`, use an explicit stable simulator UDID:
 
 ```bash
 set -o pipefail
-xcodebuild test -project PrintFarmer.xcodeproj -scheme PrintFarmer \
+python3 scripts/run-tests.py -- test -project PrintFarmer.xcodeproj -scheme PrintFarmer \
   -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
   -parallel-testing-enabled NO \
   -test-timeouts-enabled YES \
@@ -134,6 +134,58 @@ startup, diagnostics, restart, and teardown overhead. Whole invocation time
 including build is 749.138s. Exit status remains 65. The independent collector
 tail is owned by [#2583](https://github.com/OlyForge3D/PrintFarmer/issues/2583);
 the 25-minute CI step ceiling remains a separate process backstop.
+
+### Runner finalization policy (#2583)
+
+The delayed activity is Xcode's `IDETestOperationsObserverDebug` **automatic
+simulator diagnostic collection**, not another 600s test body. The prior
+bundle's exported diagnostics contain `simctl_diagnostics`; the last test
+finished at 09:06:29.123 and the collector timeout arrived at 09:16:29.411.
+The retained evidence identifies that activity, not the particular descendant
+inside the collector that failed to respond.
+
+Xcode 26.6 `xcodebuild -help` documents `-collect-test-diagnostics never` as
+disabling verbose failure diagnostics (such as sysdiagnose). It does **not**
+disable assertions, test timeouts, XCTest activities, local attachments or
+result bundles. There is no documented `xcodebuild` switch to shorten that
+collector's internal 600s timeout. We use the supported `never` policy rather
+than private defaults or running a second collector.
+
+`mobile/scripts/run-tests.py` wraps the existing serial `xcodebuild test` or
+`test-without-building` command in both local instructions and iOS PR CI:
+
+- Automatic verbose simulator collection has a **zero budget** (`never`).
+- After a live `testFinished` event, while no test is active, allow **120s**
+  for finalization or starting the next test/runner. A new `testStarted`
+  cancels this idle deadline; it does not constrain an active test body.
+  Test-suite/log chatter cannot extend the deadline.
+- The 120s includes a **10s graceful interrupt/flush window**: interrupt
+  xcodebuild at 110s and kill its invocation-owned process group at 120s if it
+  has not exited. Shared simulator services are not swept. A runner timeout
+  always returns **124**, even if interrupted Xcode reports success.
+  Normally Xcode's original exit (including **65**) is preserved.
+- A separate **1440s invocation ceiling** covers build, startup and missing
+  events; the unit CI job uses 840s. These include the same flush window and
+  leave a minute before the existing 25/15-minute Actions step ceilings.
+  Local overrides are explicit `--invocation-timeout` and
+  `--finalization-timeout` arguments before `--`, both greater than 10s.
+- The runner forces enabled XCTest timeouts and serial execution; it rejects
+  repetition/retry switches. The shared plan's general 600s allowance and
+  individual 60s watchdogs remain unchanged.
+
+The supported `-resultStreamPath` output is retained as `.events.jsonl`.
+Sibling `.timing.json` reports every test's original XCTest duration/status,
+the whole invocation, non-test overhead, and the observed post-last-test tail.
+XCTest-reported durations include setup/teardown inside each case; they are
+**not a pure method-body profiler**. Non-test overhead includes build/startup,
+runner restarts, collection and process teardown. Stream observation has
+approximately 100ms polling resolution. A malformed/missing successful stream
+fails visibly rather than implying measured success.
+
+The wrapper never deletes artifacts. Normal failures retain complete `.xcresult`
+bundles and text logs. An exceptional forced stop can leave a partial bundle;
+raw logs, stream and timing JSON are still retained/uploaded with `if: always()`.
+This does not promise Xcode can finish a valid bundle after a hard kill.
 
 ### Synchronized-head adjacent validation
 
