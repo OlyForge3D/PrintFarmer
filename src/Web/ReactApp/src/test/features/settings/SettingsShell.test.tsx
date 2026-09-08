@@ -557,6 +557,71 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=slicing');
   });
 
+  it('preserves `?q=` from a bookmarked/shared URL when clicking to another matching settings destination (#2555)', () => {
+    renderSettings('/admin/settings?scope=system&tab=general&sub=system&q=default');
+
+    fireEvent.click(getCategoryButton('Slicer Defaults'));
+
+    expect(getCategoryButton('Slicer Defaults')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=slicing');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=defaults');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('q=default');
+  });
+
+  it('honors an explicit bookmarked `tab` and `sub` even when `q` also matches another sub-page', () => {
+    renderSettings('/admin/settings?scope=system&tab=general&sub=system&q=default');
+
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=system');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('q=default');
+    expect(screen.getByTestId('legacy-settings-page')).toHaveAttribute('data-groups', 'System,Networking,Catalog,Files,Printers');
+  });
+
+  it('preserves an explicit bookmarked `tab` and `sub` when `q` has no navigation match', () => {
+    renderSettings('/admin/settings?scope=system&tab=general&sub=farm&q=zzz-nonexistent');
+
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=farm');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('q=zzz-nonexistent');
+    expect(screen.getByText('No matching settings')).toBeInTheDocument();
+  });
+
+  it('retains a just-typed workspace search query when clicking a matching destination before debounce commit', () => {
+    renderSettings('/admin/settings?scope=system&tab=general&sub=system');
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'default' } });
+
+    fireEvent.click(getCategoryButton('Slicer Defaults'));
+
+    expect(getCategoryButton('Slicer Defaults')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=slicing');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=defaults');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('q=default');
+  });
+
+  it('keeps an explicit admin destination click even when the retained query matches only destination keywords', () => {
+    renderSettings('/admin/settings?scope=system&tab=general&sub=system');
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'branding' } });
+
+    fireEvent.click(getCategoryButton('Farm Defaults'));
+
+    expect(getCategoryButton('Farm Defaults')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=farm');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('q=branding');
+    expect(screen.queryByText('No matching settings')).not.toBeInTheDocument();
+  });
+
   it('shows empty state when no categories match search', () => {
     renderSettings('/settings?q=xyznonexistent');
     expect(screen.getByText('No matching settings')).toBeInTheDocument();
@@ -565,7 +630,7 @@ describe('SettingsShell', () => {
   });
 
   it('clears stale tab and sub params when search returns no results', () => {
-    renderSettings('/settings?scope=system&tab=hardware&sub=cameras&q=xyznonexistent');
+    renderSettings('/settings?scope=system&tab=not-a-real-tab&sub=not-a-real-sub&q=xyznonexistent');
     expect(screen.getByText('No matching settings')).toBeInTheDocument();
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('tab=');
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
@@ -932,7 +997,7 @@ describe('SettingsShell — persistent workspace search (#2505)', () => {
     expect(getCategoryButton('Slicer Defaults')).toHaveAttribute('aria-current', 'page');
   });
 
-  it('browser back to a URL whose q coincidentally matches a value the box wrote earlier still auto-navigates', async () => {
+  it('browser back to an explicitly described entry whose q coincidentally matches a value the box wrote earlier still restores that explicit location', async () => {
     // Regression for: `lastSelfWrittenQueryRef` never got invalidated on a
     // genuine external navigation, so a POP (browser back/forward) landing on
     // a `q` that happens to equal a value the box previously committed itself
@@ -959,13 +1024,14 @@ describe('SettingsShell — persistent workspace search (#2505)', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('q=quotas');
 
     // Browser back (POP) returns to the replaced entry, whose q is "slicer"
-    // again — the exact same value the ref still remembers.
+    // again — the exact same value the ref still remembers. That history
+    // entry is already fully described (`tab=general&sub=farm`), so POP must
+    // restore that explicit location instead of reinterpreting the coincidentally
+    // equal query as a fresh fuzzy-navigation request.
     fireEvent.click(screen.getByRole('button', { name: 'Go Back' }));
     await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('q=slicer'));
-
-    // Because this arrived via POP, it must be treated as external and drive
-    // legacy auto-navigation, not be suppressed as a self-authored echo.
-    expect(getCategoryButton('Slicer Defaults')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=farm');
   });
 
   it('explicit selection (Enter) pushes a new history entry and retains the query', async () => {
@@ -993,6 +1059,29 @@ describe('SettingsShell — persistent workspace search (#2505)', () => {
 
     await waitFor(() => expect(getCategoryButton('Quotas')).toHaveAttribute('aria-current', 'page'));
     expect(screen.getByTestId('location-search')).toHaveTextContent('q=quotas');
+  });
+
+  it('browser back restores an explicit tab/sub entry even when it carries a self-authored retained q marker', async () => {
+    renderSettings('/admin/settings?scope=system&tab=slicing&sub=defaults');
+
+    const input = screen.getByRole('combobox', { name: 'Search all settings' });
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'default' } });
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('q=default'));
+
+    fireEvent.click(getCategoryButton('Farm Defaults'));
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=farm');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('q=default');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go To Quotas' }));
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('tab=quotas'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go Back' }));
+    await waitFor(() => expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general'));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=farm');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('q=default');
+    expect(getCategoryButton('Farm Defaults')).toHaveAttribute('aria-current', 'page');
   });
 
   it('reaches an exact qualified field via the field=Section.property deep link on explicit selection', async () => {

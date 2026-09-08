@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom';
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, useSearchParams } from 'react-router';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 /**
@@ -28,6 +28,7 @@ const matchMediaMock = vi.fn().mockImplementation(() => ({
   addEventListener: vi.fn(),
   removeEventListener: vi.fn(),
 }));
+const usePageTourMock = vi.fn(() => ({ startTour: vi.fn(), hasSeenTour: true, resetTour: vi.fn() }));
 
 vi.mock('@/services/settingsApi', async () => {
   return {
@@ -93,7 +94,7 @@ vi.mock('@/hooks/useSlicer', () => ({
   useSlicer: () => ({ isSlicerAvailable: true, workerCount: 1 }),
 }));
 vi.mock('@/common/hooks/usePageTour', () => ({
-  usePageTour: () => ({ startTour: vi.fn(), hasSeenTour: true, resetTour: vi.fn() }),
+  usePageTour: (...args: unknown[]) => usePageTourMock(...args),
 }));
 vi.mock('@/features/admin/tours/settings.tour', () => ({ settingsTour: [] }));
 vi.mock('@/features/admin/components/ObicoServersSection', () => ({
@@ -127,11 +128,25 @@ async function renderPageWithField(fieldParam?: string) {
   return result;
 }
 
+function FieldReactivationHarness() {
+  const [, setSearchParams] = useSearchParams();
+
+  return (
+    <>
+      <button type="button" onClick={() => setSearchParams({})}>Clear field</button>
+      <button type="button" onClick={() => setSearchParams({ field: 'CatalogUpdates.autoApply' })}>Restore field</button>
+      <button type="button" onClick={() => setSearchParams({ field: 'CatalogUpdates.autoApply', q: 'printer' }, { replace: true })}>Update query</button>
+      <SettingsPage />
+    </>
+  );
+}
+
 describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () => {
   beforeEach(() => {
     scrollIntoViewMock.mockReset();
     toastErrorMock.mockReset();
     saveSettingsMock.mockReset().mockResolvedValue(undefined);
+    usePageTourMock.mockClear();
     // JSDOM does not implement scrollIntoView — polyfill so the effect runs.
     Element.prototype.scrollIntoView = scrollIntoViewMock;
     Object.defineProperty(window, 'matchMedia', {
@@ -168,6 +183,7 @@ describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () =>
     await waitFor(() => {
       expect(catalogRow!.classList.contains('pf-setting-focus')).toBe(true);
     });
+    expect(catalogRow!.querySelector('input')).toHaveFocus();
     // The unrelated SystemLog.enabled row does NOT get the highlight —
     // that would be the regression the qualifier prevents.
     expect(systemLogRow!.classList.contains('pf-setting-focus')).toBe(false);
@@ -220,6 +236,69 @@ describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () =>
     await waitFor(() => {
       expect(target!.classList.contains('pf-setting-focus')).toBe(true);
     });
+  });
+
+  it('disables first-visit tour auto-start for exact-field deep links so focus can land on the target (#2556)', async () => {
+    await renderPageWithField('CatalogUpdates.autoApply');
+
+    expect(usePageTourMock).toHaveBeenCalledWith({
+      tourId: 'settings',
+      steps: [],
+      autoStart: false,
+    });
+    const targetInput = document.querySelector<HTMLInputElement>('[data-setting-property="CatalogUpdates.autoApply"] input');
+    expect(targetInput).toBeTruthy();
+    expect(targetInput).toHaveFocus();
+  });
+
+  it('re-focuses the same exact field when the link is cleared and then re-activated on the same mounted page', async () => {
+    render(
+      <MemoryRouter initialEntries={['/?field=CatalogUpdates.autoApply']}>
+        <FieldReactivationHarness />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-mode-controls')).toBeInTheDocument();
+    });
+
+    const targetInput = document.querySelector<HTMLInputElement>('[data-setting-property="CatalogUpdates.autoApply"] input');
+    expect(targetInput).toBeTruthy();
+    await waitFor(() => {
+      expect(targetInput).toHaveFocus();
+    });
+    await waitFor(() => expect(scrollIntoViewMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear field' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Restore field' }));
+
+    await waitFor(() => expect(scrollIntoViewMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect((document.activeElement as HTMLElement | null)?.id).toBe('CatalogUpdates.autoApply');
+    });
+  });
+
+  it('does not re-scroll or steal focus back when unrelated `?q=` updates happen while the same field deep-link stays active', async () => {
+    render(
+      <MemoryRouter initialEntries={['/?field=CatalogUpdates.autoApply']}>
+        <FieldReactivationHarness />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('settings-mode-controls')).toBeInTheDocument();
+    });
+
+    const targetInput = document.querySelector<HTMLInputElement>('[data-setting-property="CatalogUpdates.autoApply"] input');
+    expect(targetInput).toBeTruthy();
+    await waitFor(() => expect(scrollIntoViewMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Update query' }));
+
+    await waitFor(() => {
+      expect((document.activeElement as HTMLElement | null)?.id).toBe('CatalogUpdates.autoApply');
+    });
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(1);
   });
 
   it('surfaces a toast and leaves the page mounted when the deep-linked field does not resolve (#2505)', async () => {

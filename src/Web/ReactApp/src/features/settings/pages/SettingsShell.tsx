@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, useContext } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, useContext } from 'react';
 import { Link, useLocation, useNavigate, useNavigationType, useSearchParams, useBlocker, UNSAFE_DataRouterContext, type BlockerFunction } from 'react-router';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
@@ -224,6 +224,10 @@ function readHistoryIndex(): number | null {
   return typeof index === 'number' ? index : null;
 }
 
+function readSelfAuthoredQueryMarker(): boolean {
+  return Boolean((window.history.state as { pfSettingsSelfAuthoredQuery?: unknown } | null)?.pfSettingsSelfAuthoredQuery);
+}
+
 function DataRouterBlocker({
   shouldBlock,
   onBlockerChange,
@@ -265,7 +269,7 @@ interface SettingsShellProps {
 }
 
 export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
-  const { hasRole, hasPermission } = useAuth();
+  const { hasRole, hasPermission, isLoading: isAuthLoading } = useAuth();
   // Passed to adminDestinations.ts helpers so scope/tab access checks share the
   // exact same permission semantics as the Control Center hub and nav (issue 1457).
   const destinationAccess = useMemo(() => ({ hasRole, hasPermission }), [hasRole, hasPermission]);
@@ -309,6 +313,13 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const requestedField = searchParams.get('field');
   const query = searchParams.get('q') || '';
   const normalizedQuery = query.trim().toLowerCase();
+  const hasSelfAuthoredQueryMarker = readSelfAuthoredQueryMarker();
+  const liveWorkspaceQueryRef = useRef(query);
+  const explicitCategoryQueryOverrideRef = useRef<{
+    query: string;
+    categoryId: string;
+    subPageId: string;
+  } | null>(null);
 
   /**
    * Mirrors `isResumePending` (declared further down, alongside the
@@ -350,6 +361,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     navigationType !== 'POP' &&
     lastSelfWrittenQueryRef.current !== null &&
     lastSelfWrittenQueryRef.current === query;
+  const shouldHonorExplicitQueryNavigation = !normalizedQuery || !hasSelfAuthoredQueryMarker || navigationType === 'POP';
 
   const commitSearchQuery = useCallback((nextQuery: string) => {
     // A blocked-POP resume is racing React Router's own revert of the
@@ -371,7 +383,25 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       }
       return next;
     }, { replace: true });
+    queueMicrotask(() => {
+      const currentState = (window.history.state as Record<string, unknown> | null) ?? {};
+      const nextState = { ...currentState };
+      if (nextQuery) {
+        nextState.pfSettingsSelfAuthoredQuery = true;
+      } else {
+        delete nextState.pfSettingsSelfAuthoredQuery;
+      }
+      window.history.replaceState(nextState, '');
+    });
   }, [setSearchParams]);
+
+  const handleWorkspaceQueryChange = useCallback((nextQuery: string) => {
+    liveWorkspaceQueryRef.current = nextQuery;
+  }, []);
+
+  useLayoutEffect(() => {
+    liveWorkspaceQueryRef.current = query;
+  }, [query]);
 
   const isAdminRoute = routeScope === 'system';
   const fieldSearchIndex = useSettingsSearchIndex({
@@ -483,51 +513,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   useEffect(() => {
     isDirtyRef.current = isDirty;
   }, [isDirty]);
-
-  const handleWorkspaceResultSelect = useCallback((item: SettingsCommandItem, queryText: string) => {
-    const doNavigate = () => {
-      if (item.onExecute) {
-        item.onExecute();
-        return;
-      }
-      if (item.href) {
-        // Destination/setting items already carry a fully-qualified path
-        // (including `field=Section.property` for exact field matches, see
-        // `buildSettingCommandItems`); retain the in-progress search text so
-        // the workspace search keeps reflecting it once we land.
-        navigate(withRetainedQuery(item.href, queryText));
-        return;
-      }
-      // Settings-nav (category/sub-page) items carry no `href` — navigate
-      // within the shell exactly like a sidebar/sub-tab click, but as a
-      // *push* (new history entry), per "explicit selection ... adds
-      // destination history" — unlike `executeCategoryChange`'s `replace`.
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('scope', item.scopeId);
-        next.set('tab', item.categoryId);
-        if (item.subPageId) {
-          next.set('sub', item.subPageId);
-        } else {
-          next.delete('sub');
-        }
-        next.delete('field');
-        if (queryText) {
-          next.set('q', queryText);
-        } else {
-          next.delete('q');
-        }
-        return next;
-      });
-    };
-
-    if (isDirty) {
-      setPendingNavigation(() => doNavigate);
-      setShowDraftModal(true);
-      return;
-    }
-    doNavigate();
-  }, [isDirty, navigate, setSearchParams]);
 
   const publishSummary = useCallback((group: string, summary: GroupDirtySummary | null) => {
     setDirtyByGroup((prev) => {
@@ -1008,45 +993,64 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, [isDirty]);
 
   const executeCategoryChange = useCallback(
-    (categoryId: string, explicitSubPageId?: string) => {
-      const target = resolveSettingsNavigationTarget(categoryId, explicitSubPageId, activeScope);
+    (
+      categoryId: string,
+      explicitSubPageId?: string,
+      options?: {
+        queryText?: string;
+        replace?: boolean;
+        scopeId?: string;
+      },
+    ) => {
+      const target = resolveSettingsNavigationTarget(categoryId, explicitSubPageId, options?.scopeId ?? activeScope);
       const targetCategory = accessibleCategories.find((category) => category.id === target.categoryId);
+      const liveQuery = isAdminRoute ? (options?.queryText ?? liveWorkspaceQueryRef.current).trim() : '';
+      const normalizedLiveQuery = liveQuery.toLowerCase();
+      const subToUse = explicitSubPageId ?? (() => {
+        const matchingTargetSubPage = !normalizedLiveQuery || !targetCategory
+          ? undefined
+          : targetCategory.subPages.find((subPage) => (
+              subPage.label.toLowerCase().includes(normalizedLiveQuery)
+              || subPage.keywords.some((keyword) => keyword.includes(normalizedLiveQuery))
+            ));
+
+        if (matchingTargetSubPage) {
+          return matchingTargetSubPage.id;
+        }
+
+        return target.subPageId ?? targetCategory?.subPages[0]?.id ?? '';
+      })();
+
+      explicitCategoryQueryOverrideRef.current = liveQuery
+        ? {
+            query: liveQuery,
+            categoryId: target.categoryId,
+            subPageId: subToUse,
+          }
+        : null;
       shouldFocusSectionRef.current = true;
       setSearchParams((prev) => {
         const next = new URLSearchParams(prev);
         next.set('scope', target.scopeId);
         next.set('tab', target.categoryId);
-        next.delete('q');
+        if (liveQuery) {
+          next.set('q', liveQuery);
+        } else {
+          next.delete('q');
+        }
         next.delete('field');
         next.delete('workerTab');
 
-        const subToUse = explicitSubPageId ?? target.subPageId;
         if (subToUse) {
           next.set('sub', subToUse);
         } else {
-          const matchingTargetSubPage = !normalizedQuery || !targetCategory
-            ? undefined
-            : targetCategory.subPages.find((subPage) => (
-                subPage.label.toLowerCase().includes(normalizedQuery)
-                || subPage.keywords.some((keyword) => keyword.includes(normalizedQuery))
-              ));
-
-          if (matchingTargetSubPage) {
-            next.set('sub', matchingTargetSubPage.id);
-          } else {
-            const defaultSubPage = targetCategory?.subPages[0]?.id;
-            if (defaultSubPage) {
-              next.set('sub', defaultSubPage);
-            } else {
-              next.delete('sub');
-            }
-          }
+          next.delete('sub');
         }
 
         return next;
-      });
+      }, { replace: options?.replace ?? false });
     },
-    [accessibleCategories, activeScope, normalizedQuery, setSearchParams],
+    [accessibleCategories, activeScope, isAdminRoute, setSearchParams],
   );
 
   const handleCategoryChange = useCallback(
@@ -1065,6 +1069,8 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     (subPageId: string) => {
       const doNavigate = () => {
         shouldFocusSectionRef.current = true;
+        liveWorkspaceQueryRef.current = '';
+        explicitCategoryQueryOverrideRef.current = null;
         setSearchParams((prev) => {
           const next = new URLSearchParams(prev);
           next.set('scope', activeScope);
@@ -1111,6 +1117,47 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     },
     [executeCategoryChange, isDirty, navigate],
   );
+
+  const handleWorkspaceResultSelect = useCallback((item: SettingsCommandItem, queryText: string) => {
+    const doNavigate = () => {
+      if (item.onExecute) {
+        item.onExecute();
+        return;
+      }
+      if (item.href) {
+        if (item.href.startsWith('/admin/settings')) {
+          const queryString = item.href.includes('?') ? item.href.split('?')[1] : '';
+          const queryParams = new URLSearchParams(queryString);
+          const destTab = queryParams.get('tab');
+          const destSub = queryParams.get('sub');
+          const destField = queryParams.get('field');
+          if (destTab && !destField) {
+            liveWorkspaceQueryRef.current = queryText;
+            executeCategoryChange(destTab, destSub ?? undefined, {
+              queryText,
+              replace: false,
+              scopeId: item.scopeId,
+            });
+            return;
+          }
+        }
+        navigate(withRetainedQuery(item.href, queryText));
+        return;
+      }
+      executeCategoryChange(item.categoryId, item.subPageId ?? undefined, {
+        queryText,
+        replace: false,
+        scopeId: item.scopeId,
+      });
+    };
+
+    if (isDirty) {
+      setPendingNavigation(() => doNavigate);
+      setShowDraftModal(true);
+      return;
+    }
+    doNavigate();
+  }, [executeCategoryChange, isDirty, navigate]);
 
   useEffect(() => registerNavigationGuard((href) => {
     if (!isDirty) {
@@ -1192,7 +1239,16 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   // decision below is gated on `canAutoNavigate`, not the raw `isFiltering`,
   // while highlighting-only consumers keep using the raw flag/id lists
   // unchanged.
-  const canAutoNavigate = isFiltering && !isDirty && !isSelfAuthoredQuery;
+  const isExplicitCategoryQueryOverrideActive = (() => {
+    const override = explicitCategoryQueryOverrideRef.current;
+    return Boolean(
+      override
+      && override.query === query
+      && override.categoryId === requestedCategory
+      && override.subPageId === (requestedSubPage ?? '')
+    );
+  })();
+  const canAutoNavigate = isFiltering && !isDirty && !isSelfAuthoredQuery && !isExplicitCategoryQueryOverrideActive;
 
   const effectiveScope = useMemo(() => {
     if (!isDirty && requestedFieldTarget) {
@@ -1221,6 +1277,14 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return requestedFieldTarget.categoryId;
     }
 
+    if (
+      requestedCategory !== null
+      && shouldHonorExplicitQueryNavigation
+      && scopeCategories.some((category) => category.id === requestedCategory)
+    ) {
+      return requestedCategory;
+    }
+
     if (!canAutoNavigate || !matchingCategoryIds || matchingCategoryIds.length === 0) {
       return scopeCategories.some((category) => category.id === activeCategory)
         ? activeCategory
@@ -1233,7 +1297,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
     const firstMatchingCategory = scopeCategories.find((category) => matchingCategoryIds.includes(category.id));
     return firstMatchingCategory?.id ?? scopeCategories[0]?.id ?? getDefaultCategoryForScope(effectiveScope);
-  }, [activeCategory, canAutoNavigate, effectiveScope, isDirty, matchingCategoryIds, requestedFieldTarget, scopeCategories]);
+  }, [activeCategory, canAutoNavigate, effectiveScope, isDirty, matchingCategoryIds, requestedCategory, requestedFieldTarget, scopeCategories, shouldHonorExplicitQueryNavigation]);
 
   const currentCategory = useMemo(
     () => scopeCategories.find((category) => category.id === effectiveCategory) ?? scopeCategories[0],
@@ -1319,6 +1383,10 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     // set still feeds SettingsSubTabs highlighting unguarded above.
     const autoNavigateSubPageIds = canAutoNavigate ? matchingCurrentSubPageIds : [];
 
+    if (isExplicitSubPage && isValidSubPage && requestedTargetSubPage && shouldHonorExplicitQueryNavigation) {
+      return requestedTargetSubPage;
+    }
+
     if (canUseRequestedSubPage && requestedTargetSubPage) {
       if (!canAutoNavigate || autoNavigateSubPageIds.length === 0 || autoNavigateSubPageIds.includes(requestedTargetSubPage)) {
         return requestedTargetSubPage;
@@ -1332,7 +1400,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     const firstAccessibleSubPage = accessibleSubPages[0]?.id;
 
     return firstAccessibleSubPage ?? getDefaultSubPage(currentCategory.id);
-  }, [accessibleCategories, canAutoNavigate, currentCategory, matchingCurrentSubPageIds, requestedFieldTarget, requestedSubPage, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId]);
+  }, [accessibleCategories, canAutoNavigate, currentCategory, matchingCurrentSubPageIds, requestedFieldTarget, requestedSubPage, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId, shouldHonorExplicitQueryNavigation]);
 
   const hasSubTabs = accessibleCategories.length > 0 && currentCategory.subPages.length >= 2;
   const renderedContentKey = currentCategory.subPages.length === 0
@@ -1366,6 +1434,9 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return;
     }
     if (isAdminRoute && accessibleCategories.length === 0) {
+      if (isAuthLoading) {
+        return;
+      }
       if (requestedScope !== 'system' || requestedCategory !== null || requestedSubPage !== null || searchParams.has('field')) {
         setSearchParams((prev) => {
           const next = new URLSearchParams(prev);
@@ -1390,14 +1461,26 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     // already-selected tab out from under a dirty editor, or out from under
     // the user while they're still typing into the persistent search box,
     // the moment a query stops matching anything by the legacy label match.
-    if (isDirty || isSelfAuthoredQuery) {
+    if (isAuthLoading || isDirty || isSelfAuthoredQuery) {
       return;
     }
     if (requestedField && (fieldSearchIndex.isLoading || fieldSearchIndex.isError)) {
       return;
     }
-    if (isFiltering && !requestedFieldTarget && matchingCategoryIds?.length === 0) {
+    const syncScope = requestedFieldTarget?.scopeId ?? activeScope;
+    const syncCategory = requestedFieldTarget?.categoryId ?? effectiveCategory;
+    if (isFiltering && !requestedFieldTarget && matchingCategoryIds?.length === 0 && !isExplicitCategoryQueryOverrideActive) {
+      const shouldPreserveExplicitNoMatchLocation =
+        shouldHonorExplicitQueryNavigation &&
+        (requestedScope === null || requestedScope === syncScope) &&
+        requestedCategory !== null &&
+        requestedCategory === effectiveCategory &&
+        (requestedSubPage ?? '') === activeSubPage;
+
       if (requestedCategory === null && requestedSubPage === null) {
+        return;
+      }
+      if (shouldPreserveExplicitNoMatchLocation) {
         return;
       }
 
@@ -1409,9 +1492,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       }, { replace: true });
       return;
     }
-
-    const syncScope = requestedFieldTarget?.scopeId ?? activeScope;
-    const syncCategory = requestedFieldTarget?.categoryId ?? effectiveCategory;
     const shouldSyncScope = Boolean(requestedFieldTarget) || isFiltering || requestedScope !== null || requestedCategory !== null || activeScope !== DEFAULT_SCOPE;
     const shouldSyncCategory = Boolean(requestedFieldTarget) || isFiltering || requestedCategory !== null || activeScope !== DEFAULT_SCOPE;
     const shouldSyncSub = requestedSubPage !== null
@@ -1451,11 +1531,13 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     searchParams,
     activeScope,
     activeSubPage,
+    isAuthLoading,
     currentCategory.subPages.length,
     effectiveCategory,
     fieldSearchIndex.isError,
     fieldSearchIndex.isLoading,
     isFiltering,
+    isExplicitCategoryQueryOverrideActive,
     matchingCategoryIds,
     requestedCategory,
     requestedField,
@@ -1463,6 +1545,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     requestedScope,
     requestedSubPage,
     setSearchParams,
+    shouldHonorExplicitQueryNavigation,
   ]);
 
   useEffect(() => {
@@ -1512,14 +1595,20 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     [activeSubPage, currentCategory],
   );
   const canAccessActiveTab = useMemo(() => {
+    if (isAuthLoading) {
+      return true;
+    }
     if (isAdminRoute && accessibleCategories.length === 0) return false;
     if (!activeTabDestination) {
       return true;
     }
     return canAccessDestination(activeTabDestination, destinationAccess);
-  }, [accessibleCategories.length, activeTabDestination, destinationAccess, isAdminRoute]);
+  }, [accessibleCategories.length, activeTabDestination, destinationAccess, isAdminRoute, isAuthLoading]);
 
   const content = useMemo(() => {
+    if (isAdminRoute && isAuthLoading) {
+      return <FormSkeleton />;
+    }
     if (isAdminRoute && accessibleCategories.length === 0) {
       return (
         <SettingsSection>
@@ -1552,12 +1641,17 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <p className="text-sm">Content not found for {renderedContentKey}</p>
       </div>
     );
-  }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, isAdminRoute, renderedContentKey]);
+  }, [accessibleCategories.length, activeSubPageLabel, canAccessActiveTab, currentCategory, isAdminRoute, isAuthLoading, renderedContentKey]);
 
   const pageTitle = currentScopeMeta?.label ?? 'Settings';
   const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
 
-  const hasNoMatches = accessibleCategories.length > 0 && canAutoNavigate && !requestedFieldTarget && matchingCategoryIds && matchingCategoryIds.length === 0;
+  const hasNoMatches = !isAuthLoading
+    && accessibleCategories.length > 0
+    && canAutoNavigate
+    && !requestedFieldTarget
+    && matchingCategoryIds
+    && matchingCategoryIds.length === 0;
 
   // Page-level actions. The mode toggle arrives by portal from whichever content
   // page owns it (see SettingsHeaderPortal); the palette is always available, so
@@ -1575,6 +1669,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       {isAdminRoute ? (
         <WorkspaceSearchResults
           initialQuery={query}
+          onQueryChange={handleWorkspaceQueryChange}
           onQueryCommit={commitSearchQuery}
           onSelect={handleWorkspaceResultSelect}
         />

@@ -718,17 +718,17 @@ export function SettingsPage({
   afterContent,
 }: SettingsPageProps = {}) {
   const { isSlicerAvailable } = useSlicer();
-  const { startTour } = usePageTour({ tourId: 'settings', steps: settingsTour });
-  const { mode, setMode } = useSettingsMode();
   const [searchParams] = useSearchParams();
   const fieldParam = searchParams.get('field');
+  const { startTour } = usePageTour({ tourId: 'settings', steps: settingsTour, autoStart: !fieldParam });
+  const { mode, setMode } = useSettingsMode();
   const [query, setQuery] = useState('');
   const [metadata, setMetadata] = useState<SettingMetadata[]>([]);
   const [groupMetadata, setGroupMetadata] = useState<SettingGroupMetadata[]>([]);
   const [values, setValues] = useState<GroupValues>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
-  const scrolledFieldRef = useRef<string | null>(null);
+  const handledFieldActivationRef = useRef<string | null>(null);
 
   // ── Page-level save aggregation ────────────────────────────────────────────
   // Dirty *values* stay inside each GroupSaveBlock so groups cannot clobber each
@@ -842,10 +842,17 @@ export function SettingsPage({
   // per the React-compiler guidance the palette task calls out. The URL param
   // stays put so the link remains copy-pasteable.
   useEffect(() => {
+    if (fieldParam) {
+      return;
+    }
+    handledFieldActivationRef.current = null;
+  }, [fieldParam]);
+
+  useEffect(() => {
     if (loading || !fieldParam) {
       return;
     }
-    if (scrolledFieldRef.current === fieldParam) {
+    if (handledFieldActivationRef.current === fieldParam) {
       return;
     }
     if (typeof window === 'undefined') {
@@ -867,6 +874,15 @@ export function SettingsPage({
         : `[data-setting-property$=".${escapedField}"]`;
       const target = document.querySelector<HTMLElement>(selector);
       if (target) {
+        const control = target.querySelector<HTMLElement>(
+          'input, select, textarea, button, [tabindex]:not([tabindex="-1"])',
+        );
+        if (control) {
+          control.focus({ preventScroll: true });
+        } else {
+          target.setAttribute('tabindex', '-1');
+          target.focus({ preventScroll: true });
+        }
         const prefersReducedMotion = typeof window.matchMedia === 'function'
           && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         target.scrollIntoView({
@@ -887,13 +903,13 @@ export function SettingsPage({
         // remains inspectable, and nothing crashes.
         toast.error(`Couldn't find the "${fieldParam}" setting on this page.`);
       }
-      scrolledFieldRef.current = fieldParam;
+      handledFieldActivationRef.current = fieldParam;
     });
 
     return () => {
       window.cancelAnimationFrame(raf);
     };
-  }, [loading, fieldParam]);
+  }, [fieldParam, loading]);
 
   // Intentionally NO parent-level refetch after per-group save. Each group's
   // block accepts its own successful save as the new baseline via
