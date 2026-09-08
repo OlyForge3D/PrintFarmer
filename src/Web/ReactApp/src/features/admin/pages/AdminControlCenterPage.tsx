@@ -202,7 +202,7 @@ const OPERATIONAL_DESTINATION_IDS = [
   'ops-maintenance',
   'ops-analytics',
   'ops-auto-dispatch',
-  'ops-printed-parts',
+  'parts-inventory',
 ] as const;
 
 function getDashboardDestinations(
@@ -306,12 +306,13 @@ export function AdminControlCenterPage() {
   const { hasRole, hasPermission } = useAuth();
   const { pinnedIds, setPinned, movePinned } = useAdminNavPins();
   const [showPinChooser, setShowPinChooser] = useState(false);
-  const [draggingPinnedDestinationId, setDraggingPinnedDestinationId] = useState<string | null>(null);
-  const [pinAnnouncement, setPinAnnouncement] = useState('');
   const pinChooserButtonRef = useRef<HTMLButtonElement | null>(null);
   const pinChooserRef = useRef<HTMLDivElement | null>(null);
   const pinMoveButtonRefs = useRef(new Map<string, { up: HTMLButtonElement | null; down: HTMLButtonElement | null; row: HTMLElement | null }>());
   const pendingPinMoveFocusRef = useRef<{ destinationId: string; direction: MoveButtonDirection } | null>(null);
+  const [draggingPinId, setDraggingPinId] = useState<string | null>(null);
+  const pinAnnouncementRef = useRef<HTMLDivElement | null>(null);
+  const pinAnnouncementTimeoutRef = useRef<number | null>(null);
   const canViewOverview = hasRole('farm_admin') || hasPermission('system_settings', 'admin');
   const { data, isLoading, isError, error, isFetching, refetch } = useAdminOverview({
     enabled: canViewOverview,
@@ -359,6 +360,34 @@ export function AdminControlCenterPage() {
     () => new Map(orderedPinnedIds.map((id, index) => [id, index])),
     [orderedPinnedIds],
   );
+
+  const announcePinChange = useCallback((message: string) => {
+    if (pinAnnouncementTimeoutRef.current !== null) {
+      window.clearTimeout(pinAnnouncementTimeoutRef.current);
+    }
+    if (pinAnnouncementRef.current) {
+      pinAnnouncementRef.current.textContent = message;
+    }
+    pinAnnouncementTimeoutRef.current = window.setTimeout(() => {
+      if (pinAnnouncementRef.current) {
+        pinAnnouncementRef.current.textContent = '';
+      }
+      pinAnnouncementTimeoutRef.current = null;
+    }, 1_500);
+  }, []);
+
+  const movePin = useCallback((destinationId: string, targetIndex: number, focusDirection?: MoveButtonDirection) => {
+    const destination = orderedPinnedDestinations.find((candidate) => candidate.id === destinationId);
+    const targetPosition = Math.max(1, Math.min(targetIndex + 1, orderedPinnedDestinations.length));
+    if (focusDirection) {
+      pendingPinMoveFocusRef.current = { destinationId, direction: focusDirection };
+    }
+    movePinned(destinationId, targetIndex, orderedPinnedIds);
+    if (destination) {
+      announcePinChange(`Moved ${destination.label} to position ${targetPosition} of ${orderedPinnedDestinations.length}.`);
+    }
+  }, [announcePinChange, movePinned, orderedPinnedDestinations, orderedPinnedIds]);
+
   const pinChooserDestinations = useMemo(() => {
     const pinnedDestinationIds = new Set(orderedPinnedIds);
     return [
@@ -366,24 +395,6 @@ export function AdminControlCenterPage() {
       ...eligiblePinDestinations.filter((destination) => !pinnedDestinationIds.has(destination.id)),
     ];
   }, [eligiblePinDestinations, orderedPinnedDestinations, orderedPinnedIds]);
-  const reorderPinnedDestination = useCallback((
-    destinationId: string,
-    targetIndex: number,
-    focusDirection?: MoveButtonDirection,
-  ) => {
-    const destination = orderedPinnedDestinations.find((candidate) => candidate.id === destinationId);
-    const targetPosition = Math.max(1, Math.min(targetIndex + 1, orderedPinnedIds.length));
-    if (focusDirection) {
-      pendingPinMoveFocusRef.current = { destinationId, direction: focusDirection };
-    }
-
-    movePinned(destinationId, targetIndex, orderedPinnedIds);
-    if (destination) {
-      setPinAnnouncement(
-        `Moved ${destination.label} to position ${targetPosition} of ${orderedPinnedIds.length}.`,
-      );
-    }
-  }, [movePinned, orderedPinnedDestinations, orderedPinnedIds]);
 
   useEffect(() => {
     if (!showPinChooser) return;
@@ -463,6 +474,7 @@ export function AdminControlCenterPage() {
       maxWidth="max-w-7xl"
       titleWrap
     >
+      <div ref={pinAnnouncementRef} className="sr-only" aria-live="polite" aria-atomic="true" />
       {showPinChooser && (
         <div
           ref={pinChooserRef}
@@ -476,9 +488,6 @@ export function AdminControlCenterPage() {
             <p className="text-sm text-pf-text-secondary">
               Choose authorized admin destinations to show in your navbar. Pinned links stay in the order shown and are saved in this browser for your account.
             </p>
-          </div>
-          <div className="sr-only" aria-live="polite" aria-atomic="true">
-            {pinAnnouncement}
           </div>
           <div className="space-y-2" role="list" aria-label="Authorized admin destinations">
             {pinChooserDestinations.map((destination) => {
@@ -495,33 +504,30 @@ export function AdminControlCenterPage() {
                   role="listitem"
                   tabIndex={-1}
                   draggable={pinned}
+                  aria-label={pinned ? `${destination.label}, draggable to reorder` : undefined}
                   onDragStart={(event) => {
+                    // Synthetic drag events can still be dispatched to an unpinned row,
+                    // so guard the source as well as using draggable={pinned}.
+                    if (!pinned) return;
                     event.dataTransfer.effectAllowed = 'move';
                     event.dataTransfer.setData('text/plain', destination.id);
-                    setDraggingPinnedDestinationId(destination.id);
+                    setDraggingPinId(destination.id);
                   }}
-                  onDragEnd={() => setDraggingPinnedDestinationId(null)}
+                  onDragEnd={() => setDraggingPinId(null)}
                   onDragOver={(event) => {
-                    if (pinned) {
-                      event.preventDefault();
-                    }
+                    if (pinned && draggingPinId) event.preventDefault();
                   }}
                   onDrop={(event) => {
-                    if (!pinned) {
-                      return;
-                    }
+                    if (!pinned || !draggingPinId) return;
                     event.preventDefault();
-                    if (draggingPinnedDestinationId && draggingPinnedDestinationId !== destination.id) {
-                      reorderPinnedDestination(
-                        draggingPinnedDestinationId,
-                        pinPosition!,
-                      );
+                    if (draggingPinId !== destination.id) {
+                      movePin(draggingPinId, pinPosition ?? 0);
                     }
-                    setDraggingPinnedDestinationId(null);
+                    setDraggingPinId(null);
                   }}
                   className={clsx(
                     'rounded-md border border-pf-border p-2',
-                    draggingPinnedDestinationId === destination.id && 'opacity-60',
+                    pinned && draggingPinId === destination.id && 'opacity-60',
                   )}
                 >
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -544,9 +550,7 @@ export function AdminControlCenterPage() {
                               current.up = node;
                               pinMoveButtonRefs.current.set(destination.id, current);
                             }}
-                            onClick={() => {
-                              reorderPinnedDestination(destination.id, (pinPosition ?? 0) - 1, 'up');
-                            }}
+                            onClick={() => movePin(destination.id, (pinPosition ?? 0) - 1, 'up')}
                             iconCenter={<ArrowUpIcon className="h-4 w-4" />}
                           />
                           <Button
@@ -561,9 +565,7 @@ export function AdminControlCenterPage() {
                               current.down = node;
                               pinMoveButtonRefs.current.set(destination.id, current);
                             }}
-                            onClick={() => {
-                              reorderPinnedDestination(destination.id, (pinPosition ?? 0) + 1, 'down');
-                            }}
+                            onClick={() => movePin(destination.id, (pinPosition ?? 0) + 1, 'down')}
                             iconCenter={<ArrowDownIcon className="h-4 w-4" />}
                           />
                         </>

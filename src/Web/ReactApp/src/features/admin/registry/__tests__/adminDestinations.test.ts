@@ -86,7 +86,7 @@ describe('adminDestinations registry', () => {
   });
 
   it('registers Printed Parts as a pinnable operational destination', () => {
-    expect(getDestinationById('ops-printed-parts')).toMatchObject({
+    expect(getDestinationById('parts-inventory')).toMatchObject({
       kind: 'operational',
       label: 'Printed Parts',
       path: '/parts-inventory',

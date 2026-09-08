@@ -280,18 +280,17 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     isHubTile: true,
   },
   {
-    id: 'ops-printed-parts',
+    id: 'parts-inventory',
     kind: 'operational',
     label: 'Printed Parts',
-    description: 'Track printed inventory and its availability for farm operations.',
+    description: 'Track printed spare parts inventory and reorder status.',
     path: '/parts-inventory',
     icon: PackageIcon,
     group: 'operations',
-    // PartsInventoryController is protected by
-    // `[RequirePermission("parts_inventory", "admin")]`.
+    // Backed by PartsInventoryController, class-level `[RequirePermission("parts_inventory", "admin")]`.
     requiredRole: null,
     requiredPermission: { resource: 'parts_inventory', action: 'admin' },
-    keywords: ['printed parts', 'parts inventory', 'inventory', 'stock'],
+    keywords: ['parts', 'inventory', 'printed parts', 'spares', 'stock'],
     isHubTile: true,
   },
 

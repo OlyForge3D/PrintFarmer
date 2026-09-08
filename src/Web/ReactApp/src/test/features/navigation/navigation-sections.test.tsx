@@ -143,7 +143,7 @@ describe('Navigation rail sections', () => {
     expect(desktopNav.querySelector('a[href="/admin"]')).not.toBeNull();
   });
 
-  it('renders exactly one divider immediately before the Admin group', async () => {
+  it('renders exactly one divider immediately before the anchored Admin group', async () => {
     const { container } = renderLayout();
     const desktopNav = getDesktopNav(container);
 
@@ -159,6 +159,10 @@ describe('Navigation rail sections', () => {
   // #2526 — the default admin rail is pinned to an exact set, not a count. A
   // raw length says nothing about *which* destinations own the default surface,
   // so it cannot catch a swap (one admin duplicate removed, another added).
+  //
+  // Printed Parts (`parts-inventory`) moved off this default set in #2588: it
+  // is a normal, user-pinnable `ADMIN_DESTINATIONS` entry now, so it only
+  // shows up here once a user opts in via the ACC "Pin admin links" panel.
   const DEFAULT_ADMIN_RAIL_HREFS = [
     '/dashboard',
     '/printers',
@@ -188,6 +192,9 @@ describe('Navigation rail sections', () => {
   // The Admin Control Center owns these five, so a *default* rail must not
   // offer a second route to them. User-chosen pinning is separate work (#2527)
   // and would be an explicit opt-in, not a default entry.
+  //
+  // Printed Parts joined this set in #2588 — it too is now Control-Center-owned
+  // and only reachable via the rail after an explicit admin pin.
   it.each([
     ['Maintenance', '/maintenance'],
     ['Locations', '/locations'],
@@ -329,7 +336,7 @@ describe('Navigation rail sections', () => {
       orderedItemIds: [],
       hiddenItemIds: [],
       pinnedItemIds: [],
-      adminPinnedItemIds: ['ops-workers', 'ops-analytics', 'ops-printed-parts'],
+      adminPinnedItemIds: ['parts-inventory', 'ops-workers', 'ops-analytics'],
     }));
     const { container } = renderLayout();
     const desktopNav = getDesktopNav(container);
@@ -342,12 +349,12 @@ describe('Navigation rail sections', () => {
 
     const adminSection = within(desktopNav).getByRole('region', { name: 'Admin' });
     expect(within(adminSection).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+    expect(within(adminSection).getByRole('link', { name: 'Printed Parts' })).toHaveAttribute('href', '/parts-inventory');
     expect(within(adminSection).getByRole('link', { name: 'Workers & Jobs' })).toHaveAttribute('href', '/admin/workers?workerTab=jobs');
     expect(within(adminSection).getByRole('link', { name: 'Analytics' })).toHaveAttribute('href', '/analytics');
-    expect(within(adminSection).getByRole('link', { name: 'Printed Parts' })).toHaveAttribute('href', '/parts-inventory');
 
     const adminLinks = within(adminSection).getAllByRole('link').map((link) => link.textContent?.trim());
-    expect(adminLinks).toEqual(['Admin', 'Workers & Jobs', 'Analytics', 'Printed Parts']);
+    expect(adminLinks).toEqual(['Admin', 'Printed Parts', 'Workers & Jobs', 'Analytics']);
   });
 
   it('updates desktop and mobile ordering from another tab without a remount', async () => {
