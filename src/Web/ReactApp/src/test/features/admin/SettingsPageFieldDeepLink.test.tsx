@@ -74,7 +74,17 @@ vi.mock('@/services/settingsApi', async () => {
             name: 'autoApply',
             type: 'Boolean',
             attributes: [],
-            display: { name: 'Auto Apply', inputType: 'Boolean' },
+            display: {
+              name: 'Auto Apply',
+              description: 'Apply downloaded catalog updates automatically.',
+              inputType: 'Boolean',
+            },
+          },
+          {
+            name: 'notificationEmails',
+            type: 'string[]',
+            attributes: [],
+            display: { name: 'Notification Emails', inputType: 'Array', isMulti: true },
           },
         ],
       },
@@ -84,7 +94,7 @@ vi.mock('@/services/settingsApi', async () => {
     ]),
     fetchSettingsUnified: vi.fn().mockResolvedValue({
       SystemLog: { enabled: true, retentionDays: 30 },
-      CatalogUpdates: { enabled: false, autoApply: false },
+      CatalogUpdates: { enabled: false, autoApply: false, notificationEmails: ['alerts@example.com'] },
     }),
     saveSettingsValues: (...args: unknown[]) => saveSettingsMock(...args),
   };
@@ -238,7 +248,7 @@ describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () =>
     });
   });
 
-  it('disables first-visit tour auto-start for exact-field deep links so focus can land on the target (#2556)', async () => {
+  it('disables first-visit tour auto-start and focuses the exact control for a descriptive field deep link (#2556)', async () => {
     await renderPageWithField('CatalogUpdates.autoApply');
 
     expect(usePageTourMock).toHaveBeenCalledWith({
@@ -246,7 +256,17 @@ describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () =>
       steps: [],
       autoStart: false,
     });
-    const targetInput = document.querySelector<HTMLInputElement>('[data-setting-property="CatalogUpdates.autoApply"] input');
+    const targetInput = document.getElementById('CatalogUpdates.autoApply');
+    expect(targetInput).toBeTruthy();
+    expect(targetInput).toHaveFocus();
+  });
+
+  it('falls back to the first array input when its qualified field link has no matching control ID', async () => {
+    await renderPageWithField('CatalogUpdates.notificationEmails');
+
+    const targetInput = document.querySelector<HTMLInputElement>(
+      '[data-setting-property="CatalogUpdates.notificationEmails"] input',
+    );
     expect(targetInput).toBeTruthy();
     expect(targetInput).toHaveFocus();
   });
