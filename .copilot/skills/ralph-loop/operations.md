@@ -33,7 +33,9 @@ critical-path work that unblocks macOS issues; never dispatch the mobile depende
 Re-fetch and confirm each issue immediately before claim/spawn. Maintain at most five live
 implementation/analysis sessions. Use `gpt-5.6-terra` medium for implementation and
 `gpt-5.6-luna` medium for non-code analysis unless an explicit premium justification exists.
-Pass `implementation-pre-pr.md` and task-specific acceptance criteria to implementation sessions.
+Every kickoff passes `session-terminal-contract.md`. Implementation kickoffs also pass
+`implementation-pre-pr.md` and task-specific acceptance criteria; analysis kickoffs state their
+exact non-code deliverable and publication location.
 
 ## Round Report
 

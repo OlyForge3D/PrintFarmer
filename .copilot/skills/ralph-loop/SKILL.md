@@ -54,18 +54,13 @@ explicitly, and this change must not alter live workflows. Preserve manual targe
   read `.copilot/skills/ralph-loop/operations.md`. It is the sole conditional operational
   authority for these actions; do not read or follow generic `.squad` Ralph templates.
 - **Implementation dispatch and pre-PR requirements:** pass
-  `.copilot/skills/ralph-loop/implementation-pre-pr.md` and task-specific acceptance criteria
-  in the kickoff—do not paste its policy. Default implementation model is `gpt-5.6-terra`
-  medium; non-code analysis is `gpt-5.6-luna` medium. Premium or xhigh needs explicit
-  justification.
-- **Verdicts, CodeQL, PR lifecycle, merging:** read `.github/ralph-reference.md` and run
-  `scripts/ci/verify-squad-verdict.mjs --json`. Verify messages/authors/current state first.
-  `squad` label scope, SHA-bound unanimous reviews, green required checks, CodeQL completion and
-  new-vs-baseline behavior, serialized `--match-head-commit` merges, and no unattended bypass
-  remain mandatory. A base-sync carry-forward has only the verifier/gate's actual semantics;
-  heuristic diff equality cannot grant authorization.
-- **Conflicts:** only a fresh targeted review of hand-authored resolution hunks is permitted;
-  it must agree across every resolved file. Clean syncs follow the verifier’s carry rules.
+  `.copilot/skills/ralph-loop/implementation-pre-pr.md`,
+  `.copilot/skills/ralph-loop/session-terminal-contract.md`, and task-specific acceptance
+  criteria in the kickoff—do not paste their policy. Default implementation model is
+  `gpt-5.6-terra` medium; non-code analysis is `gpt-5.6-luna` medium. Premium or xhigh needs
+  explicit justification.
+- **Verdicts, CodeQL, PR lifecycle, merging, conflicts:** read
+  `.copilot/skills/ralph-loop/pr-merge.md`; it is the sole scheduled-Ralph authority.
 - **Cleanup candidates:** read `.copilot/skills/ralph-loop/cleanup.md` and use
   `assessCleanupCandidate` while reusing that round's session inventory and PR results.
 

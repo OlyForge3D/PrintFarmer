@@ -14,6 +14,7 @@ import {
   orderReadyIssues,
   readRoundCache,
   resolveRalphCacheDirectory,
+  validateDependencyGraph,
   writeRoundCache,
 } from '../ralph-round-cache.mjs';
 
@@ -98,12 +99,29 @@ test('reclaims only a lock with demonstrably expired ownership metadata', async 
   try {
     const file = cacheFileForScope(scope, { env: { RALPH_CACHE_DIR: directory } });
     await writeFile(`${file}.lock`, JSON.stringify({
-      pid: 1, createdAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:01:00Z',
+      ownerToken: 'interrupted-owner', pid: 1,
+      createdAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:01:00Z',
     }));
     await writeRoundCache(scope, cache(), {
-      env: { RALPH_CACHE_DIR: directory }, staleLockMs: 1,
+      env: { RALPH_CACHE_DIR: directory }, staleLockMs: 1, isOwnerAlive: () => false,
     });
     assert.equal((await readRoundCache(scope, { env: { RALPH_CACHE_DIR: directory } })).reason, undefined);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('never reclaims an expired lease while its owner is demonstrably alive', async () => {
+  const directory = await temporaryDirectory();
+  try {
+    const file = cacheFileForScope(scope, { env: { RALPH_CACHE_DIR: directory } });
+    await writeFile(`${file}.lock`, JSON.stringify({
+      ownerToken: 'long-owner', pid: 1,
+      createdAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:01:00Z',
+    }));
+    await assert.rejects(() => writeRoundCache(scope, cache(), {
+      env: { RALPH_CACHE_DIR: directory }, retries: 1, isOwnerAlive: () => true,
+    }), (error) => error.code === 'LOCK_TIMEOUT');
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -152,6 +170,9 @@ test('orders READY issues using the complete graph and rejects cycles', () => {
     { blocker: 1, blocked: 2 }, { blocker: 2, blocked: 1 },
   ]),
     (error) => error.code === 'DEPENDENCY_CYCLE');
+  assert.throws(() => validateDependencyGraph(completeIssues, [
+    { blocker: 4, blocked: 5 }, { blocker: 5, blocked: 4 },
+  ]), (error) => error.code === 'DEPENDENCY_CYCLE');
 });
 
 test('reports compact unchanged and changed fixture output', () => {
@@ -200,16 +221,18 @@ test('cleanup candidates are report-only and fail closed for uncertainty or post
 });
 
 test('dispatcher routes only to self-contained policies and retains gates', async () => {
-  const [skill, operations, cleanup, prePr] = await Promise.all([
+  const [skill, operations, cleanup, prePr, prMerge, terminal] = await Promise.all([
     readFile('.copilot/skills/ralph-loop/SKILL.md', 'utf8'),
     readFile('.copilot/skills/ralph-loop/operations.md', 'utf8'),
     readFile('.copilot/skills/ralph-loop/cleanup.md', 'utf8'),
     readFile('.copilot/skills/ralph-loop/implementation-pre-pr.md', 'utf8'),
+    readFile('.copilot/skills/ralph-loop/pr-merge.md', 'utf8'),
+    readFile('.copilot/skills/ralph-loop/session-terminal-contract.md', 'utf8'),
   ]);
   for (const reference of [
-    'implementation-pre-pr.md', '.github/ralph-reference.md',
-    'verify-squad-verdict.mjs', 'one round and exits', 'five implementation/analysis slots maximum',
-    'never dispatch, review, or merge it', 'CodeQL completion',
+    'implementation-pre-pr.md', 'session-terminal-contract.md', 'pr-merge.md',
+    'one round and exits', 'five implementation/analysis slots maximum',
+    'never dispatch, review, or merge it',
     'Before every dispatch, claim, message, review decision, or merge, fetch',
     'gemini-3.1-pro-preview', 'assessCleanupCandidate', 'operations.md', 'cleanup.md',
     'No named non-workflow test entrypoint', 'test-ralph-round-cache.mjs',
@@ -223,7 +246,15 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
     'confirmed-action handoff', 'explicitly confirms each exact',
   ]) assert.match(cleanup, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   for (const reference of [
-    'documentation-only', 'Workflow/configuration', 'agent-safety-boundary',
-    'Bishop', 'Hicks', 'Vasquez',
+    '.github/copilot-instructions.md', 'Documentation-Only Changes: One Reviewer',
   ]) assert.match(prePr, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+  assert.doesNotMatch(prePr, /Workflow\/configuration|agent-safety-boundary/i);
+  for (const reference of [
+    'verify-squad-verdict.mjs', 'CodeQL', 'match-head-commit', 'hand-authored conflict',
+  ]) assert.match(prMerge, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+  assert.doesNotMatch(prMerge, /\.squad\/templates\/ralph-reference\.md/i);
+  for (const reference of [
+    'working tree clean', 'all commits pushed', 'origin/development', 'CLOSED WITHOUT MERGE',
+    'verified linked-issue disposition', 'completed, verified deliverable',
+  ]) assert.match(terminal, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
 });

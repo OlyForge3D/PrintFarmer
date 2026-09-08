@@ -20,13 +20,11 @@ test assembly.
 ## Pre-PR Gate
 
 Before opening a PR, fetch then merge `origin/development` into the branch, resolve only actual
-conflicts, and rerun targeted validation. Do not rebase. A documentation-only change needs one
-domain-appropriate reviewer; all other changes require unanimous, SHA-bound approvals from Bishop
-(`claude-opus-5`), Hicks (`gpt-5.6-sol`), and Vasquez (`gemini-3.1-pro-preview`), all medium.
-Workflow/configuration, security, API-contract, and agent-safety-boundary documentation retain
-the full trio. Dispatch reviewers as parallel read-only task agents—not sessions—and explicitly
-prohibit builds, installs, and tests. An unavailable model blocks the PR; never substitute or
-self-review.
+conflicts, and rerun targeted validation. Do not rebase. Reviewer count and documentation-only
+classification are governed solely by
+`.github/copilot-instructions.md` § `Documentation-Only Changes: One Reviewer`. Dispatch the
+required reviewers as parallel read-only task agents—not sessions—and explicitly prohibit builds,
+installs, and tests. An unavailable model blocks the PR; never substitute or self-review.
 
 Fix every blocker and repeat review at the new head. If conflict resolution authored hunks,
 request narrowly targeted review that agrees across all resolved files. Then create the PR with

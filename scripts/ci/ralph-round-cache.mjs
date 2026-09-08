@@ -102,27 +102,56 @@ export async function readRoundCache(scope, options = {}) {
   }
 }
 
-async function acquireLock(lockFile, { retries = 40, retryMs = 10, staleLockMs = 5 * 60 * 1000 } = {}) {
+function ownerIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return undefined;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'ESRCH' ? false : undefined;
+  }
+}
+
+async function releaseLock(lockFile, lock) {
+  try {
+    const current = JSON.parse(await readFile(lockFile, 'utf8'));
+    if (current.ownerToken === lock.metadata.ownerToken) await rm(lockFile, { force: true });
+  } finally {
+    await lock.handle.close();
+  }
+}
+
+async function acquireLock(lockFile, {
+  retries = 40, retryMs = 10, staleLockMs = 5 * 60 * 1000, isOwnerAlive = ownerIsAlive,
+} = {}) {
   for (let attempt = 0; attempt < retries; attempt += 1) {
     try {
       const handle = await open(lockFile, 'wx');
-      await handle.writeFile(JSON.stringify({
+      const metadata = {
+        ownerToken: randomUUID(),
         pid: process.pid,
         createdAt: new Date().toISOString(),
         expiresAt: new Date(Date.now() + staleLockMs).toISOString(),
-      }));
-      return handle;
+      };
+      await handle.writeFile(JSON.stringify(metadata));
+      return { handle, metadata };
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
       try {
         const metadata = JSON.parse(await readFile(lockFile, 'utf8'));
         const expiresAt = Date.parse(metadata.expiresAt);
-        if (!Number.isNaN(expiresAt) && expiresAt < Date.now()) {
+        if (
+          typeof metadata.ownerToken === 'string' &&
+          Number.isInteger(metadata.pid) &&
+          !Number.isNaN(expiresAt) &&
+          expiresAt < Date.now() &&
+          isOwnerAlive(metadata.pid) === false
+        ) {
           await rm(lockFile, { force: true });
           continue;
         }
       } catch {
-        // A malformed or unreadable lock is not demonstrably stale.
+        // A malformed, unreadable, or live lock is not demonstrably stale.
       }
       await new Promise((resolve) => setTimeout(resolve, retryMs));
     }
@@ -141,8 +170,7 @@ export async function writeRoundCache(scope, cache, options = {}) {
     await rename(temp, file);
   } finally {
     await rm(temp, { force: true });
-    await lock.close();
-    await rm(lockFile, { force: true });
+    await releaseLock(lockFile, lock);
   }
 }
 
@@ -152,7 +180,30 @@ function priorityNumber(labels = []) {
   return match ? Number(match.slice(-1)) : 4;
 }
 
+export function validateDependencyGraph(completeIssues, edges) {
+  const nodes = new Set(completeIssues.map((issue) => issue.number));
+  const outward = new Map();
+  for (const { blocker, blocked } of edges) {
+    nodes.add(blocker);
+    nodes.add(blocked);
+    if (!outward.has(blocker)) outward.set(blocker, new Set());
+    outward.get(blocker).add(blocked);
+  }
+  const visiting = new Set();
+  const visited = new Set();
+  const visit = (number) => {
+    if (visiting.has(number)) throw new RalphCacheError(`Dependency cycle includes #${number}.`, 'DEPENDENCY_CYCLE');
+    if (visited.has(number)) return;
+    visiting.add(number);
+    for (const child of outward.get(number) || []) visit(child);
+    visiting.delete(number);
+    visited.add(number);
+  };
+  for (const number of nodes) visit(number);
+}
+
 export function orderReadyIssues(completeIssues, readyIssues, edges) {
+  validateDependencyGraph(completeIssues, edges);
   const byNumber = new Map(completeIssues.map((issue) => [issue.number, issue]));
   const outward = new Map();
   for (const { blocker, blocked } of edges) {
@@ -160,7 +211,6 @@ export function orderReadyIssues(completeIssues, readyIssues, edges) {
     outward.get(blocker).add(blocked);
   }
   const descendants = (number, visited = new Set()) => {
-    if (visited.has(number)) throw new RalphCacheError(`Dependency cycle includes #${number}.`, 'DEPENDENCY_CYCLE');
     const next = new Set(visited).add(number);
     const result = new Set();
     for (const child of outward.get(number) || []) {
