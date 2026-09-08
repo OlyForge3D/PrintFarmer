@@ -25,10 +25,12 @@ classification are governed solely by
 `.github/copilot-instructions.md` § `Documentation-Only Changes: One Reviewer`. Dispatch the
 required reviewers as parallel read-only task agents—not sessions—and explicitly prohibit builds,
 installs, and tests. An unavailable model blocks the PR; never substitute or self-review.
+Post exactly the number of genuine canonical verdict comments the canonical rule requires: one
+for a documentation-only change and three for a full-gate change.
 
 Fix every blocker and repeat review at the new head. If conflict resolution authored hunks,
 request narrowly targeted review that agrees across all resolved files. Then create the PR with
-`Closes #<issue>`, apply `squad`, and post three genuine canonical verdict comments at the
+`Closes #<issue>`, apply `squad`, and post the required canonical verdict comments at the
 reviewed 40-character SHA. Watch CodeQL through completion; compare PR alerts with development,
 fix or justify new findings, and do not act on the pre-existing backlog. Never claim
 base-sync/diff heuristics authorize a merge.

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -130,35 +130,53 @@ function lockMetadata(staleLockMs) {
   };
 }
 
-async function staleMetadata(lockFile, isOwnerAlive) {
+async function staleLock(lockFile, { isOwnerAlive, staleLockMs }) {
   try {
-    const metadata = JSON.parse(await readFile(lockFile, 'utf8'));
-    const expiresAt = Date.parse(metadata.expiresAt);
-    return (
-      typeof metadata.ownerToken === 'string' &&
-      Number.isInteger(metadata.pid) &&
+    const [content, details] = await Promise.all([readFile(lockFile, 'utf8'), stat(lockFile)]);
+    let metadata;
+    try {
+      metadata = JSON.parse(content);
+    } catch {
+      metadata = undefined;
+    }
+    const expiresAt = Date.parse(metadata?.expiresAt);
+    if (
+      typeof metadata?.ownerToken === 'string' &&
+      Number.isInteger(metadata?.pid) &&
       !Number.isNaN(expiresAt) &&
       expiresAt < Date.now() &&
       isOwnerAlive(metadata.pid) === false
-    ) ? metadata : undefined;
+    ) return { metadata, generation: `token:${metadata.ownerToken}` };
+    if (
+      (!metadata || typeof metadata.ownerToken !== 'string') &&
+      Date.now() - details.mtimeMs > staleLockMs
+    ) return { metadata: undefined, generation: `incomplete:${fingerprint([details.mtimeMs, content])}` };
+    return undefined;
   } catch {
     return undefined;
   }
 }
 
-async function reclaimObservedGeneration(lockFile, observed, options, suffix) {
-  const claimFile = `${lockFile}.${suffix}.${observed.ownerToken}`;
+async function reclaimObservedGeneration(lockFile, observed, options, suffix, depth = 0) {
+  const claimFile = `${lockFile}.${suffix}.${encodeURIComponent(observed.generation)}`;
   let claim;
   try {
     claim = await open(claimFile, 'wx');
   } catch (error) {
-    if (error.code === 'EEXIST') return false;
+    if (error.code === 'EEXIST' && depth < 2) {
+      const orphan = await staleLock(claimFile, options);
+      if (orphan && await reclaimObservedGeneration(claimFile, orphan, options, 'recover', depth + 1)) {
+        return reclaimObservedGeneration(lockFile, observed, options, suffix, depth);
+      }
+      return false;
+    }
     throw error;
   }
   try {
     await options.hooks?.afterRecoveryClaimAcquired?.(lockFile, observed);
-    const current = await staleMetadata(lockFile, options.isOwnerAlive);
-    if (current?.ownerToken !== observed.ownerToken) return false;
+    await claim.writeFile(JSON.stringify(lockMetadata(options.staleLockMs)));
+    const current = await staleLock(lockFile, options);
+    if (current?.generation !== observed.generation) return false;
     await rm(lockFile, { force: true });
     return true;
   } finally {
@@ -183,14 +201,14 @@ async function acquireReclaimGuard(guardFile, options) {
       await rm(guardFile, { force: true });
     }
     if (error.code !== 'EEXIST') throw error;
-    const observed = await staleMetadata(guardFile, options.isOwnerAlive);
+    const observed = await staleLock(guardFile, options);
     if (observed) await reclaimObservedGeneration(guardFile, observed, options, 'recover');
     return undefined;
   }
 }
 
 async function reclaimStaleLock(lockFile, options) {
-  const observed = await staleMetadata(lockFile, options.isOwnerAlive);
+  const observed = await staleLock(lockFile, options);
   if (!observed) return false;
   await options.hooks?.afterStaleObservation?.(observed);
   const guardFile = `${lockFile}.reclaim`;
@@ -199,8 +217,8 @@ async function reclaimStaleLock(lockFile, options) {
 
   try {
     await options.hooks?.afterReclaimGuardAcquired?.(guard.metadata);
-    const current = await staleMetadata(lockFile, options.isOwnerAlive);
-    if (current?.ownerToken === observed.ownerToken) {
+    const current = await staleLock(lockFile, options);
+    if (current?.generation === observed.generation) {
       // The exclusive guard makes this read/check/remove sequence one reclaim
       // generation: another contender cannot remove a replacement lock.
       await rm(lockFile, { force: true });
@@ -231,7 +249,9 @@ async function acquireLock(lockFile, {
       return { handle, metadata };
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      if (await reclaimStaleLock(lockFile, { isOwnerAlive, hooks, writeGuardMetadata })) continue;
+      if (await reclaimStaleLock(lockFile, {
+        isOwnerAlive, hooks, writeGuardMetadata, staleLockMs,
+      })) continue;
       await new Promise((resolve) => setTimeout(resolve, retryMs));
     }
   }

@@ -37,7 +37,9 @@ Every implementation and Dallas/non-code analysis kickoff uses `create_session` 
 `base_branch: development` in an isolated worktree. Every kickoff passes
 `session-terminal-contract.md`. Implementation kickoffs also pass `implementation-pre-pr.md` and
 task-specific acceptance criteria; analysis kickoffs state their exact non-code deliverable and
-publication location.
+publication location. Before every spawn, perform this exact claim protocol: fresh eligibility
+fetch; apply claim label and comment; re-fetch; verify that exact claim landed; then spawn. Abort
+on any failed or stale claim.
 
 ## Round Report
 

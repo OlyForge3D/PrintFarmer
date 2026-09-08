@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import {
@@ -248,6 +248,51 @@ test('stale guard recovery cannot remove a replacement guard generation', async 
   }
 });
 
+test('recovers only old incomplete lock and guard records after interrupted writes', async () => {
+  const directory = await temporaryDirectory();
+  try {
+    const file = cacheFileForScope(scope, { env: { RALPH_CACHE_DIR: directory } });
+    const old = new Date('2026-01-01T00:00:00Z');
+    await writeFile(`${file}.lock`, '');
+    await utimes(`${file}.lock`, old, old);
+    await writeRoundCache(scope, cache(), {
+      env: { RALPH_CACHE_DIR: directory }, staleLockMs: 1, isOwnerAlive: () => false,
+    });
+    await writeFile(`${file}.lock`, JSON.stringify({
+      ownerToken: 'dead-main', pid: 1,
+      createdAt: old.toISOString(), expiresAt: old.toISOString(),
+    }));
+    await writeFile(`${file}.lock.reclaim`, '{"partial":');
+    await utimes(`${file}.lock.reclaim`, old, old);
+    await writeRoundCache(scope, cache(), {
+      env: { RALPH_CACHE_DIR: directory }, staleLockMs: 1, isOwnerAlive: () => false,
+    });
+    assert.equal((await readRoundCache(scope, { env: { RALPH_CACHE_DIR: directory } })).reason, undefined);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('recovers an orphaned generation recovery claim without deleting a replacement', async () => {
+  const directory = await temporaryDirectory();
+  try {
+    const file = cacheFileForScope(scope, { env: { RALPH_CACHE_DIR: directory } });
+    const old = new Date('2026-01-01T00:00:00Z');
+    const main = { ownerToken: 'dead-main', pid: 1, createdAt: old.toISOString(), expiresAt: old.toISOString() };
+    const guard = { ownerToken: 'dead-guard', pid: 1, createdAt: old.toISOString(), expiresAt: old.toISOString() };
+    const claim = `${file}.lock.reclaim.recover.token%3Adead-guard`;
+    await writeFile(`${file}.lock`, JSON.stringify(main));
+    await writeFile(`${file}.lock.reclaim`, JSON.stringify(guard));
+    await writeFile(claim, JSON.stringify(guard));
+    await writeRoundCache(scope, cache(), {
+      env: { RALPH_CACHE_DIR: directory }, staleLockMs: 1, isOwnerAlive: () => false, retries: 8,
+    });
+    assert.equal(await readFile(claim, 'utf8').then(() => true, () => false), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('all authorization-adjacent changes invalidate cached conclusions', () => {
   const baseline = cache().comparisons;
   for (const comparisons of [
@@ -361,6 +406,7 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
   assert.doesNotMatch(skill, /\.squad\/templates\/ralph-reference\.md/i);
   for (const reference of [
     'GitHub native', 'dependency prose markers', 'Detect cycles', 'five live',
+    'fresh eligibility', 'apply claim label and comment', 'verify that exact claim landed',
   ]) assert.match(operations, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   for (const reference of [
     'one Ralph automation', 'delete_item', 'earlier-round children', 'post-merge',
@@ -368,6 +414,8 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
   ]) assert.match(cleanup, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   for (const reference of [
     '.github/copilot-instructions.md', 'Documentation-Only Changes: One Reviewer',
+    'number of genuine canonical verdict comments', 'documentation-only change and three',
+    'full-gate change',
   ]) assert.match(prePr, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   assert.doesNotMatch(prePr, /Workflow\/configuration|agent-safety-boundary/i);
   for (const reference of [
