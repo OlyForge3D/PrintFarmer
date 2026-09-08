@@ -12,7 +12,7 @@ namespace Farm.Modules.Inventory.Tests.Controllers;
 /// Issue #711 round-5 FIX 4 (updated for issue #1451): fallback-group configuration mutations
 /// must require the <c>filament_type:admin</c> permission (matching the migrated
 /// <c>PrintersController</c>/<c>MaintenanceController</c> sites), while read endpoints remain
-/// reachable by any authenticated user. farm_admin still reaches these mutations exactly as
+/// subject to printer-group View authorization in the service. farm_admin still reaches these mutations exactly as
 /// before, via the unconditional bypass plus the seeded <c>admin</c> grant on every resource — a
 /// custom role can now reach them too, by holding <c>filament_type:admin</c> without being named
 /// farm_admin. A live-pipeline test is not possible in this unit project (no authentication
@@ -31,7 +31,7 @@ public sealed class FilamentFallbackGroupsControllerAuthorizationTests
 
         classAuthorize.Should().NotBeNull("every endpoint requires an authenticated user");
         classAuthorize!.Roles.Should().BeNullOrEmpty(
-            "read endpoints must be reachable by any authenticated user, so the class-level gate carries no role");
+            "printer-group access is checked against the caller by the service, not a class-level role");
     }
 
     [Theory]
@@ -65,6 +65,6 @@ public sealed class FilamentFallbackGroupsControllerAuthorizationTests
         method!
             .GetCustomAttributes<AuthorizeAttribute>(inherit: true)
             .Should().BeEmpty(
-                "read endpoints inherit the class-level [Authorize] and must stay reachable by any authenticated user (200, not 403)");
+                "read endpoints inherit authentication and enforce printer-group View access in the service");
     }
 }

@@ -1,7 +1,9 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Security.Claims;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -99,9 +101,11 @@ public sealed class FilamentFallbackGroupServiceConcurrencyTests : IAsyncLifetim
         });
 
         await using AppDbContext serviceDb = CreateContext(interceptor);
-        FilamentFallbackGroupService service = new(serviceDb, NullLogger<FilamentFallbackGroupService>.Instance);
+        FilamentFallbackGroupService service = new(
+            serviceDb, NullLogger<FilamentFallbackGroupService>.Instance, new QueueResourceAuthorizationService(serviceDb));
 
         Func<Task> act = async () => await service.CreateAsync(
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "farm_admin")], "Test")),
             printerId,
             new CreateFilamentFallbackGroupRequest("pla chain", "PLA", null, [t0, t1]),
             CancellationToken.None);

@@ -133,6 +133,9 @@ public static class FeatureServicesStartup
         // Filament fallback groups (issue #711, F6)
         services.AddScoped<Farm.Infrastructure.Services.Printers.IFilamentFallbackGroupService,
             Farm.Infrastructure.Services.Printers.FilamentFallbackGroupService>();
+        services.AddScoped<Farm.Infrastructure.Services.Printers.IFilamentFallbackGroupResolver>(sp =>
+            (Farm.Infrastructure.Services.Printers.FilamentFallbackGroupService)sp
+                .GetRequiredService<Farm.Infrastructure.Services.Printers.IFilamentFallbackGroupService>());
 
         // Persistent Idempotency-Key store and cleanup (issue #715). Store is
         // registered scoped because it uses IDbContextFactory internally and is

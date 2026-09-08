@@ -11,7 +11,7 @@ namespace Farm.Infrastructure.Services.Attention.Sources;
 
 /// <summary>
 /// Default <see cref="IFilamentRunoutSwitchEvaluator"/>. Combines the configured-backup resolver
-/// (<see cref="IFilamentFallbackGroupService.GetAvailableFallbacksAsync"/>) with live printer
+/// (<see cref="IFilamentFallbackGroupResolver.GetAvailableFallbacksAsync"/>) with live printer
 /// telemetry to grade a runout's mitigation evidence (issue #711, F6 remediation, Finding 2).
 /// </summary>
 /// <remarks>
@@ -33,7 +33,7 @@ namespace Farm.Infrastructure.Services.Attention.Sources;
 /// </remarks>
 public sealed class FilamentRunoutSwitchEvaluator(
     AppDbContext dbContext,
-    IFilamentFallbackGroupService fallbackService,
+    IFilamentFallbackGroupResolver fallbackService,
     IPrinterStatusCacheReader printerStatusCache) : IFilamentRunoutSwitchEvaluator
 {
     private const string ActiveRunoutReason = "runout-during-active-job";
@@ -49,7 +49,7 @@ public sealed class FilamentRunoutSwitchEvaluator(
     private readonly AppDbContext _dbContext =
         dbContext ?? throw new ArgumentNullException(nameof(dbContext));
 
-    private readonly IFilamentFallbackGroupService _fallbackService =
+    private readonly IFilamentFallbackGroupResolver _fallbackService =
         fallbackService ?? throw new ArgumentNullException(nameof(fallbackService));
 
     private readonly IPrinterStatusCacheReader _printerStatusCache =

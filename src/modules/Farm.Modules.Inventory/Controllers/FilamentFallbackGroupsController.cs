@@ -21,9 +21,9 @@ namespace Farm.Modules.Inventory.Controllers;
 /// 404 (mirroring <c>FilamentCoverageController</c>) and no <c>fallbackgroupsupdated</c>
 /// SignalR event is emitted (issue #711, FIX E).
 ///
-/// Read endpoints require any authenticated user; configuration mutations
-/// (create/update/delete) additionally require the <c>farm_admin</c> role, matching
-/// <c>PrintersController</c> and <c>MaintenanceController</c> (issue #711, round-5 FIX 4).
+/// Every operation requires View access to the printer's group. Configuration mutations
+/// additionally require <c>filament_type:admin</c>. Missing and inaccessible printers
+/// return the same 404 response.
 /// </remarks>
 [ApiController]
 [Route("api/printers/{printerId:guid}/fallback-groups")]
@@ -49,8 +49,15 @@ public class FilamentFallbackGroupsController(
             return FeatureDisabled();
         }
 
-        IReadOnlyList<FilamentFallbackGroupDto> groups = await service.ListForPrinterAsync(printerId, ct);
-        return Ok(groups);
+        try
+        {
+            IReadOnlyList<FilamentFallbackGroupDto> groups = await service.ListForPrinterAsync(User, printerId, ct);
+            return Ok(groups);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
     }
 
     [HttpGet("{groupId:guid}")]
@@ -63,8 +70,15 @@ public class FilamentFallbackGroupsController(
             return FeatureDisabled();
         }
 
-        FilamentFallbackGroupDto? dto = await service.GetAsync(printerId, groupId, ct);
-        return dto is null ? NotFound() : Ok(dto);
+        try
+        {
+            FilamentFallbackGroupDto? dto = await service.GetAsync(User, printerId, groupId, ct);
+            return dto is null ? NotFound() : Ok(dto);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
     }
 
     /// <summary>
@@ -93,8 +107,15 @@ public class FilamentFallbackGroupsController(
             return BadRequest(new ProblemDetails { Title = "Invalid request", Detail = "The 'material' query parameter is required.", Status = 400 });
         }
 
-        AvailableFallbackMember? member = await service.FindAvailableFallbackAsync(printerId, sourceToolheadId, material, ct);
-        return member is null ? NoContent() : Ok(member);
+        try
+        {
+            AvailableFallbackMember? member = await service.FindAvailableFallbackAsync(User, printerId, sourceToolheadId, material, ct);
+            return member is null ? NoContent() : Ok(member);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
     }
 
     [HttpPost]
@@ -115,7 +136,7 @@ public class FilamentFallbackGroupsController(
 
         try
         {
-            FilamentFallbackGroupDto dto = await service.CreateAsync(printerId, request, ct);
+            FilamentFallbackGroupDto dto = await service.CreateAsync(User, printerId, request, ct);
             await BroadcastAsync(printerId, ct);
             return CreatedAtAction(nameof(GetAsync), new { printerId, groupId = dto.Id }, dto);
         }
@@ -149,7 +170,7 @@ public class FilamentFallbackGroupsController(
 
         try
         {
-            FilamentFallbackGroupDto dto = await service.UpdateAsync(printerId, groupId, request, ct);
+            FilamentFallbackGroupDto dto = await service.UpdateAsync(User, printerId, groupId, request, ct);
             await BroadcastAsync(printerId, ct);
             return Ok(dto);
         }
@@ -176,9 +197,16 @@ public class FilamentFallbackGroupsController(
             return FeatureDisabled();
         }
 
-        await service.DeleteAsync(printerId, groupId, ct);
-        await BroadcastAsync(printerId, ct);
-        return NoContent();
+        try
+        {
+            await service.DeleteAsync(User, printerId, groupId, ct);
+            await BroadcastAsync(printerId, ct);
+            return NoContent();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
     }
 
     private async Task BroadcastAsync(Guid printerId, CancellationToken ct)
