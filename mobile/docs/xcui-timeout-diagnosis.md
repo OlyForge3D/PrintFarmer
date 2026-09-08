@@ -204,6 +204,69 @@ a claim that bundles were uploaded to GitHub:
 Original SwiftPM/build-failure logs and JSON test trees are retained too.
 CI publishes text logs alongside result bundles for future diagnosable failures.
 
+### Owned #2578 recovery: fresh causal evidence, gap retained
+
+Scoped to
+`ShiftTasksFailedRefreshUITests/testFailedStateHostsRefreshableScrollContainerAndRecoversCanonically`
+alone. The historical 337.731s failure identity is mapped in
+`/tmp/gorman-2519-test.log` line 4741; the historical xcresult, source location,
+and diagnostic stacks are **still absent** and not inferred. The gap is retained
+deliberately.
+
+Fresh run at head `d0330781cbb4d1cd28934b7494a83cdd90d0dd19`, Xcode 26.6
+(17F113), iOS 26.5 (23F77), `iPhone 15` UDID
+`65801085-CA6B-49F5-A6BE-E26729477142`, `-parallel-testing-enabled NO`,
+`-test-timeouts-enabled YES`, default and maximum allowance 60s. Bundle
+`fresh-failed-refresh-2578.xcresult` and log
+`fresh-failed-refresh-2578.log` (SHA-256
+`61686290726d15380b08dc070da1d21ae4b6f738c972976650572442782d3006`) are
+retained under Copilot session
+`afd03518-d0b9-4faa-921e-0229a4feef88/files`.
+
+The test passed in **11.608s**. Each XCUI activity that a stalled runner would
+block on is present in the fresh log with its timestamp:
+
+| t (s) | Activity |
+| --- | --- |
+| 3.90 – 4.95 | Existence probes and tap on `tab.tasks` Button |
+| 6.89 – 7.93 | 10s wait for `shiftTasks.load.errorList` ScrollView (satisfied) |
+| 7.95 – 7.99 | Existence check of `shiftTasks.load.error` Button and negative check on `shiftTasks.group.now` |
+| 8.01 – 8.34 | Tap `shiftTasks.load.error` (Retry) |
+| 8.94 – 9.98 | 10s wait for `shiftTasks.group.now` (satisfied) |
+| 10.05 – 11.09 | 5s wait for `shiftTasks.load.errorList` non-existence (satisfied) |
+
+Combined with the retained excerpt above, the fresh evidence distinguishes the
+failure modes as follows:
+
+- **Not the harness.** The three composite `waitForExistence` calls used by the
+  test each satisfy inside their 10s / 5s windows. Their scoped total is well
+  under the 60s allowance. The historical 337.731s exceeded every window used by
+  this test by more than an order of magnitude, so the test's assertions cannot
+  be the timeout source on their own.
+- **Not readiness/query.** The `tab.tasks`, `shiftTasks.load.errorList`,
+  `shiftTasks.load.error`, and `shiftTasks.group.now` identifiers all resolve
+  end-to-end on the pinned runtime with the same
+  `--uitesting-shift-task-initial-load-failure` bootstrap. Identifier drift
+  would fail here in 10–20s, not 337s.
+- **Not app stall (bootstrap).** Launch to first tap completes by 4.95s, and
+  the failed-state → recovery transition traverses cleanly at 8.01–9.98s.
+- **Consistent with runner/accessibility, not proven.** The retained gorman
+  excerpt shows neighboring *passing* tests on the same source parallel run
+  taking 277–323s (`LoginFlowUITests.testLoginTransitionsToOperatorShell` at
+  277.168s, `ShiftTasksUITests.testP6RetryCausallyRunsOnceAndPublishesCanonicalEmptyState`
+  at 323.063s), and all three unresolved failures cluster at 314–339s. That
+  clustering is consistent with a shared runner/accessibility trouble on the
+  iPhone 17 clones / iOS 27 beta parallel run but does not by itself rule out
+  an app main-thread stall unique to that runtime. **A green rerun on iOS 26.5
+  is not a diagnosis** of the historical failure.
+
+No product, harness, snapshot, or bootstrap change is warranted from this
+evidence alone. The existing `executionTimeAllowance = 60` on the test body is
+already the scoped regression against the 337.731s class of stall — a future
+recurrence will fail deterministically at 60s with a genuine XCTest watchdog
+activity retained by `-test-timeouts-enabled YES`. No additional regression
+test is added; the doc records the rationale.
+
 ### Scope exclusions
 
 No product navigation, snapshot references, service/bootstrap behavior, or
