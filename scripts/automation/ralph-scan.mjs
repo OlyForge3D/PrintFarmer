@@ -328,7 +328,7 @@ function isEligibleSuggestion(issue) {
     !issue.requiresSemanticReview;
 }
 
-export function topologicalOrder(repo, issues, edges) {
+export function topologicalOrder(repo, issues, edges, uncertaintyEdges = []) {
   const indexed = new Map(issues.map((issue) => [issueReference(repo, issue.number), issue]));
   const incoming = new Map(issues.map((issue) => [issueReference(repo, issue.number), 0]));
   const next = new Map(issues.map((issue) => [issueReference(repo, issue.number), []]));
@@ -337,22 +337,23 @@ export function topologicalOrder(repo, issues, edges) {
   const uncertainTargets = new Set();
   let suppressReadiness = false;
   let unknown = false;
+  const suppressForUncertainEdge = (edge) => {
+    unknown = true;
+    if (indexed.has(edge.blocked)) uncertainTargets.add(edge.blocked);
+    else suppressReadiness = true;
+  };
   for (const edge of edges) {
     if (edge.unknown || !edge.state) {
-      unknown = true;
       blockedEdges.push(edge);
-      if (indexed.has(edge.blocked)) uncertainTargets.add(edge.blocked);
-      else suppressReadiness = true;
+      suppressForUncertainEdge(edge);
       continue;
     }
     if (edge.state === 'closed') {
       continue;
     }
     if (edge.state !== 'open') {
-      unknown = true;
       blockedEdges.push(edge);
-      if (indexed.has(edge.blocked)) uncertainTargets.add(edge.blocked);
-      else suppressReadiness = true;
+      suppressForUncertainEdge(edge);
       continue;
     }
     blockedEdges.push(edge);
@@ -363,6 +364,11 @@ export function topologicalOrder(repo, issues, edges) {
     }
     incoming.set(edge.blocked, incoming.get(edge.blocked) + 1);
     next.get(edge.blocker).push(edge.blocked);
+  }
+  for (const edge of uncertaintyEdges) {
+    if (edge.unknown || !edge.state || (edge.state !== 'open' && edge.state !== 'closed')) {
+      suppressForUncertainEdge(edge);
+    }
   }
   const compare = (left, right) => priority(indexed.get(left)) - priority(indexed.get(right)) ||
     (indexed.get(left).createdAt || '').localeCompare(indexed.get(right).createdAt || '') ||
@@ -524,7 +530,7 @@ export async function scan(options) {
     const observedEdges = uniqueEdges(snapshot.issues.flatMap((issue) => [
       ...issue.dependencies.blockedBy, ...issue.dependencies.blocking,
     ]));
-    const graph = topologicalOrder(snapshot.repo, snapshot.issues, incomingEdges);
+    const graph = topologicalOrder(snapshot.repo, snapshot.issues, incomingEdges, observedEdges);
     const blockedEdges = uniqueEdges([
       ...graph.blockedEdges,
       ...observedEdges.filter((edge) => edge.unknown || edge.state !== 'closed'),

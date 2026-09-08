@@ -304,6 +304,20 @@ test('an unknown edge without an identifiable blocked target suppresses all imme
   assert.deepEqual(graph.suggestions, []);
 });
 
+test('outgoing unknown edges participate in scan-level immediate readiness suppression', async (t) => {
+  const options = await temporaryOptions(t, {
+    transport: transport({
+      dependencies: { 1: { blocking: [{}] } },
+    }),
+  });
+  const result = await scan(options);
+  assert.equal(result.graphFlags.unknown, true);
+  assert.equal(result.graphFlags.readinessSuppressed, true);
+  assert.deepEqual(result.issues.currentlyUnblocked, []);
+  assert.deepEqual(result.issues.readyUnresolved, []);
+  assert.deepEqual(result.dependencyOrder, [1, 2]);
+});
+
 test('symlinked state namespace components are rejected before observation writes', async (t) => {
   const options = await temporaryOptions(t);
   const parent = path.join(options.stateRoot, 'github.com', 'olyforge3d', 'printfarmer');
