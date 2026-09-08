@@ -34,6 +34,23 @@ struct PrinterDetailView: View {
         services.capabilitiesService.resolved.guidedSwapEnabled
     }
 
+    /// Gates camera snapshot polling and MJPEG stream mounting (issue #2522,
+    /// Hicks review finding 19). Native `TabView` paging keeps the adjacent
+    /// page mounted for swipe animation, so `statusPage`'s `cameraSection`
+    /// stays alive — and, without this gate, kept polling/streaming — even
+    /// while the Controls page is the one on screen. Combines BOTH
+    /// conditions the pre-#2522 single-page screen never had to distinguish:
+    /// the existing `scenePhase == .active` foreground gate, and now also
+    /// `selectedPanel == .status`, so leaving the Status page (Controls
+    /// selected) stops the camera exactly the same way backgrounding the
+    /// app already did.
+    private var isStatusPageForeground: Bool {
+        PrinterDetailCameraLifecycleMapping.isForeground(
+            scenePhase: scenePhase,
+            selectedPanel: selectedPanel
+        )
+    }
+
     init(printerId: UUID) {
         self.printerId = printerId
         _viewModel = State(initialValue: PrinterDetailViewModel(printerId: printerId))
@@ -99,7 +116,7 @@ struct PrinterDetailView: View {
                 viewModel: viewModel,
                 coverageViewModel: coverageViewModel,
                 refreshCoverage: filamentCoverageEnabled,
-                snapshotPollingAllowed: scenePhase == .active
+                snapshotPollingAllowed: isStatusPageForeground
             )
         }
         .alert(
@@ -125,7 +142,7 @@ struct PrinterDetailView: View {
         }
         .task {
             viewModel.isViewActive = true
-            viewModel.setSnapshotPollingAllowed(scenePhase == .active)
+            viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
             viewModel.configure(printerService: services.printerService)
             #if canImport(UIKit)
             if let nfc = services.nfcService {
@@ -141,7 +158,7 @@ struct PrinterDetailView: View {
                 maintenanceService: services.maintenanceService
             )
             await viewModel.loadPrinter()
-            viewModel.setSnapshotPollingAllowed(scenePhase == .active)
+            viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
 
             // Handle NFC "mark ready" deep link
             if let pendingId = router.pendingNFCReadyPrinterId, pendingId == viewModel.printerId {
@@ -184,7 +201,8 @@ struct PrinterDetailView: View {
                         await PrinterDetailViewLifecycle.willEnterForeground(
                             viewModel: viewModel,
                             coverageViewModel: coverageViewModel,
-                            refreshCoverage: filamentCoverageEnabled
+                            refreshCoverage: filamentCoverageEnabled,
+                            snapshotPollingAllowed: selectedPanel == .status
                         )
                     }
                     activeTasks.append(task)
@@ -194,6 +212,13 @@ struct PrinterDetailView: View {
             @unknown default:
                 viewModel.setSnapshotPollingAllowed(false)
             }
+        }
+        // Reacts to a page switch alone, independent of `scenePhase` (issue
+        // #2522, Hicks review finding 19): leaving the Status page for
+        // Controls must stop camera polling immediately, not just the next
+        // time the app backgrounds/foregrounds.
+        .onChange(of: selectedPanel) { _, _ in
+            viewModel.setSnapshotPollingAllowed(isStatusPageForeground)
         }
         .onChange(of: guidedSwapEnabled) { _, isEnabled in
             guard !isEnabled, guidedSwapTarget != nil else { return }
@@ -1323,7 +1348,18 @@ struct PrinterDetailView: View {
         switch viewModel.cameraPreviewMode {
         case .mjpegStream:
             #if canImport(UIKit)
+            // `isStatusPageForeground` (issue #2522, Hicks review finding
+            // 19): native `TabView` paging keeps this page mounted
+            // alongside Controls for swipe animation, so without this gate
+            // the live `MJPEGStreamContainer` (a `UIViewRepresentable`
+            // backed by a persistent WKWebView connection) would keep
+            // streaming off-screen. Falling through to the snapshot/
+            // placeholder branches when not foreground tears the stream
+            // down without touching `viewModel.showLivestream` or
+            // `cameraRotation`, so returning to Status resumes the SAME
+            // camera state the user left, not a reset one.
             if viewModel.showLivestream,
+               isStatusPageForeground,
                let streamUrlString = printer.cameraStreamUrl,
                let streamUrl = URL(string: streamUrlString) {
                 MJPEGStreamContainer(url: streamUrl, rotation: viewModel.cameraRotation)
@@ -1613,10 +1649,11 @@ enum PrinterDetailViewLifecycle {
     static func willEnterForeground(
         viewModel: PrinterDetailViewModel,
         coverageViewModel: PrinterFilamentCoverageViewModel,
-        refreshCoverage: Bool
+        refreshCoverage: Bool,
+        snapshotPollingAllowed: Bool
     ) async {
         guard viewModel.isViewActive else { return }
-        viewModel.setSnapshotPollingAllowed(true)
+        viewModel.setSnapshotPollingAllowed(snapshotPollingAllowed)
         if refreshCoverage {
             await coverageViewModel.load()
         }

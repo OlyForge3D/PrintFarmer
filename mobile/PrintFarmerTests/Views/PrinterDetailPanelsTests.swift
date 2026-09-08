@@ -373,4 +373,31 @@ final class PrinterDetailPanelsTests: XCTestCase {
     func testFilamentStaleMappingFalseWhenNotShowingStaleCache() {
         XCTAssertFalse(PrinterDetailFilamentStaleMapping.isStale(isShowingStaleCache: false))
     }
+
+    // MARK: - Camera lifecycle mapping (Hicks review finding 19)
+
+    func testCameraForegroundTrueOnlyWhenSceneActiveAndStatusSelected() {
+        XCTAssertTrue(PrinterDetailCameraLifecycleMapping.isForeground(
+            scenePhase: .active, selectedPanel: .status
+        ))
+    }
+
+    func testCameraNotForegroundWhenControlsSelectedEvenIfSceneActive() {
+        // The exact regression this mapping fixes: native `TabView` paging
+        // keeps Status mounted alongside Controls for swipe animation, so
+        // `scenePhase == .active` alone is not sufficient once Controls is
+        // the page actually on screen.
+        XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
+            scenePhase: .active, selectedPanel: .controls
+        ))
+    }
+
+    func testCameraNotForegroundWhenSceneInactiveOrBackgroundedEvenOnStatusPage() {
+        XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
+            scenePhase: .inactive, selectedPanel: .status
+        ))
+        XCTAssertFalse(PrinterDetailCameraLifecycleMapping.isForeground(
+            scenePhase: .background, selectedPanel: .status
+        ))
+    }
 }

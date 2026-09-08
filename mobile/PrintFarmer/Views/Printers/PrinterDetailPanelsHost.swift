@@ -330,3 +330,23 @@ enum PrinterDetailFilamentStaleMapping {
         isShowingStaleCache
     }
 }
+
+// MARK: - Camera lifecycle mapping (issue #2522, Hicks review finding 19)
+
+/// Pure mirror of `PrinterDetailView.isStatusPageForeground`, extracted so
+/// the exact gate deciding whether camera snapshot polling/the MJPEG live
+/// stream may run is unit-testable without hosting a view.
+///
+/// Native `TabView` paging keeps the Status page's `cameraSection` mounted
+/// alongside Controls for swipe animation, so `scenePhase == .active` alone
+/// (the pre-#2522 single-page screen's only gate) is no longer sufficient:
+/// leaving Status for Controls must stop the camera exactly the same way
+/// backgrounding the app already did, so both conditions are required.
+enum PrinterDetailCameraLifecycleMapping {
+    static func isForeground(
+        scenePhase: ScenePhase,
+        selectedPanel: PrinterDetailPanel
+    ) -> Bool {
+        scenePhase == .active && selectedPanel == .status
+    }
+}

@@ -206,29 +206,17 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
 
         // Emergency Stop is the one run action guaranteed to be visible for
         // any online printer regardless of print state (issue #2520/#2522).
-        //
-        // Queried by its `PrinterRunActionLabels.accessibilityLabel(for:)`
-        // text, not its `PrinterRunActionLabels.accessibilityIdentifier(for:)`
-        // identifier: `PrinterRunActionBar`'s own root `VStack` combines
-        // `.accessibilityElement(children: .contain)` with its own
-        // `containerAccessibilityIdentifier`, and in this iOS/Xcode
-        // toolchain that container identifier is what XCUITest reports for
-        // EVERY descendant button — each button's own, more specific
-        // `.accessibilityIdentifier(...)` is unreachable via an identifier
-        // query. `PrinterRunActionBar` is a merged #2520 component outside
-        // this issue's edit scope (`mobile/PrintFarmer/Views/Printers/
-        // PrinterDetailView.swift` alone), and its labels remain distinct
-        // and correct for real VoiceOver users regardless of this
-        // identifier-query limitation, so this test adapts its query
-        // strategy rather than modifying that file.
-        func emergencyStopButton() -> XCUIElement {
-            app.buttons.matching(
-                NSPredicate(format: "label == %@", "Emergency stop printer")
-            ).firstMatch
-        }
-
+        // Queried by its own stable identifier (Hicks review finding 22):
+        // `PrinterRunActionBar`'s container previously combined
+        // `.accessibilityIdentifier(...)` with `.accessibilityElement
+        // (children: .contain)` in the wrong order, which made every
+        // descendant button report the CONTAINER's identifier instead of
+        // its own; fixed at the source by reordering those two modifiers
+        // (`.contain` first, then the container's own identifier) so child
+        // identifiers are reachable again.
+        let emergencyStopOnStatus = app.buttons["printer.detail.control.emergencyStop"]
         XCTAssertTrue(
-            emergencyStopButton().waitForExistence(timeout: 8),
+            emergencyStopOnStatus.waitForExistence(timeout: 8),
             "Emergency Stop must be reachable on the Status page for an online printer"
         )
 
@@ -240,7 +228,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         controlsSegment.tap()
 
         XCTAssertTrue(
-            emergencyStopButton().waitForExistence(timeout: 8),
+            app.buttons["printer.detail.control.emergencyStop"].waitForExistence(timeout: 8),
             "The shared run-action bar (and Emergency Stop within it) must remain reachable on the Controls page without scrolling or an Advanced disclosure"
         )
     }

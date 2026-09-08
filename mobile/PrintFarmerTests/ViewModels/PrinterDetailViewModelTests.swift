@@ -676,6 +676,86 @@ final class PrinterDetailViewModelTests: XCTestCase {
         )
     }
 
+    // MARK: - Guided-swap toolhead bind retired-session protection
+    // (issue #2522, Hicks review finding 20)
+
+    private func makeSpool(id: Int = 42) -> SpoolmanSpool {
+        SpoolmanSpool(
+            id: id,
+            name: "PLA Spool",
+            material: "PLA",
+            colorHex: "#000000",
+            inUse: false,
+            filamentName: nil,
+            vendor: "TestVendor",
+            registeredAt: nil,
+            firstUsedAt: nil,
+            lastUsedAt: nil,
+            remainingWeightG: 750.0,
+            initialWeightG: 1000.0,
+            usedWeightG: 250.0,
+            spoolWeightG: 200.0,
+            remainingLengthMm: nil,
+            usedLengthMm: nil,
+            location: nil,
+            lotNumber: nil,
+            archived: false,
+            price: nil,
+            comment: nil,
+            hasNfcTag: nil,
+            usedPercent: nil,
+            remainingPercent: nil
+        )
+    }
+
+    /// Navigation-away: the view tears down (`isViewActive = false`, as
+    /// `PrinterDetailView.onDisappear` does) WHILE the bind request is still
+    /// in flight. The retired session must not still refresh the printer
+    /// once the request completes.
+    func testBindToolheadSpoolSkipsRefreshAfterViewTornDownMidFlight() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        mockService.beforeBindToolheadSpool = { [weak viewModel] in
+            await MainActor.run { viewModel?.isViewActive = false }
+        }
+
+        await viewModel.bindToolheadSpool(makeSpool(), at: 0)
+
+        XCTAssertEqual(mockService.bindToolheadSpoolCalls.count, 1, "The in-flight request itself must still fire")
+        XCTAssertEqual(
+            mockService.getPrinterCallCount, 0,
+            "A torn-down session must not refresh the printer after the bind completes"
+        )
+    }
+
+    /// Same-UUID/different-server: `configure(printerService:)` reassigns a
+    /// DIFFERENT service instance for the SAME view (a supported, tested
+    /// scenario elsewhere in this view model — server reconnect/hot-swap)
+    /// WHILE the bind request against the OLD service is still in flight.
+    /// The stale request's completion must not refresh through either the
+    /// old (retired) or the newly reconfigured service.
+    func testBindToolheadSpoolSkipsRefreshAfterServiceReconfiguredMidFlight() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        let newService = MockPrinterService()
+        newService.printerToReturn = printer
+        mockService.beforeBindToolheadSpool = { [weak viewModel] in
+            await MainActor.run { viewModel?.configure(printerService: newService) }
+        }
+
+        await viewModel.bindToolheadSpool(makeSpool(), at: 0)
+
+        XCTAssertEqual(mockService.bindToolheadSpoolCalls.count, 1)
+        XCTAssertEqual(
+            mockService.getPrinterCallCount, 0,
+            "The retired old service must not be refreshed after a mid-flight reconfigure"
+        )
+        XCTAssertEqual(
+            newService.getPrinterCallCount, 0,
+            "The new service must not be refreshed on behalf of an operation it never targeted"
+        )
+    }
+
     // MARK: - Destructive Action Confirmation
 
     func testRequestCancelShowsConfirmation() {

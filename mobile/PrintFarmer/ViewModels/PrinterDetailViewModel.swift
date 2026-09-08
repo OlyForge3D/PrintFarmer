@@ -171,12 +171,36 @@ final class PrinterDetailViewModel {
         self.printerService = printerService
     }
 
+    /// Guided-swap toolhead bind (issue #2522, Hicks review finding 20).
+    ///
+    /// Dispatched from an unstructured `.sheet` completion closure in
+    /// `PrinterDetailView`, not a `.task` the view's `onDisappear` can rely
+    /// on cancelling promptly — `activeTasks.forEach { $0.cancel() }` is
+    /// cooperative and this method has an uncancellable network await in
+    /// the middle of it. Captures the exact `printerService` identity this
+    /// call targets before that await; if the view has since torn down
+    /// (`isViewActive == false`) or `configure(printerService:)` has since
+    /// reassigned a DIFFERENT instance for this same view — a supported,
+    /// tested scenario elsewhere in this view model (server
+    /// reconnect/hot-swap) — this retired session must not still apply the
+    /// mutation's result or trigger a refresh through whatever service is
+    /// current now. Mirrors the `isViewActive` guard-before-and-after-await
+    /// convention every sibling mutation in this file already follows,
+    /// plus the service-identity capture `isCanonicalLoadCurrent`/
+    /// `hasSignalRAuthority` already use for their own longer-lived
+    /// operations.
     func bindToolheadSpool(_ spool: SpoolmanSpool, at toolheadIndex: Int) async {
+        guard isViewActive else { return }
         guard let printerService else {
             actionError = "Printer service not available."
             return
         }
-
+        let authorityServiceIdentity = Self.identity(printerService)
+        func hasAuthority() -> Bool {
+            isViewActive && Self.identity(self.printerService) == authorityServiceIdentity
+        }
+        isPerformingAction = true
+        actionError = nil
         do {
             _ = try await printerService.bindToolheadSpool(
                 printerId: printerId,
@@ -184,10 +208,14 @@ final class PrinterDetailViewModel {
                 request: ToolheadSpoolBindRequest(spoolId: spool.id),
                 idempotencyKey: UUID().uuidString
             )
+            guard hasAuthority() else { return }
             await loadPrinter()
         } catch {
+            guard hasAuthority() else { return }
             actionError = error.localizedDescription
         }
+        guard hasAuthority() else { return }
+        isPerformingAction = false
     }
 
     /// Injects the job and maintenance services used by the F7 operator

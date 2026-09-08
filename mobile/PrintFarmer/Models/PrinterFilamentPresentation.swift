@@ -22,6 +22,13 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
         let coverage: ToolheadFilamentCoverage?
         let isLastConfirmed: Bool
         let isCoverageOnly: Bool
+        /// Physical toolhead nozzle diameter in mm (issue #2522, Hicks
+        /// review finding 21). Roster authority only — `nil` for
+        /// coverage-only slots (no roster `Toolhead` match) and the
+        /// printer-level spool row, exactly as the pre-#2522
+        /// `toolheadSlotRow` never showed one for those either. Preserves
+        /// the retired per-toolhead detail this section's rows replaced.
+        let nozzleDiameter: Double?
 
         var notice: String? {
             guard let coverage else { return nil }
@@ -122,7 +129,8 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
                 spoolID: toolhead.currentSpoolId,
                 spoolName: nil,
                 remainingGrams: nil,
-                coverage: slot, isLastConfirmed: self.isStale, isCoverageOnly: false
+                coverage: slot, isLastConfirmed: self.isStale, isCoverageOnly: false,
+                nozzleDiameter: toolhead.nozzleDiameter
             ))
         }
         for offset in slots.indices where !used.contains(offset) {
@@ -136,7 +144,8 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
                 toolheadID: slot.toolheadId, index: slot.toolheadIndex,
                 title: slot.toolheadName,
                 material: nil, spoolID: nil, spoolName: nil,
-                remainingGrams: nil, coverage: slot, isLastConfirmed: self.isStale, isCoverageOnly: true
+                remainingGrams: nil, coverage: slot, isLastConfirmed: self.isStale, isCoverageOnly: true,
+                nozzleDiameter: nil
             ))
         }
         // Printer-level spool data has no slot authority. Keep it once, explicitly
@@ -152,7 +161,8 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
                     ? (spool.filamentName ?? spool.spoolName ?? "Assigned spool")
                     : "No printer-level spool assigned",
                 remainingGrams: spool.hasActiveSpool ? spool.remainingWeightG : nil,
-                coverage: nil, isLastConfirmed: false, isCoverageOnly: false
+                coverage: nil, isLastConfirmed: false, isCoverageOnly: false,
+                nozzleDiameter: nil
             ))
         }
         rows = result

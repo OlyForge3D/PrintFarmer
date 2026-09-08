@@ -90,7 +90,8 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
             await PrinterDetailViewLifecycle.willEnterForeground(
                 viewModel: detailViewModel,
                 coverageViewModel: coverageViewModel,
-                refreshCoverage: true
+                refreshCoverage: true,
+                snapshotPollingAllowed: true
             )
         }
         await service.awaitPending(count: 1)
@@ -111,7 +112,8 @@ final class PrinterFilamentCoverageViewModelTests: XCTestCase {
         await PrinterDetailViewLifecycle.willEnterForeground(
             viewModel: detailViewModel,
             coverageViewModel: coverageViewModel,
-            refreshCoverage: false
+            refreshCoverage: false,
+            snapshotPollingAllowed: true
         )
 
         XCTAssertEqual(coverageViewModel.dispatchedRequestCount, 2)

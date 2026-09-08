@@ -77,8 +77,21 @@ public struct PrinterRunActionBar: View {
                     emergencyStopButton(for: emergency)
                 }
             }
-            .accessibilityIdentifier(PrinterRunActionLabels.containerAccessibilityIdentifier)
+            // Modifier ORDER matters here (issue #2522, Hicks review finding
+            // 22): `.accessibilityElement(children: .contain)` must come
+            // BEFORE `.accessibilityIdentifier(...)` so the identifier is
+            // attached to the already-established contain boundary, not to
+            // a plain VStack that `.contain` then wraps. The reverse order
+            // (identifier first, `.contain` second) left every descendant
+            // button reporting THIS container's identifier instead of its
+            // own more specific one (each button below already sets its own
+            // `.accessibilityIdentifier`) — confirmed via the accessibility
+            // tree dump in `PrinterDetailPanelsUITests`, and matching the
+            // ordering already fixed for `PrinterDetailView`'s outer root
+            // identifier for the same underlying reason. Purely a modifier
+            // reordering: no structural or behavioral change.
             .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(PrinterRunActionLabels.containerAccessibilityIdentifier)
         }
     }
 
