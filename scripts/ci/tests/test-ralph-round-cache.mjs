@@ -135,16 +135,114 @@ test('concurrent stale-lock reclaimers cannot remove a replacement generation', 
       ownerToken: 'crashed-owner', pid: 1,
       createdAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:01:00Z',
     }));
+    let observed = 0;
+    let releaseObservations;
+    const observations = new Promise((resolve) => { releaseObservations = resolve; });
+    let activeGuards = 0;
+    let maxActiveGuards = 0;
+    const hooks = {
+      afterStaleObservation: async () => {
+        observed += 1;
+        if (observed === 2) releaseObservations();
+        await observations;
+      },
+      afterReclaimGuardAcquired: async () => {
+        activeGuards += 1;
+        maxActiveGuards = Math.max(maxActiveGuards, activeGuards);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        activeGuards -= 1;
+      },
+    };
     await Promise.all([
       writeRoundCache(scope, cache({ queue: ['#first'] }), {
-        env: { RALPH_CACHE_DIR: directory }, isOwnerAlive: () => false,
+        env: { RALPH_CACHE_DIR: directory }, isOwnerAlive: () => false, hooks,
       }),
       writeRoundCache(scope, cache({ queue: ['#second'] }), {
-        env: { RALPH_CACHE_DIR: directory }, isOwnerAlive: () => false,
+        env: { RALPH_CACHE_DIR: directory }, isOwnerAlive: () => false, hooks,
       }),
     ]);
     const result = await readRoundCache(scope, { env: { RALPH_CACHE_DIR: directory } });
     assert.ok(['#first', '#second'].includes(result.cache.conclusions.queue[0]));
+    assert.equal(maxActiveGuards, 1);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('a stale reclaimer cannot remove a replacement lock generation', async () => {
+  const directory = await temporaryDirectory();
+  try {
+    const file = cacheFileForScope(scope, { env: { RALPH_CACHE_DIR: directory } });
+    await writeFile(`${file}.lock`, JSON.stringify({
+      ownerToken: 'old-generation', pid: 1,
+      createdAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:01:00Z',
+    }));
+    const replacement = {
+      ownerToken: 'replacement-generation', pid: 2,
+      createdAt: '2099-01-01T00:00:00Z', expiresAt: '2099-01-01T01:00:00Z',
+    };
+    await assert.rejects(() => writeRoundCache(scope, cache(), {
+      env: { RALPH_CACHE_DIR: directory }, retries: 1, isOwnerAlive: () => false,
+      hooks: { afterReclaimGuardAcquired: () => writeFile(`${file}.lock`, JSON.stringify(replacement)) },
+    }), (error) => error.code === 'LOCK_TIMEOUT');
+    assert.equal(JSON.parse(await readFile(`${file}.lock`, 'utf8')).ownerToken, replacement.ownerToken);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('recovers a dead stale reclaim guard and cleans up after guard creation failure', async () => {
+  const directory = await temporaryDirectory();
+  try {
+    const file = cacheFileForScope(scope, { env: { RALPH_CACHE_DIR: directory } });
+    const stale = {
+      ownerToken: 'crashed-owner', pid: 1,
+      createdAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:01:00Z',
+    };
+    await writeFile(`${file}.lock`, JSON.stringify(stale));
+    await writeFile(`${file}.lock.reclaim`, JSON.stringify(stale));
+    await writeRoundCache(scope, cache(), {
+      env: { RALPH_CACHE_DIR: directory }, isOwnerAlive: () => false, retries: 4,
+    });
+    assert.equal((await readRoundCache(scope, { env: { RALPH_CACHE_DIR: directory } })).reason, undefined);
+
+    await writeFile(`${file}.lock`, JSON.stringify(stale));
+    await assert.rejects(() => writeRoundCache(scope, cache(), {
+      env: { RALPH_CACHE_DIR: directory }, isOwnerAlive: () => false,
+      writeGuardMetadata: async () => { throw new Error('simulated guard write failure'); },
+    }), /simulated guard write failure/);
+    assert.equal(await readFile(`${file}.lock.reclaim`, 'utf8').then(() => true, () => false), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('stale guard recovery cannot remove a replacement guard generation', async () => {
+  const directory = await temporaryDirectory();
+  try {
+    const file = cacheFileForScope(scope, { env: { RALPH_CACHE_DIR: directory } });
+    const stale = {
+      ownerToken: 'dead-generation', pid: 1,
+      createdAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:01:00Z',
+    };
+    const replacement = {
+      ownerToken: 'new-guard-generation', pid: 2,
+      createdAt: '2099-01-01T00:00:00Z', expiresAt: '2099-01-01T01:00:00Z',
+    };
+    await writeFile(`${file}.lock`, JSON.stringify(stale));
+    await writeFile(`${file}.lock.reclaim`, JSON.stringify(stale));
+    await assert.rejects(() => writeRoundCache(scope, cache(), {
+      env: { RALPH_CACHE_DIR: directory }, retries: 1, isOwnerAlive: () => false,
+      hooks: {
+        afterRecoveryClaimAcquired: async (lockFile) => {
+          if (lockFile.endsWith('.reclaim')) await writeFile(lockFile, JSON.stringify(replacement));
+        },
+      },
+    }), (error) => error.code === 'LOCK_TIMEOUT');
+    assert.equal(
+      JSON.parse(await readFile(`${file}.lock.reclaim`, 'utf8')).ownerToken,
+      replacement.ownerToken,
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
