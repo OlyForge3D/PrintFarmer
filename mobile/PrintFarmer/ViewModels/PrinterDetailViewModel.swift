@@ -22,6 +22,33 @@ final class PrinterDetailViewModel {
     var actionError: String?
     var isViewActive = true {
         didSet {
+            // Monotonic action-lifecycle epoch (issue #2522, Hicks review
+            // finding 24): bumped on EVERY activation-state transition, not
+            // only deactivation. A boolean-only `isViewActive` check has an
+            // ABA gap — an in-flight, uncancellable mutation (e.g.
+            // `bindToolheadSpool`) captures `isViewActive == true`, the view
+            // deactivates then REACTIVATES before the mutation's network
+            // await resolves, and a check against the CURRENT `isViewActive`
+            // alone would see `true` again and wrongly conclude its
+            // authority is still current — even though a full
+            // deactivate/reactivate cycle (a materially different session)
+            // occurred in between. `actionLifecycleEpoch` closes this: it is
+            // captured alongside `isViewActive` at the START of such a
+            // mutation and compared again afterward, and once bumped it
+            // never returns to its old value, so the ABA sequence is always
+            // detected regardless of what `isViewActive` reads at the
+            // moment the check runs.
+            guard oldValue != isViewActive else { return }
+            actionLifecycleEpoch &+= 1
+            // A transition means whatever operation last set `true` no
+            // longer owns the current epoch, so its eventual completion
+            // will correctly skip resetting this (see `hasAuthority()`-style
+            // guards) — but nothing else would ever clear it for the NEW
+            // epoch otherwise, permanently stranding the UI in a busy state
+            // across a reactivation. Resetting it here, not the retired
+            // operation's own tail check, is what "clear busy only if the
+            // operation owns it" resolves to structurally.
+            isPerformingAction = false
             if oldValue && !isViewActive {
                 invalidateCanonicalLoad()
                 tearDownSignalR()
@@ -98,6 +125,10 @@ final class PrinterDetailViewModel {
     @ObservationIgnored private var signalRSubscriptions: [SignalRSubscription] = []
     @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
     @ObservationIgnored private var signalRAuthorityEpoch: UInt64 = 0
+    /// Issue #2522, Hicks review finding 24 — see `isViewActive`'s `didSet`
+    /// and `configure(printerService:)` for where this is bumped, and
+    /// `bindToolheadSpool` for the authority check that consumes it.
+    @ObservationIgnored private var actionLifecycleEpoch: UInt64 = 0
     @ObservationIgnored private var lastObservedConnectionState: SignalRConnectionState?
     @ObservationIgnored private let callbackEnqueuer: CallbackEnqueuer
     @ObservationIgnored private var canonicalLifecycleEpoch: UInt64 = 0
@@ -166,38 +197,62 @@ final class PrinterDetailViewModel {
         if !Self.identical(self.printerService, printerService) {
             invalidateCanonicalLoad()
             invalidateSnapshotLifecycle()
+            // Issue #2522, Hicks review finding 24: a service replacement is
+            // its own kind of lifecycle transition for `bindToolheadSpool`'s
+            // authority — an in-flight bind against the OLD service must not
+            // treat this reconfigured session as still its own, and the busy
+            // flag it set must not strand the reconfigured session either.
+            actionLifecycleEpoch &+= 1
+            isPerformingAction = false
         }
 
         self.printerService = printerService
     }
 
-    /// Guided-swap toolhead bind (issue #2522, Hicks review finding 20).
+    /// Guided-swap toolhead bind (issue #2522, Hicks review findings 20 and
+    /// 24).
     ///
     /// Dispatched from an unstructured `.sheet` completion closure in
     /// `PrinterDetailView`, not a `.task` the view's `onDisappear` can rely
     /// on cancelling promptly — `activeTasks.forEach { $0.cancel() }` is
     /// cooperative and this method has an uncancellable network await in
-    /// the middle of it. Captures the exact `printerService` identity this
-    /// call targets before that await; if the view has since torn down
-    /// (`isViewActive == false`) or `configure(printerService:)` has since
-    /// reassigned a DIFFERENT instance for this same view — a supported,
-    /// tested scenario elsewhere in this view model (server
-    /// reconnect/hot-swap) — this retired session must not still apply the
-    /// mutation's result or trigger a refresh through whatever service is
-    /// current now. Mirrors the `isViewActive` guard-before-and-after-await
-    /// convention every sibling mutation in this file already follows,
-    /// plus the service-identity capture `isCanonicalLoadCurrent`/
-    /// `hasSignalRAuthority` already use for their own longer-lived
-    /// operations.
+    /// the middle of it. Captures the exact `printerService` identity AND
+    /// `actionLifecycleEpoch` this call targets before that await.
+    ///
+    /// The epoch closes an ABA gap a boolean `isViewActive` check and a
+    /// service-identity check cannot close alone (finding 24): the view can
+    /// deactivate and then REACTIVATE — or `configure(printerService:)` can
+    /// be called again with an instance that happens to compare equal —
+    /// before this bind's network await resolves, at which point
+    /// `isViewActive` reads `true` again and identity matches again, so a
+    /// check against only those two would wrongly conclude this stale call
+    /// still owns the CURRENT session. `actionLifecycleEpoch` is bumped on
+    /// every activation-state transition and every service reconfiguration
+    /// (see `isViewActive`'s `didSet` and `configure(printerService:)`) and
+    /// never returns to an old value, so comparing it here always detects
+    /// the ABA sequence regardless of what the other two read at the
+    /// moment `hasAuthority()` runs.
+    ///
+    /// "Clear busy only if the operation owns it": `isPerformingAction` is
+    /// reset to `false` at the tail ONLY when `hasAuthority()` still holds.
+    /// A retired call that loses authority never touches it — the epoch
+    /// bump that revoked its authority already reset it once for the NEW
+    /// session (see `isViewActive`'s `didSet` / `configure`), so a stale
+    /// completion resetting it again would be redundant at best and, if a
+    /// newer legitimate call had since set it back to `true`, would
+    /// incorrectly clear busy state that call still owns.
     func bindToolheadSpool(_ spool: SpoolmanSpool, at toolheadIndex: Int) async {
         guard isViewActive else { return }
         guard let printerService else {
             actionError = "Printer service not available."
             return
         }
+        let authorityEpoch = actionLifecycleEpoch
         let authorityServiceIdentity = Self.identity(printerService)
         func hasAuthority() -> Bool {
-            isViewActive && Self.identity(self.printerService) == authorityServiceIdentity
+            isViewActive
+                && actionLifecycleEpoch == authorityEpoch
+                && Self.identity(self.printerService) == authorityServiceIdentity
         }
         isPerformingAction = true
         actionError = nil

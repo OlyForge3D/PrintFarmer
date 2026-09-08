@@ -116,7 +116,7 @@ struct PrinterDetailView: View {
                 viewModel: viewModel,
                 coverageViewModel: coverageViewModel,
                 refreshCoverage: filamentCoverageEnabled,
-                snapshotPollingAllowed: isStatusPageForeground
+                snapshotPollingAllowed: { isStatusPageForeground }
             )
         }
         .alert(
@@ -1633,17 +1633,29 @@ struct PrinterDetailBorderedDestructiveButton: View {
 
 @MainActor
 enum PrinterDetailViewLifecycle {
+    /// - Parameter snapshotPollingAllowed: a closure, not a precomputed
+    ///   `Bool` (issue #2522, Hicks review finding 23). This is applied
+    ///   AFTER `loadPrinter()`/`coverageViewModel.load()`'s awaits, which a
+    ///   pull-to-refresh can leave in flight for a while; evaluating the
+    ///   gate eagerly at the call site — as a plain `Bool` argument would —
+    ///   captures whatever page/scene state was current when refresh
+    ///   STARTED, not when it actually applies the result. If the operator
+    ///   switches pages mid-refresh (Status → Controls or back), that stale
+    ///   snapshot would restart polling on a now-hidden Controls page, or
+    ///   stop it on a now-visible Status page — the opposite of current
+    ///   reality. A closure re-reads the caller's live state at the exact
+    ///   moment it is invoked, below.
     static func refresh(
         viewModel: PrinterDetailViewModel,
         coverageViewModel: PrinterFilamentCoverageViewModel,
         refreshCoverage: Bool,
-        snapshotPollingAllowed: Bool
+        snapshotPollingAllowed: @escaping () -> Bool
     ) async {
         await viewModel.loadPrinter()
         if refreshCoverage {
             await coverageViewModel.load()
         }
-        viewModel.setSnapshotPollingAllowed(snapshotPollingAllowed)
+        viewModel.setSnapshotPollingAllowed(snapshotPollingAllowed())
     }
 
     static func willEnterForeground(

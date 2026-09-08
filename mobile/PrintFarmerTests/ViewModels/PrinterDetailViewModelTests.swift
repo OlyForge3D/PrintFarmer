@@ -711,7 +711,9 @@ final class PrinterDetailViewModelTests: XCTestCase {
     /// Navigation-away: the view tears down (`isViewActive = false`, as
     /// `PrinterDetailView.onDisappear` does) WHILE the bind request is still
     /// in flight. The retired session must not still refresh the printer
-    /// once the request completes.
+    /// once the request completes, and the deactivation itself must clear
+    /// `isPerformingAction` rather than leaving it stuck `true` forever on a
+    /// view model nobody is observing anymore.
     func testBindToolheadSpoolSkipsRefreshAfterViewTornDownMidFlight() async throws {
         let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
         mockService.printerToReturn = printer
@@ -726,6 +728,40 @@ final class PrinterDetailViewModelTests: XCTestCase {
             mockService.getPrinterCallCount, 0,
             "A torn-down session must not refresh the printer after the bind completes"
         )
+        XCTAssertFalse(viewModel.isPerformingAction)
+    }
+
+    /// ABA (issue #2522, Hicks review finding 24): the view deactivates
+    /// THEN REACTIVATES — a materially different session — before the bind
+    /// request's uncancellable network await resolves. A boolean-only
+    /// `isViewActive` check would see `true` again at completion time and
+    /// wrongly conclude this stale call still owns the current session;
+    /// `actionLifecycleEpoch` (bumped on every activation-state transition)
+    /// must still detect it and skip both the refresh and any busy-flag
+    /// mutation — the reactivation transition itself is what already reset
+    /// `isPerformingAction` for the NEW session, not this stale call's own
+    /// tail check.
+    func testBindToolheadSpoolSkipsRefreshAfterDeactivateReactivateABAMidFlight() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        mockService.beforeBindToolheadSpool = { [weak viewModel] in
+            await MainActor.run {
+                viewModel?.isViewActive = false
+                viewModel?.isViewActive = true
+            }
+        }
+
+        await viewModel.bindToolheadSpool(makeSpool(), at: 0)
+
+        XCTAssertEqual(mockService.bindToolheadSpoolCalls.count, 1)
+        XCTAssertEqual(
+            mockService.getPrinterCallCount, 0,
+            "A stale call surviving a deactivate/reactivate ABA cycle must not refresh the reactivated session"
+        )
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "The reactivated session must not be stranded with a busy flag the retired call no longer owns"
+        )
     }
 
     /// Same-UUID/different-server: `configure(printerService:)` reassigns a
@@ -733,7 +769,10 @@ final class PrinterDetailViewModelTests: XCTestCase {
     /// scenario elsewhere in this view model — server reconnect/hot-swap)
     /// WHILE the bind request against the OLD service is still in flight.
     /// The stale request's completion must not refresh through either the
-    /// old (retired) or the newly reconfigured service.
+    /// old (retired) or the newly reconfigured service, and the
+    /// reconfiguration itself must clear `isPerformingAction` for the new
+    /// session rather than leaving it stuck `true` (issue #2522, Hicks
+    /// review finding 24 — "service replacement busy cleanup").
     func testBindToolheadSpoolSkipsRefreshAfterServiceReconfiguredMidFlight() async throws {
         let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
         mockService.printerToReturn = printer
@@ -753,6 +792,55 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertEqual(
             newService.getPrinterCallCount, 0,
             "The new service must not be refreshed on behalf of an operation it never targeted"
+        )
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "The reconfigured session must not be stranded with a busy flag the retired call no longer owns"
+        )
+    }
+
+    // MARK: - Pull-to-refresh transition-during-refresh (issue #2522, Hicks
+    // review finding 23)
+
+    /// `PrinterDetailViewLifecycle.refresh` must re-evaluate its caller's
+    /// CURRENT page/scene state when it finally applies
+    /// `setSnapshotPollingAllowed`, not a value captured before its
+    /// `loadPrinter()` await — a pull-to-refresh can leave that await in
+    /// flight for a while, long enough for the operator to switch from the
+    /// Status page (foreground for the camera) to Controls (not) or back.
+    func testRefreshAppliesSnapshotPollingStateAsOfCompletionNotAsOfStart() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        let gate = ShiftTaskResultGate<Printer>()
+        let script = ScriptedCanonicalResult<Printer>([.gated(gate)])
+        mockService.getHandler = { _ in try await script.next() }
+        let coverageViewModel = PrinterFilamentCoverageViewModel(printerId: TestData.testUUID)
+
+        // Mirrors `PrinterDetailView.isStatusPageForeground` at the moment
+        // refresh STARTS: the Status page is foreground, so polling should
+        // resume once refresh concludes — UNLESS the operator switches away
+        // before it does, below.
+        var isStatusPageForegroundNow = true
+
+        let refreshTask = Task {
+            await PrinterDetailViewLifecycle.refresh(
+                viewModel: viewModel,
+                coverageViewModel: coverageViewModel,
+                refreshCoverage: false,
+                snapshotPollingAllowed: { isStatusPageForegroundNow }
+            )
+        }
+        await script.waitForCallCount(1)
+
+        // The operator switches to the Controls page while `loadPrinter()`'s
+        // network request is still in flight.
+        isStatusPageForegroundNow = false
+
+        await gate.succeed(printer)
+        await refreshTask.value
+
+        XCTAssertFalse(
+            viewModel.isSnapshotPollingActive,
+            "Refresh must apply the CURRENT (post-switch) page state, not the state captured when refresh started"
         )
     }
 
