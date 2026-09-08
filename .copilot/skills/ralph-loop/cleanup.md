@@ -23,4 +23,7 @@ remote branch comparison; squash merge does not prove feature-head containment.
 
 Always report `Sessions retained` and `🧹 Ready to reap`, including empty headings. Never invoke
 `archive_session` or `delete_item`; `archive_session` cannot archive earlier-round children.
-Only a human may later use `delete_item`, after confirming each exact session name.
+Ralph's only follow-up is a confirmed-action handoff: after a human explicitly confirms each exact
+candidate session name, report those names for the human to act on. Ralph still never invokes a
+deletion. Only that human may later use `delete_item`; unrelated audit/UI automations are out of
+scope.

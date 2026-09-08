@@ -220,6 +220,7 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
   ]) assert.match(operations, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   for (const reference of [
     'one Ralph automation', 'delete_item', 'earlier-round children', 'post-merge',
+    'confirmed-action handoff', 'explicitly confirms each exact',
   ]) assert.match(cleanup, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   for (const reference of [
     'documentation-only', 'Workflow/configuration', 'agent-safety-boundary',
