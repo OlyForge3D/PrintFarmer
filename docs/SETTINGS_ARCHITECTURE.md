@@ -589,10 +589,11 @@ Removing a rail entry must never strand a user. The `Admin` entry is gated on
 `requiresAnyAccessibleHubTile`, so every permission that used to unlock a removed rail
 entry still lights up `/admin`, including custom roles with no `farm_admin`.
 
-Opt-in **pinning** of an admin destination back onto the rail is separate work (#2527).
-A pin is an explicit user choice and is not a default home, so it does not contradict
-this rule. Stored navigation preferences naming a removed entry are filtered out by
-`uniqueKnownIds`, so legacy automatic ordering is never read as an intentional pin.
+The Admin Control Center's opt-in **Pin admin links** chooser (#2527) can add an
+authorized destination back onto the rail. A pin is an explicit, browser-local user
+choice and is not a default home, so it does not contradict this rule. Stored
+navigation preferences naming a removed entry are filtered out by `uniqueKnownIds`,
+so legacy automatic ordering is never read as an intentional pin.
 
 ## Adding A New Settings Section
 

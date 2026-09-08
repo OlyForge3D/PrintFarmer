@@ -229,8 +229,9 @@ Admin Control Center is that surface for the admin area.
   recovery affordance, for a delegate who can open the shell but has no category
   in it.
 
-Opt-in pinning of an admin destination onto the rail is tracked separately
-(#2527); a user-chosen pin is not a default home.
+The Admin Control Center's opt-in **Pin admin links** chooser (#2527) can add an
+authorized destination to the rail. Pins are browser-local, user-specific choices,
+not default homes or permission grants.
 
 #### Canonical Admin Routes
 
