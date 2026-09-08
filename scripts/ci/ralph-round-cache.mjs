@@ -186,15 +186,40 @@ async function reclaimObservedGeneration(lockFile, observed, options, suffix) {
       suffix = 'recover';
     }
   }
+  const holds = [];
   try {
     await options.hooks?.afterRecoveryClaimAcquired?.(lockFile, observed);
+    for (const staleTarget of staleTargets) {
+      const holdFile = `${staleTarget.file}.hold.${encodeURIComponent(staleTarget.generation)}`;
+      let handle;
+      try {
+        handle = await open(holdFile, 'wx');
+        const metadata = lockMetadata(options.staleLockMs);
+        await handle.writeFile(JSON.stringify(metadata));
+        holds.push({ file: holdFile, handle, metadata });
+      } catch (error) {
+        if (handle) {
+          await handle.close();
+          await rm(holdFile, { force: true });
+        }
+        if (error.code === 'EEXIST') {
+          const orphan = await staleLock(holdFile, options);
+          if (orphan) await reclaimObservedGeneration(holdFile, orphan, options, 'recover');
+        }
+        return false;
+      }
+    }
     for (const staleTarget of staleTargets.reverse()) {
       const current = await staleLock(staleTarget.file, options);
       if (current?.generation !== staleTarget.generation) return false;
+      await options.hooks?.afterAncestorValidated?.(staleTarget.file, staleTarget.generation);
+      const beforeRemove = await staleLock(staleTarget.file, options);
+      if (beforeRemove?.generation !== staleTarget.generation) return false;
       await rm(staleTarget.file, { force: true });
     }
     return true;
   } finally {
+    await Promise.all(holds.reverse().map((hold) => releaseLock(hold.file, hold)));
     await releaseLock(claim.file, claim);
   }
 }

@@ -248,6 +248,47 @@ test('stale guard recovery cannot remove a replacement guard generation', async 
   }
 });
 
+test('a coordinated second writer cannot overlap or remove a live replaced ancestor', async () => {
+  const directory = await temporaryDirectory();
+  try {
+    const file = cacheFileForScope(scope, { env: { RALPH_CACHE_DIR: directory } });
+    const stale = {
+      ownerToken: 'dead-generation', pid: 1,
+      createdAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:01:00Z',
+    };
+    const replacement = {
+      ownerToken: 'live-replacement', pid: 2,
+      createdAt: '2099-01-01T00:00:00Z', expiresAt: '2099-01-01T01:00:00Z',
+    };
+    const claim = `${file}.lock.reclaim.recover.token%3Adead-generation`;
+    await writeFile(`${file}.lock`, JSON.stringify(stale));
+    await writeFile(`${file}.lock.reclaim`, JSON.stringify(stale));
+    await writeFile(claim, JSON.stringify(stale));
+    let secondWriter;
+    await assert.rejects(() => writeRoundCache(scope, cache(), {
+      env: { RALPH_CACHE_DIR: directory }, retries: 1, isOwnerAlive: () => false,
+      hooks: {
+        afterAncestorValidated: async (ancestor) => {
+          if (ancestor.endsWith('.reclaim')) {
+            await writeFile(ancestor, JSON.stringify(replacement));
+            secondWriter = writeRoundCache(scope, cache({ queue: ['#second'] }), {
+              env: { RALPH_CACHE_DIR: directory }, retries: 1, isOwnerAlive: () => false,
+            });
+            await assert.rejects(secondWriter, (error) => error.code === 'LOCK_TIMEOUT');
+          }
+        },
+      },
+    }), (error) => error.code === 'LOCK_TIMEOUT');
+    assert.ok(secondWriter);
+    assert.equal(
+      JSON.parse(await readFile(`${file}.lock.reclaim`, 'utf8')).ownerToken,
+      replacement.ownerToken,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('recovers only old incomplete lock and guard records after interrupted writes', async () => {
   const directory = await temporaryDirectory();
   try {
