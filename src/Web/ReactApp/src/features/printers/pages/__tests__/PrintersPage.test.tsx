@@ -3,6 +3,13 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mockUseAdminHubParent = vi.fn();
+
+vi.mock('@/features/admin/utils/adminHubParentState', () => ({
+  ADMIN_HUB_ROUTE_STATE: { pageParent: 'admin-control-center' },
+  useAdminHubParent: () => mockUseAdminHubParent(),
+}));
 import type { Printer } from '@/types/api';
 import { PrintersPage } from '../PrintersPage';
 import { LG_BREAKPOINT_QUERY } from '@/common/hooks/useMediaQuery';
@@ -74,7 +81,18 @@ vi.mock('@/services/api', () => ({
 }));
 
 vi.mock('@/common/components/PageTemplate', () => ({
-  PageTemplate: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  PageTemplate: ({
+    children,
+    parent,
+  }: {
+    children: React.ReactNode;
+    parent?: { label: string };
+  }) => (
+    <div>
+      {parent && <div data-testid="page-parent">{parent.label}</div>}
+      {children}
+    </div>
+  ),
 }));
 
 vi.mock('@/common/components/ui/Button', () => ({
@@ -241,6 +259,8 @@ function mockLgBreakpoint(matches: boolean) {
 describe('PrintersPage', () => {
   beforeEach(() => {
     localStorage.clear();
+    mockUseAdminHubParent.mockReset();
+    mockUseAdminHubParent.mockReturnValue(undefined);
     mockRefetchPrinters.mockClear();
     mockUsePrinters.mockReturnValue({
       data: mockPrinters,
@@ -277,6 +297,26 @@ describe('PrintersPage', () => {
     mockLgBreakpoint(false);
     const { unmount } = renderPage('/printers/printer-1');
     expect(screen.getAllByTestId('printer-details-sidebar')).toHaveLength(1);
+    unmount();
+
+    mockLgBreakpoint(true);
+    renderPage('/printers/printer-1');
+    expect(screen.getAllByTestId('printer-details-sidebar')).toHaveLength(1);
+
+    mockLgBreakpoint(false);
+  });
+
+  it('shows the Admin Control Center parent when navigation state marks the page as admin-origin', () => {
+    mockUseAdminHubParent.mockReturnValue({ label: 'Admin Control Center', to: '/admin' });
+    renderPage('/printers');
+
+    expect(screen.getByTestId('page-parent')).toHaveTextContent('Admin Control Center');
+  });
+
+  it('does not show the Admin Control Center parent during ordinary printers navigation', () => {
+    const { unmount } = renderPage('/printers');
+
+    expect(screen.queryByTestId('page-parent')).not.toBeInTheDocument();
     unmount();
 
     mockLgBreakpoint(true);

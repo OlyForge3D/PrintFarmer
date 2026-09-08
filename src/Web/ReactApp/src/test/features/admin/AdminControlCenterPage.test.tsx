@@ -8,6 +8,19 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AdminControlCenterPage } from '@/features/admin/pages/AdminControlCenterPage';
 import { AdminNavPinsProvider } from '@/common/contexts/AdminNavPinsContext';
 import type { AdminOverviewDto } from '@/types/adminOverview';
+import { ADMIN_HUB_ROUTE_STATE } from '@/features/admin/utils/adminHubParentState';
+
+vi.mock('react-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-router')>();
+  return {
+    ...actual,
+    Link: ({ state, ...props }: Record<string, unknown>) => React.createElement(actual.Link, {
+      ...props,
+      state,
+      'data-route-state': state ? JSON.stringify(state) : undefined,
+    }),
+  };
+});
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -27,15 +40,18 @@ vi.mock('@/common/components/PageTemplate', () => ({
   PageTemplate: ({
     title,
     subtitle,
+    parent,
     actions,
     children,
   }: {
     title: string;
     subtitle?: string;
+    parent?: { label: string };
     actions?: React.ReactNode;
     children: React.ReactNode;
   }) => (
     <div data-testid="page-template">
+      {parent && <div data-testid="page-parent">{parent.label}</div>}
       <h1>{title}</h1>
       {subtitle && <p>{subtitle}</p>}
       {actions && <div data-testid="page-template-actions">{actions}</div>}
@@ -425,6 +441,15 @@ describe('AdminControlCenterPage', () => {
     expect(actionLink).toHaveAttribute('href', '/printers');
   });
 
+  it('marks a raw attention fallback route as admin-origin', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+
+    renderHub();
+
+    const actionLink = await screen.findByRole('link', { name: /Open Printers/i });
+    expect(actionLink).toHaveAttribute('data-route-state', JSON.stringify(ADMIN_HUB_ROUTE_STATE));
+  });
+
   it('omits the action link when actionRoute is missing', async () => {
     mockedApiGet.mockResolvedValue({
       data: makeOverview({
@@ -483,6 +508,15 @@ describe('AdminControlCenterPage', () => {
     expect(actionLink).toHaveAttribute('href', '/admin/status');
     // Legacy path must not leak through.
     expect(actionLink).not.toHaveAttribute('href', '/admin/system');
+  });
+
+  it('marks a hub tile to a top-level admin destination as admin-origin', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+
+    renderHub();
+
+    const analyticsCard = await screen.findByRole('link', { name: /analytics production, cost, and utilization dashboards\./i });
+    expect(analyticsCard).toHaveAttribute('data-route-state', JSON.stringify(ADMIN_HUB_ROUTE_STATE));
   });
 
   it('prefers actionDestinationId over actionRoute when both are supplied', async () => {
@@ -769,6 +803,36 @@ describe('AdminControlCenterPage', () => {
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('region', { name: 'Pin admin links' })).not.toBeInTheDocument();
     expect(launcher).toHaveFocus();
+  });
+
+  it('reorders pinned admin links in the chooser and preserves the order across remount', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+    const user = userEvent.setup();
+
+    const firstRender = renderHub();
+
+    await user.click(screen.getByRole('button', { name: 'Pin admin links' }));
+    await user.click(screen.getByRole('button', { name: 'Pin Analytics from navbar' }));
+    await user.click(screen.getByRole('button', { name: 'Pin Workers & Jobs from navbar' }));
+
+    const destinationList = screen.getByRole('list', { name: 'Authorized admin destinations' });
+    let [firstRow, secondRow] = within(destinationList).getAllByRole('listitem');
+    expect(within(firstRow).getByText('Analytics')).toBeInTheDocument();
+    expect(within(secondRow).getByText('Workers & Jobs')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Move Analytics down' }));
+
+    [firstRow, secondRow] = within(destinationList).getAllByRole('listitem');
+    expect(within(firstRow).getByText('Workers & Jobs')).toBeInTheDocument();
+    expect(within(secondRow).getByText('Analytics')).toBeInTheDocument();
+
+    firstRender.unmount();
+    renderHub();
+
+    await user.click(screen.getByRole('button', { name: 'Pin admin links' }));
+    [firstRow, secondRow] = within(screen.getByRole('list', { name: 'Authorized admin destinations' })).getAllByRole('listitem');
+    expect(within(firstRow).getByText('Workers & Jobs')).toBeInTheDocument();
+    expect(within(secondRow).getByText('Analytics')).toBeInTheDocument();
   });
 
   // #2526 — removing a destination from the navbar is only safe because the hub

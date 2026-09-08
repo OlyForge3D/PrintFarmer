@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from '@/common/components/Layout';
+import { AdminNavPinsProvider } from '@/common/contexts/AdminNavPinsContext';
 import { getNavPreferencesStorageKey, NAV_PREFERENCES_VERSION, saveNavPreferences } from '@/common/utils/navPreferences';
 
 import { createStorageEvent } from '@/test/utils/storage-event';
@@ -109,7 +110,9 @@ describe('Navigation rail sections', () => {
     return render(
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={initialEntries}>
-          <Layout />
+          <AdminNavPinsProvider>
+            <Layout />
+          </AdminNavPinsProvider>
         </MemoryRouter>
       </QueryClientProvider>,
     );
@@ -319,6 +322,33 @@ describe('Navigation rail sections', () => {
     expect(desktopNav.querySelectorAll('a[href="/files"]')).toHaveLength(1);
     expect(desktopNav.querySelector('a[href="/projects"]')).toBeNull();
     expect(within(desktopNav).getByRole('button', { name: /show hidden navigation items/i })).toBeInTheDocument();
+  });
+
+  it('renders pinned admin destinations inside the Admin section instead of Favorites', async () => {
+    localStorage.setItem(getNavPreferencesStorageKey('1'), JSON.stringify({
+      version: NAV_PREFERENCES_VERSION,
+      orderedItemIds: [],
+      hiddenItemIds: [],
+      pinnedItemIds: [],
+      adminPinnedItemIds: ['ops-workers', 'ops-analytics'],
+    }));
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+
+    await waitFor(() => {
+      expect(within(desktopNav).getByRole('link', { name: 'Workers & Jobs' })).toBeInTheDocument();
+    });
+
+    expect(within(desktopNav).queryByRole('region', { name: 'Favorites' })).not.toBeInTheDocument();
+
+    const adminSection = within(desktopNav).getByRole('region', { name: 'Admin' });
+    expect(within(adminSection).getByRole('link', { name: 'Printed Parts' })).toHaveAttribute('href', '/parts-inventory');
+    expect(within(adminSection).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+    expect(within(adminSection).getByRole('link', { name: 'Workers & Jobs' })).toHaveAttribute('href', '/admin/workers?workerTab=jobs');
+    expect(within(adminSection).getByRole('link', { name: 'Analytics' })).toHaveAttribute('href', '/analytics');
+
+    const adminLinks = within(adminSection).getAllByRole('link').map((link) => link.textContent?.trim());
+    expect(adminLinks).toEqual(['Printed Parts', 'Admin', 'Workers & Jobs', 'Analytics']);
   });
 
   it('updates desktop and mobile ordering from another tab without a remount', async () => {

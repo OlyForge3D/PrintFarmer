@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Alert } from '@/common/components/ui';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { AdminNavPinButton } from '@/features/admin/components/AdminNavPinButton';
 import { AdminPageShell } from '@/features/admin/components/AdminPageShell';
 import { canAccessDestination, getDestinationById } from '@/features/admin/registry/adminDestinations';
 
@@ -16,7 +17,12 @@ export function AdminDestinationRoute({ destinationId, children }: AdminDestinat
   if (!destination) throw new Error(`Unknown admin destination: ${destinationId}`);
 
   return (
-    <AdminPageShell title={destination.label} subtitle={destination.description} icon={destination.icon}>
+    <AdminPageShell
+      title={destination.label}
+      subtitle={destination.description}
+      icon={destination.icon}
+      titleActions={<AdminNavPinButton destinationId={destinationId} />}
+    >
       {auth.isLoading ? (
         <p role="status">Loading access...</p>
       ) : auth.isAuthenticated && canAccessDestination(destination, auth) ? children : (

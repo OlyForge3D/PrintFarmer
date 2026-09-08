@@ -329,6 +329,33 @@ function groupNavigationItems(items: SectionedNavigationItem[]): NavigationGroup
   }));
 }
 
+function mergeNavigationGroupItems(
+  groups: NavigationGroup[],
+  sectionName: string,
+  items: SectionedNavigationItem[],
+): NavigationGroup[] {
+  if (items.length === 0) {
+    return groups;
+  }
+
+  const targetIndex = groups.findIndex((group) => group.header.name === sectionName);
+  if (targetIndex < 0) {
+    return [
+      ...groups,
+      {
+        header: navigationHeadersByName.get(sectionName) ?? { name: sectionName, icon: HomeIcon },
+        items,
+      },
+    ];
+  }
+
+  return groups.map((group, index) => (
+    index === targetIndex
+      ? { ...group, items: [...group.items, ...items] }
+      : group
+  ));
+}
+
 export function Layout() {
   const { isConnected } = useSignalRConnection('printer');
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
@@ -505,12 +532,15 @@ export function Layout() {
     [navigationItemById, resolvedNavPreferences.hiddenItems]
   );
   const favoriteNavigationGroups = useMemo<NavigationGroup[]>(
-    () => favoriteNavigationItems.length > 0 || adminPinnedNavigationItems.length > 0
-      ? [{ header: FAVORITES_HEADER, items: [...adminPinnedNavigationItems, ...favoriteNavigationItems] }]
+    () => favoriteNavigationItems.length > 0
+      ? [{ header: FAVORITES_HEADER, items: favoriteNavigationItems }]
       : [],
-    [adminPinnedNavigationItems, favoriteNavigationItems]
+    [favoriteNavigationItems]
   );
-  const navigationGroups = useMemo<NavigationGroup[]>(() => groupNavigationItems(regularNavigationItems), [regularNavigationItems]);
+  const navigationGroups = useMemo<NavigationGroup[]>(
+    () => mergeNavigationGroupItems(groupNavigationItems(regularNavigationItems), 'Admin', adminPinnedNavigationItems),
+    [adminPinnedNavigationItems, regularNavigationItems],
+  );
   const allNavigationGroups = useMemo<NavigationGroup[]>(
     () => [...favoriteNavigationGroups, ...navigationGroups],
     [favoriteNavigationGroups, navigationGroups]

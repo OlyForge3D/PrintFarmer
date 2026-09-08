@@ -23,6 +23,7 @@ import { presentationForAttentionSeverity } from './attentionPresentation';
 export interface AttentionRouteAction {
   label: string;
   to: string;
+  state?: unknown;
   onClick?: never;
 }
 
@@ -118,7 +119,7 @@ export function AttentionRow({
       {action && (
         <div className="shrink-0 sm:ml-auto sm:self-center">
           {action.to !== undefined ? (
-            <Link to={action.to} className={ACTION_CLASS}>
+            <Link to={action.to} state={action.state} className={ACTION_CLASS}>
               {action.label}
               <ArrowRightIcon className="h-3.5 w-3.5" ariaLabel="" />
             </Link>
