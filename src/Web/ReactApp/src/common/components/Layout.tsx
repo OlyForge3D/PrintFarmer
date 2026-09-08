@@ -21,7 +21,6 @@ import {
   AlertIcon,
   ClipboardListIcon,
   CalendarIcon,
-  PackageIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -218,18 +217,6 @@ const navigation: NavigationElement[] = [
   // Do not re-add a destination here that the Control Center already owns.
   // Opt-in user pinning of admin destinations onto this rail is separate work
   // (#2527) and is deliberately *not* the same thing as a default entry.
-  {
-    id: 'parts-inventory',
-    name: 'Printed Parts',
-    href: '/parts-inventory',
-    icon: PackageIcon,
-    // PartsInventoryController, `[RequirePermission("parts_inventory", "admin")]` (#1457).
-    // Not an `ADMIN_DESTINATIONS` entry, so the navbar is its only default
-    // home — it is not a duplicate and must stay (#2526).
-    requiredPermission: { resource: 'parts_inventory', action: 'admin' },
-    anchored: true,
-    matches: (pathname) => pathname === '/parts-inventory' || pathname.startsWith('/parts-inventory/')
-  },
   {
     id: 'admin',
     name: 'Admin',

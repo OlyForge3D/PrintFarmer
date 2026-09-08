@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
@@ -726,9 +726,9 @@ describe('AdminControlCenterPage', () => {
     });
 
     const cards = screen.getAllByTestId('admin-hub-destination');
-    // 7 operational + 3 standalone configuration (Catalog, Locations, Power
+    // 8 operational + 3 standalone configuration (Catalog, Locations, Power
     // Monitors) + 1 Farm & Admin Settings entry point.
-    expect(cards.length).toBe(11);
+    expect(cards.length).toBe(12);
     // Every card links somewhere absolute.
     for (const card of cards) {
       expect(card.getAttribute('href')).toMatch(/^\//);
@@ -833,6 +833,34 @@ describe('AdminControlCenterPage', () => {
     [firstRow, secondRow] = within(screen.getByRole('list', { name: 'Authorized admin destinations' })).getAllByRole('listitem');
     expect(within(firstRow).getByText('Workers & Jobs')).toBeInTheDocument();
     expect(within(secondRow).getByText('Analytics')).toBeInTheDocument();
+  });
+
+  it('uses the same live announcement for button and drag reorder interactions', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+    const user = userEvent.setup();
+
+    renderHub();
+
+    await user.click(screen.getByRole('button', { name: 'Pin admin links' }));
+    await user.click(screen.getByRole('button', { name: 'Pin Analytics from navbar' }));
+    await user.click(screen.getByRole('button', { name: 'Pin Workers & Jobs from navbar' }));
+
+    await user.click(screen.getByRole('button', { name: 'Move Analytics down' }));
+    const announcement = screen.getByText('Moved Analytics to position 2 of 2.');
+    expect(announcement).toHaveAttribute('aria-live', 'polite');
+
+    const destinationList = screen.getByRole('list', { name: 'Authorized admin destinations' });
+    const [workersRow, analyticsRow] = within(destinationList).getAllByRole('listitem');
+    await act(async () => {
+      fireEvent.dragStart(analyticsRow);
+    });
+    await act(async () => {
+      fireEvent.dragOver(workersRow);
+      fireEvent.drop(workersRow);
+    });
+
+    expect(screen.getByText('Moved Analytics to position 1 of 2.')).toHaveAttribute('aria-live', 'polite');
+    expect(within(destinationList).getAllByRole('listitem')[0]).toHaveTextContent('Analytics');
   });
 
   // #2526 — removing a destination from the navbar is only safe because the hub

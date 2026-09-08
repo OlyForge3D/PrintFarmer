@@ -13,6 +13,7 @@ import {
   LayersTripleOutlineIcon,
   LocationIcon,
   NfcIcon,
+  PackageIcon,
   PlayIcon,
   PrinterIcon,
   ServerIcon,
@@ -276,6 +277,21 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     requiredRole: null,
     requiredPermission: { resource: 'queue', action: 'read' },
     keywords: ['auto-dispatch', 'dispatch', 'automation', 'jobs'],
+    isHubTile: true,
+  },
+  {
+    id: 'ops-printed-parts',
+    kind: 'operational',
+    label: 'Printed Parts',
+    description: 'Track printed inventory and its availability for farm operations.',
+    path: '/parts-inventory',
+    icon: PackageIcon,
+    group: 'operations',
+    // PartsInventoryController is protected by
+    // `[RequirePermission("parts_inventory", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'parts_inventory', action: 'admin' },
+    keywords: ['printed parts', 'parts inventory', 'inventory', 'stock'],
     isHubTile: true,
   },
 
