@@ -627,6 +627,26 @@ final class PrinterDetailViewModelTests: XCTestCase {
         )
     }
 
+    /// Shared fixture for tests that need a printer starting WITH an active
+    /// spool assignment (used by both `clearActiveSpoolAssignment` and
+    /// `ejectFilament`'s stale-snapshot-override regression tests).
+    private static let assignedPrinterJSON = """
+    {
+        "id": "660e8400-e29b-41d4-a716-446655440001",
+        "rowVersion": "AQIDBA==",
+        "name": "Ender 3",
+        "backend": "Moonraker",
+        "backendPort": 7125,
+        "inMaintenance": false,
+        "isEnabled": true,
+        "isOnline": true,
+        "spoolInfo": {
+            "hasActiveSpool": true,
+            "activeSpoolId": 42
+        }
+    }
+    """
+
     /// Hicks review finding 14: a confirmed server-side clear must survive a
     /// FAILED post-clear `loadPrinter()` refresh. `loadPrinter()`'s failure
     /// path leaves `printer` untouched, so without an explicit local
@@ -634,23 +654,7 @@ final class PrinterDetailViewModelTests: XCTestCase {
     /// would win in `effectiveSpoolInfo` and resurrect the very assignment
     /// the server just confirmed cleared.
     func testClearActiveSpoolAssignmentOverridesStalePrinterSnapshotWhenReloadFails() async throws {
-        let assignedPrinterJSON = """
-        {
-            "id": "660e8400-e29b-41d4-a716-446655440001",
-            "rowVersion": "AQIDBA==",
-            "name": "Ender 3",
-            "backend": "Moonraker",
-            "backendPort": 7125,
-            "inMaintenance": false,
-            "isEnabled": true,
-            "isOnline": true,
-            "spoolInfo": {
-                "hasActiveSpool": true,
-                "activeSpoolId": 42
-            }
-        }
-        """
-        let printer = try TestData.decodePrinter(from: assignedPrinterJSON)
+        let printer = try TestData.decodePrinter(from: Self.assignedPrinterJSON)
         mockService.printerToReturn = printer
         await viewModel.loadPrinter()
         guard let before = viewModel.effectiveSpoolInfo, before.hasActiveSpool else {
@@ -1205,6 +1209,54 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertTrue(
             error.contains("Emergency Stop"),
             "The error must explicitly name Emergency Stop as the reason the unload was withheld, not silently return: \(error)"
+        )
+    }
+
+    /// Bishop review finding (parity with `clearActiveSpoolAssignment()`'s
+    /// own Hicks review finding 14 fix): the assignment is ALREADY cleared
+    /// server-side once the first leg succeeds, so the local
+    /// `printer.spoolInfo` snapshot must be reconciled immediately — before
+    /// Emergency Stop preempts the physical unload — not left showing an
+    /// assigned spool the server no longer has recorded.
+    func testEjectFilamentOverridesStalePrinterSnapshotWhenEmergencyStopPreemptsUnload() async throws {
+        let printer = try TestData.decodePrinter(from: Self.assignedPrinterJSON)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        guard let before = viewModel.effectiveSpoolInfo, before.hasActiveSpool else {
+            XCTFail("Setup: printer must start with an active spool assignment")
+            return
+        }
+        mockService.beforeSetActiveSpool = { [weak viewModel] in
+            await MainActor.run { viewModel?.engageEmergencyStopSafetyOverrideForTesting() }
+        }
+
+        await viewModel.ejectFilament()
+
+        XCTAssertFalse(
+            viewModel.effectiveSpoolInfo?.hasActiveSpool ?? true,
+            "The local snapshot must show the assignment cleared even though Emergency Stop preempted the physical unload"
+        )
+    }
+
+    /// Same parity fix, different early-return path: the physical unload
+    /// leg itself fails AFTER the assignment was already cleared. The local
+    /// snapshot must still be reconciled, not left showing a stale
+    /// assignment.
+    func testEjectFilamentOverridesStalePrinterSnapshotWhenPhysicalUnloadFails() async throws {
+        let printer = try TestData.decodePrinter(from: Self.assignedPrinterJSON)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        guard let before = viewModel.effectiveSpoolInfo, before.hasActiveSpool else {
+            XCTFail("Setup: printer must start with an active spool assignment")
+            return
+        }
+        mockService.unloadFilamentErrorToThrow = NetworkError.invalidResponse
+
+        await viewModel.ejectFilament()
+
+        XCTAssertFalse(
+            viewModel.effectiveSpoolInfo?.hasActiveSpool ?? true,
+            "The local snapshot must show the assignment cleared even though the physical unload leg failed"
         )
     }
 

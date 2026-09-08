@@ -659,6 +659,23 @@ final class PrinterDetailViewModel {
                 spoolId: nil,
                 reviewedRowVersion: try reviewedPrinterRowVersion()
             )
+            // Confirmed-cleared local override (issue #2522, Bishop review
+            // finding — parity with `clearActiveSpoolAssignment()`'s own
+            // Hicks review finding 14 fix). The assignment is ALREADY
+            // cleared server-side the moment the call above succeeds, so
+            // the local snapshot must be reconciled RIGHT HERE — before any
+            // of the early returns below (Emergency Stop preemption, an
+            // unload failure, or a lost `hasActionAuthority`) and before
+            // `loadPrinter()`, which can itself fail without touching
+            // `printer` at all. Without this, any of those paths left the
+            // UI showing an assigned spool the server no longer has
+            // recorded, exactly the same stale-resurrection hazard finding
+            // 14 already fixed for the assignment-only clear path.
+            lastSetSpoolInfo = nil
+            if var updatedPrinter = printer, updatedPrinter.spoolInfo?.hasActiveSpool == true {
+                updatedPrinter.spoolInfo = PrinterSpoolInfo(hasActiveSpool: false)
+                printer = updatedPrinter
+            }
             // Safety precedence (issue #2522, Vasquez review finding —
             // CRITICAL): Emergency Stop is an intentional safety override
             // and must be able to preempt this already-in-flight eject
@@ -691,7 +708,6 @@ final class PrinterDetailViewModel {
                 return
             }
             guard hasActionAuthority(authority) else { return }
-            lastSetSpoolInfo = nil
             await loadPrinter()
         } catch {
             guard hasActionAuthority(authority) else { return }
