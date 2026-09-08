@@ -302,28 +302,31 @@ enum PrinterDetailControlsOwnerMapping {
     }
 }
 
-// MARK: - Filament staleness mapping (issue #2522, Bishop review finding 6)
+// MARK: - Filament staleness mapping (issue #2522, Hicks review finding 16
+// — reverses the interim fix from Bishop review finding 6)
 
-/// Pure mirror of `PrinterFilamentCoverageViewModel.isStaleCacheReportable`
-/// (issue #789's truthful-staleness rule), used at the `PrinterDetailView`
-/// wiring point so a unit test can pin the exact boolean the integration
-/// passes into `PrinterFilamentPresentation.isStale` without needing a live,
-/// SignalR-wired view model.
+/// Whether #2519's `PrinterFilamentPresentation` should treat filament data
+/// as stale (last-confirmed wording, no enabled mutation actions).
 ///
-/// Passing the raw `isShowingStaleCache` flag directly would be wrong: it is
-/// true from the instant a cache hydrates — before the first canonical load
-/// has even concluded — and, per `PrinterFilamentCoverageViewModel
-/// .commitError`, is never cleared by a generic (non-feature-disabled,
-/// non-not-found) load error. Either would disable every filament action
-/// (`PrinterFilamentPresentation` empties `supportedActions` while stale)
-/// during ordinary warm-cache hydration, or indefinitely after one
-/// transient error. Requiring `hasConcludedCanonicalLoad` too matches the
-/// same precondition the stale banner already uses.
+/// This is the RAW `PrinterFilamentCoverageViewModel.isShowingStaleCache`
+/// flag, deliberately NOT ANDed with `hasConcludedCanonicalLoad`. An earlier
+/// revision of this mapping required `hasConcludedCanonicalLoad` too (Bishop
+/// review finding 6), reasoning that raw `isShowingStaleCache` would
+/// wrongly disable every action during ordinary warm-cache hydration. That
+/// traded one bug for a worse one (Hicks review finding 16): while a
+/// canonical refresh is still in flight, the on-screen coverage is
+/// UNCONFIRMED cached data, and mapping it to `.available` with enabled
+/// mutation actions before the refresh concludes lets an operator act on
+/// stale data as if it were current — a real safety issue, not merely a
+/// premature-banner cosmetic one.
+///
+/// `isStaleCacheReportable` (`isShowingStaleCache && hasConcludedCanonicalLoad`)
+/// stays reserved for the connection-status BANNER only (wired directly in
+/// `PrinterDetailView`, unaffected by this mapping), whose job genuinely is
+/// different: suppressing a premature "offline" flash on an entirely
+/// healthy cold open, not gating mutation safety.
 enum PrinterDetailFilamentStaleMapping {
-    static func isStale(
-        isShowingStaleCache: Bool,
-        hasConcludedCanonicalLoad: Bool
-    ) -> Bool {
-        isShowingStaleCache && hasConcludedCanonicalLoad
+    static func isStale(isShowingStaleCache: Bool) -> Bool {
+        isShowingStaleCache
     }
 }

@@ -76,6 +76,19 @@ struct PrinterDetailView: View {
         // Stable, printer-scoped destination identifier so task-action routing
         // (#788) can assert it reached the exact printer and place a11y focus
         // there. Additive only — no behavior change.
+        //
+        // `.accessibilityElement(children: .contain)` (issue #2522): without
+        // it, this identifier — set on a plain, non-rendering `VStack` —
+        // bubbles down and OVERRIDES the explicit identifiers of multiple
+        // distinct descendant elements (observed: the panel selector's own
+        // `SegmentedControl` and the paging `TabView`'s internal
+        // `CollectionView` both silently lost their own identifiers and
+        // reported "printer.detail.root.<uuid>" instead once the
+        // Status/Controls pager replaced the single old `ScrollView`).
+        // `.contain` makes this VStack a genuine, opaque accessibility node
+        // in its own right so its identifier stops leaking onto children
+        // that already declare their own.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("printer.detail.root.\(printerId.uuidString)")
         .navigationTitle("Printer")
         #if os(iOS)
@@ -251,18 +264,18 @@ struct PrinterDetailView: View {
             spool: viewModel.effectiveSpoolInfo,
             coverage: coverageViewModel.coverage,
             coverageState: coverageState,
-            // `PrinterDetailFilamentStaleMapping.isStale`, not the raw
-            // `isShowingStaleCache` flag: the latter is true from the
-            // instant the cache hydrates (before the first canonical load
-            // has even concluded) and, per `commitError`, never clears on a
-            // generic load error, so using it directly would disable every
-            // filament action during ordinary warm-cache hydration and
-            // indefinitely after one transient error. This mirrors the
-            // stale banner above (line ~41) and the truthful-staleness rule
-            // from issue #789.
+            // `PrinterDetailFilamentStaleMapping.isStale` — the RAW
+            // `isShowingStaleCache` flag (Hicks review finding 16). While a
+            // canonical refresh is still in flight the on-screen coverage is
+            // UNCONFIRMED cached data; it must present as last-confirmed
+            // with mutation actions disabled the whole time that flag is
+            // set, not only once the refresh concludes. `isStaleCacheReportable`
+            // (which additionally requires `hasConcludedCanonicalLoad`) stays
+            // reserved for the connection-status banner above (line ~41),
+            // which suppresses a premature "offline" flash — a different,
+            // cosmetic concern from mutation-safety gating here.
             isStale: PrinterDetailFilamentStaleMapping.isStale(
-                isShowingStaleCache: coverageViewModel.isShowingStaleCache,
-                hasConcludedCanonicalLoad: coverageViewModel.hasConcludedCanonicalLoad
+                isShowingStaleCache: coverageViewModel.isShowingStaleCache
             ),
             supportedActions: PrinterDetailFilamentActionMapping.supportedActions(
                 hasActiveSpool: viewModel.effectiveSpoolInfo?.hasActiveSpool ?? false
@@ -407,6 +420,13 @@ struct PrinterDetailView: View {
                 currentJobBlock(printer)
                 // 4. Filament — one #2519 section (roster + coverage + spool).
                 filamentSectionView(printer)
+                // 4b. Eject Filament — retained physical-unload utility
+                // (issue #2522 Hicks review finding 17). At the pre-#2522
+                // baseline this lived in `activeSpoolContent` with NO
+                // `printer.isOnline` gate, only an active-spool/pending
+                // gate; it must stay reachable on that same basis, not
+                // folded into the online-gated `setupActionsSection` below.
+                ejectFilamentUtility(printer)
                 // 5. Queue — next 3 assigned jobs, per-tool match state, dispatch-to.
                 queueSection(printer)
                 // 6. Maintenance odometer — hours vs threshold, due → log completion.
@@ -465,47 +485,53 @@ struct PrinterDetailView: View {
         }
     }
 
-    /// Retained-location setup actions (issue #2522 preserve-before-cleanup
-    /// checklist): the admin maintenance toggle, NFC printer-tag write, and
-    /// the physical filament eject, all previously nested inside the old
-    /// Advanced disclosure's Actions block, which rendered
-    /// `if printer.isOnline` regardless of the Advanced Printer Controls
-    /// safety preference. The caller (`statusPage`) reproduces that exact
-    /// `printer.isOnline` gate; this function itself only decides whether
-    /// it has anything to show at all.
-    ///
-    /// "Eject Filament" here dispatches the ORIGINAL combined operation
-    /// (`ejectFilament()`: clears the assignment AND physically unloads via
-    /// `unloadFilament()`) preserved with truthful, distinct wording — never
-    /// to be confused with #2519's "Clear spool assignment" action in
-    /// `PrinterFilamentSection`, which is assignment-only
+    /// Retained physical-unload utility (issue #2522 preserve-before-cleanup
+    /// checklist, Hicks review finding 17). At the pre-#2522 baseline this
+    /// lived in the removed `activeSpoolContent` block with NO
+    /// `printer.isOnline` gate — only an active-spool visibility gate and a
+    /// pending-action disable gate — so it is rendered directly in
+    /// `statusPage`, never folded into the online-gated
+    /// `setupActionsSection` below. Dispatches the ORIGINAL combined
+    /// operation (`ejectFilament()`: clears the assignment AND physically
+    /// unloads via `unloadFilament()`), preserved with truthful, distinct
+    /// wording — never to be confused with #2519's "Clear spool assignment"
+    /// action in `PrinterFilamentSection`, which is assignment-only
     /// (`clearActiveSpoolAssignment()`, no physical unload).
+    @ViewBuilder
+    private func ejectFilamentUtility(_ printer: Printer) -> some View {
+        if viewModel.effectiveSpoolInfo?.hasActiveSpool ?? false {
+            PrinterDetailBorderedDestructiveButton(kind: .eject) {
+                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                let task = Task { await viewModel.ejectFilament() }
+                activeTasks.append(task)
+            }
+            .disabled(viewModel.isPerformingAction)
+            .accessibilityLabel("Eject filament: clears the spool assignment and physically unloads")
+            .accessibilityIdentifier("printer.detail.status.ejectFilament")
+        }
+    }
+
+    /// Retained-location setup actions (issue #2522 preserve-before-cleanup
+    /// checklist): the admin maintenance toggle and NFC printer-tag write,
+    /// both previously nested inside the old Advanced disclosure's Actions
+    /// block, which rendered `if printer.isOnline` regardless of the
+    /// Advanced Printer Controls safety preference. The caller
+    /// (`statusPage`) reproduces that exact `printer.isOnline` gate; this
+    /// function itself only decides whether it has anything to show at all.
     @ViewBuilder
     private func setupActionsSection(_ printer: Printer) -> some View {
         let showsMaintenanceToggle = authViewModel.currentUserRole == "farm_admin"
-        let showsEjectFilament = viewModel.effectiveSpoolInfo?.hasActiveSpool ?? false
         #if canImport(UIKit)
         let showsWriteTag = true
         #else
         let showsWriteTag = false
         #endif
-        if showsMaintenanceToggle || showsWriteTag || showsEjectFilament {
+        if showsMaintenanceToggle || showsWriteTag {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Setup Actions")
                     .font(.headline)
 
                 VStack(spacing: 10) {
-                    if showsEjectFilament {
-                        PrinterDetailBorderedDestructiveButton(kind: .eject) {
-                            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                            let task = Task { await viewModel.ejectFilament() }
-                            activeTasks.append(task)
-                        }
-                        .disabled(viewModel.isPerformingAction)
-                        .accessibilityLabel("Eject filament: clears the spool assignment and physically unloads")
-                        .accessibilityIdentifier("printer.detail.status.ejectFilament")
-                    }
-
                     if showsMaintenanceToggle {
                         Button {
                             UIImpactFeedbackGenerator(style: .medium).impactOccurred()

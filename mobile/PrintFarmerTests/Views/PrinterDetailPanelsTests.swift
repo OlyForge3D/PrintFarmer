@@ -356,34 +356,21 @@ final class PrinterDetailPanelsTests: XCTestCase {
         ))
     }
 
-    // MARK: - Filament staleness mapping (Bishop review finding 6)
+    // MARK: - Filament staleness mapping (Hicks review finding 16, reversing
+    // the interim fix from Bishop review finding 6)
 
-    func testFilamentStaleMappingFalseDuringWarmCacheHydrationBeforeConclusion() {
-        // Cache hydrated but the canonical load has not concluded yet — must
-        // NOT disable filament actions during ordinary warm-cache hydration.
-        // This is exactly the bug: passing raw `isShowingStaleCache` here
-        // would return true and empty every supported filament action.
-        XCTAssertFalse(PrinterDetailFilamentStaleMapping.isStale(
-            isShowingStaleCache: true, hasConcludedCanonicalLoad: false
-        ))
-    }
-
-    func testFilamentStaleMappingTrueOnceCanonicalLoadConcludedWithoutClearingCache() {
-        // A concluded pass (including one ending in a generic error, which
-        // never clears `isShowingStaleCache`) that left the cache flag set
-        // must genuinely disable filament actions — the data really is
-        // unconfirmed.
-        XCTAssertTrue(PrinterDetailFilamentStaleMapping.isStale(
-            isShowingStaleCache: true, hasConcludedCanonicalLoad: true
-        ))
+    func testFilamentStaleMappingTrueWhileShowingStaleCacheEvenBeforeCanonicalLoadConcludes() {
+        // While a canonical refresh is still in flight, on-screen coverage
+        // is UNCONFIRMED cached data. It must be treated as stale — last-
+        // confirmed wording, no enabled mutation actions — for the whole
+        // time the cache flag is set, not only once the refresh concludes.
+        // An earlier revision ANDed this with `hasConcludedCanonicalLoad`
+        // and asserted `false` here, which let mutation actions stay
+        // enabled against data the current session had not yet confirmed.
+        XCTAssertTrue(PrinterDetailFilamentStaleMapping.isStale(isShowingStaleCache: true))
     }
 
     func testFilamentStaleMappingFalseWhenNotShowingStaleCache() {
-        XCTAssertFalse(PrinterDetailFilamentStaleMapping.isStale(
-            isShowingStaleCache: false, hasConcludedCanonicalLoad: true
-        ))
-        XCTAssertFalse(PrinterDetailFilamentStaleMapping.isStale(
-            isShowingStaleCache: false, hasConcludedCanonicalLoad: false
-        ))
+        XCTAssertFalse(PrinterDetailFilamentStaleMapping.isStale(isShowingStaleCache: false))
     }
 }

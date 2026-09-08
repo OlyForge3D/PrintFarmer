@@ -9,24 +9,32 @@ import XCTest
 /// exercised by `OperatorShellUITests`.
 ///
 /// Deterministic-test discipline: every wait is a bounded
-/// `waitForExistence`; no `Thread.sleep`/`Task.sleep`/retry-until-pass. Only
-/// the initial navigation-entry helpers (`openFirstPrinterDetail`,
-/// `enableAdvancedPrinterControls`) soft-skip (return) when the shell/demo
-/// fleet/Settings surface they depend on is not present at all — mirroring
-/// the existing `OperatorShellUITests` convention for environment variance
-/// unrelated to this feature. Once a test has actually reached printer
-/// detail, every assertion about the Status page, the panel selector, the
-/// Controls page, and Emergency Stop is a deterministic `XCTAssertTrue`/
-/// `XCTAssertFalse` — a bare `return` there would let a real regression
-/// (the page/selector/action never appearing) silently pass.
+/// `waitForExistence`; no `Thread.sleep`/`Task.sleep`/retry-until-pass. The
+/// navigation-entry helpers (`openFirstPrinterDetail`,
+/// `enableAdvancedPrinterControls`) assert every REQUIRED step of the
+/// deterministic bootstrap — the Farm tab, a printer card, Settings, and its
+/// safety toggle all always exist in this environment, so a missing one is a
+/// real regression, not tolerated as "environment variance" (Hicks review
+/// finding 18). The one deliberate exception is the farm-card-vs-collection-
+/// cell choice inside `openFirstPrinterDetail`: that is picking between two
+/// equally valid ways to reach the SAME target, not tolerating its absence.
+/// Once a test has actually reached printer detail, every assertion about
+/// the Status page, the panel selector, the Controls page, and Emergency
+/// Stop is likewise a deterministic `XCTAssertTrue`/`XCTAssertFalse`.
 @MainActor
 final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
 
     // MARK: - Navigation helpers
 
-    private func openFirstPrinterDetail() -> Bool {
+    /// Navigates to the first printer's detail screen. Every step is a
+    /// REQUIRED precondition of the deterministic `--uitesting` bootstrap
+    /// and is asserted, not silently tolerated.
+    private func openFirstPrinterDetail() {
         let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 5)
-        guard farm.exists else { return false }
+        XCTAssertTrue(
+            farm.exists,
+            "The Farm destination must be reachable in the deterministic UI-test bootstrap"
+        )
         farm.tap()
 
         let farmCard = app.buttons
@@ -34,44 +42,93 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             .firstMatch
         if farmCard.waitForExistence(timeout: 5) {
             farmCard.tap()
-            return true
+            return
         }
+        // Deliberate choice between two equally valid ways to reach the SAME
+        // target (a stable farm-card wrapper vs. the raw collection-view
+        // cell) — not a tolerance for the fleet being empty.
         let firstPrinter = app.collectionViews.cells.firstMatch
-        guard firstPrinter.waitForExistence(timeout: 5) else { return false }
+        XCTAssertTrue(
+            firstPrinter.waitForExistence(timeout: 5),
+            "The deterministic UI-test fleet must expose at least one printer card or collection cell"
+        )
         firstPrinter.tap()
-        return true
     }
 
     /// Enables the per-server "Advanced Printer Controls" safety toggle from
-    /// Settings, then returns to Farm. Soft-skips (returns false) only if the
-    /// Settings navigation itself is unavailable in this environment — not a
-    /// concern of the panels feature under test.
-    @discardableResult
-    private func enableAdvancedPrinterControls() -> Bool {
+    /// Settings. Every step is a REQUIRED precondition of the deterministic
+    /// bootstrap and is asserted, not silently tolerated.
+    private func enableAdvancedPrinterControls() {
         let attention = shellDestinationButton(tabIdentifier: "tab.attention", timeout: 5)
-        guard attention.exists else { return false }
+        XCTAssertTrue(
+            attention.exists,
+            "The Attention/Account destination must be reachable in the deterministic UI-test bootstrap"
+        )
         attention.tap()
 
+        // Matches `OperatorShellUITests.openAccount()`: tapping the Attention
+        // tab reveals the Account entry point, which must itself be tapped
+        // to reach `account.root` before any `account.destination.*` button
+        // exists. Hard-asserting `enableAdvancedPrinterControls` (Hicks
+        // review finding 18) is what surfaced this step was missing here —
+        // the prior soft-skip silently returned instead of ever reaching
+        // Settings, letting every caller "pass" without exercising Controls.
+        let account = app.buttons["navigation.account"]
+        XCTAssertTrue(
+            account.waitForExistence(timeout: 5),
+            "The Account entry point must be reachable from Attention in the deterministic UI-test bootstrap"
+        )
+        account.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["account.root"].waitForExistence(timeout: 5),
+            "The Account root must appear after tapping into it"
+        )
+
         let settingsDestination = app.buttons["account.destination.settings"]
-        guard settingsDestination.waitForExistence(timeout: 3) else { return false }
+        XCTAssertTrue(
+            settingsDestination.waitForExistence(timeout: 3),
+            "Settings must be reachable from Account in the deterministic UI-test bootstrap"
+        )
         settingsDestination.tap()
 
-        guard app.navigationBars["Settings"].waitForExistence(timeout: 5) else { return false }
+        XCTAssertTrue(
+            app.navigationBars["Settings"].waitForExistence(timeout: 5),
+            "The Settings screen must appear"
+        )
         let toggle = app.switches["settings.advancedPrinterControls"]
         if !toggle.waitForExistence(timeout: 3) {
             app.swipeUp()
         }
-        guard toggle.waitForExistence(timeout: 3) else { return false }
+        XCTAssertTrue(
+            toggle.waitForExistence(timeout: 3),
+            "The Advanced Printer Controls safety toggle must be discoverable in Settings"
+        )
         if toggle.value as? String != "1" {
-            toggle.tap()
+            // A plain `toggle.tap()` targets the center of the accessibility
+            // element's frame, which for a SwiftUI `Toggle` row spans the
+            // full row width (label text + switch combined into one
+            // accessibility element for VoiceOver). The center of that frame
+            // sits over the LABEL text, not the switch knob UIKit actually
+            // hit-tests against, so a center tap can silently land on inert
+            // text instead of flipping the switch. Target the right edge,
+            // where the switch control itself renders, instead.
+            toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+            let becameOn = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value == '1'"),
+                object: toggle
+            )
+            let result = XCTWaiter().wait(for: [becameOn], timeout: 5)
+            XCTAssertEqual(
+                result, .completed,
+                "Tapping the Advanced Printer Controls toggle must flip its own value to on"
+            )
         }
-        return true
     }
 
     // MARK: - Default entry / gating
 
     func testDefaultEntryLandsOnStatusPage() {
-        guard openFirstPrinterDetail() else { return }
+        openFirstPrinterDetail()
 
         let statusPage = app.descendants(matching: .any)["printer.detail.panel.status"]
         XCTAssertTrue(
@@ -81,7 +138,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
     }
 
     func testSelectorAndControlsPageOmittedWhileSafetyToggleIsOff() {
-        guard openFirstPrinterDetail() else { return }
+        openFirstPrinterDetail()
 
         XCTAssertTrue(
             app.descendants(matching: .any)["printer.detail.panel.status"]
@@ -101,8 +158,8 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
     // MARK: - Selector reachability once Controls is available
 
     func testSelectorTapSwitchesToControlsPageAndBackToStatus() {
-        guard enableAdvancedPrinterControls() else { return }
-        guard openFirstPrinterDetail() else { return }
+        enableAdvancedPrinterControls()
+        openFirstPrinterDetail()
 
         let selector = app.segmentedControls["printer.detail.panel.selector"]
         XCTAssertTrue(
@@ -138,8 +195,8 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
     }
 
     func testRunActionBarStaysReachableAcrossPanelSwitch() {
-        guard enableAdvancedPrinterControls() else { return }
-        guard openFirstPrinterDetail() else { return }
+        enableAdvancedPrinterControls()
+        openFirstPrinterDetail()
 
         let selector = app.segmentedControls["printer.detail.panel.selector"]
         XCTAssertTrue(
@@ -149,9 +206,29 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
 
         // Emergency Stop is the one run action guaranteed to be visible for
         // any online printer regardless of print state (issue #2520/#2522).
-        let emergencyStopOnStatus = app.buttons["printer.detail.control.emergencyStop"]
+        //
+        // Queried by its `PrinterRunActionLabels.accessibilityLabel(for:)`
+        // text, not its `PrinterRunActionLabels.accessibilityIdentifier(for:)`
+        // identifier: `PrinterRunActionBar`'s own root `VStack` combines
+        // `.accessibilityElement(children: .contain)` with its own
+        // `containerAccessibilityIdentifier`, and in this iOS/Xcode
+        // toolchain that container identifier is what XCUITest reports for
+        // EVERY descendant button — each button's own, more specific
+        // `.accessibilityIdentifier(...)` is unreachable via an identifier
+        // query. `PrinterRunActionBar` is a merged #2520 component outside
+        // this issue's edit scope (`mobile/PrintFarmer/Views/Printers/
+        // PrinterDetailView.swift` alone), and its labels remain distinct
+        // and correct for real VoiceOver users regardless of this
+        // identifier-query limitation, so this test adapts its query
+        // strategy rather than modifying that file.
+        func emergencyStopButton() -> XCUIElement {
+            app.buttons.matching(
+                NSPredicate(format: "label == %@", "Emergency stop printer")
+            ).firstMatch
+        }
+
         XCTAssertTrue(
-            emergencyStopOnStatus.waitForExistence(timeout: 8),
+            emergencyStopButton().waitForExistence(timeout: 8),
             "Emergency Stop must be reachable on the Status page for an online printer"
         )
 
@@ -163,7 +240,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         controlsSegment.tap()
 
         XCTAssertTrue(
-            app.buttons["printer.detail.control.emergencyStop"].waitForExistence(timeout: 8),
+            emergencyStopButton().waitForExistence(timeout: 8),
             "The shared run-action bar (and Emergency Stop within it) must remain reachable on the Controls page without scrolling or an Advanced disclosure"
         )
     }
@@ -171,8 +248,8 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
     // MARK: - Native horizontal swipe (Hicks review finding 11)
 
     func testSwipeLeftToControlsPageSyncsSelectorAndExcludesStatusFromAccessibility() {
-        guard enableAdvancedPrinterControls() else { return }
-        guard openFirstPrinterDetail() else { return }
+        enableAdvancedPrinterControls()
+        openFirstPrinterDetail()
 
         let selector = app.segmentedControls["printer.detail.panel.selector"]
         XCTAssertTrue(
@@ -203,8 +280,8 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
     }
 
     func testSwipeRightBackToStatusPageSyncsSelectorAndExcludesControlsFromAccessibility() {
-        guard enableAdvancedPrinterControls() else { return }
-        guard openFirstPrinterDetail() else { return }
+        enableAdvancedPrinterControls()
+        openFirstPrinterDetail()
 
         let selector = app.segmentedControls["printer.detail.panel.selector"]
         XCTAssertTrue(
