@@ -3,7 +3,9 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Layout } from '@/common/components/Layout';
-import { getNavPreferencesStorageKey, NAV_PREFERENCES_VERSION } from '@/common/utils/navPreferences';
+import { getNavPreferencesStorageKey, NAV_PREFERENCES_VERSION, saveNavPreferences } from '@/common/utils/navPreferences';
+
+import { createStorageEvent } from '@/test/utils/storage-event';
 
 const createTestQueryClient = () => new QueryClient({
   defaultOptions: {
@@ -317,6 +319,86 @@ describe('Navigation rail sections', () => {
     expect(desktopNav.querySelectorAll('a[href="/files"]')).toHaveLength(1);
     expect(desktopNav.querySelector('a[href="/projects"]')).toBeNull();
     expect(within(desktopNav).getByRole('button', { name: /show hidden navigation items/i })).toBeInTheDocument();
+  });
+
+  it('updates desktop and mobile ordering from another tab without a remount', async () => {
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+    const storageKey = getNavPreferencesStorageKey('1');
+    const newValue = JSON.stringify({
+      version: NAV_PREFERENCES_VERSION,
+      orderedItemIds: ['files', 'print-queue', 'overview'],
+      hiddenItemIds: [],
+      pinnedItemIds: [],
+    });
+    await waitFor(() => {
+      expect(within(desktopNav).getAllByRole('link')[0]).toHaveAttribute('href', '/dashboard');
+    });
+
+    // A remote write has already changed storage when the native event arrives.
+    // Do not use saveNavPreferences: that would also send the same-tab event.
+    localStorage.setItem(storageKey, newValue);
+    fireEvent(window, createStorageEvent({ key: storageKey, newValue }));
+
+    expect(within(desktopNav).getAllByRole('link').slice(0, 3).map((link) => link.getAttribute('href')))
+      .toEqual(['/files', '/printQueue', '/dashboard']);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open navigation menu' }));
+    const mobileNav = within(screen.getByRole('dialog', { name: 'Mobile navigation drawer' }))
+      .getByRole('navigation', { name: 'Main navigation' });
+    expect(within(mobileNav).getAllByRole('link').slice(0, 3).map((link) => link.getAttribute('href')))
+      .toEqual(['/files', '/printQueue', '/dashboard']);
+  });
+
+  it.each(['remove', 'clear', 'malformed'])('syncs hidden items and favorites, then restores defaults on remote %s', async (reset) => {
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+    const storageKey = getNavPreferencesStorageKey('1');
+    await waitFor(() => {
+      expect(within(desktopNav).getByRole('link', { name: 'Projects' })).toBeInTheDocument();
+    });
+    const defaultHrefs = within(desktopNav).getAllByRole('link').map((link) => link.getAttribute('href'));
+    const newValue = JSON.stringify({
+      version: NAV_PREFERENCES_VERSION,
+      orderedItemIds: ['files', 'overview'],
+      hiddenItemIds: ['projects'],
+      pinnedItemIds: ['files'],
+    });
+    localStorage.setItem(storageKey, newValue);
+    fireEvent(window, createStorageEvent({ key: storageKey, newValue }));
+
+    expect(within(desktopNav).queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
+    expect(within(desktopNav).getByRole('button', { name: /show hidden navigation items/i })).toBeInTheDocument();
+    expect(within(within(desktopNav).getByRole('region', { name: 'Favorites' }))
+      .getByRole('link', { name: 'Files' })).toBeInTheDocument();
+
+    if (reset === 'clear') localStorage.clear();
+    else if (reset === 'remove') localStorage.removeItem(storageKey);
+    else localStorage.setItem(storageKey, '{invalid json');
+    fireEvent(window, createStorageEvent({
+      key: reset === 'clear' ? null : storageKey,
+      oldValue: newValue,
+      newValue: localStorage.getItem(storageKey),
+    }));
+
+    expect(within(desktopNav).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(defaultHrefs);
+    expect(within(desktopNav).queryByRole('region', { name: 'Favorites' })).not.toBeInTheDocument();
+    expect(within(desktopNav).queryByRole('button', { name: /show hidden navigation items/i })).not.toBeInTheDocument();
+  });
+
+  it('still refreshes Layout after another same-tab consumer saves preferences', async () => {
+    const { container } = renderLayout();
+    const desktopNav = getDesktopNav(container);
+    saveNavPreferences(getNavPreferencesStorageKey('1'), {
+      version: NAV_PREFERENCES_VERSION,
+      orderedItemIds: ['files', 'overview'],
+      hiddenItemIds: ['projects'],
+      pinnedItemIds: [],
+    });
+    await waitFor(() => {
+      expect(within(desktopNav).getAllByRole('link')[0]).toHaveAttribute('href', '/files');
+      expect(within(desktopNav).queryByRole('link', { name: 'Projects' })).not.toBeInTheDocument();
+    });
   });
 
   it('hides the admin section for authenticated non-admin users', () => {

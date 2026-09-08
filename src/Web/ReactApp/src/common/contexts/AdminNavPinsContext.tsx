@@ -3,7 +3,7 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
   getNavPreferencesStorageKey,
   loadNavPreferences,
-  NAV_PREFERENCES_UPDATED_EVENT,
+  subscribeToNavPreferences,
   saveNavPreferences,
   NAV_PREFERENCES_VERSION,
   type NavPreferences,
@@ -14,7 +14,7 @@ export function AdminNavPinsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const storageKey = useMemo(() => getNavPreferencesStorageKey(user?.id), [user?.id]);
   // `version` is bumped whenever preferences change (this tab's own writes, or
-  // the storage-updated event from another consumer) to force `pinnedIds` to
+  // same-tab or cross-tab storage events) to force `pinnedIds` to
   // recompute. Using useMemo keyed on storageKey (rather than useState +
   // useEffect) means a change in `storageKey` — logout or account switch —
   // is reflected in the very first render for the new principal: useEffect
@@ -26,10 +26,8 @@ export function AdminNavPinsProvider({ children }: { children: ReactNode }) {
   const [version, setVersion] = useState(0);
 
   useEffect(() => {
-    const refresh = () => setVersion((current) => current + 1);
-    window.addEventListener(NAV_PREFERENCES_UPDATED_EVENT, refresh);
-    return () => window.removeEventListener(NAV_PREFERENCES_UPDATED_EVENT, refresh);
-  }, []);
+    return subscribeToNavPreferences(storageKey, () => setVersion((current) => current + 1));
+  }, [storageKey]);
 
   const pinnedIds = useMemo(() => {
     const preferences = loadNavPreferences(storageKey);
