@@ -847,7 +847,8 @@ describe('AdminControlCenterPage', () => {
     await user.click(screen.getByRole('button', { name: 'Pin Workers & Jobs from navbar' }));
 
     await user.click(screen.getByRole('button', { name: 'Move Analytics down' }));
-    expect(screen.getByText('Moved Analytics to position 2 of 2.')).toBeInTheDocument();
+    const buttonAnnouncement = screen.getByText('Moved Analytics to position 2 of 2.');
+    expect(buttonAnnouncement).toHaveAttribute('aria-live', 'polite');
 
     const destinationList = screen.getByRole('list', { name: 'Authorized admin destinations' });
     const [firstRow, secondRow] = within(destinationList).getAllByRole('listitem');
@@ -857,9 +858,12 @@ describe('AdminControlCenterPage', () => {
     // this drives the same movePin/announce path as the up/down buttons.
     // Each event is flushed separately so the component re-renders between
     // them, mirroring how real drag events land on separate ticks.
+    const dataTransfer = { effectAllowed: '', setData: vi.fn() };
     act(() => {
-      fireEvent.dragStart(secondRow);
+      fireEvent.dragStart(secondRow, { dataTransfer });
     });
+    expect(dataTransfer.effectAllowed).toBe('move');
+    expect(dataTransfer.setData).toHaveBeenCalledWith('text/plain', 'ops-analytics');
     act(() => {
       fireEvent.dragOver(firstRow);
     });
@@ -867,7 +871,8 @@ describe('AdminControlCenterPage', () => {
       fireEvent.drop(firstRow);
     });
 
-    expect(screen.getByText('Moved Analytics to position 1 of 2.')).toBeInTheDocument();
+    const dragAnnouncement = screen.getByText('Moved Analytics to position 1 of 2.');
+    expect(dragAnnouncement).toHaveAttribute('aria-live', 'polite');
 
     // Verify the drag path actually reordered the pinned rows (not just the
     // announcement text) — Analytics must now render before Workers & Jobs.
@@ -881,6 +886,49 @@ describe('AdminControlCenterPage', () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 1600));
     });
+  });
+
+  it('accepts drag reordering only between pinned shortcuts', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+    const user = userEvent.setup();
+
+    renderHub();
+
+    await user.click(screen.getByRole('button', { name: 'Pin admin links' }));
+    await user.click(screen.getByRole('button', { name: 'Pin Analytics from navbar' }));
+    await user.click(screen.getByRole('button', { name: 'Pin Workers & Jobs from navbar' }));
+
+    const destinationList = screen.getByRole('list', { name: 'Authorized admin destinations' });
+    const analyticsRow = screen.getByRole('listitem', { name: 'Analytics, draggable to reorder' });
+    const workersRow = screen.getByRole('listitem', { name: 'Workers & Jobs, draggable to reorder' });
+    const statusRow = within(destinationList)
+      .getByText('System Status')
+      .closest('[role=listitem]') as HTMLElement;
+
+    // Directly dispatching an event bypasses the browser's draggable=false
+    // protection; the source handler must still reject unpinned rows.
+    const unpinnedDataTransfer = { effectAllowed: '', setData: vi.fn() };
+    act(() => {
+      fireEvent.dragStart(statusRow, { dataTransfer: unpinnedDataTransfer });
+      fireEvent.dragOver(analyticsRow);
+      fireEvent.drop(analyticsRow);
+    });
+    expect(unpinnedDataTransfer.setData).not.toHaveBeenCalled();
+
+    // A legitimate pinned source may not be dropped onto an unpinned target.
+    const pinnedDataTransfer = { effectAllowed: '', setData: vi.fn() };
+    act(() => {
+      fireEvent.dragStart(analyticsRow, { dataTransfer: pinnedDataTransfer });
+      fireEvent.dragOver(statusRow);
+      fireEvent.drop(statusRow);
+      fireEvent.dragEnd(analyticsRow);
+    });
+    expect(pinnedDataTransfer.setData).toHaveBeenCalledWith('text/plain', 'ops-analytics');
+
+    const [firstRow, secondRow] = within(destinationList).getAllByRole('listitem');
+    expect(within(firstRow).getByText('Analytics')).toBeInTheDocument();
+    expect(within(secondRow).getByText('Workers & Jobs')).toBeInTheDocument();
+    expect(workersRow).toBeInTheDocument();
   });
 
   it('marks pinned rows as draggable with an accessible label and leaves unpinned rows non-draggable', async () => {

@@ -85,6 +85,16 @@ describe('adminDestinations registry', () => {
     expect(getDestinationById('hw-locations')?.path).toBe('/locations');
   });
 
+  it('registers Printed Parts as a pinnable operational destination', () => {
+    expect(getDestinationById('parts-inventory')).toMatchObject({
+      kind: 'operational',
+      label: 'Printed Parts',
+      path: '/parts-inventory',
+      requiredPermission: { resource: 'parts_inventory', action: 'admin' },
+      isHubTile: true,
+    });
+  });
+
   it('has at least one hub-tile destination per operational group', () => {
     const requiredHubGroups: AdminDestinationGroup[] = [
       'operations',

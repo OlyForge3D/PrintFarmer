@@ -505,7 +505,14 @@ export function AdminControlCenterPage() {
                   tabIndex={-1}
                   draggable={pinned}
                   aria-label={pinned ? `${destination.label}, draggable to reorder` : undefined}
-                  onDragStart={() => pinned && setDraggingPinId(destination.id)}
+                  onDragStart={(event) => {
+                    // Synthetic drag events can still be dispatched to an unpinned row,
+                    // so guard the source as well as using draggable={pinned}.
+                    if (!pinned) return;
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', destination.id);
+                    setDraggingPinId(destination.id);
+                  }}
                   onDragEnd={() => setDraggingPinId(null)}
                   onDragOver={(event) => {
                     if (pinned && draggingPinId) event.preventDefault();
