@@ -93,6 +93,11 @@ Standalone browser-based 3D slicer application for converting models to G-code.
 - Print preview and analysis
 - Direct output to print queue
 
+**Importing from a URL:** In **Add Model → Enter URL**, use a direct download
+link to an STL, PLY, or 3MF model. The response is validated before an object is
+added to the plate. Web pages, JSON responses, empty files, and invalid meshes
+show an error notification without changing the plate; retry with a model link.
+
 **Note:** This is a dedicated application interface separate from Files management. It provides an immersive slicing experience as a first-class application feature.
 
 ### Admin Control Center And Settings

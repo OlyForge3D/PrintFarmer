@@ -155,6 +155,40 @@ final class PrinterFilamentPresentationTests: XCTestCase {
         XCTAssertEqual(model.rows.last?.remainingGrams, 1200)
     }
 
+    // MARK: - Nozzle diameter (issue #2522, Hicks review finding 21)
+
+    func testRosterRowCarriesNozzleDiameterFromToolhead() throws {
+        let printer = try TestData.decodePrinter()
+        let roster = [
+            Toolhead(id: UUID(), name: "Tool 0", index: 0, isPrimary: true, nozzleDiameter: 0.4),
+            Toolhead(id: UUID(), name: "Tool 1", index: 1, isPrimary: false, nozzleDiameter: nil)
+        ]
+        let model = try build(printer: printer, roster: roster)
+        XCTAssertEqual(model.rows.count, 2)
+        XCTAssertEqual(model.rows[0].nozzleDiameter, 0.4)
+        XCTAssertNil(model.rows[1].nozzleDiameter)
+    }
+
+    func testCoverageOnlyAndPrinterSpoolRowsHaveNoNozzleDiameter() throws {
+        let printer = try TestData.decodePrinter()
+        let id = UUID()
+        let coverage = snapshot(
+            printer: printer,
+            slots: [ToolheadFilamentCoverage(
+                toolheadIndex: 0, toolheadId: id, toolheadName: "Coverage-only",
+                spoolId: 1, material: "PLA", remainingGrams: 500, status: .covers
+            )]
+        )
+        let model = try build(
+            printer: printer, roster: [], // no roster match -> coverage-only row
+            spool: PrinterSpoolInfo(hasActiveSpool: true, activeSpoolId: 9, material: "PLA", remainingWeightG: 400),
+            coverage: coverage
+        )
+        // One coverage-only row + one printer-level spool row.
+        XCTAssertEqual(model.rows.count, 2)
+        XCTAssertTrue(model.rows.allSatisfy { $0.nozzleDiameter == nil })
+    }
+
     func testCoverageCannotResurrectClearedOrChangedAssignments() throws {
         let printer = try TestData.decodePrinter()
         let id = UUID()

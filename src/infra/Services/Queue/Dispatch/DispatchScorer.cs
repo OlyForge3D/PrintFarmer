@@ -33,7 +33,7 @@ public class DispatchScorer(
     ILogger<DispatchScorer> logger,
     IOperatorFeatureGate? featureGate = null,
     IFilamentCoverageService? coverageService = null,
-    IFilamentFallbackGroupService? fallbackService = null,
+    IFilamentFallbackGroupResolver? fallbackService = null,
     IMutationWatermarkReader? watermarkReader = null) : IDispatchScorerWithOrigin
 {
     // Factor weight constants

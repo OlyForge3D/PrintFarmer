@@ -14,6 +14,7 @@ import { slicerRegistry } from '../../../../services/slicerRegistry';
 import { slicerService } from '@/services/slicerService';
 import { sliceJobService } from '@/services/sliceJobService';
 import { toast } from 'sonner';
+import { binaryStl, modelTextBuffer, threeMfBuffer } from '@/features/slicer/utils/__tests__/model-response-fixtures';
 
 // Mutable slicer-mode ref so individual describes can opt into Advanced mode.
 // Hoisted because vi.mock factories run before module-body initialization.
@@ -1599,12 +1600,16 @@ describe('NewSliceJobPage', () => {
   });
 
   describe('Enter URL (issue #1910)', () => {
+    beforeEach(() => {
+      vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:validated-model');
+      vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    });
     // Regression tests: the "Use URL" action used to close the dialog
     // without validating input, sending a request, or adding anything to the
     // plate — a silent no-op. See NewSliceJobPage's handleUrlModelSubmit and
     // SearchablePickerModal's isValidModelSourceUrl/handleUrlConfirm.
     async function renderAndOpenUrlTab() {
-      renderWithProviders(<NewSliceJobPage />);
+      const result = renderWithProviders(<NewSliceJobPage />);
       await waitFor(() => {
         expect(screen.getByTestId('printer-select')).toBeInTheDocument();
       });
@@ -1619,10 +1624,12 @@ describe('NewSliceJobPage', () => {
       act(() => {
         fireEvent.click(urlTabButton);
       });
+      return result;
     }
 
     afterEach(() => {
       vi.unstubAllGlobals();
+      vi.restoreAllMocks();
     });
 
     it('rejects malformed input with an inline error and neither sends a request nor adds a model', async () => {
@@ -1648,7 +1655,8 @@ describe('NewSliceJobPage', () => {
       const fetchSpy = vi.fn().mockResolvedValue({
         ok: true,
         status: 200,
-        arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+        headers: new Headers({ 'content-type': 'application/octet-stream' }),
+        arrayBuffer: () => Promise.resolve(modelTextBuffer()),
       });
       vi.stubGlobal('fetch', fetchSpy);
 
@@ -1666,8 +1674,11 @@ describe('NewSliceJobPage', () => {
         const models = slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? [];
         expect(models).toHaveLength(1);
         expect(models[0].url).toBe('https://example.com/model.stl');
+        expect(models[0].viewerUrl).toBe('blob:validated-model');
       });
       expect(toast.success).toHaveBeenCalled();
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
     });
 
     it('shows an error toast and adds nothing to the plate for an unreachable URL', async () => {
@@ -1690,6 +1701,70 @@ describe('NewSliceJobPage', () => {
       expect(slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? []).toHaveLength(0);
     });
 
+    it.each([
+      ['manifest.json', 'application/json', modelTextBuffer('{"models":[],"padding":"' + 'x'.repeat(200) + '"}')],
+      ['model.stl', 'application/octet-stream', modelTextBuffer('<html>' + 'Not a model'.repeat(20) + '</html>')],
+      ['model.stl', '', new ArrayBuffer(0)],
+      ['model.stl', 'application/octet-stream', (() => {
+        const data = binaryStl();
+        new DataView(data).setUint32(80, 0xffffffff, true);
+        return data;
+      })()],
+    ])('rejects invalid %s responses without adding a ghost object and allows a valid retry', async (name, contentType, data) => {
+      const fetchSpy = vi.fn()
+        .mockResolvedValueOnce(new Response(data, { headers: { 'content-type': contentType } }))
+        .mockResolvedValueOnce(new Response(modelTextBuffer(), { headers: { 'content-type': 'text/plain' } }));
+      vi.stubGlobal('fetch', fetchSpy);
+      const { unmount } = await renderAndOpenUrlTab();
+      fireEvent.change(screen.getByLabelText('File URL'), { target: { value: `https://example.com/${name}` } });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining('Use a direct download link'),
+        expect.anything(),
+      ));
+      expect(slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? []).toHaveLength(0);
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
+      expect(sliceJobService.submitJob).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: /add model/i }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Enter URL' }));
+      fireEvent.change(screen.getByLabelText('File URL'), { target: { value: 'https://example.com/valid.stl' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+      await waitFor(() => expect(slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? []).toHaveLength(1));
+      expect(toast.success).toHaveBeenCalled();
+      unmount();
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:validated-model');
+    });
+
+    it('rejects an authenticated non-model response without adding an object', async () => {
+      await renderAndOpenUrlTab();
+      vi.mocked(apiClient.get).mockResolvedValueOnce({
+        data: modelTextBuffer('{"error":"not a model"}'),
+        headers: { 'content-type': 'application/json' },
+      } as never);
+      fireEvent.change(screen.getByLabelText('File URL'), { target: { value: '/api/3d-models/file/model-3d-1' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      expect(slicerWorkspaceSpy.mock.calls.at(-1)?.[0]?.models ?? []).toHaveLength(0);
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+    });
+
+    it('does not create a viewer URL or report success when a pending import completes after unmount', async () => {
+      let resolveResponse!: (response: Response) => void;
+      vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => { resolveResponse = resolve; })));
+      const { unmount } = await renderAndOpenUrlTab();
+      fireEvent.change(screen.getByLabelText('File URL'), { target: { value: 'https://example.com/model.stl' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Use URL' }));
+      unmount();
+      await act(async () => {
+        resolveResponse(new Response(modelTextBuffer()));
+      });
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+      expect(toast.success).not.toHaveBeenCalled();
+    });
+
     it('uses the authenticated apiClient (not a bare fetch) for an internal /api/3d-models/file/ URL, so it succeeds instead of 401ing', async () => {
       // Regression coverage: /api/3d-models/file/{id} is one of the API's
       // authenticated file endpoints (see AuthenticatedModelSource / #1711).
@@ -1697,10 +1772,11 @@ describe('NewSliceJobPage', () => {
       // viewer can load it fine via the bearer-token-attached apiClient.
       const fetchSpy = vi.fn();
       vi.stubGlobal('fetch', fetchSpy);
+      const modelData = await threeMfBuffer();
 
       await renderAndOpenUrlTab();
 
-      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: new ArrayBuffer(0) } as never);
+      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: modelData } as never);
 
       fireEvent.change(screen.getByLabelText('File URL'), {
         target: { value: '/api/3d-models/file/model-3d-1' },
@@ -1733,10 +1809,11 @@ describe('NewSliceJobPage', () => {
       // .3mf, so a wrong/default detection would produce 'stl' here.
       const fetchSpy = vi.fn();
       vi.stubGlobal('fetch', fetchSpy);
+      const modelData = await threeMfBuffer();
 
       await renderAndOpenUrlTab();
 
-      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: new ArrayBuffer(0) } as never);
+      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: modelData } as never);
 
       fireEvent.change(screen.getByLabelText('File URL'), {
         target: { value: '/api/3d-models/file/model-3d-1' },
@@ -1768,7 +1845,7 @@ describe('NewSliceJobPage', () => {
         if (url === '/3d-models') {
           return modelsListPromise;
         }
-        return Promise.resolve({ data: new ArrayBuffer(0) });
+        return threeMfBuffer().then((data) => ({ data }));
       }) as never);
 
       const fetchSpy = vi.fn();
@@ -1852,7 +1929,7 @@ describe('NewSliceJobPage', () => {
           if (url === '/3d-models') {
             return Promise.resolve({ data: mockModelListWithGuid });
           }
-          return Promise.resolve({ data: new ArrayBuffer(0) });
+          return threeMfBuffer().then((data) => ({ data }));
         }) as never);
 
         await reachSubmittableStateViaUrl();
@@ -1887,12 +1964,13 @@ describe('NewSliceJobPage', () => {
           if (url === '/3d-models') {
             return Promise.resolve({ data: mockModelListWithGuid });
           }
-          return Promise.resolve({ data: new ArrayBuffer(0) });
+          return threeMfBuffer().then((data) => ({ data }));
         }) as never);
         const fetchSpy = vi.fn().mockResolvedValue({
           ok: true,
           status: 200,
-          arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+          headers: new Headers(),
+          arrayBuffer: () => Promise.resolve(modelTextBuffer()),
         });
         vi.stubGlobal('fetch', fetchSpy);
 
@@ -1938,12 +2016,13 @@ describe('NewSliceJobPage', () => {
           if (url === '/3d-models') {
             return Promise.resolve({ data: mockModelListWithGuid });
           }
-          return Promise.resolve({ data: new ArrayBuffer(0) });
+          return threeMfBuffer().then((data) => ({ data }));
         }) as never);
         const fetchSpy = vi.fn().mockResolvedValue({
           ok: true,
           status: 200,
-          arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+          headers: new Headers(),
+          arrayBuffer: () => Promise.resolve(modelTextBuffer()),
         });
         vi.stubGlobal('fetch', fetchSpy);
 

@@ -1430,6 +1430,9 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, [activeSubPageLabel, currentCategory.label, currentScopeMeta, hasSubTabs]);
 
   useEffect(() => {
+    if (isAuthLoading) {
+      return;
+    }
     if (isResumePending) {
       return;
     }
@@ -1525,13 +1528,13 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, [
     accessibleCategories.length,
     isAdminRoute,
+    isAuthLoading,
     isDirty,
     isResumePending,
     isSelfAuthoredQuery,
     searchParams,
     activeScope,
     activeSubPage,
-    isAuthLoading,
     currentCategory.subPages.length,
     effectiveCategory,
     fieldSearchIndex.isError,
@@ -1595,9 +1598,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     [activeSubPage, currentCategory],
   );
   const canAccessActiveTab = useMemo(() => {
-    if (isAuthLoading) {
-      return true;
-    }
+    if (isAdminRoute && isAuthLoading) return false;
     if (isAdminRoute && accessibleCategories.length === 0) return false;
     if (!activeTabDestination) {
       return true;
@@ -1607,7 +1608,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
   const content = useMemo(() => {
     if (isAdminRoute && isAuthLoading) {
-      return <FormSkeleton />;
+      return <TabLoader />;
     }
     if (isAdminRoute && accessibleCategories.length === 0) {
       return (

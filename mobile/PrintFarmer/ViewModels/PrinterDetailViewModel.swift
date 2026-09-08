@@ -16,12 +16,158 @@ final class PrinterDetailViewModel {
     var showLivestream = false
     var isLoading = false
     var errorMessage: String?
-    var isPerformingAction = false
+    /// Whether any sibling action (bind/set/clear/eject spool,
+    /// pause/resume/cancel/stop/emergencyStop, mark-ready, maintenance log)
+    /// currently has an in-flight, uncancellable network request. Derived
+    /// from `activeActionTokens` (issue #2522, Hicks review finding — same-
+    /// service/same-epoch operation overlap), not a bare settable flag:
+    /// without a per-operation identity, two GENUINELY CONCURRENT actions
+    /// sharing the same service and lifecycle epoch (e.g. Emergency Stop
+    /// dispatched while an ordinary filament action is still in flight — no
+    /// deactivate/reconfigure between them at all, so `ActionAuthority`'s
+    /// epoch/service-identity pair alone is IDENTICAL for both) are
+    /// indistinguishable to a shared boolean, so whichever finishes FIRST
+    /// would incorrectly clear it while the other is still genuinely
+    /// running. Busy stays `true` until every token any in-flight operation
+    /// is holding has been released, matching a true reference count rather
+    /// than "whichever operation happens to complete first says so."
+    var isPerformingAction: Bool { !activeActionTokens.isEmpty }
+    /// Tokens for operations currently holding a share of `isPerformingAction`.
+    /// Each sibling action inserts its own via `beginBusyToken()` and
+    /// removes ONLY that token via `endBusyToken(_:)` when it completes,
+    /// regardless of whether its own result/refresh authority
+    /// (`hasActionAuthority`) still holds — removing your own token can
+    /// never affect a sibling operation's separate token.
+    private var activeActionTokens: Set<UUID> = []
+    /// Which run-action kinds (pause/resume/cancel/stop/emergencyStop) are
+    /// CURRENTLY dispatched and awaiting a result (issue #2522, Vasquez
+    /// review finding: `PrinterDetailRunActionMapping.presentation` never
+    /// populated `isPending` on any descriptor, so `PrinterRunActionBar`'s
+    /// own re-entrant-tap guard — which keys off `isPending`, not
+    /// `isEnabled` — never actually engaged, and VoiceOver never announced
+    /// a "Pending" value/hint on the button genuinely in flight). Threaded
+    /// into `PrinterDetailView.runActionPresentation(for:)` so the mapping
+    /// can mark exactly the in-flight kind(s) as pending, not merely
+    /// disabled.
+    var pendingRunActionKinds: Set<PrinterRunActionKind> = []
     var showConfirmation = false
     var pendingAction: DestructiveAction?
-    var actionError: String?
+    /// Combined, user-facing error text (issue #2522, Hicks review finding:
+    /// a single shared `actionError` string let two concurrent sibling
+    /// actions — e.g. a failing Emergency Stop and a concurrently in-flight
+    /// eject — silently clobber each other's message depending on
+    /// completion order, discarding whichever one finished FIRST regardless
+    /// of which mattered more). Backed by `operationErrorMessages`/
+    /// `operationErrorOrder`, keyed by a STABLE per-method
+    /// `OperationErrorSource` (not the random per-invocation busy token): a
+    /// FRESH invocation of the SAME method still replaces its OWN prior
+    /// stale error (matching the original "clear at start" intent), while a
+    /// DIFFERENT concurrently in-flight method's error is never touched.
+    /// Every currently-recorded message is combined for display, so none is
+    /// ever silently lost regardless of which operation completes first.
+    var actionError: String? {
+        get {
+            let messages = operationErrorOrder.compactMap { operationErrorMessages[$0] }
+            return messages.isEmpty ? nil : messages.joined(separator: "\n\n")
+        }
+        set {
+            if let newValue {
+                setOperationError(newValue, source: .untracked)
+            } else {
+                // Dismissing the alert (`Button("OK") { viewModel.actionError
+                // = nil }`) acknowledges every currently-displayed message
+                // at once.
+                operationErrorMessages.removeAll()
+                operationErrorOrder.removeAll()
+            }
+        }
+    }
+    /// Identifies which sibling action produced a given `actionError`
+    /// entry. One case per METHOD (not per random per-invocation token), so
+    /// a fresh call to the SAME method still clears/replaces only its own
+    /// prior message.
+    private enum OperationErrorSource: Hashable {
+        case bindToolheadSpool
+        case prepareReadyConfirmation
+        case markPrinterReady
+        case loadSpoolById
+        case ejectFilament
+        case clearActiveSpoolAssignment
+        case setActiveSpool
+        case logMaintenanceCompletion
+        case toggleMaintenance
+        case runAction(PrinterRunActionKind)
+        /// Any caller that assigns `actionError = "..."` directly rather
+        /// than through one of the named sources above (there are none
+        /// left in this file after this change, but external/preview code
+        /// could still do so through the property's public setter).
+        case untracked
+    }
+    /// Issue #2522, Hicks review finding: these two must NOT be
+    /// `@ObservationIgnored`. `actionError`'s computed getter reads them
+    /// directly, and SwiftUI's `.alert(isPresented: .constant(viewModel
+    /// .actionError != nil))` depends on Observation tracking that read.
+    /// Several call sites — `prepareReadyConfirmation()`,
+    /// `markPrinterReady()`'s early-return guard, and `toggleMaintenance()`
+    /// — mutate ONLY these two properties on their error path (no
+    /// `activeActionTokens`/busy-token change happens alongside them, which
+    /// is what masked this on every OTHER sibling action's error path: that
+    /// property IS tracked, so its own mutation incidentally forced the
+    /// same view body to re-evaluate and pick up the new `actionError`
+    /// value too). Marking these `@ObservationIgnored` (an earlier revision
+    /// did, copying the pattern from the OTHER, genuinely-internal epoch
+    /// counters in this file that are never read by a UI-facing computed
+    /// property) meant those three paths' alerts could silently fail to
+    /// redraw at all.
+    private var operationErrorMessages: [OperationErrorSource: String] = [:]
+    private var operationErrorOrder: [OperationErrorSource] = []
+
+    /// Records (or replaces) the error message for one sibling action.
+    private func setOperationError(_ message: String, source: OperationErrorSource) {
+        if operationErrorMessages[source] == nil {
+            operationErrorOrder.append(source)
+        }
+        operationErrorMessages[source] = message
+    }
+
+    /// Clears ONLY this source's own message, leaving every other
+    /// concurrently-recorded error untouched.
+    private func clearOperationError(source: OperationErrorSource) {
+        operationErrorMessages.removeValue(forKey: source)
+        operationErrorOrder.removeAll { $0 == source }
+    }
     var isViewActive = true {
         didSet {
+            // Monotonic action-lifecycle epoch (issue #2522, Hicks review
+            // finding 24): bumped on EVERY activation-state transition, not
+            // only deactivation. A boolean-only `isViewActive` check has an
+            // ABA gap — an in-flight, uncancellable mutation (e.g.
+            // `bindToolheadSpool`) captures `isViewActive == true`, the view
+            // deactivates then REACTIVATES before the mutation's network
+            // await resolves, and a check against the CURRENT `isViewActive`
+            // alone would see `true` again and wrongly conclude its
+            // authority is still current — even though a full
+            // deactivate/reactivate cycle (a materially different session)
+            // occurred in between. `actionLifecycleEpoch` closes this: it is
+            // captured alongside `isViewActive` at the START of such a
+            // mutation and compared again afterward, and once bumped it
+            // never returns to its old value, so the ABA sequence is always
+            // detected regardless of what `isViewActive` reads at the
+            // moment the check runs.
+            //
+            // This transition deliberately does NOT touch
+            // `activeActionTokens` (an earlier revision force-cleared the
+            // busy flag here, which is exactly the shared-flag hazard the
+            // token set now replaces): a token genuinely in flight when the
+            // view deactivates is released by ITS OWN eventual completion,
+            // not by this transition, so `isPerformingAction` correctly
+            // stays `true` for as long as that underlying network request
+            // is genuinely still outstanding — including across a
+            // REACTIVATION, rather than being reset early only to have a
+            // later, unrelated operation's completion (mis)read as owning
+            // whatever the flag was reset to.
+            guard oldValue != isViewActive else { return }
+            actionLifecycleEpoch &+= 1
             if oldValue && !isViewActive {
                 invalidateCanonicalLoad()
                 tearDownSignalR()
@@ -98,6 +244,10 @@ final class PrinterDetailViewModel {
     @ObservationIgnored private var signalRSubscriptions: [SignalRSubscription] = []
     @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
     @ObservationIgnored private var signalRAuthorityEpoch: UInt64 = 0
+    /// Issue #2522, Hicks review finding 24 — see `isViewActive`'s `didSet`
+    /// and `configure(printerService:)` for where this is bumped, and
+    /// `bindToolheadSpool` for the authority check that consumes it.
+    @ObservationIgnored private var actionLifecycleEpoch: UInt64 = 0
     @ObservationIgnored private var lastObservedConnectionState: SignalRConnectionState?
     @ObservationIgnored private let callbackEnqueuer: CallbackEnqueuer
     @ObservationIgnored private var canonicalLifecycleEpoch: UInt64 = 0
@@ -166,17 +316,36 @@ final class PrinterDetailViewModel {
         if !Self.identical(self.printerService, printerService) {
             invalidateCanonicalLoad()
             invalidateSnapshotLifecycle()
+            // Issue #2522, Hicks review finding 24: a service replacement is
+            // its own kind of lifecycle transition for the sibling action
+            // authority below — an in-flight action against the OLD service
+            // must not treat this reconfigured session as still its own.
+            // Busy-state tracking itself (`activeActionTokens`) is
+            // deliberately untouched here — see `isViewActive`'s `didSet`.
+            actionLifecycleEpoch &+= 1
         }
 
         self.printerService = printerService
     }
 
+    /// Guided-swap toolhead bind (issue #2522, Hicks review findings 20 and
+    /// 24, Bishop review finding 25 — see `ActionAuthority` above for the
+    /// shared implementation every sibling `printerService` action uses).
+    ///
+    /// Dispatched from an unstructured `.sheet` completion closure in
+    /// `PrinterDetailView`, not a `.task` the view's `onDisappear` can rely
+    /// on cancelling promptly — `activeTasks.forEach { $0.cancel() }` is
+    /// cooperative and this method has an uncancellable network await in
+    /// the middle of it.
     func bindToolheadSpool(_ spool: SpoolmanSpool, at toolheadIndex: Int) async {
+        guard isViewActive else { return }
         guard let printerService else {
-            actionError = "Printer service not available."
+            setOperationError("Printer service not available.", source: .bindToolheadSpool)
             return
         }
-
+        let authority = beginActionAuthority(for: printerService)
+        clearOperationError(source: .bindToolheadSpool)
+        defer { endBusyToken(authority.busyToken) }
         do {
             _ = try await printerService.bindToolheadSpool(
                 printerId: printerId,
@@ -184,9 +353,11 @@ final class PrinterDetailViewModel {
                 request: ToolheadSpoolBindRequest(spoolId: spool.id),
                 idempotencyKey: UUID().uuidString
             )
+            guard hasActionAuthority(authority) else { return }
             await loadPrinter()
         } catch {
-            actionError = error.localizedDescription
+            guard hasActionAuthority(authority) else { return }
+            setOperationError(error.localizedDescription, source: .bindToolheadSpool)
         }
     }
 
@@ -382,19 +553,20 @@ final class PrinterDetailViewModel {
             )
             showNFCReadyConfirmation = true
         } catch {
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .prepareReadyConfirmation)
         }
     }
 
     func markPrinterReady() async {
         guard isViewActive else { return }
         guard let autoDispatchService, let reviewedReadyStatus else {
-            actionError = "Refresh the auto-dispatch status before confirming."
+            setOperationError("Refresh the auto-dispatch status before confirming.", source: .markPrinterReady)
             return
         }
         self.reviewedReadyStatus = nil
-        isPerformingAction = true
-        actionError = nil
+        let busyToken = beginBusyToken()
+        clearOperationError(source: .markPrinterReady)
+        defer { endBusyToken(busyToken) }
         do {
             _ = try await autoDispatchService.markReady(
                 status: reviewedReadyStatus
@@ -403,10 +575,8 @@ final class PrinterDetailViewModel {
             await loadPrinter()
         } catch {
             guard isViewActive else { return }
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .markPrinterReady)
         }
-        guard isViewActive else { return }
-        isPerformingAction = false
     }
 
     // MARK: - Filament / Spool
@@ -447,8 +617,9 @@ final class PrinterDetailViewModel {
             print("⚠️ loadSpoolById: printerService is nil")
             return
         }
-        isPerformingAction = true
-        actionError = nil
+        let authority = beginActionAuthority(for: printerService)
+        clearOperationError(source: .loadSpoolById)
+        defer { endBusyToken(authority.busyToken) }
         do {
             let rowVersion = try reviewedPrinterRowVersion()
             print("📡 loadSpoolById: printer=\(printerId) spool=\(id)")
@@ -457,7 +628,7 @@ final class PrinterDetailViewModel {
                 spoolId: id,
                 reviewedRowVersion: rowVersion
             )
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             print("✅ loadSpoolById: success")
             lastSetSpoolInfo = PrinterSpoolInfo(
                 hasActiveSpool: true,
@@ -465,36 +636,178 @@ final class PrinterDetailViewModel {
             )
             await loadPrinter()
         } catch {
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             print("❌ loadSpoolById failed: \(error)")
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .loadSpoolById)
         }
-        guard isViewActive else { return }
-        isPerformingAction = false
     }
 
+    /// Physical eject: clears the active-spool assignment, then physically
+    /// unloads the filament — two SEPARATE network legs against
+    /// `printerService`.
+    ///
+    /// Safety (Bishop review finding): once the FIRST leg
+    /// (`setActiveSpool(spoolId: nil, ...)`) succeeds, the assignment is
+    /// ALREADY cleared server-side. Gating the SECOND leg
+    /// (`unloadFilament`) behind this call's RESULT/REFRESH authority — as
+    /// an earlier revision did — could silently skip the physical unload
+    /// if that authority was lost between the two legs (a deactivate/
+    /// reactivate ABA cycle, or a service reconfigure, mid-flight),
+    /// leaving a printer that is STILL PHYSICALLY LOADED with no assignment
+    /// recorded for it — a materially worse, silent state than either leg
+    /// failing outright. The physical unload therefore always dispatches
+    /// against the CAPTURED `printerService` local (stable regardless of
+    /// any later `configure(printerService:)` reassigning `self
+    /// .printerService`), never gated by `hasActionAuthority`, and any
+    /// failure of that leg is surfaced explicitly rather than swallowed —
+    /// this call must never silently return once the assignment has
+    /// already been cleared.
     func ejectFilament() async {
         guard isViewActive else { return }
         guard let printerService else { return }
-        isPerformingAction = true
-        actionError = nil
+        let authority = beginActionAuthority(for: printerService)
+        let capturedEmergencyStopEpoch = emergencyStopEngagedEpoch
+        clearOperationError(source: .ejectFilament)
+        defer { endBusyToken(authority.busyToken) }
         do {
             _ = try await printerService.setActiveSpool(
                 printerId: printerId,
                 spoolId: nil,
                 reviewedRowVersion: try reviewedPrinterRowVersion()
             )
-            guard isViewActive else { return }
-            _ = try await printerService.unloadFilament(printerId: printerId)
-            guard isViewActive else { return }
+            // Confirmed-cleared local override (issue #2522, Bishop review
+            // finding — parity with `clearActiveSpoolAssignment()`'s own
+            // Hicks review finding 14 fix). The assignment is ALREADY
+            // cleared server-side the moment the call above succeeds, so
+            // the local snapshot must be reconciled RIGHT HERE — before any
+            // of the early returns below (Emergency Stop preemption, an
+            // unload failure) and before `loadPrinter()`, which can itself
+            // fail without touching `printer` at all. Without this, any of
+            // those paths left the UI showing an assigned spool the server
+            // no longer has recorded, exactly the same stale-resurrection
+            // hazard finding 14 already fixed for the assignment-only
+            // clear path.
+            //
+            // `lastSetSpoolInfo = nil` is UNCONDITIONAL — a later Bishop
+            // review finding. It is this view model's own internal
+            // optimistic-state cache, never written by a replacement
+            // service and never reset by a refresh; a retired eject
+            // clearing ONLY its own prior optimistic guess can never harm a
+            // replacement session, because `effectiveSpoolInfo` always
+            // prefers `printer?.spoolInfo` whenever THAT reports an active
+            // spool. But leaving a STALE `lastSetSpoolInfo` behind is
+            // actively harmful: if the replacement session's own refresh
+            // later reports `hasActiveSpool: false`, `effectiveSpoolInfo`
+            // falls through to `lastSetSpoolInfo ?? printer?.spoolInfo` and
+            // would resurrect this retired eject's now-cleared spool.
+            //
+            // `printer.spoolInfo`'s mutation below stays GATED on
+            // `hasActionAuthority` (a separate, earlier Hicks review
+            // finding): if `configure(printerService:)` hot-swapped
+            // mid-flight, a NEWER session may already have established its
+            // OWN `printer.spoolInfo` truth (e.g. via its own
+            // `loadPrinter()` or a live SignalR update) between this leg's
+            // success and this point, and a retired eject targeting the OLD
+            // service must not overwrite that — unlike `lastSetSpoolInfo`,
+            // `printer` IS written by a replacement session, so clearing it
+            // unconditionally here could genuinely clobber that session's
+            // legitimate state. This is deliberately separate from the
+            // physical unload leg below, which still dispatches
+            // UNCONDITIONALLY regardless of authority (Bishop review
+            // finding, separately): the physical operation must always
+            // reach the printer once the assignment is already cleared, but
+            // only the operation that still owns the current session may
+            // touch the replacement-session-writable `printer` model.
             lastSetSpoolInfo = nil
+            if hasActionAuthority(authority) {
+                if var updatedPrinter = printer, updatedPrinter.spoolInfo?.hasActiveSpool == true {
+                    updatedPrinter.spoolInfo = PrinterSpoolInfo(hasActiveSpool: false)
+                    printer = updatedPrinter
+                }
+            }
+            // Safety precedence (issue #2522, Vasquez review finding —
+            // CRITICAL): Emergency Stop is an intentional safety override
+            // and must be able to preempt this already-in-flight eject
+            // BEFORE it sends the physical unload command — continuing to
+            // command motor movement after an Emergency Stop has been
+            // engaged is exactly the hazard that override exists to
+            // prevent. This is deliberately a SEPARATE check from
+            // `hasActionAuthority` below: ordinary lifecycle noise (view
+            // deactivate/reactivate, a service reconfigure) must NOT skip
+            // the physical unload (Bishop review finding — a real, distinct
+            // hazard of its own), but Emergency Stop specifically must.
+            guard !hasEmergencyStopEngagedSince(capturedEmergencyStopEpoch) else {
+                setOperationError(
+                    "Spool assignment cleared, but the physical unload was not sent because Emergency Stop was engaged.",
+                    source: .ejectFilament
+                )
+                return
+            }
+            do {
+                _ = try await printerService.unloadFilament(printerId: printerId)
+            } catch {
+                // The assignment clear above already succeeded. The
+                // operator must know the printer may still be physically
+                // loaded despite that, regardless of whether this call's
+                // own result/refresh authority has since been lost.
+                setOperationError(
+                    "Spool assignment cleared, but the physical unload failed: \(error.localizedDescription)",
+                    source: .ejectFilament
+                )
+                return
+            }
+            guard hasActionAuthority(authority) else { return }
             await loadPrinter()
         } catch {
-            guard isViewActive else { return }
-            actionError = error.localizedDescription
+            guard hasActionAuthority(authority) else { return }
+            setOperationError(error.localizedDescription, source: .ejectFilament)
         }
+    }
+
+    /// Assignment-only clear (issue #2522 / #2519 integration contract).
+    ///
+    /// Unlike `ejectFilament()`, this clears ONLY the active-spool
+    /// assignment via `setActiveSpool(spoolId: nil, ...)` and deliberately
+    /// never dispatches the physical `unloadFilament()` POST. #2519's
+    /// `PrinterFilamentAction.Kind.clearAssignment` — visible copy "Clear
+    /// spool assignment" — is assignment-only by contract; it must never
+    /// alias the combined eject flow, which stays reachable separately
+    /// (accurately labeled "Eject Filament") for the physical operation.
+    func clearActiveSpoolAssignment() async {
         guard isViewActive else { return }
-        isPerformingAction = false
+        guard let printerService else { return }
+        let authority = beginActionAuthority(for: printerService)
+        clearOperationError(source: .clearActiveSpoolAssignment)
+        defer { endBusyToken(authority.busyToken) }
+        do {
+            _ = try await printerService.setActiveSpool(
+                printerId: printerId,
+                spoolId: nil,
+                reviewedRowVersion: try reviewedPrinterRowVersion()
+            )
+            guard hasActionAuthority(authority) else { return }
+            lastSetSpoolInfo = nil
+            // Confirmed-cleared local override (issue #2522, Hicks review
+            // finding 14): `loadPrinter()` below can itself fail (network
+            // hiccup) without touching `printer` at all, leaving the
+            // PRE-clear snapshot's `spoolInfo.hasActiveSpool == true` in
+            // place. `effectiveSpoolInfo` prioritizes `printer?.spoolInfo`
+            // over `lastSetSpoolInfo` whenever it reports an active spool,
+            // so clearing only `lastSetSpoolInfo` above cannot by itself
+            // prevent a failed refresh from resurrecting the very
+            // assignment the server just confirmed cleared. Mutate the
+            // retained snapshot directly so the clear survives a refresh
+            // failure; a SUCCESSFUL `loadPrinter()` below still overwrites
+            // this with the server's own current truth.
+            if var updatedPrinter = printer, updatedPrinter.spoolInfo?.hasActiveSpool == true {
+                updatedPrinter.spoolInfo = PrinterSpoolInfo(hasActiveSpool: false)
+                printer = updatedPrinter
+            }
+            await loadPrinter()
+        } catch {
+            guard hasActionAuthority(authority) else { return }
+            setOperationError(error.localizedDescription, source: .clearActiveSpoolAssignment)
+        }
     }
 
     func setActiveSpool(_ spool: SpoolmanSpool) async {
@@ -504,8 +817,9 @@ final class PrinterDetailViewModel {
             print("⚠️ setActiveSpool: printerService is nil")
             return
         }
-        isPerformingAction = true
-        actionError = nil
+        let authority = beginActionAuthority(for: printerService)
+        clearOperationError(source: .setActiveSpool)
+        defer { endBusyToken(authority.busyToken) }
         do {
             let rowVersion = try reviewedPrinterRowVersion()
             print("📡 setActiveSpool: printer=\(printerId) spool=\(spool.id)")
@@ -514,7 +828,7 @@ final class PrinterDetailViewModel {
                 spoolId: spool.id,
                 reviewedRowVersion: rowVersion
             )
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             print("✅ setActiveSpool: success")
             lastSetSpoolInfo = PrinterSpoolInfo(
                 hasActiveSpool: true,
@@ -529,12 +843,10 @@ final class PrinterDetailViewModel {
             )
             await loadPrinter()
         } catch {
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             print("❌ setActiveSpool failed: \(error)")
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .setActiveSpool)
         }
-        guard isViewActive else { return }
-        isPerformingAction = false
     }
 
     func loadPrinter() async {
@@ -861,7 +1173,140 @@ final class PrinterDetailViewModel {
         identity(lhs) == identity(rhs)
     }
 
+    // MARK: - Action authority (issue #2522, Hicks/Bishop review findings
+    // 24/25, generalized to every sibling action, plus a subsequent Hicks
+    // review finding: per-operation busy identity)
+    //
+    // Every action-dispatching method below shares THREE risks
+    // `bindToolheadSpool` was hardened against, one at a time:
+    //
+    //   * ABA (finding 24): a boolean `isViewActive` check alone cannot
+    //     distinguish "this call's original activation window is still
+    //     current" from "the view deactivated and REACTIVATED — or
+    //     `configure(printerService:)` ran again with an instance that
+    //     happens to compare identical — before this call's uncancellable
+    //     network await resolved". `actionLifecycleEpoch` (bumped on every
+    //     activation-state transition and every service reconfiguration,
+    //     and never returning to an old value) closes this for any caller
+    //     that captures it before an await and compares it again after.
+    //   * Operation-owned busy-state cleanup (finding 25): cleanup must run
+    //     via `defer`, not a tail line a future added return path could
+    //     bypass.
+    //   * Per-operation busy identity (a later Hicks review round): epoch
+    //     and service identity alone are IDENTICAL for two operations that
+    //     are GENUINELY CONCURRENT against the same service with no
+    //     lifecycle transition between them at all — e.g. Emergency Stop
+    //     dispatched while an ordinary filament action is still in flight.
+    //     A shared boolean busy flag cannot tell those two apart, so
+    //     whichever finishes FIRST would incorrectly clear it while the
+    //     other is still genuinely running. `activeActionTokens` (see
+    //     `isPerformingAction` above) replaces the boolean with a
+    //     reference count: each call gets its OWN token via
+    //     `beginBusyToken()`, and releases ONLY that token via
+    //     `endBusyToken(_:)` — UNCONDITIONALLY, regardless of
+    //     `hasActionAuthority`, since removing your own entry from a set
+    //     can never affect a sibling operation's separate entry.
+    //
+    // `ActionAuthority` and the functions below are the single, shared
+    // implementation of that pattern so every sibling action states it
+    // identically rather than re-deriving its own copy.
+    private struct ActionAuthority {
+        let busyToken: UUID
+        let epoch: UInt64
+        let serviceIdentity: ObjectIdentifier?
+    }
+
+    /// Begins tracking a new in-flight operation and captures the CURRENT
+    /// action authority. Call once, before the first `await` a dispatching
+    /// method performs; release the returned token via `endBusyToken(_:)`
+    /// (typically in a `defer`) when the method exits, regardless of
+    /// outcome.
+    private func beginActionAuthority(for printerService: any PrinterServiceProtocol) -> ActionAuthority {
+        ActionAuthority(
+            busyToken: beginBusyToken(),
+            epoch: actionLifecycleEpoch,
+            serviceIdentity: Self.identity(printerService)
+        )
+    }
+
+    /// Whether the CURRENT lifecycle state still matches a previously
+    /// captured authority — i.e. whether the operation that captured it
+    /// still owns the current session. This is RESULT/REFRESH authority
+    /// only (whether `loadPrinter()`/`actionError` may still be applied);
+    /// it does NOT gate busy-state cleanup — see `endBusyToken(_:)`.
+    private func hasActionAuthority(_ authority: ActionAuthority) -> Bool {
+        isViewActive
+            && actionLifecycleEpoch == authority.epoch
+            && Self.identity(printerService) == authority.serviceIdentity
+    }
+
+    /// Begins tracking one more in-flight operation for `isPerformingAction`
+    /// purposes and returns the token this call must release when done.
+    /// Every sibling action — including ones that dispatch through a
+    /// service OTHER than `printerService` (`markPrinterReady`,
+    /// `logMaintenanceCompletion`) — shares this SAME reference count, so
+    /// an Emergency Stop and an unrelated mark-ready/maintenance-log call
+    /// overlapping in flight are equally protected from clobbering each
+    /// other's busy state.
+    private func beginBusyToken() -> UUID {
+        let token = UUID()
+        activeActionTokens.insert(token)
+        return token
+    }
+
+    /// Releases exactly one token. Safe to call unconditionally — removing
+    /// your own token from the set can never affect a DIFFERENT token a
+    /// sibling operation is still holding, so no authority check is needed
+    /// here (contrast `hasActionAuthority`, which gates a different
+    /// concern).
+    private func endBusyToken(_ token: UUID) {
+        activeActionTokens.remove(token)
+    }
+
+    // MARK: - Emergency Stop safety precedence (issue #2522, Vasquez review
+    // finding — CRITICAL)
+    //
+    // Distinct from `actionLifecycleEpoch`: that one is about SESSION
+    // identity (view lifecycle transitions / service reconfiguration) and
+    // gates RESULT/REFRESH authority for a retired session, but must NOT by
+    // itself prevent an already-in-flight multi-step physical mutation
+    // (`ejectFilament`'s second, physical-unload leg) from completing —
+    // Bishop's review separately established that silently skipping a
+    // physical unload after its assignment-clear leg already succeeded is
+    // its own real safety hazard. Emergency Stop is different: it is an
+    // INTENTIONAL safety override that MUST be able to preempt any other
+    // in-flight action's continuation to its next physical step, so it
+    // gets its own, dedicated, monotonic signal rather than overloading
+    // the general lifecycle epoch (which would conflate "ordinary
+    // lifecycle noise" with "Emergency Stop was just engaged" and make the
+    // two findings impossible to satisfy simultaneously with one epoch).
+    @ObservationIgnored private var emergencyStopEngagedEpoch: UInt64 = 0
+
+    /// Bumped the moment Emergency Stop is confirmed — synchronously,
+    /// before its own network dispatch even starts — so any OTHER
+    /// concurrently in-flight multi-step action can observe it as early as
+    /// possible.
+    private func engageEmergencyStopSafetyOverride() {
+        emergencyStopEngagedEpoch &+= 1
+    }
+
+    /// Whether Emergency Stop has been engaged since a multi-step action
+    /// captured `emergencyStopEngagedEpoch` at its own start. A multi-step
+    /// action must check this before dispatching its NEXT physical step.
+    private func hasEmergencyStopEngagedSince(_ capturedEpoch: UInt64) -> Bool {
+        emergencyStopEngagedEpoch != capturedEpoch
+    }
+
 #if DEBUG
+    /// Issue #2522, Vasquez review finding: exposes
+    /// `engageEmergencyStopSafetyOverride()` for tests that need to
+    /// simulate Emergency Stop firing at an EXACT point mid-flight (e.g.
+    /// between `ejectFilament`'s two legs) without driving the full
+    /// `requestEmergencyStop()`/`confirmAction()` round trip.
+    func engageEmergencyStopSafetyOverrideForTesting() {
+        engageEmergencyStopSafetyOverride()
+    }
+
     func beginCanonicalLoadForTesting() -> CanonicalLoadWaiter? {
         guard canLoadPrinter else { return nil }
         return beginCanonicalLoad()
@@ -1384,8 +1829,9 @@ final class PrinterDetailViewModel {
 
     func logMaintenanceCompletion(_ row: OdometerRow, performedBy: String) async {
         guard isViewActive, let maintenanceService else { return }
-        isPerformingAction = true
-        actionError = nil
+        let busyToken = beginBusyToken()
+        clearOperationError(source: .logMaintenanceCompletion)
+        defer { endBusyToken(busyToken) }
         let request = CreateMaintenanceLogRequest(
             printerId: printerId,
             performedBy: performedBy,
@@ -1400,24 +1846,22 @@ final class PrinterDetailViewModel {
             await loadMaintenance()
         } catch {
             guard isViewActive else { return }
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .logMaintenanceCompletion)
         }
-        guard isViewActive else { return }
-        isPerformingAction = false
     }
 
     // MARK: - Actions
 
     func pausePrinter() async {
-        await performAction { _ = try await $0.pause(id: self.printerId) }
+        await performAction(.pause) { _ = try await $0.pause(id: self.printerId) }
     }
 
     func resumePrinter() async {
-        await performAction { _ = try await $0.resume(id: self.printerId) }
+        await performAction(.resume) { _ = try await $0.resume(id: self.printerId) }
     }
 
     func stopPrinter() async {
-        await performAction { _ = try await $0.stop(id: self.printerId) }
+        await performAction(.stop) { _ = try await $0.stop(id: self.printerId) }
     }
 
     func requestCancel() {
@@ -1438,13 +1882,19 @@ final class PrinterDetailViewModel {
 
         switch action {
         case .cancelPrint:
-            await performAction { _ = try await $0.cancel(id: self.printerId) }
+            await performAction(.cancel) { _ = try await $0.cancel(id: self.printerId) }
             guard isViewActive else { return }
             #if os(iOS)
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
             #endif
         case .emergencyStop:
-            await performAction { _ = try await $0.emergencyStop(id: self.printerId) }
+            // Safety precedence (issue #2522, Vasquez review finding —
+            // CRITICAL): engage the safety override BEFORE dispatching, so
+            // any OTHER already-in-flight multi-step action (e.g.
+            // `ejectFilament`) observes it as early as possible and does
+            // not proceed to its next physical step.
+            engageEmergencyStopSafetyOverride()
+            await performAction(.emergencyStop) { _ = try await $0.emergencyStop(id: self.printerId) }
             guard isViewActive else { return }
             #if os(iOS)
             UINotificationFeedbackGenerator().notificationOccurred(.error)
@@ -1465,7 +1915,7 @@ final class PrinterDetailViewModel {
             self.printer = updated
         } catch {
             guard isViewActive else { return }
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .toggleMaintenance)
         }
     }
 
@@ -1932,22 +2382,33 @@ final class PrinterDetailViewModel {
 
     // MARK: - Private
 
-    private func performAction(_ action: @escaping (any PrinterServiceProtocol) async throws -> Void) async {
+    /// Shared dispatch for pause/resume/cancel/stop/emergencyStop (issue
+    /// #2522, Hicks/Bishop review findings 24/25 — see `ActionAuthority`
+    /// above; Vasquez review finding — threads `kind` into
+    /// `pendingRunActionKinds` so `PrinterDetailRunActionMapping.presentation`
+    /// can mark exactly the in-flight kind as `isPending`, not merely
+    /// disabled).
+    private func performAction(
+        _ kind: PrinterRunActionKind,
+        _ action: @escaping (any PrinterServiceProtocol) async throws -> Void
+    ) async {
         guard isViewActive else { return }
         guard let printerService else { return }
-        isPerformingAction = true
-        actionError = nil
+        let authority = beginActionAuthority(for: printerService)
+        clearOperationError(source: .runAction(kind))
+        pendingRunActionKinds.insert(kind)
+        defer {
+            endBusyToken(authority.busyToken)
+            pendingRunActionKinds.remove(kind)
+        }
 
         do {
             try await action(printerService)
-            guard isViewActive else { return }
+            guard hasActionAuthority(authority) else { return }
             await loadPrinter()
         } catch {
-            guard isViewActive else { return }
-            actionError = error.localizedDescription
+            guard hasActionAuthority(authority) else { return }
+            setOperationError(error.localizedDescription, source: .runAction(kind))
         }
-
-        guard isViewActive else { return }
-        isPerformingAction = false
     }
 }

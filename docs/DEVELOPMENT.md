@@ -362,7 +362,9 @@ npm test -- PrinterCard.test.tsx
 **Test Framework**: Vitest with React Testing Library
 
 **Key Points:**
-- CI runs `npm run test:coverage`; use `npm run test:run` for a faster local non-interactive run
+- Use `npm run test:coverage` before submitting changes; it matches CI, including
+  coverage instrumentation and thresholds. `npm run test:run` is a faster local
+  non-interactive check only and cannot reproduce coverage-only failures.
 - Use `npm test` for interactive development (watch mode, requires 'q' to exit)
 - Focus on user behavior, not implementation details
 - Mock external services (API calls, WebSocket)

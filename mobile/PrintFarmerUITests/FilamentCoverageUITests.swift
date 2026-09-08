@@ -244,37 +244,40 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
 
     /// Tapping the DUPLICATE card (same display name as the demo
     /// original, different UUID) reaches the DUPLICATE's detail —
-    /// proven by the runout-no-ETA aggregate badge that only the
-    /// duplicate's coverage snapshot carries. Confirms stable-id
-    /// navigation, not display-name matching.
+    /// proven by a filament row accessibility identifier that embeds
+    /// the duplicate's own stable printer UUID (issue #2522: the old
+    /// `FilamentCoverageDetailSection` is gone; #2519's
+    /// `PrinterFilamentSection` owns the one Filament block, and its
+    /// row ids are `printer.filament.row.<printerId>/coverage/<slot>`
+    /// when the printer has no toolhead roster, as demo printers do).
+    /// Confirms stable-id navigation, not display-name matching.
     func testTappingDuplicateNameCardNavigatesByStableIDToCorrectDetail() {
         enterFarmView()
         let duplicateCard = card(uuid: duplicateID)
         XCTAssertTrue(duplicateCard.waitForExistence(timeout: 10))
         duplicateCard.tap()
 
-        let section = app.descendants(matching: .any)
-            .matching(identifier: "filament-coverage-section").firstMatch
-        XCTAssertTrue(section.waitForExistence(timeout: 10),
+        let heading = app.descendants(matching: .any)
+            .matching(identifier: "printer.filament.heading").firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 10),
                       "Tapping the duplicate 'Prusa MK4 #1' card must navigate to A printer's detail.")
 
-        // The DUPLICATE's coverage is runout-no-ETA. The ORIGINAL's
-        // is covers. Presence of runout-no-ETA on the detail proves
-        // we arrived at the DUPLICATE (stable-id nav).
-        let noETABadge = app.descendants(matching: .any)
-            .matching(identifier: "filament-coverage-badge-runout-no-eta")
-            .matching(NSPredicate(format: "label == %@", "Filament will run out before the job finishes"))
+        // The DUPLICATE's coverage is runout-no-ETA (status .runout); the
+        // ORIGINAL's is .covers. A filament row whose id embeds the
+        // DUPLICATE's own printer UUID proves we landed on the duplicate.
+        let duplicateRow = app.descendants(matching: .any)
+            .matching(identifier: "printer.filament.row.\(duplicateID)/coverage/index:0")
             .firstMatch
-        XCTAssertTrue(noETABadge.waitForExistence(timeout: 5),
-                      "The duplicate's runout-no-ETA badge on the detail proves we landed on the DUPLICATE, not the original.")
+        XCTAssertTrue(duplicateRow.waitForExistence(timeout: 5),
+                      "A filament row keyed by the DUPLICATE's own UUID proves we landed on the DUPLICATE, not the original.")
 
-        // Absence cross-check: the ORIGINAL's covers badge must NOT
-        // be present on this detail — proves we did NOT navigate to
-        // the demo original.
-        let coversOnDetail = app.descendants(matching: .any)
-            .matching(identifier: "filament-coverage-badge-covers").count
-        XCTAssertEqual(coversOnDetail, 0,
-                       "Detail must not carry the ORIGINAL's covers badge — stable-id nav landed on the duplicate.")
+        // Absence cross-check: the ORIGINAL's own printer-UUID-keyed row
+        // must NOT be present on this detail — proves we did NOT navigate
+        // to the demo original.
+        let originalRowCount = app.descendants(matching: .any)
+            .matching(identifier: "printer.filament.row.\(prusaMK4_1_ID)/coverage/index:0").count
+        XCTAssertEqual(originalRowCount, 0,
+                       "Detail must not carry a row keyed by the ORIGINAL's UUID — stable-id nav landed on the duplicate.")
     }
 
     // MARK: - Detail: multi-toolhead rows keyed by stable id
@@ -286,20 +289,23 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
         XCTAssertTrue(voronCard.waitForExistence(timeout: 10))
         voronCard.tap()
 
-        let section = app.descendants(matching: .any)
-            .matching(identifier: "filament-coverage-section").firstMatch
-        XCTAssertTrue(section.waitForExistence(timeout: 10),
-                      "Filament Coverage section must render on printer detail.")
+        let heading = app.descendants(matching: .any)
+            .matching(identifier: "printer.filament.heading").firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 10),
+                      "Filament section must render on printer detail.")
 
-        // Voron 2.4: 3 toolheads. Rows 0 and 2 share the display
-        // name "Extruder" but have distinct index-derived stable
-        // ids. Row 1 carries a backend UUID toolheadId.
+        // Voron 2.4: 3 toolheads, no roster (demo printers report none), so
+        // #2519's `PrinterFilamentPresentation` renders one coverage-only row
+        // per slot, keyed by `<printerId>/coverage/<identity>`. Rows 0 and 2
+        // share the display name "Extruder" but have distinct index-derived
+        // stable ids. Row 1 carries a backend UUID toolheadId.
         let rowIndex0 = app.descendants(matching: .any)
-            .matching(identifier: "filament-coverage-toolhead-index:0").firstMatch
+            .matching(identifier: "printer.filament.row.\(voron24_ID)/coverage/index:0").firstMatch
         let rowBackendUUID = app.descendants(matching: .any)
-            .matching(identifier: "filament-coverage-toolhead-id:20000000-1111-2222-3333-444444444444").firstMatch
+            .matching(identifier: "printer.filament.row.\(voron24_ID)/coverage/id:20000000-1111-2222-3333-444444444444")
+            .firstMatch
         let rowIndex2 = app.descendants(matching: .any)
-            .matching(identifier: "filament-coverage-toolhead-index:2").firstMatch
+            .matching(identifier: "printer.filament.row.\(voron24_ID)/coverage/index:2").firstMatch
 
         XCTAssertTrue(rowIndex0.waitForExistence(timeout: 5),
                       "Toolhead row at index 0 must be present with a stable index-derived id.")
@@ -317,19 +323,17 @@ final class FilamentCoverageUITests: PrintFarmerUITestCase {
         XCTAssertTrue(bambuCard.waitForExistence(timeout: 10))
         bambuCard.tap()
 
-        let section = app.descendants(matching: .any)
-            .matching(identifier: "filament-coverage-section").firstMatch
-        XCTAssertTrue(section.waitForExistence(timeout: 10),
+        let heading = app.descendants(matching: .any)
+            .matching(identifier: "printer.filament.heading").firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 10),
                       "Tapping a Farm card must navigate to that printer's detail.")
 
-        // Only Bambu X1C's coverage snapshot is runout-no-ETA in
-        // the seeded fleet (aside from the duplicate). Its presence
-        // here proves we landed on THIS printer.
-        let noETABadge = app.descendants(matching: .any)
-            .matching(identifier: "filament-coverage-badge-runout-no-eta")
-            .matching(NSPredicate(format: "label == %@", "Filament will run out before the job finishes"))
+        // A filament row keyed by Bambu X1C's own printer UUID proves we
+        // landed on THIS printer (stable-id nav proof).
+        let row = app.descendants(matching: .any)
+            .matching(identifier: "printer.filament.row.\(bambuX1C_ID)/coverage/index:0")
             .firstMatch
-        XCTAssertTrue(noETABadge.waitForExistence(timeout: 5),
-                      "Detail must render Bambu X1C's runout-no-ETA presentation (stable-id nav proof).")
+        XCTAssertTrue(row.waitForExistence(timeout: 5),
+                      "Detail must render a filament row keyed by Bambu X1C's own UUID (stable-id nav proof).")
     }
 }

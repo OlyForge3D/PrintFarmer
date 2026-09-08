@@ -1,6 +1,6 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.NfcDevices;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -21,7 +21,7 @@ public class NfcController(INfcTagService nfcTagService) : ControllerBase
     /// <remarks>
     /// Payload: { tagUid, spoolId, spoolName, printerId, trayId, readAt }
     /// </remarks>
-    [Authorize]
+    [RequirePermission("nfc_devices", "admin")]
     [HttpPost("link")]
     [ProducesResponseType(typeof(NfcTagBindingDto), 200)]
     [ProducesResponseType(400)]
@@ -36,7 +36,7 @@ public class NfcController(INfcTagService nfcTagService) : ControllerBase
     /// <summary>
     /// Returns all NFC tag bindings.
     /// </summary>
-    [Authorize]
+    [RequirePermission("nfc_devices", "admin")]
     [HttpGet("bindings")]
     [ProducesResponseType(typeof(IReadOnlyList<NfcTagBindingDto>), 200)]
     public async Task<ActionResult<IReadOnlyList<NfcTagBindingDto>>> ListBindingsAsync(CancellationToken ct)
@@ -48,7 +48,7 @@ public class NfcController(INfcTagService nfcTagService) : ControllerBase
     /// <summary>
     /// Deletes an NFC tag binding by id.
     /// </summary>
-    [Authorize]
+    [RequirePermission("nfc_devices", "admin")]
     [HttpDelete("bindings/{id:guid}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]

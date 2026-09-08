@@ -24,7 +24,7 @@ namespace Farm.Infrastructure.Tests.Services.Attention;
 /// <c>factory.Services</c> lazily starts the complete API host, including core and slicer schema
 /// initialization, reference-data seeding, and registered hosted services. The old fixture used
 /// that host only to obtain an <c>AsyncServiceScope</c>, <see cref="AppDbContext"/>, and
-/// <see cref="IFilamentFallbackGroupService"/>. The direct graph below is the complete graph needed
+/// <see cref="IFilamentFallbackGroupResolver"/>. The direct graph below is the complete graph needed
 /// by the evaluator: one private EF in-memory context containing <see cref="Toolhead"/> plus the
 /// scalar <see cref="Printer"/> row required by the context's save hook, and strict fallback-service
 /// and status-cache mocks. A unique database name per test instance keeps this class isolated and
@@ -38,7 +38,7 @@ public sealed class FilamentRunoutSwitchEvaluatorTests
     private const int BackupSpoolId = 42;
 
     private readonly AppDbContext _db;
-    private readonly Mock<IFilamentFallbackGroupService> _fallbackService;
+    private readonly Mock<IFilamentFallbackGroupResolver> _fallbackService;
     private readonly Mock<IPrinterStatusCacheReader> _statusCache;
     private readonly FilamentRunoutSwitchEvaluator _evaluator;
 
@@ -49,7 +49,7 @@ public sealed class FilamentRunoutSwitchEvaluatorTests
             .UseModel(modelFixture.Model)
             .Options;
         _db = new EvaluatorDbContext(options);
-        _fallbackService = new Mock<IFilamentFallbackGroupService>(MockBehavior.Strict);
+        _fallbackService = new Mock<IFilamentFallbackGroupResolver>(MockBehavior.Strict);
         _statusCache = new Mock<IPrinterStatusCacheReader>(MockBehavior.Strict);
         _statusCache
             .Setup(cache => cache.GetSnapshot(It.IsAny<Guid>()))

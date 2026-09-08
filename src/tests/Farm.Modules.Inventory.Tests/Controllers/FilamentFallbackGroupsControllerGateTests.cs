@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Dtos;
+﻿using System.Security.Claims;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
@@ -45,7 +46,7 @@ public class FilamentFallbackGroupsControllerGateTests
             await controller.ListAsync(Guid.NewGuid(), CancellationToken.None);
 
         result.Result.Should().BeOfType<NotFoundObjectResult>();
-        _service.Verify(s => s.ListForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _service.Verify(s => s.ListForPrinterAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -59,7 +60,7 @@ public class FilamentFallbackGroupsControllerGateTests
 
         result.Result.Should().BeOfType<NotFoundObjectResult>();
         _service.Verify(
-            s => s.CreateAsync(It.IsAny<Guid>(), It.IsAny<CreateFilamentFallbackGroupRequest>(), It.IsAny<CancellationToken>()),
+            s => s.CreateAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<CreateFilamentFallbackGroupRequest>(), It.IsAny<CancellationToken>()),
             Times.Never);
         // Strict hub mock proves no SignalR broadcast was attempted while gated off.
     }
@@ -74,7 +75,7 @@ public class FilamentFallbackGroupsControllerGateTests
 
         result.Result.Should().BeOfType<NotFoundObjectResult>();
         _service.Verify(
-            s => s.FindAvailableFallbackAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            s => s.FindAvailableFallbackAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -83,7 +84,7 @@ public class FilamentFallbackGroupsControllerGateTests
     {
         Guid printerId = Guid.NewGuid();
         IReadOnlyList<FilamentFallbackGroupDto> groups = [];
-        _service.Setup(s => s.ListForPrinterAsync(printerId, It.IsAny<CancellationToken>()))
+        _service.Setup(s => s.ListForPrinterAsync(It.IsAny<ClaimsPrincipal>(), printerId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(groups);
         FilamentFallbackGroupsController controller = CreateController(enabled: true);
 
@@ -92,7 +93,7 @@ public class FilamentFallbackGroupsControllerGateTests
 
         OkObjectResult ok = result.Result.Should().BeOfType<OkObjectResult>().Subject;
         ok.Value.Should().BeSameAs(groups);
-        _service.Verify(s => s.ListForPrinterAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
+        _service.Verify(s => s.ListForPrinterAsync(It.IsAny<ClaimsPrincipal>(), printerId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
@@ -107,7 +108,7 @@ public class FilamentFallbackGroupsControllerGateTests
             null,
             [Guid.NewGuid(), Guid.NewGuid()]);
         _service
-            .Setup(s => s.CreateAsync(printerId, request, It.IsAny<CancellationToken>()))
+            .Setup(s => s.CreateAsync(It.IsAny<ClaimsPrincipal>(), printerId, request, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new FilamentFallbackGroupValidationException(
                 oversizedName
                     ? "Fallback group name must be 128 characters or fewer."

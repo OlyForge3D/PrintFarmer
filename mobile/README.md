@@ -160,16 +160,32 @@ On iPad, the app uses a `NavigationSplitView`. Server switching lives in the
 sidebar and the destination list is scoped to the operator set for the
 active server.
 
+### Printer Detail: Status / Controls
+
+Printer detail is a two-page, swipeable screen (issue #2522): **Status** (identity,
+camera, current job, filament, queue, maintenance, history, compact temperatures)
+and **Controls** (jog/preheat/home setup). Status is always the default page. A
+segmented selector and a horizontal swipe move between the two pages and always
+agree with each other. One shared run-action bar (Pause/Resume/Cancel/Stop/
+Emergency Stop) is mounted once outside both pages' scroll content, so it stays
+reachable from either page without scrolling. The Controls page only exists when
+Advanced Printer Controls is enabled for the active server (see below); when it is
+disabled, the selector and Controls page are both omitted rather than shown
+disabled, and a printer/server change or a mid-session capability revoke returns
+the view to Status rather than stranding it on a page that no longer exists.
+
 ### Advanced Printer Controls
 
 Advanced printer controls are off by default for every server. To use jog,
 preheat, home, z-offset, or disable motors, open **Settings** → **Printer
-Safety** and enable **Advanced Printer Controls** for the active server.
-Enabling the controls on one server does not enable them on another. Turning
-the setting off removes access immediately, including an open advanced-controls
-screen. Changing a registered server's URL also resets the setting to off so an
-opt-in cannot carry over to a different endpoint. Misuse may damage a printer or
-ruin a print.
+Safety** and enable **Advanced Printer Controls** for the active server. Once
+enabled, jog/preheat/home setup is reachable as the Controls page of printer
+detail (see above) — there is no separate "Advanced" screen nested inside
+another "Advanced" entry. Enabling the controls on one server does not enable
+them on another. Turning the setting off removes access immediately, including
+an open Controls page, which safely returns to Status. Changing a registered
+server's URL also resets the setting to off so an opt-in cannot carry over to a
+different endpoint. Misuse may damage a printer or ruin a print.
 
 ### Post-Login Connection Check
 

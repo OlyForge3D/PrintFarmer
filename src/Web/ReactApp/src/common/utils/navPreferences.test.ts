@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createDefaultNavPreferences,
   getNavMoveFocusTarget,
@@ -7,12 +7,16 @@ import {
   loadNavPreferences,
   moveNavItem,
   NAV_PREFERENCES_VERSION,
+  NAV_PREFERENCES_UPDATED_EVENT,
   resolveNavPreferences,
   saveNavPreferences,
   setNavItemHidden,
   setNavItemPinned,
+  subscribeToNavPreferences,
 } from '@/common/utils/navPreferences';
 import type { NavPreferenceItem } from '@/common/utils/navPreferences';
+
+import { createStorageEvent } from '@/test/utils/storage-event';
 
 const items: NavPreferenceItem[] = [
   { id: 'overview', name: 'Overview', sectionName: 'Dashboard' },
@@ -230,5 +234,75 @@ describe('navPreferences', () => {
     expect(() => saveNavPreferences('throwing-storage', defaults, storage)).not.toThrow();
     expect(storage.setItem).toHaveBeenCalledWith('throwing-storage', JSON.stringify(defaults));
     expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe('nav preference change subscriptions', () => {
+  const storageKey = getNavPreferencesStorageKey('user-1');
+  let unsubscribe: () => void;
+  let onChange: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    localStorage.clear();
+    onChange = vi.fn();
+    unsubscribe = subscribeToNavPreferences(storageKey, onChange);
+  });
+
+  afterEach(() => {
+    unsubscribe();
+    vi.restoreAllMocks();
+  });
+
+  it('preserves queued same-tab saves and legacy unkeyed notifications', async () => {
+    saveNavPreferences(getNavPreferencesStorageKey('other-user'), createDefaultNavPreferences(items, 'admin'));
+    await Promise.resolve();
+    expect(onChange).not.toHaveBeenCalled();
+
+    saveNavPreferences(storageKey, createDefaultNavPreferences(items, 'admin'));
+    expect(onChange).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    window.dispatchEvent(new Event(NAV_PREFERENCES_UPDATED_EVENT));
+    expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('notifies all subscribers for remote changes without writing or rebroadcasting', async () => {
+    const secondConsumer = vi.fn();
+    const unsubscribeSecond = subscribeToNavPreferences(storageKey, secondConsumer);
+    const setItem = vi.spyOn(localStorage, 'setItem');
+    const dispatch = vi.spyOn(window, 'dispatchEvent');
+    const event = createStorageEvent({ key: storageKey, newValue: '{}' });
+
+    try {
+      window.dispatchEvent(event);
+      await Promise.resolve();
+      expect(onChange).toHaveBeenCalledOnce();
+      expect(secondConsumer).toHaveBeenCalledOnce();
+      expect(setItem).not.toHaveBeenCalled();
+      expect(dispatch).toHaveBeenCalledExactlyOnceWith(event);
+    } finally {
+      unsubscribeSecond();
+    }
+  });
+
+  it('ignores unrelated keys, other users, and sessionStorage events', () => {
+    window.dispatchEvent(createStorageEvent({ key: 'pf_navbar_collapsed' }));
+    window.dispatchEvent(createStorageEvent({ key: getNavPreferencesStorageKey('user-2') }));
+    window.dispatchEvent(createStorageEvent({ key: storageKey }, sessionStorage));
+    window.dispatchEvent(createStorageEvent({ key: null }, sessionStorage));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it.each([storageKey, null])('notifies on preference removal or localStorage.clear (key: %s)', (key) => {
+    window.dispatchEvent(createStorageEvent({ key, newValue: null }));
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+
+  it('removes both listeners when unsubscribed', () => {
+    unsubscribe();
+    window.dispatchEvent(createStorageEvent({ key: storageKey }));
+    window.dispatchEvent(new CustomEvent(NAV_PREFERENCES_UPDATED_EVENT, { detail: { storageKey } }));
+    expect(onChange).not.toHaveBeenCalled();
   });
 });

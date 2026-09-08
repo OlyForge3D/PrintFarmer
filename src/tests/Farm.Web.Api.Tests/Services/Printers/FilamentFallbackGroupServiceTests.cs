@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Security.Claims;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Printers;
@@ -18,6 +19,8 @@ namespace Farm.Web.Api.Tests.Services.Printers;
 [Collection(IntegrationTestCollection.Name)]
 public class FilamentFallbackGroupServiceTests : IAsyncLifetime
 {
+    private static readonly ClaimsPrincipal Admin = new(
+        new ClaimsIdentity([new Claim(ClaimTypes.Role, "farm_admin")], "Test"));
     private readonly CustomWebApplicationFactory _factory;
     private AsyncServiceScope _scope;
     private IFilamentFallbackGroupService _service = null!;
@@ -95,7 +98,7 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
         (Printer p, Toolhead t0, Toolhead t1, _) = await SeedPrinterWithToolheadsAsync();
 
         FilamentFallbackGroupDto dto = await _service.CreateAsync(
-            p.Id,
+            Admin, p.Id,
             new CreateFilamentFallbackGroupRequest("PLA Chain", "PLA", null, [t0.Id, t1.Id]),
             CancellationToken.None);
 
@@ -109,6 +112,21 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task UpdateAsync_WithAuthorizedCaller_ReplacesMembers()
+    {
+        (Printer p, Toolhead t0, Toolhead t1, Toolhead t2) = await SeedPrinterWithToolheadsAsync();
+        FilamentFallbackGroupDto created = await _service.CreateAsync(
+            Admin, p.Id, new("Original", "PLA", null, [t0.Id, t1.Id]), CancellationToken.None);
+
+        FilamentFallbackGroupDto updated = await _service.UpdateAsync(
+            Admin, p.Id, created.Id, new("Updated", "PLA", null, [t1.Id, t2.Id]), CancellationToken.None);
+
+        updated.Members.Select(member => member.ToolheadId).Should().Equal(t1.Id, t2.Id);
+        (await _db.FilamentFallbackGroupMembers.CountAsync(member => member.FallbackGroupId == created.Id))
+            .Should().Be(2);
+    }
+
+    [Fact]
     public async Task CreateAsync_WithMmuGateMember_Succeeds()
     {
         // Issue #711 (FIX D): AMS/MMU multi-slot fallback chains are the primary use case,
@@ -118,7 +136,7 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
             await SeedPrinterWithToolheadsAsync(mmuTopology: true);
 
         FilamentFallbackGroupDto dto = await _service.CreateAsync(
-            p.Id,
+            Admin, p.Id,
             new CreateFilamentFallbackGroupRequest(
                 "AMS Chain",
                 "PLA",
@@ -136,7 +154,7 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
         (Printer p, Toolhead t0, _, _) = await SeedPrinterWithToolheadsAsync();
 
         Func<Task> act = () => _service.CreateAsync(
-            p.Id,
+            Admin, p.Id,
             new CreateFilamentFallbackGroupRequest("Solo", "PLA", null, [t0.Id]),
             CancellationToken.None);
 
@@ -150,7 +168,7 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
         (Printer p, Toolhead t0, _, _) = await SeedPrinterWithToolheadsAsync();
 
         Func<Task> act = () => _service.CreateAsync(
-            p.Id,
+            Admin, p.Id,
             new CreateFilamentFallbackGroupRequest("Dup", "PLA", null, [t0.Id, t0.Id]),
             CancellationToken.None);
 
@@ -168,7 +186,7 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
         string material = oversizedName ? "PLA" : new string('M', 65);
 
         Func<Task> act = () => _service.CreateAsync(
-            p.Id,
+            Admin, p.Id,
             new CreateFilamentFallbackGroupRequest(name, material, null, [t0.Id, t1.Id]),
             CancellationToken.None);
 
@@ -184,7 +202,7 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
         (_, Toolhead foreignA, Toolhead foreignB, _) = await SeedPrinterWithToolheadsAsync("B");
 
         Func<Task> act = () => _service.CreateAsync(
-            p.Id,
+            Admin, p.Id,
             new CreateFilamentFallbackGroupRequest("Cross", "PLA", null, [foreignA.Id, foreignB.Id]),
             CancellationToken.None);
 
@@ -197,12 +215,12 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
     {
         (Printer p, Toolhead t0, Toolhead t1, _) = await SeedPrinterWithToolheadsAsync();
         await _service.CreateAsync(
-            p.Id,
+            Admin, p.Id,
             new CreateFilamentFallbackGroupRequest("PLA Chain", "PLA", null, [t0.Id, t1.Id]),
             CancellationToken.None);
 
         Func<Task> act = () => _service.CreateAsync(
-            p.Id,
+            Admin, p.Id,
             new CreateFilamentFallbackGroupRequest("pla chain", "PLA", null, [t1.Id, t0.Id]),
             CancellationToken.None);
 
@@ -219,12 +237,12 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
         await _db.SaveChangesAsync();
 
         await _service.CreateAsync(
-            p.Id,
+            Admin, p.Id,
             new CreateFilamentFallbackGroupRequest("PLA Chain", "PLA", null, [t0.Id, t1.Id]),
             CancellationToken.None);
 
         AvailableFallbackMember? result = await _service.FindAvailableFallbackAsync(
-            p.Id,
+            Admin, p.Id,
             sourceToolheadId: t0.Id,
             materialType: "PLA",
             CancellationToken.None);
@@ -241,12 +259,12 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
         (Printer p, Toolhead t0, Toolhead t1, _) = await SeedPrinterWithToolheadsAsync();
         // Neither t0 nor t1 has anything loaded.
         await _service.CreateAsync(
-            p.Id,
+            Admin, p.Id,
             new CreateFilamentFallbackGroupRequest("PLA Chain", "PLA", null, [t0.Id, t1.Id]),
             CancellationToken.None);
 
         AvailableFallbackMember? result = await _service.FindAvailableFallbackAsync(
-            p.Id,
+            Admin, p.Id,
             sourceToolheadId: t0.Id,
             materialType: "PLA",
             CancellationToken.None);
@@ -263,12 +281,12 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
         await _db.SaveChangesAsync();
 
         await _service.CreateAsync(
-            p.Id,
+            Admin, p.Id,
             new CreateFilamentFallbackGroupRequest("PLA Chain", "PLA", null, [t0.Id, t1.Id]),
             CancellationToken.None);
 
         AvailableFallbackMember? result = await _service.FindAvailableFallbackAsync(
-            p.Id,
+            Admin, p.Id,
             sourceToolheadId: t0.Id,
             materialType: "PLA",
             CancellationToken.None);
@@ -288,7 +306,7 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
         await _db.SaveChangesAsync();
 
         await _service.CreateAsync(
-            p.Id,
+            Admin, p.Id,
             new CreateFilamentFallbackGroupRequest(
                 "AMS Chain",
                 "PLA",
@@ -297,7 +315,7 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
             CancellationToken.None);
 
         AvailableFallbackMember? result = await _service.FindAvailableFallbackAsync(
-            p.Id,
+            Admin, p.Id,
             sourceToolheadId: gateOne.Id,
             materialType: "PLA",
             CancellationToken.None);
@@ -314,7 +332,7 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
             await SeedPrinterWithToolheadsAsync(mmuTopology: true);
 
         Func<Task> act = () => _service.CreateAsync(
-            p.Id,
+            Admin, p.Id,
             new CreateFilamentFallbackGroupRequest(
                 "Invalid shared hotend",
                 "PLA",
@@ -372,7 +390,7 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
         await _db.SaveChangesAsync();
 
         IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution> results =
-            await _service.GetAvailableFallbacksAsync([p.Id], CancellationToken.None);
+            await _service.GetAvailableFallbacksAsync(Admin, [p.Id], CancellationToken.None);
 
         results[FilamentFallbackLookupKey.Create(p.Id, gateOne.Id, "PLA")]
             .Members.Should().ContainSingle(member => member.ToolheadId == gateTwo.Id);
@@ -393,7 +411,7 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
         await _db.SaveChangesAsync();
 
         await _service.CreateAsync(
-            first.Id,
+            Admin, first.Id,
             new CreateFilamentFallbackGroupRequest(
                 "First chain",
                 "PLA",
@@ -401,7 +419,7 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
                 [firstT0.Id, firstT1.Id, firstMmu.Id]),
             CancellationToken.None);
         await _service.CreateAsync(
-            second.Id,
+            Admin, second.Id,
             new CreateFilamentFallbackGroupRequest(
                 "Second chain",
                 "PLA",
@@ -411,6 +429,7 @@ public class FilamentFallbackGroupServiceTests : IAsyncLifetime
 
         IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution> results =
             await _service.GetAvailableFallbacksAsync(
+                Admin,
                 [first.Id, second.Id],
                 CancellationToken.None);
 
