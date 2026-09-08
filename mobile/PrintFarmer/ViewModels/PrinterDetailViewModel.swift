@@ -16,7 +16,29 @@ final class PrinterDetailViewModel {
     var showLivestream = false
     var isLoading = false
     var errorMessage: String?
-    var isPerformingAction = false
+    /// Whether any sibling action (bind/set/clear/eject spool,
+    /// pause/resume/cancel/stop/emergencyStop, mark-ready, maintenance log)
+    /// currently has an in-flight, uncancellable network request. Derived
+    /// from `activeActionTokens` (issue #2522, Hicks review finding — same-
+    /// service/same-epoch operation overlap), not a bare settable flag:
+    /// without a per-operation identity, two GENUINELY CONCURRENT actions
+    /// sharing the same service and lifecycle epoch (e.g. Emergency Stop
+    /// dispatched while an ordinary filament action is still in flight — no
+    /// deactivate/reconfigure between them at all, so `ActionAuthority`'s
+    /// epoch/service-identity pair alone is IDENTICAL for both) are
+    /// indistinguishable to a shared boolean, so whichever finishes FIRST
+    /// would incorrectly clear it while the other is still genuinely
+    /// running. Busy stays `true` until every token any in-flight operation
+    /// is holding has been released, matching a true reference count rather
+    /// than "whichever operation happens to complete first says so."
+    var isPerformingAction: Bool { !activeActionTokens.isEmpty }
+    /// Tokens for operations currently holding a share of `isPerformingAction`.
+    /// Each sibling action inserts its own via `beginBusyToken()` and
+    /// removes ONLY that token via `endBusyToken(_:)` when it completes,
+    /// regardless of whether its own result/refresh authority
+    /// (`hasActionAuthority`) still holds — removing your own token can
+    /// never affect a sibling operation's separate token.
+    private var activeActionTokens: Set<UUID> = []
     var showConfirmation = false
     var pendingAction: DestructiveAction?
     var actionError: String?
@@ -38,17 +60,20 @@ final class PrinterDetailViewModel {
             // never returns to its old value, so the ABA sequence is always
             // detected regardless of what `isViewActive` reads at the
             // moment the check runs.
+            //
+            // This transition deliberately does NOT touch
+            // `activeActionTokens` (an earlier revision force-cleared the
+            // busy flag here, which is exactly the shared-flag hazard the
+            // token set now replaces): a token genuinely in flight when the
+            // view deactivates is released by ITS OWN eventual completion,
+            // not by this transition, so `isPerformingAction` correctly
+            // stays `true` for as long as that underlying network request
+            // is genuinely still outstanding — including across a
+            // REACTIVATION, rather than being reset early only to have a
+            // later, unrelated operation's completion (mis)read as owning
+            // whatever the flag was reset to.
             guard oldValue != isViewActive else { return }
             actionLifecycleEpoch &+= 1
-            // A transition means whatever operation last set `true` no
-            // longer owns the current epoch, so its eventual completion
-            // will correctly skip resetting this (see `hasAuthority()`-style
-            // guards) — but nothing else would ever clear it for the NEW
-            // epoch otherwise, permanently stranding the UI in a busy state
-            // across a reactivation. Resetting it here, not the retired
-            // operation's own tail check, is what "clear busy only if the
-            // operation owns it" resolves to structurally.
-            isPerformingAction = false
             if oldValue && !isViewActive {
                 invalidateCanonicalLoad()
                 tearDownSignalR()
@@ -198,12 +223,12 @@ final class PrinterDetailViewModel {
             invalidateCanonicalLoad()
             invalidateSnapshotLifecycle()
             // Issue #2522, Hicks review finding 24: a service replacement is
-            // its own kind of lifecycle transition for `bindToolheadSpool`'s
-            // authority — an in-flight bind against the OLD service must not
-            // treat this reconfigured session as still its own, and the busy
-            // flag it set must not strand the reconfigured session either.
+            // its own kind of lifecycle transition for the sibling action
+            // authority below — an in-flight action against the OLD service
+            // must not treat this reconfigured session as still its own.
+            // Busy-state tracking itself (`activeActionTokens`) is
+            // deliberately untouched here — see `isViewActive`'s `didSet`.
             actionLifecycleEpoch &+= 1
-            isPerformingAction = false
         }
 
         self.printerService = printerService
@@ -225,13 +250,8 @@ final class PrinterDetailViewModel {
             return
         }
         let authority = beginActionAuthority(for: printerService)
-        isPerformingAction = true
         actionError = nil
-        defer {
-            if hasActionAuthority(authority) {
-                isPerformingAction = false
-            }
-        }
+        defer { endBusyToken(authority.busyToken) }
         do {
             _ = try await printerService.bindToolheadSpool(
                 printerId: printerId,
@@ -450,8 +470,9 @@ final class PrinterDetailViewModel {
             return
         }
         self.reviewedReadyStatus = nil
-        isPerformingAction = true
+        let busyToken = beginBusyToken()
         actionError = nil
+        defer { endBusyToken(busyToken) }
         do {
             _ = try await autoDispatchService.markReady(
                 status: reviewedReadyStatus
@@ -462,8 +483,6 @@ final class PrinterDetailViewModel {
             guard isViewActive else { return }
             actionError = error.localizedDescription
         }
-        guard isViewActive else { return }
-        isPerformingAction = false
     }
 
     // MARK: - Filament / Spool
@@ -505,13 +524,8 @@ final class PrinterDetailViewModel {
             return
         }
         let authority = beginActionAuthority(for: printerService)
-        isPerformingAction = true
         actionError = nil
-        defer {
-            if hasActionAuthority(authority) {
-                isPerformingAction = false
-            }
-        }
+        defer { endBusyToken(authority.busyToken) }
         do {
             let rowVersion = try reviewedPrinterRowVersion()
             print("📡 loadSpoolById: printer=\(printerId) spool=\(id)")
@@ -538,13 +552,8 @@ final class PrinterDetailViewModel {
         guard isViewActive else { return }
         guard let printerService else { return }
         let authority = beginActionAuthority(for: printerService)
-        isPerformingAction = true
         actionError = nil
-        defer {
-            if hasActionAuthority(authority) {
-                isPerformingAction = false
-            }
-        }
+        defer { endBusyToken(authority.busyToken) }
         do {
             _ = try await printerService.setActiveSpool(
                 printerId: printerId,
@@ -575,13 +584,8 @@ final class PrinterDetailViewModel {
         guard isViewActive else { return }
         guard let printerService else { return }
         let authority = beginActionAuthority(for: printerService)
-        isPerformingAction = true
         actionError = nil
-        defer {
-            if hasActionAuthority(authority) {
-                isPerformingAction = false
-            }
-        }
+        defer { endBusyToken(authority.busyToken) }
         do {
             _ = try await printerService.setActiveSpool(
                 printerId: printerId,
@@ -621,13 +625,8 @@ final class PrinterDetailViewModel {
             return
         }
         let authority = beginActionAuthority(for: printerService)
-        isPerformingAction = true
         actionError = nil
-        defer {
-            if hasActionAuthority(authority) {
-                isPerformingAction = false
-            }
-        }
+        defer { endBusyToken(authority.busyToken) }
         do {
             let rowVersion = try reviewedPrinterRowVersion()
             print("📡 setActiveSpool: printer=\(printerId) spool=\(spool.id)")
@@ -982,12 +981,11 @@ final class PrinterDetailViewModel {
     }
 
     // MARK: - Action authority (issue #2522, Hicks/Bishop review findings
-    // 24/25, generalized to every sibling `printerService`-dispatching
-    // action)
+    // 24/25, generalized to every sibling action, plus a subsequent Hicks
+    // review finding: per-operation busy identity)
     //
-    // Every method below that dispatches a mutation through `printerService`
-    // and tracks it via `isPerformingAction` shares the SAME two risks
-    // `bindToolheadSpool` was first hardened against:
+    // Every action-dispatching method below shares THREE risks
+    // `bindToolheadSpool` was hardened against, one at a time:
     //
     //   * ABA (finding 24): a boolean `isViewActive` check alone cannot
     //     distinguish "this call's original activation window is still
@@ -998,37 +996,78 @@ final class PrinterDetailViewModel {
     //     activation-state transition and every service reconfiguration,
     //     and never returning to an old value) closes this for any caller
     //     that captures it before an await and compares it again after.
-    //   * Operation-owned busy state (finding 25): `isPerformingAction`
-    //     must be cleared for the operation that owns it via `defer`, not a
-    //     tail line a future added return path could bypass, and only for
-    //     the SAME session that set it — a lifecycle transition already
-    //     resets it once for whatever session is current now (see
-    //     `isViewActive`'s `didSet` / `configure(printerService:)`), so an
-    //     unconditional clear from a stale, retired call could otherwise
-    //     stomp a NEWER concurrent operation's busy state.
+    //   * Operation-owned busy-state cleanup (finding 25): cleanup must run
+    //     via `defer`, not a tail line a future added return path could
+    //     bypass.
+    //   * Per-operation busy identity (a later Hicks review round): epoch
+    //     and service identity alone are IDENTICAL for two operations that
+    //     are GENUINELY CONCURRENT against the same service with no
+    //     lifecycle transition between them at all — e.g. Emergency Stop
+    //     dispatched while an ordinary filament action is still in flight.
+    //     A shared boolean busy flag cannot tell those two apart, so
+    //     whichever finishes FIRST would incorrectly clear it while the
+    //     other is still genuinely running. `activeActionTokens` (see
+    //     `isPerformingAction` above) replaces the boolean with a
+    //     reference count: each call gets its OWN token via
+    //     `beginBusyToken()`, and releases ONLY that token via
+    //     `endBusyToken(_:)` — UNCONDITIONALLY, regardless of
+    //     `hasActionAuthority`, since removing your own entry from a set
+    //     can never affect a sibling operation's separate entry.
     //
-    // `ActionAuthority` and the two functions below are the single, shared
+    // `ActionAuthority` and the functions below are the single, shared
     // implementation of that pattern so every sibling action states it
     // identically rather than re-deriving its own copy.
     private struct ActionAuthority {
+        let busyToken: UUID
         let epoch: UInt64
         let serviceIdentity: ObjectIdentifier?
     }
 
-    /// Captures the CURRENT action authority. Call once, before the first
-    /// `await` a dispatching method performs.
+    /// Begins tracking a new in-flight operation and captures the CURRENT
+    /// action authority. Call once, before the first `await` a dispatching
+    /// method performs; release the returned token via `endBusyToken(_:)`
+    /// (typically in a `defer`) when the method exits, regardless of
+    /// outcome.
     private func beginActionAuthority(for printerService: any PrinterServiceProtocol) -> ActionAuthority {
-        ActionAuthority(epoch: actionLifecycleEpoch, serviceIdentity: Self.identity(printerService))
+        ActionAuthority(
+            busyToken: beginBusyToken(),
+            epoch: actionLifecycleEpoch,
+            serviceIdentity: Self.identity(printerService)
+        )
     }
 
-    /// Whether the CURRENT state still matches a previously captured
-    /// authority — i.e. whether the operation that captured it still owns
-    /// the current session. Re-evaluate this after every `await`, and in a
-    /// `defer` for busy-state cleanup.
+    /// Whether the CURRENT lifecycle state still matches a previously
+    /// captured authority — i.e. whether the operation that captured it
+    /// still owns the current session. This is RESULT/REFRESH authority
+    /// only (whether `loadPrinter()`/`actionError` may still be applied);
+    /// it does NOT gate busy-state cleanup — see `endBusyToken(_:)`.
     private func hasActionAuthority(_ authority: ActionAuthority) -> Bool {
         isViewActive
             && actionLifecycleEpoch == authority.epoch
             && Self.identity(printerService) == authority.serviceIdentity
+    }
+
+    /// Begins tracking one more in-flight operation for `isPerformingAction`
+    /// purposes and returns the token this call must release when done.
+    /// Every sibling action — including ones that dispatch through a
+    /// service OTHER than `printerService` (`markPrinterReady`,
+    /// `logMaintenanceCompletion`) — shares this SAME reference count, so
+    /// an Emergency Stop and an unrelated mark-ready/maintenance-log call
+    /// overlapping in flight are equally protected from clobbering each
+    /// other's busy state.
+    private func beginBusyToken() -> UUID {
+        let token = UUID()
+        activeActionTokens.insert(token)
+        return token
+    }
+
+    /// Releases exactly one token. Safe to call unconditionally — removing
+    /// your own token from the set can never affect a DIFFERENT token a
+    /// sibling operation is still holding, so no authority check is needed
+    /// here (contrast `hasActionAuthority`, which gates a different
+    /// concern).
+    private func endBusyToken(_ token: UUID) {
+        activeActionTokens.remove(token)
     }
 
 #if DEBUG
@@ -1554,8 +1593,9 @@ final class PrinterDetailViewModel {
 
     func logMaintenanceCompletion(_ row: OdometerRow, performedBy: String) async {
         guard isViewActive, let maintenanceService else { return }
-        isPerformingAction = true
+        let busyToken = beginBusyToken()
         actionError = nil
+        defer { endBusyToken(busyToken) }
         let request = CreateMaintenanceLogRequest(
             printerId: printerId,
             performedBy: performedBy,
@@ -1572,8 +1612,6 @@ final class PrinterDetailViewModel {
             guard isViewActive else { return }
             actionError = error.localizedDescription
         }
-        guard isViewActive else { return }
-        isPerformingAction = false
     }
 
     // MARK: - Actions
@@ -2109,13 +2147,8 @@ final class PrinterDetailViewModel {
         guard isViewActive else { return }
         guard let printerService else { return }
         let authority = beginActionAuthority(for: printerService)
-        isPerformingAction = true
         actionError = nil
-        defer {
-            if hasActionAuthority(authority) {
-                isPerformingAction = false
-            }
-        }
+        defer { endBusyToken(authority.busyToken) }
 
         do {
             try await action(printerService)

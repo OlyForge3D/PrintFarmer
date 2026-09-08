@@ -878,12 +878,18 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertTrue(viewModel.isPerformingAction, "Setup: operation A must be genuinely in flight")
 
         // An unrelated lifecycle event: the server is hot-swapped WHILE A is
-        // still suspended in its network await. This revokes A's authority
-        // and — per the existing transition-based reset — clears the busy
-        // flag for whatever session is current now, exactly as findings
-        // 24/25 already require.
+        // still suspended in its network await. This revokes A's RESULT/
+        // REFRESH authority, but must NOT touch busy-state tracking — A's
+        // own token remains held until A's own completion releases it, so
+        // busy correctly stays `true` straight through this reconfigure
+        // (a later Hicks review round: an earlier revision force-cleared
+        // the shared boolean here, which is exactly the same hazard the
+        // per-operation token set now replaces).
         viewModel.configure(printerService: newService)
-        XCTAssertFalse(viewModel.isPerformingAction)
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "A's own outstanding token must keep busy true across an unrelated reconfigure, not be reset by the transition itself"
+        )
 
         let bEntered = ShiftTaskResultGate<Void>()
         let bRelease = ShiftTaskResultGate<Void>()
@@ -896,14 +902,15 @@ final class PrinterDetailViewModelTests: XCTestCase {
         _ = try await bEntered.wait()
         XCTAssertTrue(viewModel.isPerformingAction, "Setup: operation B must be genuinely in flight")
 
-        // Release A. Its stale completion must detect it lost authority
-        // (the epoch moved on when B's host service was reconfigured above)
-        // and must NOT clear B's busy flag.
+        // Release A. Its stale completion must detect it lost RESULT/REFRESH
+        // authority (the epoch moved on when B's host service was
+        // reconfigured above) and skip refreshing — but releasing A's OWN
+        // token must not clear B's separate token.
         await aRelease.succeed(())
         await aTask.value
         XCTAssertTrue(
             viewModel.isPerformingAction,
-            "Operation A's stale, authority-less completion must not clobber operation B's busy state while B is still genuinely in flight"
+            "Operation A's own token release must not clobber operation B's separate token while B is still genuinely in flight"
         )
         XCTAssertEqual(
             mockService.getPrinterCallCount, baselineOldServiceGetPrinterCallCount,
@@ -918,6 +925,113 @@ final class PrinterDetailViewModelTests: XCTestCase {
             "Operation B's own legitimate completion must clear the busy flag it still owns"
         )
         XCTAssertEqual(newService.getPrinterCallCount, 1, "Operation B must refresh through the service it actually targeted")
+    }
+
+    /// Same-service, SAME epoch Emergency Stop overlap (Hicks review
+    /// finding: per-operation busy identity) — completion order 1: the
+    /// ordinary filament action (`setActiveSpool`) finishes FIRST while
+    /// Emergency Stop is still in flight. Deliberately does NOT reconfigure
+    /// or deactivate between the two: `ActionAuthority`'s epoch/service
+    /// identity are IDENTICAL for both calls, so only the per-operation
+    /// token set can tell them apart. `setActiveSpool`'s own completion
+    /// must not clear busy while Emergency Stop — a materially different,
+    /// still-outstanding operation against the exact same session — is
+    /// still genuinely in flight.
+    func testSameServiceEmergencyStopOverlapFilamentActionCompletesFirstKeepsBusyUntilEmergencyStopCompletes() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+
+        let spoolEntered = ShiftTaskResultGate<Void>()
+        let spoolRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeSetActiveSpool = {
+            await spoolEntered.succeed(())
+            _ = try? await spoolRelease.wait()
+        }
+        let spoolTask = Task { await viewModel.setActiveSpool(makeSpool(id: 1)) }
+        _ = try await spoolEntered.wait()
+        XCTAssertTrue(viewModel.isPerformingAction, "Setup: the filament action must be genuinely in flight")
+
+        let stopEntered = ShiftTaskResultGate<Void>()
+        let stopRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeEmergencyStop = {
+            await stopEntered.succeed(())
+            _ = try? await stopRelease.wait()
+        }
+        viewModel.requestEmergencyStop()
+        let stopTask = Task { await viewModel.confirmAction() }
+        _ = try await stopEntered.wait()
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Setup: Emergency Stop must ALSO be genuinely in flight, overlapping the filament action"
+        )
+
+        // Complete the filament action FIRST. Ordinary/filament actions and
+        // Emergency Stop must both stay disabled (busy) throughout, since
+        // Emergency Stop is still outstanding.
+        await spoolRelease.succeed(())
+        await spoolTask.value
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "The filament action's own completion must not clear busy while Emergency Stop is still genuinely in flight"
+        )
+
+        // Complete Emergency Stop. Only NOW may busy clear.
+        await stopRelease.succeed(())
+        await stopTask.value
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "Busy must clear once every overlapping operation has completed"
+        )
+    }
+
+    /// Same scenario, REVERSED completion order: Emergency Stop finishes
+    /// FIRST while the ordinary filament action is still in flight.
+    func testSameServiceEmergencyStopOverlapEmergencyStopCompletesFirstKeepsBusyUntilFilamentActionCompletes() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+
+        let spoolEntered = ShiftTaskResultGate<Void>()
+        let spoolRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeSetActiveSpool = {
+            await spoolEntered.succeed(())
+            _ = try? await spoolRelease.wait()
+        }
+        let spoolTask = Task { await viewModel.setActiveSpool(makeSpool(id: 1)) }
+        _ = try await spoolEntered.wait()
+        XCTAssertTrue(viewModel.isPerformingAction, "Setup: the filament action must be genuinely in flight")
+
+        let stopEntered = ShiftTaskResultGate<Void>()
+        let stopRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeEmergencyStop = {
+            await stopEntered.succeed(())
+            _ = try? await stopRelease.wait()
+        }
+        viewModel.requestEmergencyStop()
+        let stopTask = Task { await viewModel.confirmAction() }
+        _ = try await stopEntered.wait()
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Setup: Emergency Stop must ALSO be genuinely in flight, overlapping the filament action"
+        )
+
+        // Complete Emergency Stop FIRST this time. Busy must stay true: the
+        // filament action is still genuinely outstanding.
+        await stopRelease.succeed(())
+        await stopTask.value
+        XCTAssertTrue(
+            viewModel.isPerformingAction,
+            "Emergency Stop's own completion must not clear busy while the filament action is still genuinely in flight"
+        )
+
+        // Complete the filament action. Only NOW may busy clear.
+        await spoolRelease.succeed(())
+        await spoolTask.value
+        XCTAssertFalse(
+            viewModel.isPerformingAction,
+            "Busy must clear once every overlapping operation has completed"
+        )
     }
 
     // MARK: - Pull-to-refresh transition-during-refresh (issue #2522, Hicks
