@@ -19,7 +19,7 @@ Run each expensive suite once per code state and capture output with `tee`. Afte
 | Backend/API full tests | `cd src && dotnet test ./farm-web.sln -c Debug --no-build --settings ./vstest.runsettings --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini 2>&1 | tee /tmp/printfarmer-dotnet-test.log` |
 | Slicer module tests | `cd src && dotnet test ./tests/Farm.Slicer.Module.Tests --no-restore 2>&1 | tee /tmp/printfarmer-slicer-test.log` |
 | React build | `cd src/Web/ReactApp && npm run build 2>&1 | tee /tmp/printfarmer-react-build.log` |
-| React tests | `cd src/Web/ReactApp && npm run test:run 2>&1 | tee /tmp/printfarmer-react-test.log` |
+| React tests (CI parity) | `cd src/Web/ReactApp && npm run test:coverage 2>&1 | tee /tmp/printfarmer-react-coverage.log` |
 | React lint | `cd src/Web/ReactApp && npm run lint 2>&1 | tee /tmp/printfarmer-react-lint.log` |
 
 Use repo-relative directories. Do not hardcode machine-specific absolute paths.
@@ -44,7 +44,7 @@ Frontend example:
 ```bash
 cd src/Web/ReactApp
 npm run build 2>&1 | tee /tmp/printfarmer-react-build.log
-npm run test:run 2>&1 | tee /tmp/printfarmer-react-test.log
+npm run test:coverage 2>&1 | tee /tmp/printfarmer-react-coverage.log
 npm run lint 2>&1 | tee /tmp/printfarmer-react-lint.log
 ```
 
@@ -54,8 +54,8 @@ npm run lint 2>&1 | tee /tmp/printfarmer-react-lint.log
 tail -40 /tmp/printfarmer-dotnet-test.log
 grep -E "Failed|FAIL|Error|Passed|Skipped" /tmp/printfarmer-dotnet-test.log | tail -40
 
-tail -30 /tmp/printfarmer-react-test.log
-grep -E "FAIL|Error" /tmp/printfarmer-react-test.log
+tail -30 /tmp/printfarmer-react-coverage.log
+grep -E "FAIL|Error" /tmp/printfarmer-react-coverage.log
 ```
 
 If a log is missing, empty, or truncated before the summary, re-run that same command once to capture a fresh log.
@@ -70,6 +70,9 @@ dotnet test ./farm-web.sln -c Debug --filter "FullyQualifiedName~TestClassName.T
 
 cd src/Web/ReactApp
 npm run test:run -- path/to/test-file.test.tsx 2>&1 | tee /tmp/printfarmer-react-focused-test.log
+
+# Reproduce a CI-only failure under coverage instrumentation.
+npm run test:coverage -- path/to/test-file.test.tsx 2>&1 | tee /tmp/printfarmer-react-focused-coverage.log
 ```
 
 ## Timeouts
@@ -80,7 +83,10 @@ npm run test:run -- path/to/test-file.test.tsx 2>&1 | tee /tmp/printfarmer-react
 | `dotnet test ./farm-web.sln -c Debug` | 240s |
 | Focused `dotnet test --filter` | 60s |
 | `npm run build` | 30s |
-| `npm run test:run` | 60s |
+| `npm run test:coverage` | 180s |
 | `npm run lint` | 60s |
 
-Use `npm run test:run` for automated React tests. Do not use `npm test`, because it starts watch mode.
+Use `npm run test:coverage` for the full automated React suite so local validation
+matches CI, including coverage instrumentation and thresholds. Use `npm run test:run`
+only for a faster, non-interactive focused test run; it cannot detect coverage-only
+failures. Do not use `npm test`, because it starts watch mode.

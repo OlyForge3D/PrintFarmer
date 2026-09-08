@@ -64,9 +64,9 @@ cd ./src
 dotnet test ./farm-web.sln -c Debug
 # ✅ 1572/1572 tests passing
 
-# React tests (non-interactive)
+# React tests (matches CI coverage instrumentation)
 cd ./src/Web/ReactApp
-npm run test:run
+npm run test:coverage
 # ✅ 365/365 tests passing
 
 # Watch mode for development
