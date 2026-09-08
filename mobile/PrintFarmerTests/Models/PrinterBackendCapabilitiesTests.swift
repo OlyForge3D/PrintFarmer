@@ -3,66 +3,23 @@ import XCTest
 
 final class PrinterBackendCapabilitiesTests: XCTestCase {
 
-    // MARK: - Static fallback table
-
-    func testFallback_moonraker_supportsEverythingWithXYZ() {
-        let caps = PrinterBackendCapabilities.fallback(for: .moonraker)
-        XCTAssertTrue(caps.supportsMovement)
-        XCTAssertTrue(caps.supportsTemperatureControl)
-        XCTAssertTrue(caps.supportsBedTemperature)
-        XCTAssertTrue(caps.supportsFanControl)
-        XCTAssertTrue(caps.supportsHoming)
-        XCTAssertEqual(caps.supportedAxes, ["X", "Y", "Z"])
-    }
-
-    func testFallback_prusaLink_supportsEverythingWithXYZ() {
-        let caps = PrinterBackendCapabilities.fallback(for: .prusaLink)
-        XCTAssertTrue(caps.supportsMovement)
-        XCTAssertTrue(caps.supportsTemperatureControl)
-        XCTAssertTrue(caps.supportsBedTemperature)
-        XCTAssertTrue(caps.supportsFanControl)
-        XCTAssertTrue(caps.supportsHoming)
-        XCTAssertEqual(caps.supportedAxes, ["X", "Y", "Z"])
-    }
-
-    func testFallback_octoPrint_supportsEverythingWithXYZ() {
-        let caps = PrinterBackendCapabilities.fallback(for: .octoPrint)
-        XCTAssertTrue(caps.supportsMovement)
-        XCTAssertTrue(caps.supportsTemperatureControl)
-        XCTAssertTrue(caps.supportsBedTemperature)
-        XCTAssertTrue(caps.supportsFanControl)
-        XCTAssertTrue(caps.supportsHoming)
-        XCTAssertEqual(caps.supportedAxes, ["X", "Y", "Z"])
-    }
-
-    func testFallback_flashForge_movementAndHomingButNoBedOrFan() {
-        let caps = PrinterBackendCapabilities.fallback(for: .flashForge)
-        XCTAssertTrue(caps.supportsMovement)
-        XCTAssertTrue(caps.supportsTemperatureControl)
-        XCTAssertFalse(caps.supportsBedTemperature)
-        XCTAssertFalse(caps.supportsFanControl)
-        XCTAssertTrue(caps.supportsHoming)
-        XCTAssertEqual(caps.supportedAxes, ["X", "Y", "Z"])
-    }
-
-    func testFallback_sdcp_allDisabledNoAxes() {
-        let caps = PrinterBackendCapabilities.fallback(for: .sdcp)
-        XCTAssertFalse(caps.supportsMovement)
-        XCTAssertFalse(caps.supportsTemperatureControl)
-        XCTAssertFalse(caps.supportsBedTemperature)
-        XCTAssertFalse(caps.supportsFanControl)
-        XCTAssertFalse(caps.supportsHoming)
-        XCTAssertTrue(caps.supportedAxes.isEmpty)
-    }
-
-    func testFallback_unknown_allDisabledNoAxes() {
-        let caps = PrinterBackendCapabilities.fallback(for: .unknown)
-        XCTAssertFalse(caps.supportsMovement)
-        XCTAssertFalse(caps.supportsTemperatureControl)
-        XCTAssertFalse(caps.supportsBedTemperature)
-        XCTAssertFalse(caps.supportsFanControl)
-        XCTAssertFalse(caps.supportsHoming)
-        XCTAssertTrue(caps.supportedAxes.isEmpty)
+    func testFallbackNeverProvesPhysicalControlForAnyBackend() {
+        for backend in [PrinterBackend.moonraker, .prusaLink, .octoPrint, .flashForge, .sdcp, .unknown] {
+            let caps = PrinterBackendCapabilities.fallback(for: backend)
+            XCTAssertFalse(caps.supportsMovement)
+            XCTAssertFalse(caps.supportsTemperatureControl)
+            XCTAssertFalse(caps.supportsBedTemperature)
+            XCTAssertFalse(caps.supportsHoming)
+            XCTAssertFalse(caps.supportsAbsoluteMovement)
+            XCTAssertFalse(caps.supportsDisableMotors)
+            XCTAssertFalse(caps.supportsExtrusion)
+            XCTAssertFalse(caps.supportsZOffset)
+            XCTAssertFalse(caps.supportsZOffsetFirmwareSave)
+            XCTAssertFalse(caps.supportsFilamentLoad)
+            XCTAssertFalse(caps.supportsFilamentUnload)
+            XCTAssertFalse(caps.supportsFilamentChange)
+            XCTAssertTrue(caps.supportedAxes.isEmpty)
+        }
     }
 
     // MARK: - Codable
@@ -82,10 +39,21 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
         XCTAssertEqual(a, b)
     }
 
-    func testEquatable_differentBackends_areNotEqual() {
-        let moonraker = PrinterBackendCapabilities.fallback(for: .moonraker)
-        let sdcp = PrinterBackendCapabilities.fallback(for: .sdcp)
-        XCTAssertNotEqual(moonraker, sdcp)
+    func testEquatable_differentEvidence_isNotEqual() {
+        XCTAssertNotEqual(
+            PrinterBackendCapabilities.allControlsFixture,
+            PrinterBackendCapabilities.fallback(for: .unknown)
+        )
+    }
+
+    func testDemoAndDefaultMockDoNotAdvertiseNoOpControls() async throws {
+        let demo = DemoPrinterService()
+        for printer in try await demo.list(includeDisabled: false) {
+            let caps = try await demo.getBackendCapabilities(printerId: printer.id)
+            XCTAssertEqual(caps, .fallback(for: .unknown))
+        }
+        let mockCaps = try await MockPrinterService().getBackendCapabilities(printerId: UUID())
+        XCTAssertEqual(mockCaps, .fallback(for: .unknown))
     }
     // MARK: - Wire DTO Decoder Fixtures
 
@@ -119,37 +87,40 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
         XCTAssertEqual(dto.supportsCamera, true)
     }
 
-    // Partial-support fixture: FlashForge backend — movement and hotend temp supported,
-    // but fan control, file management, and camera are absent.
-    func testWireDto_partialSupport_flashForge() throws {
-        let json = Data("""
-        {
-            "printerId": "550e8400-e29b-41d4-a716-446655440000",
-            "printerName": "FlashForge Adventurer 5M",
-            "backend": "FlashForge",
-            "supportsMovement": true,
-            "supportsTemperatureControl": true,
-            "supportsCamera": false,
-            "supportsFileDownload": false,
-            "supportsFileList": false,
-            "supportsFileUpload": false,
-            "supportsStartPrint": false,
-            "supportsControlOperations": false,
-            "supportsFileMetadata": false,
-            "supportsPrinterInformation": false,
-            "supportsHistory": false,
-            "supportsFilamentControl": false
+    func testWireDto_flashForge_heatersRequirePairedRouteProof_withoutMovementOrHoming() throws {
+        for heatersProven in [false, true] {
+            let json = Data("""
+            {
+                "printerId": "550e8400-e29b-41d4-a716-446655440000",
+                "printerName": "FlashForge Adventurer 5M",
+                "backend": "FlashForge",
+                "supportsMovement": false,
+                "supportsTemperatureControl": true,
+                "supportsRelativeMovement": false,
+                "supportsAbsoluteMovement": false,
+                "supportsHoming": false,
+                "supportsHomingXY": false,
+                "supportsHomingZ": false,
+                "supportsHotendTemperature": \(heatersProven),
+                "supportsBedTemperature": \(heatersProven),
+                "supportedAxes": []
+            }
+            """.utf8)
+            let dto = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
+            XCTAssertEqual(dto.backend, .flashForge)
+            XCTAssertEqual(dto.supportsMovement, false)
+            let caps = PrinterBackendCapabilities(wire: dto)
+            XCTAssertFalse(caps.supportsMovement)
+            XCTAssertFalse(caps.supportsAbsoluteMovement)
+            XCTAssertFalse(caps.supportsHoming)
+            XCTAssertFalse(caps.supportsHomingXY)
+            XCTAssertFalse(caps.supportsHomingZ)
+            XCTAssertTrue(caps.supportedAxes.isEmpty)
+            XCTAssertEqual(caps.supportsTemperatureControl, heatersProven,
+                           "Legacy temperature metadata alone does not prove route support")
+            XCTAssertEqual(caps.supportsBedTemperature, heatersProven,
+                           "Current FlashForge route proves both heaters together")
         }
-        """.utf8)
-        let dto = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
-        XCTAssertEqual(dto.backend, .flashForge)
-        XCTAssertEqual(dto.supportsMovement, true,
-                       "FlashForge supports movement (cartesian homing)")
-        XCTAssertEqual(dto.supportsTemperatureControl, true,
-                       "FlashForge supports hotend temp control")
-        XCTAssertEqual(dto.supportsControlOperations, false,
-                       "FlashForge does not expose fan/control operations")
-        XCTAssertEqual(dto.supportsCamera, false)
     }
 
     // Resin fixture: SDCP/Elegoo backend — supportsMovement=false, supportsTemperatureControl=false.
@@ -201,5 +172,44 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
                      "Missing wire field must decode as nil, not crash")
         XCTAssertNil(dto.supportsTemperatureControl)
         XCTAssertNil(dto.printerName)
+    }
+
+    func testGenericFlagsDoNotEnableSpecificOperations() throws {
+        let json = Data("""
+        {"printerId":"\(TestData.testUUID)","backend":"Moonraker",
+         "supportsMovement":true,"supportsTemperatureControl":true,
+         "supportsControlOperations":true,"supportsFilamentControl":true}
+        """.utf8)
+        let wire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
+        XCTAssertEqual(PrinterBackendCapabilities(wire: wire), .fallback(for: .unknown))
+    }
+
+    func testSpecificEvidenceIsUsedWithoutBackendNameAllowlist() throws {
+        let json = Data("""
+        {"printerId":"\(TestData.testUUID)","backend":"FutureBackend",
+         "supportsRelativeMovement":true,"supportsAbsoluteMovement":true,
+         "supportsHotendTemperature":true,"supportsBedTemperature":false,
+         "supportsHoming":false,"supportsHomingXY":true,"supportsHomingZ":false,
+         "supportsExtrusion":true,"supportsDisableMotors":true,
+         "supportsFilamentLoad":true,"supportsFilamentUnload":true,"supportsFilamentChange":false,
+         "supportsZOffset":true,"supportsZOffsetFirmwareSave":false,"supportedAxes":["x","y","e"]}
+        """.utf8)
+        let wire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: json)
+        let caps = PrinterBackendCapabilities(wire: wire)
+        XCTAssertTrue(caps.supportsMovement)
+        XCTAssertTrue(caps.supportsAbsoluteMovement)
+        XCTAssertTrue(caps.supportsExtrusion)
+        XCTAssertTrue(caps.supportsDisableMotors)
+        XCTAssertTrue(caps.supportsTemperatureControl)
+        XCTAssertFalse(caps.supportsBedTemperature)
+        XCTAssertFalse(caps.supportsHoming)
+        XCTAssertTrue(caps.supportsHomingXY)
+        XCTAssertFalse(caps.supportsHomingZ)
+        XCTAssertTrue(caps.supportsZOffset)
+        XCTAssertFalse(caps.supportsZOffsetFirmwareSave)
+        XCTAssertTrue(caps.supportsFilamentLoad)
+        XCTAssertTrue(caps.supportsFilamentUnload)
+        XCTAssertFalse(caps.supportsFilamentChange)
+        XCTAssertEqual(caps.supportedAxes, ["X", "Y"])
     }
 }

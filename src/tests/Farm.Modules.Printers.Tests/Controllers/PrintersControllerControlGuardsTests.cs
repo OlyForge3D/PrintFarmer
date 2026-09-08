@@ -152,6 +152,9 @@ public class PrintersControllerControlGuardsTests
     [InlineData(0, 300)]
     [InlineData(101, 300)]
     [InlineData(-101, 300)]
+    [InlineData(double.NaN, 300)]
+    [InlineData(double.PositiveInfinity, 300)]
+    [InlineData(double.NegativeInfinity, 300)]
     [InlineData(5, 0)]
     [InlineData(5, 6001)]
     public async Task ExtrudeFilamentAsync_InvalidBounds_ProduceZeroBackendIo(
@@ -215,6 +218,36 @@ public class PrintersControllerControlGuardsTests
             id,
             "M83\nG1 E-5 F300\nM82",
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("extrude")]
+    [InlineData("disable-motors")]
+    [InlineData("moveto")]
+    public async Task EssentialControlAsync_PrintingPrinter_RejectsWithoutBackendIo(string operation)
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Printing"));
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = operation switch
+        {
+            "extrude" => await controller.ExtrudeFilamentAsync(id,
+                new ExtrudeFilamentRequest { DistanceMm = -5, FeedrateMmPerMinute = 300 },
+                CancellationToken.None),
+            "disable-motors" => await controller.DisableMotorsAsync(id, CancellationToken.None),
+            _ => await controller.MoveToAsync(id, new MoveRequest(X: 0, Y: null, Z: 10, F: null), CancellationToken.None),
+        };
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.False(Assert.IsType<CommandResult>(conflict.Value).Success);
+        printersService.Verify(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>()), Times.Once);
+        printersService.VerifyNoOtherCalls();
     }
 
     [Fact]

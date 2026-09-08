@@ -31,6 +31,110 @@ final class PrinterServiceFallbackTests: XCTestCase {
 
     // MARK: - getDetails
 
+    func testDetailsIncludesReviewedCalibrationWithoutInventingUnknownValues() async throws {
+        mockAPIClient.stubResponse(json: """
+        {"id":"\(printerId)","name":"MK4","backend":"PrusaLink",
+         "rowVersion":"AQIDBA==","zOffsetMm":0,"lastZOffsetCalibrationAt":"2026-09-08T10:00:00Z",
+         "capabilities":{"maxHotendTemp":280,"maxBedTemp":110,"maxBuildVolumeX":250}}
+        """)
+        let details = try await printerService.getDetails(id: printerId)
+        XCTAssertEqual(details.rowVersion, "AQIDBA==")
+        XCTAssertEqual(details.zOffsetMm, 0)
+        XCTAssertNotNil(details.lastZOffsetCalibrationAt)
+        XCTAssertEqual(details.capabilities?.maxHotendTemp, 280)
+        XCTAssertEqual(details.capabilities?.maxBedTemp, 110)
+        XCTAssertEqual(details.capabilities?.maxBuildVolumeX, 250)
+        XCTAssertNil(details.capabilities?.maxBuildVolumeY)
+        XCTAssertNil(details.capabilities?.hasHeatedBed)
+        mockAPIClient.stubResponse(json: """
+        {"id":"\(printerId)","name":"MK4","backend":"PrusaLink"}
+        """)
+        let unknown = try await printerService.getDetails(id: printerId)
+        XCTAssertNil(unknown.rowVersion)
+        XCTAssertNil(unknown.zOffsetMm)
+        XCTAssertNil(unknown.lastZOffsetCalibrationAt)
+        XCTAssertNil(unknown.capabilities)
+    }
+
+    func testCapabilityRefreshDoesNotReusePrinterIDAcrossServersOrConfigurationChanges() async throws {
+        mockAPIClient.stubResponse(json: """
+        {"printerId":"\(printerId)","supportsAbsoluteMovement":true}
+        """)
+        let first = try await printerService.getBackendCapabilities(printerId: printerId)
+        XCTAssertTrue(first.supportsAbsoluteMovement)
+        await apiClient.updateBaseURL(URL(string: "https://second.example.com")!)
+        mockAPIClient.stubResponse(json: """
+        {"printerId":"\(printerId)","supportsAbsoluteMovement":false}
+        """)
+        let second = try await printerService.getBackendCapabilities(printerId: printerId)
+        XCTAssertFalse(second.supportsAbsoluteMovement)
+        XCTAssertEqual(mockAPIClient.capturedRequests.last?.url?.host, "second.example.com")
+        mockAPIClient.stubResponse(json: """
+        {"printerId":"\(printerId)","supportsAbsoluteMovement":true}
+        """)
+        let third = try await printerService.getBackendCapabilities(printerId: printerId)
+        XCTAssertTrue(third.supportsAbsoluteMovement)
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 3)
+    }
+
+    func testCapabilityFailureDoesNotReusePreviouslySupportedValue() async throws {
+        mockAPIClient.stubResponse(json: """
+        {"printerId":"\(printerId)","supportsAbsoluteMovement":true}
+        """)
+        _ = try await printerService.getBackendCapabilities(printerId: printerId)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 503)
+        do {
+            _ = try await printerService.getBackendCapabilities(printerId: printerId)
+            XCTFail("Failure must propagate, not reuse cached support")
+        } catch NetworkError.serverError(503) {}
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 2)
+    }
+
+    func testCapabilitiesRejectWrongPrinterIdentity() async throws {
+        mockAPIClient.stubResponse(json: """
+        {"printerId":"\(TestData.testUUID2)","supportsAbsoluteMovement":true}
+        """)
+        do {
+            _ = try await printerService.getBackendCapabilities(printerId: printerId)
+            XCTFail("Wrong printer evidence")
+        } catch NetworkError.invalidResponse {}
+    }
+
+    func testOldInFlightCapabilitiesCannotEscapeServerGenerationFence() async throws {
+        let generation = ActiveServerGeneration()
+        let client = APIClient(baseURL: TestData.testBaseURL, session: mockAPIClient.urlSession, serverGeneration: generation)
+        let service = PrinterService(apiClient: client)
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        let id = printerId
+        mockAPIClient.asyncRequestHandler = { request in
+            await barrier.arriveAndWait()
+            return (TestData.httpResponse(url: request.url, statusCode: 200), Data("""
+            {"printerId":"\(id)","supportsAbsoluteMovement":true}
+            """.utf8))
+        }
+        let pending = Task { try await service.getBackendCapabilities(printerId: id) }
+        await barrier.waitUntilArrived()
+        generation.advance()
+        barrier.release()
+        do {
+            _ = try await pending.value
+            XCTFail("Stale support must never reach the control owner")
+        } catch NetworkError.staleServerResponse {}
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+    }
+
+    func testCancelledCapabilityReadCannotBecomeSupportedFallback() async throws {
+        mockAPIClient.stubError(.cancelled)
+        do {
+            _ = try await printerService.getBackendCapabilities(printerId: printerId)
+            XCTFail("Cancellation must propagate")
+        } catch NetworkError.transportError(let error) {
+            XCTAssertEqual(error.code, .cancelled)
+        }
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+    }
+
     func testGetDetails_callsCorrectEndpoint() async throws {
         let json = """
         {

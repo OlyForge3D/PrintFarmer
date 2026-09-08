@@ -8,8 +8,11 @@
 
 ## Model
 
-- **Preferred:** `gemini-3.1-pro-preview`
-- **Rationale:** Gemini 3.1 Pro Preview for analytical diversity in multi-model review gate.
+- **Required:** `gemini-3.8-flash`, explicitly authorized by the user for this and future reviews.
+- **Availability:** pass this exact ID only; do not select `latest`, infer a Gemini Pro ID, or
+  substitute another model. If it is unavailable, do not dispatch Vasquez; report the reviewer
+  as blocked.
+- **Rationale:** Preserves the user-authorized Gemini perspective in the multi-model review gate.
 
 ## Responsibilities
 

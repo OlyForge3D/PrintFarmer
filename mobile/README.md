@@ -209,19 +209,113 @@ On iPad, the app uses a `NavigationSplitView`. Server switching lives in the
 sidebar and the destination list is scoped to the operator set for the
 active server.
 
-### Printer Detail: Status / Controls
+### Printer Detail: Overview / Controls
 
-Printer detail is a two-page, swipeable screen (issue #2522): **Status** (identity,
-camera, current job, filament, queue, maintenance, history, compact temperatures)
-and **Controls** (jog/preheat/home setup). Status is always the default page. A
-segmented selector and a horizontal swipe move between the two pages and always
-agree with each other. One shared run-action bar (Pause/Resume/Cancel/Stop/
-Emergency Stop) is mounted once outside both pages' scroll content, so it stays
-reachable from either page without scrolling. The Controls page only exists when
-Advanced Printer Controls is enabled for the active server (see below); when it is
-disabled, the selector and Controls page are both omitted rather than shown
-disabled, and a printer/server change or a mid-session capability revoke returns
-the view to Status rather than stranding it on a page that no longer exists.
+Printer detail opens on **Overview**, with printer identity, paired measured and
+target Hotend/Bed temperatures, filament and current work before supporting
+information. Missing or offline readings are unavailable, not zero or ready;
+missing bed telemetry does not establish whether a heated bed is installed.
+At useful iPad widths, camera, queue, maintenance and history occupy a supporting
+column. Narrow split views and accessibility text reflow to one reading column.
+Navigation remains Farm grid → pushed printer detail.
+
+Both **Overview** and **Controls** remain visible, through the segmented selector
+or a swipe, even offline or with setup controls disabled. Controls explains the
+restriction and links to the existing per-server Printer Safety settings.
+Selection is retained when access changes; visibility does not grant permission
+or trigger capability loading while setup controls are unavailable.
+
+A compact labeled **Emergency Stop** stays above the selector on both pages,
+with confirmation, its own pending guard, and an offline explanation. It never
+requires a timed hold and is not disabled by an unrelated pending command.
+Pause/Resume/Cancel/Stop stay with **Current Job** on Overview. Camera/live view,
+queue, history, maintenance, Mainsail, auto-dispatch, predictive/failure detection,
+NFC and spool assignment/Eject utilities remain available under their existing gates.
+
+### Native control transport contract
+
+The typed networking prerequisite for Essential controls is implemented in
+`PrinterServiceProtocol` and `PrinterService`, together with safety corrections
+to the existing Preheat and Home controls and a visible capability-read retry.
+The new absolute-move, extrusion, motor-release and calibration UI is delivered
+separately. All paths below are relative to `/api/printers/{printerId}`.
+
+| Native method | POST route | Request / response |
+| --- | --- | --- |
+| `setTemperatures` | `/temps` | Optional `hotend` / `bed` in Celsius; nil omitted, zero means off. Decodes `CommandResult` and throws on rejection. |
+| `home`, `homeXY`, `homeZ` | `/home`, `/homexy`, `/homez` | No body. Only All, XY or Z; decodes `CommandResult` and throws on rejection. |
+| `move` | `/move` | Single X/Y/Z delta in mm and `f` in mm/min; rejects an invalid axis. |
+| `moveTo` | `/moveto` | Optional `x`, `y`, `z`, `f`; zero is a coordinate, nil omits it. Returns `CommandResult`. |
+| `extrude` | `/extrude` | Signed `distanceMm` (-100...100, nonzero), `feedrateMmPerMinute` (1...6000); returns `CommandResult`. |
+| `disableMotors` | `/disable-motors` | No body; returns `CommandResult`. |
+| `loadFilament`, `changeFilament` | `/filament-load`, `/filament-change` | No body; returns `CommandResult`, unrelated to spool assignment. |
+| `unloadFilament` | `/filament-unload` | Optional query `toolheadIndex`; detailed overload returns success/message/spoolId/material/residualWeightG. Printer-only overload preserves `CommandResult`. |
+| `saveZOffset` | `/z-offset` | Required `offsetMm` (-5...5), `saveToFirmware`; quoted `If-Match` from `reviewedRowVersion`; returns `CommandResult`. |
+
+Callers must check each operation's explicit server capability, Queue.Start
+permission, current server/printer identity, user opt-in and physical readiness.
+Generic control flags and backend-name fallbacks do not enable commands.
+Missing fields or a missing capability endpoint fail closed. This is command
+availability, not evidence that hardware is absent. Capabilities are fetched
+fresh; the former permanent UUID-only cache is removed. APIClient's registered
+server generation fence rejects stale in-flight responses.
+Homing visibility and dispatch use independent All/XY/Z evidence, not jogging
+support. A failed capability read remains unknown and shows a read-only retry
+affordance; it is not cached as permanent unsupported state.
+Preheat, including Cool Down, stays hidden and refuses dispatch until hotend
+support is confirmed. Cool Down omits an unconfirmed bed just like heating
+presets; unknown support never permits a speculative 0/0 command. Missing bed
+support is described as unavailable control, not physically absent hardware.
+Demo mode advertises no physical or persistence capabilities: its no-op commands
+are not backend support evidence.
+
+Control requests are never replayed automatically. Errors (including 409, 412,
+428 and uncertain firmware-save 503) propagate through existing APIClient
+semantics. A successful HTTP response must still contain a valid command result;
+`success: false` is not physical success. Callers of result-returning methods
+must inspect it. Neither acceptance nor inventory residual weight proves final
+physical telemetry. After an offset save, refresh details for the next reviewed
+rowVersion; never fetch a newer revision merely to retry an old confirmation.
+
+`Printer` already exposes optional measured temperatures, targets, XYZ position
+and `homedAxes`. `getDetails` now also projects optional `zOffsetMm`,
+`lastZOffsetCalibrationAt`, `rowVersion` and nested `capabilities` with optional
+catalog/configuration maxima (`maxBuildVolumeX/Y/Z`, `maxHotendTemp`,
+`maxBedTemp`, `hasHeatedBed`). These values stay unknown when absent. Build
+volume is not live firmware travel bounds or proof of a zero-based origin;
+catalog heater maxima are not a material-specific safe extrusion temperature.
+The control owner must not use a target as a measurement or invent limits from web defaults. UI feedrates
+expressed in mm/s convert to mm/min once **before** calling the service.
+Native presets remain PLA 200/60, PETG 240/80 and ABS 240/100.
+
+The shared operation flags are `supportsRelativeMovement`,
+`supportsAbsoluteMovement`, `supportsDisableMotors`, `supportsExtrusion`,
+`supportsZOffset`, `supportsZOffsetFirmwareSave`, `supportsHoming`,
+`supportsHomingXY`, `supportsHomingZ`, `supportsHotendTemperature`,
+`supportsBedTemperature`, and `supportsFilamentLoad/Unload/Change`.
+Native `supportsMovement` and `supportsTemperatureControl` are compatibility
+aliases for relative movement and hotend targets. `supportedAxes` normalizes
+the server's lowercase axes to native uppercase, without implying they are homed.
+
+Current implementation evidence is deliberately narrower than legacy flags:
+
+| Backend | Proven shared commands |
+| --- | --- |
+| Moonraker | All/XY/Z home, hotend/bed targets, bounded extrusion, motor release, database-only Z-offset. |
+| OctoPrint | All/XY home, hotend/bed targets, database-only Z-offset; Z-only home requires matching derived/configured backend ports. |
+| PrusaLink | All/XY home, database-only Z-offset; Z-only home and heater targets require matching derived/configured backend ports. |
+| FlashForge | Database-only Z-offset; heater targets require matching derived/configured ports and an actual temperature-control client. |
+| SDCP / unknown | Database-only Z-offset; no inferred physical-command support. |
+
+These flags also require the concrete typed backend clients; permission and
+runtime readiness remain separate. Movement is currently unavailable: the
+Moonraker implementation combines mode and move on one G-code line, other
+absolute-move implementations are stubs, and relative routes omit credentials
+required by some backends. Firmware Z-offset persistence is not proven by
+`SET_GCODE_OFFSET` / `SAVE_CONFIG` or generic `M851` / `M500` transport.
+Physical-filament macros are not enabled without installed per-printer macro
+evidence. These prerequisites are recorded in #2597 / #2593; the typed native
+methods do not invent support or silently issue substitute commands.
 
 ### Advanced Printer Controls
 
@@ -231,8 +325,8 @@ Safety** and enable **Advanced Printer Controls** for the active server. Once
 enabled, jog/preheat/home setup is reachable as the Controls page of printer
 detail (see above) — there is no separate "Advanced" screen nested inside
 another "Advanced" entry. Enabling the controls on one server does not enable
-them on another. Turning the setting off removes access immediately, including
-an open Controls page, which safely returns to Status. Changing a registered
+them on another. Turning the setting off removes command access immediately;
+an open Controls page retains selection and explains the restriction. Changing a registered
 server's URL also resets the setting to off so an opt-in cannot carry over to a
 different endpoint. Misuse may damage a printer or ruin a print.
 

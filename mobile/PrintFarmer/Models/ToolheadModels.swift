@@ -165,6 +165,10 @@ struct PrinterDetails: Codable, Identifiable, Sendable, Equatable {
     let toolheads: [Toolhead]
     let fallbackGroups: [FilamentFallbackGroup]
     let supportsPerToolAttribution: Bool
+    let rowVersion: String?
+    let zOffsetMm: Double?
+    let lastZOffsetCalibrationAt: Date?
+    let capabilities: PrinterHardwareCapabilities?
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -178,6 +182,10 @@ struct PrinterDetails: Codable, Identifiable, Sendable, Equatable {
         toolheads = heads.sorted { $0.index < $1.index }
         fallbackGroups = try c.decodeIfPresent([FilamentFallbackGroup].self, forKey: .fallbackGroups) ?? []
         supportsPerToolAttribution = try c.decodeIfPresent(Bool.self, forKey: .supportsPerToolAttribution) ?? false
+        rowVersion = try c.decodeIfPresent(String.self, forKey: .rowVersion)
+        zOffsetMm = try c.decodeIfPresent(Double.self, forKey: .zOffsetMm)
+        lastZOffsetCalibrationAt = try c.decodeIfPresent(Date.self, forKey: .lastZOffsetCalibrationAt)
+        capabilities = try c.decodeIfPresent(PrinterHardwareCapabilities.self, forKey: .capabilities)
     }
 
     init(
@@ -189,7 +197,11 @@ struct PrinterDetails: Codable, Identifiable, Sendable, Equatable {
         modelName: String? = nil,
         toolheads: [Toolhead] = [],
         fallbackGroups: [FilamentFallbackGroup] = [],
-        supportsPerToolAttribution: Bool = false
+        supportsPerToolAttribution: Bool = false,
+        rowVersion: String? = nil,
+        zOffsetMm: Double? = nil,
+        lastZOffsetCalibrationAt: Date? = nil,
+        capabilities: PrinterHardwareCapabilities? = nil
     ) {
         self.id = id
         self.name = name
@@ -200,10 +212,26 @@ struct PrinterDetails: Codable, Identifiable, Sendable, Equatable {
         self.toolheads = toolheads.sorted { $0.index < $1.index }
         self.fallbackGroups = fallbackGroups
         self.supportsPerToolAttribution = supportsPerToolAttribution
+        self.rowVersion = rowVersion
+        self.zOffsetMm = zOffsetMm
+        self.lastZOffsetCalibrationAt = lastZOffsetCalibrationAt
+        self.capabilities = capabilities
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, backend, hasMmu, manufacturerName, modelName
         case toolheads, fallbackGroups, supportsPerToolAttribution
+        case rowVersion, zOffsetMm, lastZOffsetCalibrationAt, capabilities
     }
+}
+
+/// Catalog/configuration data from the shared PrinterCapabilitiesDto, not live
+/// firmware travel bounds, safe extrusion temperature, or installed-hardware proof.
+struct PrinterHardwareCapabilities: Codable, Sendable, Equatable {
+    let maxBuildVolumeX: Double?
+    let maxBuildVolumeY: Double?
+    let maxBuildVolumeZ: Double?
+    let maxHotendTemp: Int?
+    let maxBedTemp: Int?
+    let hasHeatedBed: Bool?
 }

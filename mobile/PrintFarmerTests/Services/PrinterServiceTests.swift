@@ -299,7 +299,7 @@ final class PrinterServiceTests: XCTestCase {
     // MARK: - setTemperatures()
 
     func testSetTemperaturesPostsBothFields() async throws {
-        mockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
 
         try await printerService.setTemperatures(printerId: TestData.testUUID, hotend: 215, bed: 60)
 
@@ -315,7 +315,7 @@ final class PrinterServiceTests: XCTestCase {
     }
 
     func testSetTemperaturesOmitsNilFields() async throws {
-        mockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
 
         try await printerService.setTemperatures(printerId: TestData.testUUID, hotend: 200, bed: nil)
 
@@ -327,7 +327,7 @@ final class PrinterServiceTests: XCTestCase {
     }
 
     func testSetTemperaturesCooldownSendsZeros() async throws {
-        mockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
 
         try await printerService.setTemperatures(printerId: TestData.testUUID, hotend: 0, bed: 0)
 
@@ -341,7 +341,7 @@ final class PrinterServiceTests: XCTestCase {
     // MARK: - home()
 
     func testHomeAllAxesRoutesToHomeEndpoint() async throws {
-        mockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
 
         try await printerService.home(printerId: TestData.testUUID, axes: ["X", "Y", "Z"])
 
@@ -352,7 +352,7 @@ final class PrinterServiceTests: XCTestCase {
     }
 
     func testHomeXYAxesRoutesToHomeXYEndpoint() async throws {
-        mockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
 
         try await printerService.home(printerId: TestData.testUUID, axes: ["X", "Y"])
 
@@ -362,7 +362,7 @@ final class PrinterServiceTests: XCTestCase {
     }
 
     func testHomeZAxisRoutesToHomeZEndpoint() async throws {
-        mockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
 
         try await printerService.home(printerId: TestData.testUUID, axes: ["Z"])
 
@@ -372,7 +372,7 @@ final class PrinterServiceTests: XCTestCase {
     }
 
     func testHomeXYConvenienceWrapper() async throws {
-        mockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
 
         try await printerService.homeXY(printerId: TestData.testUUID)
 
@@ -382,7 +382,7 @@ final class PrinterServiceTests: XCTestCase {
     }
 
     func testHomeZConvenienceWrapper() async throws {
-        mockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
 
         try await printerService.homeZ(printerId: TestData.testUUID)
 
@@ -394,7 +394,7 @@ final class PrinterServiceTests: XCTestCase {
     // MARK: - move()
 
     func testMoveOnXAxisSendsCorrectBody() async throws {
-        mockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
 
         try await printerService.move(printerId: TestData.testUUID, axis: "X", distanceMm: 10.0, feedrateMmMin: 3000)
 
@@ -412,7 +412,7 @@ final class PrinterServiceTests: XCTestCase {
     }
 
     func testMoveOnYAxisSendsCorrectBody() async throws {
-        mockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
 
         try await printerService.move(printerId: TestData.testUUID, axis: "Y", distanceMm: -5.0, feedrateMmMin: 3000)
 
@@ -426,7 +426,7 @@ final class PrinterServiceTests: XCTestCase {
     }
 
     func testMoveOnZAxisUsesLockedFeedrate() async throws {
-        mockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
 
         try await printerService.move(printerId: TestData.testUUID, axis: "Z", distanceMm: 0.1, feedrateMmMin: 600)
 
@@ -466,6 +466,8 @@ final class PrinterServiceTests: XCTestCase {
             "backend": "Moonraker",
             "supportsMovement": true,
             "supportsTemperatureControl": true,
+            "supportsRelativeMovement": true,
+            "supportsHotendTemperature": true,
             "supportsCamera": true,
             "supportsControlOperations": true,
             "supportsFileList": true,
@@ -489,7 +491,7 @@ final class PrinterServiceTests: XCTestCase {
         XCTAssertTrue(caps.supportsTemperatureControl)
     }
 
-    func testGetBackendCapabilities_404_fallsBackToStaticTable() async throws {
+    func testGetBackendCapabilities_404_doesNotInferActuationFromBackendName() async throws {
         // Stub per-path: capabilities returns 404, printer get returns Moonraker printer
         mockAPIClient.stubResponses([
             "backend-capabilities": (statusCode: 404, json: "{}"),
@@ -498,12 +500,11 @@ final class PrinterServiceTests: XCTestCase {
 
         let caps = try await printerService.getBackendCapabilities(printerId: TestData.testUUID)
 
-        // Moonraker fallback: all controls supported
-        XCTAssertTrue(caps.supportsMovement,
-                      "Moonraker fallback must report supportsMovement=true")
-        XCTAssertTrue(caps.supportsTemperatureControl)
-        XCTAssertTrue(caps.supportsBedTemperature)
-        XCTAssertTrue(caps.supportsFanControl)
+        XCTAssertFalse(caps.supportsMovement)
+        XCTAssertFalse(caps.supportsTemperatureControl)
+        XCTAssertFalse(caps.supportsBedTemperature)
+        XCTAssertFalse(caps.supportsFanControl)
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
     }
 
     func testGetBackendCapabilities_resin_sdcp_movementFalse() async throws {
@@ -523,5 +524,235 @@ final class PrinterServiceTests: XCTestCase {
         XCTAssertFalse(caps.supportsTemperatureControl)
         XCTAssertFalse(caps.supportsBedTemperature)
         XCTAssertFalse(caps.supportsFanControl)
+    }
+
+    func testMoveToPreservesOriginOmittedAxesAndFeedrateUnits() async throws {
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
+        let result = try await printerService.moveTo(
+            printerId: TestData.testUUID, x: 0, y: nil, z: 12.5, feedrateMmMin: 1200
+        )
+        XCTAssertTrue(result.success)
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.first)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertTrue(request.url?.path.hasSuffix("/moveto") == true)
+        let body = try requestBody(request)
+        XCTAssertEqual(body["x"] as? Double, 0)
+        XCTAssertNil(body["y"])
+        XCTAssertEqual(body["z"] as? Double, 12.5)
+        XCTAssertEqual(body["f"] as? Int, 1200)
+    }
+
+    func testMoveToOmitsUnspecifiedFeedrate() async throws {
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
+        _ = try await printerService.moveTo(printerId: TestData.testUUID, x: nil, y: 0, z: nil, feedrateMmMin: nil)
+        let body = try requestBody(XCTUnwrap(mockAPIClient.capturedRequests.first))
+        XCTAssertEqual(body.count, 1)
+        XCTAssertEqual(body["y"] as? Int, 0)
+    }
+
+    func testExtrudePreservesRetractionAndDoesNotConvertMmMinAgain() async throws {
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
+        _ = try await printerService.extrude(printerId: TestData.testUUID, distanceMm: -8.5, feedrateMmPerMinute: 300)
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.first)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertTrue(request.url?.path.hasSuffix("/extrude") == true)
+        let body = try requestBody(request)
+        XCTAssertEqual(body.count, 2)
+        XCTAssertEqual(body["distanceMm"] as? Double, -8.5)
+        XCTAssertEqual(body["feedrateMmPerMinute"] as? Int, 300)
+    }
+
+    func testDisableMotorsHasNoBodyAndPreservesRejectedResult() async throws {
+        mockAPIClient.stubResponse(json: #"{"success":false,"message":"Unsupported"}"#)
+        let result = try await printerService.disableMotors(printerId: TestData.testUUID)
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.message, "Unsupported")
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.first)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertTrue(request.url?.path.hasSuffix("/disable-motors") == true)
+        XCTAssertNil(request.capturedHTTPBody())
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+    }
+
+    func testSaveOffsetBindsReviewedRevisionAndDoesNotRefetch() async throws {
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
+        _ = try await printerService.saveZOffset(
+            printerId: TestData.testUUID, offsetMm: -0.15, saveToFirmware: true, reviewedRowVersion: "AQIDBA=="
+        )
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.first)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertTrue(request.url?.path.hasSuffix("/z-offset") == true)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "If-Match"), "\"AQIDBA==\"")
+        let body = try requestBody(request)
+        XCTAssertEqual(body["offsetMm"] as? Double, -0.15)
+        XCTAssertEqual(body["saveToFirmware"] as? Bool, true)
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+    }
+
+    func testSaveOffsetErrorsNeverRetryOrRefreshRevision() async throws {
+        for status in [400, 403, 404, 409, 412, 428, 503] {
+            mockAPIClient.reset()
+            mockAPIClient.stubResponse(json: #"{"success":false,"message":"Not applied or outcome unknown"}"#, statusCode: status)
+            do {
+                _ = try await printerService.saveZOffset(
+                    printerId: TestData.testUUID, offsetMm: 0, saveToFirmware: true, reviewedRowVersion: "AQIDBA=="
+                )
+                XCTFail("Expected HTTP \(status) to surface")
+            } catch let error as NetworkError {
+                switch (status, error) {
+                case (400, .clientError(400, _)), (403, .forbidden), (404, .notFound),
+                     (409, .conflict), (412, .preconditionFailed), (428, .preconditionRequired),
+                     (503, .serverError(503)): break
+                default: XCTFail("Unexpected mapping for \(status): \(error)")
+                }
+            }
+            XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+        }
+    }
+
+    func testDetailedUnloadPreservesToolZeroAndInventoryUnknowns() async throws {
+        mockAPIClient.stubResponse(json: #"{"success":true,"spoolId":7,"material":"PETG","residualWeightG":0}"#)
+        let result = try await printerService.unloadFilament(printerId: TestData.testUUID, toolheadIndex: 0)
+        XCTAssertEqual(result.spoolId, 7)
+        XCTAssertEqual(result.material, "PETG")
+        XCTAssertEqual(result.residualWeightG, 0)
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.first)
+        XCTAssertTrue(request.url?.path.hasSuffix("/filament-unload") == true)
+        XCTAssertEqual(request.url?.query, "toolheadIndex=0")
+        XCTAssertNil(request.capturedHTTPBody())
+        mockAPIClient.reset()
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
+        let unknown = try await printerService.unloadFilament(printerId: TestData.testUUID, toolheadIndex: nil)
+        XCTAssertNil(unknown.residualWeightG)
+        XCTAssertNil(mockAPIClient.capturedRequests.first?.url?.query)
+    }
+
+    func testLegacyVoidControlsRejectFalseAndMalformedSuccessBodies() async throws {
+        for json in [#"{"success":false,"message":"Rejected"}"#, "{}", ""] {
+            mockAPIClient.reset()
+            mockAPIClient.stubResponse(json: json)
+            do {
+                try await printerService.setTemperatures(printerId: TestData.testUUID, hotend: 200, bed: nil)
+                XCTFail("Must not silently accept \(json)")
+            } catch {}
+            XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+        }
+    }
+
+    func testInvalidAxisCannotSilentlyMoveX() async throws {
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
+        do {
+            try await printerService.move(printerId: TestData.testUUID, axis: "E", distanceMm: 10, feedrateMmMin: 300)
+            XCTFail("Expected invalid axis")
+        } catch {}
+        do {
+            try await printerService.home(printerId: TestData.testUUID, axes: ["X"])
+            XCTFail("A single X request must not home every axis")
+        } catch {}
+        XCTAssertTrue(mockAPIClient.capturedRequests.isEmpty)
+    }
+
+    func testInvalidExtrusionAndUnreviewedOffsetNeverReachTransport() async throws {
+        for distance in [0, 101, -101, .infinity, .nan] {
+            do {
+                _ = try await printerService.extrude(printerId: TestData.testUUID, distanceMm: distance, feedrateMmPerMinute: 300)
+                XCTFail("Invalid extrusion")
+            } catch {}
+        }
+        for revision in ["", " ", "*", "\"AQID==\""] {
+            do {
+                _ = try await printerService.saveZOffset(
+                    printerId: TestData.testUUID, offsetMm: 0, saveToFirmware: true, reviewedRowVersion: revision
+                )
+                XCTFail("Invalid revision")
+            } catch {}
+        }
+        XCTAssertTrue(mockAPIClient.capturedRequests.isEmpty)
+    }
+
+    func testControlTransportCancellationIsNotRetried() async throws {
+        mockAPIClient.stubError(.cancelled)
+        do {
+            _ = try await printerService.extrude(printerId: TestData.testUUID, distanceMm: 1, feedrateMmPerMinute: 60)
+            XCTFail("Expected cancellation")
+        } catch NetworkError.transportError(let error) {
+            XCTAssertEqual(error.code, .cancelled)
+        }
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+    }
+
+    func testCancelledBeforeDispatchDoesNotActuate() async throws {
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        let service = try XCTUnwrap(printerService)
+        let pending = Task {
+            await barrier.arriveAndWait()
+            return try await service.disableMotors(printerId: TestData.testUUID)
+        }
+        await barrier.waitUntilArrived()
+        pending.cancel()
+        barrier.release()
+        do {
+            _ = try await pending.value
+            XCTFail("Cancelled command must not be sent")
+        } catch is CancellationError {}
+        XCTAssertTrue(mockAPIClient.capturedRequests.isEmpty)
+    }
+
+    func testStalePhysicalResponseCannotAcknowledgeNewServer() async throws {
+        let generation = ActiveServerGeneration()
+        let client = APIClient(baseURL: TestData.testBaseURL, session: mockAPIClient.urlSession, serverGeneration: generation)
+        let service = PrinterService(apiClient: client)
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        mockAPIClient.asyncRequestHandler = { request in
+            await barrier.arriveAndWait()
+            return (TestData.httpResponse(url: request.url, statusCode: 200), Data(TestJSON.commandSuccess.utf8))
+        }
+        let pending = Task { try await service.disableMotors(printerId: TestData.testUUID) }
+        await barrier.waitUntilArrived()
+        generation.advance()
+        barrier.release()
+        do {
+            _ = try await pending.value
+            XCTFail("Old server response must not acknowledge new control state")
+        } catch NetworkError.staleServerResponse {}
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+    }
+
+    func testControlBoundariesAndDatabaseOnlySave() async throws {
+        mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
+        for (distance, feedrate) in [(-100.0, 1), (100.0, 6000)] {
+            _ = try await printerService.extrude(printerId: TestData.testUUID, distanceMm: distance, feedrateMmPerMinute: feedrate)
+        }
+        for offset in [-5.0, 5.0] {
+            _ = try await printerService.saveZOffset(
+                printerId: TestData.testUUID, offsetMm: offset, saveToFirmware: false, reviewedRowVersion: "AQIDBA=="
+            )
+            let body = try requestBody(XCTUnwrap(mockAPIClient.capturedRequests.last))
+            XCTAssertEqual(body["saveToFirmware"] as? Bool, false)
+        }
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 4)
+        mockAPIClient.reset()
+        for feedrate in [0, 6001] {
+            do {
+                _ = try await printerService.extrude(printerId: TestData.testUUID, distanceMm: 1, feedrateMmPerMinute: feedrate)
+                XCTFail("Invalid feedrate")
+            } catch PrinterControlError.invalidRequest {}
+        }
+        for offset in [-5.01, 5.01, .nan, .infinity] {
+            do {
+                _ = try await printerService.saveZOffset(
+                    printerId: TestData.testUUID, offsetMm: offset, saveToFirmware: false, reviewedRowVersion: "AQIDBA=="
+                )
+                XCTFail("Invalid offset")
+            } catch PrinterControlError.invalidRequest {}
+        }
+        XCTAssertTrue(mockAPIClient.capturedRequests.isEmpty)
+    }
+
+    private func requestBody(_ request: URLRequest) throws -> [String: Any] {
+        let data = try XCTUnwrap(request.capturedHTTPBody())
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 }

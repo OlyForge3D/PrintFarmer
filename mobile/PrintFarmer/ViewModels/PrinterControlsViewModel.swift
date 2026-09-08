@@ -63,6 +63,7 @@ final class PrinterControlsViewModel: ObservableObject {
     @Published private(set) var lastError: ControlsError?
     @Published private(set) var pendingCommand: ControlCommand?
     @Published private(set) var isLoadingCapabilities: Bool = false
+    @Published private(set) var capabilityLoadError: String?
 
     private(set) var printer: Printer
 
@@ -82,15 +83,19 @@ final class PrinterControlsViewModel: ObservableObject {
     // MARK: - Capabilities
 
     func loadCapabilities() async {
-        if capabilities != nil { return } // cache for lifetime of view model
+        if capabilities != nil || isLoadingCapabilities { return }
         isLoadingCapabilities = true
+        capabilityLoadError = nil
         defer { isLoadingCapabilities = false }
         do {
-            capabilities = try await printerService.getBackendCapabilities(printerId: printer.id)
+            let loaded = try await printerService.getBackendCapabilities(printerId: printer.id)
+            try Task.checkCancellation()
+            capabilities = loaded
         } catch {
-            // Fall back to backend-keyed defaults so UI stays usable. Don't surface
-            // capability fetch errors via lastError (that channel is for command failures).
-            capabilities = PrinterBackendCapabilities.fallback(for: printer.backend)
+            guard !Task.isCancelled else { return }
+            // Failed reads are not cached as proof of unsupported hardware.
+            // Retrying this read never replays a physical command.
+            capabilityLoadError = error.localizedDescription
         }
     }
 
@@ -99,19 +104,9 @@ final class PrinterControlsViewModel: ObservableObject {
     func preheat(_ preset: PreheatPreset) async {
         let caps = capabilities ?? PrinterBackendCapabilities.fallback(for: printer.backend)
 
-        // Values actually sent to the backend:
-        //   * coolDown always sends 0/0 (safe even if the backend ignores bed).
-        //   * A preset's hotend requires temperature control (gated below).
-        //   * A preset's bed is silently dropped when bed control is unsupported.
-        let sentHotend: Double?
-        let sentBed: Double?
-        if preset == .coolDown {
-            sentHotend = 0
-            sentBed = 0
-        } else {
-            sentHotend = preset.hotend
-            sentBed = caps.supportsBedTemperature ? preset.bed : nil
-        }
+        // Cool-down uses the same evidence and omission rules as heating.
+        let sentHotend: Double? = caps.supportsTemperatureControl ? preset.hotend : nil
+        let sentBed: Double? = caps.supportsBedTemperature ? preset.bed : nil
 
         // Confirmation targets carried on the pending command. A setpoint the
         // backend can't drive is `nil` so we treat it as already satisfied and
@@ -128,11 +123,9 @@ final class PrinterControlsViewModel: ObservableObject {
         guard beginCommand(command) else { return }
         defer { endCommand(command) }
 
-        if preset != .coolDown {
-            guard caps.supportsTemperatureControl else {
-                setError(command: command, message: "Printer doesn't support temperature control.", isRetryable: false)
-                return
-            }
+        guard caps.supportsTemperatureControl else {
+            setError(command: command, message: "Temperature control is unavailable without confirmed backend support.", isRetryable: false)
+            return
         }
 
         do {
@@ -161,7 +154,7 @@ final class PrinterControlsViewModel: ObservableObject {
 
         let caps = capabilities ?? PrinterBackendCapabilities.fallback(for: printer.backend)
         guard caps.supportsMovement else {
-            setError(command: command, message: "Printer doesn't support movement.", isRetryable: false)
+            setError(command: command, message: "Movement is unavailable without confirmed backend support.", isRetryable: false)
             return
         }
 
@@ -299,8 +292,8 @@ final class PrinterControlsViewModel: ObservableObject {
         defer { endCommand(command) }
 
         let caps = capabilities ?? PrinterBackendCapabilities.fallback(for: printer.backend)
-        guard caps.supportsHoming else {
-            setError(command: command, message: "Printer doesn't support homing.", isRetryable: false)
+        guard caps.supportsHome(axes: axes) else {
+            setError(command: command, message: "Homing is unavailable without confirmed backend support.", isRetryable: false)
             return
         }
         do {

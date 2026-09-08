@@ -93,6 +93,9 @@ public interface IBackendCapabilityFactory
     /// <param name="backend">The printer backend type to query capabilities for.</param>
     BackendCapabilities GetSupportedCapabilities(PrinterBackend backend);
 
+    /// <summary>Gets the actual raw-command client, rather than inferring support from print-job controls.</summary>
+    bool TryGetGcodeExecutionClientTyped(PrinterBackend backend, out ISupportsGcodeExecution? client);
+
     /// <summary>
     /// Tries to get a backend client that supports history operations.
     /// </summary>
