@@ -346,6 +346,25 @@ final class PrinterFilamentPresentationTests: XCTestCase {
         XCTAssertEqual(model.compactTitle(for: model.rows[2]), "Printer-level spool (slot not specified)")
     }
 
+    func testColorOnlyToolIsRetainedBesideUnassignedPrinterSpool() throws {
+        let printer = try TestData.decodePrinter()
+        for color in ["#123456", "Blue"] {
+            let tool = Toolhead(
+                id: UUID(), name: "Primary", index: 0, isPrimary: true,
+                currentFilamentColor: color
+            )
+            let model = try build(
+                printer: printer, roster: [tool], spool: PrinterSpoolInfo(hasActiveSpool: false)
+            )
+            XCTAssertEqual(model.compactRows.count, 2)
+            XCTAssertEqual(model.compactRows[0].toolheadID, tool.id)
+            XCTAssertEqual(model.compactRows[0].colorText, color)
+            XCTAssertEqual(model.compactRows[0].swatchHex, color.hasPrefix("#") ? color : nil)
+            XCTAssertFalse(model.compactRows[0].hasAssignment)
+            XCTAssertNil(model.compactRows[1].colorText)
+        }
+    }
+
     func testCoverageOnlyCannotBecomeCurrentMaterialAndShortageStaysVisible() throws {
         let printer = try TestData.decodePrinter()
         let slot = ToolheadFilamentCoverage(

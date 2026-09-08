@@ -79,7 +79,7 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
         let current = rows.filter { !$0.isCoverageOnly }
         let tools = current.filter { $0.index != nil }
         if tools.count == 1, let tool = tools.first,
-           !tool.hasAssignment, tool.material == nil,
+           !tool.hasAssignment, tool.material == nil, (tool.colorText ?? "").isEmpty,
            current.contains(where: { $0.index == nil }) {
             return current.filter { $0.index == nil }
         }
