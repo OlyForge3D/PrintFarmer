@@ -248,7 +248,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
 
         // Attempting to reach the Controls page before entering a printer
         // must not surface it; the selector only exists inside a printer's
-        // detail view, and only when the per-server safety toggle is on.
+        // detail view, independent of the per-server safety preference.
         XCTAssertFalse(app.segmentedControls["printer.detail.panel.selector"].exists,
                        "Controls page selector must not appear on the Farm tab root")
 
@@ -264,24 +264,19 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         }
         firstPrinter.tap()
 
-        guard app.descendants(matching: .any)["printer.detail.panel.status"]
+        guard app.descendants(matching: .any)["printer.detail.panel.overview"]
             .waitForExistence(timeout: 5) else {
             // Detail did not render rich content in this environment; skip.
             return
         }
 
-        // Advanced printer controls are a safety interlock and default off.
-        // With the per-server toggle off, the Controls page (and its
-        // selector) must be entirely omitted — not merely collapsed behind
-        // a disclosure — so there is zero "Advanced" surface to reach.
-        XCTAssertFalse(
+        // Discovering the destination does not grant command access.
+        XCTAssertTrue(
             app.segmentedControls["printer.detail.panel.selector"].exists,
-            "Controls page selector must be omitted while the per-server safety toggle is off"
+            "Controls remains discoverable with the per-server safety toggle off"
         )
-        XCTAssertFalse(
-            app.descendants(matching: .any)["printer.detail.panel.controls"].exists,
-            "Controls page must be omitted while the per-server safety toggle is off"
-        )
+        app.segmentedControls["printer.detail.panel.selector"].buttons["Controls"].tap()
+        XCTAssertTrue(app.otherElements["printer.detail.controls.unavailable"].waitForExistence(timeout: 5))
     }
 
     private func openAccount(
@@ -482,26 +477,22 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
     func testPrinterDetailV2OperatorFirstOrderAndAdvancedDemotion() {
         guard openFirstPrinterDetail() else { return }
 
-        // The Status page anchors the operator layout (issue #2522); if the
+        // The Overview page anchors the operator layout (issue #2522); if the
         // detail rendered at all it must be reachable without scrolling
         // gymnastics.
-        let statusPage = app.descendants(matching: .any)["printer.detail.panel.status"]
+        let statusPage = app.descendants(matching: .any)["printer.detail.panel.overview"]
         guard statusPage.waitForExistence(timeout: 5) else {
             // Detail did not present rich content in this environment — skip.
             return
         }
 
-        // Advanced printer controls are a safety interlock and default off.
-        // With the per-server toggle off there must be ZERO Advanced surface
-        // at all — no selector, no Controls page, and (critically) no nested
-        // "Advanced → Advanced" the pre-#2522 disclosure link used to allow.
-        XCTAssertFalse(
+        XCTAssertTrue(
             app.segmentedControls["printer.detail.panel.selector"].exists,
-            "Panel selector must be omitted while the per-server safety toggle is off"
+            "Both destinations are discoverable while the per-server safety toggle is off"
         )
         XCTAssertFalse(
             app.descendants(matching: .any)["printer.detail.panel.controls"].exists,
-            "Controls page must be omitted while the per-server safety toggle is off"
+            "The inactive Controls page must not be traversable by VoiceOver"
         )
 
         // Tap-to-live camera toggle lives at the top of the operator layout.
@@ -515,7 +506,7 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
 
     func testPrinterDetailV2DispatchOpensSheet() {
         guard openFirstPrinterDetail() else { return }
-        guard app.descendants(matching: .any)["printer.detail.panel.status"]
+        guard app.descendants(matching: .any)["printer.detail.panel.overview"]
             .waitForExistence(timeout: 5) else { return }
 
         // Dispatch-to is only offered when this printer has assigned queue jobs;

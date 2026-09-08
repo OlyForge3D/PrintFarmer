@@ -205,19 +205,28 @@ On iPad, the app uses a `NavigationSplitView`. Server switching lives in the
 sidebar and the destination list is scoped to the operator set for the
 active server.
 
-### Printer Detail: Status / Controls
+### Printer Detail: Overview / Controls
 
-Printer detail is a two-page, swipeable screen (issue #2522): **Status** (identity,
-camera, current job, filament, queue, maintenance, history, compact temperatures)
-and **Controls** (jog/preheat/home setup). Status is always the default page. A
-segmented selector and a horizontal swipe move between the two pages and always
-agree with each other. One shared run-action bar (Pause/Resume/Cancel/Stop/
-Emergency Stop) is mounted once outside both pages' scroll content, so it stays
-reachable from either page without scrolling. The Controls page only exists when
-Advanced Printer Controls is enabled for the active server (see below); when it is
-disabled, the selector and Controls page are both omitted rather than shown
-disabled, and a printer/server change or a mid-session capability revoke returns
-the view to Status rather than stranding it on a page that no longer exists.
+Printer detail opens on **Overview**, with printer identity, paired measured and
+target Hotend/Bed temperatures, filament and current work before supporting
+information. Missing or offline readings are unavailable, not zero or ready;
+missing bed telemetry does not establish whether a heated bed is installed.
+At useful iPad widths, camera, queue, maintenance and history occupy a supporting
+column. Narrow split views and accessibility text reflow to one reading column.
+Navigation remains Farm grid → pushed printer detail.
+
+Both **Overview** and **Controls** remain visible, through the segmented selector
+or a swipe, even offline or with setup controls disabled. Controls explains the
+restriction and links to the existing per-server Printer Safety settings.
+Selection is retained when access changes; visibility does not grant permission
+or trigger capability loading while setup controls are unavailable.
+
+A compact labeled **Emergency Stop** stays above the selector on both pages,
+with confirmation, its own pending guard, and an offline explanation. It never
+requires a timed hold and is not disabled by an unrelated pending command.
+Pause/Resume/Cancel/Stop stay with **Current Job** on Overview. Camera/live view,
+queue, history, maintenance, Mainsail, auto-dispatch, predictive/failure detection,
+NFC and spool assignment/Eject utilities remain available under their existing gates.
 
 ### Advanced Printer Controls
 
@@ -227,8 +236,8 @@ Safety** and enable **Advanced Printer Controls** for the active server. Once
 enabled, jog/preheat/home setup is reachable as the Controls page of printer
 detail (see above) — there is no separate "Advanced" screen nested inside
 another "Advanced" entry. Enabling the controls on one server does not enable
-them on another. Turning the setting off removes access immediately, including
-an open Controls page, which safely returns to Status. Changing a registered
+them on another. Turning the setting off removes command access immediately;
+an open Controls page retains selection and explains the restriction. Changing a registered
 server's URL also resets the setting to off so an opt-in cannot carry over to a
 different endpoint. Misuse may damage a printer or ruin a print.
 

@@ -6,12 +6,13 @@ import SwiftUI
 struct PrinterSetupControlsContent: View {
     let printer: Printer
     @ObservedObject var viewModel: PrinterControlsViewModel
+    var usesColumns: Bool? = nil
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var isPrintingOrPaused: Bool {
         switch printer.state?.lowercased() {
-        case "printing", "paused": return true
+        case "printing", "paused", "starting": return true
         default: return false
         }
     }
@@ -35,17 +36,17 @@ struct PrinterSetupControlsContent: View {
                         .padding(.bottom, 12)
                 }
 
-                if horizontalSizeClass == .regular && !dynamicTypeSize.isAccessibilitySize {
+                if (usesColumns ?? (horizontalSizeClass == .regular)) && !dynamicTypeSize.isAccessibilitySize {
                     HStack(alignment: .top, spacing: 16) {
                         PreheatSubgroup(viewModel: viewModel)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        HomeSubgroup(viewModel: viewModel)
+                        VStack(alignment: .leading, spacing: 12) {
+                            HomeSubgroup(viewModel: viewModel)
+                            Divider()
+                            JogSubgroup(viewModel: viewModel)
+                        }
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    Divider()
-                        .background(Color.pfBorder)
-                        .padding(.vertical, 8)
-                    JogSubgroup(viewModel: viewModel)
                 } else {
                     PreheatSubgroup(viewModel: viewModel)
                     Divider()

@@ -7,20 +7,20 @@ import SwiftUI
 /// Session identity remains registered server + printer UUID; this enum only
 /// tracks which page is currently on screen.
 enum PrinterDetailPanel: String, CaseIterable, Hashable, Sendable {
-    case status
+    case overview
     case controls
 
     var title: String {
         switch self {
-        case .status: return "Status"
+        case .overview: return String(localized: "Overview")
         case .controls: return "Controls"
         }
     }
 
-    /// Reserved by epic #2518: `printer.detail.panel.status` / `.controls`.
+    /// Reserved by epic #2518: `printer.detail.panel.overview` / `.controls`.
     var accessibilityIdentifier: String {
         switch self {
-        case .status: return "printer.detail.panel.status"
+        case .overview: return "printer.detail.panel.overview"
         case .controls: return "printer.detail.panel.controls"
         }
     }
@@ -28,7 +28,7 @@ enum PrinterDetailPanel: String, CaseIterable, Hashable, Sendable {
 
 // MARK: - Panels host (pure paging shell)
 
-/// Narrowly scoped host for the printer-detail Status/Controls paging
+/// Narrowly scoped host for the printer-detail Overview/Controls paging
 /// (issue #2522).
 ///
 /// Purely a layout shell: a labeled selector plus native horizontal paging
@@ -37,30 +37,24 @@ enum PrinterDetailPanel: String, CaseIterable, Hashable, Sendable {
 /// `PrinterDetailView` per the epic's "page selection sits above ownership"
 /// contract. Both the selector tap and a horizontal swipe update the same
 /// `selection` binding, so the two can never disagree.
-struct PrinterDetailPanelsHost<Status: View, Controls: View>: View {
+struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
     @Binding var selection: PrinterDetailPanel
     let controlsAvailable: Bool
-    @ViewBuilder let status: () -> Status
+    @ViewBuilder let overview: () -> Overview
     @ViewBuilder let controls: () -> Controls
 
-    /// Panels currently reachable given capability/access gates. A pure
-    /// static function so panel-availability rules are unit-testable
-    /// without hosting a view (`PrinterDetailPanelsTests`).
+    /// Discoverability is independent of command authorization. The Controls
+    /// page explains unavailable access instead of removing the destination.
     static func availablePanels(controlsAvailable: Bool) -> [PrinterDetailPanel] {
-        controlsAvailable ? PrinterDetailPanel.allCases : [.status]
+        PrinterDetailPanel.allCases
     }
 
-    /// Resolve a safe selection after a capability/access change. If the
-    /// currently selected panel is no longer available (e.g. Controls access
-    /// revoked while selected, or the printer went offline), fall back to
-    /// `.status` rather than stranding the user on a page that no longer
-    /// exists.
+    /// Retain the chosen destination through offline/preference transitions.
     static func resolvedSelection(
         current: PrinterDetailPanel,
         controlsAvailable: Bool
     ) -> PrinterDetailPanel {
-        availablePanels(controlsAvailable: controlsAvailable).contains(current)
-            ? current : .status
+        current
     }
 
     private var availablePanels: [PrinterDetailPanel] {
@@ -69,27 +63,23 @@ struct PrinterDetailPanelsHost<Status: View, Controls: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if controlsAvailable {
-                Picker("Printer detail panel", selection: $selection) {
-                    ForEach(availablePanels, id: \.self) { panel in
-                        Text(panel.title).tag(panel)
-                    }
+            Picker("Printer detail panel", selection: $selection) {
+                ForEach(availablePanels, id: \.self) { panel in
+                    Text(panel.title).tag(panel)
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.top, 8)
-                .padding(.bottom, 4)
-                .accessibilityIdentifier("printer.detail.panel.selector")
             }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+            .accessibilityIdentifier("printer.detail.panel.selector")
 
             TabView(selection: $selection) {
-                page(status(), panel: .status)
-                    .tag(PrinterDetailPanel.status)
+                page(overview(), panel: .overview)
+                    .tag(PrinterDetailPanel.overview)
 
-                if controlsAvailable {
-                    page(controls(), panel: .controls)
-                        .tag(PrinterDetailPanel.controls)
-                }
+                page(controls(), panel: .controls)
+                    .tag(PrinterDetailPanel.controls)
             }
             #if os(iOS)
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -179,11 +169,12 @@ enum PrinterDetailRunActionMapping {
                 ))
             }
         }
-        if isOnline {
-            descriptors.append(.init(
-                kind: .emergencyStop, isEnabled: true, isPending: pendingKinds.contains(.emergencyStop)
-            ))
-        }
+        descriptors.append(.init(
+            kind: .emergencyStop,
+            isEnabled: isOnline,
+            isPending: pendingKinds.contains(.emergencyStop),
+            unavailableReason: isOnline ? nil : "Printer is offline. Use the physical safety switch if needed."
+        ))
         return PrinterRunActionPresentation(descriptors: descriptors)
     }
 }
@@ -305,7 +296,7 @@ enum PrinterDetailFilamentCoverageStateMapping {
 /// (`PrinterControlsViewModel`, hoisted above the pager in
 /// `PrinterDetailView` per finding 10) should be built or replaced.
 ///
-/// Construction is gated on `controlsAvailable` so a Status-only visit — the
+/// Construction is gated on `controlsAvailable` so a Overview-only visit — the
 /// common case, since Advanced Printer Controls defaults off — never
 /// dispatches a capability request nobody can reach. Once an owner exists
 /// for the CURRENT printer, this always says "no" again even if
@@ -355,20 +346,48 @@ enum PrinterDetailFilamentStaleMapping {
 
 // MARK: - Camera lifecycle mapping (issue #2522, Hicks review finding 19)
 
-/// Pure mirror of `PrinterDetailView.isStatusPageForeground`, extracted so
+/// Pure mirror of `PrinterDetailView.isOverviewPageForeground`, extracted so
 /// the exact gate deciding whether camera snapshot polling/the MJPEG live
 /// stream may run is unit-testable without hosting a view.
 ///
-/// Native `TabView` paging keeps the Status page's `cameraSection` mounted
+/// Native `TabView` paging keeps the Overview page's `cameraSection` mounted
 /// alongside Controls for swipe animation, so `scenePhase == .active` alone
 /// (the pre-#2522 single-page screen's only gate) is no longer sufficient:
-/// leaving Status for Controls must stop the camera exactly the same way
+/// leaving Overview for Controls must stop the camera exactly the same way
 /// backgrounding the app already did, so both conditions are required.
 enum PrinterDetailCameraLifecycleMapping {
     static func isForeground(
         scenePhase: ScenePhase,
         selectedPanel: PrinterDetailPanel
     ) -> Bool {
-        scenePhase == .active && selectedPanel == .status
+        scenePhase == .active && selectedPanel == .overview
+    }
+}
+
+/// Use the actual detail width, not the device family: an iPad split can be
+/// narrower than a phone in landscape. Accessibility text uses one column.
+enum PrinterDetailLayout {
+    static func usesColumns(width: CGFloat, dynamicTypeSize: DynamicTypeSize) -> Bool {
+        width >= 760 && !dynamicTypeSize.isAccessibilitySize
+    }
+}
+
+struct PrinterDetailTemperatureReading: Equatable {
+    let measured: Double?
+    let target: Double?
+    let isOnline: Bool
+
+    var measuredText: String {
+        guard isOnline, let measured, measured.isFinite else {
+            return String(localized: "Unavailable")
+        }
+        return measured.temperatureFormatted
+    }
+
+    var targetText: String {
+        guard isOnline, let target, target.isFinite else {
+            return String(localized: "Unknown")
+        }
+        return target == 0 ? String(localized: "Off") : target.temperatureFormatted
     }
 }

@@ -45,7 +45,7 @@ public struct PrinterRunActionBar: View {
 
     /// When Dynamic Type is at an accessibility size, the row wraps to a
     /// stacked column so labels are not clipped and every action keeps its
-    /// 44 pt height. Emergency Stop is always its own full-width row.
+    /// 44 pt height. Emergency Stop remains separate from routine actions.
     private var shouldStack: Bool {
         dynamicTypeSize.isAccessibilitySize
     }
@@ -124,7 +124,7 @@ public struct PrinterRunActionBar: View {
         .accessibilityAddTraits(traits(for: descriptor))
     }
 
-    /// Emergency Stop is always its own full-width, prominently coloured row
+    /// Emergency Stop is a compact labeled action for the detail's top bar.
     /// carrying a distinct label. The bar never blanket-disables it because
     /// another descriptor is pending — the host's descriptor is the only gate.
     private func emergencyStopButton(for descriptor: PrinterRunActionDescriptor) -> some View {
@@ -135,11 +135,13 @@ public struct PrinterRunActionBar: View {
                 PrinterRunActionLabels.title(for: .emergencyStop),
                 systemImage: PrinterRunActionLabels.systemImage(for: .emergencyStop)
             )
-            .fullWidthActionButton(prominence: .prominent)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
             .fontWeight(.semibold)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(Color.pfErrorFill)
+        .buttonStyle(.bordered)
+        .tint(Color.pfError)
         .disabled(!descriptor.isEnabled || descriptor.isPending)
         .accessibilityIdentifier(
             PrinterRunActionLabels.accessibilityIdentifier(for: .emergencyStop)
