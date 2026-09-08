@@ -492,7 +492,8 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
     'one round and exits', 'five implementation/analysis slots maximum',
     'never dispatch, review, or merge it',
     'Before every dispatch, claim, message, review decision, or merge, fetch',
-    'gemini-3.1-pro-preview', 'assessCleanupCandidate', 'operations.md', 'cleanup.md',
+    'newest available Gemini Pro exact ID', 'Gemini Pro is a blocker',
+    'assessCleanupCandidate', 'operations.md', 'cleanup.md',
     'No named non-workflow test entrypoint', 'test-ralph-round-cache.mjs',
   ]) assert.match(skill, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   assert.doesNotMatch(skill, /\.squad\/templates\/ralph-reference\.md/i);
@@ -519,4 +520,31 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
     'working tree clean', 'all commits pushed', 'origin/development', 'CLOSED WITHOUT MERGE',
     'verified linked-issue disposition', 'completed, verified deliverable',
   ]) assert.match(terminal, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+});
+
+test('Vasquez resolves only a current supported Gemini Pro exact ID', async () => {
+  const [configText, registryText, charter, modelSkill, modelReference, templateReference] = await Promise.all([
+    readFile('.squad/config.json', 'utf8'),
+    readFile('.squad/casting/registry.json', 'utf8'),
+    readFile('.squad/agents/vasquez/charter.md', 'utf8'),
+    readFile('.copilot/skills/model-selection/SKILL.md', 'utf8'),
+    readFile('.github/model-selection-reference.md', 'utf8'),
+    readFile('.squad/templates/model-selection-reference.md', 'utf8'),
+  ]);
+  const config = JSON.parse(configText);
+  const registry = JSON.parse(registryText);
+  assert.deepEqual(config.reviewerModelPolicies.vasquez, {
+    provider: 'gemini',
+    capability: 'pro',
+    selection: 'newest-supported-exact-id',
+    onUnavailable: 'block-and-report',
+  });
+  assert.equal(config.agentModelOverrides.vasquez, undefined);
+  assert.equal(registry.find((agent) => agent.persistent_name === 'Vasquez').model, undefined);
+  for (const guidance of [charter, modelSkill, modelReference, templateReference]) {
+    assert.match(guidance, /Gemini Pro/i);
+    assert.match(guidance, /exact (model )?ID/i);
+    assert.match(guidance, /never\s+(use |pass )?Gemini Flash|never\s+fall back to Gemini Flash/i);
+    assert.match(guidance, /do not dispatch Vasquez|reviewer as blocked|report the reviewer blocked/i);
+  }
 });

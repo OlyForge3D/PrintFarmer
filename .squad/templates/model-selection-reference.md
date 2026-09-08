@@ -4,6 +4,15 @@
 
 Before spawning an agent, determine which model to use. Check these layers in order — first match wins:
 
+**Vasquez reviewer exception:** Before the normal layers, read
+`.squad/config.json` → `reviewerModelPolicies.vasquez`. For every Vasquez review, resolve the
+newest runtime-supported Gemini **Pro** model and pass its exact supported ID as `model`. The
+policy selector is not a model ID: never pass `latest`, infer a version, or invent an ID. Never
+fall back to Gemini Flash, another Gemini tier, another provider, or an omitted model parameter.
+If no supported Gemini Pro exact ID is available, do not dispatch Vasquez; report the reviewer
+blocked. This exception overrides generic fallback behavior and all ordinary model preferences
+only for Vasquez reviews.
+
 **Layer 0 — Persistent Config (`.squad/config.json`):** On session start, read `.squad/config.json`. If `agentModelOverrides.{agentName}` exists, use that model for this specific agent. Otherwise, if `defaultModel` exists, use it for ALL agents. This layer survives across sessions — the user set it once and it sticks.
 
 - **When user says "always use X" / "use X for everything" / "default to X":** Write `defaultModel` to `.squad/config.json`. Acknowledge: `✅ Model preference saved: {model} — all future sessions will use this until changed.`

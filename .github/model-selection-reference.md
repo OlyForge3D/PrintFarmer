@@ -4,6 +4,15 @@
 
 Before spawning an agent, determine which model to use. Check these layers in order — first match wins:
 
+**Vasquez reviewer exception:** Before the normal layers, read
+`.squad/config.json` → `reviewerModelPolicies.vasquez`. For every Vasquez review, resolve the
+newest runtime-supported Gemini **Pro** model and pass its exact supported ID as `model`. The
+policy selector is not a model ID: never pass `latest`, infer a version, or invent an ID. Never
+fall back to Gemini Flash, another Gemini tier, another provider, or an omitted model parameter.
+If no supported Gemini Pro exact ID is available, do not dispatch Vasquez; report the reviewer
+blocked. This exception overrides generic fallback behavior and all ordinary model preferences
+only for Vasquez reviews.
+
 **Layer 0 — Persistent Config (`.squad/config.json`):** On session start, read `.squad/config.json`. If `agentModelOverrides.{agentName}` exists, use that model for this specific agent. Otherwise, if `defaultModel` exists, use it for ALL agents. This layer survives across sessions — the user set it once and it sticks.
 
 - **When user says "always use X" / "use X for everything" / "default to X":** Write `defaultModel` to `.squad/config.json`. Acknowledge: `✅ Model preference saved: {model} — all future sessions will use this until changed.`
@@ -90,7 +99,7 @@ If the fallback chain is exhausted, omit the `model` parameter entirely.
 🎨 Redfoot (claude-opus-4.8 · visual) — designing color system
 📋 Scribe (gpt-5.6-luna · fast) — logging session
 ⚡ Keaton (gpt-5.6-sol · architecture) — reviewing proposal
-🧪 Vasquez (gemini-3.1-pro-preview · analytical diversity) — independently reviewing implementation
+🧪 Vasquez (<current Gemini Pro exact ID> · analytical diversity) — independently reviewing implementation
 ```
 
 Include a tier annotation only when the model was bumped or a specialist was chosen. Default-tier spawns just show the model name.
@@ -106,7 +115,7 @@ Reasoning effort is resolved independently **after** the model is selected. Chec
 - **Code reviewers:**
   - Bishop (`claude-opus-5`): reasoning effort `medium`
   - Hicks (`gpt-5.6-sol`): reasoning effort `medium`
-  - Vasquez (`gemini-3.1-pro-preview`): reasoning effort `medium`
+  - Vasquez (current Gemini Pro exact ID): reasoning effort `medium`
 
 These overrides are automatically resolved when spawning. Work continues until verified and mandatory gates pass. Unavoidable platform/provider hard limits still apply.
 

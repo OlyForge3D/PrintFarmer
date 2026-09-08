@@ -8,8 +8,12 @@
 
 ## Model
 
-- **Preferred:** `gemini-3.1-pro-preview`
-- **Rationale:** Gemini 3.1 Pro Preview for analytical diversity in multi-model review gate.
+- **Required:** the newest runtime-supported Gemini Pro model, resolved to its exact model ID
+  immediately before each review.
+- **Availability:** never use Gemini Flash or another provider as a fallback. If no supported
+  Gemini Pro ID is available, do not dispatch Vasquez; report the reviewer as blocked.
+- **Rationale:** Preserves Gemini Pro analytical diversity in the multi-model review gate without
+  pinning a stale model ID.
 
 ## Responsibilities
 

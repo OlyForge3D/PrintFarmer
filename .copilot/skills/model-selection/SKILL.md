@@ -18,6 +18,18 @@
 
 Squad supports 18 models across three routing tiers (premium, standard, fast/cheap). These tiers are policy groupings, not verified pricing claims. The coordinator must select the right model for each agent spawn while preserving explicit user preferences.
 
+## Vasquez Reviewer Exception
+
+For every Vasquez review, read `.squad/config.json` `reviewerModelPolicies.vasquez` before the normal hierarchy. Resolve the newest currently
+supported Gemini **Pro** model from the runtime's available-model catalog, then pass that exact
+supported ID as `model`. The policy selector is not a model ID: never pass `latest`, a version
+you inferred, or an invented identifier.
+
+Never fall back to Gemini Flash, another Gemini tier, another provider, or an omitted model
+parameter. If no supported Gemini Pro exact ID is available, do not dispatch Vasquez and report
+the reviewer as blocked. This exception overrides `defaultModel`, generic fallback chains, and
+charter preferences only for Vasquez reviews.
+
 ## 5-Layer Model Resolution Hierarchy
 
 Resolution is **first-match-wins** — the highest layer with a value wins.

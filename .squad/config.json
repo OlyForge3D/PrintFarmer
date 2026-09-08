@@ -11,8 +11,15 @@
     "parker": "gpt-6-astra",
     "newt": "claude-opus-4.7-xhigh",
     "bishop": "claude-opus-5",
-    "hicks": "gpt-6-astra",
-    "vasquez": "gemini-3.1-pro-preview"
+    "hicks": "gpt-6-astra"
+  },
+  "reviewerModelPolicies": {
+    "vasquez": {
+      "provider": "gemini",
+      "capability": "pro",
+      "selection": "newest-supported-exact-id",
+      "onUnavailable": "block-and-report"
+    }
   },
   "agentReasoningEffortOverrides": {
     "dallas": "max",
