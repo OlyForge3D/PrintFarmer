@@ -100,6 +100,18 @@ const uniqueKnownIds = (ids: readonly string[], knownIds: ReadonlySet<string>) =
   });
 };
 
+const uniqueStringIds = (ids: readonly unknown[]) => {
+  const seen = new Set<string>();
+  return ids.filter((id): id is string => {
+    if (typeof id !== 'string' || seen.has(id)) {
+      return false;
+    }
+
+    seen.add(id);
+    return true;
+  });
+};
+
 const getAnchoredIds = (items: readonly NavPreferenceItem[]) => new Set(items.filter((item) => item.anchored).map((item) => item.id));
 
 const enforceAnchoredNavPreferences = (preferences: NavPreferences, items: readonly NavPreferenceItem[]): NavPreferences => {
@@ -153,7 +165,7 @@ export function normalizeNavPreferences(
     hiddenItemIds: uniqueKnownIds(preferences?.hiddenItemIds ?? [], knownIds),
     pinnedItemIds: uniqueKnownIds(preferences?.pinnedItemIds ?? [], knownIds),
     ...(Array.isArray(preferences?.adminPinnedItemIds)
-      ? { adminPinnedItemIds: [...new Set(preferences.adminPinnedItemIds)] }
+      ? { adminPinnedItemIds: uniqueStringIds(preferences.adminPinnedItemIds) }
       : {}),
   }, items);
 }
@@ -310,5 +322,58 @@ export function setNavItemPinned(preferences: NavPreferences, itemId: string, pi
   return {
     ...preferences,
     pinnedItemIds: preferences.orderedItemIds.filter((id) => pinnedIds.has(id)),
+  };
+}
+
+export function getAdminPinnedItemIds(preferences?: Partial<NavPreferences> | null): string[] {
+  return Array.isArray(preferences?.adminPinnedItemIds) ? uniqueStringIds(preferences.adminPinnedItemIds) : [];
+}
+
+export function setAdminNavItemPinned(preferences: NavPreferences, destinationId: string, pinned: boolean): NavPreferences {
+  const currentPinnedIds = getAdminPinnedItemIds(preferences);
+  const nextPinnedIds = pinned
+    ? uniqueStringIds([...currentPinnedIds, destinationId])
+    : currentPinnedIds.filter((id) => id !== destinationId);
+
+  return {
+    ...preferences,
+    adminPinnedItemIds: nextPinnedIds,
+  };
+}
+
+export function moveAdminNavItem(
+  preferences: NavPreferences,
+  destinationId: string,
+  targetIndex: number,
+  orderedPinnedIds: readonly string[] = getAdminPinnedItemIds(preferences),
+): NavPreferences {
+  const currentPinnedIds = getAdminPinnedItemIds(preferences);
+  const reorderablePinnedIds = uniqueStringIds(orderedPinnedIds).filter((id) => currentPinnedIds.includes(id));
+  const currentIndex = reorderablePinnedIds.indexOf(destinationId);
+  if (currentIndex < 0) {
+    return preferences;
+  }
+
+  const nextPinnedIds = reorderablePinnedIds.filter((id) => id !== destinationId);
+  const safeTargetIndex = Math.max(0, Math.min(targetIndex, nextPinnedIds.length));
+  nextPinnedIds.splice(safeTargetIndex, 0, destinationId);
+
+  if (reorderablePinnedIds.length === currentPinnedIds.length) {
+    return {
+      ...preferences,
+      adminPinnedItemIds: nextPinnedIds,
+    };
+  }
+
+  const reorderedVisibleIds = [...nextPinnedIds];
+  const reorderablePinnedIdSet = new Set(reorderablePinnedIds);
+
+  return {
+    ...preferences,
+    adminPinnedItemIds: currentPinnedIds.map((id) => (
+      reorderablePinnedIdSet.has(id)
+        ? reorderedVisibleIds.shift() ?? id
+        : id
+    )),
   };
 }

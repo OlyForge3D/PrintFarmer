@@ -11,6 +11,7 @@ import { MemoryRouter, useLocation } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
 import { useCommandPalette } from '@/features/settings/components/commandPaletteContext';
+import { renderUnknown } from '@/common/utils/renderUnknown';
 
 const authState: {
   roles: string[];
@@ -64,8 +65,9 @@ function LocationProbe() {
   const location = useLocation();
   return (
     <div>
-      <div data-testid="pathname">{location.pathname}</div>
-      <div data-testid="search">{location.search}</div>
+      <div data-testid="pathname">{renderUnknown(location.pathname)}</div>
+      <div data-testid="search">{renderUnknown(location.search)}</div>
+      <div data-testid="state">{renderUnknown(location.state)}</div>
     </div>
   );
 }
@@ -142,6 +144,21 @@ describe('GlobalCommandPaletteProvider', () => {
       expect(screen.getByTestId('pathname')).toHaveTextContent('/admin/login-audit');
     });
     expect(screen.getByTestId('search')).toHaveTextContent('');
+  });
+
+  it('marks top-level admin destination navigation as admin-origin', async () => {
+    renderProvider();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open palette' }));
+    const input = await screen.findByRole('combobox', { name: 'Search settings command palette' });
+    fireEvent.change(input, { target: { value: 'analytics' } });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pathname')).toHaveTextContent('/analytics');
+    });
+    expect(screen.getByTestId('state')).toHaveTextContent('"pageParent": "admin-control-center"');
   });
 
   it('runs the switch-theme action inline and closes the palette', async () => {

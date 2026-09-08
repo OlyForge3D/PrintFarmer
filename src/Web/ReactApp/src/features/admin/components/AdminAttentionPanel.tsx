@@ -16,6 +16,7 @@ import {
   canAccessDestination,
   getDestinationById,
 } from '@/features/admin/registry';
+import { ADMIN_HUB_ROUTE_STATE } from '@/features/admin/utils/adminHubParentState';
 import {
   canonicalizeInternalRoute,
   isControlCenterSelfRoute,
@@ -133,7 +134,7 @@ function AttentionRowFromDto({
       detail={item.detail}
       action={
         item.actionLabel && actionRoute
-          ? { label: item.actionLabel, to: actionRoute }
+          ? { label: item.actionLabel, to: actionRoute, state: ADMIN_HUB_ROUTE_STATE }
           : undefined
       }
       dataAttributes={{

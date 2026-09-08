@@ -49,6 +49,7 @@ import {
   getSettingsScopeForCategory,
 } from '@/features/settings/types';
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
+import { AdminNavPinButton } from '@/features/admin/components/AdminNavPinButton';
 import { BedTypeAdminPage } from '@/features/admin/pages/BedTypeAdminPage';
 import { NfcDevicesPage } from '@/features/nfc/pages/NfcDevicesPage';
 import { CamerasPage } from '@/features/cameras/pages/CamerasPage';
@@ -1667,6 +1668,9 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const headerActions = (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <div ref={setHeaderSlot} className="contents" />
+      {isAdminRoute && activeTabDestination ? (
+        <AdminNavPinButton destinationId={activeTabDestination.id} />
+      ) : null}
       {isAdminRoute ? (
         <WorkspaceSearchResults
           initialQuery={query}

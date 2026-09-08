@@ -45,6 +45,7 @@ import { FailureDetectionPollingProvider } from '@/features/printers/hooks/useFa
 import type { DetailedPrinterCardProps } from '@/features/printers/components/DetailedPrinterCard';
 import type { EditPrinterModalProps } from '@/features/printers/components/EditPrinterModal';
 import type { PrinterDiscoveryModalProps } from '@/features/printers/components/PrinterDiscoveryModal';
+import { useAdminHubParent } from '@/features/admin/utils/adminHubParentState';
 
 // Interaction-only surfaces: not needed for the initial grid paint, so they're
 // lazy-loaded out of the PrintersPage chunk (#1146 item 10). `DetailedPrinterCard`
@@ -67,6 +68,7 @@ type BackendFilter = 'all' | 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint' | 
 type AvailabilityFilter = 'all' | '1' | '2' | '4' | '8' | '12' | '24';
 
 export function PrintersPage() {
+  const adminHubParent = useAdminHubParent();
   const { hasPermission } = useAuth();
   // Prime the fleet filament coverage cache for all compact-card slots so
   // per-printer hooks dedupe via the fleet snapshot instead of each issuing
@@ -481,21 +483,27 @@ export function PrintersPage() {
 
   if (isLoading && !showPrintersError) {
     return (
-      <div className="min-h-full bg-pf-bg-2 pt-4 pb-8 lg:pt-20">
-        <div className="mx-auto px-4 sm:px-6 lg:px-8" role="status" aria-busy="true">
-          <div className="pf-skeleton pf-animate-skeleton h-8 w-48 rounded-sm mb-6" />
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+      <PageTemplate
+        title="Printers"
+        subtitle="Monitor and manage your 3D printer farm"
+        icon={PrinterIcon}
+        titleActions={<HelpButton onClick={startTour} />}
+        parent={adminHubParent}
+      >
+        <div role="status" aria-busy="true">
+          <div className="pf-skeleton pf-animate-skeleton mb-6 h-8 w-48 rounded-sm" />
+          <div className="mb-8 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="pf-skeleton pf-animate-skeleton h-24 rounded-lg" />
             ))}
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <PrinterCardSkeleton key={i} />
             ))}
           </div>
         </div>
-      </div>
+      </PageTemplate>
     );
   }
 
@@ -506,6 +514,7 @@ export function PrintersPage() {
         subtitle="Monitor and manage your 3D printer farm"
         icon={PrinterIcon}
         titleActions={<HelpButton onClick={startTour} />}
+        parent={adminHubParent}
       >
         <div
           role="alert"
@@ -542,6 +551,7 @@ export function PrintersPage() {
       subtitle="Monitor and manage your 3D printer farm"
       icon={PrinterIcon}
       titleActions={<HelpButton onClick={startTour} />}
+      parent={adminHubParent}
     >
       <FailureDetectionPollingProvider value={anyObicoEnabled}>
       <div className={isSidebarOpen ? 'min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-6' : 'min-w-0'}>
