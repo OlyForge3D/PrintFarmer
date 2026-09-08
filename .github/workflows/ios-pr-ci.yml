@@ -355,6 +355,13 @@ jobs:
       - name: Run ${{ matrix.suite }} XCUI
         timeout-minutes: 25
         run: |
+          additional_tests=()
+          if [[ "${{ matrix.suite }}" == "OperatorShellUITests" ]]; then
+            additional_tests+=(
+              "-only-testing:PrintFarmerUITests/OperatorFeatureVisibilityUITests/testDisabledDestinationsAreAbsentAndFarmIsSelected"
+              "-only-testing:PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations"
+            )
+          fi
           xcodebuild test \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
@@ -366,6 +373,7 @@ jobs:
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             -only-testing:PrintFarmerUITests/${{ matrix.suite }} \
+            "${additional_tests[@]}" \
             -parallel-testing-enabled NO \
             -disable-concurrent-destination-testing \
             -resultBundlePath "build-${{ matrix.key }}-${{ matrix.suite }}/${{ matrix.suite }}.xcresult"
