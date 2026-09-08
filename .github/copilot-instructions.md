@@ -220,9 +220,23 @@ Note the bare `squad` label is the scope marker. A `squad:{member}` label is an
 > deliberately for single-maintainer operation — see issue #1310 and § "Repository
 > verdict evidence".
 
+**Push early and often.** After the first meaningful commit, publish the feature
+branch with `git push -u origin <branch>`, and push again after each meaningful
+chunk of work. Do not wait for review approval to push. **Pushing is not merging**:
+it does not open or authorize a PR, request review, apply labels, authorize a
+merge, or bypass the pre-PR review gate.
+
+A session's worktree is destroyed when it is archived. Before ending a session or
+archiving it, verify every intended commit is reachable from the remote branch
+and report that remote branch/ref. No push is required before a commit exists.
+
+Early publication does not relax the review-SHA rules in § "Repository verdict
+evidence"; rebases and force-pushes still supersede recorded reviews.
+
 Flow:
 
-1. Commit code to a feature branch (do not push yet).
+1. Commit code to a feature branch, then push the branch for recovery. **Do not open
+   the PR yet**; the review gate below must still pass before PR creation.
 2. Request review from Bishop, Hicks, Vasquez (mention all three).
 3. Reviewers converge adversarially on the branch — no serial review or independence.
 4. If consensus is APPROVE, proceed to step 5. If REJECT or BLOCK, fix the code on the

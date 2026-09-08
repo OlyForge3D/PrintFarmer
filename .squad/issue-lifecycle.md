@@ -141,10 +141,24 @@ cd ../worktrees/{issue-number}
 
 ### 3. Implementation & Commit
 
+**Push early and often.** After the first meaningful commit, publish the feature
+branch with `git push -u origin <branch>`, and push again after each meaningful
+chunk of work. Do not wait for review approval to push. **Pushing is not merging**:
+it does not open or authorize a PR, request review, apply labels, authorize a
+merge, or bypass the pre-PR review gate.
+
+A session's worktree is destroyed when it is archived. Before ending a session or
+archiving it, verify every intended commit is reachable from the remote branch
+and report that remote branch/ref. No push is required before a commit exists.
+
+Early publication does not relax the review-SHA rules in
+`.github/copilot-instructions.md` § "Repository verdict evidence"; rebases and
+force-pushes still supersede recorded reviews.
+
 **Actions:**
 1. Agent makes code changes
 2. Commits reference the issue number
-3. Pushes branch to remote
+3. Pushes meaningful chunks to remote without waiting for PR readiness
 
 **Commit message format:**
 ```
@@ -161,14 +175,15 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>
 
 **Commit types:** `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `perf`, `style`, `build`, `ci`
 
-**Push command:**
+**Final push command (repeat before ending the session):**
 ```bash
 git push -u origin squad/{issue-number}-{slug}
 ```
 
 ### 4. PR Creation
 
-**Trigger:** Agent completes implementation and is ready for review.
+**Trigger:** Implementation is complete and the branch has approval under
+`.github/copilot-instructions.md` § "Pre-PR Review Gate".
 
 **Actions:**
 1. Open PR from feature branch to base branch
@@ -316,14 +331,25 @@ When spawning an agent to work on an issue, include this context block:
 **Your task:**
 {specific directive to the agent}
 
+**While working:**
+Push early and often: run `git push -u origin squad/{issue-number}-{slug}` after
+the first meaningful commit and push again after each meaningful chunk of work.
+Do not wait for review approval to push. Pushing is not merging and does not open
+or authorize a PR, request review, apply labels, authorize a merge, or bypass the
+pre-PR review gate. Rebases and force-pushes remain subject to the review-SHA rules
+in `.github/copilot-instructions.md` § "Repository verdict evidence".
+
 **After completing work:**
-1. Commit with message referencing issue number
-2. Push branch
-3. Open PR: prefer the app's `create_pull_request` tool (title/body as above), then
+1. Commit any remaining work with a message referencing the issue number
+2. Push branch and verify every intended commit is reachable from the remote
+   branch before ending the session or archival
+3. Obtain approval under `.github/copilot-instructions.md` § "Pre-PR Review Gate"
+   before opening a PR; publication alone does not satisfy this gate
+4. Open PR: prefer the app's `create_pull_request` tool (title/body as above), then
    `gh pr edit <num> --add-label squad`. Fall back to `gh pr create --label squad
    --title "{title}" --body "Closes #{number}\n\n{description}" --head
    squad/{issue-number}-{slug} --base {base-branch}` only if the tool is unavailable.
-4. Report PR URL to coordinator
+5. Report PR URL and remote branch/ref to coordinator
 ```
 
 ## Ralph's Role in Issue Lifecycle
