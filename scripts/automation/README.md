@@ -31,7 +31,7 @@ preserves the preceding good snapshot.
 The state namespace is:
 
 ```text
-<state-root>/github.com/OlyForge3D/PrintFarmer/<workflow-id>/
+<state-root>/github.com/olyforge3d/printfarmer/<workflow-id>/
 ```
 
 It contains a mode-`0700` directory, an atomic `snapshot.json`, a short-lived

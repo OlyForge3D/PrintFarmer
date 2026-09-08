@@ -142,7 +142,7 @@ test('missing CI collection arrays abort before the snapshot advances', async (t
 test('a failed collection preserves the last good snapshot and does not emit an empty success', async (t) => {
   const options = await temporaryOptions(t);
   await scan(options);
-  const stateFile = path.join(options.stateRoot, 'github.com', 'OlyForge3D', 'PrintFarmer', 'workflow-test', 'snapshot.json');
+  const stateFile = path.join(options.stateRoot, 'github.com', 'olyforge3d', 'printfarmer', 'workflow-test', 'snapshot.json');
   const before = await readFile(stateFile, 'utf8');
   options.transport = { async get() { throw Object.assign(new Error('rate limited'), { code: 'GITHUB_ERROR' }); } };
   await assert.rejects(() => scan(options), /rate limited/);
@@ -151,7 +151,7 @@ test('a failed collection preserves the last good snapshot and does not emit an 
 
 test('malformed pagination, corrupt state, and concurrent locks fail closed', async (t) => {
   const options = await temporaryOptions(t);
-  const lock = path.join(options.stateRoot, 'github.com', 'OlyForge3D', 'PrintFarmer', 'workflow-test', 'scan.lock');
+  const lock = path.join(options.stateRoot, 'github.com', 'olyforge3d', 'printfarmer', 'workflow-test', 'scan.lock');
   await (await import('node:fs/promises')).mkdir(path.dirname(lock), { recursive: true });
   const release = await acquireLock(lock);
   await assert.rejects(() => scan(options), /already holds/);
@@ -188,7 +188,7 @@ test('unavailable CodeQL evidence remains unknown instead of passing as clean', 
 
 test('corrupt snapshots are retained for diagnosis and require an explicit rebaseline', async (t) => {
   const options = await temporaryOptions(t);
-  const directory = path.join(options.stateRoot, 'github.com', 'OlyForge3D', 'PrintFarmer', 'workflow-test');
+  const directory = path.join(options.stateRoot, 'github.com', 'olyforge3d', 'printfarmer', 'workflow-test');
   await mkdir(directory, { recursive: true });
   await writeFile(path.join(directory, 'snapshot.json'), '{ invalid');
   await assert.rejects(() => scan(options), /Prior state is corrupt/);

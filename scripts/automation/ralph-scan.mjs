@@ -38,6 +38,8 @@ export function parseArgs(argv) {
   const workflowId = required(args['--workflow-id'], '--workflow-id');
   const stateRoot = required(args['--state-root'], '--state-root');
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) fail('--repo must be OWNER/REPO.', 'ARGUMENT_ERROR');
+  for (const segment of repo.split('/')) safeSegment(segment);
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(workflowId)) fail('--workflow-id contains unsupported characters.', 'ARGUMENT_ERROR');
   if (!path.isAbsolute(stateRoot)) fail('--state-root must be an absolute path.', 'ARGUMENT_ERROR');
   if (args['--sessions-file'] && !path.isAbsolute(args['--sessions-file'])) {
     fail('--sessions-file must be an absolute path.', 'ARGUMENT_ERROR');
@@ -58,11 +60,21 @@ export function digest(value) {
 }
 
 function safeSegment(value) {
-  return value.replace(/[^A-Za-z0-9_.-]/g, '_');
+  const segment = value.replace(/[^A-Za-z0-9_.-]/g, '_');
+  if (!segment || segment === '.' || segment === '..') fail('State namespace contains an unsafe path segment.', 'ARGUMENT_ERROR');
+  return segment;
 }
 
 function stateDirectory({ stateRoot, repo, workflowId, host = 'github.com' }) {
-  return path.join(stateRoot, safeSegment(host), ...repo.toLowerCase().split('/').map(safeSegment), safeSegment(workflowId));
+  const root = path.resolve(stateRoot);
+  const directory = path.resolve(
+    root, safeSegment(host), ...repo.toLowerCase().split('/').map(safeSegment), safeSegment(workflowId),
+  );
+  const relative = path.relative(root, directory);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    fail('State namespace escapes --state-root.', 'ARGUMENT_ERROR');
+  }
+  return directory;
 }
 
 async function ensurePrivateDirectory(directory) {
