@@ -36,6 +36,8 @@ const COMMIT_DEBOUNCE_MS = 200;
 export interface WorkspaceSearchResultsProps {
   /** Seeds the input on mount, e.g. from the current `q` URL param. */
   initialQuery: string;
+  /** Mirrors the live input text upward so explicit shell navigation can use it before the debounced URL sync lands. */
+  onQueryChange?: (query: string) => void;
   /**
    * Called ~200ms after the user stops typing (or immediately on clear) with
    * the latest raw text, so the parent can persist it into the URL with
@@ -52,10 +54,11 @@ export interface WorkspaceSearchResultsProps {
   className?: string;
 }
 
-export function WorkspaceSearchResults({ initialQuery, onQueryCommit, onSelect, className }: WorkspaceSearchResultsProps) {
+export function WorkspaceSearchResults({ initialQuery, onQueryChange, onQueryCommit, onSelect, className }: WorkspaceSearchResultsProps) {
   const [query, setQuery] = useState(initialQuery);
   const [isFocused, setIsFocused] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [pendingLocalCommitQuery, setPendingLocalCommitQuery] = useState<string | null>(null);
   const listboxId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const onQueryCommitRef = useRef(onQueryCommit);
@@ -100,6 +103,9 @@ export function WorkspaceSearchResults({ initialQuery, onQueryCommit, onSelect, 
       ]);
     } else {
       setQuery(initialQuery);
+      if (pendingLocalCommitQuery !== null) {
+        setPendingLocalCommitQuery(null);
+      }
       if (pendingSelfCommits.length > 0) {
         setPendingSelfCommits([]);
       }
@@ -121,21 +127,31 @@ export function WorkspaceSearchResults({ initialQuery, onQueryCommit, onSelect, 
     [items, query],
   );
   const groupedResults = useMemo(() => groupRankedResults(rankedResults), [rankedResults]);
+  const setQueryAndNotify = useCallback((nextQuery: string) => {
+    setQuery(nextQuery);
+    setPendingLocalCommitQuery(nextQuery);
+    onQueryChange?.(nextQuery);
+  }, [onQueryChange]);
 
   // Debounced, replace-only URL sync — see the module doc for why this must
   // never push a history entry or drive navigation on its own.
   useEffect(() => {
+    if (pendingLocalCommitQuery === null || pendingLocalCommitQuery !== query) {
+      return undefined;
+    }
     const timer = window.setTimeout(() => {
+      const committedQuery = pendingLocalCommitQuery;
       // Queue before calling out — however long the parent takes to echo
       // this back through `initialQuery`, and regardless of the order in
       // which multiple queued commits eventually echo, each will be
       // recognized as our own write rather than an external change to
       // re-sync from.
-      setPendingSelfCommits((prev) => [...prev, query]);
-      onQueryCommitRef.current(query);
+      setPendingSelfCommits((prev) => [...prev, committedQuery]);
+      setPendingLocalCommitQuery((current) => (current === committedQuery ? null : current));
+      onQueryCommitRef.current(committedQuery);
     }, COMMIT_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [query]);
+  }, [pendingLocalCommitQuery, query]);
 
   // "Adjusting state when a prop changes" (not a derived-value effect): reset
   // the active index during render when `query` changes, following the
@@ -200,9 +216,9 @@ export function WorkspaceSearchResults({ initialQuery, onQueryCommit, onSelect, 
   }, [activeIndex, commitSelection, isOpen, rankedResults, setActiveResult]);
 
   const handleClear = useCallback(() => {
-    setQuery('');
+    setQueryAndNotify('');
     inputRef.current?.focus();
-  }, []);
+  }, [setQueryAndNotify]);
 
   return (
     <div className={clsx('relative w-full max-w-xs', className)}>
@@ -214,7 +230,7 @@ export function WorkspaceSearchResults({ initialQuery, onQueryCommit, onSelect, 
         <Input
           ref={inputRef}
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => setQueryAndNotify(event.target.value)}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           onKeyDown={handleInputKeyDown}
