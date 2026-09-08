@@ -74,7 +74,11 @@ vi.mock('@/services/settingsApi', async () => {
             name: 'autoApply',
             type: 'Boolean',
             attributes: [],
-            display: { name: 'Auto Apply', inputType: 'Boolean' },
+            display: {
+              name: 'Auto Apply',
+              description: 'Apply catalog updates automatically.',
+              inputType: 'Boolean',
+            },
           },
         ],
       },
@@ -238,7 +242,7 @@ describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () =>
     });
   });
 
-  it('disables first-visit tour auto-start for exact-field deep links so focus can land on the target (#2556)', async () => {
+  it('focuses the exact field control when its label includes a description affordance (#2556)', async () => {
     await renderPageWithField('CatalogUpdates.autoApply');
 
     expect(usePageTourMock).toHaveBeenCalledWith({
@@ -248,7 +252,38 @@ describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () =>
     });
     const targetInput = document.querySelector<HTMLInputElement>('[data-setting-property="CatalogUpdates.autoApply"] input');
     expect(targetInput).toBeTruthy();
+    const description = targetInput!.closest('[data-setting-property]')!
+      .querySelector('[aria-label="Apply catalog updates automatically."]');
+    expect(description).toBeTruthy();
     expect(targetInput).toHaveFocus();
+  });
+
+  it('waits for a deferred exact-field control before restoring focus (#2556)', async () => {
+    const querySelector = document.querySelector.bind(document);
+    let exactFieldAttempts = 0;
+    vi.spyOn(document, 'querySelector').mockImplementation((selectors: string) => {
+      if (selectors === '[data-setting-property="CatalogUpdates.autoApply"]' && exactFieldAttempts++ === 0) {
+        return null;
+      }
+      return querySelector(selectors);
+    });
+
+    await renderPageWithField('CatalogUpdates.autoApply');
+
+    const targetInput = querySelector(
+      '[data-setting-property="CatalogUpdates.autoApply"] input',
+    ) as HTMLInputElement | null;
+    expect(targetInput).toBeTruthy();
+    expect(targetInput).not.toHaveFocus();
+
+    // A later settings commit wakes the observer after the first lookup missed.
+    const deferredCommit = document.createElement('div');
+    document.body.appendChild(deferredCommit);
+
+    await waitFor(() => expect(targetInput).toHaveFocus());
+    expect(scrollIntoViewMock).toHaveBeenCalledTimes(1);
+
+    deferredCommit.remove();
   });
 
   it('re-focuses the same exact field when the link is cleared and then re-activated on the same mounted page', async () => {
@@ -308,7 +343,7 @@ describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () =>
     // should apply, and the user gets a toast instead of silence.
     await renderPageWithField('NoSuchSection.NoSuchProperty');
 
-    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledTimes(1), { timeout: 1500 });
     expect(toastErrorMock).toHaveBeenCalledWith(
       expect.stringContaining('NoSuchSection.NoSuchProperty'),
     );

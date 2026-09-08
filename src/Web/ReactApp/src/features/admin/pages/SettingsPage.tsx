@@ -859,7 +859,8 @@ export function SettingsPage({
       return;
     }
 
-    const raf = window.requestAnimationFrame(() => {
+    let observer: MutationObserver | null = null;
+    const resolveField = (allowRowFocus = false) => {
       // The attribute value is quoted, so only backslashes and quotes need
       // escaping. CSS.escape is for bare identifiers and would mangle the dot
       // separator in a qualified `Section.Property` key.
@@ -874,14 +875,19 @@ export function SettingsPage({
         : `[data-setting-property$=".${escapedField}"]`;
       const target = document.querySelector<HTMLElement>(selector);
       if (target) {
-        const control = target.querySelector<HTMLElement>(
-          'input, select, textarea, button, [tabindex]:not([tabindex="-1"])',
-        );
+        const settingKey = target.dataset.settingProperty;
+        const controlContainer = target.children.item(1);
+        const control = (settingKey ? document.getElementById(settingKey) : null)
+          ?? controlContainer?.querySelector<HTMLElement>(
+            'input, select, textarea, [contenteditable="true"], button, [tabindex]:not([tabindex="-1"])',
+          );
         if (control) {
           control.focus({ preventScroll: true });
-        } else {
+        } else if (allowRowFocus) {
           target.setAttribute('tabindex', '-1');
           target.focus({ preventScroll: true });
+        } else {
+          return false;
         }
         const prefersReducedMotion = typeof window.matchMedia === 'function'
           && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -893,21 +899,39 @@ export function SettingsPage({
         window.setTimeout(() => {
           target.classList.remove('pf-setting-focus');
         }, 2000);
-      } else {
-        // #2505: a qualified field link can fail to resolve — stale metadata,
-        // a typo carried over from an older link, or (now that the workspace
-        // search can reach fields on other admin pages) a field that simply
-        // doesn't render on *this* page. Surface it rather than silently
-        // doing nothing: the current page and its editor stay mounted
-        // exactly as they were, `?field=` stays in the URL so the link
-        // remains inspectable, and nothing crashes.
-        toast.error(`Couldn't find the "${fieldParam}" setting on this page.`);
+        handledFieldActivationRef.current = fieldParam;
+        observer?.disconnect();
+        return true;
       }
-      handledFieldActivationRef.current = fieldParam;
+
+      return false;
+    };
+
+    const raf = window.requestAnimationFrame(() => {
+      if (resolveField()) return;
+
+      // Some settings controls mount after the page-level loading state clears.
+      // Observe those deferred commits instead of permanently treating the
+      // first missing frame as a failed deep link.
+      observer = new MutationObserver(() => {
+        resolveField();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
     });
+    const resolutionTimeout = window.setTimeout(() => {
+      if (handledFieldActivationRef.current === fieldParam || resolveField(true)) return;
+
+      observer?.disconnect();
+      // #2505: stale metadata, a typo, or a field on another page should remain
+      // inspectable in the URL while surfacing the failed resolution.
+      toast.error(`Couldn't find the "${fieldParam}" setting on this page.`);
+      handledFieldActivationRef.current = fieldParam;
+    }, 1000);
 
     return () => {
       window.cancelAnimationFrame(raf);
+      window.clearTimeout(resolutionTimeout);
+      observer?.disconnect();
     };
   }, [fieldParam, loading]);
 
