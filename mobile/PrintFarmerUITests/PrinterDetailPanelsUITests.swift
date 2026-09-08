@@ -133,7 +133,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         defer { XCUIDevice.shared.orientation = .portrait }
         for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
             XCUIDevice.shared.orientation = orientation
-            let overview = app.otherElements["printer.detail.panel.overview"]
+            let overview = app.descendants(matching: .any)["printer.detail.panel.overview"]
             XCTAssertTrue(overview.waitForExistence(timeout: 8))
             let expectedLayout = overview.frame.width >= 760
                 ? "printer.detail.columns" : "printer.detail.readingColumn"
