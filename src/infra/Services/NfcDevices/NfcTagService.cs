@@ -101,10 +101,17 @@ public class NfcTagService(
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var authorization = scope.ServiceProvider.GetRequiredService<NfcManagementAuthorization>();
+            await authorization.EnsurePrinterAsync(request.PrinterId, ct);
 
             var binding = await db.NfcTagBindings
                 .Include(b => b.Printer)
                 .FirstOrDefaultAsync(b => b.TagUid == request.TagUid, ct);
+
+            if (binding is not null)
+            {
+                await authorization.EnsurePrinterAsync(binding.PrinterId, ct);
+            }
 
             if (binding is null)
             {
@@ -152,10 +159,13 @@ public class NfcTagService(
         // Final fallback: return the existing binding (winner of the race)
         await using var fallbackScope = scopeFactory.CreateAsyncScope();
         var fallbackDb = fallbackScope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var fallbackAuthorization = fallbackScope.ServiceProvider.GetRequiredService<NfcManagementAuthorization>();
+        await fallbackAuthorization.EnsurePrinterAsync(request.PrinterId, ct);
 
         var existing = await fallbackDb.NfcTagBindings
             .Include(b => b.Printer)
             .FirstAsync(b => b.TagUid == request.TagUid, ct);
+        await fallbackAuthorization.EnsurePrinterAsync(existing.PrinterId, ct);
 
         existing.SpoolId = request.SpoolId;
         existing.SpoolName = request.SpoolName;
@@ -175,22 +185,29 @@ public class NfcTagService(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var authorization = scope.ServiceProvider.GetRequiredService<NfcManagementAuthorization>();
+        authorization.EnsureAdmin();
 
         var bindings = await db.NfcTagBindings
             .Include(b => b.Printer)
             .OrderBy(b => b.CreatedAt)
             .ToListAsync(ct);
 
-        return bindings.Select(MapToDto).ToList();
+        var allowed = await authorization.FilterPrinterIdsAsync(
+            bindings.Where(b => b.PrinterId.HasValue).Select(b => b.PrinterId!.Value).Distinct().ToArray(), ct);
+        return bindings.Where(b => !b.PrinterId.HasValue || allowed.Contains(b.PrinterId.Value))
+            .Select(MapToDto).ToList();
     }
 
     public async Task<bool> DeleteBindingAsync(Guid id, CancellationToken ct)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var authorization = scope.ServiceProvider.GetRequiredService<NfcManagementAuthorization>();
+        authorization.EnsureAdmin();
 
         var binding = await db.NfcTagBindings.FindAsync([id], ct);
-        if (binding is null)
+        if (binding is null || !await authorization.CanAccessPrinterAsync(binding.PrinterId, ct))
         {
             return false;
         }

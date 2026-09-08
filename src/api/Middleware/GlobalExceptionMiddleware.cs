@@ -90,6 +90,8 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
         {
             // Authentication and authorization
             UnauthorizedAccessException => (HttpStatusCode.Unauthorized, "Unauthorized access", null),
+            Farm.Infrastructure.Services.NfcDevices.NfcManagementAccessDeniedException =>
+                (HttpStatusCode.Forbidden, "NFC management access denied", null),
             Farm.Infrastructure.QueueGroupAccessDeniedException => (HttpStatusCode.Forbidden, "Access denied to printer group", null),
 
             // Validation errors (more specific first)

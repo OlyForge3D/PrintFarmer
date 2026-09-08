@@ -19,7 +19,7 @@ public class NfcDevicesController(INfcDeviceService nfcDeviceService) : Controll
     /// <summary>
     /// Gets all registered NFC devices.
     /// </summary>
-    [Authorize]
+    [RequirePermission("nfc_devices", "admin")]
     [HttpGet]
     [ProducesResponseType(typeof(NfcDeviceDto[]), 200)]
     public async Task<ActionResult<NfcDeviceDto[]>> GetAllAsync(CancellationToken ct)
@@ -31,7 +31,7 @@ public class NfcDevicesController(INfcDeviceService nfcDeviceService) : Controll
     /// <summary>
     /// Gets a specific NFC device by ID.
     /// </summary>
-    [Authorize]
+    [RequirePermission("nfc_devices", "admin")]
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(NfcDeviceDto), 200)]
     [ProducesResponseType(404)]
@@ -44,7 +44,7 @@ public class NfcDevicesController(INfcDeviceService nfcDeviceService) : Controll
     /// <summary>
     /// Registers a new NFC device.
     /// </summary>
-    [Authorize]
+    [RequirePermission("nfc_devices", "admin")]
     [HttpPost]
     [ProducesResponseType(typeof(NfcDeviceDto), 201)]
     [ProducesResponseType(400)]
@@ -64,7 +64,7 @@ public class NfcDevicesController(INfcDeviceService nfcDeviceService) : Controll
     /// <summary>
     /// Updates an NFC device.
     /// </summary>
-    [Authorize]
+    [RequirePermission("nfc_devices", "admin")]
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(NfcDeviceDto), 200)]
     [ProducesResponseType(404)]
@@ -85,7 +85,7 @@ public class NfcDevicesController(INfcDeviceService nfcDeviceService) : Controll
     /// <summary>
     /// Deletes an NFC device.
     /// </summary>
-    [Authorize]
+    [RequirePermission("nfc_devices", "admin")]
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
@@ -170,7 +170,7 @@ public class NfcDevicesController(INfcDeviceService nfcDeviceService) : Controll
     /// <summary>
     /// Gets scan history for a specific NFC device.
     /// </summary>
-    [Authorize]
+    [RequirePermission("nfc_devices", "admin")]
     [HttpGet("{id:guid}/history")]
     [ProducesResponseType(typeof(NfcScanHistoryDto[]), 200)]
     [ProducesResponseType(404)]

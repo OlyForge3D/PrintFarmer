@@ -1,10 +1,13 @@
-﻿using Farm.Infrastructure;
+﻿using System.Security.Claims;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.NfcDevices;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -55,6 +58,16 @@ public class NfcTagServiceConcurrencyTests : IDisposable
     {
         var services = new ServiceCollection();
         services.AddScoped(_ => db);
+        services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.Role, "farm_admin")], "Test"))
+            }
+        });
+        services.AddScoped<IQueueResourceAuthorizationService, QueueResourceAuthorizationService>();
+        services.AddScoped<NfcManagementAuthorization>();
         var provider = services.BuildServiceProvider();
         var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
         return new NfcTagService(scopeFactory, _hubMock.Object, NullLogger<NfcTagService>.Instance);
