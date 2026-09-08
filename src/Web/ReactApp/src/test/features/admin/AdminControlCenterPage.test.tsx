@@ -851,8 +851,9 @@ describe('AdminControlCenterPage', () => {
 
     const destinationList = screen.getByRole('list', { name: 'Authorized admin destinations' });
     const [workersRow, analyticsRow] = within(destinationList).getAllByRole('listitem');
+    const dataTransfer = { effectAllowed: '', setData: vi.fn() };
     await act(async () => {
-      fireEvent.dragStart(analyticsRow);
+      fireEvent.dragStart(analyticsRow, { dataTransfer });
     });
     await act(async () => {
       fireEvent.dragOver(workersRow);
@@ -861,6 +862,32 @@ describe('AdminControlCenterPage', () => {
 
     expect(screen.getByText('Moved Analytics to position 1 of 2.')).toHaveAttribute('aria-live', 'polite');
     expect(within(destinationList).getAllByRole('listitem')[0]).toHaveTextContent('Analytics');
+  });
+
+  it('does not accept a pinned shortcut drop on an unpinned destination', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+    const user = userEvent.setup();
+
+    renderHub();
+
+    await user.click(screen.getByRole('button', { name: 'Pin admin links' }));
+    await user.click(screen.getByRole('button', { name: 'Pin Analytics from navbar' }));
+    await user.click(screen.getByRole('button', { name: 'Pin Workers & Jobs from navbar' }));
+
+    const destinationList = screen.getByRole('list', { name: 'Authorized admin destinations' });
+    const analyticsRow = within(destinationList).getByText('Analytics').closest('[role="listitem"]')!;
+    const statusRow = within(destinationList).getByText('System Status').closest('[role="listitem"]')!;
+    const dataTransfer = { effectAllowed: '', setData: vi.fn() };
+    await act(async () => {
+      fireEvent.dragStart(analyticsRow, { dataTransfer });
+    });
+    await act(async () => {
+      fireEvent.dragOver(statusRow);
+      fireEvent.drop(statusRow);
+    });
+
+    expect(within(destinationList).getAllByRole('listitem')[0]).toHaveTextContent('Analytics');
+    expect(within(destinationList).getAllByRole('listitem')[1]).toHaveTextContent('Workers & Jobs');
   });
 
   // #2526 — removing a destination from the navbar is only safe because the hub
@@ -872,6 +899,7 @@ describe('AdminControlCenterPage', () => {
     ['Locations', '/locations'],
     ['Catalog', '/catalog'],
     ['Auto-Dispatch', '/auto-dispatch'],
+    ['Printed Parts', '/parts-inventory'],
   ])('owns %s as its single default home (#2526)', async (_label, href) => {
     mockedApiGet.mockResolvedValue({ data: makeOverview() });
 

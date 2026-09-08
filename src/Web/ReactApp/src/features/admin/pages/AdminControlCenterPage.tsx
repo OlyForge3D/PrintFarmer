@@ -495,15 +495,26 @@ export function AdminControlCenterPage() {
                   role="listitem"
                   tabIndex={-1}
                   draggable={pinned}
-                  onDragStart={() => setDraggingPinnedDestinationId(destination.id)}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', destination.id);
+                    setDraggingPinnedDestinationId(destination.id);
+                  }}
                   onDragEnd={() => setDraggingPinnedDestinationId(null)}
-                  onDragOver={(event) => event.preventDefault()}
+                  onDragOver={(event) => {
+                    if (pinned) {
+                      event.preventDefault();
+                    }
+                  }}
                   onDrop={(event) => {
+                    if (!pinned) {
+                      return;
+                    }
                     event.preventDefault();
                     if (draggingPinnedDestinationId && draggingPinnedDestinationId !== destination.id) {
                       reorderPinnedDestination(
                         draggingPinnedDestinationId,
-                        pinPosition ?? orderedPinnedIds.length - 1,
+                        pinPosition!,
                       );
                     }
                     setDraggingPinnedDestinationId(null);

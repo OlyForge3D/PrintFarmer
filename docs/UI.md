@@ -215,9 +215,8 @@ Admin Control Center is that surface for the admin area.
 
 - The main navigation rail has a single `Admin` entry pointing at `/admin`. It
   carries **no** default entries for Maintenance, Locations, Analytics,
-  Auto-Dispatch or Catalog — those are Control Center destinations. `Printed
-  Parts` (`/parts-inventory`) is not a Control Center destination, so it keeps
-  its rail entry.
+  Auto-Dispatch, Catalog, or Printed Parts — those are Control Center
+  destinations. Users can pin any authorized destination to the rail.
 - The `Admin` entry is shown to anyone who can reach at least one hub tile, so
   a delegate holding only, say, `queue:read` or `catalog:admin` still reaches
   their destination — nothing is stranded by the removals.
