@@ -39,6 +39,14 @@ export function isAuthenticatedModelUrl(url: string): boolean {
  * plain `fetch` otherwise (e.g. public bed textures/models).
  */
 export async function loadModelArrayBuffer(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  return (await loadModelResponse(url, signal)).data;
+}
+
+/** Loads model bytes and response metadata using the same authentication routing. */
+export async function loadModelResponse(url: string, signal?: AbortSignal): Promise<{
+  data: ArrayBuffer;
+  contentType: string;
+}> {
   if (isAuthenticatedModelUrl(url)) {
     const response = await apiClient.get<ArrayBuffer>(url, {
       responseType: 'arraybuffer',
@@ -47,7 +55,7 @@ export async function loadModelArrayBuffer(url: string, signal?: AbortSignal): P
       baseURL: '',
       signal,
     });
-    return response.data;
+    return { data: response.data, contentType: String(response.headers?.['content-type'] ?? '') };
   }
 
   const response = await fetch(url, { signal });
@@ -55,5 +63,5 @@ export async function loadModelArrayBuffer(url: string, signal?: AbortSignal): P
     throw new Error(`Failed to load model (${response.status})`);
   }
 
-  return response.arrayBuffer();
+  return { data: await response.arrayBuffer(), contentType: response.headers.get('content-type') ?? '' };
 }
