@@ -46,6 +46,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var beforeUnloadFilament: (@Sendable () async -> Void)?
     var unloadFilamentErrorToThrow: Error?
     var beforePause: (@Sendable () async -> Void)?
+    var emergencyStopErrorToThrow: Error?
     var listAvailableSpoolsCalledWith: UUID?
     var loadFilamentCalledWith: UUID?
     var unloadFilamentCalledWith: UUID?
@@ -148,6 +149,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     func emergencyStop(id: UUID) async throws -> CommandResult {
         if let hook = beforeEmergencyStop { await hook() }
         emergencyStopCalledWith = id
+        if let error = emergencyStopErrorToThrow { throw error }
         if let error = errorToThrow { throw error }
         return commandResultToReturn
     }

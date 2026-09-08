@@ -1208,6 +1208,118 @@ final class PrinterDetailViewModelTests: XCTestCase {
         )
     }
 
+    // MARK: - Concurrent error preservation (Hicks review finding: a single
+    // shared `actionError` let two concurrent operations silently clobber
+    // each other's error message)
+
+    /// Both eject AND Emergency Stop are genuinely concurrent and BOTH
+    /// fail. Completion order 1: eject completes FIRST. Emergency Stop's
+    /// own error, set when it completes SECOND, must not be lost, and it
+    /// must not clobber eject's own error either.
+    func testConcurrentFailingEjectAndEmergencyStopPreserveBothErrorsWhenEjectCompletesFirst() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        // Eject's first leg (`setActiveSpool`) fails via the shared
+        // `errorToThrow`; Emergency Stop fails via its OWN dedicated error
+        // so the two produce DISTINGUISHABLE messages.
+        mockService.errorToThrow = NetworkError.invalidResponse
+        mockService.emergencyStopErrorToThrow = ShiftTaskProofError.forced("Emergency Stop rejected by printer")
+
+        let ejectEntered = ShiftTaskResultGate<Void>()
+        let ejectRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeSetActiveSpool = {
+            await ejectEntered.succeed(())
+            _ = try? await ejectRelease.wait()
+        }
+        let ejectTask = Task { await viewModel.ejectFilament() }
+        _ = try await ejectEntered.wait()
+
+        let stopEntered = ShiftTaskResultGate<Void>()
+        let stopRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeEmergencyStop = {
+            await stopEntered.succeed(())
+            _ = try? await stopRelease.wait()
+        }
+        viewModel.requestEmergencyStop()
+        let stopTask = Task { await viewModel.confirmAction() }
+        _ = try await stopEntered.wait()
+
+        // Eject completes FIRST.
+        await ejectRelease.succeed(())
+        await ejectTask.value
+        let afterEject = try XCTUnwrap(viewModel.actionError)
+        XCTAssertTrue(
+            afterEject.contains("Invalid server response"),
+            "Eject's own error must be visible immediately after it completes: \(afterEject)"
+        )
+
+        // Emergency Stop completes SECOND — must not clobber eject's error.
+        await stopRelease.succeed(())
+        await stopTask.value
+        let combined = try XCTUnwrap(viewModel.actionError)
+        XCTAssertTrue(
+            combined.contains("Invalid server response"),
+            "Eject's error must survive Emergency Stop completing second: \(combined)"
+        )
+        XCTAssertTrue(
+            combined.contains("Emergency Stop rejected by printer"),
+            "Emergency Stop's own error must also be present, not lost: \(combined)"
+        )
+    }
+
+    /// Same scenario, REVERSED completion order: Emergency Stop completes
+    /// FIRST. Eject's own error, set when it completes SECOND, must not be
+    /// lost, and it must not clobber Emergency Stop's error either.
+    func testConcurrentFailingEjectAndEmergencyStopPreserveBothErrorsWhenEmergencyStopCompletesFirst() async throws {
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.printerToReturn = printer
+        await viewModel.loadPrinter()
+        mockService.errorToThrow = NetworkError.invalidResponse
+        mockService.emergencyStopErrorToThrow = ShiftTaskProofError.forced("Emergency Stop rejected by printer")
+
+        let ejectEntered = ShiftTaskResultGate<Void>()
+        let ejectRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeSetActiveSpool = {
+            await ejectEntered.succeed(())
+            _ = try? await ejectRelease.wait()
+        }
+        let ejectTask = Task { await viewModel.ejectFilament() }
+        _ = try await ejectEntered.wait()
+
+        let stopEntered = ShiftTaskResultGate<Void>()
+        let stopRelease = ShiftTaskResultGate<Void>()
+        mockService.beforeEmergencyStop = {
+            await stopEntered.succeed(())
+            _ = try? await stopRelease.wait()
+        }
+        viewModel.requestEmergencyStop()
+        let stopTask = Task { await viewModel.confirmAction() }
+        _ = try await stopEntered.wait()
+
+        // Emergency Stop completes FIRST this time.
+        await stopRelease.succeed(())
+        await stopTask.value
+        let afterStop = try XCTUnwrap(viewModel.actionError)
+        XCTAssertTrue(
+            afterStop.contains("Emergency Stop rejected by printer"),
+            "Emergency Stop's own error must be visible immediately after it completes: \(afterStop)"
+        )
+
+        // Eject completes SECOND — must not clobber Emergency Stop's error.
+        await ejectRelease.succeed(())
+        await ejectTask.value
+        let combined = try XCTUnwrap(viewModel.actionError)
+        XCTAssertTrue(
+            combined.contains("Emergency Stop rejected by printer"),
+            "Emergency Stop's error must survive eject completing second: \(combined)"
+        )
+        XCTAssertTrue(
+            combined.contains("Invalid server response"),
+            "Eject's own error must also be present, not lost: \(combined)"
+        )
+    }
+
     // MARK: - Pull-to-refresh transition-during-refresh (issue #2522, Hicks
     // review finding 23)
 

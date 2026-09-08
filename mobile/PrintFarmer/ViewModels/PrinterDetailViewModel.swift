@@ -52,7 +52,74 @@ final class PrinterDetailViewModel {
     var pendingRunActionKinds: Set<PrinterRunActionKind> = []
     var showConfirmation = false
     var pendingAction: DestructiveAction?
-    var actionError: String?
+    /// Combined, user-facing error text (issue #2522, Hicks review finding:
+    /// a single shared `actionError` string let two concurrent sibling
+    /// actions — e.g. a failing Emergency Stop and a concurrently in-flight
+    /// eject — silently clobber each other's message depending on
+    /// completion order, discarding whichever one finished FIRST regardless
+    /// of which mattered more). Backed by `operationErrorMessages`/
+    /// `operationErrorOrder`, keyed by a STABLE per-method
+    /// `OperationErrorSource` (not the random per-invocation busy token): a
+    /// FRESH invocation of the SAME method still replaces its OWN prior
+    /// stale error (matching the original "clear at start" intent), while a
+    /// DIFFERENT concurrently in-flight method's error is never touched.
+    /// Every currently-recorded message is combined for display, so none is
+    /// ever silently lost regardless of which operation completes first.
+    var actionError: String? {
+        get {
+            let messages = operationErrorOrder.compactMap { operationErrorMessages[$0] }
+            return messages.isEmpty ? nil : messages.joined(separator: "\n\n")
+        }
+        set {
+            if let newValue {
+                setOperationError(newValue, source: .untracked)
+            } else {
+                // Dismissing the alert (`Button("OK") { viewModel.actionError
+                // = nil }`) acknowledges every currently-displayed message
+                // at once.
+                operationErrorMessages.removeAll()
+                operationErrorOrder.removeAll()
+            }
+        }
+    }
+    /// Identifies which sibling action produced a given `actionError`
+    /// entry. One case per METHOD (not per random per-invocation token), so
+    /// a fresh call to the SAME method still clears/replaces only its own
+    /// prior message.
+    private enum OperationErrorSource: Hashable {
+        case bindToolheadSpool
+        case prepareReadyConfirmation
+        case markPrinterReady
+        case loadSpoolById
+        case ejectFilament
+        case clearActiveSpoolAssignment
+        case setActiveSpool
+        case logMaintenanceCompletion
+        case toggleMaintenance
+        case runAction(PrinterRunActionKind)
+        /// Any caller that assigns `actionError = "..."` directly rather
+        /// than through one of the named sources above (there are none
+        /// left in this file after this change, but external/preview code
+        /// could still do so through the property's public setter).
+        case untracked
+    }
+    @ObservationIgnored private var operationErrorMessages: [OperationErrorSource: String] = [:]
+    @ObservationIgnored private var operationErrorOrder: [OperationErrorSource] = []
+
+    /// Records (or replaces) the error message for one sibling action.
+    private func setOperationError(_ message: String, source: OperationErrorSource) {
+        if operationErrorMessages[source] == nil {
+            operationErrorOrder.append(source)
+        }
+        operationErrorMessages[source] = message
+    }
+
+    /// Clears ONLY this source's own message, leaving every other
+    /// concurrently-recorded error untouched.
+    private func clearOperationError(source: OperationErrorSource) {
+        operationErrorMessages.removeValue(forKey: source)
+        operationErrorOrder.removeAll { $0 == source }
+    }
     var isViewActive = true {
         didSet {
             // Monotonic action-lifecycle epoch (issue #2522, Hicks review
@@ -257,11 +324,11 @@ final class PrinterDetailViewModel {
     func bindToolheadSpool(_ spool: SpoolmanSpool, at toolheadIndex: Int) async {
         guard isViewActive else { return }
         guard let printerService else {
-            actionError = "Printer service not available."
+            setOperationError("Printer service not available.", source: .bindToolheadSpool)
             return
         }
         let authority = beginActionAuthority(for: printerService)
-        actionError = nil
+        clearOperationError(source: .bindToolheadSpool)
         defer { endBusyToken(authority.busyToken) }
         do {
             _ = try await printerService.bindToolheadSpool(
@@ -274,7 +341,7 @@ final class PrinterDetailViewModel {
             await loadPrinter()
         } catch {
             guard hasActionAuthority(authority) else { return }
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .bindToolheadSpool)
         }
     }
 
@@ -470,19 +537,19 @@ final class PrinterDetailViewModel {
             )
             showNFCReadyConfirmation = true
         } catch {
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .prepareReadyConfirmation)
         }
     }
 
     func markPrinterReady() async {
         guard isViewActive else { return }
         guard let autoDispatchService, let reviewedReadyStatus else {
-            actionError = "Refresh the auto-dispatch status before confirming."
+            setOperationError("Refresh the auto-dispatch status before confirming.", source: .markPrinterReady)
             return
         }
         self.reviewedReadyStatus = nil
         let busyToken = beginBusyToken()
-        actionError = nil
+        clearOperationError(source: .markPrinterReady)
         defer { endBusyToken(busyToken) }
         do {
             _ = try await autoDispatchService.markReady(
@@ -492,7 +559,7 @@ final class PrinterDetailViewModel {
             await loadPrinter()
         } catch {
             guard isViewActive else { return }
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .markPrinterReady)
         }
     }
 
@@ -535,7 +602,7 @@ final class PrinterDetailViewModel {
             return
         }
         let authority = beginActionAuthority(for: printerService)
-        actionError = nil
+        clearOperationError(source: .loadSpoolById)
         defer { endBusyToken(authority.busyToken) }
         do {
             let rowVersion = try reviewedPrinterRowVersion()
@@ -555,7 +622,7 @@ final class PrinterDetailViewModel {
         } catch {
             guard hasActionAuthority(authority) else { return }
             print("❌ loadSpoolById failed: \(error)")
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .loadSpoolById)
         }
     }
 
@@ -584,7 +651,7 @@ final class PrinterDetailViewModel {
         guard let printerService else { return }
         let authority = beginActionAuthority(for: printerService)
         let capturedEmergencyStopEpoch = emergencyStopEngagedEpoch
-        actionError = nil
+        clearOperationError(source: .ejectFilament)
         defer { endBusyToken(authority.busyToken) }
         do {
             _ = try await printerService.setActiveSpool(
@@ -604,7 +671,10 @@ final class PrinterDetailViewModel {
             // the physical unload (Bishop review finding — a real, distinct
             // hazard of its own), but Emergency Stop specifically must.
             guard !hasEmergencyStopEngagedSince(capturedEmergencyStopEpoch) else {
-                actionError = "Spool assignment cleared, but the physical unload was not sent because Emergency Stop was engaged."
+                setOperationError(
+                    "Spool assignment cleared, but the physical unload was not sent because Emergency Stop was engaged.",
+                    source: .ejectFilament
+                )
                 return
             }
             do {
@@ -614,7 +684,10 @@ final class PrinterDetailViewModel {
                 // operator must know the printer may still be physically
                 // loaded despite that, regardless of whether this call's
                 // own result/refresh authority has since been lost.
-                actionError = "Spool assignment cleared, but the physical unload failed: \(error.localizedDescription)"
+                setOperationError(
+                    "Spool assignment cleared, but the physical unload failed: \(error.localizedDescription)",
+                    source: .ejectFilament
+                )
                 return
             }
             guard hasActionAuthority(authority) else { return }
@@ -622,7 +695,7 @@ final class PrinterDetailViewModel {
             await loadPrinter()
         } catch {
             guard hasActionAuthority(authority) else { return }
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .ejectFilament)
         }
     }
 
@@ -639,7 +712,7 @@ final class PrinterDetailViewModel {
         guard isViewActive else { return }
         guard let printerService else { return }
         let authority = beginActionAuthority(for: printerService)
-        actionError = nil
+        clearOperationError(source: .clearActiveSpoolAssignment)
         defer { endBusyToken(authority.busyToken) }
         do {
             _ = try await printerService.setActiveSpool(
@@ -668,7 +741,7 @@ final class PrinterDetailViewModel {
             await loadPrinter()
         } catch {
             guard hasActionAuthority(authority) else { return }
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .clearActiveSpoolAssignment)
         }
     }
 
@@ -680,7 +753,7 @@ final class PrinterDetailViewModel {
             return
         }
         let authority = beginActionAuthority(for: printerService)
-        actionError = nil
+        clearOperationError(source: .setActiveSpool)
         defer { endBusyToken(authority.busyToken) }
         do {
             let rowVersion = try reviewedPrinterRowVersion()
@@ -707,7 +780,7 @@ final class PrinterDetailViewModel {
         } catch {
             guard hasActionAuthority(authority) else { return }
             print("❌ setActiveSpool failed: \(error)")
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .setActiveSpool)
         }
     }
 
@@ -1692,7 +1765,7 @@ final class PrinterDetailViewModel {
     func logMaintenanceCompletion(_ row: OdometerRow, performedBy: String) async {
         guard isViewActive, let maintenanceService else { return }
         let busyToken = beginBusyToken()
-        actionError = nil
+        clearOperationError(source: .logMaintenanceCompletion)
         defer { endBusyToken(busyToken) }
         let request = CreateMaintenanceLogRequest(
             printerId: printerId,
@@ -1708,7 +1781,7 @@ final class PrinterDetailViewModel {
             await loadMaintenance()
         } catch {
             guard isViewActive else { return }
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .logMaintenanceCompletion)
         }
     }
 
@@ -1777,7 +1850,7 @@ final class PrinterDetailViewModel {
             self.printer = updated
         } catch {
             guard isViewActive else { return }
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .toggleMaintenance)
         }
     }
 
@@ -2257,7 +2330,7 @@ final class PrinterDetailViewModel {
         guard isViewActive else { return }
         guard let printerService else { return }
         let authority = beginActionAuthority(for: printerService)
-        actionError = nil
+        clearOperationError(source: .runAction(kind))
         pendingRunActionKinds.insert(kind)
         defer {
             endBusyToken(authority.busyToken)
@@ -2270,7 +2343,7 @@ final class PrinterDetailViewModel {
             await loadPrinter()
         } catch {
             guard hasActionAuthority(authority) else { return }
-            actionError = error.localizedDescription
+            setOperationError(error.localizedDescription, source: .runAction(kind))
         }
     }
 }
