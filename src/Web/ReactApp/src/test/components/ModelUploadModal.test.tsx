@@ -63,17 +63,12 @@ describe('ModelUploadModal', () => {
     it('should show progress capped at 95% during network upload', async () => {
       const mockFile = new File(['test content'], 'test.stl', { type: 'model/stl' });
       let progressCallback: ((progress: number) => void) | undefined;
+      let completeUpload: ((value: { id: string; url: string }) => void) | undefined;
 
-      // Mock uploadModel to capture progress callback
-      vi.mocked(slicerService.uploadModel).mockImplementation((file, onProgress) => {
+      vi.mocked(slicerService.uploadModel).mockImplementation((_file, onProgress) => {
         progressCallback = onProgress;
         return new Promise((resolve) => {
-          // Simulate progress updates
-          setTimeout(() => progressCallback?.(50), 10);
-          setTimeout(() => progressCallback?.(100), 20);
-          setTimeout(() => {
-            resolve({ id: 'test-id', url: 'test-url' });
-          }, 100);
+          completeUpload = resolve;
         });
       });
 
@@ -98,11 +93,21 @@ describe('ModelUploadModal', () => {
       const uploadButton = screen.getByRole('button', { name: /upload 1 file/i });
       fireEvent.click(uploadButton);
 
-      // Wait for progress updates - should cap at 95%
       await waitFor(() => {
-        const progressText = screen.getByText(/95%/);
-        expect(progressText).toBeInTheDocument();
-      }, { timeout: 2000 });
+        expect(progressCallback).toBeDefined();
+      });
+
+      act(() => {
+        progressCallback?.(100);
+      });
+
+      expect(screen.getByText('95%')).toBeInTheDocument();
+
+      await act(async () => {
+        completeUpload?.({ id: 'test-id', url: 'test-url' });
+      });
+
+      expect(screen.getByText('✓ Done')).toBeInTheDocument();
     });
 
     it('should only show success toast after backend completes processing', async () => {
