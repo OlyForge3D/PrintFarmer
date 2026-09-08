@@ -327,8 +327,9 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     func test_snapshot_loadingState_capabilitiesNil() throws {
         let printer = try makePrinter(backend: .moonraker)
         let svc = MockPrinterService()
-        // Hold the capabilities call open by throwing — viewModel keeps caps == nil.
-        svc.errorToThrow = NetworkError.notFound
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        svc.beforeGetBackendCapabilities = { await barrier.arriveAndWait() }
         let section = PrinterControlsSection(printer: printer, printerService: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
     }

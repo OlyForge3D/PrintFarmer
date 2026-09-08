@@ -209,12 +209,13 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
 
     func test_currentCommandFailure_recordsError_andClearsPending() async throws {
         let service = MockPrinterService()
-        service.errorToThrow = NetworkError.serverError(500)
         let vm = makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps, service: service)
         await vm.loadCapabilities()
+        service.errorToThrow = NetworkError.serverError(500)
 
         await vm.preheat(.pla)
 
+        XCTAssertNotNil(service.setTemperaturesCalledWith)
         XCTAssertNil(vm.pendingCommand, "The current command's failure clears pending for retry")
         XCTAssertFalse(vm.isExecuting)
         XCTAssertEqual(vm.lastError?.isRetryable, true, "The current command's error is surfaced")
