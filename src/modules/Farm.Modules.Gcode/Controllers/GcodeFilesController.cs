@@ -933,9 +933,15 @@ public class GcodeFilesController(
         return Ok(resp);
     }
 
+    /// <summary>
+    /// Updates the farm-wide upload-extension policy for system-settings administrators.
+    /// </summary>
+    [RequirePermission("system_settings", "admin")]
     [HttpPut("settings")]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public IActionResult UpdateSettings([FromBody] UpdateSettingsRequest req)
     {
         if (req?.AllowedExtensions == null || req.AllowedExtensions.Count == 0)
