@@ -867,7 +867,6 @@ export function SettingsPage({
     let scrolledTarget: HTMLElement | null = null;
     let mutationObserver: MutationObserver | null = null;
     let completionTimer = 0;
-    let focusRepairTimer = 0;
     let retryTimer = 0;
     let scrollHighlightTimer = 0;
     const disposeActivation = () => {
@@ -876,25 +875,12 @@ export function SettingsPage({
       }
       activationClosed = true;
       window.clearTimeout(completionTimer);
-      window.clearTimeout(focusRepairTimer);
       window.clearTimeout(retryTimer);
       mutationObserver?.disconnect();
-      document.removeEventListener('focusout', scheduleBodyFocusRepair, true);
     };
     const finishActivation = () => {
       handledFieldActivationRef.current = fieldParam;
       disposeActivation();
-    };
-    const scheduleBodyFocusRepair = () => {
-      if (activationClosed || focusRepairTimer !== 0) {
-        return;
-      }
-      focusRepairTimer = window.setTimeout(() => {
-        focusRepairTimer = 0;
-        if (!activationClosed && document.activeElement === document.body) {
-          tryActivate();
-        }
-      }, 0);
     };
     const scheduleRetry = (delayMs = FIELD_DEEP_LINK_RETRY_DELAY_MS) => {
       if (activationClosed || retryTimer !== 0) {
@@ -933,9 +919,9 @@ export function SettingsPage({
         }
 
         const activeElement = document.activeElement;
-        const shouldClaimInitialFocus = !hasFocusedTarget;
-        const shouldRepairBodyFocus = hasFocusedTarget && activeElement === document.body;
-        if ((shouldClaimInitialFocus && activeElement !== focusTarget) || shouldRepairBodyFocus) {
+        const canClaimFocus = !hasFocusedTarget
+          && (activeElement === null || activeElement === document.body || target.contains(activeElement));
+        if (canClaimFocus && activeElement !== focusTarget) {
           focusTarget.focus({ preventScroll: true });
         }
 
@@ -957,12 +943,6 @@ export function SettingsPage({
         const focusStable = document.activeElement === focusTarget;
         if (focusStable) {
           hasFocusedTarget = true;
-        }
-        const focusMovedElsewhere = hasFocusedTarget
-          && document.activeElement !== null
-          && document.activeElement !== document.body
-          && document.activeElement !== focusTarget;
-        if (focusMovedElsewhere) {
           finishActivation();
           return;
         }
@@ -975,8 +955,7 @@ export function SettingsPage({
 
     if (typeof MutationObserver !== 'undefined') {
       mutationObserver = new MutationObserver(() => {
-        scheduleBodyFocusRepair();
-        if (!hasFocusedTarget || document.activeElement === document.body) {
+        if (!hasFocusedTarget) {
           scheduleRetry(0);
         }
       });
@@ -985,8 +964,6 @@ export function SettingsPage({
         subtree: true,
       });
     }
-
-    document.addEventListener('focusout', scheduleBodyFocusRepair, true);
     completionTimer = window.setTimeout(() => {
       if (activationClosed) {
         return;

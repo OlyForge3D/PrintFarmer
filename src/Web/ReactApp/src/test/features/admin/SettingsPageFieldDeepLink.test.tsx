@@ -325,19 +325,21 @@ describe('SettingsPage — palette `?field=` deep-link resolution (#939)', () =>
     expect(scrollIntoViewMock).toHaveBeenCalledTimes(1);
   });
 
-  it('reclaims focus when the deep-linked control blurs back to body during the focus window (#2556)', async () => {
-    await renderPageWithField('CatalogUpdates.autoApply');
+  it('does not steal focus back after an intentional blur on a deep-linked number field', async () => {
+    await renderPageWithField('SystemLog.retentionDays');
 
-    const targetInput = document.querySelector<HTMLInputElement>('[data-setting-property="CatalogUpdates.autoApply"] input');
+    const targetInput = document.querySelector<HTMLInputElement>('[data-setting-property="SystemLog.retentionDays"] input');
     expect(targetInput).toBeTruthy();
     expect(targetInput).toHaveFocus();
 
     targetInput!.blur();
     expect(document.activeElement).toBe(document.body);
 
-    await waitFor(() => {
-      expect(targetInput).toHaveFocus();
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
     });
+
+    expect(document.activeElement).toBe(document.body);
   });
 
   it('surfaces a toast and leaves the page mounted when the deep-linked field does not resolve (#2505)', async () => {
