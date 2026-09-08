@@ -329,24 +329,26 @@ final class PrinterControlsViewModelTests: XCTestCase {
     }
 
     func test_errorMapping_5xx_isRetryable() async throws {
-        mockService.errorToThrow = NetworkError.serverError(503)
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
+        mockService.errorToThrow = NetworkError.serverError(503)
 
         await vm.preheat(.pla)
 
+        XCTAssertNotNil(mockService.setTemperaturesCalledWith)
         XCTAssertNotNil(vm.lastError)
         XCTAssertEqual(vm.lastError?.isRetryable, true)
         XCTAssertNil(vm.pendingCommand, "Pending must clear on failure so user can retry")
     }
 
     func test_errorMapping_4xx_unauthorized_notRetryable() async throws {
-        mockService.errorToThrow = NetworkError.unauthorized
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
+        mockService.errorToThrow = NetworkError.unauthorized
 
         await vm.homeAll()
 
+        XCTAssertNotNil(mockService.homeCalledWith)
         XCTAssertEqual(vm.lastError?.isRetryable, false)
     }
 
@@ -377,20 +379,22 @@ final class PrinterControlsViewModelTests: XCTestCase {
     }
 
     func test_errorMapping_network_isRetryable() async throws {
-        mockService.errorToThrow = NetworkError.noConnection
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
+        mockService.errorToThrow = NetworkError.noConnection
 
         await vm.jog(axis: "X", distanceMm: 1)
 
+        XCTAssertNotNil(mockService.moveCalledWith)
         XCTAssertEqual(vm.lastError?.isRetryable, true)
     }
 
     func test_dismissError_clearsLastError() async throws {
-        mockService.errorToThrow = NetworkError.serverError(500)
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
+        mockService.errorToThrow = NetworkError.serverError(500)
         await vm.preheat(.pla)
+        XCTAssertNotNil(mockService.setTemperaturesCalledWith)
         XCTAssertNotNil(vm.lastError)
 
         vm.dismissError()
