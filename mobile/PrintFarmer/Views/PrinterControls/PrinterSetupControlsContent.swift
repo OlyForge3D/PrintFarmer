@@ -31,6 +31,22 @@ struct PrinterSetupControlsContent: View {
                 .accessibilityAddTraits(.isHeader)
 
             VStack(alignment: .leading, spacing: 0) {
+                if let error = viewModel.capabilityLoadError {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Control capabilities unavailable")
+                            .font(.headline)
+                        Text(error)
+                            .font(.footnote)
+                        Button("Retry capability check") {
+                            Task { await viewModel.loadCapabilities() }
+                        }
+                        .frame(minHeight: 44)
+                        .disabled(viewModel.isLoadingCapabilities)
+                    }
+                    .foregroundStyle(Color.pfTextPrimary)
+                    .padding(.bottom, 12)
+                }
+
                 if isPrintingOrPaused {
                     lockoutBanner
                         .padding(.bottom, 12)

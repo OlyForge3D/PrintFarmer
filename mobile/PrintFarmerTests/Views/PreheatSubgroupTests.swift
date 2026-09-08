@@ -17,31 +17,25 @@ final class PreheatSubgroupTests: XCTestCase {
 
     // MARK: - isVisible(capabilities:)
 
-    func test_isVisible_trueWhenCapabilitiesNil() {
-        // Capabilities haven't loaded yet — fail open and render.
-        XCTAssertTrue(PreheatSubgroup.isVisible(capabilities: nil))
+    func test_isVisible_falseWhenCapabilitiesNil() {
+        XCTAssertFalse(PreheatSubgroup.isVisible(capabilities: nil))
     }
 
     func test_isVisible_trueForFullCaps() {
-        let caps = PrinterBackendCapabilities.fallback(for: .moonraker)
+        let caps = PrinterBackendCapabilities.allControlsFixture
         XCTAssertTrue(caps.supportsTemperatureControl)
         XCTAssertTrue(PreheatSubgroup.isVisible(capabilities: caps))
     }
 
-    func test_isVisible_trueForFlashForge_hotendOnly() {
-        // FlashForge supports temperature control on the hotend but not the
-        // bed. The subgroup must still render — caption inside notes the
-        // hotend-only state.
-        let caps = PrinterBackendCapabilities.fallback(for: .flashForge)
+    func test_isVisible_trueForExplicitHotendOnlyEvidence() {
+        let caps = PrinterBackendCapabilities.hotendOnlyFixture
         XCTAssertTrue(caps.supportsTemperatureControl)
         XCTAssertFalse(caps.supportsBedTemperature)
         XCTAssertTrue(PreheatSubgroup.isVisible(capabilities: caps))
     }
 
     func test_isVisible_falseWhenTemperatureControlMissing() {
-        // SDCP backend reports no temperature control — the entire subgroup
-        // must be hidden.
-        let caps = PrinterBackendCapabilities.fallback(for: .sdcp)
+        let caps = PrinterBackendCapabilities.fallback(for: .unknown)
         XCTAssertFalse(caps.supportsTemperatureControl)
         XCTAssertFalse(PreheatSubgroup.isVisible(capabilities: caps))
     }
@@ -251,8 +245,13 @@ private final class PreheatSubgroupTestService: PrinterServiceProtocol, @uncheck
     func homeXY(printerId: UUID) async throws {}
     func homeZ(printerId: UUID) async throws {}
     func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws {}
+    func moveTo(printerId: UUID, x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async throws -> CommandResult { throw NetworkError.notFound }
+    func extrude(printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int) async throws -> CommandResult { throw NetworkError.notFound }
+    func disableMotors(printerId: UUID) async throws -> CommandResult { throw NetworkError.notFound }
+    func saveZOffset(printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String) async throws -> CommandResult { throw NetworkError.notFound }
+    func unloadFilament(printerId: UUID, toolheadIndex: Int?) async throws -> FilamentUnloadResult { throw NetworkError.notFound }
     func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
-        PrinterBackendCapabilities.fallback(for: .moonraker)
+        PrinterBackendCapabilities.allControlsFixture
     }
 
     // #711 F6 stubs — not exercised by preheat tests but required for conformance.

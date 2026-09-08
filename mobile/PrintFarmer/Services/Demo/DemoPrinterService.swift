@@ -198,13 +198,18 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         CommandResult(success: true, message: "Filament unloaded (demo)")
     }
 
+    func unloadFilament(printerId: UUID, toolheadIndex: Int?) async throws -> FilamentUnloadResult {
+        FilamentUnloadResult(success: true, message: "Filament unloaded (demo)", spoolId: nil, material: nil, residualWeightG: nil)
+    }
+
     func changeFilament(printerId: UUID) async throws -> CommandResult {
         CommandResult(success: true, message: "Filament changed (demo)")
     }
 
     func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
-        let backend = printers.first(where: { $0.id == printerId })?.backend ?? .moonraker
-        return PrinterBackendCapabilities.fallback(for: backend)
+        guard printers.contains(where: { $0.id == printerId }) else { throw NetworkError.notFound }
+        // Demo command no-ops do not establish backend or persistence support.
+        return PrinterBackendCapabilities.fallback(for: .unknown)
     }
 
     func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws {
@@ -225,6 +230,22 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws {
         // Demo no-op
+    }
+
+    func moveTo(printerId: UUID, x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async throws -> CommandResult {
+        CommandResult(success: true, message: "Move accepted (demo)")
+    }
+
+    func extrude(printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int) async throws -> CommandResult {
+        CommandResult(success: true, message: "Extrusion accepted (demo)")
+    }
+
+    func disableMotors(printerId: UUID) async throws -> CommandResult {
+        CommandResult(success: true, message: "Motor release accepted (demo)")
+    }
+
+    func saveZOffset(printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String) async throws -> CommandResult {
+        CommandResult(success: true, message: "Offset saved (demo)")
     }
 
     // MARK: - Details + fallback groups (issue #711, F6 demo stubs)

@@ -467,6 +467,20 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         return BackendCapabilities.None;
     }
 
+    /// <inheritdoc/>
+    public bool TryGetGcodeExecutionClientTyped(PrinterBackend backend, out ISupportsGcodeExecution? client)
+    {
+        client = null;
+        if (TryGetClientWithCapability(backend, BackendCapabilities.DirectCommand, out IBackendClient? backendClient)
+            && backendClient is ISupportsGcodeExecution gcodeClient)
+        {
+            client = gcodeClient;
+            return true;
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Internal helper to check if a backend supports a capability and return the client if it does.
     /// </summary>

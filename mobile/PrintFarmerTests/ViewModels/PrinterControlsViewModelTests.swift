@@ -42,19 +42,71 @@ final class PrinterControlsViewModelTests: XCTestCase {
         supportsBedTemperature: true,
         supportsFanControl: true,
         supportsHoming: true,
-        supportedAxes: ["X", "Y", "Z"]
+        supportedAxes: ["X", "Y", "Z"],
+        supportsHomingXY: true, supportsHomingZ: true
     )
 
-    private static let flashForgeCaps = PrinterBackendCapabilities(
-        supportsMovement: true,
-        supportsTemperatureControl: true,
-        supportsBedTemperature: false,
-        supportsFanControl: false,
-        supportsHoming: true,
-        supportedAxes: ["X", "Y", "Z"]
-    )
+    // Synthetic field-omission case, not a FlashForge backend profile.
+    private static let hotendOnlyCaps = PrinterBackendCapabilities.hotendOnlyFixture
 
     // MARK: - Tests
+
+    func test_capabilityReadsAreSingleFlightAndCancellationDoesNotPublishSupport() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        mockService.beforeGetBackendCapabilities = { await barrier.arriveAndWait() }
+        let pending = Task { await vm.loadCapabilities() }
+        await barrier.waitUntilArrived()
+        await vm.loadCapabilities()
+        XCTAssertEqual(mockService.getBackendCapabilitiesCallCount, 1)
+        XCTAssertTrue(vm.isLoadingCapabilities)
+        pending.cancel()
+        barrier.release()
+        await pending.value
+        XCTAssertNil(vm.capabilities)
+        XCTAssertNil(vm.capabilityLoadError)
+        XCTAssertFalse(vm.isLoadingCapabilities)
+    }
+
+    func test_capabilityFetchFailureRemainsUnavailableAndCanRetryWithoutActuation() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        mockService.errorToThrow = NetworkError.serverError(503)
+        await vm.loadCapabilities()
+        XCTAssertNil(vm.capabilities)
+        XCTAssertNotNil(vm.capabilityLoadError)
+        XCTAssertFalse(vm.isLoadingCapabilities)
+        mockService.errorToThrow = nil
+        await vm.loadCapabilities()
+        XCTAssertEqual(vm.capabilities, Self.fullCaps)
+        XCTAssertNil(vm.capabilityLoadError)
+        XCTAssertNil(mockService.homeCalledWith)
+        XCTAssertNil(mockService.moveCalledWith)
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+    }
+
+    func test_homingUsesIndependentOperationEvidenceWithoutJogging() async throws {
+        var caps = PrinterBackendCapabilities.fallback(for: .unknown)
+        caps.supportsHomingXY = true
+        let xy = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await xy.loadCapabilities()
+        await xy.homeXY()
+        XCTAssertEqual(mockService.homeXYCalledWith, xy.printer.id)
+        XCTAssertNil(xy.lastError)
+
+        let z = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await z.loadCapabilities()
+        await z.homeZ()
+        XCTAssertNil(mockService.homeZCalledWith)
+        XCTAssertNotNil(z.lastError)
+        XCTAssertEqual(z.lastError?.isRetryable, false)
+
+        let all = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await all.loadCapabilities()
+        await all.homeAll()
+        XCTAssertNil(mockService.homeCalledWith)
+        XCTAssertNotNil(all.lastError)
+    }
 
     func test_setupCommands_remainBlockedWhilePrintingPausedOrOffline() async throws {
         for (state, online) in [("printing", true), ("paused", true), ("ready", false)] {
@@ -108,8 +160,8 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(vm.lastError)
     }
 
-    func test_preheatPETG_onFlashForge_dropsBedSilently() async throws {
-        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.flashForgeCaps)
+    func test_preheatPETG_withExplicitHotendOnlyEvidence_omitsBed() async throws {
+        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.hotendOnlyCaps)
         await vm.loadCapabilities()
 
         await vm.preheat(.petg)
@@ -119,12 +171,49 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(vm.lastError, "Dropping the bed value must not surface as an error")
     }
 
-    func test_coolDown_sendsZeroZero_evenWhenBedUnsupported() async throws {
-        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.flashForgeCaps)
+    func test_coolDown_omitsBedWhenSupportIsUnconfirmed() async throws {
+        let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.hotendOnlyCaps)
         await vm.loadCapabilities()
 
         await vm.preheat(.coolDown)
 
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 0)
+        XCTAssertNil(mockService.setTemperaturesCalledWith?.bed)
+    }
+
+    func test_allThermalPresetsRejectUnknownAndDeniedSupportWithoutDispatch() async throws {
+        for preset in PreheatSubgroup.presets {
+            let vm = try makeViewModel(printer: idlePrinter())
+            await vm.preheat(preset)
+            XCTAssertNil(mockService.setTemperaturesCalledWith)
+            XCTAssertNotNil(vm.lastError)
+            XCTAssertNil(vm.pendingCommand)
+
+            mockService.capabilitiesToReturn = .fallback(for: .unknown)
+            await vm.loadCapabilities()
+            await vm.preheat(preset)
+            XCTAssertNil(mockService.setTemperaturesCalledWith)
+            XCTAssertNotNil(vm.lastError)
+            XCTAssertNil(vm.pendingCommand)
+        }
+    }
+
+    func test_failedCapabilityReadBlocksCooldownUntilSuccessfulRetry() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        mockService.errorToThrow = NetworkError.serverError(503)
+        await vm.loadCapabilities()
+        XCTAssertNotNil(vm.capabilityLoadError)
+        XCTAssertFalse(PreheatSubgroup.isVisible(capabilities: vm.capabilities))
+        await vm.preheat(.coolDown)
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertNil(vm.pendingCommand)
+
+        mockService.errorToThrow = nil
+        await vm.loadCapabilities()
+        XCTAssertNil(vm.capabilityLoadError)
+        XCTAssertTrue(PreheatSubgroup.isVisible(capabilities: vm.capabilities))
+        XCTAssertNil(mockService.setTemperaturesCalledWith, "Capability retry must not replay cooldown")
+        await vm.preheat(.coolDown)
         XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 0)
         XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, 0)
     }
@@ -270,24 +359,26 @@ final class PrinterControlsViewModelTests: XCTestCase {
     }
 
     func test_errorMapping_5xx_isRetryable() async throws {
-        mockService.errorToThrow = NetworkError.serverError(503)
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
+        mockService.errorToThrow = NetworkError.serverError(503)
 
         await vm.preheat(.pla)
 
+        XCTAssertNotNil(mockService.setTemperaturesCalledWith)
         XCTAssertNotNil(vm.lastError)
         XCTAssertEqual(vm.lastError?.isRetryable, true)
         XCTAssertNil(vm.pendingCommand, "Pending must clear on failure so user can retry")
     }
 
     func test_errorMapping_4xx_unauthorized_notRetryable() async throws {
-        mockService.errorToThrow = NetworkError.unauthorized
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
+        mockService.errorToThrow = NetworkError.unauthorized
 
         await vm.homeAll()
 
+        XCTAssertNotNil(mockService.homeCalledWith)
         XCTAssertEqual(vm.lastError?.isRetryable, false)
     }
 
@@ -318,20 +409,22 @@ final class PrinterControlsViewModelTests: XCTestCase {
     }
 
     func test_errorMapping_network_isRetryable() async throws {
-        mockService.errorToThrow = NetworkError.noConnection
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
+        mockService.errorToThrow = NetworkError.noConnection
 
         await vm.jog(axis: "X", distanceMm: 1)
 
+        XCTAssertNotNil(mockService.moveCalledWith)
         XCTAssertEqual(vm.lastError?.isRetryable, true)
     }
 
     func test_dismissError_clearsLastError() async throws {
-        mockService.errorToThrow = NetworkError.serverError(500)
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
+        mockService.errorToThrow = NetworkError.serverError(500)
         await vm.preheat(.pla)
+        XCTAssertNotNil(mockService.setTemperaturesCalledWith)
         XCTAssertNotNil(vm.lastError)
 
         vm.dismissError()

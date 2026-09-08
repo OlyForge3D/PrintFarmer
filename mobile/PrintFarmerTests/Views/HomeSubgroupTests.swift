@@ -44,8 +44,8 @@ final class HomeSubgroupTests: XCTestCase {
         XCTAssertTrue(HomeSubgroup.shouldHide(capabilities: nil))
     }
 
-    func test_shouldHide_whenMovementUnsupported() {
-        XCTAssertTrue(HomeSubgroup.shouldHide(capabilities: Self.noMovementCaps))
+    func test_shouldNotHide_whenHomingSupportedWithoutJogging() {
+        XCTAssertFalse(HomeSubgroup.shouldHide(capabilities: Self.noMovementCaps))
     }
 
     func test_shouldHide_whenHomingUnsupported() {
@@ -54,6 +54,35 @@ final class HomeSubgroupTests: XCTestCase {
 
     func test_shouldNotHide_whenMovementAndHomingSupported() {
         XCTAssertFalse(HomeSubgroup.shouldHide(capabilities: Self.fullCaps))
+    }
+
+    func test_shouldNotHide_whenOnlyXYOrZHomingIsProven() {
+        var caps = PrinterBackendCapabilities.fallback(for: .unknown)
+        caps.supportsHomingXY = true
+        XCTAssertFalse(HomeSubgroup.shouldHide(capabilities: caps))
+        XCTAssertTrue(caps.supportsHome(axes: ["x", "y"]))
+        XCTAssertFalse(caps.supportsHome(axes: ["Z"]))
+        XCTAssertFalse(caps.supportsHome(axes: ["X", "Y", "Z"]))
+        caps.supportsHomingXY = false
+        caps.supportsHomingZ = true
+        XCTAssertFalse(HomeSubgroup.shouldHide(capabilities: caps))
+        XCTAssertTrue(caps.supportsHome(axes: ["Z"]))
+        XCTAssertFalse(caps.supportsHome(axes: ["X"]))
+    }
+
+    func test_serverWireHomingRemainsVisibleWhenRelativeMovementIsUnproven() throws {
+        let wire = try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: Data("""
+        {"printerId":"\(TestData.testUUID)","backend":"Moonraker",
+         "supportsRelativeMovement":false,"supportsAbsoluteMovement":false,
+         "supportsHoming":true,"supportsHomingXY":true,"supportsHomingZ":true,
+         "supportedAxes":["x","y","z"]}
+        """.utf8))
+        let caps = PrinterBackendCapabilities(wire: wire)
+        XCTAssertFalse(caps.supportsMovement)
+        XCTAssertFalse(HomeSubgroup.shouldHide(capabilities: caps))
+        XCTAssertTrue(caps.supportsHome(axes: ["X", "Y", "Z"]))
+        XCTAssertTrue(caps.supportsHome(axes: ["X", "Y"]))
+        XCTAssertTrue(caps.supportsHome(axes: ["Z"]))
     }
 
     // MARK: - Smoke render

@@ -43,6 +43,9 @@ protocol PrinterServiceProtocol: Sendable {
     func listAvailableSpools(printerId: UUID) async throws -> [SpoolmanSpool]
     func loadFilament(printerId: UUID) async throws -> CommandResult
     func unloadFilament(printerId: UUID) async throws -> CommandResult
+    /// Physical unload; the optional tool selects outgoing inventory attribution,
+    /// not a spool assignment. Missing residual weight remains unknown.
+    func unloadFilament(printerId: UUID, toolheadIndex: Int?) async throws -> FilamentUnloadResult
     func changeFilament(printerId: UUID) async throws -> CommandResult
 
     // Capabilities
@@ -54,6 +57,14 @@ protocol PrinterServiceProtocol: Sendable {
     func homeXY(printerId: UUID) async throws
     func homeZ(printerId: UUID) async throws
     func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws
+    /// Coordinates are millimetres; nil leaves an axis unchanged, zero targets origin.
+    func moveTo(printerId: UUID, x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async throws -> CommandResult
+    /// Signed millimetres (negative retracts), feedrate already in mm/min.
+    func extrude(printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int) async throws -> CommandResult
+    func disableMotors(printerId: UUID) async throws -> CommandResult
+    /// Pass the rowVersion from the reviewed printer, not a newly fetched revision.
+    /// A firmware save failure can mean an unknown physical outcome; never replay.
+    func saveZOffset(printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String) async throws -> CommandResult
 
     // MARK: - Filament fallback groups (issue #711, F6)
     //

@@ -20,11 +20,20 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : nil
     }
 
-    // MARK: - Capability fixtures (per backend)
+    // Synthetic capability evidence for layout/lifecycle tests, not backend profiles.
+    private static let layoutCaps = PrinterBackendCapabilities.allControlsFixture
 
-    private static let moonrakerCaps = PrinterBackendCapabilities.fallback(for: .moonraker)
-    private static let flashForgeCaps = PrinterBackendCapabilities.fallback(for: .flashForge)
-    private static let sdcpCaps = PrinterBackendCapabilities.fallback(for: .sdcp)
+    private func wireCapabilities(backend: String, operationFields: String) throws -> PrinterBackendCapabilities {
+        let data = Data("""
+        {
+            "printerId": "550e8400-e29b-41d4-a716-446655440000",
+            "printerName": "Contract fixture",
+            "backend": "\(backend)",
+            \(operationFields)
+        }
+        """.utf8)
+        return PrinterBackendCapabilities(wire: try JSONDecoder().decode(PrinterBackendCapabilitiesWireDto.self, from: data))
+    }
 
     // MARK: - Printer fixture (force state to idle so the section renders)
 
@@ -99,7 +108,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
     func test_embeddedContent_mountAndRemount_doNotLoadOrDispatch() async throws {
         let printer = try makePrinter(backend: .moonraker)
-        let service = makeService(caps: Self.moonrakerCaps)
+        let service = makeService(caps: Self.layoutCaps)
         let model = PrinterControlsViewModel(printerService: service, printer: printer)
         let content = PrinterSetupControlsContent(printer: printer, viewModel: model)
         XCTAssertTrue(content.viewModel === model)
@@ -120,7 +129,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
     func test_embeddedContent_remount_preservesPendingAndErrorOnExternalOwner() async throws {
         let printer = try makePrinter(backend: .moonraker)
-        let service = makeService(caps: Self.moonrakerCaps)
+        let service = makeService(caps: Self.layoutCaps)
         let model = PrinterControlsViewModel(printerService: service, printer: printer)
         await model.loadCapabilities()
         await model.jog(axis: "X", distanceMm: 10)
@@ -152,7 +161,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         controller.rootView = AnyView(PrinterSetupControlsContent(printer: printer, viewModel: model))
         try await settle(controller)
         XCTAssertEqual(model.lastError, error)
-        XCTAssertEqual(model.capabilities, Self.moonrakerCaps)
+        XCTAssertEqual(model.capabilities, Self.layoutCaps)
         XCTAssertNil(service.getBackendCapabilitiesCalledWith)
         XCTAssertNil(service.moveCalledWith, "Remounting must not replay a pending command")
 
@@ -165,7 +174,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
     func test_standaloneOwner_forwardsOfflineSnapshotOutsideHiddenContent() async throws {
         let printer = try makePrinter(backend: .moonraker)
-        let service = makeService(caps: Self.moonrakerCaps)
+        let service = makeService(caps: Self.layoutCaps)
         let model = PrinterControlsViewModel(printerService: service, printer: printer)
         await model.loadCapabilities()
         let (window, controller) = install(PrinterControlsSection(printer: printer, viewModel: model))
@@ -187,7 +196,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     func test_standaloneOwner_redraw_retainsInstalledModelAndTargetCorrelation() async throws {
         var printer = try makePrinter(backend: .moonraker)
         printer.hotendTarget = 215
-        let service = makeService(caps: Self.moonrakerCaps)
+        let service = makeService(caps: Self.layoutCaps)
         let model = PrinterControlsViewModel(printerService: service, printer: printer)
         await model.loadCapabilities()
         let (window, controller) = install(PrinterControlsSection(printer: printer, viewModel: model))
@@ -244,7 +253,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
     func test_embeddedContent_largeType_reflowsAtPhoneAndTabletWidths() async throws {
         let printer = try makePrinter(backend: .moonraker, state: "paused")
-        let service = makeService(caps: Self.moonrakerCaps)
+        let service = makeService(caps: Self.layoutCaps)
         let model = PrinterControlsViewModel(printerService: service, printer: printer)
         await model.loadCapabilities()
         for width: CGFloat in [390, 1024] {
@@ -268,21 +277,44 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
     func test_snapshot_moonrakerProfile() async throws {
         let printer = try makePrinter(backend: .moonraker)
-        let svc = makeService(caps: Self.moonrakerCaps)
+        // Resolved current Moonraker interfaces: homing/heaters, never jogging.
+        let caps = try wireCapabilities(backend: "Moonraker", operationFields: """
+        "supportsRelativeMovement": false, "supportsAbsoluteMovement": false,
+        "supportsHoming": true, "supportsHomingXY": true, "supportsHomingZ": true,
+        "supportsHotendTemperature": true, "supportsBedTemperature": true,
+        "supportsExtrusion": true, "supportsDisableMotors": true, "supportsZOffset": true,
+        "supportedAxes": ["x", "y", "z"]
+        """)
+        XCTAssertFalse(caps.supportsMovement)
+        XCTAssertTrue(caps.supportsHome(axes: ["X", "Y", "Z"]))
+        let svc = makeService(caps: caps)
         let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
     }
 
     func test_snapshot_flashForgeProfile() async throws {
         let printer = try makePrinter(backend: .flashForge)
-        let svc = makeService(caps: Self.flashForgeCaps)
+        // Current unmatched-route-port case: no physical support is proven.
+        let caps = try wireCapabilities(backend: "FlashForge", operationFields: """
+        "supportsZOffset": true, "supportsRelativeMovement": false,
+        "supportsHoming": false, "supportsHotendTemperature": false,
+        "supportsBedTemperature": false, "supportedAxes": []
+        """)
+        XCTAssertFalse(caps.supportsMovement)
+        XCTAssertFalse(PreheatSubgroup.isVisible(capabilities: caps))
+        let svc = makeService(caps: caps)
         let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
     }
 
     func test_snapshot_sdcpProfile() async throws {
         let printer = try makePrinter(backend: .sdcp)
-        let svc = makeService(caps: Self.sdcpCaps)
+        let caps = try wireCapabilities(backend: "Sdcp", operationFields: """
+        "supportsZOffset": true, "supportsRelativeMovement": false,
+        "supportsHoming": false, "supportsHotendTemperature": false,
+        "supportedAxes": []
+        """)
+        let svc = makeService(caps: caps)
         let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
     }
@@ -295,8 +327,9 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     func test_snapshot_loadingState_capabilitiesNil() throws {
         let printer = try makePrinter(backend: .moonraker)
         let svc = MockPrinterService()
-        // Hold the capabilities call open by throwing — viewModel keeps caps == nil.
-        svc.errorToThrow = NetworkError.notFound
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        svc.beforeGetBackendCapabilities = { await barrier.arriveAndWait() }
         let section = PrinterControlsSection(printer: printer, printerService: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
     }
@@ -305,7 +338,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     /// exercising disabled subgroup controls without the printing lockout banner.
     func test_snapshot_disabledState_printerStarting() async throws {
         let printer = try makePrinter(backend: .moonraker, state: "starting")
-        let svc = makeService(caps: Self.moonrakerCaps)
+        let svc = makeService(caps: Self.layoutCaps)
         let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
     }
@@ -316,7 +349,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     /// the offline state hides it (spec §2.2, §2.4).
     func test_snapshot_lockoutBanner_printingState() async throws {
         let printer = try makePrinter(backend: .moonraker, state: "printing")
-        let svc = makeService(caps: Self.moonrakerCaps)
+        let svc = makeService(caps: Self.layoutCaps)
         let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
     }
