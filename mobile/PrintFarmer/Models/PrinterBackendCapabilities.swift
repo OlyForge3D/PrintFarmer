@@ -23,6 +23,15 @@ struct PrinterBackendCapabilities: Codable, Equatable, Sendable {
     var supportsRelativeMovement: Bool { supportsMovement }
     var supportsHotendTemperature: Bool { supportsTemperatureControl }
 
+    func supportsHome(axes: [String]) -> Bool {
+        switch Set(axes.map { $0.uppercased() }) {
+        case ["X", "Y", "Z"]: supportsHoming
+        case ["X", "Y"]: supportsHomingXY
+        case ["Z"]: supportsHomingZ
+        default: false
+        }
+    }
+
     /// Keep the old entry point for callers, but never enable actuation from it.
     static func fallback(for backend: PrinterBackend) -> PrinterBackendCapabilities {
         PrinterBackendCapabilities(

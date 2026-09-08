@@ -244,6 +244,9 @@ Missing fields or a missing capability endpoint fail closed. This is command
 availability, not evidence that hardware is absent. Capabilities are fetched
 fresh; the former permanent UUID-only cache is removed. APIClient's registered
 server generation fence rejects stale in-flight responses.
+Homing visibility and dispatch use independent All/XY/Z evidence, not jogging
+support. A failed capability read remains unknown and shows a read-only retry
+affordance; it is not cached as permanent unsupported state.
 
 Control requests are never replayed automatically. Errors (including 409, 412,
 428 and uncertain firmware-save 503) propagate through existing APIClient

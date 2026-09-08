@@ -42,7 +42,8 @@ final class PrinterControlsViewModelTests: XCTestCase {
         supportsBedTemperature: true,
         supportsFanControl: true,
         supportsHoming: true,
-        supportedAxes: ["X", "Y", "Z"]
+        supportedAxes: ["X", "Y", "Z"],
+        supportsHomingXY: true, supportsHomingZ: true
     )
 
     private static let flashForgeCaps = PrinterBackendCapabilities(
@@ -51,10 +52,68 @@ final class PrinterControlsViewModelTests: XCTestCase {
         supportsBedTemperature: false,
         supportsFanControl: false,
         supportsHoming: true,
-        supportedAxes: ["X", "Y", "Z"]
+        supportedAxes: ["X", "Y", "Z"],
+        supportsHomingXY: true, supportsHomingZ: true
     )
 
     // MARK: - Tests
+
+    func test_capabilityReadsAreSingleFlightAndCancellationDoesNotPublishSupport() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        mockService.beforeGetBackendCapabilities = { await barrier.arriveAndWait() }
+        let pending = Task { await vm.loadCapabilities() }
+        await barrier.waitUntilArrived()
+        await vm.loadCapabilities()
+        XCTAssertEqual(mockService.getBackendCapabilitiesCallCount, 1)
+        XCTAssertTrue(vm.isLoadingCapabilities)
+        pending.cancel()
+        barrier.release()
+        await pending.value
+        XCTAssertNil(vm.capabilities)
+        XCTAssertNil(vm.capabilityLoadError)
+        XCTAssertFalse(vm.isLoadingCapabilities)
+    }
+
+    func test_capabilityFetchFailureRemainsUnavailableAndCanRetryWithoutActuation() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        mockService.errorToThrow = NetworkError.serverError(503)
+        await vm.loadCapabilities()
+        XCTAssertNil(vm.capabilities)
+        XCTAssertNotNil(vm.capabilityLoadError)
+        XCTAssertFalse(vm.isLoadingCapabilities)
+        mockService.errorToThrow = nil
+        await vm.loadCapabilities()
+        XCTAssertEqual(vm.capabilities, Self.fullCaps)
+        XCTAssertNil(vm.capabilityLoadError)
+        XCTAssertNil(mockService.homeCalledWith)
+        XCTAssertNil(mockService.moveCalledWith)
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+    }
+
+    func test_homingUsesIndependentOperationEvidenceWithoutJogging() async throws {
+        var caps = PrinterBackendCapabilities.fallback(for: .unknown)
+        caps.supportsHomingXY = true
+        let xy = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await xy.loadCapabilities()
+        await xy.homeXY()
+        XCTAssertEqual(mockService.homeXYCalledWith, xy.printer.id)
+        XCTAssertNil(xy.lastError)
+
+        let z = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await z.loadCapabilities()
+        await z.homeZ()
+        XCTAssertNil(mockService.homeZCalledWith)
+        XCTAssertNotNil(z.lastError)
+        XCTAssertEqual(z.lastError?.isRetryable, false)
+
+        let all = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await all.loadCapabilities()
+        await all.homeAll()
+        XCTAssertNil(mockService.homeCalledWith)
+        XCTAssertNotNil(all.lastError)
+    }
 
     func test_setupCommands_remainBlockedWhilePrintingPausedOrOffline() async throws {
         for (state, online) in [("printing", true), ("paused", true), ("ready", false)] {

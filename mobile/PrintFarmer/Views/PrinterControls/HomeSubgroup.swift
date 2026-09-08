@@ -22,7 +22,7 @@ struct HomeSubgroup: View {
     /// surrounding subgroups when this returns true.
     static func shouldHide(capabilities: PrinterBackendCapabilities?) -> Bool {
         guard let caps = capabilities else { return true }
-        return !caps.supportsMovement || !caps.supportsHoming
+        return !caps.supportsHoming && !caps.supportsHomingXY && !caps.supportsHomingZ
     }
 
     private var isAllPending: Bool {
@@ -65,36 +65,42 @@ struct HomeSubgroup: View {
                     .foregroundStyle(Color.pfTextPrimary)
                     .accessibilityAddTraits(.isHeader)
 
-                homeAllButton
+                if viewModel.capabilities?.supportsHoming == true {
+                    homeAllButton
+                }
 
                 HStack(spacing: 8) {
-                    homeAxisButton(
-                        label: String(localized: "Home XY", comment: "Home subgroup: Home X and Y axes button"),
-                        symbol: "move.3d",
-                        isPending: isXYPending,
-                        hasError: isErrored(matching: ["X", "Y"]),
-                        a11yLabel: isXYPending
-                            ? String(localized: "Homing X and Y, in progress", comment: "VoiceOver: Home XY in flight")
-                            : String(localized: "Home X and Y", comment: "VoiceOver: Home XY idle per spec §4.1"),
-                        idleHint: String(localized: "Homes X and Y axes only.", comment: "VoiceOver idle hint Home XY per spec §4.1")
-                    ) {
-                        Task { await viewModel.homeXY() }
+                    if viewModel.capabilities?.supportsHomingXY == true {
+                        homeAxisButton(
+                            label: String(localized: "Home XY", comment: "Home subgroup: Home X and Y axes button"),
+                            symbol: "move.3d",
+                            isPending: isXYPending,
+                            hasError: isErrored(matching: ["X", "Y"]),
+                            a11yLabel: isXYPending
+                                ? String(localized: "Homing X and Y, in progress", comment: "VoiceOver: Home XY in flight")
+                                : String(localized: "Home X and Y", comment: "VoiceOver: Home XY idle per spec §4.1"),
+                            idleHint: String(localized: "Homes X and Y axes only.", comment: "VoiceOver idle hint Home XY per spec §4.1")
+                        ) {
+                            Task { await viewModel.homeXY() }
+                        }
+                        .disabled(isDisabled || (anyPending && !isXYPending))
                     }
-                    .disabled(isDisabled || (anyPending && !isXYPending))
 
-                    homeAxisButton(
-                        label: String(localized: "Home Z", comment: "Home subgroup: Home Z axis button"),
-                        symbol: "arrow.up.and.down",
-                        isPending: isZPending,
-                        hasError: isErrored(matching: ["Z"]),
-                        a11yLabel: isZPending
-                            ? String(localized: "Homing Z, in progress", comment: "VoiceOver: Home Z in flight")
-                            : String(localized: "Home Z", comment: "VoiceOver: Home Z idle per spec §4.1"),
-                        idleHint: String(localized: "Homes Z axis only.", comment: "VoiceOver idle hint Home Z per spec §4.1")
-                    ) {
-                        Task { await viewModel.homeZ() }
+                    if viewModel.capabilities?.supportsHomingZ == true {
+                        homeAxisButton(
+                            label: String(localized: "Home Z", comment: "Home subgroup: Home Z axis button"),
+                            symbol: "arrow.up.and.down",
+                            isPending: isZPending,
+                            hasError: isErrored(matching: ["Z"]),
+                            a11yLabel: isZPending
+                                ? String(localized: "Homing Z, in progress", comment: "VoiceOver: Home Z in flight")
+                                : String(localized: "Home Z", comment: "VoiceOver: Home Z idle per spec §4.1"),
+                            idleHint: String(localized: "Homes Z axis only.", comment: "VoiceOver idle hint Home Z per spec §4.1")
+                        ) {
+                            Task { await viewModel.homeZ() }
+                        }
+                        .disabled(isDisabled || (anyPending && !isZPending))
                     }
-                    .disabled(isDisabled || (anyPending && !isZPending))
                 }
 
                 if let message = disabledTapMessage {

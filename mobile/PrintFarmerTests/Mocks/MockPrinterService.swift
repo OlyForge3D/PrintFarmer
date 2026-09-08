@@ -9,7 +9,8 @@ extension PrinterBackendCapabilities {
             supportsMovement: supported, supportsTemperatureControl: supported,
             supportsBedTemperature: supported && backend != .flashForge,
             supportsFanControl: supported && backend != .flashForge,
-            supportsHoming: supported, supportedAxes: supported ? ["X", "Y", "Z"] : []
+            supportsHoming: supported, supportedAxes: supported ? ["X", "Y", "Z"] : [],
+            supportsHomingXY: supported, supportsHomingZ: supported
         )
     }
 }
@@ -268,9 +269,13 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     var capabilitiesToReturn: PrinterBackendCapabilities?
     var getBackendCapabilitiesCalledWith: UUID?
+    var getBackendCapabilitiesCallCount = 0
+    var beforeGetBackendCapabilities: (@Sendable () async -> Void)?
 
     func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
         getBackendCapabilitiesCalledWith = printerId
+        getBackendCapabilitiesCallCount += 1
+        if let hook = beforeGetBackendCapabilities { await hook() }
         if let error = errorToThrow { throw error }
         return capabilitiesToReturn ?? PrinterBackendCapabilities.supportedFixture(for: .moonraker)
     }
@@ -347,6 +352,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         saveZOffsetCalledWith = nil
         unloadFilamentToolheadIndex = nil
         unloadResultToReturn = nil
+        getBackendCapabilitiesCallCount = 0
+        beforeGetBackendCapabilities = nil
         spoolsToReturn = []
         getDetailsCalledWith = nil
         detailsToReturn = nil
