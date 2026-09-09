@@ -1,0 +1,3 @@
+job: pf-2611-mac-child-push-canary
+issue: 2611
+purpose: child-authenticated macOS Ralph push canary
