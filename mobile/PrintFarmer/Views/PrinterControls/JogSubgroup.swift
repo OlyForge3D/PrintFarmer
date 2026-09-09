@@ -18,6 +18,7 @@ struct JogSubgroup: View {
     @State private var disabledTapMessage: String?
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     static let stepOptions: [Double] = [0.1, 1, 10, 100]
     private static let canonicalAxes: [String] = ["X", "Y", "Z"]
@@ -26,7 +27,7 @@ struct JogSubgroup: View {
     /// have not been fetched yet, default to the full list so the UI renders sensibly
     /// during initial load. Empty result → caller should hide the subgroup.
     static func visibleAxes(for capabilities: PrinterBackendCapabilities?) -> [String] {
-        guard let caps = capabilities else { return canonicalAxes }
+        guard let caps = capabilities else { return [] }
         return canonicalAxes.filter { caps.supportedAxes.contains($0) }
     }
 
@@ -34,7 +35,7 @@ struct JogSubgroup: View {
     /// Hide if the backend explicitly does not support movement, or if all canonical
     /// axes are filtered out by `supportedAxes`.
     static func isHidden(for capabilities: PrinterBackendCapabilities?) -> Bool {
-        guard let caps = capabilities else { return false }
+        guard let caps = capabilities else { return true }
         if !caps.supportsMovement { return true }
         return visibleAxes(for: capabilities).isEmpty
     }
@@ -80,27 +81,114 @@ struct JogSubgroup: View {
 
     private var axisPicker: some View {
         let axes = Self.visibleAxes(for: viewModel.capabilities)
-        return Picker(String(localized: "Jog axis", comment: "Jog subgroup axis picker label"), selection: $selectedAxis) {
+        return selectionLayout {
             ForEach(axes, id: \.self) { axis in
-                Text(axis).tag(axis)
+                ControlActionButton(
+                    title: axis, identifier: "printer.controls.jog.axis.\(axis.lowercased())",
+                    accessibilityTitle: "Jog axis \(axis)",
+                    selected: selectedAxis == axis
+                ) { selectedAxis = axis }
             }
         }
-        .pickerStyle(.segmented)
-        .accessibilityLabel(String(localized: "Jog axis", comment: "VoiceOver label for jog axis picker"))
-        .accessibilityHint(String(localized: "Choose X, Y, or Z axis to move.", comment: "VoiceOver hint for jog axis picker"))
-        .disabled(!viewModel.canControl || viewModel.pendingCommand != nil)
+        .disabled(!viewModel.canControl || viewModel.isExecuting)
     }
 
     private var stepPicker: some View {
-        Picker(String(localized: "Jog step distance", comment: "Jog subgroup step picker label"), selection: $selectedStep) {
+        selectionLayout {
             ForEach(Self.stepOptions, id: \.self) { step in
-                Text(stepLabel(step)).tag(step)
+                ControlActionButton(
+                    title: stepLabel(step), identifier: "printer.controls.jog.step.\(stepLabel(step))",
+                    accessibilityTitle: "Jog step \(stepLabel(step)) millimeters",
+                    selected: selectedStep == step
+                ) { selectedStep = step }
             }
         }
-        .pickerStyle(.segmented)
-        .accessibilityLabel(String(localized: "Jog step distance", comment: "VoiceOver label for jog step picker"))
-        .accessibilityHint(String(localized: "Choose how many millimeters each tap moves.", comment: "VoiceOver hint for jog step picker"))
-        .disabled(!viewModel.canControl || viewModel.pendingCommand != nil)
+        .disabled(!viewModel.canControl || viewModel.isExecuting)
+    }
+
+    private var selectionLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+    }
+
+    struct AbsolutePositionControls: View {
+        @ObservedObject var viewModel: PrinterControlsViewModel
+        @State private var x = ""
+        @State private var y = ""
+        @State private var z = ""
+        @State private var feedrate = ""
+        @State private var inputError: String?
+
+        static func isVisible(_ capabilities: PrinterBackendCapabilities?) -> Bool {
+            capabilities?.supportsAbsoluteMovement == true
+                && !(capabilities?.supportedAxes.filter { ["X", "Y", "Z"].contains($0) }.isEmpty ?? true)
+        }
+
+        var body: some View {
+            if Self.isVisible(viewModel.capabilities) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Absolute position")
+                        .font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("Coordinates are in mm. Blank axes stay unchanged; zero is an explicit destination. Travel limits and origin are not reported. Verify clearance and homing before moving.")
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ForEach(JogSubgroup.visibleAxes(for: viewModel.capabilities), id: \.self) { axis in
+                        Text("\(axis) reported: \(positionText(axis))")
+                            .font(.footnote)
+                        ControlNumberField(
+                            placeholder: "\(axis) destination (mm)", text: binding(axis),
+                            label: "\(axis) absolute destination in millimeters",
+                            identifier: "printer.controls.absolute.\(axis.lowercased())",
+                            hint: ControlNumberInput.coordinatePrecisionMessage
+                        )
+                    }
+                    Text("Homed axes: \(viewModel.printer.homedAxes ?? "Unknown")")
+                        .font(.footnote)
+                    ControlNumberField(
+                        placeholder: "Custom feedrate unavailable", text: $feedrate,
+                        label: "Absolute movement feedrate in millimeters per minute",
+                        identifier: "printer.controls.absolute.feedrate",
+                        hint: ControlNumberInput.customFeedrateMessage
+                    )
+                    .disabled(true)
+                    Text("No verified custom feedrate maximum. Uses \(PrinterControlsViewModel.xyFeedrateMmMin) mm/min for XY-only moves or \(PrinterControlsViewModel.zFeedrateMmMin) mm/min when Z is included.")
+                        .font(.footnote)
+                    ControlActionButton(title: "Move to position", identifier: "printer.controls.absolute.move") {
+                        do {
+                            let axes = JogSubgroup.visibleAxes(for: viewModel.capabilities)
+                            let x = try axes.contains("X") ? ControlNumberInput.coordinate(x) : nil
+                            let y = try axes.contains("Y") ? ControlNumberInput.coordinate(y) : nil
+                            let z = try axes.contains("Z") ? ControlNumberInput.coordinate(z) : nil
+                            let f = try ControlNumberInput.feedrate(feedrate)
+                            inputError = nil
+                            Task { await viewModel.moveTo(x: x, y: y, z: z, feedrateMmMin: f) }
+                        } catch {
+                            inputError = error.localizedDescription
+                        }
+                    }
+                    if let inputError {
+                        Text(inputError).font(.footnote).foregroundStyle(Color.pfError)
+                    }
+                }
+                .foregroundStyle(Color.pfTextPrimary)
+                .disabled(!viewModel.canControl || viewModel.isExecuting)
+            }
+        }
+
+        private func binding(_ axis: String) -> Binding<String> {
+            switch axis {
+            case "X": return $x
+            case "Y": return $y
+            default: return $z
+            }
+        }
+
+        private func positionText(_ axis: String) -> String {
+            let value = axis == "X" ? viewModel.printer.x : axis == "Y" ? viewModel.printer.y : viewModel.printer.z
+            guard let value, value.isFinite else { return "Unknown" }
+            return "\(value.formatted()) mm"
+        }
     }
 
     private var jogButtons: some View {
@@ -116,7 +204,7 @@ struct JogSubgroup: View {
         let signedStep = direction * selectedStep
         let stepLabelText = stepLabel(selectedStep)
         let hasError = isErrored(direction: direction)
-        let isInteractive = viewModel.canControl && viewModel.pendingCommand == nil
+        let isInteractive = viewModel.canControl && !viewModel.isExecuting
 
         Button {
             handleTap {
@@ -154,7 +242,7 @@ struct JogSubgroup: View {
     }
 
     private func handleTap(_ action: () -> Void) {
-        guard viewModel.canControl, viewModel.pendingCommand == nil else {
+        guard viewModel.canControl, !viewModel.isExecuting else {
             let message = viewModel.blockedReason
                 ?? String(localized: "Another command is in flight.", comment: "Fallback when jog tap blocked by single-flight")
             withAnimation(.easeInOut(duration: 0.15)) {

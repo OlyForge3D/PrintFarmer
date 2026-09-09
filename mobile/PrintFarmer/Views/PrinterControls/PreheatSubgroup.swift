@@ -1,5 +1,114 @@
 import SwiftUI
 
+/// Rounded SwiftUI fields keep a 34-point UIKit editor even inside a taller
+/// frame. Size the native editor itself so both touch and VoiceOver get 44pt.
+struct ControlNumberField: UIViewRepresentable {
+    let placeholder: String
+    @Binding var text: String
+    let label: String
+    let identifier: String
+    var hint: String?
+    @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 17
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = UITextField()
+        field.borderStyle = .roundedRect
+        field.keyboardType = .numbersAndPunctuation
+        field.returnKeyType = .done
+        field.autocorrectionType = .no
+        field.delegate = context.coordinator
+        field.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .editingChanged)
+        return field
+    }
+
+    func updateUIView(_ field: UITextField, context: Context) {
+        context.coordinator.text = $text
+        if field.text != text { field.text = text }
+        field.placeholder = placeholder
+        field.font = .systemFont(ofSize: fontSize)
+        field.isEnabled = isEnabled
+        field.accessibilityLabel = label
+        field.accessibilityIdentifier = identifier
+        field.accessibilityHint = hint
+        field.textColor = UIColor(Color.pfTextPrimary)
+        field.backgroundColor = UIColor(Color.pfBackgroundTertiary)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextField, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 200, height: max(44, ceil(uiView.font?.lineHeight ?? fontSize) + 16))
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+        @objc func changed(_ field: UITextField) { text.wrappedValue = field.text ?? "" }
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            textField.resignFirstResponder()
+            return true
+        }
+    }
+}
+
+struct ControlActionButton: UIViewRepresentable {
+    let title: String
+    var identifier = ""
+    var accessibilityTitle: String?
+    var hint: String?
+    var selected = false
+    var isDestructive = false
+    let action: () -> Void
+    @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 17
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(type: .system)
+        button.addTarget(context.coordinator, action: #selector(Coordinator.activate), for: .touchUpInside)
+        return button
+    }
+
+    func updateUIView(_ button: UIButton, context: Context) {
+        context.coordinator.action = action
+        var configuration = UIButton.Configuration.gray()
+        configuration.title = title
+        configuration.buttonSize = .large
+        configuration.cornerStyle = .medium
+        configuration.baseForegroundColor = UIColor(isDestructive ? Color.pfError : Color.pfTextPrimary)
+        configuration.background.strokeColor = UIColor(selected ? Color.pfTextPrimary : Color.clear)
+        configuration.background.strokeWidth = 1
+        let font = UIFont.systemFont(ofSize: fontSize)
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer {
+            var attributes = $0
+            attributes.font = font
+            return attributes
+        }
+        button.configuration = configuration
+        button.titleLabel?.numberOfLines = 0
+        button.isSelected = selected
+        button.isEnabled = isEnabled
+        button.accessibilityLabel = accessibilityTitle ?? title
+        button.accessibilityHint = hint
+        button.accessibilityIdentifier = identifier
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIButton, context: Context) -> CGSize? {
+        let size = uiView.sizeThatFits(CGSize(
+            width: proposal.width ?? .greatestFiniteMagnitude, height: .greatestFiniteMagnitude
+        ))
+        return CGSize(width: max(44, proposal.width ?? size.width), height: max(44, size.height))
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+
+    final class Coordinator: NSObject {
+        var action: () -> Void
+        init(action: @escaping () -> Void) { self.action = action }
+        @objc func activate() { action() }
+    }
+}
+
 /// Standalone Preheat subgroup of the Printer Controls section. Renders four
 /// buttons (PLA, PETG, ABS, Cool Down) bound to `PrinterControlsViewModel`.
 ///
@@ -44,7 +153,7 @@ struct PreheatSubgroup: View {
                 .foregroundStyle(Color.pfTextPrimary)
                 .accessibilityAddTraits(.isHeader)
 
-            if viewModel.capabilities?.supportsBedTemperature == false {
+            if !viewModel.supports(.bed) {
                 Text("Hotend only — bed temperature control is unavailable.")
                     .font(.caption)
                     .foregroundStyle(Color.pfTextSecondary)
@@ -79,7 +188,7 @@ struct PreheatSubgroup: View {
         if dynamicTypeSize.isAccessibilitySize {
             count = 1
         } else if horizontalSizeClass == .regular {
-            count = 4
+            return [GridItem(.adaptive(minimum: 120), spacing: 8)]
         } else {
             count = 2
         }
@@ -95,14 +204,12 @@ struct PreheatSubgroup: View {
             return false
         }()
         let canControl = viewModel.canControl
+        let limitsReason = viewModel.preheatBlockedReason(preset)
         // Per spec §3.1 single-flight queue: if any preheat command is in
         // flight, *all* preheat siblings disable so the user can't stack
         // burst commands like "PLA then ABS".
-        let isAnyPreheatInProgress: Bool = {
-            guard case .preheat = viewModel.pendingCommand?.kind else { return false }
-            return true
-        }()
-        let isInteractive = canControl && !isAnyPreheatInProgress
+        let isAnyPreheatInProgress = viewModel.isExecuting
+        let isInteractive = canControl && !isAnyPreheatInProgress && limitsReason == nil
 
         let hasError = isErrored(preset: preset)
         Button {
@@ -111,16 +218,96 @@ struct PreheatSubgroup: View {
             buttonLabel(preset: preset, isPending: isPending)
         }
         .buttonStyle(PreheatButtonStyle(preset: preset, isEnabled: isInteractive, isPending: isPending))
-        .disabled(isAnyPreheatInProgress || isBlockedWithoutTapReveal(canControl: canControl))
+        .disabled(isAnyPreheatInProgress || limitsReason != nil || isBlockedWithoutTapReveal(canControl: canControl))
         // On compact layouts we keep blocked buttons tappable so the user can
         // reveal the disabled reason; regular width shows the reason inline.
         .disabledControlStyle(isDisabled: !isInteractive && !isPending, cornerRadius: 8)
         .errorBorderHighlight(isActive: hasError, cornerRadius: 8)
         .accessibilityLabel(accessibilityLabel(preset: preset, isPending: isPending))
-        .accessibilityHint(accessibilityHint(preset: preset, canControl: canControl, hasError: hasError))
+        .accessibilityHint(limitsReason ?? accessibilityHint(preset: preset, canControl: canControl, hasError: hasError))
         .accessibilityValue(accessibilityValue(isPending: isPending, hasError: hasError))
         .accessibilityAddTraits(isPending ? .updatesFrequently : [])
-        .help(viewModel.blockedReason ?? "")
+        .help(limitsReason ?? viewModel.blockedReason ?? "")
+    }
+
+    struct IndividualHeaterControls: View {
+        @ObservedObject var viewModel: PrinterControlsViewModel
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Heater.allCases, id: \.self) { heater in
+                    if viewModel.supports(heater) {
+                        HeaterTargetEditor(viewModel: viewModel, heater: heater)
+                    }
+                }
+            }
+        }
+    }
+
+    struct HeaterTargetEditor: View {
+        @ObservedObject var viewModel: PrinterControlsViewModel
+        let heater: Heater
+        @State private var target = ""
+        @State private var inputError: String?
+
+        static func temperatureText(_ value: Double?) -> String {
+            guard let value, value.isFinite else { return "Unknown" }
+            return "\(value.formatted(.number.precision(.fractionLength(0...1)))) °C"
+        }
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("\(heater.title) target")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Actual: \(Self.temperatureText(actual))")
+                Text("Setpoint: \(Self.temperatureText(setpoint))")
+                if let maximum = viewModel.maximum(for: heater) {
+                    Text("Configured range: 0–\(maximum) °C. Zero switches this heater off.")
+                        .font(.footnote)
+                } else {
+                    Text("No valid maximum is available. Heating is blocked; only zero-off is allowed. Retry the heater limits check.")
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ControlNumberField(
+                    placeholder: "Target (°C)", text: $target,
+                    label: "\(heater.title) target in degrees Celsius",
+                    identifier: "printer.controls.\(heater.rawValue).target",
+                    hint: ControlNumberInput.heaterPrecisionMessage
+                )
+                ControlActionButton(
+                    title: "Set \(heater.title.lowercased()) target",
+                    identifier: "printer.controls.\(heater.rawValue).set"
+                ) {
+                    do {
+                        guard let value = try ControlNumberInput.heaterTarget(target) else {
+                            throw PrinterControlError.invalidRequest("Enter a target; use zero to switch off.")
+                        }
+                        if let message = viewModel.heaterTargetError(heater, target: value) {
+                            throw PrinterControlError.invalidRequest(message)
+                        }
+                        inputError = nil
+                        Task { await viewModel.setHeaterTarget(heater, target: value) }
+                    } catch {
+                        inputError = error.localizedDescription
+                    }
+                }
+                if let inputError {
+                    Text(inputError).font(.footnote).foregroundStyle(Color.pfError)
+                }
+            }
+            .foregroundStyle(Color.pfTextPrimary)
+            .disabled(!viewModel.canControl || viewModel.isExecuting)
+        }
+
+        private var actual: Double? {
+            heater == .hotend ? viewModel.printer.hotendTemp : viewModel.printer.bedTemp
+        }
+
+        private var setpoint: Double? {
+            heater == .hotend ? viewModel.printer.hotendTarget : viewModel.printer.bedTarget
+        }
     }
 
     private var blockedReasonMessage: String? {
@@ -147,7 +334,7 @@ struct PreheatSubgroup: View {
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
             }
-            Text(preset.temperatureLabel)
+            Text(viewModel.supports(.bed) ? preset.temperatureLabel : "\(Int(preset.hotend))°")
                 .font(.caption.monospacedDigit())
                 .lineLimit(1)
                 .opacity(isPending ? 0 : 1) // hide values during pending; spinner takes over
@@ -163,6 +350,7 @@ struct PreheatSubgroup: View {
     }
 
     private func handleTap(preset: PreheatPreset, canControl: Bool) {
+        guard viewModel.preheatBlockedReason(preset) == nil else { return }
         guard canControl else {
             // Disabled tap: surface the blocked reason as a transient caption
             // (phone) and let `.help()` cover iPad/Mac hover.
@@ -208,7 +396,7 @@ struct PreheatSubgroup: View {
         if !canControl {
             return String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1")
         }
-        return preset.a11yHint(hasBed: viewModel.capabilities?.supportsBedTemperature != false)
+        return preset.a11yHint(hasBed: viewModel.supports(.bed))
     }
 
     func accessibilityValue(isPending: Bool, hasError: Bool) -> String {
@@ -453,7 +641,12 @@ private enum PreheatSubgroupPreviewFactory {
     ) -> PrinterControlsViewModel {
         let printer = Printer.previewFallbackPrinter(state: printerState, isOnline: isOnline)
         let service = PreheatSubgroupPreviewService(capabilities: capabilities, hangForever: startPendingPreset != nil)
-        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        let serverID = UUID()
+        let composition = PrinterControlsComposition(
+            identity: .init(serverID: serverID, generation: 0, revision: 0), printerService: service
+        )
+        let vm = PrinterControlsViewModel(composition: composition, printer: printer)
+        vm.configureAccess(serverID: serverID) { nil }
         // Asynchronously load preview capabilities immediately so the canvas
         // settles on the configured visibility state.
         vm.previewLoadCapabilitiesAsync()

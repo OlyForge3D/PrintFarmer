@@ -1,14 +1,227 @@
 import XCTest
 import SwiftUI
+import KeychainSwift
 @testable import PrintFarmer
 
-/// Unit tests for the pure logic extracted into `PrinterDetailPanelsHost.swift`
-/// (issue #2522): panel availability/selection-safety, the run-action
-/// presentation binding table, the filament-action mapping and the coverage
-/// state mapping. All of these are plain static functions, so they are
-/// exercised here without hosting a view, a live view model, or a simulator.
+/// Detail-host lifecycle, native panel reflow, and pure presentation mappings.
 @MainActor
 final class PrinterDetailPanelsTests: XCTestCase {
+
+    private final class DetailHostingController<Content: View>: UIHostingController<Content> {
+        private(set) var hasAppeared = false
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            hasAppeared = true
+        }
+    }
+
+    func testProductionDetailHostCreatesControlsWhenPendingCompositionSettles() async throws {
+        executionTimeAllowance = 60
+        let fixture = try detailHostFixture()
+        try fixture.registry.setActive(id: fixture.second.id)
+        fixture.registry.setAdvancedPrinterControlsEnabled(true)
+        await fixture.disconnect.waitUntilArrived()
+        XCTAssertNil(fixture.services.printerControlsComposition)
+        fixture.disconnect.release()
+        await fixture.connect.waitUntilArrived()
+        let generation = fixture.services.activeServerGeneration
+
+        // A retained read model makes the child page mount before the parent's
+        // settlement await finishes. The controls owner is NOT injected.
+        let detail = PrinterDetailViewModel(printerId: fixture.printer.id)
+        detail.configure(printerService: fixture.services.printerService)
+        await detail.loadPrinter()
+        XCTAssertNotNil(detail.printer)
+        let controller = DetailHostingController(rootView: try host(
+            PrinterDetailView(viewModel: detail), services: fixture.services, registry: fixture.registry
+        ))
+        let window = show(controller)
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await selectControls(in: controller)
+        XCTAssertNil(heaterTarget(in: controller.view))
+        XCTAssertTrue(capabilityRequests(fixture.api).isEmpty, "No owner can load capabilities before composition settles")
+        XCTAssertNil(fixture.services.printerControlsComposition)
+
+        fixture.connect.release()
+        await fixture.services.awaitActiveServerSettled()
+        XCTAssertEqual(fixture.services.activeServerGeneration, generation, "Settlement must not need a remount")
+        try await waitForHost("The existing controls page must replace its connection fallback", in: controller.view) {
+            self.heaterTarget(in: controller.view)?.isEnabled == true
+        }
+        XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
+        XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.second.baseURL.host)
+        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
+
+        let field = try XCTUnwrap(heaterTarget(in: controller.view))
+        let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
+        selector.selectedSegmentIndex = 0
+        selector.sendActions(for: .valueChanged)
+        try await selectControls(in: controller)
+        XCTAssertTrue(heaterTarget(in: controller.view) === field, "Page changes must retain the single owner/editor")
+        XCTAssertEqual(capabilityRequests(fixture.api).count, 1, "No capability refetch on repeated lifecycle triggers")
+
+        try fixture.registry.setActive(id: fixture.first.id)
+        XCTAssertNil(fixture.services.printerControlsComposition)
+        try await waitForHost("A retained old-server editor must fail closed", in: controller.view) {
+            self.heaterTarget(in: controller.view)?.isEnabled != true
+        }
+        XCTAssertEqual(capabilityRequests(fixture.api).count, 1, "Identity churn cannot rebind or replace this host's owner")
+        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
+    }
+
+    func testProductionDetailHostInitialLoadCreatesOneControlsOwner() async throws {
+        executionTimeAllowance = 60
+        let fixture = try detailHostFixture()
+        fixture.registry.setAdvancedPrinterControlsEnabled(true)
+        let controller = DetailHostingController(rootView: try host(
+            PrinterDetailView(printerId: fixture.printer.id), services: fixture.services, registry: fixture.registry
+        ))
+        let window = show(controller)
+        defer { window.isHidden = true; window.rootViewController = nil }
+        try await selectControls(in: controller)
+        try await waitForHost("Initial detail load must expose the native heater editor", in: controller.view) {
+            self.heaterTarget(in: controller.view)?.isEnabled == true
+        }
+        XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
+        XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.first.baseURL.host)
+        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
+    }
+
+    private func detailHostFixture() throws -> (
+        services: ServiceContainer, registry: ServerRegistry, printer: Printer,
+        first: RegisteredServer, second: RegisteredServer, api: MockAPIClient,
+        disconnect: AsyncBarrier, connect: AsyncBarrier
+    ) {
+        let suite = "PrinterDetailHost-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let root = try XCTUnwrap(FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first)
+            .appendingPathComponent(suite, isDirectory: true)
+        addTeardownBlock {
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let registry = ServerRegistry(userDefaults: defaults, migrateLegacyServerURL: false)
+        let first = try registry.add(displayName: "A", baseURL: URL(string: "https://detail-a.example.com")!)
+        let second = try registry.add(displayName: "B", baseURL: URL(string: "https://detail-b.example.com")!)
+        var printer = try TestData.decodePrinter()
+        printer.state = "idle"
+        printer.isOnline = true
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let printerData = try encoder.encode(printer)
+        let details = try encoder.encode(PrinterDetails.controlsLimitsFixture(for: printer))
+        let printerPath = "/api/printers/\(printer.id)"
+        let capabilities = Data("""
+        {"printerId":"\(printer.id)","backend":"Moonraker",
+         "supportsHotendTemperature":true,"supportsBedTemperature":true}
+        """.utf8)
+        let api = MockAPIClient()
+        api.requestHandler = { request in
+            let path = request.url?.path ?? ""
+            let data: Data
+            if path == printerPath {
+                data = printerData
+            } else if path.hasSuffix("/backend-capabilities") {
+                data = capabilities
+            } else if path.hasSuffix("/details") {
+                data = details
+            } else {
+                return (TestData.httpResponse(url: request.url, statusCode: 404), Data())
+            }
+            return (TestData.httpResponse(url: request.url, statusCode: 200), data)
+        }
+        let disconnect = AsyncBarrier()
+        let connect = AsyncBarrier()
+        addTeardownBlock { disconnect.close(); connect.close() }
+        let credentials = ServerCredentialsStore(keychain: KeychainSwift(keyPrefix: suite))
+        // The real switch only reconnects SignalR for a registered authenticated
+        // destination. This synthetic token never leaves the isolated mock session.
+        credentials.save(ServerCredentials(accessToken: "detail-host-test-token", expiresAt: nil), serverId: second.id)
+        addTeardownBlock { credentials.delete(serverId: second.id) }
+        let services = ServiceContainer(
+            serverRegistry: registry,
+            credentialsStore: credentials,
+            userDefaultsBox: AuthServiceUserDefaultsBox(defaults),
+            farmSnapshotRootURL: root,
+            synchronizeOfflineQueueOnStartup: false,
+            apiClientFactory: { url, generation, _, _, _ in
+                APIClient(baseURL: url, session: api.urlSession, serverGeneration: generation)
+            },
+            signalRServiceFactory: { url, _ in
+                let signal = MockSignalRService()
+                if url == first.baseURL { signal.disconnectHook = { await disconnect.arriveAndWait() } }
+                if url == second.baseURL { signal.connectHook = { await connect.arriveAndWait() } }
+                return signal
+            }
+        )
+        return (services, registry, printer, first, second, api, disconnect, connect)
+    }
+
+    private func host(
+        _ detail: PrinterDetailView, services: ServiceContainer, registry: ServerRegistry
+    ) throws -> some View {
+        let auth = AuthViewModel(services: services)
+        auth.isAuthenticated = true
+        auth.currentUser = try TestData.decodeUser(
+            from: TestJSON.userDTO.replacingOccurrences(of: "\"Admin\"", with: "\"farm_admin\"")
+        )
+        return detail
+            .environment(services)
+            .environment(registry)
+            .environment(auth)
+            .environment(AppRouter())
+            .environment(\.scenePhase, .active)
+            .transaction { $0.disablesAnimations = true }
+    }
+
+    private func show<Content: View>(_ controller: UIHostingController<Content>) -> UIWindow {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 900, height: 1200))
+        window.rootViewController = controller
+        window.isHidden = false
+        controller.view.frame = window.bounds
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        return window
+    }
+
+    private func views<T: UIView>(_ type: T.Type, in view: UIView) -> [T] {
+        (view as? T).map { [$0] } ?? view.subviews.flatMap { views(type, in: $0) }
+    }
+
+    private func heaterTarget(in view: UIView) -> UITextField? {
+        views(UITextField.self, in: view).first { $0.accessibilityIdentifier == "printer.controls.hotend.target" }
+    }
+
+    private func capabilityRequests(_ api: MockAPIClient) -> [URLRequest] {
+        api.capturedRequests.filter { $0.url?.path.hasSuffix("/backend-capabilities") == true }
+    }
+
+    private func selectControls<Content: View>(in controller: DetailHostingController<Content>) async throws {
+        try await waitForHost("The production detail pager must appear", in: controller.view) {
+            controller.hasAppeared && !self.views(UISegmentedControl.self, in: controller.view).isEmpty
+        }
+        let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
+        selector.selectedSegmentIndex = 1
+        selector.sendActions(for: .valueChanged)
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+    }
+
+    private func waitForHost(_ message: String, in view: UIView, condition: () -> Bool) async throws {
+        func layout(_ view: UIView) {
+            view.setNeedsLayout()
+            view.layoutIfNeeded()
+            view.subviews.forEach(layout)
+        }
+        let deadline = ContinuousClock.now + .seconds(5)
+        repeat {
+            layout(view)
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        } while ContinuousClock.now < deadline
+        _ = try XCTUnwrap(condition() ? true : nil, message)
+    }
 
     func testControlsReflowRetainsSelectedJogAxisAndDistance() async throws {
         var printer = try TestData.decodePrinter(from: TestJSON.printer)
@@ -20,7 +233,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
             supportsBedTemperature: true, supportsFanControl: true,
             supportsHoming: true, supportedAxes: ["X", "Y", "Z"]
         )
-        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        service.detailsToReturn = .controlsLimitsFixture(for: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
         service.getBackendCapabilitiesCalledWith = nil
 
@@ -44,23 +258,23 @@ final class PrinterDetailPanelsTests: XCTestCase {
             controller.view.setNeedsLayout()
             controller.view.layoutIfNeeded()
         }
-        func segmentedControls(in view: UIView) -> [UISegmentedControl] {
-            (view as? UISegmentedControl).map { [$0] }
-                ?? view.subviews.flatMap { segmentedControls(in: $0) }
+        func buttons(in view: UIView) -> [UIButton] {
+            (view as? UIButton).map { [$0] }
+                ?? view.subviews.flatMap { buttons(in: $0) }
         }
-        func pickers() throws -> (axis: UISegmentedControl, step: UISegmentedControl) {
-            let controls = segmentedControls(in: controller.view)
+        func choices() throws -> (axis: UIButton, step: UIButton) {
+            let controls = buttons(in: controller.view)
             return (
-                try XCTUnwrap(controls.first { $0.titleForSegment(at: 0) == "X" }),
-                try XCTUnwrap(controls.first { $0.titleForSegment(at: 0) == "0.1" })
+                try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.jog.axis.z" }),
+                try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.jog.step.10" })
             )
         }
         try await settle()
-        let initial = try pickers()
-        initial.axis.selectedSegmentIndex = 2
-        initial.axis.sendActions(for: .valueChanged)
-        initial.step.selectedSegmentIndex = 2
-        initial.step.sendActions(for: .valueChanged)
+        let initial = try choices()
+        XCTAssertTrue(initial.axis.isEnabled)
+        XCTAssertTrue(initial.step.isEnabled)
+        initial.axis.sendActions(for: .touchUpInside)
+        initial.step.sendActions(for: .touchUpInside)
         try await settle()
 
         let layouts: [(CGFloat, DynamicTypeSize)] = [
@@ -69,9 +283,9 @@ final class PrinterDetailPanelsTests: XCTestCase {
         for (width, size) in layouts {
             controller.rootView = AnyView(content(width: width, size: size))
             try await settle()
-            let current = try pickers()
-            XCTAssertEqual(current.axis.selectedSegmentIndex, 2, "Reflow must preserve selected Z")
-            XCTAssertEqual(current.step.selectedSegmentIndex, 2, "Reflow must preserve selected 10 mm")
+            let current = try choices()
+            XCTAssertTrue(current.axis.isSelected, "Reflow must preserve selected Z")
+            XCTAssertTrue(current.step.isSelected, "Reflow must preserve selected 10 mm")
         }
         XCTAssertNil(service.moveCalledWith)
         XCTAssertNil(service.getBackendCapabilitiesCalledWith)

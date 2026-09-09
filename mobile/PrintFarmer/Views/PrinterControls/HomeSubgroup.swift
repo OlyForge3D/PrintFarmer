@@ -16,6 +16,7 @@ struct HomeSubgroup: View {
     @State private var disabledTapMessage: String?
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Returns true when the entire subgroup must be removed from layout
     /// (capability gating per spec §3.5). The Controls section reflows the
@@ -41,8 +42,40 @@ struct HomeSubgroup: View {
     }
 
     private var anyPending: Bool {
-        if case .home = viewModel.pendingCommand?.kind { return true }
-        return false
+        viewModel.isExecuting
+    }
+
+    struct MotorReleaseControls: View {
+        @ObservedObject var viewModel: PrinterControlsViewModel
+        @State private var confirmsRelease = false
+
+        static let warning = "Disabling motors removes holding force. Axes may move or drop under gravity. Support the mechanism and re-home before moving again. This is not Emergency Stop and does not turn heaters off."
+
+        var body: some View {
+            if viewModel.capabilities?.supportsDisableMotors == true {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Motor maintenance")
+                        .font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(Self.warning).font(.footnote).fixedSize(horizontal: false, vertical: true)
+                    ControlActionButton(
+                        title: "Disable motors", identifier: "printer.controls.disable-motors", isDestructive: true
+                    ) {
+                        confirmsRelease = true
+                    }
+                    .disabled(!viewModel.canControl || viewModel.isExecuting)
+                }
+                .foregroundStyle(Color.pfTextPrimary)
+                .confirmationDialog("Disable motors?", isPresented: $confirmsRelease, titleVisibility: .visible) {
+                    Button("Disable motors", role: .destructive) {
+                        Task { await viewModel.disableMotors() }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text(Self.warning)
+                }
+            }
+        }
     }
 
     private var isDisabled: Bool {
@@ -69,7 +102,9 @@ struct HomeSubgroup: View {
                     homeAllButton
                 }
 
-                HStack(spacing: 8) {
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+                layout {
                     if viewModel.capabilities?.supportsHomingXY == true {
                         homeAxisButton(
                             label: String(localized: "Home XY", comment: "Home subgroup: Home X and Y axes button"),

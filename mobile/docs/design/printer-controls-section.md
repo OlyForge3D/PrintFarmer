@@ -4,7 +4,7 @@
 **Issue:** #283
 **Implementers:** #284 (Preheat), #285 (Home), #286 (Jog)
 **Owner:** Newt (UX) → Hudson (iOS)
-**Last updated:** 2026-05-21
+**Last updated:** 2026-09-09
 
 This spec defines the visual hierarchy, component anatomy, interaction model, accessibility, and edge cases for the **Printer Controls** section that lives inside `PrinterDetailView`. Three subgroups in fixed order: **Preheat → Home → Jog**.
 
@@ -12,12 +12,12 @@ This spec defines the visual hierarchy, component anatomy, interaction model, ac
 
 `Views/PrinterControls/PrinterSetupControlsContent.swift` exports
 `PrinterSetupControlsContent(printer:viewModel:)`. It observes an externally
-owned `PrinterControlsViewModel` and only renders Preheat, Home, Jog, lockout and
-error presentation. It does not create services/models, load capabilities or
+owned `PrinterControlsViewModel` and renders thermal/motion, lockout and
+command outcome presentation. It does not create services/models, load capabilities or
 subscribe to updates. `JogSubgroup` likewise no longer loads capabilities;
 its initial capability observation normalizes selection for preloaded limited axes.
 
-`PrinterControlsSection(printer:printerService:)` remains the standalone owner,
+`PrinterControlsSection(printer:composition:)` remains the standalone owner,
 with lazy construction directly inside `StateObject(wrappedValue:)`. The
 `printer:viewModel:` wrapper initializer is test-only. The wrapper loads
 capabilities and forwards `PrinterControlsUpdateSignal` changes outside
@@ -41,16 +41,21 @@ read feature flags. Replace the owner when the real server/printer target change
 
 | Task | Existing dispatch | Preserved gate/confirmation |
 | --- | --- | --- |
-| Preheat PLA/PETG/ABS | `setTemperatures` | Temperature capability; omit unsupported bed; acknowledge exact supported targets |
+| Preheat PLA/PETG/ABS | `setTemperatures` | Temperature capability and valid reported maxima for every included heater; omit unsupported bed |
 | Cool Down | Same preheat command, 0/0 preset | Shown only with temperature subgroup; unsupported confirmation targets ignored |
-| Home All/XY/Z | `home`, `homeXY`, `homeZ` | Movement + homing capability; matching axes acknowledgement |
+| Home All/XY/Z | `home`, `homeXY`, `homeZ` | Independent capability; fresh requested-axis acknowledgement, or acceptance-only when already homed |
 | Jog | `move` | Movement + supported axes; matching-axis position update; existing distances/feedrates |
+| Individual hotend/bed | `setTemperatures` | Specific heater support; other heater omitted; exact setpoint acknowledgement |
+| Absolute XYZ | `moveTo` | Absolute support + supported axes; every requested coordinate must match |
+| Disable motors | `disableMotors` | Specific motor-release support + explicit confirmation; acceptance only, no motor telemetry |
 
-All operations retain model-wide single-flight and online/idle gating. Printing
+All operations retain shared transport single-flight and online/idle gating. Printing
 and paused printers keep the explanatory lockout. Unrelated telemetry and
-other-printer updates do not acknowledge pending commands; offline/state changes
-invalidate them. Existing errors, dismissal and retry-by-tapping behavior remain.
-Z-offset, motor disabling and console are not implemented native operations.
+other-printer updates do not acknowledge pending commands. Becoming offline or
+entering an unsafe state invalidates physical confirmation, not an outstanding
+HTTP response. Network/server failures can have uncertain physical outcomes;
+inspect the printer before another request. Z-offset, physical filament and
+console are not part of this child.
 Earlier design proposals below are not evidence of additional command support
 or per-subgroup concurrency.
 
@@ -63,6 +68,157 @@ dismissal remains a separately accessible button with a minimum 44-point target.
 The controls snapshot suite includes hosted observer-remount, wrapper-offline,
 retained-owner, preloaded-axis and large-text regressions; model/correlation
 suites continue to exercise native dispatch through mock services.
+
+### Individual thermal and motion controls (#2598)
+
+- Presets remain PLA **200/60**, PETG **240/80**, ABS **240/100** and
+  Cool Down **0/0** °C. Presets require proven hotend support; unsupported or
+  explicitly bed-less hardware omits the bed, including during Cool Down.
+- Separate target editors send only the chosen heater. Zero explicitly turns
+  that heater off; blank is not zero. Actual temperature and reported setpoint
+  are separate labels; missing/nonfinite measurements read **Unknown**.
+- Targets must be finite, nonnegative **whole degrees Celsius**, and may not exceed a known configured
+  `maxHotendTemp`/`maxBedTemp` from the typed details contract. Missing maxima
+  remain unknown, not fabricated limits: **positive heating is blocked** when
+  the heater's maximum is missing, zero/negative, loading or failed to load.
+  A supported zero-off command remains available under the existing online,
+  authority and idle gates. Presets dispatch neither heater unless every
+  included positive target is within its reported maximum. Capability
+  loading also reads these optional hardware details; failed reads add no proof.
+  Read results survive normal online/state changes (including initial unknown
+  to idle). Deactivation or authority changes fence both successful and failed
+  late reads. Missing/failed limits are explained in the shared group with a
+  **Retry heater limits** read-only action. Missing fields can also be retried;
+  retry never replays a target. Reopening can retry missing hardware with cached capabilities.
+- Absolute coordinates are signed millimetres, with blank axes omitted and
+  zero preserved, and accept **at most three decimal places**. **Custom feedrate
+  input is disabled** because the shared contract provides no authoritative
+  feedrate maximum. Both the editor and VM reject any custom value, including
+  otherwise reasonable rates and extreme integers. An omitted custom rate
+  selects and explicitly sends the existing relative-jog rate: **3000 mm/min**
+  for XY-only moves, **600 mm/min** for any move including Z (even Z=0).
+  These are the established native axis-specific rates, not a newly invented
+  custom range or an unbounded server default. No mm/s conversion or relative-move fallback
+  occurs. Build-volume dimensions are not firmware travel limits or proof of
+  a zero origin. Position and homing labels preserve unknown telemetry.
+- Precision is checked in both the editor and command owner before dispatch:
+  shared Moonraker/FlashForge temperature formatting emits whole degrees, and
+  Moonraker movement formatting emits at most three decimal millimetres.
+  Excess precision is rejected with explicit inline guidance and native
+  VoiceOver hints, not silently rounded. The original valid value is sent
+  unchanged, including signed coordinates and zero; no firmware tolerance is
+  invented. Decimal validation also rejects tiny entered fractions that would
+  otherwise disappear during numeric parsing.
+- Relative jog retains **0.1/1/10/100 mm**, XY **3000 mm/min**, Z **600 mm/min**.
+  Unknown/false specific movement flags hide movement controls. The #2597
+  handoff currently proves neither relative nor absolute motion on production
+  backends; synthetic UI fixtures are not capability evidence.
+- Native input editors and action buttons have measured native hit bounds
+  of at least **44 × 44 points**, not just taller outer containers. The numeric
+  editor retains standard UIKit text entry, signed/decimal input and Done.
+  Axis/step choices stack at accessibility text sizes. Hosted tests measure
+  every new control's bounds, enabled state and hit testing (without depending
+  on the simulator's global accessibility-service activation), and retain
+  full-content phone, regular and narrow-split
+  screenshots independently on the approved iPhone and iPad hosts.
+- Motor release warns about loss of holding force, gravity, re-homing, and
+  heaters remaining on. `success:false` is an error. `success:true` means the
+  request was accepted, not that motors are physically released.
+- The persistent command owner uses invocation UUIDs and keeps single-flight
+  until the request returns even when matching telemetry arrives first.
+  Other-axis, measured-temperature and unrelated setpoint noise do not
+  acknowledge an individual target or absolute move.
+- Only a matching **post-dispatch** update permits “Matching telemetry received.”
+  If cached heater setpoints or absolute coordinates already match, successful
+  HTTP acceptance ends waiting with an explicit notice that fresh physical
+  completion is **not confirmed**. This applies equally to repeated presets,
+  already-zero Cool Down, individual heaters and already-matching destinations.
+  A fresh update arriving before the HTTP response retains telemetry wording,
+  but never releases the response's single-flight slot early.
+- Home All/XY/Z on axes already reported homed completes local waiting after
+  successful request acceptance, explicitly **without confirming fresh physical
+  completion**. Otherwise homing waits for a fresh requested-axis report.
+  Cached homing or unrelated noise never releases an outstanding HTTP request;
+  a server rejection still wins over telemetry received before its response.
+- The access-lifecycle modifier belongs on the **detail host**, not a pager
+  child. It fences server generation, signed-in user, per-server preference,
+  readiness and Queue.Start permission. Leaving the detail or losing authority
+  invalidates observation and fences late results. Benign printer-state churn does not
+  cancel work. Going offline or entering an unsafe state blocks new actions but
+  preserves the in-flight response and single-flight slot: a rejection remains
+  visible, while acceptance is reported with an unknown physical outcome even
+  if the printer reconnects first. With no outstanding response, unsafe state
+  ends telemetry waiting with an uncertainty warning.
+  **Stop waiting**, caller cancellation, access revocation and deactivation
+  never cancel a dispatched transport task or free its unresolved response's
+  single-flight slot. Routine actions remain locked even if an owner is
+  recreated, reactivated or permission is restored. Matching telemetry cannot release this
+  lock early. The eventual response releases its own slot: acceptance after
+  stopping observation reports an unknown physical outcome, while rejection
+  remains visible when authority is unchanged. After a lifecycle change,
+  neither a stale success nor failure becomes a new lifecycle's result; a
+  notice instead directs the operator to check the original printer.
+  Cancellation proven to precede dispatch releases safely without sending
+  anything. After an HTTP response has already returned, Stop waiting may end
+  telemetry observation, but cannot undo printer execution. Nothing is replayed.
+  Disabled editors expose the preference/permission reason in the
+  shared group for sighted and VoiceOver users. New failures clear stale
+  success/acceptance notices. Offline controls remain hidden, with the
+  explanation supplied by the detail host.
+- Emergency Stop remains shell-owned above both tabs, with its own confirmation
+  and no dependency on pending setup commands. The shared owner/composition
+  seam remains available for #2599; no filament or Z-offset transport is added.
+
+**Owner-lifetime contract:** a MainActor registry in
+`PrinterControlsViewModel.swift` owns invocation-token leases keyed by immutable
+**registered server UUID + printer UUID**, never by a service object's identity,
+the current user, or a transient service generation. The existing
+`ServiceContainer.printerControlsComposition` exposes an immutable MainActor
+bundle of the **actual composed** registered UUID, generation, transition
+revision and exact printer service. It is unavailable during reconciliation or
+when eager registry selection differs from the composed server, including
+pending demo transitions. The private composition ID, target and worker handle
+are observed so read-only availability updates on settlement and restoration
+even without a generation change; service initialization and switch ordering
+are unchanged.
+
+The detail host captures that bundle alongside its detail-data service after
+the existing settlement barrier, checks cancellation/generation, and retains
+it for controls-owner construction. A registry change is never used to relabel
+an earlier captured service. A captured composition identity change retries
+owner creation when a child page mounted before settlement. The retry uses
+the same current-composition/access guards and retains any existing owner;
+nil or stale contexts do not create owners or refetch capabilities. These
+tasks participate in the detail host's existing disappearance cleanup.
+The standalone owner also receives the whole
+bundle. `PrinterControlsAccessLifecycle` only checks the immutable binding
+against current registry/composition and existing user/permission gates; it
+never assigns identity. A bare-service model remains unable to dispatch even
+if later lifecycle code supplies a UUID. Tests and previews construct explicit
+synthetic bundles; production has no permissive missing/mock-context default.
+
+The transition revision additionally fences same-generation service
+replacement (`switchToReal`). Neither revision nor generation enters the shared
+lease key, so returning to the same registered server cannot bypass an earlier
+unresolved request. Delayed-disconnect and delayed-configuration tests exercise
+the real container and mock HTTP transport, not separately invented identity
+fixtures.
+
+All thermal/motion owners acquire the same lease in the existing command
+pipeline. It survives detail dismissal, replacement view models, and service
+reconstruction until the original response settles. Different servers/printers
+remain independent. Every terminal path, including failed validation and proven
+pre-dispatch cancellation, releases only its matching invocation token. Old
+telemetry cancellation cannot release a replacement's lease. An outstanding call
+retains its cleanup owner, but the registry stores only UUIDs and observes views
+weakly, so settled owners are not leaked.
+
+A replacement explains the shared lock and disables preset, home, jog and other routine inputs; it does
+not offer Stop waiting for another owner's request. Shared-state observation
+updates the replacement UI when the lease is released. Local post-response
+telemetry waiting remains separate from transport ownership. This is a
+**process-local** guarantee, not cross-device/server-side serialization or proof
+of physical completion; Emergency Stop remains independent.
 
 ---
 
