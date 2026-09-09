@@ -32,20 +32,26 @@ the plain form to new claims. An emoji/plain pair is one owner, not an ownership
 
 For a non-mobile epic needing decomposition, unmet architecture gate, or under-specified issue,
 apply `status:needs-analysis` and dispatch Dallas for child issues or an issue sign-off—not code.
-Do not re-dispatch a live analysis session. Windows only triages mobile work; it never dispatches,
-reviews, or merges it.
+Do not re-dispatch a live analysis session. Windows only dispatches mobile work through the
+enabled verified SSH adapter; it never performs mobile work, reviews, or merges it locally.
 
 ## Ready Queue
 
 READY means open, exactly one valid owner, unassigned/unclaimed, non-epic, not in-progress,
-not needs-analysis, non-mobile on Windows, and no live blocker. Read GitHub native
-`blocked_by`/`blocking` edges as authoritative. Resolve “blocked by”/dependency prose markers
-live as an additional decaying claim; either live source blocks. Closed blockers do not.
+not needs-analysis, and no live blocker. On Windows, mobile work is READY only when the verified
+SSH adapter is explicitly enabled and its trusted configuration/readiness checks pass; otherwise
+it remains deferred to macOS. Read GitHub native `blocked_by`/`blocking` edges as authoritative.
+Resolve “blocked by”/dependency prose markers live as an additional decaying claim; either live
+source blocks. Closed blockers do not.
 
 Build the complete dependency graph before selecting READY candidates. Detect cycles, deduplicate
 transitive descendants, inherit the highest downstream priority, then sort READY candidates by
 effective p0–p3, unblock value descending, creation time, and issue number. Report non-mobile
-critical-path work that unblocks macOS issues; never dispatch the mobile dependents.
+critical-path work that unblocks macOS issues. A verified, explicitly enabled SSH adapter may
+dispatch a mobile dependent only after it reserves the issue in the shared Windows-owned
+PrintFarmer ledger; legacy Mac Ralph admission must be drained before activation. Never use GitHub
+labels/comments or the round cache as admission authorization, never fall back to local Windows,
+and leave the reservation in place for offline, timeout, or uncorrelated acknowledgement results.
 
 Re-fetch and confirm each issue immediately before claim/spawn. Maintain at most five live
 implementation/analysis sessions. Use `gpt-5.6-terra` medium for implementation and
@@ -57,6 +63,43 @@ task-specific acceptance criteria; analysis kickoffs state their exact non-code 
 publication location. Before every spawn, perform this exact claim protocol: fresh eligibility
 fetch; apply claim label and comment; re-fetch; verify that exact claim landed; then spawn. Abort
 on any failed or stale claim.
+
+Every enabled local or SSH implementation/analysis dispatch reserves the same PrintFarmer
+admission ledger before delivery through `scripts/ci/ralph-admission.mjs`. The scheduled Ralph
+prompt must use only these one-shot JSON-stdin commands—never a naked `create_session` or SSH
+delivery:
+
+1. After the fresh claim re-fetch, run `node scripts/ci/ralph-admission.mjs reserve-local` with
+   `{"job":...,"eligibility":...,"controllerPid":...}` on stdin, using the app Ralph controller's
+   own process ID—not the one-shot command's PID. Preserve the returned `jobId` and `fence` in the
+   `create_session` kickoff as the stable job marker.
+2. Create the local app session only after `reserve-local` succeeds. If creation times out or
+   returns no session ID, retain the reservation; a later round must discover the marker in the
+   session inventory and run `acknowledge-local`, never create a duplicate. If authoritative
+   inventory proves no matching session exists, the reservation lease has expired, and its
+   controller PID is dead, run `recover-local` with `{"jobId":...,"sessionAbsent":true}`.
+3. Once the app returns the real session ID, run `acknowledge-local` with
+   `{"jobId":...,"sessionId":...}`. On terminal completion, run `terminal-local` with the
+   matching session ID and verified head, exit, validation, clean-worktree, and pushed-commit
+   evidence.
+4. For an eligible mobile issue only, run `dispatch-remote` with `{"job":...,"eligibility":...}`
+   instead of local session creation. It reserves, records a PID-and-lease-fenced intent, and sends
+   SSH in one durable operation; lost acknowledgement/timeouts remain reserved and the same job is
+   reconciled on a later invocation. A later round must run `recover-remote` only after the lease
+   expires and the owning controller is demonstrably dead, then re-run `dispatch-remote`. For an
+   accepted remote job, run `status-remote` with the original `{"job":...}`. That command queries
+   the trusted worker and releases the reservation only from its fence-bound process/Git terminal
+   attestation, correlated pre-launch failure, or explicit attestation that no durable worker
+   record exists for an uncertain delivery. Successful terminal evidence must bind the configured
+   origin, admitted base ancestry, clean worktree, and exact pushed branch. Never submit
+   caller-authored remote terminal claims. If a supervisor is lost, reconciliation discovers the
+   child by its unguessable launch token and retains the slot while that exact process is alive;
+   only the trusted worker may emit `SUPERVISOR_LOST` after the launch lease and fenced process
+   have both ended.
+
+The ledger is authoritative for these cooperating configured Ralph dispatch paths, not arbitrary
+manual app sessions that bypass this policy. Before enabling remote dispatch, drain or account for
+legacy Mac Ralph admission so Windows is the single coordinator.
 
 ## Round Report
 
