@@ -957,11 +957,11 @@ final class PrinterControlsViewModelTests: XCTestCase {
     func test_stopBeforeDispatch_releasesSafelyAndDoesNotClobberNextInvocation() async throws {
         let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
-        var stopBeforeDispatch = true
+        let stopBeforeDispatch = AccessGate()
         vm.configureAccess { [weak vm] in
             // The dispatch-time access check runs after the slot is acquired,
             // but before the service is called. No scheduling guesses needed.
-            if stopBeforeDispatch, vm?.pendingCommand != nil {
+            if stopBeforeDispatch.isAllowed, vm?.pendingCommand != nil {
                 vm?.cancelPendingCommand()
             }
             return nil
@@ -970,7 +970,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(mockService.setTemperaturesCalledWith)
         XCTAssertNil(vm.pendingCommand)
         XCTAssertEqual(vm.commandNotice, "Request canceled before dispatch. No printer command was sent.")
-        stopBeforeDispatch = false
+        stopBeforeDispatch.isAllowed = false
         await vm.setHeaterTarget(.bed, target: 70)
         XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, 70)
         XCTAssertNotNil(vm.pendingCommand)
