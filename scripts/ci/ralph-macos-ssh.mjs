@@ -370,11 +370,16 @@ export async function recordLocalTerminalResult(result, options = {}) {
   }, options);
 }
 
-export async function recordDeliveryIntent(jobId, options = {}) {
+export async function recordDeliveryIntent(jobId, { deliveryLeaseMs = 60_000, ...options } = {}) {
+  if (!Number.isSafeInteger(deliveryLeaseMs) || deliveryLeaseMs <= 0) {
+    throw new RalphMacSshError('Delivery lease duration is invalid.', 'INVALID_CONFIGURATION');
+  }
   return mutateLedger((ledger) => {
     const entry = ledger.jobs[jobId];
     if (!entry || entry.mode !== 'remote' || !['reserved', 'uncertain'].includes(entry.state)) throw new RalphMacSshError('Only a reserved or uncertain job may be delivered.', 'INVALID_TRANSITION');
     entry.state = 'delivery-intent';
+    entry.deliveryOwnerPid = process.pid;
+    entry.deliveryExpiresAt = new Date(Date.now() + deliveryLeaseMs).toISOString();
     entry.updatedAt = new Date().toISOString();
     return entry;
   }, options);
@@ -392,6 +397,8 @@ export async function acknowledgeJob(jobId, acknowledgement, options = {}) {
     entry.state = 'accepted';
     entry.sessionId = acknowledgement.sessionId;
     entry.host = acknowledgement.host;
+    delete entry.deliveryOwnerPid;
+    delete entry.deliveryExpiresAt;
     entry.updatedAt = new Date().toISOString();
     return entry;
   }, options);
@@ -402,7 +409,27 @@ export async function markUncertain(jobId, options = {}) {
     const entry = ledger.jobs[jobId];
     if (!entry || entry.state !== 'delivery-intent') throw new RalphMacSshError('Only an in-flight delivery may become uncertain.', 'INVALID_TRANSITION');
     entry.state = 'uncertain';
+    delete entry.deliveryOwnerPid;
+    delete entry.deliveryExpiresAt;
     entry.updatedAt = new Date().toISOString();
+    return entry;
+  }, options);
+}
+
+export async function recoverRemoteDelivery(jobId, { isOwnerAlive = ownerIsAlive, now = Date.now(), ...options } = {}) {
+  return mutateLedger((ledger) => {
+    const entry = ledger.jobs[jobId];
+    if (!entry || entry.mode !== 'remote' || entry.state !== 'delivery-intent') {
+      throw new RalphMacSshError('Only an in-flight remote delivery may be recovered.', 'INVALID_TRANSITION');
+    }
+    if (!Number.isInteger(entry.deliveryOwnerPid) || !Number.isFinite(Date.parse(entry.deliveryExpiresAt)) ||
+        Date.parse(entry.deliveryExpiresAt) > now || isOwnerAlive(entry.deliveryOwnerPid) !== false) {
+      throw new RalphMacSshError('Remote delivery is still owned by a live controller.', 'DELIVERY_ACTIVE');
+    }
+    entry.state = 'uncertain';
+    delete entry.deliveryOwnerPid;
+    delete entry.deliveryExpiresAt;
+    entry.updatedAt = new Date(now).toISOString();
     return entry;
   }, options);
 }
@@ -474,7 +501,11 @@ export async function dispatchMacJob({ job, eligibility }, options = {}) {
   if (request.model !== 'gpt-5.6-terra' || request.effort !== 'medium' || request.agent !== 'squad') {
     throw new RalphMacSshError('Remote implementation jobs must use the approved model, effort, and squad agent.', 'INVALID_REQUEST');
   }
-  const reservation = await reserveJob({ job: request, eligibility }, options);
+  let reservation = await reserveJob({ job: request, eligibility }, options);
+  if (reservation.state === 'delivery-intent') {
+    await recoverRemoteDelivery(request.jobId, options);
+    reservation = await reserveJob({ job: request, eligibility }, options);
+  }
   const reconciling = reservation.state === 'uncertain';
   if (['reserved', 'uncertain'].includes(reservation.state)) await recordDeliveryIntent(request.jobId, options);
   else {

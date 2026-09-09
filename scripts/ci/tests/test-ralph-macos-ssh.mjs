@@ -8,7 +8,7 @@ import test from 'node:test';
 import {
   RalphMacSshError, acknowledgeJob, acknowledgeLocalJob, createRemoteRequest, createSshInvocation, dispatchMacJob,
   loadMacSshConfiguration, markUncertain, parseRemoteAcknowledgement, recordDeliveryIntent,
-  recordLocalTerminalResult, recordTerminalResult, reserveJob, reserveLocalJob, runSsh,
+  recordLocalTerminalResult, recordTerminalResult, recoverRemoteDelivery, reserveJob, reserveLocalJob, runSsh,
 } from '../ralph-macos-ssh.mjs';
 
 const root = path.resolve('fixtures', 'ralph-macos-ssh-validation');
@@ -191,6 +191,19 @@ test('retains delivery ownership after lost acknowledgement and reconciles the s
   assert.equal(acknowledged.sessionId, 'session-1');
 });
 
+test('recovers an expired delivery intent only after its controller is demonstrably dead', async () => {
+  await reset();
+  const configuration = options();
+  await reserveJob({ job: job(), eligibility }, configuration);
+  await recordDeliveryIntent('job-2605', { ...configuration, deliveryLeaseMs: 1 });
+  await assert.rejects(() => recoverRemoteDelivery('job-2605', {
+    ...configuration, now: Date.now() + 1_000, isOwnerAlive: () => true,
+  }), (error) => error.code === 'DELIVERY_ACTIVE');
+  const recovered = await recoverRemoteDelivery('job-2605', {
+    ...configuration, now: Date.now() + 1_000, isOwnerAlive: () => false,
+  });
+  assert.equal(recovered.state, 'uncertain');
+});
 test('requires correlated terminal evidence before capacity is released', async () => {
   await reset();
   const configuration = options();
