@@ -296,9 +296,12 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         await model.loadCapabilities()
         await model.setHeaterTarget(.hotend, target: 220)
         XCTAssertNotNil(model.pendingCommand)
-        let (window, controller) = install(PrinterSetupControlsContent(printer: printer, viewModel: model))
+        let content = PrinterSetupControlsContent(printer: printer, viewModel: model)
+            .frame(width: 390)
+            .fixedSize(horizontal: false, vertical: true)
+        let (window, controller) = install(content)
         defer { window.isHidden = true }
-        window.frame.size.height = 3000
+        window.frame.size = controller.sizeThatFits(in: CGSize(width: 390, height: 10000))
         controller.view.frame = window.bounds
         try await settle(controller)
         let controls = nativeControls(in: controller.view)
@@ -340,6 +343,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             let controls = nativeControls(in: controller.view)
             if !printer.isOnline {
                 XCTAssertTrue(controls.isEmpty, "Offline setup controls remain hidden by the host contract")
+                continue
             } else {
                 for label in ["Hotend target in degrees Celsius", "X absolute destination in millimeters"] {
                     let control = try XCTUnwrap(controls.first { $0.accessibilityLabel == label })
@@ -347,7 +351,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 }
             }
             let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
-                controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+                XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
             }
             let attachment = XCTAttachment(image: image)
             attachment.name = "blocked-controls-\(reason)"
