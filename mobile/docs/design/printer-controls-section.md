@@ -4,7 +4,7 @@
 **Issue:** #283
 **Implementers:** #284 (Preheat), #285 (Home), #286 (Jog)
 **Owner:** Newt (UX) → Hudson (iOS)
-**Last updated:** 2026-09-08
+**Last updated:** 2026-09-09
 
 This spec defines the visual hierarchy, component anatomy, interaction model, accessibility, and edge cases for the **Printer Controls** section that lives inside `PrinterDetailView`. Three subgroups in fixed order: **Preheat → Home → Jog**.
 
@@ -143,14 +143,24 @@ suites continue to exercise native dispatch through mock services.
 - The access-lifecycle modifier belongs on the **detail host**, not a pager
   child. It fences server generation, signed-in user, per-server preference,
   readiness and Queue.Start permission. Leaving the detail or losing authority
-  cancels waiting and fences late results. Benign printer-state churn does not
+  invalidates observation and fences late results. Benign printer-state churn does not
   cancel work. Going offline or entering an unsafe state blocks new actions but
   preserves the in-flight response and single-flight slot: a rejection remains
   visible, while acceptance is reported with an unknown physical outcome even
   if the printer reconnects first. With no outstanding response, unsafe state
   ends telemetry waiting with an uncertainty warning.
-  **Stop waiting** cancels the local request but cannot undo commands
-  already received by the printer. Nothing is automatically replayed.
+  **Stop waiting**, caller cancellation, access revocation and deactivation
+  never cancel a dispatched transport task or free its unresolved response's
+  single-flight slot. Routine actions remain locked even if the same owner is
+  reactivated or permission is restored. Matching telemetry cannot release this
+  lock early. The eventual response releases its own slot: acceptance after
+  stopping observation reports an unknown physical outcome, while rejection
+  remains visible when authority is unchanged. After a lifecycle change,
+  neither a stale success nor failure becomes a new lifecycle's result; a
+  notice instead directs the operator to check the original printer.
+  Cancellation proven to precede dispatch releases safely without sending
+  anything. After an HTTP response has already returned, Stop waiting may end
+  telemetry observation, but cannot undo printer execution. Nothing is replayed.
   Disabled editors expose the preference/permission reason in the
   shared group for sighted and VoiceOver users. New failures clear stale
   success/acceptance notices. Offline controls remain hidden, with the
@@ -158,6 +168,20 @@ suites continue to exercise native dispatch through mock services.
 - Emergency Stop remains shell-owned above both tabs, with its own confirmation
   and no dependency on pending setup commands. The shared owner/composition
   seam remains available for #2599; no filament or Z-offset transport is added.
+
+**Owner-lifetime boundary:** this single-flight lock belongs to one view model.
+An outstanding call retains that owner until its response settles, including
+across disappearance and reactivation of that same instance. Dismissing and
+recreating the detail can create a *different* owner; no shared command lease
+currently prevents that new owner from sending to the same machine. A complete
+cross-owner solution requires a coordinator above the view models (for example,
+owned by `ServiceContainer`), keyed by registered server and printer UUID, with
+invocation-bound leases surviving navigation, access changes and service rebuilds
+until the original response settles. Every routine-control owner must acquire
+that same lease; Emergency Stop must bypass it. That service/lifecycle seam is
+outside #2598's allowed files. A static view-model dictionary or UI-only timer
+would not provide the required identity/lifetime guarantee. Do not treat the
+VM-local correction as resolution of this cross-owner safety gap.
 
 ---
 

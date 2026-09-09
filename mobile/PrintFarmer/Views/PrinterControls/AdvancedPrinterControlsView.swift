@@ -23,7 +23,8 @@ enum AdvancedPrinterControlsAccess {
 }
 
 /// Installed on the owner host, not a pager child: changing tabs never cancels
-/// routine work, but leaving the detail or changing authority does.
+/// routine work. Leaving the detail or changing authority invalidates observation,
+/// but the retained owner keeps an outstanding request single-flight.
 struct PrinterControlsAccessLifecycle: ViewModifier {
     let viewModel: PrinterControlsViewModel?
     @Environment(ServerRegistry.self) private var registry

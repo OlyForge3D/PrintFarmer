@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 @testable import PrintFarmer
 
@@ -820,30 +821,199 @@ final class PrinterControlsViewModelTests: XCTestCase {
         }
     }
 
-    func test_accessRevocationAndDismissal_preventDispatchAndIgnoreLateResult() async throws {
+    func test_stopWaiting_keepsNoncancellableRequestSingleFlightUntilResponse() async throws {
         let barrier = AsyncBarrier()
         addTeardownBlock { barrier.close() }
         mockService.beforeSetTemperatures = { await barrier.arriveAndWait() }
-        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        var caps = Self.fullCaps
+        caps.supportsAbsoluteMovement = true
+        caps.supportsDisableMotors = true
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
         await vm.loadCapabilities()
-        let access = AccessGate()
-        vm.configureAccess { access.isAllowed ? nil : "Preference or permission revoked" }
         let task = Task { await vm.setHeaterTarget(.hotend, target: 200) }
         await barrier.waitUntilArrived()
-        access.isAllowed = false
-        vm.refreshAccess()
-        XCTAssertNil(vm.pendingCommand)
-        XCTAssertTrue(vm.commandNotice?.contains("may still execute") == true)
+        let owner = try XCTUnwrap(vm.pendingCommand)
+        // The first call is already suspended on a continuation that ignores
+        // cancellation. Any accidental second call must return, not deadlock.
+        mockService.beforeSetTemperatures = nil
+        for _ in 0..<2 {
+            vm.cancelPendingCommand()
+            XCTAssertEqual(vm.pendingCommand, owner)
+            XCTAssertTrue(vm.commandNotice?.contains("outcome is unresolved") == true)
+            await vm.setHeaterTarget(.bed, target: 70)
+            await vm.preheat(.coolDown)
+            await vm.jog(axis: "X", distanceMm: 1)
+            await vm.homeAll()
+            await vm.homeXY()
+            await vm.homeZ()
+            await vm.moveTo(x: 0, y: nil, z: nil, feedrateMmMin: nil)
+            await vm.disableMotors()
+        }
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertNil(mockService.moveCalledWith)
+        XCTAssertNil(mockService.homeCalledWith)
+        XCTAssertNil(mockService.homeXYCalledWith)
+        XCTAssertNil(mockService.homeZCalledWith)
+        XCTAssertNil(mockService.moveToCalledWith)
+        XCTAssertNil(mockService.disableMotorsCalledWith)
+        var update = vm.printer
+        update.hotendTarget = 200
+        vm.handlePrinterUpdate(update)
+        XCTAssertEqual(vm.pendingCommand, owner, "Telemetry must not release an unresolved response")
+
+        _ = try await mockService.emergencyStop(id: vm.printer.id)
+        XCTAssertEqual(mockService.emergencyStopCalledWith, vm.printer.id)
+        XCTAssertEqual(vm.pendingCommand, owner, "Independent emergency dispatch cannot clear routine ownership")
         barrier.release()
         await task.value
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 200)
+        XCTAssertNil(vm.pendingCommand)
         XCTAssertNil(vm.lastError)
-        mockService.setTemperaturesCalledWith = nil
-        await vm.setHeaterTarget(.hotend, target: 205)
+        XCTAssertTrue(vm.commandNotice?.contains("Request accepted") == true)
+        XCTAssertTrue(vm.commandNotice?.contains("Physical outcome is unknown") == true)
+        XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true)
+    }
+
+    func test_accessRevocationAndDismissal_retainRequestAcrossReactivationAndFenceLateResults() async throws {
+        for dismiss in [false, true] {
+            for rejects in [false, true] {
+                let service = MockPrinterService()
+                let printer = try idlePrinter()
+                service.capabilitiesToReturn = Self.fullCaps
+                service.detailsToReturn = .controlsLimitsFixture(for: printer)
+                let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+                let access = AccessGate()
+                vm.configureAccess { access.isAllowed ? nil : "Preference or permission revoked" }
+                await vm.loadCapabilities()
+                let barrier = AsyncBarrier()
+                addTeardownBlock { barrier.close() }
+                service.beforeSetTemperatures = { await barrier.arriveAndWait() }
+                let task = Task { await vm.setHeaterTarget(.hotend, target: 200) }
+                await barrier.waitUntilArrived()
+                let owner = try XCTUnwrap(vm.pendingCommand)
+                service.beforeSetTemperatures = nil
+                if dismiss {
+                    vm.deactivate()
+                } else {
+                    access.isAllowed = false
+                    vm.refreshAccess()
+                }
+                XCTAssertFalse(vm.canControl)
+                XCTAssertEqual(vm.pendingCommand, owner)
+                await vm.homeAll()
+                XCTAssertNil(service.homeCalledWith)
+                access.isAllowed = true
+                vm.configureAccess { nil }
+                XCTAssertTrue(vm.canControl)
+                await vm.setHeaterTarget(.bed, target: 70)
+                await vm.homeAll()
+                XCTAssertNil(service.setTemperaturesCalledWith)
+                XCTAssertNil(service.homeCalledWith)
+                XCTAssertEqual(vm.pendingCommand, owner)
+                if rejects { service.errorToThrow = NetworkError.forbidden }
+                barrier.release()
+                await task.value
+                XCTAssertNil(vm.pendingCommand)
+                XCTAssertNil(vm.lastError, "An earlier lifecycle's error must not become the reactivated owner's error")
+                XCTAssertTrue(vm.commandNotice?.contains("check the original printer") == true)
+                XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true)
+                service.errorToThrow = nil
+                await vm.jog(axis: "X", distanceMm: 1)
+                XCTAssertNotEqual(vm.pendingCommand?.id, owner.id)
+                XCTAssertNotNil(service.moveCalledWith)
+            }
+        }
+    }
+
+    func test_callerCancellation_doesNotCancelDispatchedTransportOrReleaseItsOwner() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        mockService.beforeSetTemperatures = { await barrier.arriveAndWait() }
+        let task = Task { await vm.setHeaterTarget(.hotend, target: 200) }
+        await barrier.waitUntilArrived()
+        let owner = vm.pendingCommand
+        let stopped = expectation(description: "Caller cancellation invalidates observation")
+        let observation = vm.$commandNotice
+            .filter { $0?.contains("outcome is unresolved") == true }
+            .prefix(1)
+            .sink { _ in stopped.fulfill() }
+        defer { observation.cancel() }
+        task.cancel()
+        await fulfillment(of: [stopped], timeout: 5)
+        XCTAssertEqual(vm.pendingCommand, owner)
+        await vm.jog(axis: "X", distanceMm: 1)
+        XCTAssertNil(mockService.moveCalledWith)
+        barrier.release()
+        await task.value
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertNil(vm.lastError)
+        XCTAssertTrue(vm.commandNotice?.contains("Request accepted") == true,
+                      "Caller cancellation must not replace the actual response with CancellationError")
+        XCTAssertTrue(vm.commandNotice?.contains("Physical outcome is unknown") == true)
+    }
+
+    func test_stopBeforeDispatch_releasesSafelyAndDoesNotClobberNextInvocation() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        var stopBeforeDispatch = true
+        vm.configureAccess { [weak vm] in
+            // The dispatch-time access check runs after the slot is acquired,
+            // but before the service is called. No scheduling guesses needed.
+            if stopBeforeDispatch, vm?.pendingCommand != nil {
+                vm?.cancelPendingCommand()
+            }
+            return nil
+        }
+        await vm.setHeaterTarget(.hotend, target: 200)
         XCTAssertNil(mockService.setTemperaturesCalledWith)
-        access.isAllowed = true
-        vm.deactivate()
-        await vm.preheat(.pla)
-        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertEqual(vm.commandNotice, "Request canceled before dispatch. No printer command was sent.")
+        stopBeforeDispatch = false
+        await vm.setHeaterTarget(.bed, target: 70)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, 70)
+        XCTAssertNotNil(vm.pendingCommand)
+        XCTAssertNil(vm.lastError)
+    }
+
+    func test_serverChange_lateResponseCannotRebindOldOwnerOrMutateDifferentPrinterOwner() async throws {
+        let old = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        await old.loadCapabilities()
+        let access = AccessGate()
+        old.configureAccess { access.isAllowed ? nil : "Server changed" }
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        mockService.beforeSetTemperatures = { await barrier.arriveAndWait() }
+        let oldTask = Task { await old.setHeaterTarget(.hotend, target: 200) }
+        await barrier.waitUntilArrived()
+        access.isAllowed = false
+        old.refreshAccess()
+        old.configureAccess { nil }
+        XCTAssertFalse(old.canControl)
+        XCTAssertNotNil(old.pendingCommand)
+
+        var otherPrinter = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        otherPrinter.isOnline = true
+        otherPrinter.state = "idle"
+        XCTAssertNotEqual(otherPrinter.id, old.printer.id)
+        let otherService = MockPrinterService()
+        otherService.capabilitiesToReturn = Self.fullCaps
+        otherService.detailsToReturn = .controlsLimitsFixture(for: otherPrinter)
+        let other = PrinterControlsViewModel(printerService: otherService, printer: otherPrinter)
+        await other.loadCapabilities()
+        await other.setHeaterTarget(.bed, target: 70)
+        let otherOwner = try XCTUnwrap(other.pendingCommand)
+        let otherNotice = other.commandNotice
+        mockService.errorToThrow = NetworkError.forbidden
+        barrier.release()
+        await oldTask.value
+        XCTAssertNil(old.pendingCommand)
+        XCTAssertNil(old.lastError)
+        XCTAssertFalse(old.canControl)
+        XCTAssertEqual(other.pendingCommand, otherOwner)
+        XCTAssertEqual(other.commandNotice, otherNotice)
+        XCTAssertNil(other.lastError)
     }
 
     func test_cancelledCaller_neverDispatches() async throws {

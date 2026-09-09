@@ -220,7 +220,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         }
     }
 
-    func test_staleFailureResponse_doesNotClearNewerPendingCommand_norOverwriteError() async throws {
+    func test_stopWaiting_retainsLateFailureOwnershipBeforeAllowingNewCommand() async throws {
         let service = MockPrinterService()
         let gate = AsyncGate()
         service.beforeSetTemperatures = { await gate.wait() }
@@ -232,34 +232,41 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         async let first: Void = vm.preheat(.pla)
         while await !gate.hasWaiters { await Task.yield() }
 
-        // Explicit cancellation abandons waiting, not physical execution.
+        // Stopping observation never releases the unresolved transport slot,
+        // even if matching telemetry was received before the stop.
         var warmed = base
         warmed.hotendTarget = 200
         vm.handlePrinterUpdate(warmed)
         XCTAssertTrue(vm.isExecuting)
+        let firstOwner = try XCTUnwrap(vm.pendingCommand)
         vm.cancelPendingCommand()
-        XCTAssertFalse(vm.isExecuting)
+        XCTAssertEqual(vm.pendingCommand, firstOwner)
 
-        // C2: a new jog begins and becomes the pending command (its move
-        // succeeds because no error is armed yet).
+        // C2 cannot dispatch while C1's response is unresolved.
         await vm.jog(axis: "X", distanceMm: 10)
-        guard case .jog = vm.pendingCommand?.kind else {
-            return XCTFail("Expected a pending jog (C2) after the preheat cleared")
-        }
-        XCTAssertNil(vm.lastError, "C2 started cleanly with no error")
+        XCTAssertEqual(vm.pendingCommand, firstOwner)
+        XCTAssertNil(service.moveCalledWith)
+        XCTAssertNil(vm.lastError)
 
         // Arm the error so C1 fails *late* when it resumes past the gate.
         service.errorToThrow = NetworkError.serverError(500)
         await gate.open()
         await first
 
-        // C1's stale failure must neither clear C2 nor surface its own error.
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertEqual(vm.lastError?.command, firstOwner)
+        XCTAssertTrue(vm.lastError?.message.contains("Outcome may be unknown") == true)
+        XCTAssertNil(vm.commandNotice, "Rejection must not leave stale success wording")
+        service.errorToThrow = nil
+        await vm.jog(axis: "X", distanceMm: 10)
+        let secondOwner = try XCTUnwrap(vm.pendingCommand)
+        XCTAssertNotEqual(firstOwner.id, secondOwner.id)
+        vm.handlePrinterUpdate(warmed)
         guard case .jog = vm.pendingCommand?.kind else {
-            return XCTFail("A stale preheat failure cleared the newer jog command")
+            return XCTFail("Old heater telemetry must not clear the newer jog")
         }
-        XCTAssertTrue(vm.isExecuting, "C2 must remain pending")
-        XCTAssertNil(vm.lastError,
-                     "A stale failure from an already-confirmed C1 must not overwrite current error state")
+        XCTAssertEqual(vm.pendingCommand, secondOwner)
+        XCTAssertNil(vm.lastError, "The next invocation must not inherit the old response's error")
     }
 
     func test_currentCommandFailure_recordsError_andClearsPending() async throws {

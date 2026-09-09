@@ -151,6 +151,7 @@ final class PrinterControlsViewModel: ObservableObject {
     private var accessCheck: @MainActor () -> String? = { nil }
     private var hasConfiguredAccess = false
     private var commandTask: Task<Void, Error>?
+    private var commandWasDispatched = false
     private var telemetryConfirmed = false
     private var commandStateInvalidated = false
     private var lifecycleGeneration = 0
@@ -242,11 +243,21 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     func cancelPendingCommand() {
+        guard pendingCommand != nil else { return }
+        telemetryConfirmed = false
+        commandStateInvalidated = true
+        if commandTask != nil, commandWasDispatched {
+            // Canceling an observer cannot recall a physical command. Keep
+            // both the response and its single-flight owner until it settles.
+            commandNotice = "Stopped waiting for telemetry. The request outcome is unresolved; routine controls remain locked. The printer may still execute the request."
+            return
+        }
         commandTask?.cancel()
         commandTask = nil
-        guard pendingCommand != nil else { return }
         pendingCommand = nil
-        commandNotice = "Stopped waiting. The printer may still execute the request. Check the machine before another action."
+        commandNotice = commandWasDispatched
+            ? "Stopped waiting. The printer may still execute the request. Check the machine before another action."
+            : "Request canceled before dispatch. No printer command was sent."
     }
 
     // MARK: - Commands
@@ -605,6 +616,7 @@ final class PrinterControlsViewModel: ObservableObject {
         commandNotice = nil
         telemetryConfirmed = false
         commandStateInvalidated = false
+        commandWasDispatched = false
         pendingCommand = command
         return true
     }
@@ -619,36 +631,52 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     private func perform(_ command: ControlCommand, _ call: @escaping @MainActor () async throws -> Void) async {
+        guard !Task.isCancelled else {
+            cancelPendingCommand()
+            return
+        }
+        let generation = lifecycleGeneration
         let task = Task { @MainActor in
             try Task.checkCancellation()
-            guard self.canControl else { throw CancellationError() }
-            try await call()
+            guard self.pendingCommand == command, self.canControl else { throw CancellationError() }
             try Task.checkCancellation()
+            self.commandWasDispatched = true
+            try await call()
         }
         commandTask = task
-        do {
-            try await withTaskCancellationHandler {
-                try await task.value
-            } onCancel: {
-                task.cancel()
+        let result = await withTaskCancellationHandler {
+            await task.result
+        } onCancel: {
+            Task { @MainActor in
+                guard self.pendingCommand == command else { return }
+                self.cancelPendingCommand()
             }
-            guard pendingCommand == command else { return }
-            if !canControl || commandStateInvalidated {
-                commandTask = nil
+        }
+        guard pendingCommand == command else { return }
+        commandTask = nil
+        guard generation == lifecycleGeneration else {
+            pendingCommand = nil
+            commandNotice = "Request observation ended after controls access changed. Physical outcome is unknown; check the original printer."
+            return
+        }
+        switch result {
+        case .success:
+            if Task.isCancelled || !canControl || commandStateInvalidated {
                 pendingCommand = nil
-                commandNotice = "Request accepted, but printer controls became unavailable. Physical outcome is unknown; check the machine before another action."
+                commandNotice = "Request accepted, but waiting was interrupted or controls became unavailable. Physical outcome is unknown; check the machine before another action."
                 return
             }
             commandNotice = "Request accepted; waiting for matching telemetry. This does not confirm physical completion."
-        } catch {
-            guard pendingCommand == command else { return }
+        case .failure(let error):
             if error is CancellationError {
-                cancelPendingCommand()
+                pendingCommand = nil
+                commandNotice = commandWasDispatched
+                    ? "Request observation was canceled. Physical outcome is unknown; check the machine before another action."
+                    : "Request canceled before dispatch. No printer command was sent."
             } else {
                 setError(command: command, error: error)
             }
         }
-        if pendingCommand == command { commandTask = nil }
     }
 
     /// Completion handler for a dispatched command. Runs on the MainActor via
