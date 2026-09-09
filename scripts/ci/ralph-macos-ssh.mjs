@@ -301,13 +301,13 @@ function assertFreshEligibility(eligibility, job) {
   }
 }
 
-export async function reserveJob({ job, eligibility, now = new Date().toISOString() }, options = {}) {
+export async function reserveJob({ job, eligibility, mode = 'remote', now = new Date().toISOString() }, options = {}) {
   createRemoteRequest(job);
   assertFreshEligibility(eligibility, job);
   return mutateLedger((ledger) => {
     const existing = ledger.jobs[job.jobId];
     if (existing) {
-      if (existing.requestDigest !== requestDigest(job)) {
+      if (existing.requestDigest !== requestDigest(job) || existing.mode !== mode) {
         throw new RalphMacSshError('Job identifier is already fenced to different work.', 'FENCED');
       }
       return existing;
@@ -317,7 +317,7 @@ export async function reserveJob({ job, eligibility, now = new Date().toISOStrin
     if (active.length >= 5) throw new RalphMacSshError('All five PrintFarmer Ralph slots are reserved.', 'SLOT_EXHAUSTED');
     const entry = {
       jobId: job.jobId, repository: printFarmerRepository, issue: job.issue, owner: job.owner, baseSha: job.baseSha,
-      state: 'reserved', fence: ledger.generation + 1, requestDigest: requestDigest(job), createdAt: now, updatedAt: now,
+      state: 'reserved', mode, fence: ledger.generation + 1, requestDigest: requestDigest(job), createdAt: now, updatedAt: now,
     };
     ledger.jobs[job.jobId] = entry;
     return entry;
@@ -326,14 +326,14 @@ export async function reserveJob({ job, eligibility, now = new Date().toISOStrin
 
 export async function reserveLocalJob({ job, eligibility, now = new Date().toISOString() }, options = {}) {
   const localJob = { ...job, repository: printFarmerRepository };
-  return reserveJob({ job: localJob, eligibility, now }, options);
+  return reserveJob({ job: localJob, eligibility, mode: 'local', now }, options);
 }
 
 export async function acknowledgeLocalJob(jobId, sessionId, options = {}) {
   if (!validIdentifier(sessionId)) throw new RalphMacSshError('Local session identifier is invalid.', 'INVALID_REQUEST');
   return mutateLedger((ledger) => {
     const entry = ledger.jobs[jobId];
-    if (!entry || entry.state !== 'reserved') throw new RalphMacSshError('Only a reserved local job may be acknowledged.', 'INVALID_TRANSITION');
+    if (!entry || entry.mode !== 'local' || entry.state !== 'reserved') throw new RalphMacSshError('Only a reserved local job may be acknowledged.', 'INVALID_TRANSITION');
     entry.state = 'accepted';
     entry.sessionId = sessionId;
     entry.local = true;
@@ -346,7 +346,7 @@ export async function recordLocalTerminalResult(result, options = {}) {
   const value = safeJson(result, 'Local terminal result');
   return mutateLedger((ledger) => {
     const entry = ledger.jobs[value.jobId];
-    if (!entry?.local || !['accepted', 'running'].includes(entry.state) || value.sessionId !== entry.sessionId ||
+    if (entry?.mode !== 'local' || !entry?.local || !['accepted', 'running'].includes(entry.state) || value.sessionId !== entry.sessionId ||
         !validSha(value.headSha) || !Number.isInteger(value.exitCode) || !value.validationEvidence ||
         value.workingTreeClean !== true || value.allCommitsPushed !== true) {
       throw new RalphMacSshError('Local terminal result lacks correlated evidence.', 'INVALID_TERMINAL_EVIDENCE');
@@ -365,7 +365,7 @@ export async function recordLocalTerminalResult(result, options = {}) {
 export async function recordDeliveryIntent(jobId, options = {}) {
   return mutateLedger((ledger) => {
     const entry = ledger.jobs[jobId];
-    if (!entry || !['reserved', 'uncertain'].includes(entry.state)) throw new RalphMacSshError('Only a reserved or uncertain job may be delivered.', 'INVALID_TRANSITION');
+    if (!entry || entry.mode !== 'remote' || !['reserved', 'uncertain'].includes(entry.state)) throw new RalphMacSshError('Only a reserved or uncertain job may be delivered.', 'INVALID_TRANSITION');
     entry.state = 'delivery-intent';
     entry.updatedAt = new Date().toISOString();
     return entry;
