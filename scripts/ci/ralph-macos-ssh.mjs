@@ -58,6 +58,8 @@ function validateRemoteJob(job, { requireFence = false } = {}) {
   if (!Number.isSafeInteger(request.issue) || request.issue <= 0 || !validJobIdentifier(request.jobId) ||
       (requireFence && (!Number.isSafeInteger(request.fence) || request.fence <= 0)) ||
       !validIdentifier(request.owner) || !validSha(request.baseSha) || !Array.isArray(request.acceptanceCriteria) ||
+      request.acceptanceCriteria.some((criterion) => typeof criterion !== 'string' || !criterion.trim()) ||
+      (request.charter !== undefined && (typeof request.charter !== 'string' || !request.charter.trim())) ||
       !['gpt-5.6-terra', 'gpt-5.6-luna'].includes(request.model) || request.effort !== 'medium' || request.agent !== 'squad') {
     throw new RalphMacSshError('Remote job is malformed.', 'INVALID_REQUEST');
   }
@@ -107,7 +109,10 @@ export function createSshInvocation(configuration) {
 
 export function createRemoteRequest(job, type = 'dispatch') {
   const request = validateRemoteJob(job, { requireFence: true });
-  return `${JSON.stringify({
+  if (!['dispatch', 'reconcile', 'terminal'].includes(type)) {
+    throw new RalphMacSshError('Remote worker request type is invalid.', 'INVALID_REQUEST');
+  }
+  const serialized = `${JSON.stringify({
     version: 1,
     type,
     job: {
@@ -124,6 +129,10 @@ export function createRemoteRequest(job, type = 'dispatch') {
       charter: request.charter,
     },
   })}\n`;
+  if (Buffer.byteLength(serialized, 'utf8') > 64 * 1024) {
+    throw new RalphMacSshError('Remote worker request exceeds the protocol limit.', 'INVALID_REQUEST');
+  }
+  return serialized;
 }
 
 function requestDigest(job) {
@@ -595,6 +604,7 @@ export async function dispatchMacJob({ job, eligibility }, options = {}) {
   if (!['gpt-5.6-terra', 'gpt-5.6-luna'].includes(request.model) || request.effort !== 'medium' || request.agent !== 'squad') {
     throw new RalphMacSshError('Remote jobs must use an approved model, effort, and squad agent.', 'INVALID_REQUEST');
   }
+  createRemoteRequest({ ...request, fence: Number.MAX_SAFE_INTEGER });
   let reservation = await reserveJob({ job: request, eligibility }, options);
   if (reservation.state === 'delivery-intent') {
     await recoverRemoteDelivery(request.jobId, options);

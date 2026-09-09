@@ -383,8 +383,7 @@ function absentResponse(job) {
 
 function copilotPrompt(job, launchToken) {
   return [
-    `Ralph job ${job.jobId}, fence ${job.fence}. Work only in this isolated PrintFarmer worktree.`,
-    `Ralph launch token ${launchToken}.`,
+    `Ralph launch token ${launchToken}. Ralph job ${job.jobId}, fence ${job.fence}. Work only in this isolated PrintFarmer worktree.`,
     `Issue #${job.issue}; base SHA ${job.baseSha}. Read ${job.charter || '.github/copilot-instructions.md'} before work.`,
     'Keep the job marker and actual session identity in the final report. Do not create another session or worktree.',
     ...job.acceptanceCriteria,
@@ -420,7 +419,12 @@ function runProcess(command, args, options = {}) {
     child.once('error', (error) => finish(error));
     child.once('close', (code, signal) => {
       if (code === 0) finish(undefined, stdout.trim());
-      else finish(new Error(`${command} exited with status ${code ?? signal}: ${stderr.trim()}`));
+      else {
+        const error = new Error(`${command} exited with status ${code ?? signal}: ${stderr.trim()}`);
+        error.exitCode = code;
+        error.signal = signal;
+        finish(error);
+      }
     });
   });
 }
@@ -738,22 +742,27 @@ async function matchingProcessIds(marker) {
       return [];
     }
   }
-  const output = await runProcess('/bin/ps', ['-ww', '-axo', 'pid=,command='], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeoutMs: 10_000,
-  });
-  return output.split(/\r?\n/).flatMap((line) => {
-    const match = /^\s*(\d+)\s+(.*)$/.exec(line);
-    const pid = Number(match?.[1]);
-    return match?.[2].includes(marker) && pid !== process.pid ? [pid] : [];
-  });
+  const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let output;
+  try {
+    output = await runProcess('/usr/bin/pgrep', ['-f', escapedMarker], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeoutMs: 10_000,
+    });
+  } catch (error) {
+    if (error.exitCode === 1) return [];
+    throw error;
+  }
+  return output.split(/\r?\n/)
+    .map((line) => Number(line.trim()))
+    .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
 }
 
-async function supervisorIsFencedAlive(record) {
-  if (!Number.isInteger(record.supervisorPid)) return false;
-  if (testMode) return ownerIsAlive(record.supervisorPid) === true;
-  const matches = await matchingProcessIds(`--run ${record.job.jobId} ${record.launchToken}`);
-  return matches.includes(record.supervisorPid);
+async function fencedSupervisorIds(record) {
+  if (testMode) {
+    return ownerIsAlive(record.supervisorPid) === true ? [record.supervisorPid] : [];
+  }
+  return matchingProcessIds(`${record.job.jobId} ${record.launchToken}`);
 }
 
 function launchLeaseExpired(record) {
@@ -766,8 +775,15 @@ async function recoverLaunchState(record) {
   if (!['preparing', 'accepted', 'supervisor-launching', 'launching', 'running', 'orphan-running'].includes(record.state)) {
     fail('Worker job record has an unknown non-terminal state.');
   }
-  if (await supervisorIsFencedAlive(record)) return acknowledgement(record);
-  const matches = await matchingProcessIds(`Ralph launch token ${record.launchToken}.`);
+  const supervisors = await fencedSupervisorIds(record);
+  if (supervisors.length > 0) {
+    if (!Number.isInteger(record.supervisorPid) && supervisors.length === 1) {
+      record.supervisorPid = supervisors[0];
+      await persist(record.job.jobId, record);
+    }
+    return acknowledgement(record);
+  }
+  const matches = await matchingProcessIds(record.launchToken);
   if (matches.length === 1) {
     record.state = 'orphan-running';
     record.pid = matches[0];

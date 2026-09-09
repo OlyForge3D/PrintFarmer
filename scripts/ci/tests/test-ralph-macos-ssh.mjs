@@ -88,7 +88,30 @@ test('serializes untrusted content only as structured stdin and limits jobs to P
     (error) => error.code === 'INVALID_REQUEST');
   assert.throws(() => createRemoteRequest({ ...job(), fence: 7, owner: 2605 }),
     (error) => error.code === 'INVALID_REQUEST');
+  assert.throws(() => createRemoteRequest({ ...job(), fence: 7, acceptanceCriteria: [''] }),
+    (error) => error.code === 'INVALID_REQUEST');
+  assert.throws(() => createRemoteRequest({ ...job(), fence: 7, acceptanceCriteria: [2605] }),
+    (error) => error.code === 'INVALID_REQUEST');
+  assert.throws(() => createRemoteRequest({ ...job(), fence: 7, charter: '  ' }),
+    (error) => error.code === 'INVALID_REQUEST');
+  assert.throws(() => createRemoteRequest({ ...job(), fence: 7 }, 'unknown'),
+    (error) => error.code === 'INVALID_REQUEST');
   assert.throws(() => createRemoteRequest(job()), (error) => error.code === 'INVALID_REQUEST');
+});
+
+test('rejects oversized worker payloads before creating an admission ledger', async () => {
+  await reset();
+  await assert.rejects(
+    () => dispatchMacJob({
+      job: { ...job(), acceptanceCriteria: ['x'.repeat(70 * 1024)] },
+      eligibility,
+    }, options()),
+    (error) => error.code === 'INVALID_REQUEST',
+  );
+  await assert.rejects(
+    () => readFile(path.join(root, 'printfarmer-jobs.json'), 'utf8'),
+    (error) => error.code === 'ENOENT',
+  );
 });
 
 test('rejects malformed, wrong-host, and uncorrelated remote acknowledgements', () => {

@@ -227,6 +227,8 @@ test('worker survives dispatch exit, isolates output, pushes its deterministic b
   assert.ok(invocation.args.includes('squad'));
   assert.ok(invocation.args.includes('--reasoning-effort'));
   assert.ok(invocation.args.includes('medium'));
+  const prompt = invocation.args[invocation.args.indexOf('--prompt') + 1];
+  assert.ok(prompt.split('\n')[0].startsWith(`Ralph launch token ${running.launchToken}.`));
   assert.equal(git(record.worktree, 'branch', '--show-current'), `ralph/${fixture.job.jobId}`);
   assert.equal(git(fixture.repository, 'ls-remote', 'origin', `refs/heads/${record.branch}`).split(/\s+/)[0], fixture.baseSha);
 
