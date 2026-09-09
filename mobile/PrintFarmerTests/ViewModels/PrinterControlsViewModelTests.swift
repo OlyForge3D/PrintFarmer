@@ -245,7 +245,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
         for heater in Heater.allCases {
-            for target in [0.0, 200.0, 240.0] {
+            for target in heater == .hotend ? [0.0, 200.0, 240.0] : [0.0, 60.0, 80.0] {
                 await vm.setHeaterTarget(heater, target: target)
                 XCTAssertNil(vm.lastError)
                 XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, heater == .hotend ? target : nil)
@@ -255,6 +255,34 @@ final class PrinterControlsViewModelTests: XCTestCase {
                 vm.handlePrinterUpdate(reported)
                 XCTAssertNil(vm.pendingCommand)
                 XCTAssertEqual(vm.commandNotice, "Matching telemetry received. A heater target is a setpoint, not a measured temperature.")
+            }
+
+            func test_failedOrWrongPrinterLimitsRefresh_doesNotRetainHeatingAuthority() async throws {
+                let printer = try idlePrinter()
+                let vm = try makeViewModel(printer: printer, capabilities: Self.fullCaps)
+                await vm.loadCapabilities()
+                XCTAssertEqual(vm.maximum(for: .hotend), 280)
+                mockService.errorToThrow = NetworkError.serverError(503)
+                await vm.loadHardware()
+                XCTAssertNotNil(vm.hardwareLoadError)
+                XCTAssertNil(vm.maximum(for: .hotend))
+                await vm.setHeaterTarget(.hotend, target: 200)
+                XCTAssertNil(mockService.setTemperaturesCalledWith)
+                mockService.errorToThrow = nil
+                mockService.detailsToReturn = PrinterDetails(
+                    id: UUID(), name: printer.name, backend: printer.backend,
+                    capabilities: PrinterDetails.controlsLimitsFixture(for: printer).capabilities
+                )
+                await vm.loadHardware()
+                XCTAssertTrue(vm.hardwareLoadError?.contains("different printer") == true)
+                XCTAssertNil(vm.maximum(for: .hotend))
+                await vm.preheat(.pla)
+                XCTAssertNil(mockService.setTemperaturesCalledWith)
+                mockService.detailsToReturn = .controlsLimitsFixture(for: printer)
+                await vm.loadHardware()
+                XCTAssertNil(vm.hardwareLoadError)
+                XCTAssertEqual(vm.maximum(for: .hotend), 280)
+                XCTAssertNil(mockService.setTemperaturesCalledWith)
             }
         }
     }
