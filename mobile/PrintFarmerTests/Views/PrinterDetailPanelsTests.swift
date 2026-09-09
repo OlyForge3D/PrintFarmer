@@ -3,11 +3,7 @@ import SwiftUI
 import KeychainSwift
 @testable import PrintFarmer
 
-/// Unit tests for the pure logic extracted into `PrinterDetailPanelsHost.swift`
-/// (issue #2522): panel availability/selection-safety, the run-action
-/// presentation binding table, the filament-action mapping and the coverage
-/// state mapping. All of these are plain static functions, so they are
-/// exercised here without hosting a view, a live view model, or a simulator.
+/// Detail-host lifecycle, native panel reflow, and pure presentation mappings.
 @MainActor
 final class PrinterDetailPanelsTests: XCTestCase {
 
@@ -41,8 +37,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
         fixture.connect.release()
         await fixture.services.awaitActiveServerSettled()
         XCTAssertEqual(fixture.services.activeServerGeneration, generation, "Settlement must not need a remount")
-        try await waitForHost("The existing controls page must replace its connection fallback") {
-            self.heaterTarget(in: controller.view) != nil
+        try await waitForHost("The existing controls page must replace its connection fallback", in: controller.view) {
+            self.heaterTarget(in: controller.view)?.isEnabled == true
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.second.baseURL.host)
@@ -55,6 +51,14 @@ final class PrinterDetailPanelsTests: XCTestCase {
         try await selectControls(in: controller)
         XCTAssertTrue(heaterTarget(in: controller.view) === field, "Page changes must retain the single owner/editor")
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1, "No capability refetch on repeated lifecycle triggers")
+
+        try fixture.registry.setActive(id: fixture.first.id)
+        XCTAssertNil(fixture.services.printerControlsComposition)
+        try await waitForHost("A retained old-server editor must fail closed", in: controller.view) {
+            !field.isEnabled
+        }
+        XCTAssertEqual(capabilityRequests(fixture.api).count, 1, "Identity churn cannot rebind or replace this host's owner")
+        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
     }
 
     func testProductionDetailHostInitialLoadCreatesOneControlsOwner() async throws {
@@ -67,8 +71,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let window = show(controller)
         defer { window.isHidden = true; window.rootViewController = nil }
         try await selectControls(in: controller)
-        try await waitForHost("Initial detail load must expose the native heater editor") {
-            self.heaterTarget(in: controller.view) != nil
+        try await waitForHost("Initial detail load must expose the native heater editor", in: controller.view) {
+            self.heaterTarget(in: controller.view)?.isEnabled == true
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.first.baseURL.host)
@@ -150,8 +154,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
     ) throws -> some View {
         let auth = AuthViewModel(services: services)
         auth.isAuthenticated = true
-        auth.currentUser = try TestData.decodeUser()
-        return NavigationStack { detail }
+        auth.currentUser = try TestData.decodeUser(
+            from: TestJSON.userDTO.replacingOccurrences(of: "\"Admin\"", with: "\"farm_admin\"")
+        )
+        return detail
             .environment(services)
             .environment(registry)
             .environment(auth)
@@ -182,7 +188,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
     }
 
     private func selectControls<Content: View>(in controller: UIHostingController<Content>) async throws {
-        try await waitForHost("The production detail pager must appear") {
+        try await waitForHost("The production detail pager must appear", in: controller.view) {
             !self.views(UISegmentedControl.self, in: controller.view).isEmpty
         }
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
@@ -192,11 +198,18 @@ final class PrinterDetailPanelsTests: XCTestCase {
         controller.view.layoutIfNeeded()
     }
 
-    private func waitForHost(_ message: String, condition: () -> Bool) async throws {
-        let deadline = ContinuousClock.now + .seconds(5)
-        while !condition(), ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(10))
+    private func waitForHost(_ message: String, in view: UIView, condition: () -> Bool) async throws {
+        func layout(_ view: UIView) {
+            view.setNeedsLayout()
+            view.layoutIfNeeded()
+            view.subviews.forEach(layout)
         }
+        let deadline = ContinuousClock.now + .seconds(5)
+        repeat {
+            layout(view)
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        } while ContinuousClock.now < deadline
         _ = try XCTUnwrap(condition() ? true : nil, message)
     }
 
