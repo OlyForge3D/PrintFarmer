@@ -45,7 +45,13 @@ explicitly, and this change must not alter live workflows. Preserve manual targe
 2. Collect every open issue and PR with complete pagination. Account for each open issue as
    dispatched, in-flight, awaiting-analysis, blocked (name each open blocker), epic-tracking,
    deferred-to-macOS-Ralph, or unaccounted.
-3. On Windows, triage mobile work but never dispatch, review, or merge it; report it as deferred.
+3. On Windows, triage mobile work and normally report it as deferred. Dispatch it only through the
+   disabled-by-default, verified macOS SSH adapter in `scripts/ci/ralph-macos-ssh.mjs`; never fall back to native `--connect` or local Windows execution. The adapter is PrintFarmer-only,
+   requires explicit trusted runtime configuration, a fresh exact issue claim, and a reservation
+   in its authoritative five-slot ledger before delivery. It sends structured stdin to a fixed
+   remote worker command and retains the reservation through lost acknowledgements until the same
+   job is reconciled. The Mac owns the isolated worktree, mobile validation, review and authorized
+   merge. Windows records only correlated results and never fabricates Mac evidence.
    Classify from labels, paths, acceptance criteria, or Swift/Xcode signals—not owner identity.
 
 ## Conditional Policies
@@ -66,7 +72,8 @@ explicitly, and this change must not alter live workflows. Preserve manual targe
 
 ## Non-Negotiable Gates
 
-Never implement. Never dispatch mobile work on Windows. Never silently skip an issue. Never
+Never implement. Never dispatch mobile work from Windows except through the enabled verified SSH
+adapter. Never silently skip an issue. Never
 self-review or invent/substitute a reviewer/model: Bishop `claude-opus-5`, Hicks
 `gpt-5.6-sol`, and Vasquez `gemini-3.8-flash` (explicitly user-authorized), each medium;
 an unavailable exact model is a blocker and never permits substitution.

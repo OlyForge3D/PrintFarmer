@@ -45,7 +45,11 @@ live as an additional decaying claim; either live source blocks. Closed blockers
 Build the complete dependency graph before selecting READY candidates. Detect cycles, deduplicate
 transitive descendants, inherit the highest downstream priority, then sort READY candidates by
 effective p0–p3, unblock value descending, creation time, and issue number. Report non-mobile
-critical-path work that unblocks macOS issues; never dispatch the mobile dependents.
+critical-path work that unblocks macOS issues. A verified, explicitly enabled SSH adapter may
+dispatch a mobile dependent only after it reserves the issue in the shared Windows-owned
+PrintFarmer ledger; legacy Mac Ralph admission must be drained before activation. Never use GitHub
+labels/comments or the round cache as admission authorization, never fall back to local Windows,
+and leave the reservation in place for offline, timeout, or uncorrelated acknowledgement results.
 
 Re-fetch and confirm each issue immediately before claim/spawn. Maintain at most five live
 implementation/analysis sessions. Use `gpt-5.6-terra` medium for implementation and

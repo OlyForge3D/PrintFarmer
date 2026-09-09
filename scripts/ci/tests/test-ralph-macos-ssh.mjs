@@ -1,0 +1,130 @@
+import assert from 'node:assert/strict';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import test from 'node:test';
+import {
+  RalphMacSshError, acknowledgeJob, createRemoteRequest, createSshInvocation, dispatchMacJob,
+  loadMacSshConfiguration, markUncertain, parseRemoteAcknowledgement, recordDeliveryIntent,
+  recordTerminalResult, reserveJob,
+} from '../ralph-macos-ssh.mjs';
+
+const root = path.resolve('fixtures', 'ralph-macos-ssh-validation');
+const options = () => ({
+  platform: 'win32',
+  env: {
+    RALPH_MAC_SSH_ENABLED: 'true', RALPH_MAC_SSH_DESTINATION: 'operator@trusted-mac.local',
+    RALPH_MAC_SSH_EXPECTED_HOST: 'trusted-mac.local', RALPH_MAC_SSH_WORKER_PATH: '/opt/printfarmer/ralph-worker',
+    RALPH_MAC_SSH_KNOWN_HOSTS: path.join(root, 'known_hosts'), RALPH_ADMISSION_LEDGER_DIR: root,
+  },
+});
+const job = (id = 'job-2605') => ({
+  jobId: id, repository: 'OlyForge3D/PrintFarmer', issue: 2605, owner: 'hudson',
+  baseSha: 'a'.repeat(40), model: 'gpt-5.6-terra', effort: 'medium', agent: 'squad',
+  acceptanceCriteria: ['Run the targeted iOS test'], charter: 'mobile/AGENTS.md',
+});
+const eligibility = { repository: 'OlyForge3D/PrintFarmer', issue: 2605, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false };
+
+async function reset() {
+  await rm(root, { recursive: true, force: true });
+  await mkdir(root, { recursive: true });
+}
+
+test('requires explicit trusted Windows configuration and strict SSH options', () => {
+  assert.throws(() => loadMacSshConfiguration({ platform: 'win32', env: {} }), (error) => error.code === 'DISABLED');
+  const configuration = loadMacSshConfiguration(options());
+  const invocation = createSshInvocation(configuration);
+  assert.deepEqual(invocation.args.slice(0, 8), [
+    '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o',
+    `UserKnownHostsFile=${configuration.knownHosts}`, '-o', 'ConnectTimeout=10',
+  ]);
+  assert.match(invocation.args.at(-1), /^zsh -lic /);
+  assert.throws(() => loadMacSshConfiguration({ ...options(), env: { ...options().env, RALPH_MAC_SSH_DESTINATION: 'x;whoami' } }),
+    (error) => error.code === 'INVALID_CONFIGURATION');
+});
+
+test('serializes untrusted content only as structured stdin and limits jobs to PrintFarmer', () => {
+  const malicious = job();
+  malicious.acceptanceCriteria = ['"; rm -rf / #'];
+  const input = createRemoteRequest(malicious);
+  assert.match(input, /rm -rf/);
+  assert.throws(() => createRemoteRequest({ ...job(), repository: 'OlyForge3D/PrintFarmerDesktop' }),
+    (error) => error.code === 'UNSUPPORTED_REPOSITORY');
+  assert.throws(() => createRemoteRequest({ ...job(), model: 'gpt-5.6-luna' }),
+    (error) => error.code === 'INVALID_REQUEST');
+});
+
+test('rejects malformed, wrong-host, and uncorrelated remote acknowledgements', () => {
+  const expected = { version: 1, type: 'accepted', jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1' };
+  assert.deepEqual(parseRemoteAcknowledgement(JSON.stringify(expected), { ...job(), expectedHost: expected.host }), expected);
+  for (const output of ['not-json', `${JSON.stringify(expected)}\nextra`, JSON.stringify({ ...expected, host: 'wrong-host.local' })]) {
+    assert.throws(() => parseRemoteAcknowledgement(output, { ...job(), expectedHost: expected.host }),
+      (error) => error.code === 'MALFORMED_RESPONSE');
+  }
+});
+
+test('enforces five shared slots, one owner per issue, and stable job fencing', async () => {
+  await reset();
+  const configuration = options();
+  await Promise.all(Array.from({ length: 5 }, (_, index) => reserveJob({
+    job: { ...job(`job-${index}`), issue: index + 1 }, eligibility: { ...eligibility, issue: index + 1 },
+  }, configuration)));
+  await assert.rejects(() => reserveJob({ job: { ...job('job-overflow'), issue: 99 }, eligibility: { ...eligibility, issue: 99 } }, configuration),
+    (error) => error.code === 'SLOT_EXHAUSTED');
+  await assert.rejects(() => reserveJob({ job: { ...job('job-other'), issue: 1 }, eligibility: { ...eligibility, issue: 1 } }, configuration),
+    (error) => error.code === 'ISSUE_OWNED');
+  await assert.rejects(() => reserveJob({ job: { ...job('job-0'), issue: 99 }, eligibility: { ...eligibility, issue: 99 } }, configuration),
+    (error) => error.code === 'FENCED');
+});
+
+test('recovers a crashed controller lock without allowing a live controller overlap', async () => {
+  await reset();
+  const configuration = options();
+  await writeFile(path.join(root, 'printfarmer-jobs.json.lock'), JSON.stringify({
+    token: 'crashed-controller', pid: 1, expiresAt: '2026-01-01T00:00:00Z',
+  }));
+  await reserveJob({ job: job(), eligibility }, { ...configuration, isOwnerAlive: () => false });
+  await writeFile(path.join(root, 'printfarmer-jobs.json.lock'), JSON.stringify({
+    token: 'live-controller', pid: 1, expiresAt: '2026-01-01T00:00:00Z',
+  }));
+  await assert.rejects(() => reserveJob({ job: { ...job('blocked-job'), issue: 9 }, eligibility: { ...eligibility, issue: 9 } }, {
+    ...configuration, retries: 1, isOwnerAlive: () => true,
+  }), (error) => error.code === 'LOCK_TIMEOUT');
+});
+
+test('retains delivery ownership after lost acknowledgement and reconciles the same job', async () => {
+  await reset();
+  const configuration = options();
+  await reserveJob({ job: job(), eligibility }, configuration);
+  await recordDeliveryIntent('job-2605', configuration);
+  await markUncertain('job-2605', configuration);
+  const acknowledged = await acknowledgeJob('job-2605', {
+    version: 1, type: 'accepted', jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer',
+    issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1',
+  }, configuration);
+  assert.equal(acknowledged.state, 'accepted');
+  assert.equal(acknowledged.sessionId, 'session-1');
+});
+
+test('requires correlated terminal evidence before capacity is released', async () => {
+  await reset();
+  const configuration = options();
+  await reserveJob({ job: job(), eligibility }, configuration);
+  await recordDeliveryIntent('job-2605', configuration);
+  const acknowledgement = { version: 1, type: 'accepted', jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1' };
+  await acknowledgeJob('job-2605', acknowledgement, configuration);
+  await assert.rejects(() => recordTerminalResult({ jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, baseSha: 'a'.repeat(40), host: 'trusted-mac.local', headSha: 'b'.repeat(40), exitCode: 0 }, configuration),
+    (error) => error.code === 'INVALID_TERMINAL_EVIDENCE');
+  const completed = await recordTerminalResult({ jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, baseSha: 'a'.repeat(40), host: 'trusted-mac.local', headSha: 'b'.repeat(40), exitCode: 0, validationEvidence: 'mobile/PrintFarmerTests: passed', workingTreeClean: true, allCommitsPushed: true }, configuration);
+  assert.equal(completed.state, 'completed');
+});
+
+test('marks SSH failure uncertain instead of retrying locally or releasing its slot', async () => {
+  await reset();
+  const configuration = options();
+  await assert.rejects(() => dispatchMacJob({ job: job(), eligibility }, {
+    ...configuration,
+    spawn: () => { throw new RalphMacSshError('offline', 'SSH_FAILURE'); },
+  }), (error) => error.code === 'SSH_FAILURE');
+  await assert.rejects(() => reserveJob({ job: { ...job('duplicate'), issue: 2605 }, eligibility }, configuration),
+    (error) => error.code === 'ISSUE_OWNED');
+});

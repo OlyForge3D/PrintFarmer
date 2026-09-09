@@ -490,11 +490,12 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
   for (const reference of [
     'implementation-pre-pr.md', 'session-terminal-contract.md', 'pr-merge.md',
     'one round and exits', 'five implementation/analysis slots maximum',
-    'never dispatch, review, or merge it',
+    'verified macOS SSH adapter', 'never fall back to native `--connect` or local Windows execution',
     'Before every dispatch, claim, message, review decision, or merge, fetch',
     'Vasquez `gemini-3.8-flash`', 'unavailable exact model is a blocker',
     'assessCleanupCandidate', 'operations.md', 'cleanup.md',
-    'No named non-workflow test entrypoint', 'test-ralph-round-cache.mjs',
+    'authoritative five-slot ledger', 'No named non-workflow test entrypoint',
+    'test-ralph-round-cache.mjs',
   ]) assert.match(skill, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   assert.doesNotMatch(skill, /\.squad\/templates\/ralph-reference\.md/i);
   for (const reference of [
