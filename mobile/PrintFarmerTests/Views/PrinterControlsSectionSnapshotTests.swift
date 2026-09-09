@@ -296,12 +296,9 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         await model.loadCapabilities()
         await model.setHeaterTarget(.hotend, target: 220)
         XCTAssertNotNil(model.pendingCommand)
-        let content = PrinterSetupControlsContent(printer: printer, viewModel: model)
-            .frame(width: 390)
-            .fixedSize(horizontal: false, vertical: true)
-        let (window, controller) = install(content)
+        let (window, controller) = install(PrinterSetupControlsContent(printer: printer, viewModel: model))
         defer { window.isHidden = true }
-        window.frame.size = controller.sizeThatFits(in: CGSize(width: 390, height: 10000))
+        window.frame.size.height = 3000
         controller.view.frame = window.bounds
         try await settle(controller)
         let controls = nativeControls(in: controller.view)
@@ -335,9 +332,12 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             await model.loadCapabilities()
             if printer.isOnline { model.configureAccess { reason } }
             XCTAssertEqual(model.blockedReason, reason)
-            let (window, controller) = install(PrinterSetupControlsContent(printer: printer, viewModel: model))
+            let content = PrinterSetupControlsContent(printer: printer, viewModel: model)
+                .frame(width: 390)
+                .fixedSize(horizontal: false, vertical: true)
+            let (window, controller) = install(content)
             defer { window.isHidden = true }
-            window.frame.size.height = 3000
+            window.frame.size = controller.sizeThatFits(in: CGSize(width: 390, height: 10000))
             controller.view.frame = window.bounds
             try await settle(controller)
             let controls = nativeControls(in: controller.view)
