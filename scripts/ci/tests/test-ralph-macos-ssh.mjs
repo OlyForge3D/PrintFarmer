@@ -109,6 +109,7 @@ test('rejects oversized worker payloads before creating an admission ledger', as
     () => dispatchMacJob({
       job: { ...job(), acceptanceCriteria: ['x'.repeat(70 * 1024)] },
       eligibility,
+      controllerPid: process.pid,
     }, options()),
     (error) => error.code === 'INVALID_REQUEST',
   );
@@ -210,7 +211,7 @@ test('retains delivery ownership after lost acknowledgement and reconciles the s
   await recordDeliveryIntent('job-2605', configuration);
   await markUncertain('job-2605', configuration);
   const child = fakeChild();
-  const acknowledged = await dispatchMacJob({ job: job(), eligibility }, {
+  const acknowledged = await dispatchMacJob({ job: job(), eligibility, controllerPid: process.pid }, {
     ...configuration,
     spawn: () => {
       queueMicrotask(() => {
@@ -234,7 +235,7 @@ test('releases an uncertain delivery only from the worker attesting no durable j
   await recordDeliveryIntent('job-2605', configuration);
   await markUncertain('job-2605', configuration);
   const child = fakeChild();
-  const failed = await dispatchMacJob({ job: job(), eligibility }, {
+  const failed = await dispatchMacJob({ job: job(), eligibility, controllerPid: process.pid }, {
     ...configuration,
     spawn: () => {
       queueMicrotask(() => {
@@ -386,11 +387,14 @@ test('executes the local create-session admission lifecycle through the CLI', as
   }
 });
 
-test('requires the app Ralph controller PID for CLI local reservations', async () => {
+test('requires the app Ralph controller PID for CLI reservations and remote dispatch', async () => {
   await reset();
-  const result = await runAdmission('reserve-local', { job: job(), eligibility });
-  assert.equal(result.code, 1);
-  assert.match(result.stderr, /requires the Ralph controller process identifier/);
+  const local = await runAdmission('reserve-local', { job: job(), eligibility });
+  assert.equal(local.code, 1);
+  assert.match(local.stderr, /requires the Ralph controller process identifier/);
+  const remote = await runAdmission('dispatch-remote', { job: job(), eligibility });
+  assert.equal(remote.code, 1);
+  assert.match(remote.stderr, /requires the Ralph controller process identifier/);
 });
 
 test('contains SSH stream errors, nonzero exits, and wall-clock timeout', async () => {
@@ -417,10 +421,13 @@ test('contains SSH stream errors, nonzero exits, and wall-clock timeout', async 
 test('marks SSH failure uncertain instead of retrying locally or releasing its slot', async () => {
   await reset();
   const configuration = options();
-  await assert.rejects(() => dispatchMacJob({ job: job(), eligibility }, {
+  const controllerPid = process.pid + 100_000;
+  await assert.rejects(() => dispatchMacJob({ job: job(), eligibility, controllerPid }, {
     ...configuration,
     spawn: () => { throw new RalphMacSshError('offline', 'SSH_FAILURE'); },
   }), (error) => error.code === 'SSH_FAILURE');
+  const ledger = JSON.parse(await readFile(path.join(root, 'printfarmer-jobs.json'), 'utf8'));
+  assert.equal(ledger.jobs['job-2605'].reservationOwnerPid, controllerPid);
   await assert.rejects(() => reserveJob({ job: { ...job('duplicate'), issue: 2605 }, eligibility }, configuration),
     (error) => error.code === 'ISSUE_OWNED');
 });

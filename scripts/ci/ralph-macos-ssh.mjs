@@ -605,17 +605,20 @@ export function runSsh(invocation, input, { spawn = nodeSpawn, timeoutMs = 45_00
   });
 }
 
-export async function dispatchMacJob({ job, eligibility }, options = {}) {
+export async function dispatchMacJob({ job, eligibility, controllerPid }, options = {}) {
+  if (!Number.isInteger(controllerPid) || controllerPid <= 0) {
+    throw new RalphMacSshError('Remote dispatch requires the Ralph controller process identifier.', 'INVALID_REQUEST');
+  }
   const configuration = loadMacSshConfiguration(options);
   const request = { ...job, expectedHost: configuration.expectedHost };
   if (!['gpt-5.6-terra', 'gpt-5.6-luna'].includes(request.model) || request.effort !== 'medium' || request.agent !== 'squad') {
     throw new RalphMacSshError('Remote jobs must use an approved model, effort, and squad agent.', 'INVALID_REQUEST');
   }
   createRemoteRequest({ ...request, fence: Number.MAX_SAFE_INTEGER });
-  let reservation = await reserveJob({ job: request, eligibility }, options);
+  let reservation = await reserveJob({ job: request, eligibility, reservationOwnerPid: controllerPid }, options);
   if (reservation.state === 'delivery-intent') {
     await recoverRemoteDelivery(request.jobId, options);
-    reservation = await reserveJob({ job: request, eligibility }, options);
+    reservation = await reserveJob({ job: request, eligibility, reservationOwnerPid: controllerPid }, options);
   }
   request.fence = reservation.fence;
   const reconciling = reservation.state === 'uncertain';
