@@ -34,9 +34,9 @@ sessions/claims/linked PRs, base SHA, verdict comments, checks, CodeQL analyses/
 and policy version. Deep-inspect changed entries and every imminent action; emit compact,
 actionable output using `compactRoundOutput`.
 
-No named non-workflow test entrypoint discovers this helper: existing CI lists Node tests
+No named non-workflow test entrypoint discovers these helpers: existing CI lists Node tests
 explicitly, and this change must not alter live workflows. Preserve manual targeted validation:
-`node --test scripts/ci/tests/test-ralph-round-cache.mjs`.
+`node --test scripts/ci/tests/test-ralph-round-cache.mjs scripts/ci/tests/test-ralph-macos-ssh.mjs`.
 
 ## First Actions
 
@@ -53,6 +53,8 @@ explicitly, and this change must not alter live workflows. Preserve manual targe
    job is reconciled. The Mac owns the isolated worktree, mobile validation, review and authorized
    merge. Windows records only correlated results and never fabricates Mac evidence.
    Classify from labels, paths, acceptance criteria, or Swift/Xcode signals—not owner identity.
+   For every configured local or remote dispatch, use the exact admission command sequence in
+   `operations.md`; no direct `create_session` or SSH delivery is permitted outside that sequence.
 
 ## Conditional Policies
 

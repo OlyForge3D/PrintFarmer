@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -38,6 +39,22 @@ function fakeChild() {
   child.stderr = new PassThrough();
   child.kill = () => child.emit('close', 143);
   return child;
+}
+
+function runAdmission(command, request) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['scripts/ci/ralph-admission.mjs', command], {
+      env: { ...process.env, RALPH_ADMISSION_LEDGER_DIR: root },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+    child.stdin.end(JSON.stringify(request));
+  });
 }
 
 test('requires explicit trusted Windows configuration and strict SSH options', () => {
@@ -203,6 +220,32 @@ test('keeps local reservations out of the remote terminal lifecycle', async () =
     host: undefined, sessionId: 'local-session-1', headSha: 'b'.repeat(40), exitCode: 0,
     validationEvidence: 'not remote', workingTreeClean: true, allCommitsPushed: true,
   }, configuration), (error) => error.code === 'INVALID_TRANSITION');
+});
+
+test('executes the local create-session admission lifecycle through the CLI', async () => {
+  await reset();
+  const reserve = await runAdmission('reserve-local', { job: job(), eligibility });
+  assert.equal(reserve.code, 0, reserve.stderr);
+  assert.equal(JSON.parse(reserve.stdout).result.state, 'reserved');
+
+  const acknowledgement = await runAdmission('acknowledge-local', {
+    jobId: 'job-2605', sessionId: 'app-session-2605',
+  });
+  assert.equal(acknowledgement.code, 0, acknowledgement.stderr);
+  assert.equal(JSON.parse(acknowledgement.stdout).result.sessionId, 'app-session-2605');
+
+  const terminal = await runAdmission('terminal-local', {
+    result: {
+      jobId: 'job-2605', sessionId: 'app-session-2605', headSha: 'b'.repeat(40), exitCode: 0,
+      validationEvidence: 'targeted tests passed', workingTreeClean: true, allCommitsPushed: true,
+    },
+  });
+  assert.equal(terminal.code, 0, terminal.stderr);
+  assert.equal(JSON.parse(terminal.stdout).result.state, 'completed');
+
+  const invalid = await runAdmission('unknown', {});
+  assert.equal(invalid.code, 1);
+  assert.equal(JSON.parse(invalid.stderr).code, 'INVALID_COMMAND');
 });
 
 test('contains SSH stream errors, nonzero exits, and wall-clock timeout', async () => {

@@ -63,9 +63,28 @@ fetch; apply claim label and comment; re-fetch; verify that exact claim landed; 
 on any failed or stale claim.
 
 Every enabled local or SSH implementation/analysis dispatch reserves the same PrintFarmer
-admission ledger before delivery. The SSH adapter's `reserveJob` and `reserveLocalJob` are the
-only admission entry points; controllers must not create a local session or send a remote request
-without their returned reservation and fence.
+admission ledger before delivery through `scripts/ci/ralph-admission.mjs`. The scheduled Ralph
+prompt must use only these one-shot JSON-stdin commands—never a naked `create_session` or SSH
+delivery:
+
+1. After the fresh claim re-fetch, run `node scripts/ci/ralph-admission.mjs reserve-local` with
+   `{"job":...,"eligibility":...}` on stdin. Preserve the returned `jobId` and `fence` in the
+   `create_session` kickoff as the stable job marker.
+2. Create the local app session only after `reserve-local` succeeds. If creation times out or
+   returns no session ID, retain the reservation; a later round must discover the marker in the
+   session inventory and run `acknowledge-local`, never create a duplicate or release the slot.
+3. Once the app returns the real session ID, run `acknowledge-local` with
+   `{"jobId":...,"sessionId":...}`. On terminal completion, run `terminal-local` with the
+   matching session ID and verified head, exit, validation, clean-worktree, and pushed-commit
+   evidence.
+4. For an eligible mobile issue only, run `dispatch-remote` with `{"job":...,"eligibility":...}`
+   instead of local session creation. It reserves, records intent, and sends SSH in one durable
+   operation; lost acknowledgement/timeouts remain reserved and the same job is reconciled on a
+   later invocation. Use `terminal-remote` only with correlated Mac evidence.
+
+The ledger is authoritative for these cooperating configured Ralph dispatch paths, not arbitrary
+manual app sessions that bypass this policy. Before enabling remote dispatch, drain or account for
+legacy Mac Ralph admission so Windows is the single coordinator.
 
 ## Round Report
 
