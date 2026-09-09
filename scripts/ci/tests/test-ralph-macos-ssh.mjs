@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
@@ -108,6 +108,20 @@ test('fences request changes under an existing job identifier', async () => {
   await assert.rejects(() => reserveJob({
     job: { ...job(), acceptanceCriteria: ['Different request'] }, eligibility,
   }, configuration), (error) => error.code === 'FENCED');
+});
+
+test('preserves the valid backup while repairing a corrupt primary ledger', async () => {
+  await reset();
+  const configuration = options();
+  const ledger = {
+    version: 1, repository: 'OlyForge3D/PrintFarmer', generation: 0, jobs: {},
+  };
+  await writeFile(path.join(root, 'printfarmer-jobs.json'), '{not-json');
+  await writeFile(path.join(root, 'printfarmer-jobs.json.bak'), `${JSON.stringify(ledger)}\n`);
+
+  await reserveJob({ job: job(), eligibility }, configuration);
+
+  assert.deepEqual(JSON.parse(await readFile(path.join(root, 'printfarmer-jobs.json.bak'), 'utf8')), ledger);
 });
 
 test('recovers a crashed controller lock without allowing a live controller overlap', async () => {

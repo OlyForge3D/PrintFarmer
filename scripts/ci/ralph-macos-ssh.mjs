@@ -256,12 +256,14 @@ async function mutateLedger(mutator, options = {}) {
   const temp = `${file}.${process.pid}.${randomUUID()}.tmp`;
   try {
     let ledger = { version: 1, repository: printFarmerRepository, generation: 0, jobs: {} };
+    let recoveredFromBackup = false;
     try {
       ledger = JSON.parse(await readFile(file, 'utf8'));
     } catch (error) {
       if (error.code !== 'ENOENT') {
         try {
           ledger = JSON.parse(await readFile(backup, 'utf8'));
+          recoveredFromBackup = true;
         } catch {
           throw new RalphMacSshError('Admission ledger is corrupt.', 'CORRUPT_LEDGER');
         }
@@ -279,10 +281,12 @@ async function mutateLedger(mutator, options = {}) {
     } finally {
       await temporary.close();
     }
-    try {
-      await copyFile(file, backup);
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
+    if (!recoveredFromBackup) {
+      try {
+        await copyFile(file, backup);
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
     }
     await rename(temp, file);
     return result;
