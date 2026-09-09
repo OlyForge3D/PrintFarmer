@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Presentation-only setup controls. The host owns the model, capability loading,
 /// access gating and live-update forwarding even while this content is offscreen.
-/// Use `PrinterControlsSection(printer:printerService:)` for standalone ownership.
+/// Use `PrinterControlsSection(printer:composition:)` for standalone ownership.
 struct PrinterSetupControlsContent: View {
     let printer: Printer
     @ObservedObject var viewModel: PrinterControlsViewModel

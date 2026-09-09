@@ -70,7 +70,9 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored private let activeGeneration: ActiveServerGeneration
     @ObservationIgnored private var observesRegistry: Bool
     @ObservationIgnored private var activeServerID: UUID?
-    @ObservationIgnored private var activeServerSwitchTask: Task<Void, Never>?
+    // Observed so the read-only controls composition announces settlement,
+    // including when no further service-generation change is needed.
+    private var activeServerSwitchTask: Task<Void, Never>?
     /// Shared monotonic transition epoch (H1). Advanced SYNCHRONOUSLY at every
     /// target-intent change (registry callback, demo/real, switch requests), not
     /// when the worker later observes it, so a suspended switch is invalidated the
@@ -764,6 +766,21 @@ final class ServiceContainer: @unchecked Sendable {
     /// pending-activation state to the failed server and invalidate the pending record
     /// when the user switches servers.
     var currentActiveServerID: UUID? { serverRegistry?.activeServerID }
+
+    /// Capture the actual service and its registered identity in one MainActor
+    /// turn. Registry selection is intent, not proof of a completed composition.
+    var printerControlsComposition: PrinterControlsComposition? {
+        guard activeServerSwitchTask == nil,
+              let activeServerID,
+              serverRegistry?.activeServerID == activeServerID else { return nil }
+        return PrinterControlsComposition(
+            identity: .init(
+                serverID: activeServerID, generation: activeServerGeneration,
+                revision: transitionEpoch.current
+            ),
+            printerService: printerService
+        )
+    }
 
     /// Resolves the authenticated identity from the destination server only
     /// after its service composition has settled. Navigation uses this instead

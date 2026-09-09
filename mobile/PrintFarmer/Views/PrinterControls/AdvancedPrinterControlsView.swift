@@ -2,6 +2,16 @@ import SwiftUI
 
 @MainActor
 enum AdvancedPrinterControlsAccess {
+    static func matchesComposition(
+        _ model: PrinterControlsViewModel,
+        selectedServerID: UUID?,
+        composition: PrinterControlsComposition?
+    ) -> Bool {
+        model.registeredServerID != nil
+            && selectedServerID == model.registeredServerID
+            && model.matchesComposition(composition)
+    }
+
     static func isEntryVisible(isEnabled: Bool, for printer: Printer) -> Bool {
         isEnabled && !PrinterControlsSection.isHidden(for: printer)
     }
@@ -32,7 +42,7 @@ struct PrinterControlsAccessLifecycle: ViewModifier {
     @Environment(AuthViewModel.self) private var auth
 
     private var accessSignal: String {
-        "\(registry.activeServerID?.uuidString ?? "")|\(services.activeServerGeneration)|\(registry.advancedPrinterControlsEnabled)|\(auth.isAuthenticated)|\(auth.snapshotActivationPending)|\(auth.currentUser?.id.uuidString ?? "")|\(auth.currentUser?.isActive ?? false)|\(auth.currentUser?.permissions ?? [])|\(auth.currentUser?.roles ?? [])"
+        "\(registry.activeServerID?.uuidString ?? "")|\(services.activeServerGeneration)|\(String(describing: services.printerControlsComposition?.identity))|\(registry.advancedPrinterControlsEnabled)|\(auth.isAuthenticated)|\(auth.snapshotActivationPending)|\(auth.currentUser?.id.uuidString ?? "")|\(auth.currentUser?.isActive ?? false)|\(auth.currentUser?.permissions ?? [])|\(auth.currentUser?.roles ?? [])"
     }
 
     func body(content: Content) -> some View {
@@ -44,17 +54,21 @@ struct PrinterControlsAccessLifecycle: ViewModifier {
     }
 
     private func configure() {
-        let serverID = registry.activeServerID
-        let generation = services.activeServerGeneration
+        guard let viewModel else { return }
+        let serverID = viewModel.registeredServerID
         let userID = auth.currentUser?.id
-        viewModel?.configureAccess(serverID: serverID) { [registry, services, auth] in
+        viewModel.configureAccess(serverID: serverID) { [weak viewModel, registry, services, auth] in
             AdvancedPrinterControlsAccess.blockedReason(
                 enabled: registry.advancedPrinterControlsEnabled,
                 authenticated: auth.isAuthenticated,
                 ready: !auth.snapshotActivationPending,
                 user: auth.currentUser,
-                sameServer: registry.activeServerID == serverID
-                    && services.activeServerGeneration == generation
+                sameServer: viewModel.map {
+                    AdvancedPrinterControlsAccess.matchesComposition(
+                        $0, selectedServerID: registry.activeServerID,
+                        composition: services.printerControlsComposition
+                    )
+                } == true
                     && auth.currentUser?.id == userID
             )
         }
@@ -81,10 +95,13 @@ struct AdvancedPrinterControlsView: View {
                     VStack(alignment: .leading, spacing: 20) {
                         header
 
-                        PrinterControlsSection(
-                            printer: printer,
-                            printerService: services.printerService
-                        )
+                        if let composition = services.printerControlsComposition {
+                            PrinterControlsSection(printer: printer, composition: composition)
+                                .id(composition.identity)
+                        } else {
+                            Text("Controls are unavailable while the registered server connection is changing.")
+                                .font(.footnote)
+                        }
                     }
                     .padding()
                 }

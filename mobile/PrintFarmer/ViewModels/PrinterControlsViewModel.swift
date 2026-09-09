@@ -125,6 +125,17 @@ struct ControlsError: Error, Equatable, Sendable {
     let isRetryable: Bool
 }
 
+struct PrinterControlsComposition: Sendable {
+    struct Identity: Hashable, Sendable {
+        let serverID: UUID
+        let generation: Int
+        let revision: Int
+    }
+
+    let identity: Identity
+    let printerService: any PrinterServiceProtocol
+}
+
 private struct PrinterControlsIdentity: Hashable {
     let serverID: UUID
     let printerID: UUID
@@ -176,8 +187,10 @@ final class PrinterControlsViewModel: ObservableObject {
     @Published private(set) var hardwareLoadError: String?
     @Published private(set) var commandNotice: String?
     @Published private(set) var isActive = true
-    private(set) var registeredServerID: UUID?
+    var registeredServerID: UUID? { composition?.identity.serverID }
+    var compositionIdentity: PrinterControlsComposition.Identity? { composition?.identity }
 
+    private let composition: PrinterControlsComposition?
     private var accessCheck: @MainActor () -> String? = { nil }
     private var hasConfiguredAccess = false
     private let commandLeases = PrinterControlsLeases.shared
@@ -193,12 +206,33 @@ final class PrinterControlsViewModel: ObservableObject {
     private let printerService: any PrinterServiceProtocol
     private let clock: @Sendable () -> Date
 
-    init(
+    convenience init(
         printerService: any PrinterServiceProtocol,
         printer: Printer,
         clock: @escaping @Sendable () -> Date = Date.init
     ) {
+        self.init(printerService: printerService, composition: nil, printer: printer, clock: clock)
+    }
+
+    convenience init(
+        composition: PrinterControlsComposition,
+        printer: Printer,
+        clock: @escaping @Sendable () -> Date = Date.init
+    ) {
+        self.init(
+            printerService: composition.printerService, composition: composition,
+            printer: printer, clock: clock
+        )
+    }
+
+    private init(
+        printerService: any PrinterServiceProtocol,
+        composition: PrinterControlsComposition?,
+        printer: Printer,
+        clock: @escaping @Sendable () -> Date
+    ) {
         self.printerService = printerService
+        self.composition = composition
         self.printer = printer
         self.clock = clock
         leaseObservation = commandLeases.objectWillChange.sink { [weak self] _ in
@@ -256,18 +290,21 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     func configureAccess(serverID: UUID?, _ check: @escaping @MainActor () -> String?) {
-        guard let serverID,
-              registeredServerID == nil || registeredServerID == serverID else {
+        guard let serverID, composition != nil, registeredServerID == serverID else {
             deactivate()
             return
         }
         if !hasConfiguredAccess {
-            registeredServerID = serverID
             accessCheck = check
             hasConfiguredAccess = true
         }
         isActive = true
         refreshAccess()
+    }
+
+    func matchesComposition(_ current: PrinterControlsComposition?) -> Bool {
+        guard let composition, let current else { return false }
+        return composition.identity == current.identity
     }
 
     func refreshAccess() {
@@ -608,7 +645,8 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     var canControl: Bool {
-        commandIdentity != nil && isActive && accessCheck() == nil && printer.isOnline && !isPrintingOrPaused
+        commandIdentity != nil && hasConfiguredAccess && isActive && accessCheck() == nil
+            && printer.isOnline && !isPrintingOrPaused
     }
 
     var blockedReason: String? {

@@ -208,7 +208,7 @@ struct PreheatSubgroup: View {
         // Per spec §3.1 single-flight queue: if any preheat command is in
         // flight, *all* preheat siblings disable so the user can't stack
         // burst commands like "PLA then ABS".
-        let isAnyPreheatInProgress = viewModel.pendingCommand != nil
+        let isAnyPreheatInProgress = viewModel.isExecuting
         let isInteractive = canControl && !isAnyPreheatInProgress && limitsReason == nil
 
         let hasError = isErrored(preset: preset)
@@ -641,8 +641,12 @@ private enum PreheatSubgroupPreviewFactory {
     ) -> PrinterControlsViewModel {
         let printer = Printer.previewFallbackPrinter(state: printerState, isOnline: isOnline)
         let service = PreheatSubgroupPreviewService(capabilities: capabilities, hangForever: startPendingPreset != nil)
-        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
-        vm.configureAccess(serverID: UUID()) { nil }
+        let serverID = UUID()
+        let composition = PrinterControlsComposition(
+            identity: .init(serverID: serverID, generation: 0, revision: 0), printerService: service
+        )
+        let vm = PrinterControlsViewModel(composition: composition, printer: printer)
+        vm.configureAccess(serverID: serverID) { nil }
         // Asynchronously load preview capabilities immediately so the canvas
         // settles on the configured visibility state.
         vm.previewLoadCapabilitiesAsync()

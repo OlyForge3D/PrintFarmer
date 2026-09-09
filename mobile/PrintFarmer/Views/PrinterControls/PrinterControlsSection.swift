@@ -32,16 +32,16 @@ struct PrinterControlsSection: View {
     /// before the autoclosure captured it, defeating the `@StateObject`
     /// lifetime guarantee. The injected-VM initializer below is retained
     /// only for deterministic snapshot / unit-test injection.
-    init(printer: Printer, printerService: any PrinterServiceProtocol) {
+    init(printer: Printer, composition: PrinterControlsComposition) {
         self.printer = printer
         self.enforcesAccess = true
         _viewModel = StateObject(
-            wrappedValue: PrinterControlsViewModel(printerService: printerService, printer: printer)
+            wrappedValue: PrinterControlsViewModel(composition: composition, printer: printer)
         )
     }
 
     /// Test-only injection init. Not part of the production surface — every
-    /// production caller must route through `init(printer:printerService:)`
+    /// production caller must route through `init(printer:composition:)`
     /// so `@StateObject`'s autoclosure semantics keep VM construction lazy.
     init(printer: Printer, viewModel: PrinterControlsViewModel) {
         self.printer = printer

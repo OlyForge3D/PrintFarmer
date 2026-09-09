@@ -17,7 +17,7 @@ command outcome presentation. It does not create services/models, load capabilit
 subscribe to updates. `JogSubgroup` likewise no longer loads capabilities;
 its initial capability observation normalizes selection for preloaded limited axes.
 
-`PrinterControlsSection(printer:printerService:)` remains the standalone owner,
+`PrinterControlsSection(printer:composition:)` remains the standalone owner,
 with lazy construction directly inside `StateObject(wrappedValue:)`. The
 `printer:viewModel:` wrapper initializer is test-only. The wrapper loads
 capabilities and forwards `PrinterControlsUpdateSignal` changes outside
@@ -173,11 +173,29 @@ suites continue to exercise native dispatch through mock services.
 `PrinterControlsViewModel.swift` owns invocation-token leases keyed by immutable
 **registered server UUID + printer UUID**, never by a service object's identity,
 the current user, or a transient service generation. The existing
-`PrinterControlsAccessLifecycle` supplies the registered UUID together with its
-captured access/generation check. A model cannot dispatch before identity is
-configured and cannot later rebind to a different registered server.
-Tests and previews configure explicit synthetic identities; production has no
-permissive default identity.
+`ServiceContainer.printerControlsComposition` exposes an immutable MainActor
+bundle of the **actual composed** registered UUID, generation, transition
+revision and exact printer service. It is unavailable during reconciliation or
+when eager registry selection differs from the composed server. The private
+worker handle is observed only so this read-only availability updates on
+settlement; service initialization and switch ordering are unchanged.
+
+The detail host captures that bundle alongside its detail-data service after
+the existing settlement barrier, checks cancellation/generation, and retains
+it for controls-owner construction. A registry change is never used to relabel
+an earlier captured service. The standalone owner also receives the whole
+bundle. `PrinterControlsAccessLifecycle` only checks the immutable binding
+against current registry/composition and existing user/permission gates; it
+never assigns identity. A bare-service model remains unable to dispatch even
+if later lifecycle code supplies a UUID. Tests and previews construct explicit
+synthetic bundles; production has no permissive missing/mock-context default.
+
+The transition revision additionally fences same-generation service
+replacement (`switchToReal`). Neither revision nor generation enters the shared
+lease key, so returning to the same registered server cannot bypass an earlier
+unresolved request. Delayed-disconnect and delayed-configuration tests exercise
+the real container and mock HTTP transport, not separately invented identity
+fixtures.
 
 All thermal/motion owners acquire the same lease in the existing command
 pipeline. It survives detail dismissal, replacement view models, and service
@@ -188,7 +206,7 @@ telemetry cancellation cannot release a replacement's lease. An outstanding call
 retains its cleanup owner, but the registry stores only UUIDs and observes views
 weakly, so settled owners are not leaked.
 
-A replacement explains the shared lock and disables routine inputs; it does
+A replacement explains the shared lock and disables preset, home, jog and other routine inputs; it does
 not offer Stop waiting for another owner's request. Shared-state observation
 updates the replacement UI when the lease is released. Local post-response
 telemetry waiting remains separate from transport ownership. This is a

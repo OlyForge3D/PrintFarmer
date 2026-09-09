@@ -17,6 +17,7 @@ struct PrinterDetailView: View {
     @State private var selectedPanel: PrinterDetailPanel = .overview
     // The command owner outlives page visibility and access changes.
     @State private var controlsViewModel: PrinterControlsViewModel?
+    @State private var controlsComposition: PrinterControlsComposition?
 
     private let printerId: UUID
 
@@ -135,9 +136,16 @@ struct PrinterDetailView: View {
             }
         }
         .task {
+            let generation = services.activeServerGeneration
+            await services.awaitActiveServerSettled()
+            guard !Task.isCancelled, services.activeServerGeneration == generation else { return }
+            // Pin setup controls to the same composition used for detail data,
+            // before the first await that loads that data.
+            let composition = services.printerControlsComposition
+            controlsComposition = composition
             viewModel.isViewActive = true
             viewModel.setSnapshotPollingAllowed(isOverviewPageForeground)
-            viewModel.configure(printerService: services.printerService)
+            viewModel.configure(printerService: composition?.printerService ?? services.printerService)
             #if canImport(UIKit)
             if let nfc = services.nfcService {
                 viewModel.configureNFCScanner(nfc)
@@ -355,12 +363,15 @@ struct PrinterDetailView: View {
     /// retain the owner through tab, connectivity and preference transitions.
     @MainActor
     private func ensureControlsOwnerIfAvailable(for printer: Printer) async {
-        guard PrinterDetailControlsOwnerMapping.shouldBuildOwner(
+        guard !Task.isCancelled,
+              let composition = controlsComposition,
+              composition.identity == services.printerControlsComposition?.identity,
+              PrinterDetailControlsOwnerMapping.shouldBuildOwner(
             existingOwnerPrinterID: controlsViewModel?.printer.id,
             printerID: printer.id,
             controlsAvailable: controlsAvailable(for: printer)
         ) else { return }
-        let vm = PrinterControlsViewModel(printerService: services.printerService, printer: printer)
+        let vm = PrinterControlsViewModel(composition: composition, printer: printer)
         controlsViewModel = vm
         await vm.loadCapabilities()
     }
@@ -478,6 +489,10 @@ struct PrinterDetailView: View {
                                 width: geometry.size.width, dynamicTypeSize: dynamicTypeSize
                             )
                         )
+                    } else if controlsComposition == nil
+                        || controlsComposition?.identity != services.printerControlsComposition?.identity {
+                        Text("Controls require a settled registered server connection. Reopen this printer after reconnecting.")
+                            .font(.footnote)
                     } else {
                         ProgressView("Loading controls...")
                     }

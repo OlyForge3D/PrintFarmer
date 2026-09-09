@@ -1,4 +1,5 @@
 import Combine
+import KeychainSwift
 import XCTest
 @testable import PrintFarmer
 
@@ -10,7 +11,11 @@ extension PrinterControlsViewModel {
         serverID: UUID = UUID(),
         accessCheck: @escaping @MainActor () -> String? = { nil }
     ) -> PrinterControlsViewModel {
-        let model = PrinterControlsViewModel(printerService: printerService, printer: printer, clock: clock)
+        let composition = PrinterControlsComposition(
+            identity: .init(serverID: serverID, generation: 0, revision: 0),
+            printerService: printerService
+        )
+        let model = PrinterControlsViewModel(composition: composition, printer: printer, clock: clock)
         model.configureAccess(serverID: serverID, accessCheck)
         return model
     }
@@ -127,7 +132,193 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(service.disableMotorsCalledWith)
     }
 
+    private func compositionFixture(
+        printer: Printer, temperatureGate: AsyncBarrier? = nil
+    ) throws -> (
+        services: ServiceContainer, registry: ServerRegistry,
+        first: RegisteredServer, second: RegisteredServer,
+        api: MockAPIClient, disconnect: AsyncBarrier
+    ) {
+        let suite = "PrinterControlsComposition-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let root = try XCTUnwrap(FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first)
+            .appendingPathComponent(suite, isDirectory: true)
+        addTeardownBlock {
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        let registry = ServerRegistry(userDefaults: defaults, migrateLegacyServerURL: false)
+        let first = try registry.add(displayName: "A", baseURL: URL(string: "https://controls-a.example.com")!)
+        let second = try registry.add(displayName: "B", baseURL: URL(string: "https://controls-b.example.com")!)
+        let api = MockAPIClient()
+        let details = try JSONEncoder().encode(PrinterDetails.controlsLimitsFixture(for: printer))
+        let capabilities = Data("""
+        {"printerId":"\(printer.id)","backend":"Moonraker","supportsHotendTemperature":true,
+         "supportsBedTemperature":true,"supportsRelativeMovement":true,"supportsAbsoluteMovement":true,
+         "supportsDisableMotors":true,"supportsHoming":true,"supportsHomingXY":true,"supportsHomingZ":true,
+         "supportedAxes":["X","Y","Z"]}
+        """.utf8)
+        api.asyncRequestHandler = { request in
+            let path = request.url?.path ?? ""
+            if request.httpMethod == "POST", path.hasSuffix("/temps"),
+               request.url?.host == first.baseURL.host, let temperatureGate {
+                await temperatureGate.arriveAndWait()
+            }
+            let data: Data
+            if path.hasSuffix("/backend-capabilities") {
+                data = capabilities
+            } else if path.hasSuffix("/details") {
+                data = details
+            } else {
+                data = Data(#"{"success":true,"message":"Accepted"}"#.utf8)
+            }
+            return (TestData.httpResponse(url: request.url, statusCode: 200), data)
+        }
+        let disconnect = AsyncBarrier()
+        addTeardownBlock { disconnect.close(); temperatureGate?.close() }
+        let services = ServiceContainer(
+            serverRegistry: registry,
+            credentialsStore: ServerCredentialsStore(keychain: KeychainSwift(keyPrefix: suite)),
+            userDefaultsBox: AuthServiceUserDefaultsBox(defaults),
+            farmSnapshotRootURL: root,
+            synchronizeOfflineQueueOnStartup: false,
+            apiClientFactory: { url, generation, _, _, _ in
+                APIClient(baseURL: url, session: api.urlSession, serverGeneration: generation)
+            },
+            signalRServiceFactory: { url, _ in
+                let signal = MockSignalRService()
+                if url == first.baseURL { signal.disconnectHook = { await disconnect.arriveAndWait() } }
+                return signal
+            }
+        )
+        return (services, registry, first, second, api, disconnect)
+    }
+
+    private func bindComposition(
+        _ model: PrinterControlsViewModel, services: ServiceContainer, registry: ServerRegistry
+    ) {
+        model.configureAccess(serverID: model.registeredServerID) { [weak model] in
+            guard let model, AdvancedPrinterControlsAccess.matchesComposition(
+                model, selectedServerID: registry.activeServerID, composition: services.printerControlsComposition
+            ) else { return "Server composition changed. Reopen this printer." }
+            return nil
+        }
+    }
+
+    private func printerMutations(_ api: MockAPIClient) -> [URLRequest] {
+        api.capturedRequests.filter {
+            $0.httpMethod != "GET" && $0.url?.path.hasPrefix("/api/printers/") == true
+        }
+    }
+
     // MARK: - Tests
+
+    func test_compositionSnapshot_blocksEagerRegistrySelectionAndLateLifecycleBinding() async throws {
+        let printer = try idlePrinter()
+        let fixture = try compositionFixture(printer: printer)
+        let original = try XCTUnwrap(fixture.services.printerControlsComposition)
+        XCTAssertEqual(original.identity.serverID, fixture.first.id)
+        let old = PrinterControlsViewModel(composition: original, printer: printer)
+        let delayed = PrinterControlsViewModel(composition: original, printer: printer)
+        await old.loadCapabilities()
+        await delayed.loadCapabilities()
+
+        try fixture.registry.setActive(id: fixture.second.id)
+        XCTAssertNil(fixture.services.printerControlsComposition, "Intent is not service composition, even before a worker starts")
+        await fixture.disconnect.waitUntilArrived()
+        XCTAssertEqual(fixture.services.activeServerGeneration, original.identity.generation)
+        XCTAssertEqual(fixture.services.currentActiveServerID, fixture.second.id, "This existing API exposes intent only")
+        bindComposition(old, services: fixture.services, registry: fixture.registry)
+        XCTAssertFalse(old.canControl)
+        await attemptRoutineCommands(on: old)
+        old.configureAccess(serverID: fixture.second.id) { nil }
+        XCTAssertEqual(old.registeredServerID, fixture.first.id)
+        XCTAssertTrue(printerMutations(fixture.api).isEmpty)
+        XCTAssertNil(fixture.services.printerControlsComposition)
+
+        fixture.disconnect.release()
+        await fixture.services.awaitActiveServerSettled()
+        let current = try XCTUnwrap(fixture.services.printerControlsComposition)
+        XCTAssertEqual(current.identity.serverID, fixture.second.id)
+        XCTAssertNotEqual(current.identity.generation, original.identity.generation)
+        bindComposition(delayed, services: fixture.services, registry: fixture.registry)
+        XCTAssertFalse(delayed.canControl, "Configuration after a rebuild cannot relabel an earlier service")
+        await attemptRoutineCommands(on: delayed)
+        XCTAssertTrue(printerMutations(fixture.api).isEmpty)
+        XCTAssertEqual(delayed.compositionIdentity, original.identity)
+
+        let fresh = PrinterControlsViewModel(composition: current, printer: printer)
+        bindComposition(fresh, services: fixture.services, registry: fixture.registry)
+        await fresh.loadCapabilities()
+        XCTAssertTrue(fresh.canControl)
+        await fresh.homeAll()
+        XCTAssertNil(fresh.lastError)
+        XCTAssertEqual(printerMutations(fixture.api).count, 1)
+        XCTAssertEqual(printerMutations(fixture.api).first?.url?.host, fixture.second.baseURL.host)
+    }
+
+    func test_compositionReconstruction_preservesRegisteredMachineLeaseAcrossReconnect() async throws {
+        let printer = try idlePrinter()
+        let response = AsyncBarrier()
+        let fixture = try compositionFixture(printer: printer, temperatureGate: response)
+        let original = try XCTUnwrap(fixture.services.printerControlsComposition)
+        let old = PrinterControlsViewModel(composition: original, printer: printer)
+        bindComposition(old, services: fixture.services, registry: fixture.registry)
+        await old.loadCapabilities()
+        let request = Task { await old.setHeaterTarget(.hotend, target: 200) }
+        await response.waitUntilArrived()
+        try fixture.registry.setActive(id: fixture.second.id)
+        await fixture.disconnect.waitUntilArrived()
+        old.refreshAccess()
+        XCTAssertNotNil(old.pendingCommand)
+        fixture.disconnect.release()
+        await fixture.services.awaitActiveServerSettled()
+        let second = PrinterControlsViewModel(
+            composition: try XCTUnwrap(fixture.services.printerControlsComposition), printer: printer
+        )
+        bindComposition(second, services: fixture.services, registry: fixture.registry)
+        await second.loadCapabilities()
+        await second.homeAll()
+        XCTAssertNil(second.lastError, "A different server remains independent of the original lease")
+        XCTAssertEqual(printerMutations(fixture.api).count, 2)
+
+        try fixture.registry.setActive(id: fixture.first.id)
+        await fixture.services.switchToServer(fixture.first)
+        let restored = try XCTUnwrap(fixture.services.printerControlsComposition)
+        XCTAssertEqual(restored.identity.serverID, original.identity.serverID)
+        XCTAssertNotEqual(restored.identity.generation, original.identity.generation)
+        let replacement = PrinterControlsViewModel(composition: restored, printer: printer)
+        bindComposition(replacement, services: fixture.services, registry: fixture.registry)
+        await replacement.loadCapabilities()
+        XCTAssertTrue(replacement.isExecuting)
+        XCTAssertFalse(old.canControl, "An old generation never rebinds when the same registered server returns")
+        await replacement.homeAll()
+        XCTAssertEqual(printerMutations(fixture.api).count, 2, "A generation change must not create a new lease namespace")
+        response.release()
+        await request.value
+        XCTAssertFalse(replacement.isExecuting)
+        await replacement.homeAll()
+        XCTAssertNil(replacement.lastError)
+        XCTAssertEqual(printerMutations(fixture.api).count, 3)
+        XCTAssertEqual(printerMutations(fixture.api).last?.url?.host, fixture.first.baseURL.host)
+    }
+
+    func test_compositionRevision_rejectsSameGenerationServiceReplacement() async throws {
+        let printer = try idlePrinter()
+        let fixture = try compositionFixture(printer: printer)
+        let original = try XCTUnwrap(fixture.services.printerControlsComposition)
+        let old = PrinterControlsViewModel(composition: original, printer: printer)
+        await old.loadCapabilities()
+        fixture.services.switchToReal()
+        let current = try XCTUnwrap(fixture.services.printerControlsComposition)
+        XCTAssertEqual(current.identity.serverID, original.identity.serverID)
+        XCTAssertEqual(current.identity.generation, original.identity.generation)
+        XCTAssertNotEqual(current.identity.revision, original.identity.revision)
+        bindComposition(old, services: fixture.services, registry: fixture.registry)
+        await attemptRoutineCommands(on: old)
+        XCTAssertFalse(old.canControl)
+        XCTAssertTrue(printerMutations(fixture.api).isEmpty)
+    }
 
     func test_sharedLease_survivesOwnerAndServiceRecreationUntilResponseSettles() async throws {
         for rejects in [false, true] {
@@ -237,7 +428,10 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let service = MockPrinterService()
         service.capabilitiesToReturn = Self.fullCaps
         service.detailsToReturn = .controlsLimitsFixture(for: observer.printer)
-        let original = PrinterControlsViewModel(printerService: service, printer: observer.printer)
+        let composition = PrinterControlsComposition(
+            identity: .init(serverID: serverID, generation: 0, revision: 0), printerService: service
+        )
+        let original = PrinterControlsViewModel(composition: composition, printer: observer.printer)
         let cancelAtDispatch = AccessGate()
         cancelAtDispatch.isAllowed = false
         original.configureAccess(serverID: serverID) { [weak original] in
@@ -263,16 +457,24 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let printer = try idlePrinter()
         mockService.capabilitiesToReturn = Self.fullCaps
         mockService.detailsToReturn = .controlsLimitsFixture(for: printer)
-        let model = PrinterControlsViewModel(printerService: mockService, printer: printer)
-        await model.loadCapabilities()
-        XCTAssertNil(model.registeredServerID)
-        XCTAssertFalse(model.canControl)
-        await attemptRoutineCommands(on: model)
+        let unbound = PrinterControlsViewModel(printerService: mockService, printer: printer)
+        await unbound.loadCapabilities()
+        XCTAssertNil(unbound.registeredServerID)
+        XCTAssertFalse(unbound.canControl)
+        await attemptRoutineCommands(on: unbound)
         assertNoRoutineDispatch(mockService)
-        XCTAssertEqual(model.blockedReason, "Controls require a registered server identity.")
-        model.configureAccess(serverID: nil) { nil }
-        XCTAssertFalse(model.canControl)
+        XCTAssertEqual(unbound.blockedReason, "Controls require a registered server identity.")
+        unbound.configureAccess(serverID: nil) { nil }
+        XCTAssertFalse(unbound.canControl)
         let serverID = UUID()
+        unbound.configureAccess(serverID: serverID) { nil }
+        XCTAssertFalse(unbound.canControl, "Lifecycle configuration cannot retrofit provenance onto a bare service")
+        XCTAssertNil(unbound.registeredServerID)
+        let composition = PrinterControlsComposition(
+            identity: .init(serverID: serverID, generation: 0, revision: 0), printerService: mockService
+        )
+        let model = PrinterControlsViewModel(composition: composition, printer: printer)
+        await model.loadCapabilities()
         model.configureAccess(serverID: serverID) { nil }
         XCTAssertTrue(model.canControl)
         let barrier = AsyncBarrier()
@@ -1208,10 +1410,14 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let printer = try idlePrinter()
         mockService.capabilitiesToReturn = Self.fullCaps
         mockService.detailsToReturn = .controlsLimitsFixture(for: printer)
-        let vm = PrinterControlsViewModel(printerService: mockService, printer: printer)
+        let serverID = UUID()
+        let composition = PrinterControlsComposition(
+            identity: .init(serverID: serverID, generation: 0, revision: 0), printerService: mockService
+        )
+        let vm = PrinterControlsViewModel(composition: composition, printer: printer)
         await vm.loadCapabilities()
         let stopBeforeDispatch = AccessGate()
-        vm.configureAccess(serverID: UUID()) { [weak vm] in
+        vm.configureAccess(serverID: serverID) { [weak vm] in
             // The dispatch-time access check runs after the slot is acquired,
             // but before the service is called. No scheduling guesses needed.
             if stopBeforeDispatch.isAllowed, vm?.pendingCommand != nil {

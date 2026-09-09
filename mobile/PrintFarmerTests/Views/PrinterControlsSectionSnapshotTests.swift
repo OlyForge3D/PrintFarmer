@@ -519,9 +519,13 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             var caps = Self.layoutCaps
             caps.supportsAbsoluteMovement = true
             let service = makeService(caps: caps)
-            let model = PrinterControlsViewModel(printerService: service, printer: printer)
+            let serverID = UUID()
+            let composition = PrinterControlsComposition(
+                identity: .init(serverID: serverID, generation: 0, revision: 0), printerService: service
+            )
+            let model = PrinterControlsViewModel(composition: composition, printer: printer)
             await model.loadCapabilities()
-            model.configureAccess(serverID: UUID()) { printer.isOnline ? reason : nil }
+            model.configureAccess(serverID: serverID) { printer.isOnline ? reason : nil }
             XCTAssertEqual(model.blockedReason, reason)
             let content = PrinterSetupControlsContent(printer: printer, viewModel: model)
                 .frame(width: 390)

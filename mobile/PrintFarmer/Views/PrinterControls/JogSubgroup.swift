@@ -90,7 +90,7 @@ struct JogSubgroup: View {
                 ) { selectedAxis = axis }
             }
         }
-        .disabled(!viewModel.canControl || viewModel.pendingCommand != nil)
+        .disabled(!viewModel.canControl || viewModel.isExecuting)
     }
 
     private var stepPicker: some View {
@@ -103,7 +103,7 @@ struct JogSubgroup: View {
                 ) { selectedStep = step }
             }
         }
-        .disabled(!viewModel.canControl || viewModel.pendingCommand != nil)
+        .disabled(!viewModel.canControl || viewModel.isExecuting)
     }
 
     private var selectionLayout: AnyLayout {
@@ -204,7 +204,7 @@ struct JogSubgroup: View {
         let signedStep = direction * selectedStep
         let stepLabelText = stepLabel(selectedStep)
         let hasError = isErrored(direction: direction)
-        let isInteractive = viewModel.canControl && viewModel.pendingCommand == nil
+        let isInteractive = viewModel.canControl && !viewModel.isExecuting
 
         Button {
             handleTap {
@@ -242,7 +242,7 @@ struct JogSubgroup: View {
     }
 
     private func handleTap(_ action: () -> Void) {
-        guard viewModel.canControl, viewModel.pendingCommand == nil else {
+        guard viewModel.canControl, !viewModel.isExecuting else {
             let message = viewModel.blockedReason
                 ?? String(localized: "Another command is in flight.", comment: "Fallback when jog tap blocked by single-flight")
             withAnimation(.easeInOut(duration: 0.15)) {

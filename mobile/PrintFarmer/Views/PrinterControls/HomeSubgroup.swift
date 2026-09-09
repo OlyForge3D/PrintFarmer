@@ -42,7 +42,7 @@ struct HomeSubgroup: View {
     }
 
     private var anyPending: Bool {
-        viewModel.pendingCommand != nil
+        viewModel.isExecuting
     }
 
     struct MotorReleaseControls: View {

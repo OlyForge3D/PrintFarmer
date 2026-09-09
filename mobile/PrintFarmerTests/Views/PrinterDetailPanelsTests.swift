@@ -20,7 +20,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
             supportsBedTemperature: true, supportsFanControl: true,
             supportsHoming: true, supportedAxes: ["X", "Y", "Z"]
         )
-        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        service.detailsToReturn = .controlsLimitsFixture(for: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
         service.getBackendCapabilitiesCalledWith = nil
 
@@ -44,23 +45,23 @@ final class PrinterDetailPanelsTests: XCTestCase {
             controller.view.setNeedsLayout()
             controller.view.layoutIfNeeded()
         }
-        func segmentedControls(in view: UIView) -> [UISegmentedControl] {
-            (view as? UISegmentedControl).map { [$0] }
-                ?? view.subviews.flatMap { segmentedControls(in: $0) }
+        func buttons(in view: UIView) -> [UIButton] {
+            (view as? UIButton).map { [$0] }
+                ?? view.subviews.flatMap { buttons(in: $0) }
         }
-        func pickers() throws -> (axis: UISegmentedControl, step: UISegmentedControl) {
-            let controls = segmentedControls(in: controller.view)
+        func choices() throws -> (axis: UIButton, step: UIButton) {
+            let controls = buttons(in: controller.view)
             return (
-                try XCTUnwrap(controls.first { $0.titleForSegment(at: 0) == "X" }),
-                try XCTUnwrap(controls.first { $0.titleForSegment(at: 0) == "0.1" })
+                try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.jog.axis.z" }),
+                try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.jog.step.10" })
             )
         }
         try await settle()
-        let initial = try pickers()
-        initial.axis.selectedSegmentIndex = 2
-        initial.axis.sendActions(for: .valueChanged)
-        initial.step.selectedSegmentIndex = 2
-        initial.step.sendActions(for: .valueChanged)
+        let initial = try choices()
+        XCTAssertTrue(initial.axis.isEnabled)
+        XCTAssertTrue(initial.step.isEnabled)
+        initial.axis.sendActions(for: .touchUpInside)
+        initial.step.sendActions(for: .touchUpInside)
         try await settle()
 
         let layouts: [(CGFloat, DynamicTypeSize)] = [
@@ -69,9 +70,9 @@ final class PrinterDetailPanelsTests: XCTestCase {
         for (width, size) in layouts {
             controller.rootView = AnyView(content(width: width, size: size))
             try await settle()
-            let current = try pickers()
-            XCTAssertEqual(current.axis.selectedSegmentIndex, 2, "Reflow must preserve selected Z")
-            XCTAssertEqual(current.step.selectedSegmentIndex, 2, "Reflow must preserve selected 10 mm")
+            let current = try choices()
+            XCTAssertTrue(current.axis.isSelected, "Reflow must preserve selected Z")
+            XCTAssertTrue(current.step.isSelected, "Reflow must preserve selected 10 mm")
         }
         XCTAssertNil(service.moveCalledWith)
         XCTAssertNil(service.getBackendCapabilitiesCalledWith)
