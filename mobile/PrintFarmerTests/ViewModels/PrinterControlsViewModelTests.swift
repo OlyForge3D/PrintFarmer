@@ -2312,6 +2312,309 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
 // MARK: - Test gate helper
 
+@MainActor
+final class GuardedMaterialControlsTests: XCTestCase {
+    private func fixture(
+        caps: PrinterBackendCapabilities? = nil,
+        access: @escaping @MainActor () -> String? = { nil }
+    ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
+        var printer = try TestData.decodePrinter()
+        printer.state = "ready"
+        printer.homedAxes = nil
+        let service = MockPrinterService()
+        var supported = PrinterBackendCapabilities.allControlsFixture
+        supported.supportsExtrusion = true
+        supported.supportsFilamentLoad = true
+        supported.supportsFilamentUnload = true
+        supported.supportsFilamentChange = true
+        supported.supportsZOffset = true
+        supported.supportsZOffsetFirmwareSave = true
+        supported.supportsAbsoluteMovement = true
+        service.capabilitiesToReturn = caps ?? supported
+        service.detailsToReturn = PrinterDetails(
+            id: printer.id, name: printer.name, backend: printer.backend,
+            rowVersion: "reviewed-revision", zOffsetMm: 0.12,
+            capabilities: .init(
+                maxBuildVolumeX: 256, maxBuildVolumeY: 256, maxBuildVolumeZ: 256,
+                maxHotendTemp: 300, maxBedTemp: 120, hasHeatedBed: true
+            )
+        )
+        let model = PrinterControlsViewModel.configuredForTests(
+            printerService: service, printer: printer, accessCheck: access
+        )
+        await model.loadCapabilities()
+        return (model, service)
+    }
+
+    func test_signedChoicesConvertFeedrateExactlyOnceAndRejectUnboundedInputs() throws {
+        for distance in MaterialControlInput.distances {
+            for speed in MaterialControlInput.speeds {
+                XCTAssertEqual(try MaterialControlInput.feedrate(distance: distance, speed: speed), speed * 60)
+                XCTAssertEqual(try MaterialControlInput.feedrate(distance: -distance, speed: speed), speed * 60)
+            }
+        }
+        for distance in [0, 1, 101, -101, Double.nan, Double.infinity] {
+            XCTAssertThrowsError(try MaterialControlInput.feedrate(distance: distance, speed: 1))
+        }
+        for speed in [-1, 0, 2, 11, 600] {
+            XCTAssertThrowsError(try MaterialControlInput.feedrate(distance: 10, speed: speed))
+        }
+    }
+
+    func test_measuredColdHotUnknownAndCachedValuesNeverReplaceMissingSafetyEvidence() async throws {
+        let (model, service) = try await fixture()
+        for measured: Double? in [nil, 20, 180, 240, .nan, .infinity] {
+            var update = model.printer
+            update.hotendTemp = measured
+            update.hotendTarget = 280
+            // Existing spoolInfo is deliberately retained: assignment is not proof.
+            model.handlePrinterUpdate(update)
+            XCTAssertNotNil(model.extrusionBlockedReason)
+            await model.extrude(distanceMm: 10, speedMmPerSecond: 5)
+            XCTAssertNil(service.extrudeCalledWith)
+            XCTAssertNotNil(model.lastError)
+            await model.extrude(distanceMm: -100, speedMmPerSecond: 10)
+            XCTAssertNil(service.extrudeCalledWith)
+            XCTAssertNil(model.pendingCommand)
+        }
+        XCTAssertNil(service.setActiveSpoolCalledWith)
+        XCTAssertTrue(service.bindToolheadSpoolCalls.isEmpty)
+    }
+
+    func test_eachPhysicalOperationUsesItsTypedResultAndNeverChangesAssignment() async throws {
+        let (model, service) = try await fixture()
+        service.commandResultToReturn = .init(success: true, message: "Follow printer prompts")
+        service.unloadResultToReturn = .init(
+            success: true, message: "Check outgoing material", spoolId: 99, material: "PLA", residualWeightG: 500
+        )
+        for operation in PhysicalFilamentOperation.allCases {
+            await model.performFilament(operation)
+            XCTAssertNil(model.lastError)
+            XCTAssertNil(model.pendingCommand, "No nonexistent physical-loaded telemetry is awaited")
+            XCTAssertTrue(model.commandNotice?.contains("request accepted") == true)
+            XCTAssertTrue(model.commandNotice?.contains("verify physical completion") == true)
+        }
+        XCTAssertEqual(service.physicalFilamentCalls, ["load", "unload", "change"])
+        XCTAssertEqual(service.loadFilamentCalledWith, model.printer.id)
+        XCTAssertEqual(service.unloadFilamentCalledWith, model.printer.id)
+        XCTAssertEqual(service.changeFilamentCalledWith, model.printer.id)
+        XCTAssertNil(service.unloadFilamentToolheadIndex)
+        XCTAssertNil(service.setActiveSpoolCalledWith)
+        XCTAssertTrue(service.bindToolheadSpoolCalls.isEmpty)
+    }
+
+    func test_unloadFailureIsNotMaskedByCommandResultOrResidualInventory() async throws {
+        let (model, service) = try await fixture()
+        service.commandResultToReturn = .init(success: true, message: nil)
+        service.unloadResultToReturn = .init(
+            success: false, message: "Firmware outcome unknown", spoolId: 99, material: "PLA", residualWeightG: 500
+        )
+        await model.performFilament(.unload)
+        XCTAssertEqual(model.lastError?.message, "Firmware outcome unknown")
+        XCTAssertNil(model.commandNotice)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertNil(service.setActiveSpoolCalledWith)
+    }
+
+    func test_rejectedLoadAndChangeAreNotSuccessfulSteps() async throws {
+        for operation in [PhysicalFilamentOperation.load, .change] {
+            let (model, service) = try await fixture()
+            service.commandResultToReturn = .init(success: false, message: "Macro unavailable")
+            await model.performFilament(operation)
+            XCTAssertEqual(model.lastError?.message, "Macro unavailable")
+            XCTAssertNil(model.commandNotice)
+            XCTAssertNil(model.pendingCommand)
+        }
+    }
+
+    func test_individualCapabilityIsRequiredForEveryOperation() async throws {
+        var caps = PrinterBackendCapabilities.allControlsFixture
+        caps.supportsFilamentUnload = true
+        let (model, service) = try await fixture(caps: caps)
+        for operation in [PhysicalFilamentOperation.load, .change] {
+            XCTAssertNotNil(model.filamentBlockedReason(operation))
+            await model.performFilament(operation)
+        }
+        XCTAssertTrue(service.physicalFilamentCalls.isEmpty)
+        await model.performFilament(.unload)
+        XCTAssertEqual(service.physicalFilamentCalls, ["unload"])
+    }
+
+    func test_offlineStartingPrintingPausedAndAccessGatesRejectMaterialAndCalibration() async throws {
+        for state in ["starting", "printing", "paused", "offline"] {
+            let (model, service) = try await fixture()
+            var update = model.printer
+            update.state = state
+            update.isOnline = state != "offline"
+            model.handlePrinterUpdate(update)
+            for operation in PhysicalFilamentOperation.allCases { await model.performFilament(operation) }
+            await model.startCalibration()
+            await model.extrude(distanceMm: 10, speedMmPerSecond: 1)
+            XCTAssertTrue(service.physicalFilamentCalls.isEmpty)
+            XCTAssertNil(service.extrudeCalledWith)
+            XCTAssertNil(model.calibrationStep)
+        }
+        for reason in ["Queue.Start permission required.", "Advanced controls disabled.", "Server changed."] {
+            let (model, service) = try await fixture(access: { reason })
+            await model.performFilament(.load)
+            await model.startCalibration()
+            XCTAssertTrue(service.physicalFilamentCalls.isEmpty)
+            XCTAssertNil(model.calibrationStep)
+        }
+    }
+
+    func test_duplicateTapsAndUnrelatedTelemetryCannotReleasePhysicalRequest() async throws {
+        let (model, service) = try await fixture()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        service.beforeUnloadFilament = { await barrier.arriveAndWait() }
+        let first = Task { await model.performFilament(.unload) }
+        await barrier.waitUntilArrived()
+        var update = model.printer
+        update.hotendTemp = 240
+        update.z = 12
+        model.handlePrinterUpdate(update)
+        await model.performFilament(.load)
+        await model.performFilament(.change)
+        await model.startCalibration()
+        XCTAssertEqual(service.physicalFilamentCalls, ["unload"])
+        XCTAssertNotNil(model.pendingCommand)
+        XCTAssertNil(model.calibrationStep)
+        // Emergency is deliberately outside routine request ownership.
+        _ = try await service.emergencyStop(id: model.printer.id)
+        XCTAssertEqual(service.emergencyStopCalledWith, model.printer.id)
+        barrier.release()
+        await first.value
+        XCTAssertNil(model.pendingCommand)
+    }
+
+    func test_cancelAndServerEpochChangeNeverPublishLatePhysicalSuccess() async throws {
+        for deactivate in [false, true] {
+            let (model, service) = try await fixture()
+            let barrier = AsyncBarrier()
+            addTeardownBlock { barrier.close() }
+            service.beforeUnloadFilament = { await barrier.arriveAndWait() }
+            let first = Task { await model.performFilament(.unload) }
+            await barrier.waitUntilArrived()
+            if deactivate { model.deactivate() } else { model.cancelPendingCommand() }
+            await model.performFilament(.load)
+            XCTAssertEqual(service.physicalFilamentCalls, ["unload"])
+            XCTAssertTrue(model.isExecuting)
+            barrier.release()
+            await first.value
+            XCTAssertNil(model.pendingCommand)
+            XCTAssertFalse(model.commandNotice?.contains("Spool assignment was not changed") == true)
+            XCTAssertTrue(model.commandNotice?.lowercased().contains("unknown") == true)
+        }
+    }
+
+    func test_offsetSignIncrementsAndSaveBounds() throws {
+        for increment in MaterialControlInput.increments {
+            XCTAssertEqual(try MaterialControlInput.adjustedOffset(0, delta: -increment), -increment)
+            XCTAssertEqual(try MaterialControlInput.adjustedOffset(0, delta: increment), increment)
+        }
+        XCTAssertEqual(try MaterialControlInput.adjustedOffset(4.9, delta: 0.1), 5)
+        XCTAssertEqual(try MaterialControlInput.adjustedOffset(-4.9, delta: -0.1), -5)
+        XCTAssertThrowsError(try MaterialControlInput.adjustedOffset(5, delta: 0.01))
+        XCTAssertThrowsError(try MaterialControlInput.adjustedOffset(-5, delta: -0.01))
+        XCTAssertThrowsError(try MaterialControlInput.adjustedOffset(.nan, delta: 0.01))
+        XCTAssertThrowsError(try MaterialControlInput.adjustedOffset(0, delta: .infinity))
+        XCTAssertThrowsError(try MaterialControlInput.adjustedOffset(0, delta: 0.2))
+    }
+
+    func test_databaseOnlySupportCannotStartPhysicalCalibration() async throws {
+        var caps = PrinterBackendCapabilities.allControlsFixture
+        caps.supportsZOffset = true
+        let (model, service) = try await fixture(caps: caps)
+        await model.startCalibration()
+        XCTAssertEqual(model.calibrationStep, .introduction)
+        XCTAssertTrue(model.calibrationBlockedReason?.contains("Database-only") == true)
+        model.beginCalibrationHome()
+        await model.homeForCalibration()
+        await model.positionForCalibration()
+        await model.adjustCalibration(delta: -0.01)
+        await model.reviewCalibration()
+        await model.saveCalibration()
+        XCTAssertEqual(model.calibrationStep, .introduction)
+        XCTAssertNil(service.homeCalledWith)
+        XCTAssertNil(service.moveToCalledWith)
+        XCTAssertNil(service.saveZOffsetCalledWith)
+    }
+
+    func test_missingOffsetDoesNotInventZero() async throws {
+        let (model, service) = try await fixture()
+        service.detailsToReturn = .controlsLimitsFixture(for: model.printer)
+        await model.startCalibration()
+        model.beginCalibrationHome()
+        XCTAssertNil(model.calibrationOffset)
+        XCTAssertEqual(model.calibrationStep, .introduction)
+        XCTAssertTrue(model.calibrationMessage?.contains("No zero baseline") == true)
+    }
+
+    func test_homeRequiresRealTelemetryAndUnknownGeometryBlocksAllFurtherPhysicalSteps() async throws {
+        let (model, service) = try await fixture()
+        await model.startCalibration()
+        model.beginCalibrationHome()
+        await model.homeForCalibration()
+        XCTAssertEqual(model.calibrationStep, .home)
+        var update = model.printer
+        update.hotendTemp = 220
+        update.z = 0
+        model.handlePrinterUpdate(update)
+        XCTAssertEqual(model.calibrationStep, .home)
+        update.homedAxes = "xyz"
+        model.handlePrinterUpdate(update)
+        XCTAssertEqual(model.calibrationStep, .position)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertTrue(model.calibrationPositionBlockedReason?.contains("bed origin") == true)
+        XCTAssertEqual(model.hardware?.maxBuildVolumeX, 256, "Even catalog dimensions do not prove an origin")
+        await model.positionForCalibration()
+        await model.adjustCalibration(delta: -0.01)
+        await model.reviewCalibration()
+        await model.saveCalibration()
+        XCTAssertEqual(model.calibrationStep, .position)
+        XCTAssertEqual(model.calibrationOffset, 0.12)
+        XCTAssertNil(service.moveToCalledWith)
+        XCTAssertNil(service.saveZOffsetCalledWith)
+        model.cancelCalibration()
+        XCTAssertNil(model.calibrationStep)
+    }
+
+    func test_cachedHomingOrCancellationCannotCompleteCalibrationHome() async throws {
+        let (model, _) = try await fixture()
+        var update = model.printer
+        update.homedAxes = "xyz"
+        model.handlePrinterUpdate(update)
+        await model.startCalibration()
+        model.beginCalibrationHome()
+        await model.homeForCalibration()
+        model.handlePrinterUpdate(update)
+        XCTAssertEqual(model.calibrationStep, .home)
+        XCTAssertNotNil(model.pendingCommand)
+        model.cancelCalibration()
+        model.handlePrinterUpdate(update)
+        XCTAssertNil(model.calibrationStep)
+        XCTAssertNil(model.calibrationOffset)
+    }
+
+    func test_homeRejectionAndLostAccessDoNotAdvanceCalibration() async throws {
+        let (model, service) = try await fixture()
+        await model.startCalibration()
+        model.beginCalibrationHome()
+        service.errorToThrow = PrinterControlError.rejected("Homing rejected")
+        await model.homeForCalibration()
+        XCTAssertEqual(model.lastError?.message, "Homing rejected")
+        var update = model.printer
+        update.homedAxes = "xyz"
+        model.handlePrinterUpdate(update)
+        XCTAssertEqual(model.calibrationStep, .home)
+        model.deactivate()
+        model.handlePrinterUpdate(update)
+        XCTAssertNil(model.calibrationStep)
+        XCTAssertNil(service.saveZOffsetCalledWith)
+    }
+}
+
 private actor AsyncGate {
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private var opened = false

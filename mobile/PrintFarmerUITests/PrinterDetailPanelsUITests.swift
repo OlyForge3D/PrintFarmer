@@ -209,6 +209,31 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
 
     // MARK: - Selector reachability once Controls is available
 
+    func testGuardedMaterialControlsExplainUnavailableCommandsAndKeepEmergencyIndependent() {
+        enableAdvancedPrinterControls()
+        openFirstPrinterDetail()
+        app.segmentedControls["printer.detail.panel.selector"].buttons["Controls"].tap()
+        let extrude = app.buttons["printer.controls.extrude"]
+        XCTAssertTrue(extrude.waitForExistence(timeout: 8))
+        XCTAssertFalse(extrude.isEnabled, "Demo targets and spool assignment cannot establish extrusion safety")
+        for operation in ["load", "unload", "change"] {
+            let action = app.buttons["printer.controls.filament-\(operation)"]
+            XCTAssertTrue(action.exists)
+            XCTAssertFalse(action.isEnabled, "Demo no-op commands are not verified physical support")
+        }
+        let emergency = app.buttons["printer.detail.control.emergencyStop"]
+        XCTAssertTrue(emergency.isHittable)
+        XCTAssertTrue(emergency.isEnabled)
+        XCTAssertGreaterThanOrEqual(emergency.frame.height, 44)
+        emergency.tap()
+        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 3))
+        app.alerts.firstMatch.buttons["Cancel"].tap()
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "Guarded material unavailable; independent confirmed emergency"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+    }
+
     func testSelectorTapSwitchesToControlsPageAndBackToOverview() {
         enableAdvancedPrinterControls()
         openFirstPrinterDetail()

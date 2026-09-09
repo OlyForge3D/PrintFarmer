@@ -633,6 +633,97 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertNil(service.disableMotorsCalledWith)
     }
 
+    func test_guardedMaterial_supportedPhoneEvidence() async throws {
+        try await guardedMaterialEvidence(width: 390, dynamicType: .large, supported: true)
+    }
+
+    func test_guardedMaterial_supportedRegularWidthEvidence() async throws {
+        try await guardedMaterialEvidence(width: 1024, dynamicType: .large, supported: true)
+    }
+
+    func test_guardedMaterial_narrowSplitAccessibilityEvidence() async throws {
+        try await guardedMaterialEvidence(width: 320, dynamicType: .accessibility3, supported: true)
+    }
+
+    func test_guardedMaterial_unsupportedEvidence() async throws {
+        try await guardedMaterialEvidence(width: 390, dynamicType: .large, supported: false)
+    }
+
+    private func guardedMaterialEvidence(width: CGFloat, dynamicType: DynamicTypeSize, supported: Bool) async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        var caps = Self.layoutCaps
+        caps.supportsExtrusion = true
+        caps.supportsFilamentLoad = supported
+        caps.supportsFilamentUnload = supported
+        caps.supportsFilamentChange = supported
+        caps.supportsZOffset = true
+        let service = makeService(caps: caps)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        let content = PrinterSetupControlsContent(
+            printer: printer, viewModel: model,
+            usesColumns: PrinterDetailLayout.usesColumns(width: width, dynamicTypeSize: dynamicType)
+        )
+        .environment(\.dynamicTypeSize, dynamicType)
+        .frame(width: width)
+        .fixedSize(horizontal: false, vertical: true)
+        let controller = UIHostingController(rootView: content)
+        let size = controller.sizeThatFits(in: CGSize(width: width, height: 20000))
+        XCTAssertEqual(size.width, width, accuracy: 1)
+        XCTAssertGreaterThan(size.height, 500)
+        XCTAssertLessThan(size.height, 20000, "All material/calibration text must fit without clipping")
+        let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        window.windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        window.frame = CGRect(origin: .zero, size: size)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        controller.view.frame = window.bounds
+        try await settle(controller)
+        let controls = nativeControls(in: controller.view)
+        for suffix in ["extrude", "retract", "filament-load", "filament-unload", "filament-change", "calibration-start"] {
+            let button = try XCTUnwrap(
+                controls.first { $0.accessibilityIdentifier == "printer.controls.\(suffix)" }, suffix
+            )
+            XCTAssertGreaterThanOrEqual(button.bounds.height, 44, suffix)
+            XCTAssertGreaterThanOrEqual(button.bounds.width, 44, suffix)
+            XCTAssertFalse(button.accessibilityLabel?.isEmpty ?? true, suffix)
+            XCTAssertEqual(button.isEnabled, suffix == "calibration-start" || (suffix.hasPrefix("filament-") && supported))
+        }
+        let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+            controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "issue-2599-\(snapshotName ?? "iPhone")-\(Int(width))-\(dynamicType)-\(supported)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        XCTAssertTrue(service.physicalFilamentCalls.isEmpty)
+        XCTAssertNil(service.extrudeCalledWith)
+        XCTAssertNil(service.saveZOffsetCalledWith)
+    }
+
+    func test_guardedCalibration_cancelRemovesInlineFlowWithoutSendingCommands() async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        let service = makeService(caps: Self.layoutCaps)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        let (window, controller) = install(PrinterZOffsetCalibrationControls(viewModel: model))
+        defer { window.isHidden = true }
+        await model.startCalibration()
+        try await settle(controller)
+        let cancel = try XCTUnwrap(nativeControls(in: controller.view).first {
+            $0.accessibilityIdentifier == "printer.controls.calibration-cancel"
+        })
+        XCTAssertTrue(cancel.isEnabled)
+        XCTAssertGreaterThanOrEqual(cancel.bounds.height, 44)
+        cancel.sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertNil(model.calibrationStep)
+        XCTAssertNil(service.homeCalledWith)
+        XCTAssertNil(service.moveToCalledWith)
+        XCTAssertNil(service.saveZOffsetCalledWith)
+    }
+
     func test_snapshot_moonrakerProfile() async throws {
         let printer = try makePrinter(backend: .moonraker)
         // Resolved current Moonraker interfaces: homing/heaters, never jogging.

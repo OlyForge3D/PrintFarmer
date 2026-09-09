@@ -237,8 +237,9 @@ NFC and spool assignment/Eject utilities remain available under their existing g
 The typed networking prerequisite for Essential controls is implemented in
 `PrinterServiceProtocol` and `PrinterService`, together with safety corrections
 to the existing Preheat and Home controls and a visible capability-read retry.
-The new absolute-move, extrusion, motor-release and calibration UI is delivered
-separately. All paths below are relative to `/api/printers/{printerId}`.
+Controls includes absolute movement, motor release, guarded material controls
+and an inline calibration review. Availability is limited by the safety
+evidence described below. All paths below are relative to `/api/printers/{printerId}`.
 
 | Native method | POST route | Request / response |
 | --- | --- | --- |
@@ -316,6 +317,37 @@ required by some backends. Firmware Z-offset persistence is not proven by
 Physical-filament macros are not enabled without installed per-printer macro
 evidence. These prerequisites are recorded in #2597 / #2593; the typed native
 methods do not invent support or silently issue substitute commands.
+
+### Physical Material and Calibration Safety
+
+Controls now shows separate **Extrude / Retract** and **Load / Unload / Change
+filament** actions. These are physical printer requests, not Assign/Change
+spool or Clear assignment. Existing NFC and combined Eject remain unchanged.
+Physical requests are printer-level: no MMU lane or tool is selected. A
+successful response means the request was accepted; follow printer prompts
+and verify completion yourself.
+
+Extrusion offers 10/25/50/100 mm and 1/5/10 mm/s. It remains unavailable on
+current servers because neither a material-safe minimum temperature nor
+measurement freshness is exposed. A hot target, preheat preset, assigned spool
+or catalog heater maximum cannot override this guard. Use the Hotend controls
+to preheat when appropriate, and the printer's own guarded extrusion procedure.
+Load/Unload/Change also remain unavailable until the server verifies the
+individual installed operation, rather than advertising a generic capability.
+
+**Review calibration** explains the native Introduction/Home/Position/Adjust/
+Save/Done sequence without claiming unsupported steps work. Current servers
+do not prove firmware persistence or absolute-move support, and catalog build
+dimensions do not prove safe coordinates. Automatic positioning, adjustment
+and firmware saving therefore remain blocked; use your printer's supported
+calibration procedure. No guessed center, default zero offset, or database-only
+save is substituted. A future supported firmware save requires explicit review
+of the current printer revision and will never automatically retry a conflict.
+
+Cancel calibration stops the workflow, not an already-issued printer command.
+Emergency Stop remains separate and confirmed. After interruption or an
+uncertain response, inspect the original printer before another action.
+See the [guarded controls design and availability matrix](docs/design/printer-controls-section.md#guarded-physical-material-and-calibration-2599).
 
 ### Advanced Printer Controls
 

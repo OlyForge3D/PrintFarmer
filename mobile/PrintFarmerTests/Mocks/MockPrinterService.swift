@@ -78,6 +78,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var saveZOffsetCalledWith: (printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String)?
     var unloadFilamentToolheadIndex: Int?
     var unloadResultToReturn: FilamentUnloadResult?
+    var physicalFilamentCalls: [String] = []
 
     func list(includeDisabled: Bool = false) async throws -> [Printer] {
         listPrintersCalled = true
@@ -218,12 +219,14 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     }
 
     func loadFilament(printerId: UUID) async throws -> CommandResult {
+        physicalFilamentCalls.append("load")
         loadFilamentCalledWith = printerId
         if let error = errorToThrow { throw error }
         return commandResultToReturn
     }
 
     func unloadFilament(printerId: UUID) async throws -> CommandResult {
+        physicalFilamentCalls.append("unload")
         if let hook = beforeUnloadFilament { await hook() }
         unloadFilamentCalledWith = printerId
         if let error = unloadFilamentErrorToThrow { throw error }
@@ -232,6 +235,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     }
 
     func changeFilament(printerId: UUID) async throws -> CommandResult {
+        physicalFilamentCalls.append("change")
         changeFilamentCalledWith = printerId
         if let error = errorToThrow { throw error }
         return commandResultToReturn

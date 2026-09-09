@@ -55,7 +55,7 @@ other-printer updates do not acknowledge pending commands. Becoming offline or
 entering an unsafe state invalidates physical confirmation, not an outstanding
 HTTP response. Network/server failures can have uncertain physical outcomes;
 inspect the printer before another request. Z-offset, physical filament and
-console are not part of this child.
+console were not part of #2598; material/calibration extensions are described below.
 Earlier design proposals below are not evidence of additional command support
 or per-subgroup concurrency.
 
@@ -68,6 +68,79 @@ dismissal remains a separately accessible button with a minimum 44-point target.
 The controls snapshot suite includes hosted observer-remount, wrapper-offline,
 retained-owner, preloaded-axis and large-text regressions; model/correlation
 suites continue to exercise native dispatch through mock services.
+
+### Guarded physical material and calibration (#2599)
+
+`PrinterMaterialControls` occupies the thermal/material column;
+`PrinterZOffsetCalibrationControls` occupies the motion column. Both observe
+the existing owner. Calibration is inline, not a second modal control owner,
+so the detail host's independently confirmed Emergency Stop remains reachable.
+Narrow and accessibility-text layouts stack. Buttons remain at least 44 points.
+
+The extrusion choices are signed 10/25/50/100 mm and 1/5/10 mm/s. The owner
+converts speed to mm/min once before the typed service boundary. Availability
+and dispatch both fail closed: **the current shared contract provides neither
+a verified material-safe minimum nor hotend sample freshness**. Measured hot,
+cold, missing and cached values therefore cannot authorize extrusion. Targets,
+preheat completion, catalog maxima and assigned-spool metadata are not safety
+evidence. Existing Hotend controls remain the preheat path, not an override.
+
+Load, Unload and Change filament require their own explicit operation flags
+and a native confirmation. The unload path consumes `FilamentUnloadResult`;
+its residual weight and spool ID are not physical-loaded state. Successful
+results say **request accepted**, preserve server guidance and ask the operator
+to verify completion. False/failed/uncertain responses never become success.
+No physical action binds or clears a spool, and no action supplies a toolhead
+index. Existing Assign/Change spool, Clear assignment, NFC and combined Eject
+remain unchanged under their original owners.
+
+Calibration exposes Introduction → Home → Position → Adjust → Save → Done.
+Starting reads the existing stored offset without assuming zero. Fresh
+matching homing telemetry, not HTTP acceptance or a cached homed flag,
+is necessary to advance Home. Catalog build volume does not establish a bed
+origin, travel envelope or safe clearance: **Position currently refuses to
+move and cannot advance to Adjust/Save**. The native adjustment/save code is
+guarded behind this prerequisite; it is not a production-operable calibration
+workflow. Completing those stages requires a separately approved shared safety
+contract and corresponding end-to-end tests; there is no geometry injection,
+default 220×220 bed, manual override or database-only substitute.
+
+The guarded downstream semantics use 0.01/0.05/0.1 mm increments (negative is
+closer), -5…5 mm save bounds, a freshly reviewed `PrinterDetails.rowVersion`,
+and `saveToFirmware: true`. A review is consumed on any save attempt, including
+412/428 or an uncertain outcome; refresh/review never automatically retries.
+Done describes firmware-request acceptance, not a measured gap or first-layer
+quality. Current backend firmware-save flags are false, so native physical
+calibration remains unavailable even before the missing geometry prerequisite.
+
+Cancellation/dismissal, loss of access and server-epoch changes invalidate the
+flow's session token. Outstanding physical responses retain the existing
+single-flight lease until settled; late replies cannot advance canceled steps.
+Unrelated temperature/position changes never acknowledge a filament operation.
+
+**Shared-contract exclusions, verified against source:**
+
+| Operation | Current production availability / missing evidence |
+| --- | --- |
+| Extrude / retract | Moonraker advertises extrusion; native dispatch remains blocked without a material-safe threshold and sample freshness |
+| Load / unload / change | All backend operation flags are false; installed per-printer macro evidence is absent |
+| Calibration home | Existing ordinary Home controls remain available by their own flags; the calibration flow additionally requires firmware/movement support |
+| Calibration position / adjust | Absolute movement flags are false; shared details expose catalog dimensions, not verified machine coordinate bounds |
+| Firmware save | All firmware-save flags are false; database-only offset support is deliberately not presented as calibration |
+| Assign / clear / NFC / combined Eject | Existing paths unchanged; not replaced by these physical controls |
+
+Sources: `src/infra/Services/Printers/PrinterBackendCapabilitiesService.cs`,
+`src/infra/Models/PrinterBackendCapabilitiesDto.cs`,
+`src/modules/Farm.Modules.Printers/Controllers/PrintersController.cs`
+(`extrude`, `filament-*`, `z-offset`), and native
+`Models/ToolheadModels.swift` / `Models/Models.swift`. No backend routes,
+transport DTOs, schema changes or production safety values are added by #2599.
+
+Focused evidence lives in `mobile/build/guarded-filament-iphone/` and
+`mobile/build/guarded-filament-ipad/`, including native view attachments at
+390/1024/320-point widths, accessibility text, and separate XCUI evidence.
+These tests prove native guards and typed synthetic-capability behavior,
+**not actual hardware support or a completed physical calibration**.
 
 ### Individual thermal and motion controls (#2598)
 
