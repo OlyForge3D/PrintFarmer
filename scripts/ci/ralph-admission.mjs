@@ -4,7 +4,12 @@ import {
 } from './ralph-macos-ssh.mjs';
 
 const commands = Object.assign(Object.create(null), {
-  'reserve-local': ({ job, eligibility, controllerPid }) => reserveLocalJob({ job, eligibility, controllerPid }),
+  'reserve-local': ({ job, eligibility, controllerPid }) => {
+    if (!Number.isInteger(controllerPid) || controllerPid <= 0) {
+      throw new RalphMacSshError('reserve-local requires the Ralph controller process identifier.', 'INVALID_REQUEST');
+    }
+    return reserveLocalJob({ job, eligibility, controllerPid });
+  },
   'acknowledge-local': ({ jobId, sessionId }) => acknowledgeLocalJob(jobId, sessionId),
   'recover-local': ({ jobId, sessionAbsent }) => recoverLocalReservation(jobId, { sessionAbsent }),
   'terminal-local': ({ result }) => recordLocalTerminalResult(result),

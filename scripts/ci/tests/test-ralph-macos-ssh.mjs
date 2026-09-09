@@ -260,6 +260,7 @@ test('executes the local create-session admission lifecycle through the CLI', as
   const acknowledgement = await runAdmission('acknowledge-local', {
     jobId: 'job-2605', sessionId: 'app-session-2605',
   });
+
   assert.equal(acknowledgement.code, 0, acknowledgement.stderr);
   assert.equal(JSON.parse(acknowledgement.stdout).result.sessionId, 'app-session-2605');
 
@@ -277,6 +278,13 @@ test('executes the local create-session admission lifecycle through the CLI', as
     assert.equal(invalid.code, 1);
     assert.equal(JSON.parse(invalid.stderr).code, 'INVALID_COMMAND');
   }
+});
+
+test('requires the app Ralph controller PID for CLI local reservations', async () => {
+  await reset();
+  const result = await runAdmission('reserve-local', { job: job(), eligibility });
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /requires the Ralph controller process identifier/);
 });
 
 test('contains SSH stream errors, nonzero exits, and wall-clock timeout', async () => {
