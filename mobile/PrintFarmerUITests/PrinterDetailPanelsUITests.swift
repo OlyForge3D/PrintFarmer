@@ -209,18 +209,20 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
 
     // MARK: - Selector reachability once Controls is available
 
-    func testGuardedMaterialControlsExplainUnavailableCommandsAndKeepEmergencyIndependent() {
+    func testUnsettledControlsContextCannotExposeMaterialActuationAndKeepsEmergencyIndependent() {
         enableAdvancedPrinterControls()
         openFirstPrinterDetail()
         app.segmentedControls["printer.detail.panel.selector"].buttons["Controls"].tap()
-        let extrude = app.buttons["printer.controls.extrude"]
-        XCTAssertTrue(extrude.waitForExistence(timeout: 8))
-        XCTAssertFalse(extrude.isEnabled, "Demo targets and spool assignment cannot establish extrusion safety")
+        XCTAssertTrue(app.staticTexts[
+            "Controls require a settled registered server connection. Reopen this printer after reconnecting."
+        ].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["printer.controls.extrude"].exists,
+                       "Demo targets and spool assignment cannot establish physical-control access")
         for operation in ["load", "unload", "change"] {
             let action = app.buttons["printer.controls.filament-\(operation)"]
-            XCTAssertTrue(action.exists)
-            XCTAssertFalse(action.isEnabled, "Demo no-op commands are not verified physical support")
+            XCTAssertFalse(action.exists, "An unsettled control composition must not expose physical actuation")
         }
+        XCTAssertFalse(app.buttons["printer.controls.calibration-start"].exists)
         let emergency = app.buttons["printer.detail.control.emergencyStop"]
         XCTAssertTrue(emergency.isHittable)
         XCTAssertTrue(emergency.isEnabled)
@@ -229,7 +231,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 3))
         app.alerts.firstMatch.buttons["Cancel"].tap()
         let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        evidence.name = "Guarded material unavailable; independent confirmed emergency"
+        evidence.name = "Unsettled material context blocked; independent confirmed emergency"
         evidence.lifetime = .keepAlways
         add(evidence)
     }

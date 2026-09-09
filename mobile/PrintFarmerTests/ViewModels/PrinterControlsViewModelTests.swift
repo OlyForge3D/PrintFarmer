@@ -2515,6 +2515,7 @@ final class GuardedMaterialControlsTests: XCTestCase {
         }
         XCTAssertEqual(try MaterialControlInput.adjustedOffset(4.9, delta: 0.1), 5)
         XCTAssertEqual(try MaterialControlInput.adjustedOffset(-4.9, delta: -0.1), -5)
+        XCTAssertEqual(try MaterialControlInput.adjustedOffset(0.123, delta: 0.01), 0.133)
         XCTAssertThrowsError(try MaterialControlInput.adjustedOffset(5, delta: 0.01))
         XCTAssertThrowsError(try MaterialControlInput.adjustedOffset(-5, delta: -0.01))
         XCTAssertThrowsError(try MaterialControlInput.adjustedOffset(.nan, delta: 0.01))
@@ -2612,6 +2613,62 @@ final class GuardedMaterialControlsTests: XCTestCase {
         model.handlePrinterUpdate(update)
         XCTAssertNil(model.calibrationStep)
         XCTAssertNil(service.saveZOffsetCalledWith)
+    }
+
+    func test_canceledCalibrationReadCannotPopulateNewFlowOrAnotherEpoch() async throws {
+        let (_, service) = try await fixture()
+        let barrier = AsyncBarrier()
+        let count = HookCounter()
+        addTeardownBlock { barrier.close() }
+        let delayed = ControlsDelayedService(base: service, beforeDetails: {
+            if await count.next() > 1 { await barrier.arriveAndWait() }
+        })
+        var printer = try TestData.decodePrinter()
+        printer.state = "ready"
+        let model = PrinterControlsViewModel.configuredForTests(printerService: delayed, printer: printer)
+        await model.loadCapabilities()
+        let read = Task { await model.startCalibration() }
+        await barrier.waitUntilArrived()
+        model.cancelCalibration()
+        model.deactivate()
+        barrier.release()
+        await read.value
+        XCTAssertNil(model.calibrationStep)
+        XCTAssertNil(model.calibrationOffset)
+        XCTAssertNil(model.calibrationReview)
+        XCTAssertFalse(model.isReviewingCalibration)
+    }
+
+    func test_inFlightHomeTelemetryCannotOutrunRejectedResponseOrAllowRoutineCommands() async throws {
+        let (_, service) = try await fixture()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        let delayed = ControlsDelayedService(base: service, beforeHome: { await barrier.arriveAndWait() })
+        var printer = try TestData.decodePrinter()
+        printer.state = "ready"
+        printer.homedAxes = nil
+        let model = PrinterControlsViewModel.configuredForTests(printerService: delayed, printer: printer)
+        await model.loadCapabilities()
+        await model.startCalibration()
+        model.beginCalibrationHome()
+        let home = Task { await model.homeForCalibration() }
+        await barrier.waitUntilArrived()
+        printer.homedAxes = "xyz"
+        model.handlePrinterUpdate(printer)
+        XCTAssertEqual(model.calibrationStep, .home)
+        service.errorToThrow = PrinterControlError.rejected("Homing uncertain")
+        barrier.release()
+        await home.value
+        XCTAssertEqual(model.calibrationStep, .home)
+        XCTAssertNotNil(model.lastError)
+        service.errorToThrow = nil
+        await model.setHeaterTarget(.hotend, target: 200)
+        XCTAssertNil(service.setTemperaturesCalledWith)
+        XCTAssertTrue(model.commandNotice?.contains("Cancel calibration") == true)
+        model.cancelCalibration()
+        await model.setHeaterTarget(.hotend, target: 200)
+        XCTAssertNotNil(service.setTemperaturesCalledWith)
+        model.cancelPendingCommand()
     }
 }
 

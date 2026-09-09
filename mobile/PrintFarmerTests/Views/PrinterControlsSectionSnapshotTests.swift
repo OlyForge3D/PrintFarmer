@@ -662,7 +662,11 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         await model.loadCapabilities()
         let content = PrinterSetupControlsContent(
             printer: printer, viewModel: model,
-            usesColumns: PrinterDetailLayout.usesColumns(width: width, dynamicTypeSize: dynamicType)
+            usesColumns: PrinterDetailLayout.usesColumns(width: width, dynamicTypeSize: dynamicType),
+            materialPresentation: PrinterFilamentPresentation(
+                printer: printer, toolheads: [], spool: printer.spoolInfo,
+                coverage: nil, coverageState: .unavailable, isStale: false, supportedActions: []
+            )
         )
         .environment(\.dynamicTypeSize, dynamicType)
         .frame(width: width)

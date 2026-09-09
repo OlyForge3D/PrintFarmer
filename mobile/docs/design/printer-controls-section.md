@@ -73,7 +73,10 @@ suites continue to exercise native dispatch through mock services.
 
 `PrinterMaterialControls` occupies the thermal/material column;
 `PrinterZOffsetCalibrationControls` occupies the motion column. Both observe
-the existing owner. Calibration is inline, not a second modal control owner,
+the existing owner. The detail host passes its existing
+`PrinterFilamentPresentation` to the thermal/material column, which reuses
+`PrinterFilamentSection` passively, without assignment callbacks. Assign/Clear,
+NFC and Eject remain on Overview. Calibration is inline, not a second modal control owner,
 so the detail host's independently confirmed Emergency Stop remains reachable.
 Narrow and accessibility-text layouts stack. Buttons remain at least 44 points.
 

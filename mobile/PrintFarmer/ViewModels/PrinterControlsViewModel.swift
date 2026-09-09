@@ -76,10 +76,10 @@ enum MaterialControlInput {
     }
 
     static func adjustedOffset(_ offset: Double, delta: Double) throws -> Double {
-        guard offset.isFinite, increments.contains(abs(delta)) else {
+        guard ControlNumberInput.hasCoordinatePrecision(offset), increments.contains(abs(delta)) else {
             throw PrinterControlError.invalidRequest("Choose a 0.01, 0.05 or 0.1 mm adjustment.")
         }
-        let value = (offset * 100 + delta * 100).rounded() / 100
+        let value = (offset * 1000 + delta * 1000).rounded() / 1000
         guard (-5...5).contains(value) else {
             throw PrinterControlError.invalidRequest("Z-offset must stay within -5…5 mm.")
         }
@@ -1017,6 +1017,15 @@ final class PrinterControlsViewModel: ObservableObject {
     private func beginCommand(_ command: ControlCommand) -> Bool {
         guard !Task.isCancelled else { return false }
         guard pendingCommand == nil else { return false }
+        if let step = calibrationStep, step != .introduction, step != .done {
+            switch command.kind {
+            case .calibrationHome, .calibrationAdjust, .calibrationSave:
+                break
+            default:
+                commandNotice = "Cancel calibration before another setup command. Emergency Stop remains independent."
+                return false
+            }
+        }
         guard canControl else {
             commandNotice = nil
             lastError = ControlsError(

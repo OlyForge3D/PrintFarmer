@@ -7,6 +7,7 @@ struct PrinterSetupControlsContent: View {
     let printer: Printer
     @ObservedObject var viewModel: PrinterControlsViewModel
     var usesColumns: Bool? = nil
+    var materialPresentation: PrinterFilamentPresentation? = nil
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -84,6 +85,9 @@ struct PrinterSetupControlsContent: View {
                         PreheatSubgroup(viewModel: viewModel)
                         PreheatSubgroup.IndividualHeaterControls(viewModel: viewModel)
                         Divider()
+                        if let materialPresentation {
+                            PrinterFilamentSection(presentation: materialPresentation, actions: [], onAction: { _ in })
+                        }
                         PrinterMaterialControls(viewModel: viewModel)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
