@@ -269,7 +269,8 @@ async function mutateLedger(mutator, options = {}) {
         }
       }
     }
-    if (ledger.version !== 1 || ledger.repository !== printFarmerRepository || !ledger.jobs || typeof ledger.jobs !== 'object') {
+    if (ledger.version !== 1 || ledger.repository !== printFarmerRepository ||
+        !ledger.jobs || typeof ledger.jobs !== 'object' || Array.isArray(ledger.jobs)) {
       throw new RalphMacSshError('Admission ledger has an invalid schema.', 'CORRUPT_LEDGER');
     }
     const result = await mutator(ledger);

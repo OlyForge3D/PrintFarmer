@@ -124,6 +124,17 @@ test('preserves the valid backup while repairing a corrupt primary ledger', asyn
   assert.deepEqual(JSON.parse(await readFile(path.join(root, 'printfarmer-jobs.json.bak'), 'utf8')), ledger);
 });
 
+test('rejects array-shaped ledgers before an admission can be silently lost', async () => {
+  await reset();
+  const configuration = options();
+  await writeFile(path.join(root, 'printfarmer-jobs.json'), JSON.stringify({
+    version: 1, repository: 'OlyForge3D/PrintFarmer', generation: 0, jobs: [],
+  }));
+
+  await assert.rejects(() => reserveJob({ job: job(), eligibility }, configuration),
+    (error) => error.code === 'CORRUPT_LEDGER');
+});
+
 test('recovers a crashed controller lock without allowing a live controller overlap', async () => {
   await reset();
   const configuration = options();
