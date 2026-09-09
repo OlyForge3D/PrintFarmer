@@ -182,7 +182,7 @@ public class PrinterStatusCache :
             _cache.TryGetValue(status.Id, out PrinterStatusCacheSnapshot? existingSnapshot);
             PrinterStatusDto? existing = existingSnapshot?.Status;
             DateTime observedAtUtc = DateTime.UtcNow;
-            PrinterStatusDto normalized = NormalizeSafetyTelemetry(
+            PrinterStatusDto normalized = PrinterSafetyTelemetryNormalizer.Normalize(
                 status.WithNormalizedFileName(),
                 existing,
                 observedAtUtc);
@@ -214,7 +214,7 @@ public class PrinterStatusCache :
                 _cache.TryGetValue(status.Id, out PrinterStatusCacheSnapshot? existingSnapshot);
                 PrinterStatusDto? existing = existingSnapshot?.Status;
                 DateTime observedAtUtc = DateTime.UtcNow;
-                PrinterStatusDto normalized = NormalizeSafetyTelemetry(
+                PrinterStatusDto normalized = PrinterSafetyTelemetryNormalizer.Normalize(
                     status.WithNormalizedFileName(),
                     existing,
                     observedAtUtc);
@@ -260,64 +260,6 @@ public class PrinterStatusCache :
 
             return updated;
         }
-    }
-
-    private static PrinterStatusDto NormalizeSafetyTelemetry(
-        PrinterStatusDto status,
-        PrinterStatusDto? existing,
-        DateTime observedAtUtc)
-    {
-        PrinterSafetyTelemetryDto previous =
-            existing?.SafetyTelemetry ?? PrinterSafetyTelemetryDto.Empty;
-        PrinterSafetyTelemetryDto? supplied = status.SafetyTelemetry;
-
-        SafetyScalarTelemetryFactDto measured =
-            supplied?.MeasuredHotendTemperatureC.ObservedAtUtc is not null
-                ? supplied.MeasuredHotendTemperatureC
-                : status.HotendTemp.HasValue
-                    ? new SafetyScalarTelemetryFactDto(
-                        status.HotendTemp,
-                        observedAtUtc,
-                        PrinterSafetyTelemetryDto.DefaultStaleAfterSeconds,
-                        "backend.status.hotendTemp")
-                    : previous.MeasuredHotendTemperatureC;
-        SafetyScalarTelemetryFactDto target =
-            supplied?.TargetHotendTemperatureC.ObservedAtUtc is not null
-                ? supplied.TargetHotendTemperatureC
-                : status.HotendTarget.HasValue
-                    ? new SafetyScalarTelemetryFactDto(
-                        status.HotendTarget,
-                        observedAtUtc,
-                        PrinterSafetyTelemetryDto.DefaultStaleAfterSeconds,
-                        "backend.status.hotendTarget")
-                    : previous.TargetHotendTemperatureC;
-        SafetyAxesTelemetryFactDto homedAxes =
-            supplied?.HomedAxes.ObservedAtUtc is not null
-                ? supplied.HomedAxes
-                : status.HomedAxes is not null
-                    ? new SafetyAxesTelemetryFactDto(
-                        status.HomedAxes
-                            .Where(char.IsAsciiLetter)
-                            .Select(axis => char.ToLowerInvariant(axis).ToString())
-                            .Distinct(StringComparer.Ordinal)
-                            .ToArray(),
-                        observedAtUtc,
-                        PrinterSafetyTelemetryDto.DefaultStaleAfterSeconds,
-                        "backend.status.homedAxes")
-                    : previous.HomedAxes;
-        SafetyVectorTelemetryFactDto originOffset =
-            supplied?.CoordinateOriginOffsetMm.ObservedAtUtc is not null
-                ? supplied.CoordinateOriginOffsetMm
-                : previous.CoordinateOriginOffsetMm;
-
-        return status with
-        {
-            SafetyTelemetry = new PrinterSafetyTelemetryDto(
-                measured,
-                target,
-                homedAxes,
-                originOffset),
-        };
     }
 
     public void ClearStatus(Guid printerId)

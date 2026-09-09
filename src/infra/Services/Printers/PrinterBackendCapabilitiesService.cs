@@ -3,8 +3,6 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Telemetry;
-using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Primitives;
 
 namespace Farm.Infrastructure.Services.Printers;
 
@@ -16,14 +14,12 @@ public class PrinterBackendCapabilitiesService(
     IPrintersRepository repo,
     IBackendCapabilityFactory capabilityFactory,
     IBackendClientFactory? backendClientFactory = null,
-    IMemoryCache? memoryCache = null) : IPrinterBackendCapabilitiesService
+    IPrinterVerifiedSafetyCache? verifiedSafetyCache = null) : IPrinterBackendCapabilitiesService
 {
     private readonly IPrintersRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
     private readonly IBackendCapabilityFactory _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
     private readonly IBackendClientFactory? _backendClientFactory = backendClientFactory;
-    private readonly IMemoryCache? _memoryCache = memoryCache;
-    private readonly object _generationLock = new();
-    private readonly Dictionary<Guid, SafetyCacheGeneration> _cacheGenerations = [];
+    private readonly IPrinterVerifiedSafetyCache? _verifiedSafetyCache = verifiedSafetyCache;
 
     public async Task<PrinterBackendCapabilitiesDto?> GetByPrinterIdAsync(Guid printerId, CancellationToken ct)
     {
@@ -55,16 +51,7 @@ public class PrinterBackendCapabilitiesService(
     /// <inheritdoc />
     public void InvalidateVerifiedSafety(Guid printerId)
     {
-        lock (_generationLock)
-        {
-            if (_cacheGenerations.Remove(
-                    printerId,
-                    out SafetyCacheGeneration? generation))
-            {
-                generation.Cancellation.Cancel();
-                generation.Cancellation.Dispose();
-            }
-        }
+        _verifiedSafetyCache?.Invalidate(printerId);
     }
 
     /// <summary>
@@ -164,15 +151,19 @@ public class PrinterBackendCapabilitiesService(
     {
         string sourceRevision = printer.ConfigurationRevision.ToString(
             System.Globalization.CultureInfo.InvariantCulture);
+        string dispatchUrl =
+            PrinterBackendEndpointResolver.ResolveDispatchUrl(printer);
         var key = new VerifiedSafetyCacheKey(
             printer.Id,
             backend,
-            printer.BackendUrl,
+            dispatchUrl,
             printer.Revision,
             printer.ConfigurationRevision);
-        SafetyCacheGeneration generation = GetGeneration(printer.Id);
+        long cacheGeneration =
+            _verifiedSafetyCache?.GetGeneration(printer.Id) ?? 0;
 
-        if (_memoryCache?.TryGetValue(
+        if (_verifiedSafetyCache?.TryGet(
+                printer.Id,
                 key,
                 out PrinterVerifiedSafetyDto? cached) == true &&
             cached is not null)
@@ -192,7 +183,7 @@ public class PrinterBackendCapabilitiesService(
         try
         {
             result = await discovery.DiscoverVerifiedSafetyAsync(
-                printer.BackendUrl,
+                dispatchUrl,
                 printer.Credential,
                 sourceRevision,
                 ct);
@@ -209,37 +200,21 @@ public class PrinterBackendCapabilitiesService(
                 sourceRevision: sourceRevision);
         }
 
-        TimeSpan cacheDuration =
-            result.Discovery.State == VerifiedSafetyDiscoveryState.Unavailable
-                ? TimeSpan.FromSeconds(1)
-                : TimeSpan.FromSeconds(15);
-        _memoryCache?.Set(
-            key,
-            result,
-            new MemoryCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = cacheDuration,
-            }.AddExpirationToken(
-                new CancellationChangeToken(generation.Cancellation.Token)));
-        return result;
-    }
-
-    private SafetyCacheGeneration GetGeneration(Guid printerId)
-    {
-        lock (_generationLock)
+        TimeSpan cacheDuration = TimeSpan.FromSeconds(15);
+        if (_verifiedSafetyCache?.Set(
+                printer.Id,
+                key,
+                result,
+                cacheDuration,
+                cacheGeneration) == false)
         {
-            if (_cacheGenerations.TryGetValue(
-                    printerId,
-                    out SafetyCacheGeneration? generation))
-            {
-                return generation;
-            }
-
-            generation = new SafetyCacheGeneration(
-                new CancellationTokenSource());
-            _cacheGenerations.Add(printerId, generation);
-            return generation;
+            return PrinterVerifiedSafetyDto.Unknown(
+                source: "backend.discovery.invalidated-during-probe",
+                observedAtUtc: DateTime.UtcNow,
+                sourceRevision: sourceRevision);
         }
+
+        return result;
     }
 
     private sealed record VerifiedSafetyCacheKey(
@@ -248,7 +223,4 @@ public class PrinterBackendCapabilitiesService(
         string BackendUrl,
         long Revision,
         long ConfigurationRevision);
-
-    private sealed record SafetyCacheGeneration(
-        CancellationTokenSource Cancellation);
 }

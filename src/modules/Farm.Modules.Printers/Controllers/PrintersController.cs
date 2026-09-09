@@ -46,6 +46,7 @@ using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.Moonra
 using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerToolAttributionCapability;
 using PrinterSafetyMoveRequest = Farm.Infrastructure.Services.Printers.PrinterSafetyMoveRequest;
 using PrinterSafetyOperation = Farm.Infrastructure.Services.Printers.PrinterSafetyOperation;
+using PrinterSafetyTelemetryNormalizer = Farm.Infrastructure.Services.Printers.PrinterSafetyTelemetryNormalizer;
 using PrinterSafetyValidationResult = Farm.Infrastructure.Services.Printers.PrinterSafetyValidationResult;
 
 namespace Farm.Modules.Printers.Controllers;
@@ -212,8 +213,16 @@ public class PrintersController(
     {
         try
         {
-            PrinterBackendCapabilitiesDto[] capabilities = (await _printerBackendCapabilitiesService.GetAllAsync(ct)).ToArray();
-            capabilities = await FilterAccessiblePrintersAsync(capabilities, dto => dto.PrinterId, ct);
+            Printer[] printers = (await _printersService.GetAllAsync(ct)).ToArray();
+            Printer[] accessible = await FilterAccessiblePrintersAsync(
+                printers,
+                printer => printer.Id,
+                ct);
+            PrinterBackendCapabilitiesDto[] capabilities =
+                (await _printerBackendCapabilitiesService.GetByIdsAsync(
+                    accessible.Select(printer => printer.Id).ToArray(),
+                    ct))
+                .ToArray();
             return Ok(capabilities);
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
@@ -1055,7 +1064,19 @@ public class PrintersController(
         catch (Exception ex)
         {
             _logger.LogWarning("Error getting status for printer {Id}: {Message}", id, ex.Message);
-            return new PrinterStatusDto(Id: id, IsOnline: false, State: null, Progress: null, JobName: null, ThumbnailUrl: null, CameraStreamUrl: null, CameraSnapshotUrl: null, SpoolInfo: null);
+            return PrinterSafetyTelemetryNormalizer.Normalize(
+                new PrinterStatusDto(
+                    Id: id,
+                    IsOnline: false,
+                    State: null,
+                    Progress: null,
+                    JobName: null,
+                    ThumbnailUrl: null,
+                    CameraStreamUrl: null,
+                    CameraSnapshotUrl: null,
+                    SpoolInfo: null),
+                existing: null,
+                DateTime.UtcNow);
         }
     }
 
@@ -3624,7 +3645,8 @@ public class PrintersController(
             "mmu_change_tool",
             "mmu_change_tool",
             token => _printersService.SendGcodeAsync(id, $"MMU_CHANGE_TOOL TOOL={tool}", token),
-            ct);
+            ct,
+            safetyOperation: PrinterSafetyOperation.FilamentChange);
     }
 
     /// <summary>
@@ -3666,7 +3688,8 @@ public class PrintersController(
             "mmu_load",
             "mmu_load",
             token => _printersService.SendGcodeAsync(id, "MMU_LOAD", token),
-            ct);
+            ct,
+            safetyOperation: PrinterSafetyOperation.FilamentLoad);
     }
 
     /// <summary>
@@ -3788,12 +3811,20 @@ public class PrintersController(
                 "Unsupported or invalid MMU gate action."));
         }
 
+        PrinterSafetyOperation? safetyOperation = (protocol, action) switch
+        {
+            ("qidibox", "load") => PrinterSafetyOperation.FilamentLoad,
+            ("afc", "load") => PrinterSafetyOperation.FilamentChange,
+            (_, "unload") => PrinterSafetyOperation.FilamentUnload,
+            _ => null,
+        };
         return await ExecuteDirectBooleanControlAsync(
             id,
             $"mmu_{protocol}_{action}",
             "mmu_gate_action",
             token => _printersService.SendGcodeAsync(id, command, token),
-            ct);
+            ct,
+            safetyOperation: safetyOperation);
     }
 
     /// <summary>

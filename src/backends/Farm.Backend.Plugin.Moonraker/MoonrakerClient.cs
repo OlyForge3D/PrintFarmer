@@ -876,9 +876,20 @@ public class MoonrakerClient(
                     macroSource,
                     observedAtUtc);
 
+            bool hasMovementEvidence =
+                objects.Contains("toolhead") &&
+                objects.Contains("gcode_move") &&
+                origin is not null &&
+                envelope is not null;
+            VerifiedSafetySupport movementSupport = hasMovementEvidence
+                ? VerifiedSafetySupport.Supported
+                : VerifiedSafetySupport.Unknown;
+            string movementSource = hasMovementEvidence
+                ? "moonraker:toolhead+gcode_move geometry and separate G90/G0 adapter"
+                : "moonraker:authoritative movement geometry unavailable";
             var absoluteMovement = new VerifiedSafetyOperationCapabilityDto(
-                VerifiedSafetySupport.Supported,
-                "moonraker:separate G90 and G0 adapter",
+                movementSupport,
+                movementSource,
                 observedAtUtc);
             var firmwareSave = new VerifiedSafetyOperationCapabilityDto(
                 VerifiedSafetySupport.Unsupported,

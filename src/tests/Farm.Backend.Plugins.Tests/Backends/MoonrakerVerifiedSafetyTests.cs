@@ -19,7 +19,7 @@ public sealed class MoonrakerVerifiedSafetyTests
             string path = request.RequestUri!.AbsolutePath;
             string json = path.EndsWith("/list", StringComparison.Ordinal)
                 ? """
-                  {"result":{"objects":["toolhead","gcode_macro LOAD_FILAMENT","gcode_macro M600"]}}
+                  {"result":{"objects":["toolhead","gcode_move","gcode_macro LOAD_FILAMENT","gcode_macro M600"]}}
                   """
                 : """
                   {"result":{"status":{"toolhead":{"axis_minimum":[0,0,0,0],"axis_maximum":[250,210,220,0]},"gcode_move":{"homing_origin":[0,0,0,0]}}}}
@@ -96,6 +96,39 @@ public sealed class MoonrakerVerifiedSafetyTests
         Assert.Equal(
             VerifiedSafetySupport.Unknown,
             result.Operations.FilamentLoad.Support);
+    }
+
+    [Fact]
+    public async Task DiscoverVerifiedSafetyAsync_MissingMovementObject_ReturnsUnknownMovement()
+    {
+        using var handler = new InlineHandler(request =>
+        {
+            string json = request.RequestUri!.AbsolutePath.EndsWith(
+                "/list",
+                StringComparison.Ordinal)
+                ? """{"result":{"objects":["toolhead"]}}"""
+                : """
+                  {"result":{"status":{"toolhead":{"axis_minimum":[0,0,0],"axis_maximum":[250,210,220]},"gcode_move":{"homing_origin":[0,0,0]}}}}
+                  """;
+            return JsonResponse(json);
+        });
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+
+        PrinterVerifiedSafetyDto result =
+            await ((ISupportsVerifiedSafetyDiscovery)client)
+                .DiscoverVerifiedSafetyAsync(
+                    "http://printer.local/",
+                    null,
+                    "1",
+                    CancellationToken.None);
+
+        Assert.Equal(
+            VerifiedSafetySupport.Unknown,
+            result.Operations.AbsoluteMovement.Support);
     }
 
     [Fact]

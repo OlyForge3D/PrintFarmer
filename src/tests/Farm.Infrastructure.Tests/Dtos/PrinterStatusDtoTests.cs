@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Services.Printers;
 
 namespace Farm.Infrastructure.Tests.Dtos;
 
@@ -142,5 +143,35 @@ public class PrinterStatusDtoTests
             15,
             safety.GetProperty("homedAxes")
                 .GetProperty("staleAfterSeconds").GetInt32());
+    }
+
+    [Fact]
+    public void Normalize_StatusWithoutSafetyFields_ProvidesRequiredFactObjects()
+    {
+        DateTime observedAtUtc =
+            new(2026, 9, 9, 18, 0, 0, DateTimeKind.Utc);
+        var status = new PrinterStatusDto(
+            Guid.NewGuid(),
+            IsOnline: false,
+            State: "Offline");
+
+        PrinterStatusDto normalized =
+            PrinterSafetyTelemetryNormalizer.Normalize(
+                status,
+                existing: null,
+                observedAtUtc);
+
+        Assert.NotNull(normalized.SafetyTelemetry);
+        Assert.Null(
+            normalized.SafetyTelemetry.MeasuredHotendTemperatureC.Value);
+        Assert.Null(
+            normalized.SafetyTelemetry.TargetHotendTemperatureC.Value);
+        Assert.Null(normalized.SafetyTelemetry.HomedAxes.Value);
+        Assert.Null(
+            normalized.SafetyTelemetry.CoordinateOriginOffsetMm.Value);
+        Assert.Equal(
+            15,
+            normalized.SafetyTelemetry.MeasuredHotendTemperatureC
+                .StaleAfterSeconds);
     }
 }

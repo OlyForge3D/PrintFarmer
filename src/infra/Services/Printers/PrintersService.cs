@@ -1049,18 +1049,35 @@ public class PrintersService(
             _logger.LogDebug("GetStatusDtoAsync: Obtained status client {Name} for printer {PId}", statusClient.GetType().Name, p.Id);
             PrinterStatusDto result = await statusClient.GetPrinterStatusAsync(p, ct);
             _logger.LogDebug("GetStatusDtoAsync: Got status for printer {PId}: IsOnline={IsOnline}, State={State}", p.Id, result.IsOnline, result.State);
-            return result;
+            return PrinterSafetyTelemetryNormalizer.Normalize(
+                result,
+                existing: null,
+                DateTime.UtcNow);
         }
         catch (ArgumentException ex)
         {
             // Unsupported backend type
             _logger.LogWarning("✗ Unsupported printer backend {PBackend} for printer {PId} ({PName}): {Message}", p.Backend, p.Id, p.Name, ex.Message);
-            return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: "Unsupported", Progress: null);
+            return PrinterSafetyTelemetryNormalizer.Normalize(
+                new PrinterStatusDto(
+                    Id: p.Id,
+                    IsOnline: false,
+                    State: "Unsupported",
+                    Progress: null),
+                existing: null,
+                DateTime.UtcNow);
         }
         catch (Exception ex)
         {
             _logger.LogWarning("✗ Failed to get status for printer {PId} ({PName}): {Name}: {Message}", p.Id, p.Name, ex.GetType().Name, ex.Message);
-            return new PrinterStatusDto(Id: p.Id, IsOnline: false, State: "Offline", Progress: null);
+            return PrinterSafetyTelemetryNormalizer.Normalize(
+                new PrinterStatusDto(
+                    Id: p.Id,
+                    IsOnline: false,
+                    State: "Offline",
+                    Progress: null),
+                existing: null,
+                DateTime.UtcNow);
         }
     }
 #pragma warning restore CS8603
@@ -6097,32 +6114,9 @@ public class PrintersService(
     /// and Moonraker automatically routes them to port 7125 internally.
     /// </summary>
     private static string BuildMoonrakerUrl(string serverUrl, int? frontendPort)
-    {
-        if (string.IsNullOrWhiteSpace(serverUrl))
-        {
-            return serverUrl;
-        }
-
-        try
-        {
-            Uri baseUri = new(serverUrl);
-
-            // Use frontend port (default 80 for HTTP, 443 for HTTPS)
-            // User can specify custom frontend port (e.g., 8080, 8808 for Phrozen Arco)
-            int port = frontendPort ?? (baseUri.Scheme == "https" ? 443 : 80);
-
-            UriBuilder ub = new(baseUri)
-            {
-                Port = port
-            };
-
-            return ub.Uri.ToString().TrimEnd('/');
-        }
-        catch
-        {
-            return serverUrl;
-        }
-    }
+        => PrinterBackendEndpointResolver.ResolveMoonrakerDispatchUrl(
+            serverUrl,
+            frontendPort);
 
     /// <summary>
     /// Calculates aggregate statistics from OctoPrint history jobs.
