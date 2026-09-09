@@ -116,13 +116,19 @@ function compactChecks(entries, context) {
 }
 
 function compactAlerts(entries) {
-  return requireArray(entries, 'CodeQL alerts').map((entry) => ({
-    number: entry.number,
-    state: entry.state ?? '',
-    updatedAt: entry.updated_at ?? '',
-    rule: entry.rule?.id ?? '',
-    severity: entry.rule?.security_severity_level ?? '',
-  })).sort((left, right) => left.number - right.number);
+  return requireArray(entries, 'CodeQL alerts').map((entry) => {
+    if (!Number.isSafeInteger(entry?.number) || typeof entry.state !== 'string' ||
+      typeof entry.updated_at !== 'string' || typeof entry.rule?.id !== 'string') {
+      fail('CodeQL alerts returned incomplete data.');
+    }
+    return {
+      number: entry.number,
+      state: entry.state,
+      updatedAt: entry.updated_at,
+      rule: entry.rule.id,
+      severity: entry.rule.security_severity_level ?? '',
+    };
+  }).sort((left, right) => left.number - right.number);
 }
 
 export function createGitHubReader() {
@@ -226,17 +232,21 @@ export async function runSnapshot({ scope, policyVersion, sessionsFile, reader =
   const previous = await readRoundCache(scope, cacheOptions);
   const comparisons = await collectComparisons(scope.repository, reader, sessionsFile);
   const baselineCurrent = previous.cache && isCacheCurrent(previous.cache, policyVersion);
-  const coverageComplete = comparisons.codeql.availability === 'available';
+  const coverage = Object.fromEntries(
+    Object.entries(comparisons).map(([name, value]) => [name, value.availability ?? 'available']),
+  );
+  const coverageComplete = Object.values(coverage).every((availability) => availability === 'available');
   const comparison = compareSnapshots(
     baselineCurrent ? previous.cache.comparisons : {},
     comparisons,
   );
   const conclusions = {
     observation: baselineCurrent && coverageComplete ? 'delta' : 'deep-scan-required',
-    cacheReason: !coverageComplete ? 'codeql-unavailable' :
+    cacheReason: coverage.codeql !== 'available' ? 'codeql-unavailable' :
+      !coverageComplete ? 'coverage-incomplete' :
       baselineCurrent ? undefined : previous.reason ?? 'policy-version-changed',
     changed: comparison.changed,
-    coverage: { codeql: comparisons.codeql.availability },
+    coverage,
     metrics: reader.metrics,
   };
   const cache = createRoundCache({ scope, policyVersion, comparisons, conclusions });

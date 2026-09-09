@@ -34,18 +34,20 @@ The cache file is derived by `ralph-round-cache.mjs` from the exact scope:
 The collector uses `gh api --hostname github.com` and mechanical page handling
 through `collectPaginated`. It records normalized open issue dependencies,
 assignments and labels; open PR heads, comments, reviews, checks and statuses;
-and CodeQL alerts. Cache comparisons also explicitly retain unavailable
-sessions, uncached action authority, uncached linked PRs, uncollected base
-state, and uncollected holds, ensuring those values cannot be mistaken for
-approval.
+and CodeQL alerts. Cache comparisons explicitly retain unavailable sessions,
+uncached action authority, uncached linked PRs, uncollected base state, and
+uncollected holds. These values cannot be mistaken for approval or a complete
+delta: until a caller supplies those live observations, the result remains
+`deep-scan-required`.
 
 Output is one compact JSON object with `complete`, `baseline`, and
 `conclusions`. `conclusions.changed` identifies changed top-level comparison
 groups and `conclusions.metrics` provides actual request, page, and response
-byte counts. CodeQL permission denial produces explicit unknown evidence; all
+byte counts. `conclusions.coverage` reports every comparison group's
+availability. CodeQL permission denial produces explicit unknown evidence; all
 other API, pagination, shape, and parse failures exit nonzero before the
-helper writes a new cache record. Unknown CodeQL evidence forces
-`deep-scan-required` even when the unknown response itself is unchanged.
+helper writes a new cache record. Unknown CodeQL or any uncollected comparison
+group forces `deep-scan-required`, even when its value is unchanged.
 
 The collector is observation-only. It never claims, comments, labels, opens
 sessions, reviews, merges, deletes, or treats any cache field as action

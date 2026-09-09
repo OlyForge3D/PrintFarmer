@@ -36,6 +36,8 @@ test('uses the authorized cache helper for initial and delta observations', asyn
   assert.equal(first.baseline, 'initial');
   assert.equal(first.conclusions.observation, 'deep-scan-required');
   assert.equal(second.baseline, 'existing');
+  assert.equal(second.conclusions.observation, 'deep-scan-required');
+  assert.equal(second.conclusions.cacheReason, 'coverage-incomplete');
   assert.deepEqual(second.conclusions.changed, []);
   assert.deepEqual(changed.conclusions.changed, ['issues']);
   assert.ok(changed.conclusions.metrics.requests > 0);
@@ -82,4 +84,22 @@ test('CodeQL permission denial is explicit while other CodeQL failures fail clos
     return failingOriginal(endpoint, page);
   };
   await assert.rejects(() => runSnapshot({ ...input, reader: failed }), /rate limited/);
+});
+
+test('malformed CodeQL alerts fail without advancing the cache baseline', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'ralph-github-snapshot-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const input = {
+    scope: { repository: 'OlyForge3D/PrintFarmer', workflow: '5edfe068-4f7c-4734-a078-8ee6fba95918' },
+    policyVersion: '2026-09-08', cacheOptions: { env: { RALPH_CACHE_DIR: directory } },
+  };
+  await runSnapshot({ ...input, reader: reader() });
+  const malformed = reader();
+  const original = malformed.page;
+  malformed.page = async (endpoint, page) => endpoint.includes('/code-scanning/alerts')
+    ? [{ number: 1 }]
+    : original(endpoint, page);
+  await assert.rejects(() => runSnapshot({ ...input, reader: malformed }), /CodeQL alerts returned incomplete data/);
+  const changed = await runSnapshot({ ...input, reader: reader({ issueTitle: 'changed' }) });
+  assert.deepEqual(changed.conclusions.changed, ['issues']);
 });
