@@ -114,7 +114,7 @@ cd mobile
   simulator_udid="$(../scripts/ci/resolve-ios-simulator.sh --udid 2>"$run_dir/destination.log")" ||
     { cat "$run_dir/destination.log" >&2; exit 1; }
   cat "$run_dir/destination.log"
-  xcodebuild test -scheme PrintFarmer \
+  python3 scripts/run-tests.py -- test -scheme PrintFarmer \
     -destination "platform=iOS Simulator,id=$simulator_udid" \
     -only-testing:PrintFarmerTests -parallel-testing-enabled NO \
     -resultBundlePath "$run_dir/UnitTests.xcresult" \
