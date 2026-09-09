@@ -56,6 +56,281 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     // MARK: - Tests
 
+    func test_delayedCapabilities_surviveInitialStateAndReadinessChanges() async throws {
+        for state in ["idle", "printing"] {
+            var printer = try idlePrinter()
+            printer.state = nil
+            printer.isOnline = false
+            let vm = try makeViewModel(printer: printer, capabilities: Self.fullCaps)
+            let barrier = AsyncBarrier()
+            addTeardownBlock { barrier.close() }
+            mockService.beforeGetBackendCapabilities = { await barrier.arriveAndWait() }
+            let read = Task { await vm.loadCapabilities() }
+            await barrier.waitUntilArrived()
+            printer.state = state
+            printer.isOnline = true
+            vm.handlePrinterUpdate(printer)
+            barrier.release()
+            await read.value
+            XCTAssertEqual(vm.capabilities, Self.fullCaps)
+            XCTAssertNil(vm.capabilityLoadError)
+            XCTAssertFalse(vm.isLoadingCapabilities)
+            XCTAssertEqual(vm.canControl, state == "idle")
+        }
+    }
+
+    func test_delayedHardware_survivesInitialStateChangeAndEnforcesBounds() async throws {
+        var printer = try idlePrinter()
+        printer.state = nil
+        mockService.capabilitiesToReturn = Self.fullCaps
+        mockService.detailsToReturn = hardwareDetails(for: printer)
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        let service = ControlsDelayedService(base: mockService, beforeDetails: { await barrier.arriveAndWait() })
+        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        let read = Task { await vm.loadCapabilities() }
+        await barrier.waitUntilArrived()
+        printer.state = "idle"
+        vm.handlePrinterUpdate(printer)
+        barrier.release()
+        await read.value
+        XCTAssertEqual(vm.maximum(for: .hotend), 260)
+        XCTAssertFalse(vm.supports(.bed))
+        await vm.setHeaterTarget(.hotend, target: 261)
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertNotNil(vm.lastError)
+    }
+
+    func test_deactivation_discardsDelayedCapabilitySuccessAndFailure_thenAllowsRetry() async throws {
+        for error in [nil, NetworkError.serverError(503)] as [NetworkError?] {
+            let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+            let barrier = AsyncBarrier()
+            addTeardownBlock { barrier.close() }
+            mockService.beforeGetBackendCapabilities = { await barrier.arriveAndWait() }
+            let read = Task { await vm.loadCapabilities() }
+            await barrier.waitUntilArrived()
+            vm.deactivate()
+            vm.configureAccess { nil }
+            mockService.errorToThrow = error
+            barrier.release()
+            await read.value
+            XCTAssertNil(vm.capabilities, "Reactivation must not accept the prior lifecycle's response")
+            XCTAssertNil(vm.capabilityLoadError)
+            XCTAssertFalse(vm.isLoadingCapabilities)
+            mockService.errorToThrow = nil
+            await vm.loadCapabilities()
+            XCTAssertEqual(vm.capabilities, Self.fullCaps)
+        }
+    }
+
+    func test_deactivation_discardsDelayedHardware_thenReloadsWithCachedCapabilities() async throws {
+        let printer = try idlePrinter()
+        mockService.capabilitiesToReturn = Self.fullCaps
+        mockService.detailsToReturn = hardwareDetails(for: printer)
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        let service = ControlsDelayedService(base: mockService, beforeDetails: { await barrier.arriveAndWait() })
+        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        let read = Task { await vm.loadCapabilities() }
+        await barrier.waitUntilArrived()
+        vm.deactivate()
+        vm.configureAccess { nil }
+        barrier.release()
+        await read.value
+        XCTAssertEqual(vm.capabilities, Self.fullCaps)
+        XCTAssertNil(vm.hardware)
+        await vm.loadCapabilities()
+        XCTAssertEqual(vm.maximum(for: .hotend), 260)
+        XCTAssertEqual(mockService.getBackendCapabilitiesCallCount, 1)
+    }
+
+    func test_serverChange_discardsDelayedCapabilityAndHardwareReads() async throws {
+        for delayHardware in [false, true] {
+            let printer = try idlePrinter()
+            let base = MockPrinterService()
+            base.capabilitiesToReturn = Self.fullCaps
+            base.detailsToReturn = hardwareDetails(for: printer)
+            let barrier = AsyncBarrier()
+            addTeardownBlock { barrier.close() }
+            if !delayHardware { base.beforeGetBackendCapabilities = { await barrier.arriveAndWait() } }
+            let service = ControlsDelayedService(base: base, beforeDetails: {
+                if delayHardware { await barrier.arriveAndWait() }
+            })
+            let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+            let access = AccessGate()
+            vm.configureAccess { access.isAllowed ? nil : "Server changed" }
+            let read = Task { await vm.loadCapabilities() }
+            await barrier.waitUntilArrived()
+            access.isAllowed = false
+            vm.refreshAccess()
+            vm.configureAccess { nil }
+            barrier.release()
+            await read.value
+            XCTAssertNil(vm.hardware)
+            if !delayHardware { XCTAssertNil(vm.capabilities) }
+            XCTAssertNil(vm.capabilityLoadError)
+            XCTAssertFalse(vm.canControl)
+        }
+    }
+
+    private func hardwareDetails(for printer: Printer) -> PrinterDetails {
+        PrinterDetails(
+            id: printer.id, name: printer.name, backend: printer.backend,
+            capabilities: PrinterHardwareCapabilities(
+                maxBuildVolumeX: nil, maxBuildVolumeY: nil, maxBuildVolumeZ: nil,
+                maxHotendTemp: 260, maxBedTemp: nil, hasHeatedBed: false
+            )
+        )
+    }
+
+    func test_repeatedHomeAllXYAndZ_reportAcceptanceWithoutFreshCompletion() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        for _ in 0..<2 {
+            for operation in ["all", "xy", "z"] {
+                switch operation {
+                case "all": await vm.homeAll()
+                case "xy": await vm.homeXY()
+                default: await vm.homeZ()
+                }
+                XCTAssertNil(vm.pendingCommand)
+                XCTAssertNil(vm.lastError)
+                XCTAssertTrue(vm.commandNotice?.contains("Homing request accepted") == true)
+                XCTAssertTrue(vm.commandNotice?.contains("fresh physical completion is not confirmed") == true)
+                XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true)
+                XCTAssertEqual(vm.printer.homedAxes, "xyz")
+            }
+        }
+        XCTAssertEqual(mockService.homeCalledWith?.axes, ["X", "Y", "Z"])
+        XCTAssertEqual(mockService.homeXYCalledWith, vm.printer.id)
+        XCTAssertEqual(mockService.homeZCalledWith, vm.printer.id)
+    }
+
+    func test_alreadyHomed_axesDoNotReleaseInFlightRequestOrHideRejection() async throws {
+        let printer = try idlePrinter()
+        mockService.capabilitiesToReturn = Self.fullCaps
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        let service = ControlsDelayedService(base: mockService, beforeHome: { await barrier.arriveAndWait() })
+        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        await vm.loadCapabilities()
+        let command = Task { await vm.homeAll() }
+        await barrier.waitUntilArrived()
+        vm.handlePrinterUpdate(printer)
+        XCTAssertNotNil(vm.pendingCommand)
+        await vm.setHeaterTarget(.hotend, target: 200)
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        mockService.errorToThrow = NetworkError.forbidden
+        barrier.release()
+        await command.value
+        XCTAssertEqual(vm.lastError?.message, "Access denied.")
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertNil(vm.commandNotice)
+    }
+
+    func test_statusChurn_keepsRequestSingleFlightAndPreservesServerRejection() async throws {
+        for state in ["idle", "printing"] {
+            let printer = try idlePrinter()
+            let vm = try makeViewModel(printer: printer, capabilities: Self.fullCaps)
+            await vm.loadCapabilities()
+            let barrier = AsyncBarrier()
+            addTeardownBlock { barrier.close() }
+            mockService.beforeSetTemperatures = { await barrier.arriveAndWait() }
+            let command = Task { await vm.setHeaterTarget(.hotend, target: 200) }
+            await barrier.waitUntilArrived()
+            var update = printer
+            update.state = state
+            vm.handlePrinterUpdate(update)
+            XCTAssertNotNil(vm.pendingCommand)
+            XCTAssertEqual(vm.canControl, state == "idle")
+            vm.handlePrinterUpdate(printer)
+            await vm.homeAll()
+            XCTAssertNil(mockService.homeCalledWith, "Returning to ready must not overlap requests")
+            mockService.errorToThrow = NetworkError.forbidden
+            barrier.release()
+            await command.value
+            XCTAssertEqual(vm.lastError?.message, "Access denied.")
+            XCTAssertNil(vm.pendingCommand)
+            XCTAssertNil(vm.commandNotice)
+            mockService.errorToThrow = nil
+        }
+    }
+
+    func test_offlineReconnect_preservesResponseButNeverClaimsTelemetryConfirmation() async throws {
+        let printer = try idlePrinter()
+        let vm = try makeViewModel(printer: printer, capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        mockService.beforeSetTemperatures = { await barrier.arriveAndWait() }
+        let command = Task { await vm.setHeaterTarget(.hotend, target: 200) }
+        await barrier.waitUntilArrived()
+        var update = printer
+        update.isOnline = false
+        vm.handlePrinterUpdate(update)
+        XCTAssertFalse(vm.canControl)
+        XCTAssertNotNil(vm.pendingCommand)
+        update.isOnline = true
+        update.hotendTarget = 200
+        vm.handlePrinterUpdate(update)
+        XCTAssertNotNil(vm.pendingCommand)
+        barrier.release()
+        await command.value
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertNil(vm.lastError)
+        XCTAssertTrue(vm.commandNotice?.contains("Request accepted") == true)
+        XCTAssertTrue(vm.commandNotice?.contains("Physical outcome is unknown") == true)
+        XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true)
+    }
+
+    func test_failedCommand_clearsStaleAcceptanceNotice() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        await vm.homeAll()
+        XCTAssertNotNil(vm.commandNotice)
+        vm.deactivate()
+        await vm.homeZ()
+        XCTAssertNotNil(vm.lastError)
+        XCTAssertNil(vm.commandNotice)
+    }
+
+    func test_motionTelemetry_noticesAreNotHeaterSpecific() async throws {
+        let printer = try idlePrinter()
+        var caps = Self.fullCaps
+        caps.supportsAbsoluteMovement = true
+        let vm = try makeViewModel(printer: printer, capabilities: caps)
+        await vm.loadCapabilities()
+        await vm.moveTo(x: try XCTUnwrap(printer.x), y: nil, z: nil, feedrateMmMin: nil)
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertEqual(vm.commandNotice, "Matching telemetry received. Check the machine before further setup.")
+        await vm.jog(axis: "X", distanceMm: 10)
+        var moved = printer
+        moved.x = (printer.x ?? 0) + 10
+        vm.handlePrinterUpdate(moved)
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertEqual(vm.commandNotice, "Matching telemetry received. Check the machine before further setup.")
+    }
+
+    func test_freshHomingTelemetryBeforeResponse_keepsSlotThenReportsGenericConfirmation() async throws {
+        var printer = try idlePrinter()
+        printer.homedAxes = nil
+        mockService.capabilitiesToReturn = Self.fullCaps
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        let service = ControlsDelayedService(base: mockService, beforeHome: { await barrier.arriveAndWait() })
+        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        await vm.loadCapabilities()
+        let command = Task { await vm.homeAll() }
+        await barrier.waitUntilArrived()
+        printer.homedAxes = "xyz"
+        vm.handlePrinterUpdate(printer)
+        XCTAssertNotNil(vm.pendingCommand)
+        barrier.release()
+        await command.value
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertEqual(vm.commandNotice, "Matching telemetry received. Check the machine before further setup.")
+    }
+
     func test_individualHeaters_preserveOmissionAndZero() async throws {
         let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
@@ -949,10 +1224,9 @@ final class PrinterControlsViewModelTests: XCTestCase {
     }
 
     func test_handlePrinterUpdate_positionAndTempNoise_doesNotClearPendingHome() async throws {
-        // Start from a printer already reporting all axes homed so re-homing
-        // does not move `homedAxes`; only unrelated telemetry drifts.
-        let base = try idlePrinter()
-        XCTAssertEqual(base.homedAxes, "xyz")
+        // Unknown homing requires fresh evidence, never position/temperature noise.
+        var base = try idlePrinter()
+        base.homedAxes = nil
         let vm = try makeViewModel(printer: base, capabilities: Self.fullCaps)
         await vm.loadCapabilities()
 
@@ -1075,4 +1349,87 @@ private actor AsyncGate {
 private actor HookCounter {
     private var n = 0
     func next() -> Int { n += 1; return n }
+}
+
+/// Local decorator keeps delayed read/home seams inside this issue's test ownership.
+private struct ControlsDelayedService: PrinterServiceProtocol {
+    let base: MockPrinterService
+    var beforeDetails: @Sendable () async -> Void = {}
+    var beforeHome: @Sendable () async -> Void = {}
+
+    func getDetails(id: UUID) async throws -> PrinterDetails {
+        await beforeDetails()
+        return try await base.getDetails(id: id)
+    }
+    func home(printerId: UUID, axes: [String]) async throws {
+        await beforeHome()
+        try await base.home(printerId: printerId, axes: axes)
+    }
+    func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
+        try await base.getBackendCapabilities(printerId: printerId)
+    }
+    func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws {
+        try await base.setTemperatures(printerId: printerId, hotend: hotend, bed: bed)
+    }
+    func list(includeDisabled: Bool) async throws -> [Printer] { try await base.list(includeDisabled: includeDisabled) }
+    func get(id: UUID) async throws -> Printer { try await base.get(id: id) }
+    func getStatus(id: UUID) async throws -> PrinterStatusDetail { try await base.getStatus(id: id) }
+    func listCameraUrls() async throws -> [PrinterCameraUrls] { try await base.listCameraUrls() }
+    func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl { try await base.getCameraUrl(id: id) }
+    func getSnapshot(id: UUID) async throws -> Data { try await base.getSnapshot(id: id) }
+    func getCurrentJob(id: UUID) async throws -> PrintJobStatusInfo? { try await base.getCurrentJob(id: id) }
+    func getHistory(id: UUID, limit: Int?) async throws -> PrinterHistoryList { try await base.getHistory(id: id, limit: limit) }
+    func pause(id: UUID) async throws -> CommandResult { try await base.pause(id: id) }
+    func resume(id: UUID) async throws -> CommandResult { try await base.resume(id: id) }
+    func cancel(id: UUID) async throws -> CommandResult { try await base.cancel(id: id) }
+    func stop(id: UUID) async throws -> CommandResult { try await base.stop(id: id) }
+    func emergencyStop(id: UUID) async throws -> CommandResult { try await base.emergencyStop(id: id) }
+    func setMaintenanceMode(id: UUID, inMaintenance: Bool, reviewedRowVersion: String) async throws -> Printer {
+        try await base.setMaintenanceMode(id: id, inMaintenance: inMaintenance, reviewedRowVersion: reviewedRowVersion)
+    }
+    func getQueueOverview(model: String?, nozzle: Double?, material: String?) async throws -> [QueueOverview] {
+        try await base.getQueueOverview(model: model, nozzle: nozzle, material: material)
+    }
+    func setActiveSpool(printerId: UUID, spoolId: Int?, reviewedRowVersion: String) async throws -> CommandResult {
+        try await base.setActiveSpool(printerId: printerId, spoolId: spoolId, reviewedRowVersion: reviewedRowVersion)
+    }
+    func bindToolheadSpool(printerId: UUID, toolheadIndex: Int, request: ToolheadSpoolBindRequest, idempotencyKey: String) async throws -> CommandResult {
+        try await base.bindToolheadSpool(printerId: printerId, toolheadIndex: toolheadIndex, request: request, idempotencyKey: idempotencyKey)
+    }
+    func listAvailableSpools(printerId: UUID) async throws -> [SpoolmanSpool] { try await base.listAvailableSpools(printerId: printerId) }
+    func loadFilament(printerId: UUID) async throws -> CommandResult { try await base.loadFilament(printerId: printerId) }
+    func unloadFilament(printerId: UUID) async throws -> CommandResult { try await base.unloadFilament(printerId: printerId) }
+    func changeFilament(printerId: UUID) async throws -> CommandResult { try await base.changeFilament(printerId: printerId) }
+    func homeXY(printerId: UUID) async throws { try await base.homeXY(printerId: printerId) }
+    func homeZ(printerId: UUID) async throws { try await base.homeZ(printerId: printerId) }
+    func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws {
+        try await base.move(printerId: printerId, axis: axis, distanceMm: distanceMm, feedrateMmMin: feedrateMmMin)
+    }
+    func moveTo(printerId: UUID, x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async throws -> CommandResult {
+        try await base.moveTo(printerId: printerId, x: x, y: y, z: z, feedrateMmMin: feedrateMmMin)
+    }
+    func extrude(printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int) async throws -> CommandResult {
+        try await base.extrude(printerId: printerId, distanceMm: distanceMm, feedrateMmPerMinute: feedrateMmPerMinute)
+    }
+    func disableMotors(printerId: UUID) async throws -> CommandResult { try await base.disableMotors(printerId: printerId) }
+    func saveZOffset(printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String) async throws -> CommandResult {
+        try await base.saveZOffset(printerId: printerId, offsetMm: offsetMm, saveToFirmware: saveToFirmware, reviewedRowVersion: reviewedRowVersion)
+    }
+    func unloadFilament(printerId: UUID, toolheadIndex: Int?) async throws -> FilamentUnloadResult {
+        try await base.unloadFilament(printerId: printerId, toolheadIndex: toolheadIndex)
+    }
+    func listFallbackGroups(printerId: UUID) async throws -> [FilamentFallbackGroup] { try await base.listFallbackGroups(printerId: printerId) }
+    func getFallbackGroup(printerId: UUID, groupId: UUID) async throws -> FilamentFallbackGroup {
+        try await base.getFallbackGroup(printerId: printerId, groupId: groupId)
+    }
+    func createFallbackGroup(printerId: UUID, _ request: CreateFilamentFallbackGroupRequest) async throws -> FilamentFallbackGroup {
+        try await base.createFallbackGroup(printerId: printerId, request)
+    }
+    func updateFallbackGroup(printerId: UUID, groupId: UUID, _ request: UpdateFilamentFallbackGroupRequest) async throws -> FilamentFallbackGroup {
+        try await base.updateFallbackGroup(printerId: printerId, groupId: groupId, request)
+    }
+    func deleteFallbackGroup(printerId: UUID, groupId: UUID) async throws { try await base.deleteFallbackGroup(printerId: printerId, groupId: groupId) }
+    func getAvailableFallback(printerId: UUID, sourceToolheadId: UUID, material: String) async throws -> AvailableFallbackMember? {
+        try await base.getAvailableFallback(printerId: printerId, sourceToolheadId: sourceToolheadId, material: material)
+    }
 }

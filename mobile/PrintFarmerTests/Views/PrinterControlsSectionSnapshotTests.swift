@@ -318,6 +318,39 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await captureIndividualControls(width: 1024, dynamicType: .large, name: "regular")
     }
 
+    func test_blockedEditors_explainOfflinePreferenceAndPermissionGates() async throws {
+        for reason in [
+            "Printer is offline.",
+            "Enable printer controls for this server in Settings.",
+            "Printer controls require Queue.Start permission."
+        ] {
+            let printer = try makePrinter(backend: .moonraker, isOnline: reason != "Printer is offline.")
+            var caps = Self.layoutCaps
+            caps.supportsAbsoluteMovement = true
+            let service = makeService(caps: caps)
+            let model = PrinterControlsViewModel(printerService: service, printer: printer)
+            await model.loadCapabilities()
+            if printer.isOnline { model.configureAccess { reason } }
+            XCTAssertEqual(model.blockedReason, reason)
+            let (window, controller) = install(PrinterSetupControlsContent(printer: printer, viewModel: model))
+            defer { window.isHidden = true }
+            window.frame.size.height = 3000
+            controller.view.frame = window.bounds
+            try await settle(controller)
+            for label in ["Hotend target in degrees Celsius", "X absolute destination in millimeters"] {
+                let control = try XCTUnwrap(nativeControls(in: controller.view).first { $0.accessibilityLabel == label })
+                XCTAssertFalse(control.isEnabled)
+            }
+            let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+                controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+            }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "blocked-controls-\(reason)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
     func test_individualControls_narrowSplitLargeTypeEvidence() async throws {
         try await captureIndividualControls(width: 500, dynamicType: .accessibility3, name: "narrow-accessibility")
     }

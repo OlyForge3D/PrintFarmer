@@ -49,6 +49,14 @@ struct PrinterSetupControlsContent: View {
                 if isPrintingOrPaused {
                     lockoutBanner
                         .padding(.bottom, 12)
+                } else if let reason = viewModel.blockedReason {
+                    Label(reason, systemImage: "lock.fill")
+                        .font(.footnote)
+                        .foregroundStyle(Color.pfTextPrimary)
+                        .padding(.bottom, 12)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(reason)
+                        .accessibilityIdentifier("printer.controls.blocked-reason")
                 }
 
                 let columns = (usesColumns ?? (horizontalSizeClass == .regular))

@@ -43,7 +43,7 @@ read feature flags. Replace the owner when the real server/printer target change
 | --- | --- | --- |
 | Preheat PLA/PETG/ABS | `setTemperatures` | Temperature capability; omit unsupported bed; acknowledge exact supported targets |
 | Cool Down | Same preheat command, 0/0 preset | Shown only with temperature subgroup; unsupported confirmation targets ignored |
-| Home All/XY/Z | `home`, `homeXY`, `homeZ` | Independent All/XY/Z capability; requested homed axes acknowledgement |
+| Home All/XY/Z | `home`, `homeXY`, `homeZ` | Independent capability; fresh requested-axis acknowledgement, or acceptance-only when already homed |
 | Jog | `move` | Movement + supported axes; matching-axis position update; existing distances/feedrates |
 | Individual hotend/bed | `setTemperatures` | Specific heater support; other heater omitted; exact setpoint acknowledgement |
 | Absolute XYZ | `moveTo` | Absolute support + supported axes; every requested coordinate must match |
@@ -51,8 +51,9 @@ read feature flags. Replace the owner when the real server/printer target change
 
 All operations retain model-wide single-flight and online/idle gating. Printing
 and paused printers keep the explanatory lockout. Unrelated telemetry and
-other-printer updates do not acknowledge pending commands; offline/state changes
-invalidate them. Network/server failures can have uncertain physical outcomes;
+other-printer updates do not acknowledge pending commands. Becoming offline or
+entering an unsafe state invalidates physical confirmation, not an outstanding
+HTTP response. Network/server failures can have uncertain physical outcomes;
 inspect the printer before another request. Z-offset, physical filament and
 console are not part of this child.
 Earlier design proposals below are not evidence of additional command support
@@ -80,6 +81,9 @@ suites continue to exercise native dispatch through mock services.
   `maxHotendTemp`/`maxBedTemp` from the typed details contract. Missing maxima
   remain unknown with a visible warning, not fabricated limits. Capability
   loading also reads these optional hardware details; failed reads add no proof.
+  Read results survive normal online/state changes (including initial unknown
+  to idle). Deactivation or authority changes fence both successful and failed
+  late reads. Reopening can retry missing hardware with cached capabilities.
 - Absolute coordinates are signed millimetres, with blank axes omitted and
   zero preserved. Optional feedrate is a positive whole number in **mm/min**;
   blank uses the server default. No mm/s conversion or relative-move fallback
@@ -104,12 +108,25 @@ suites continue to exercise native dispatch through mock services.
   until the request returns even when matching telemetry arrives first.
   Other-axis, measured-temperature and unrelated setpoint noise do not
   acknowledge an individual target or absolute move.
+- Home All/XY/Z on axes already reported homed completes local waiting after
+  successful request acceptance, explicitly **without confirming fresh physical
+  completion**. Otherwise homing waits for a fresh requested-axis report.
+  Cached homing or unrelated noise never releases an outstanding HTTP request;
+  a server rejection still wins over telemetry received before its response.
 - The access-lifecycle modifier belongs on the **detail host**, not a pager
   child. It fences server generation, signed-in user, per-server preference,
-  readiness and Queue.Start permission. Leaving the detail, losing authority,
-  going offline or changing printer state cancels waiting and fences late
-  results. **Stop waiting** cancels the local request but cannot undo commands
+  readiness and Queue.Start permission. Leaving the detail or losing authority
+  cancels waiting and fences late results. Benign printer-state churn does not
+  cancel work. Going offline or entering an unsafe state blocks new actions but
+  preserves the in-flight response and single-flight slot: a rejection remains
+  visible, while acceptance is reported with an unknown physical outcome even
+  if the printer reconnects first. With no outstanding response, unsafe state
+  ends telemetry waiting with an uncertainty warning.
+  **Stop waiting** cancels the local request but cannot undo commands
   already received by the printer. Nothing is automatically replayed.
+  Disabled editors expose the offline/preference/permission reason in the
+  shared group for sighted and VoiceOver users. New failures clear stale
+  success/acceptance notices.
 - Emergency Stop remains shell-owned above both tabs, with its own confirmation
   and no dependency on pending setup commands. The shared owner/composition
   seam remains available for #2599; no filament or Z-offset transport is added.
