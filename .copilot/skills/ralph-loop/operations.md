@@ -86,8 +86,11 @@ delivery:
    instead of local session creation. It reserves, records a PID-and-lease-fenced intent, and sends
    SSH in one durable operation; lost acknowledgement/timeouts remain reserved and the same job is
    reconciled on a later invocation. A later round must run `recover-remote` only after the lease
-   expires and the owning controller is demonstrably dead, then re-run `dispatch-remote`. Use
-   `terminal-remote` only with correlated Mac evidence.
+   expires and the owning controller is demonstrably dead, then re-run `dispatch-remote`. For an
+   accepted remote job, run `status-remote` with the original `{"job":...}`. That command queries
+   the trusted worker and releases the reservation only from its fence-bound process/Git terminal
+   attestation or correlated pre-launch failure. Never submit caller-authored remote terminal
+   claims.
 
 The ledger is authoritative for these cooperating configured Ralph dispatch paths, not arbitrary
 manual app sessions that bypass this policy. Before enabling remote dispatch, drain or account for

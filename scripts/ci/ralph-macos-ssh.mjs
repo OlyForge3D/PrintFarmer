@@ -129,26 +129,64 @@ function requestDigest(job) {
   })).digest('hex');
 }
 
-export function parseRemoteAcknowledgement(output, job) {
+export function parseRemoteWorkerResponse(output, job) {
   if (typeof output !== 'string' || output.length > 64 * 1024) {
-    throw new RalphMacSshError('Remote acknowledgement is missing or exceeds the protocol limit.', 'MALFORMED_RESPONSE');
+    throw new RalphMacSshError('Remote worker response is missing or exceeds the protocol limit.', 'MALFORMED_RESPONSE');
   }
   const lines = output.trim().split(/\r?\n/);
-  if (lines.length !== 1) throw new RalphMacSshError('Remote acknowledgement must contain exactly one record.', 'MALFORMED_RESPONSE');
-  let acknowledgement;
+  if (lines.length !== 1) throw new RalphMacSshError('Remote worker response must contain exactly one record.', 'MALFORMED_RESPONSE');
+  let response;
   try {
-    acknowledgement = JSON.parse(lines[0]);
+    response = JSON.parse(lines[0]);
   } catch {
-    throw new RalphMacSshError('Remote acknowledgement is not JSON.', 'MALFORMED_RESPONSE');
+    throw new RalphMacSshError('Remote worker response is not JSON.', 'MALFORMED_RESPONSE');
   }
-  if (
-    acknowledgement?.version !== 1 || acknowledgement.type !== 'accepted' ||
-    acknowledgement.jobId !== job.jobId || acknowledgement.repository !== printFarmerRepository ||
-    acknowledgement.issue !== job.issue || acknowledgement.owner !== job.owner ||
-    acknowledgement.baseSha !== job.baseSha || acknowledgement.host !== job.expectedHost ||
-    !validIdentifier(acknowledgement.sessionId)
-  ) throw new RalphMacSshError('Remote acknowledgement does not match the dispatched job.', 'MALFORMED_RESPONSE');
-  return acknowledgement;
+  const correlated = response?.version === 1 && response.jobId === job.jobId &&
+    response.fence === job.fence && response.repository === printFarmerRepository &&
+    response.issue === job.issue && response.owner === job.owner &&
+    response.baseSha === job.baseSha && response.host === job.expectedHost &&
+    validIdentifier(response.sessionId);
+  if (!correlated) throw new RalphMacSshError('Remote worker response does not match the dispatched job.', 'MALFORMED_RESPONSE');
+  if (response.type === 'accepted') {
+    if (!['accepted', 'supervisor-launching', 'launching', 'running'].includes(response.state)) {
+      throw new RalphMacSshError('Remote acknowledgement has an invalid live state.', 'MALFORMED_RESPONSE');
+    }
+    return response;
+  }
+  if (response.type === 'terminal') {
+    const hasExitCode = Number.isInteger(response.exitCode);
+    const hasSignal = validIdentifier(response.signal);
+    const validProcessResult = hasExitCode !== hasSignal;
+    const validEvidence = response.workerVerified === true && ['completed', 'failed'].includes(response.state) &&
+      validProcessResult && validSha(response.headSha) && typeof response.validationEvidence === 'string' &&
+      response.validationEvidence.trim() && typeof response.workingTreeClean === 'boolean' &&
+      typeof response.allCommitsPushed === 'boolean';
+    const validSuccess = response.state !== 'completed' ||
+      (response.exitCode === 0 && response.signal === undefined &&
+       response.workingTreeClean === true && response.allCommitsPushed === true);
+    const validFailure = response.state !== 'failed' || hasSignal || response.exitCode !== 0;
+    if (!validEvidence || !validSuccess || !validFailure) {
+      throw new RalphMacSshError('Remote terminal attestation is malformed.', 'MALFORMED_RESPONSE');
+    }
+    return response;
+  }
+  if (response.type === 'failed') {
+    if (response.state !== 'failed' || response.workerVerified !== true ||
+        !validIdentifier(response.failureCode) || typeof response.failureMessage !== 'string' ||
+        !response.failureMessage.trim() || response.failureMessage.length > 1024) {
+      throw new RalphMacSshError('Remote failure attestation is malformed.', 'MALFORMED_RESPONSE');
+    }
+    return response;
+  }
+  throw new RalphMacSshError('Remote worker response has an invalid type.', 'MALFORMED_RESPONSE');
+}
+
+export function parseRemoteAcknowledgement(output, job) {
+  const response = parseRemoteWorkerResponse(output, job);
+  if (response.type !== 'accepted') {
+    throw new RalphMacSshError('Remote worker response is not a live acknowledgement.', 'MALFORMED_RESPONSE');
+  }
+  return response;
 }
 
 function resolveLedgerDirectory({ env = process.env, platform = process.platform, home = os.homedir() } = {}) {
@@ -420,7 +458,8 @@ export async function acknowledgeJob(jobId, acknowledgement, options = {}) {
     if (!entry || entry.mode !== 'remote' || !['delivery-intent', 'uncertain'].includes(entry.state)) {
       throw new RalphMacSshError('Only a delivered or uncertain job may be acknowledged.', 'INVALID_TRANSITION');
     }
-    if (acknowledgement.jobId !== entry.jobId || acknowledgement.issue !== entry.issue || acknowledgement.baseSha !== entry.baseSha) {
+    if (acknowledgement.jobId !== entry.jobId || acknowledgement.fence !== entry.fence ||
+        acknowledgement.issue !== entry.issue || acknowledgement.baseSha !== entry.baseSha) {
       throw new RalphMacSshError('Acknowledgement is fenced to a different job.', 'FENCED');
     }
     entry.state = 'accepted';
@@ -463,25 +502,43 @@ export async function recoverRemoteDelivery(jobId, { isOwnerAlive = ownerIsAlive
   }, options);
 }
 
-export async function recordTerminalResult(result, options = {}) {
-  const value = safeJson(result, 'Terminal result');
+async function recordRemoteWorkerResponse(response, options = {}) {
   return mutateLedger((ledger) => {
-    const entry = ledger.jobs[value.jobId];
-    if (!entry || entry.mode !== 'remote' || !['accepted', 'running'].includes(entry.state)) {
-      throw new RalphMacSshError('Terminal result has no accepted remote reservation.', 'INVALID_TRANSITION');
+    const entry = ledger.jobs[response.jobId];
+    if (!entry || entry.mode !== 'remote' ||
+        !['delivery-intent', 'uncertain', 'accepted', 'running'].includes(entry.state)) {
+      throw new RalphMacSshError('Worker response has no active remote reservation.', 'INVALID_TRANSITION');
     }
-    if (value.repository !== printFarmerRepository || value.issue !== entry.issue || value.baseSha !== entry.baseSha ||
-        value.host !== entry.host || !validHost(value.host) || value.sessionId !== entry.sessionId || !validIdentifier(value.sessionId) ||
-        !validSha(value.headSha) || !Number.isInteger(value.exitCode) ||
-        !value.validationEvidence || value.workingTreeClean !== true || value.allCommitsPushed !== true) {
-      throw new RalphMacSshError('Terminal result lacks correlated evidence.', 'INVALID_TERMINAL_EVIDENCE');
+    const sessionMatches = entry.sessionId === undefined || entry.sessionId === response.sessionId;
+    const hostMatches = entry.host === undefined || entry.host === response.host;
+    if (response.repository !== printFarmerRepository || response.issue !== entry.issue ||
+        response.baseSha !== entry.baseSha || response.fence !== entry.fence ||
+        !hostMatches || !validHost(response.host) || !sessionMatches || !validIdentifier(response.sessionId)) {
+      throw new RalphMacSshError('Worker response lacks correlated evidence.', 'INVALID_TERMINAL_EVIDENCE');
     }
-    entry.state = value.exitCode === 0 ? 'completed' : 'failed';
-    entry.headSha = value.headSha;
-    entry.exitCode = value.exitCode;
-    entry.validationEvidence = value.validationEvidence;
-    entry.workingTreeClean = true;
-    entry.allCommitsPushed = true;
+    entry.sessionId = response.sessionId;
+    entry.host = response.host;
+    if (response.type === 'accepted') {
+      entry.state = 'accepted';
+    } else if (response.type === 'terminal') {
+      entry.state = response.state;
+      entry.headSha = response.headSha;
+      entry.exitCode = response.exitCode;
+      entry.signal = response.signal;
+      entry.validationEvidence = response.validationEvidence;
+      entry.workingTreeClean = response.workingTreeClean;
+      entry.allCommitsPushed = response.allCommitsPushed;
+      entry.workerVerified = true;
+    } else if (response.type === 'failed') {
+      entry.state = 'failed';
+      entry.failureCode = response.failureCode;
+      entry.failureReason = response.failureMessage;
+      entry.workerVerified = true;
+    } else {
+      throw new RalphMacSshError('Worker response type is invalid.', 'MALFORMED_RESPONSE');
+    }
+    delete entry.deliveryOwnerPid;
+    delete entry.deliveryExpiresAt;
     entry.updatedAt = new Date().toISOString();
     return entry;
   }, options);
@@ -547,10 +604,35 @@ export async function dispatchMacJob({ job, eligibility }, options = {}) {
       createRemoteRequest(request, reconciling ? 'reconcile' : 'dispatch'),
       options,
     );
-    const acknowledgement = parseRemoteAcknowledgement(output, request);
-    return acknowledgeJob(request.jobId, acknowledgement, options);
+    const response = parseRemoteWorkerResponse(output, request);
+    return recordRemoteWorkerResponse(response, options);
   } catch (error) {
     await markUncertain(request.jobId, options);
     throw error;
   }
+}
+
+export async function reconcileMacJob({ job }, options = {}) {
+  const configuration = loadMacSshConfiguration(options);
+  validateRemoteJob(job);
+  const reservation = await mutateLedger((ledger) => {
+    const entry = ledger.jobs[job.jobId];
+    if (!entry || entry.mode !== 'remote' || !['accepted', 'running'].includes(entry.state) ||
+        entry.requestDigest !== requestDigest(job)) {
+      throw new RalphMacSshError('Only the matching accepted remote job may be reconciled.', 'INVALID_TRANSITION');
+    }
+    return entry;
+  }, options);
+  const request = {
+    ...job,
+    fence: reservation.fence,
+    expectedHost: configuration.expectedHost,
+  };
+  const output = await runSsh(
+    createSshInvocation(configuration),
+    createRemoteRequest(request, 'reconcile'),
+    options,
+  );
+  const response = parseRemoteWorkerResponse(output, request);
+  return recordRemoteWorkerResponse(response, options);
 }

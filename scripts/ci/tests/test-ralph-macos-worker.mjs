@@ -31,6 +31,9 @@ if (process.env.RALPH_MAC_WORKER_FAKE_PUSH === 'true') {
     process.exit(91);
   }
 }
+if (process.env.RALPH_MAC_WORKER_FAKE_SIGNAL) {
+  process.kill(process.pid, process.env.RALPH_MAC_WORKER_FAKE_SIGNAL);
+}
 process.exit(Number(process.env.RALPH_MAC_WORKER_FAKE_EXIT_CODE || 0));
 `);
 
@@ -83,10 +86,10 @@ async function createFixture(name) {
     RALPH_MAC_WORKER_EXPECTED_ORIGIN: origin,
     RALPH_MAC_WORKER_BASE_REF: 'origin/development',
     RALPH_MAC_WORKER_EXPECTED_HOST: 'trusted-mac.local',
+    RALPH_MAC_WORKER_TEST_HOSTNAME: 'trusted-mac.local',
     RALPH_MAC_WORKER_FAKE_INVOCATIONS: invocations,
     RALPH_MAC_WORKER_FAKE_PID_FILE: pidFile,
     RALPH_MAC_WORKER_FAKE_PUSH: 'true',
-    HOSTNAME: 'trusted-mac.local',
   };
   return {
     root,
@@ -179,7 +182,11 @@ test('worker survives dispatch exit, isolates output, pushes its deterministic b
 
   const replay = await invoke({ ...request, type: 'reconcile' }, env);
   assert.equal(replay.code, 0, replay.stderr);
-  assert.deepEqual(JSON.parse(replay.stdout), acknowledgement);
+  const replayAcknowledgement = JSON.parse(replay.stdout);
+  assert.equal(replayAcknowledgement.sessionId, acknowledgement.sessionId);
+  assert.equal(replayAcknowledgement.fence, acknowledgement.fence);
+  assert.equal(replayAcknowledgement.jobId, acknowledgement.jobId);
+  assert.equal(replayAcknowledgement.type, 'accepted');
 
   const record = await waitForRecord(
     path.join(fixture.state, `${fixture.job.jobId}.json`),
@@ -200,54 +207,20 @@ test('worker survives dispatch exit, isolates output, pushes its deterministic b
   assert.equal(git(record.worktree, 'branch', '--show-current'), `ralph/${fixture.job.jobId}`);
   assert.equal(git(fixture.repository, 'ls-remote', 'origin', `refs/heads/${record.branch}`).split(/\s+/)[0], fixture.baseSha);
 
-  const mismatched = await invoke({
-    version: 1,
-    type: 'terminal',
-    result: {
-      jobId: fixture.job.jobId,
-      sessionId: acknowledgement.sessionId,
-      headSha: fixture.baseSha,
-      exitCode: 9,
-      validationEvidence: 'prose is not process evidence',
-      workingTreeClean: true,
-      allCommitsPushed: true,
-    },
-  }, env);
-  assert.equal(mismatched.code, 1);
-  assert.match(mismatched.stderr, /does not match an exited worker job/);
   assert.equal(JSON.parse(await readFile(path.join(fixture.state, `${fixture.job.jobId}.json`), 'utf8')).state, 'awaiting-terminal-evidence');
-
-  const unpushedHead = await invoke({
-    version: 1,
-    type: 'terminal',
-    result: {
-      jobId: fixture.job.jobId,
-      sessionId: acknowledgement.sessionId,
-      headSha: 'b'.repeat(40),
-      exitCode: 0,
-      validationEvidence: 'claimed evidence does not match Git',
-      workingTreeClean: true,
-      allCommitsPushed: true,
-    },
-  }, env);
-  assert.equal(unpushedHead.code, 1);
-  assert.match(unpushedHead.stderr, /does not match the worker worktree and pushed branch/);
-
-  const terminal = await invoke({
-    version: 1,
-    type: 'terminal',
-    result: {
-      jobId: fixture.job.jobId,
-      sessionId: acknowledgement.sessionId,
-      headSha: fixture.baseSha,
-      exitCode: 0,
-      validationEvidence: 'fake process-boundary validation passed',
-      workingTreeClean: true,
-      allCommitsPushed: true,
-    },
-  }, env);
+  const terminal = await invoke({ ...request, type: 'reconcile' }, env);
   assert.equal(terminal.code, 0, terminal.stderr);
-  assert.equal(JSON.parse(terminal.stdout).state, 'completed');
+  const attestation = JSON.parse(terminal.stdout);
+  assert.equal(attestation.type, 'terminal');
+  assert.equal(attestation.state, 'completed');
+  assert.equal(attestation.workerVerified, true);
+  assert.equal(attestation.exitCode, 0);
+  assert.equal(attestation.headSha, fixture.baseSha);
+  assert.equal(attestation.workingTreeClean, true);
+  assert.equal(attestation.allCommitsPushed, true);
+  assert.equal(attestation.sessionId, acknowledgement.sessionId);
+  const repeated = await invoke({ ...request, type: 'reconcile' }, env);
+  assert.deepEqual(JSON.parse(repeated.stdout), attestation);
 });
 
 test('concurrent duplicate dispatches launch Copilot exactly once', async () => {
@@ -257,7 +230,7 @@ test('concurrent duplicate dispatches launch Copilot exactly once', async () => 
   const [first, second] = await Promise.all([invoke(request, env), invoke(request, env)]);
   assert.equal(first.code, 0, first.stderr);
   assert.equal(second.code, 0, second.stderr);
-  assert.deepEqual(JSON.parse(first.stdout), JSON.parse(second.stdout));
+  assert.equal(JSON.parse(first.stdout).sessionId, JSON.parse(second.stdout).sessionId);
   await waitForRecord(
     path.join(fixture.state, `${fixture.job.jobId}.json`),
     (record) => record.state === 'awaiting-terminal-evidence',
@@ -319,36 +292,82 @@ test('nonzero Copilot exit cannot be converted into success by terminal prose', 
   );
   assert.equal(record.processResult.exitCode, 9);
 
-  const falseSuccess = await invoke({
-    version: 1,
-    type: 'terminal',
-    result: {
-      jobId: fixture.job.jobId,
-      sessionId: acknowledgement.sessionId,
-      headSha: fixture.baseSha,
-      exitCode: 0,
-      validationEvidence: 'looks successful',
-      workingTreeClean: true,
-      allCommitsPushed: true,
-    },
-  }, env);
-  assert.equal(falseSuccess.code, 1);
-
-  const failed = await invoke({
-    version: 1,
-    type: 'terminal',
-    result: {
-      jobId: fixture.job.jobId,
-      sessionId: acknowledgement.sessionId,
-      headSha: fixture.baseSha,
-      exitCode: 9,
-      validationEvidence: 'fake Copilot exited 9',
-      workingTreeClean: true,
-      allCommitsPushed: true,
-    },
-  }, env);
+  const failed = await invoke({ version: 1, type: 'reconcile', job: fixture.job }, env);
   assert.equal(failed.code, 0, failed.stderr);
-  assert.equal(JSON.parse(failed.stdout).state, 'failed');
+  const attestation = JSON.parse(failed.stdout);
+  assert.equal(attestation.state, 'failed');
+  assert.equal(attestation.workerVerified, true);
+  assert.equal(attestation.exitCode, 9);
+  assert.equal(attestation.sessionId, acknowledgement.sessionId);
+});
+
+test('exit 0 without a pushed branch remains held for terminal evidence', async () => {
+  const fixture = await createFixture('unpushed');
+  const env = { ...fixture.env, RALPH_MAC_WORKER_FAKE_PUSH: 'false' };
+  const request = { version: 1, type: 'dispatch', job: fixture.job };
+  const accepted = await invoke(request, env);
+  assert.equal(accepted.code, 0, accepted.stderr);
+  const recordFile = path.join(fixture.state, `${fixture.job.jobId}.json`);
+  await waitForRecord(recordFile, (record) => record.state === 'awaiting-terminal-evidence', 'unpushed process result');
+  const status = await invoke({ ...request, type: 'reconcile' }, env);
+  assert.equal(status.code, 1);
+  assert.match(status.stderr, /lacks clean, pushed Git evidence/);
+  assert.equal(JSON.parse(await readFile(recordFile, 'utf8')).state, 'awaiting-terminal-evidence');
+});
+
+test('signal termination produces a worker-verified failure attestation', async () => {
+  const fixture = await createFixture('signal');
+  const env = { ...fixture.env, RALPH_MAC_WORKER_FAKE_SIGNAL: 'SIGTERM' };
+  const request = { version: 1, type: 'dispatch', job: fixture.job };
+  const accepted = await invoke(request, env);
+  assert.equal(accepted.code, 0, accepted.stderr);
+  const record = await waitForRecord(
+    path.join(fixture.state, `${fixture.job.jobId}.json`),
+    (value) => value.state === 'awaiting-terminal-evidence',
+    'signal process result',
+  );
+  if (process.platform === 'win32') assert.notEqual(record.processResult.exitCode, 0);
+  else assert.equal(record.processResult.signal, 'SIGTERM');
+  const status = await invoke({ ...request, type: 'reconcile' }, env);
+  assert.equal(status.code, 0, status.stderr);
+  const attestation = JSON.parse(status.stdout);
+  assert.equal(attestation.state, 'failed');
+  if (process.platform === 'win32') assert.notEqual(attestation.exitCode, 0);
+  else {
+    assert.equal(attestation.signal, 'SIGTERM');
+    assert.equal(attestation.exitCode, undefined);
+  }
+});
+
+test('pre-launch failure reconciles as failure and never as accepted work', async () => {
+  const fixture = await createFixture('prelaunch-failure');
+  execFileSync('git', ['-C', fixture.repository, 'branch', `ralph/${fixture.job.jobId}`, fixture.baseSha], { stdio: 'ignore' });
+  const request = { version: 1, type: 'dispatch', job: fixture.job };
+  const dispatched = await invoke(request, fixture.env);
+  assert.equal(dispatched.code, 1);
+  const reconciled = await invoke({ ...request, type: 'reconcile' }, fixture.env);
+  assert.equal(reconciled.code, 0, reconciled.stderr);
+  const response = JSON.parse(reconciled.stdout);
+  assert.equal(response.type, 'failed');
+  assert.equal(response.state, 'failed');
+  assert.equal(response.workerVerified, true);
+  await assert.rejects(() => readFile(fixture.invocations, 'utf8'), (error) => error.code === 'ENOENT');
+});
+
+test('reclaims an old malformed worker lock without overlapping a live generation', async () => {
+  const fixture = await createFixture('malformed-lock');
+  const lockDirectory = path.join(fixture.state, '.locks');
+  await mkdir(lockDirectory, { recursive: true });
+  await writeFile(path.join(lockDirectory, `${fixture.job.jobId}.lock`), '{}');
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  const dispatched = await invoke({ version: 1, type: 'dispatch', job: fixture.job }, fixture.env);
+  assert.equal(dispatched.code, 0, dispatched.stderr);
+  await waitForRecord(
+    path.join(fixture.state, `${fixture.job.jobId}.json`),
+    (record) => record.state === 'awaiting-terminal-evidence',
+    'post-reclaim process result',
+  );
+  assert.equal((await waitForInvocations(fixture.invocations, 1)).length, 1);
 });
 
 test('rejects malformed requests, untrusted hosts, repositories, models, and bases before launch', async () => {
@@ -367,7 +386,7 @@ test('rejects malformed requests, untrusted hosts, repositories, models, and bas
   }
   const wrongHost = await invoke(
     { version: 1, type: 'dispatch', job: { ...fixture.job, jobId: 'wrong-host-2605' } },
-    { ...fixture.env, HOSTNAME: 'impostor.local' },
+    { ...fixture.env, RALPH_MAC_WORKER_TEST_HOSTNAME: 'impostor.local' },
   );
   assert.equal(wrongHost.code, 1);
   assert.match(wrongHost.stderr, /trusted host/);

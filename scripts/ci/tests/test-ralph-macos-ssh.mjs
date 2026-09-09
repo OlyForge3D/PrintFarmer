@@ -7,8 +7,8 @@ import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import {
   RalphMacSshError, acknowledgeJob, acknowledgeLocalJob, createRemoteRequest, createSshInvocation, dispatchMacJob,
-  loadMacSshConfiguration, markUncertain, parseRemoteAcknowledgement, recordDeliveryIntent,
-  recordLocalTerminalResult, recordTerminalResult, recoverRemoteDelivery, reserveJob, reserveLocalJob, runSsh,
+  loadMacSshConfiguration, markUncertain, parseRemoteAcknowledgement, parseRemoteWorkerResponse, reconcileMacJob,
+  recordDeliveryIntent, recordLocalTerminalResult, recoverRemoteDelivery, reserveJob, reserveLocalJob, runSsh,
 } from '../ralph-macos-ssh.mjs';
 
 const root = path.resolve('fixtures', 'ralph-macos-ssh-validation');
@@ -88,17 +88,20 @@ test('serializes untrusted content only as structured stdin and limits jobs to P
 });
 
 test('rejects malformed, wrong-host, and uncorrelated remote acknowledgements', () => {
-  const expected = { version: 1, type: 'accepted', jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1' };
-  assert.deepEqual(parseRemoteAcknowledgement(JSON.stringify(expected), { ...job(), expectedHost: expected.host }), expected);
+  const expected = { version: 1, type: 'accepted', state: 'running', jobId: 'job-2605', fence: 7, repository: 'OlyForge3D/PrintFarmer', issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1' };
+  const expectedJob = { ...job(), fence: 7, expectedHost: expected.host };
+  assert.deepEqual(parseRemoteAcknowledgement(JSON.stringify(expected), expectedJob), expected);
   for (const output of ['not-json', `${JSON.stringify(expected)}\nextra`, JSON.stringify({ ...expected, host: 'wrong-host.local' })]) {
-    assert.throws(() => parseRemoteAcknowledgement(output, { ...job(), expectedHost: expected.host }),
+    assert.throws(() => parseRemoteAcknowledgement(output, expectedJob),
       (error) => error.code === 'MALFORMED_RESPONSE');
   }
   for (const acknowledgement of [
     { ...expected, sessionId: undefined },
     { ...expected, sessionId: 1 },
+    { ...expected, fence: 8 },
+    { ...expected, state: 'failed' },
   ]) {
-    assert.throws(() => parseRemoteAcknowledgement(JSON.stringify(acknowledgement), { ...job(), expectedHost: expected.host }),
+    assert.throws(() => parseRemoteAcknowledgement(JSON.stringify(acknowledgement), expectedJob),
       (error) => error.code === 'MALFORMED_RESPONSE');
   }
 });
@@ -181,7 +184,7 @@ test('retains delivery ownership after lost acknowledgement and reconciles the s
     spawn: () => {
       queueMicrotask(() => {
         child.stdout.end(JSON.stringify({
-          version: 1, type: 'accepted', jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer',
+          version: 1, type: 'accepted', state: 'running', jobId: 'job-2605', fence: 1, repository: 'OlyForge3D/PrintFarmer',
           issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1',
         }));
         child.emit('close', 0);
@@ -206,22 +209,41 @@ test('recovers an expired delivery intent only after its controller is demonstra
   });
   assert.equal(recovered.state, 'uncertain');
 });
-test('requires correlated terminal evidence before capacity is released', async () => {
+test('releases remote capacity only from a correlated worker terminal attestation', async () => {
   await reset();
   const configuration = options();
   await reserveJob({ job: job(), eligibility }, configuration);
-  await assert.rejects(() => recordTerminalResult({
-    jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, baseSha: 'a'.repeat(40),
-    host: 'trusted-mac.local', sessionId: 'session-1', headSha: 'b'.repeat(40), exitCode: 0,
-    validationEvidence: 'not accepted', workingTreeClean: true, allCommitsPushed: true,
-  }, configuration), (error) => error.code === 'INVALID_TRANSITION');
   await recordDeliveryIntent('job-2605', configuration);
-  const acknowledgement = { version: 1, type: 'accepted', jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1' };
+  const acknowledgement = { version: 1, type: 'accepted', state: 'running', jobId: 'job-2605', fence: 1, repository: 'OlyForge3D/PrintFarmer', issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1' };
   await acknowledgeJob('job-2605', acknowledgement, configuration);
-  await assert.rejects(() => recordTerminalResult({ jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, baseSha: 'a'.repeat(40), host: 'trusted-mac.local', headSha: 'b'.repeat(40), exitCode: 0 }, configuration),
-    (error) => error.code === 'INVALID_TERMINAL_EVIDENCE');
-  const completed = await recordTerminalResult({ jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1', headSha: 'b'.repeat(40), exitCode: 0, validationEvidence: 'mobile/PrintFarmerTests: passed', workingTreeClean: true, allCommitsPushed: true }, configuration);
+  const terminal = {
+    ...acknowledgement,
+    type: 'terminal',
+    state: 'completed',
+    workerVerified: true,
+    headSha: 'b'.repeat(40),
+    exitCode: 0,
+    validationEvidence: 'Mac worker verified exit 0 with a clean worktree and matching pushed branch.',
+    workingTreeClean: true,
+    allCommitsPushed: true,
+  };
+  const child = fakeChild();
+  const completed = await reconcileMacJob({ job: job() }, {
+    ...configuration,
+    spawn: () => {
+      queueMicrotask(() => {
+        child.stdout.end(JSON.stringify(terminal));
+        child.emit('close', 0);
+      });
+      return child;
+    },
+  });
   assert.equal(completed.state, 'completed');
+  assert.equal(completed.workerVerified, true);
+
+  const manual = await runAdmission('terminal-remote', { result: terminal });
+  assert.equal(manual.code, 1);
+  assert.equal(JSON.parse(manual.stderr).code, 'INVALID_COMMAND');
 });
 
 test('keeps local reservations out of the remote terminal lifecycle', async () => {
@@ -230,11 +252,29 @@ test('keeps local reservations out of the remote terminal lifecycle', async () =
   await reserveLocalJob({ job: job(), eligibility }, configuration);
   await acknowledgeLocalJob('job-2605', 'local-session-1', configuration);
 
-  await assert.rejects(() => recordTerminalResult({
-    jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, baseSha: 'a'.repeat(40),
-    host: undefined, sessionId: 'local-session-1', headSha: 'b'.repeat(40), exitCode: 0,
-    validationEvidence: 'not remote', workingTreeClean: true, allCommitsPushed: true,
-  }, configuration), (error) => error.code === 'INVALID_TRANSITION');
+  await assert.rejects(() => reconcileMacJob({ job: job() }, configuration),
+    (error) => error.code === 'INVALID_TRANSITION');
+});
+
+test('accepts a correlated worker signal attestation only as failure', () => {
+  const expectedJob = { ...job(), fence: 3, expectedHost: 'trusted-mac.local' };
+  const signalFailure = {
+    version: 1, type: 'terminal', state: 'failed', workerVerified: true,
+    jobId: 'job-2605', fence: 3, repository: 'OlyForge3D/PrintFarmer', issue: 2605,
+    owner: 'hudson', baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1',
+    headSha: 'b'.repeat(40), signal: 'SIGTERM', validationEvidence: 'Mac worker verified a non-success process result.',
+    workingTreeClean: false, allCommitsPushed: false,
+  };
+  const response = parseRemoteWorkerResponse(JSON.stringify(signalFailure), expectedJob);
+  assert.equal(response.state, 'failed');
+  assert.equal(response.signal, 'SIGTERM');
+  for (const invalid of [
+    { ...signalFailure, signal: undefined, exitCode: 0 },
+    { ...signalFailure, exitCode: 9 },
+  ]) {
+    assert.throws(() => parseRemoteWorkerResponse(JSON.stringify(invalid), expectedJob),
+      (error) => error.code === 'MALFORMED_RESPONSE');
+  }
 });
 
 test('does not reuse a terminal job identifier as an active reservation', async () => {

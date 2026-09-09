@@ -2,7 +2,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 const repository = 'OlyForge3D/PrintFarmer';
@@ -14,6 +15,7 @@ const expectedOrigin = process.env.RALPH_MAC_WORKER_EXPECTED_ORIGIN;
 const baseRef = process.env.RALPH_MAC_WORKER_BASE_REF;
 const expectedHost = process.env.RALPH_MAC_WORKER_EXPECTED_HOST;
 const testMode = process.env.RALPH_MAC_WORKER_TEST_MODE === 'true';
+const actualHost = testMode ? process.env.RALPH_MAC_WORKER_TEST_HOSTNAME : os.hostname();
 
 function fail(message) {
   throw new Error(message);
@@ -45,7 +47,7 @@ function validateConfiguration() {
   if ((!testMode && process.platform !== 'darwin') ||
       ![stateRoot, repositoryRoot, worktreeRoot, copilotPath].every(absolute) ||
       !outsideRepository(stateRoot) || !outsideRepository(worktreeRoot) ||
-      !host(expectedHost) || process.env.HOSTNAME !== expectedHost ||
+      !host(expectedHost) || actualHost !== expectedHost ||
       typeof expectedOrigin !== 'string' || !expectedOrigin || /[\r\n]/.test(expectedOrigin) ||
       typeof baseRef !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(baseRef) ||
       baseRef.includes('..') || baseRef.includes('//')) {
@@ -109,26 +111,59 @@ async function replaceFile(target, content) {
 }
 
 async function reclaimDeadLock(lockFile) {
-  let lock;
-  try {
-    lock = JSON.parse(await readFile(lockFile, 'utf8'));
-  } catch {
-    return false;
-  }
   const leaseMs = testMode ? 100 : 30_000;
-  if (!Number.isInteger(lock.pid) || !Number.isFinite(Date.parse(lock.createdAt)) ||
-      Date.now() - Date.parse(lock.createdAt) < leaseMs || ownerIsAlive(lock.pid) !== false) {
+  let observed;
+  try {
+    observed = JSON.parse(await readFile(lockFile, 'utf8'));
+    if (!identifier(observed?.token) || !Number.isInteger(observed?.pid) ||
+        !Number.isFinite(Date.parse(observed?.createdAt))) {
+      throw new Error('Lock schema is incomplete.');
+    }
+  } catch {
+    try {
+      const details = await stat(lockFile);
+      if (Date.now() - details.mtimeMs < leaseMs) return false;
+      observed = { malformed: true, mtimeMs: details.mtimeMs, size: details.size };
+    } catch {
+      return false;
+    }
+  }
+  if (!observed.malformed && (
+    Date.now() - Date.parse(observed.createdAt) < leaseMs ||
+    ownerIsAlive(observed.pid) !== false
+  )) {
     return false;
   }
-  const reclaimed = `${lockFile}.${randomUUID()}.reclaimed`;
+  const guardFile = `${lockFile}.reclaim`;
+  let guard;
   try {
-    await rename(lockFile, reclaimed);
+    guard = await open(guardFile, 'wx', 0o600);
   } catch (error) {
-    if (error.code === 'ENOENT') return false;
+    if (error.code === 'EEXIST') return false;
     throw error;
   }
-  await rm(reclaimed, { force: true });
-  return true;
+  try {
+    let current;
+    try {
+      current = JSON.parse(await readFile(lockFile, 'utf8'));
+      if (!identifier(current?.token) || !Number.isInteger(current?.pid) ||
+          !Number.isFinite(Date.parse(current?.createdAt))) {
+        throw new Error('Lock schema is incomplete.');
+      }
+    } catch {
+      if (!observed.malformed) return false;
+      const details = await stat(lockFile).catch(() => undefined);
+      if (!details || details.mtimeMs !== observed.mtimeMs || details.size !== observed.size) return false;
+      await rm(lockFile, { force: true });
+      return true;
+    }
+    if (observed.malformed || current.token !== observed.token) return false;
+    await rm(lockFile, { force: true });
+    return true;
+  } finally {
+    await guard.close();
+    await rm(guardFile, { force: true });
+  }
 }
 
 async function withJobLock(jobId, action) {
@@ -138,7 +173,8 @@ async function withJobLock(jobId, action) {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     try {
       handle = await open(lockFile, 'wx', 0o600);
-      await handle.writeFile(JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }));
+      await handle.writeFile(JSON.stringify({ token: randomUUID(), pid: process.pid, createdAt: new Date().toISOString() }));
+      await handle.sync();
       break;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
@@ -182,20 +218,40 @@ async function mutate(jobId, mutator) {
 
 function acknowledgement(record) {
   if (!record || !identifier(record.sessionId) ||
-      !['accepted', 'supervisor-launching', 'launching', 'running', 'awaiting-terminal-evidence', 'completed', 'failed'].includes(record.state)) {
+      !['accepted', 'supervisor-launching', 'launching', 'running'].includes(record.state)) {
     fail('Job has not reached durable acceptance.');
   }
-  const { job, sessionId } = record;
   return {
+    ...correlation(record),
     version: 1,
     type: 'accepted',
-    jobId: job.jobId,
+    state: record.state,
+  };
+}
+
+function correlation(record) {
+  return {
+    jobId: record.job.jobId,
+    fence: record.job.fence,
     repository,
-    issue: job.issue,
-    owner: job.owner,
-    baseSha: job.baseSha,
+    issue: record.job.issue,
+    owner: record.job.owner,
+    baseSha: record.job.baseSha,
     host: expectedHost,
-    sessionId,
+    sessionId: record.sessionId,
+  };
+}
+
+function failedResponse(record) {
+  if (!record || record.state !== 'failed' || !identifier(record.sessionId)) fail('Job is not a correlated worker failure.');
+  return {
+    ...correlation(record),
+    version: 1,
+    type: 'failed',
+    state: 'failed',
+    workerVerified: true,
+    failureCode: identifier(record.processResult?.errorCode) ? record.processResult.errorCode : 'WORKER_FAILURE',
+    failureMessage: 'Mac worker failed before a terminal process result was available.',
   };
 }
 
@@ -210,9 +266,22 @@ function copilotPrompt(job) {
 
 function runProcess(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { ...options, windowsHide: true });
+    const { timeoutMs = 30_000, ...spawnOptions } = options;
+    const child = spawn(command, args, { ...spawnOptions, windowsHide: true });
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const timeout = setTimeout(() => {
+      child.kill();
+      finish(new Error(`${command} timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
     child.stdout?.on('data', (chunk) => {
       stdout += chunk;
       if (stdout.length > 64 * 1024) child.kill();
@@ -221,10 +290,10 @@ function runProcess(command, args, options = {}) {
       stderr += chunk;
       if (stderr.length > 64 * 1024) child.kill();
     });
-    child.once('error', reject);
+    child.once('error', (error) => finish(error));
     child.once('close', (code, signal) => {
-      if (code === 0) resolve(stdout.trim());
-      else reject(new Error(`${command} exited with status ${code ?? signal}: ${stderr.trim()}`));
+      if (code === 0) finish(undefined, stdout.trim());
+      else finish(new Error(`${command} exited with status ${code ?? signal}: ${stderr.trim()}`));
     });
   });
 }
@@ -358,14 +427,18 @@ async function runJob(jobId, launchToken) {
       if (!current || current.launchToken !== launchToken || !['launching', 'running'].includes(current.state)) {
         fail('Worker process result has no owned launch.');
       }
-      current.state = 'awaiting-terminal-evidence';
+      current.state = outcome.error ? 'failed' : 'awaiting-terminal-evidence';
       current.processResult = outcome.error
         ? {
             error: outcome.error.message,
             errorCode: typeof outcome.error.code === 'string' ? outcome.error.code : undefined,
             completedAt: new Date().toISOString(),
           }
-        : { exitCode: outcome.exitCode, signal: outcome.signal, completedAt: new Date().toISOString() };
+        : {
+            ...(Number.isInteger(outcome.exitCode) ? { exitCode: outcome.exitCode } : {}),
+            ...(typeof outcome.signal === 'string' ? { signal: outcome.signal } : {}),
+            completedAt: new Date().toISOString(),
+          };
       delete current.pid;
       return current;
     });
@@ -423,7 +496,7 @@ async function dispatch(job) {
     const existing = await load(job.jobId);
     if (existing) {
       if (existing.digest !== jobDigest) fail('Job identifier is fenced to a different request.');
-      return { acknowledgement: acknowledgement(existing) };
+      return { response: await workerResponse(existing) };
     }
     await validateRepository(job);
     const worktree = path.join(worktreeRoot, job.jobId);
@@ -458,42 +531,60 @@ async function dispatch(job) {
       throw error;
     }
   });
-  if (prepared.acknowledgement) return prepared.acknowledgement;
+  if (prepared.response) return prepared.response;
   await startSupervisor(job.jobId, prepared.launchToken);
   return acknowledgement(prepared.record);
 }
 
-async function verifyTerminalRepository(record, result) {
+async function inspectTerminalRepository(record) {
   const [headSha, status, remoteHead] = await Promise.all([
     runGit(['-C', record.worktree, 'rev-parse', 'HEAD']),
     runGit(['-C', record.worktree, 'status', '--porcelain']),
-    runGit(['-C', record.worktree, 'ls-remote', '--exit-code', 'origin', `refs/heads/${record.branch}`]),
+    runGit(['-C', record.worktree, 'ls-remote', '--exit-code', 'origin', `refs/heads/${record.branch}`])
+      .catch(() => ''),
   ]);
   const pushedSha = remoteHead.split(/\s+/)[0];
-  if (headSha.toLowerCase() !== result.headSha.toLowerCase() || status ||
-      pushedSha?.toLowerCase() !== result.headSha.toLowerCase()) {
-    fail('Terminal evidence does not match the worker worktree and pushed branch.');
-  }
+  return {
+    headSha,
+    workingTreeClean: status === '',
+    allCommitsPushed: pushedSha?.toLowerCase() === headSha.toLowerCase(),
+  };
 }
 
-async function recordTerminal(result) {
-  if (!result || !identifier(result.jobId) || !identifier(result.sessionId) || !sha(result.headSha) ||
-      !Number.isInteger(result.exitCode) || typeof result.validationEvidence !== 'string' ||
-      !result.validationEvidence.trim() || result.workingTreeClean !== true || result.allCommitsPushed !== true) {
-    fail('Malformed terminal evidence.');
+async function terminalResponse(record) {
+  if (record.terminal) return record.terminal;
+  if (record.state !== 'awaiting-terminal-evidence' ||
+      (!Number.isInteger(record.processResult?.exitCode) && typeof record.processResult?.signal !== 'string')) {
+    fail('Job does not have a terminal process result.');
   }
-  return withJobLock(result.jobId, async () => {
-    const record = await load(result.jobId);
-    if (!record || record.sessionId !== result.sessionId || record.state !== 'awaiting-terminal-evidence' ||
-        !Number.isInteger(record.processResult?.exitCode) || record.processResult.exitCode !== result.exitCode) {
-      fail('Terminal evidence does not match an exited worker job.');
-    }
-    await verifyTerminalRepository(record, result);
-    record.state = result.exitCode === 0 ? 'completed' : 'failed';
-    record.terminal = { ...result, recordedAt: new Date().toISOString() };
-    await persist(result.jobId, record);
-    return { version: 1, type: 'terminal', jobId: result.jobId, sessionId: result.sessionId, state: record.state };
-  });
+  const gitEvidence = await inspectTerminalRepository(record);
+  const completed = record.processResult.exitCode === 0 && record.processResult.signal === undefined;
+  if (completed && (!gitEvidence.workingTreeClean || !gitEvidence.allCommitsPushed)) {
+    fail('Successful worker process lacks clean, pushed Git evidence.');
+  }
+  record.state = completed ? 'completed' : 'failed';
+  record.terminal = {
+    ...correlation(record),
+    ...gitEvidence,
+    version: 1,
+    type: 'terminal',
+    state: record.state,
+    workerVerified: true,
+    ...(Number.isInteger(record.processResult.exitCode) ? { exitCode: record.processResult.exitCode } : {}),
+    ...(typeof record.processResult.signal === 'string' ? { signal: record.processResult.signal } : {}),
+    validationEvidence: completed
+      ? 'Mac worker verified exit 0 with a clean worktree and matching pushed branch.'
+      : 'Mac worker verified a non-success process result.',
+    recordedAt: new Date().toISOString(),
+  };
+  await persist(record.job.jobId, record);
+  return record.terminal;
+}
+
+async function workerResponse(record) {
+  if (record.state === 'awaiting-terminal-evidence' || record.terminal) return terminalResponse(record);
+  if (record.state === 'failed') return failedResponse(record);
+  return acknowledgement(record);
 }
 
 async function readRequest() {
@@ -527,16 +618,12 @@ async function main() {
   if (process.argv.length !== 2) fail('Worker accepts requests only on stdin.');
   validateConfiguration();
   const request = await readRequest();
-  if (request.type === 'terminal') {
-    process.stdout.write(`${JSON.stringify(await recordTerminal(request.result))}\n`);
-    return;
-  }
   validateJob(request.job);
-  const answer = request.type === 'reconcile'
+  const answer = ['reconcile', 'terminal'].includes(request.type)
     ? await withJobLock(request.job.jobId, async () => {
         const record = await load(request.job.jobId);
         if (!record || record.digest !== digest(request.job)) fail('No matching job to reconcile.');
-        return acknowledgement(record);
+        return workerResponse(record);
       })
     : await dispatch(request.job);
   process.stdout.write(`${JSON.stringify(answer)}\n`);
