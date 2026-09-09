@@ -8,7 +8,7 @@ import test from 'node:test';
 import {
   RalphMacSshError, acknowledgeJob, acknowledgeLocalJob, createRemoteRequest, createSshInvocation, dispatchMacJob,
   loadMacSshConfiguration, markUncertain, parseRemoteAcknowledgement, recordDeliveryIntent,
-  recordTerminalResult, reserveJob, reserveLocalJob, runSsh,
+  recordLocalTerminalResult, recordTerminalResult, reserveJob, reserveLocalJob, runSsh,
 } from '../ralph-macos-ssh.mjs';
 
 const root = path.resolve('fixtures', 'ralph-macos-ssh-validation');
@@ -222,6 +222,20 @@ test('keeps local reservations out of the remote terminal lifecycle', async () =
   }, configuration), (error) => error.code === 'INVALID_TRANSITION');
 });
 
+test('does not reuse a terminal job identifier as an active reservation', async () => {
+  await reset();
+  const configuration = options();
+  await reserveLocalJob({ job: job(), eligibility }, configuration);
+  await acknowledgeLocalJob('job-2605', 'local-session-1', configuration);
+  await recordLocalTerminalResult({
+    jobId: 'job-2605', sessionId: 'local-session-1', headSha: 'b'.repeat(40), exitCode: 0,
+    validationEvidence: 'targeted tests passed', workingTreeClean: true, allCommitsPushed: true,
+  }, configuration);
+
+  await assert.rejects(() => reserveLocalJob({ job: job(), eligibility }, configuration),
+    (error) => error.code === 'FENCED');
+});
+
 test('executes the local create-session admission lifecycle through the CLI', async () => {
   await reset();
   const reserve = await runAdmission('reserve-local', { job: job(), eligibility });
@@ -243,9 +257,11 @@ test('executes the local create-session admission lifecycle through the CLI', as
   assert.equal(terminal.code, 0, terminal.stderr);
   assert.equal(JSON.parse(terminal.stdout).result.state, 'completed');
 
-  const invalid = await runAdmission('unknown', {});
-  assert.equal(invalid.code, 1);
-  assert.equal(JSON.parse(invalid.stderr).code, 'INVALID_COMMAND');
+  for (const command of ['unknown', 'constructor']) {
+    const invalid = await runAdmission(command, {});
+    assert.equal(invalid.code, 1);
+    assert.equal(JSON.parse(invalid.stderr).code, 'INVALID_COMMAND');
+  }
 });
 
 test('contains SSH stream errors, nonzero exits, and wall-clock timeout', async () => {

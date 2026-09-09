@@ -3,13 +3,13 @@ import {
   recordTerminalResult, reserveLocalJob,
 } from './ralph-macos-ssh.mjs';
 
-const commands = {
+const commands = Object.assign(Object.create(null), {
   'reserve-local': ({ job, eligibility }) => reserveLocalJob({ job, eligibility }),
   'acknowledge-local': ({ jobId, sessionId }) => acknowledgeLocalJob(jobId, sessionId),
   'terminal-local': ({ result }) => recordLocalTerminalResult(result),
   'dispatch-remote': ({ job, eligibility }) => dispatchMacJob({ job, eligibility }),
   'terminal-remote': ({ result }) => recordTerminalResult(result),
-};
+});
 
 async function readRequest() {
   const input = await new Promise((resolve, reject) => {

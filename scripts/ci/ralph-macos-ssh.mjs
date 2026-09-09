@@ -315,6 +315,9 @@ export async function reserveJob({ job, eligibility, mode = 'remote', now = new 
       if (existing.requestDigest !== requestDigest(job) || existing.mode !== mode) {
         throw new RalphMacSshError('Job identifier is already fenced to different work.', 'FENCED');
       }
+      if (!activeJobStates.has(existing.state)) {
+        throw new RalphMacSshError('A terminal job identifier cannot be reserved again.', 'FENCED');
+      }
       return existing;
     }
     const active = Object.values(ledger.jobs).filter((entry) => activeJobStates.has(entry.state));
