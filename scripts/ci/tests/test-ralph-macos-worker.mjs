@@ -24,12 +24,31 @@ writeFileSync(process.env.RALPH_MAC_WORKER_FAKE_PID_FILE, String(process.pid));
 process.stdout.write('fake child stdout must not contaminate protocol JSON\\n');
 process.stderr.write('fake child stderr is isolated\\n');
 await new Promise((resolve) => setTimeout(resolve, Number(process.env.RALPH_MAC_WORKER_FAKE_DELAY_MS || 0)));
+if (process.env.RALPH_MAC_WORKER_FAKE_UNRELATED_HISTORY === 'true') {
+  const tree = spawnSync('git', ['write-tree'], { cwd: process.cwd(), encoding: 'utf8' });
+  const root = spawnSync(
+    'git',
+    ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit-tree', tree.stdout.trim()],
+    { cwd: process.cwd(), encoding: 'utf8', input: 'unrelated root\\n' },
+  );
+  const reset = spawnSync('git', ['reset', '--hard', root.stdout.trim()], { cwd: process.cwd(), encoding: 'utf8' });
+  if (tree.status !== 0 || root.status !== 0 || reset.status !== 0) process.exit(92);
+}
 if (process.env.RALPH_MAC_WORKER_FAKE_PUSH === 'true') {
   const pushed = spawnSync('git', ['push', '-u', 'origin', 'HEAD'], { cwd: process.cwd(), encoding: 'utf8' });
   if (pushed.status !== 0) {
     process.stderr.write(pushed.stderr);
     process.exit(91);
   }
+}
+if (process.env.RALPH_MAC_WORKER_FAKE_REWRITE_ORIGIN === 'true') {
+  const rewritten = spawnSync(
+    'git',
+    ['remote', 'set-url', 'origin', process.env.RALPH_MAC_WORKER_FAKE_ROGUE_ORIGIN],
+    { cwd: process.cwd(), encoding: 'utf8' },
+  );
+  const roguePush = spawnSync('git', ['push', '-u', 'origin', 'HEAD'], { cwd: process.cwd(), encoding: 'utf8' });
+  if (rewritten.status !== 0 || roguePush.status !== 0) process.exit(93);
 }
 if (process.env.RALPH_MAC_WORKER_FAKE_SIGNAL) {
   process.kill(process.pid, process.env.RALPH_MAC_WORKER_FAKE_SIGNAL);
@@ -58,6 +77,7 @@ function git(cwd, ...args) {
 async function createFixture(name) {
   const root = path.join(suiteRoot, name);
   const origin = path.join(root, 'origin.git');
+  const rogueOrigin = path.join(root, 'rogue-origin.git');
   const repository = path.join(root, 'repo');
   const state = path.join(root, 'state');
   const worktrees = path.join(root, 'worktrees');
@@ -65,6 +85,7 @@ async function createFixture(name) {
   const pidFile = path.join(root, 'fake.pid');
   await mkdir(root, { recursive: true });
   execFileSync('git', ['init', '--bare', origin], { stdio: 'ignore' });
+  execFileSync('git', ['init', '--bare', rogueOrigin], { stdio: 'ignore' });
   execFileSync('git', ['init', repository], { stdio: 'ignore' });
   await writeFile(path.join(repository, 'README.md'), 'fixture\n');
   execFileSync('git', ['-C', repository, 'add', '.'], { stdio: 'ignore' });
@@ -90,10 +111,12 @@ async function createFixture(name) {
     RALPH_MAC_WORKER_FAKE_INVOCATIONS: invocations,
     RALPH_MAC_WORKER_FAKE_PID_FILE: pidFile,
     RALPH_MAC_WORKER_FAKE_PUSH: 'true',
+    RALPH_MAC_WORKER_FAKE_ROGUE_ORIGIN: rogueOrigin,
   };
   return {
     root,
     origin,
+    rogueOrigin,
     repository,
     state,
     worktrees,
@@ -218,6 +241,8 @@ test('worker survives dispatch exit, isolates output, pushes its deterministic b
   assert.equal(attestation.headSha, fixture.baseSha);
   assert.equal(attestation.workingTreeClean, true);
   assert.equal(attestation.allCommitsPushed, true);
+  assert.equal(attestation.repositoryIdentityVerified, true);
+  assert.equal(attestation.baseAncestor, true);
   assert.equal(attestation.sessionId, acknowledgement.sessionId);
   const repeated = await invoke({ ...request, type: 'reconcile' }, env);
   assert.deepEqual(JSON.parse(repeated.stdout), attestation);
@@ -311,7 +336,35 @@ test('exit 0 without a pushed branch remains held for terminal evidence', async 
   await waitForRecord(recordFile, (record) => record.state === 'awaiting-terminal-evidence', 'unpushed process result');
   const status = await invoke({ ...request, type: 'reconcile' }, env);
   assert.equal(status.code, 1);
-  assert.match(status.stderr, /lacks clean, pushed Git evidence/);
+  assert.match(status.stderr, /lacks clean, pushed, ancestry-bound Git evidence/);
+  assert.equal(JSON.parse(await readFile(recordFile, 'utf8')).state, 'awaiting-terminal-evidence');
+});
+
+test('exit 0 cannot succeed after the child rewrites origin even when the trusted branch was pushed', async () => {
+  const fixture = await createFixture('rewritten-origin');
+  const env = { ...fixture.env, RALPH_MAC_WORKER_FAKE_REWRITE_ORIGIN: 'true' };
+  const request = { version: 1, type: 'dispatch', job: fixture.job };
+  const accepted = await invoke(request, env);
+  assert.equal(accepted.code, 0, accepted.stderr);
+  const recordFile = path.join(fixture.state, `${fixture.job.jobId}.json`);
+  await waitForRecord(recordFile, (record) => record.state === 'awaiting-terminal-evidence', 'rewritten origin result');
+  const status = await invoke({ ...request, type: 'reconcile' }, env);
+  assert.equal(status.code, 1);
+  assert.match(status.stderr, /ancestry-bound Git evidence/);
+  assert.equal(JSON.parse(await readFile(recordFile, 'utf8')).state, 'awaiting-terminal-evidence');
+});
+
+test('exit 0 cannot succeed from unrelated history pushed to the admitted branch', async () => {
+  const fixture = await createFixture('unrelated-history');
+  const env = { ...fixture.env, RALPH_MAC_WORKER_FAKE_UNRELATED_HISTORY: 'true' };
+  const request = { version: 1, type: 'dispatch', job: fixture.job };
+  const accepted = await invoke(request, env);
+  assert.equal(accepted.code, 0, accepted.stderr);
+  const recordFile = path.join(fixture.state, `${fixture.job.jobId}.json`);
+  await waitForRecord(recordFile, (record) => record.state === 'awaiting-terminal-evidence', 'unrelated history result');
+  const status = await invoke({ ...request, type: 'reconcile' }, env);
+  assert.equal(status.code, 1);
+  assert.match(status.stderr, /ancestry-bound Git evidence/);
   assert.equal(JSON.parse(await readFile(recordFile, 'utf8')).state, 'awaiting-terminal-evidence');
 });
 
@@ -370,6 +423,41 @@ test('reclaims an old malformed worker lock without overlapping a live generatio
   assert.equal((await waitForInvocations(fixture.invocations, 1)).length, 1);
 });
 
+test('recovers stale reclaim guards and orphaned recovery claims before reclaiming a dead lock', async () => {
+  const fixture = await createFixture('stale-reclaim-guard');
+  const lockDirectory = path.join(fixture.state, '.locks');
+  const lockFile = path.join(lockDirectory, `${fixture.job.jobId}.lock`);
+  const expired = {
+    token: 'dead-main', pid: 2147483647,
+    createdAt: '2026-01-01T00:00:00Z', expiresAt: '2026-01-01T00:00:01Z',
+  };
+  const staleGuard = { ...expired, token: 'dead-guard' };
+  const staleClaim = { ...expired, token: 'dead-claim' };
+  await mkdir(lockDirectory, { recursive: true });
+  await writeFile(lockFile, JSON.stringify(expired));
+  await writeFile(`${lockFile}.reclaim`, JSON.stringify(staleGuard));
+  await writeFile(`${lockFile}.reclaim.recover.token%3Adead-guard`, JSON.stringify(staleClaim));
+  const dispatched = await invoke({ version: 1, type: 'dispatch', job: fixture.job }, fixture.env);
+  assert.equal(dispatched.code, 0, dispatched.stderr);
+  await waitForRecord(
+    path.join(fixture.state, `${fixture.job.jobId}.json`),
+    (record) => record.state === 'awaiting-terminal-evidence',
+    'post-stale-guard recovery process result',
+  );
+  assert.equal((await waitForInvocations(fixture.invocations, 1)).length, 1);
+});
+
+test('reconcile attests absence without launching a missing job', async () => {
+  const fixture = await createFixture('absent-reconcile');
+  const result = await invoke({ version: 1, type: 'reconcile', job: fixture.job }, fixture.env);
+  assert.equal(result.code, 0, result.stderr);
+  const response = JSON.parse(result.stdout);
+  assert.equal(response.type, 'failed');
+  assert.equal(response.failureCode, 'JOB_NOT_FOUND');
+  assert.equal(response.workerVerified, true);
+  await assert.rejects(() => readFile(fixture.invocations, 'utf8'), (error) => error.code === 'ENOENT');
+});
+
 test('rejects malformed requests, untrusted hosts, repositories, models, and bases before launch', async () => {
   const fixture = await createFixture('validation');
   const malformed = await invoke('{not-json', fixture.env);
@@ -380,10 +468,31 @@ test('rejects malformed requests, untrusted hosts, repositories, models, and bas
     { ...fixture.job, repository: 'OlyForge3D/PrintFarmerDesktop' },
     { ...fixture.job, model: 'gpt-5.6-sol' },
     { ...fixture.job, baseSha: 'b'.repeat(40) },
+    { ...fixture.job, jobId: 'x'.repeat(65) },
+    { ...fixture.job, jobId: 'invalid:git-ref' },
   ]) {
     const result = await invoke({ version: 1, type: 'dispatch', job: changedJob }, fixture.env);
     assert.equal(result.code, 1);
   }
+  execFileSync(
+    'git',
+    ['-C', fixture.repository, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test',
+      'commit', '--allow-empty', '-m', 'advance trusted base'],
+    { stdio: 'ignore' },
+  );
+  execFileSync('git', ['-C', fixture.repository, 'push', 'origin', 'development'], { stdio: 'ignore' });
+  execFileSync(
+    'git',
+    ['-C', fixture.repository, 'update-ref', 'refs/remotes/origin/development', fixture.baseSha],
+    { stdio: 'ignore' },
+  );
+  execFileSync('git', ['-C', fixture.repository, 'reset', '--hard', fixture.baseSha], { stdio: 'ignore' });
+  const staleBase = await invoke(
+    { version: 1, type: 'dispatch', job: { ...fixture.job, jobId: 'stale-base-2605' } },
+    fixture.env,
+  );
+  assert.equal(staleBase.code, 1);
+  assert.match(staleBase.stderr, /repository identity or base commit/);
   const wrongHost = await invoke(
     { version: 1, type: 'dispatch', job: { ...fixture.job, jobId: 'wrong-host-2605' } },
     { ...fixture.env, RALPH_MAC_WORKER_TEST_HOSTNAME: 'impostor.local' },

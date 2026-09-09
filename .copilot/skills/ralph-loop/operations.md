@@ -89,8 +89,10 @@ delivery:
    expires and the owning controller is demonstrably dead, then re-run `dispatch-remote`. For an
    accepted remote job, run `status-remote` with the original `{"job":...}`. That command queries
    the trusted worker and releases the reservation only from its fence-bound process/Git terminal
-   attestation or correlated pre-launch failure. Never submit caller-authored remote terminal
-   claims.
+   attestation, correlated pre-launch failure, or explicit attestation that no durable worker
+   record exists for an uncertain delivery. Successful terminal evidence must bind the configured
+   origin, admitted base ancestry, clean worktree, and exact pushed branch. Never submit
+   caller-authored remote terminal claims.
 
 The ledger is authoritative for these cooperating configured Ralph dispatch paths, not arbitrary
 manual app sessions that bypass this policy. Before enabling remote dispatch, drain or account for

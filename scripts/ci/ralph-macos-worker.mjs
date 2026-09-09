@@ -25,6 +25,10 @@ function identifier(value) {
   return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
 }
 
+function jobIdentifier(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value);
+}
+
 function sha(value) {
   return typeof value === 'string' && /^[0-9a-f]{40}$/i.test(value);
 }
@@ -49,7 +53,7 @@ function validateConfiguration() {
       !outsideRepository(stateRoot) || !outsideRepository(worktreeRoot) ||
       !host(expectedHost) || actualHost !== expectedHost ||
       typeof expectedOrigin !== 'string' || !expectedOrigin || /[\r\n]/.test(expectedOrigin) ||
-      typeof baseRef !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(baseRef) ||
+      typeof baseRef !== 'string' || !/^origin\/[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/.test(baseRef) ||
       baseRef.includes('..') || baseRef.includes('//')) {
     fail('Mac worker configuration does not match its trusted host, repository, or absolute paths.');
   }
@@ -57,7 +61,7 @@ function validateConfiguration() {
 
 function validateJob(job) {
   if (!job || job.repository !== repository || !Number.isSafeInteger(job.issue) || job.issue <= 0 ||
-      !identifier(job.jobId) || !Number.isSafeInteger(job.fence) || job.fence <= 0 ||
+      !jobIdentifier(job.jobId) || !Number.isSafeInteger(job.fence) || job.fence <= 0 ||
       !identifier(job.owner) || !sha(job.baseSha) ||
       !['gpt-5.6-terra', 'gpt-5.6-luna'].includes(job.model) || job.effort !== 'medium' ||
       job.agent !== 'squad' || !Array.isArray(job.acceptanceCriteria) ||
@@ -89,6 +93,141 @@ function ownerIsAlive(pid) {
   }
 }
 
+function lockMetadata(leaseMs) {
+  return {
+    token: randomUUID(),
+    pid: process.pid,
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + leaseMs).toISOString(),
+  };
+}
+
+async function releaseOwnedFile(file, lock) {
+  try {
+    const current = JSON.parse(await readFile(file, 'utf8'));
+    if (current.token === lock.metadata.token) await rm(file, { force: true });
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  } finally {
+    await lock.handle.close();
+  }
+}
+
+async function staleLock(file, leaseMs) {
+  try {
+    const [content, details] = await Promise.all([readFile(file, 'utf8'), stat(file)]);
+    let metadata;
+    try {
+      metadata = JSON.parse(content);
+    } catch {
+      metadata = undefined;
+    }
+    const expiresAt = Date.parse(metadata?.expiresAt);
+    const valid = identifier(metadata?.token) && Number.isInteger(metadata?.pid) &&
+      Number.isFinite(expiresAt);
+    if (valid && expiresAt < Date.now() && ownerIsAlive(metadata.pid) === false) {
+      return { metadata, generation: `token:${metadata.token}` };
+    }
+    if (!valid && Date.now() - details.mtimeMs > leaseMs) {
+      const fingerprint = createHash('sha256')
+        .update(JSON.stringify([details.mtimeMs, details.size, content]))
+        .digest('hex');
+      return { metadata: undefined, generation: `incomplete:${fingerprint}` };
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function reclaimObservedGeneration(file, observed, leaseMs, suffix) {
+  const staleTargets = [];
+  let targetFile = file;
+  let target = observed;
+  let claim;
+  for (;;) {
+    staleTargets.push({ file: targetFile, generation: target.generation });
+    const claimFile = `${targetFile}.${suffix}.${encodeURIComponent(target.generation)}`;
+    try {
+      const handle = await open(claimFile, 'wx', 0o600);
+      const metadata = lockMetadata(leaseMs);
+      try {
+        await handle.writeFile(JSON.stringify(metadata));
+        await handle.sync();
+      } catch (error) {
+        await handle.close();
+        await rm(claimFile, { force: true });
+        throw error;
+      }
+      claim = { file: claimFile, handle, metadata };
+      break;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      const orphan = await staleLock(claimFile, leaseMs);
+      if (!orphan) return false;
+      targetFile = claimFile;
+      target = orphan;
+      suffix = 'recover';
+    }
+  }
+
+  const holds = [];
+  try {
+    for (const staleTarget of staleTargets) {
+      const holdFile = `${staleTarget.file}.hold.${encodeURIComponent(staleTarget.generation)}`;
+      let handle;
+      try {
+        handle = await open(holdFile, 'wx', 0o600);
+        const metadata = lockMetadata(leaseMs);
+        await handle.writeFile(JSON.stringify(metadata));
+        await handle.sync();
+        holds.push({ file: holdFile, handle, metadata });
+      } catch (error) {
+        if (handle) {
+          await handle.close();
+          await rm(holdFile, { force: true });
+        }
+        if (error.code === 'EEXIST') {
+          const orphan = await staleLock(holdFile, leaseMs);
+          if (orphan) await reclaimObservedGeneration(holdFile, orphan, leaseMs, 'recover');
+        }
+        return false;
+      }
+    }
+    for (const staleTarget of staleTargets.reverse()) {
+      const current = await staleLock(staleTarget.file, leaseMs);
+      if (current?.generation !== staleTarget.generation) return false;
+      const beforeRemove = await staleLock(staleTarget.file, leaseMs);
+      if (beforeRemove?.generation !== staleTarget.generation) return false;
+      await rm(staleTarget.file, { force: true });
+    }
+    return true;
+  } finally {
+    await Promise.all(holds.reverse().map((hold) => releaseOwnedFile(hold.file, hold)));
+    await releaseOwnedFile(claim.file, claim);
+  }
+}
+
+async function acquireReclaimGuard(guardFile, leaseMs) {
+  let handle;
+  const metadata = lockMetadata(leaseMs);
+  try {
+    handle = await open(guardFile, 'wx', 0o600);
+    await handle.writeFile(JSON.stringify(metadata));
+    await handle.sync();
+    return { handle, metadata };
+  } catch (error) {
+    if (handle) {
+      await handle.close();
+      await rm(guardFile, { force: true });
+    }
+    if (error.code !== 'EEXIST') throw error;
+    const observed = await staleLock(guardFile, leaseMs);
+    if (observed) await reclaimObservedGeneration(guardFile, observed, leaseMs, 'recover');
+    return undefined;
+  }
+}
+
 async function replaceFile(target, content) {
   const temporary = `${target}.${randomUUID()}.tmp`;
   const handle = await open(temporary, 'wx', 0o600);
@@ -112,57 +251,20 @@ async function replaceFile(target, content) {
 
 async function reclaimDeadLock(lockFile) {
   const leaseMs = testMode ? 100 : 30_000;
-  let observed;
-  try {
-    observed = JSON.parse(await readFile(lockFile, 'utf8'));
-    if (!identifier(observed?.token) || !Number.isInteger(observed?.pid) ||
-        !Number.isFinite(Date.parse(observed?.createdAt))) {
-      throw new Error('Lock schema is incomplete.');
-    }
-  } catch {
-    try {
-      const details = await stat(lockFile);
-      if (Date.now() - details.mtimeMs < leaseMs) return false;
-      observed = { malformed: true, mtimeMs: details.mtimeMs, size: details.size };
-    } catch {
-      return false;
-    }
-  }
-  if (!observed.malformed && (
-    Date.now() - Date.parse(observed.createdAt) < leaseMs ||
-    ownerIsAlive(observed.pid) !== false
-  )) {
-    return false;
-  }
+  const observed = await staleLock(lockFile, leaseMs);
+  if (!observed) return false;
   const guardFile = `${lockFile}.reclaim`;
-  let guard;
+  const guard = await acquireReclaimGuard(guardFile, leaseMs);
+  if (!guard) return false;
   try {
-    guard = await open(guardFile, 'wx', 0o600);
-  } catch (error) {
-    if (error.code === 'EEXIST') return false;
-    throw error;
-  }
-  try {
-    let current;
-    try {
-      current = JSON.parse(await readFile(lockFile, 'utf8'));
-      if (!identifier(current?.token) || !Number.isInteger(current?.pid) ||
-          !Number.isFinite(Date.parse(current?.createdAt))) {
-        throw new Error('Lock schema is incomplete.');
-      }
-    } catch {
-      if (!observed.malformed) return false;
-      const details = await stat(lockFile).catch(() => undefined);
-      if (!details || details.mtimeMs !== observed.mtimeMs || details.size !== observed.size) return false;
+    const current = await staleLock(lockFile, leaseMs);
+    if (current?.generation === observed.generation) {
       await rm(lockFile, { force: true });
       return true;
     }
-    if (observed.malformed || current.token !== observed.token) return false;
-    await rm(lockFile, { force: true });
-    return true;
+    return false;
   } finally {
-    await guard.close();
-    await rm(guardFile, { force: true });
+    await releaseOwnedFile(guardFile, guard);
   }
 }
 
@@ -173,7 +275,7 @@ async function withJobLock(jobId, action) {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     try {
       handle = await open(lockFile, 'wx', 0o600);
-      await handle.writeFile(JSON.stringify({ token: randomUUID(), pid: process.pid, createdAt: new Date().toISOString() }));
+      await handle.writeFile(JSON.stringify(lockMetadata(testMode ? 100 : 30_000)));
       await handle.sync();
       break;
     } catch (error) {
@@ -255,6 +357,25 @@ function failedResponse(record) {
   };
 }
 
+function absentResponse(job) {
+  return {
+    jobId: job.jobId,
+    fence: job.fence,
+    repository,
+    issue: job.issue,
+    owner: job.owner,
+    baseSha: job.baseSha,
+    host: expectedHost,
+    sessionId: `absent-${digest(job).slice(0, 32)}`,
+    version: 1,
+    type: 'failed',
+    state: 'failed',
+    workerVerified: true,
+    failureCode: 'JOB_NOT_FOUND',
+    failureMessage: 'Mac worker verified that no durable job record exists for this fenced request.',
+  };
+}
+
 function copilotPrompt(job) {
   return [
     `Ralph job ${job.jobId}, fence ${job.fence}. Work only in this isolated PrintFarmer worktree.`,
@@ -303,12 +424,20 @@ function runGit(args, options = {}) {
 }
 
 async function validateRepository(job) {
-  const [inside, origin, resolvedBase] = await Promise.all([
+  const remoteBaseRef = `refs/heads/${baseRef.slice('origin/'.length)}`;
+  const [inside, origin, resolvedBase, remoteBase] = await Promise.all([
     runGit(['-C', repositoryRoot, 'rev-parse', '--is-inside-work-tree']),
     runGit(['-C', repositoryRoot, 'remote', 'get-url', 'origin']),
-    runGit(['-C', repositoryRoot, 'rev-parse', `${job.baseSha}^{commit}`]),
+    runGit(['-C', repositoryRoot, 'rev-parse', `${baseRef}^{commit}`]),
+    runGit(['-C', repositoryRoot, 'ls-remote', '--exit-code', expectedOrigin, remoteBaseRef]),
   ]);
-  if (inside !== 'true' || origin !== expectedOrigin || resolvedBase.toLowerCase() !== job.baseSha.toLowerCase()) {
+  const remoteBaseSha = remoteBase.split(/\s+/)[0];
+  if (inside !== 'true' || origin !== expectedOrigin ||
+      remoteBaseSha?.toLowerCase() !== resolvedBase.toLowerCase()) {
+    fail('Configured repository identity or base commit does not match the job.');
+  }
+  const resolvedJobBase = await runGit(['-C', repositoryRoot, 'rev-parse', `${job.baseSha}^{commit}`]);
+  if (resolvedJobBase.toLowerCase() !== job.baseSha.toLowerCase()) {
     fail('Configured repository identity or base commit does not match the job.');
   }
   await runGit(['-C', repositoryRoot, 'merge-base', '--is-ancestor', job.baseSha, baseRef]);
@@ -537,10 +666,14 @@ async function dispatch(job) {
 }
 
 async function inspectTerminalRepository(record) {
-  const [headSha, status, remoteHead] = await Promise.all([
+  const [headSha, status, worktreeOrigin, repositoryOrigin, baseAncestor, remoteHead] = await Promise.all([
     runGit(['-C', record.worktree, 'rev-parse', 'HEAD']),
     runGit(['-C', record.worktree, 'status', '--porcelain']),
-    runGit(['-C', record.worktree, 'ls-remote', '--exit-code', 'origin', `refs/heads/${record.branch}`])
+    runGit(['-C', record.worktree, 'remote', 'get-url', 'origin']).catch(() => ''),
+    runGit(['-C', repositoryRoot, 'remote', 'get-url', 'origin']).catch(() => ''),
+    runGit(['-C', record.worktree, 'merge-base', '--is-ancestor', record.job.baseSha, 'HEAD'])
+      .then(() => true, () => false),
+    runGit(['-C', record.worktree, 'ls-remote', '--exit-code', expectedOrigin, `refs/heads/${record.branch}`])
       .catch(() => ''),
   ]);
   const pushedSha = remoteHead.split(/\s+/)[0];
@@ -548,6 +681,8 @@ async function inspectTerminalRepository(record) {
     headSha,
     workingTreeClean: status === '',
     allCommitsPushed: pushedSha?.toLowerCase() === headSha.toLowerCase(),
+    repositoryIdentityVerified: worktreeOrigin === expectedOrigin && repositoryOrigin === expectedOrigin,
+    baseAncestor,
   };
 }
 
@@ -559,8 +694,9 @@ async function terminalResponse(record) {
   }
   const gitEvidence = await inspectTerminalRepository(record);
   const completed = record.processResult.exitCode === 0 && record.processResult.signal === undefined;
-  if (completed && (!gitEvidence.workingTreeClean || !gitEvidence.allCommitsPushed)) {
-    fail('Successful worker process lacks clean, pushed Git evidence.');
+  if (completed && (!gitEvidence.workingTreeClean || !gitEvidence.allCommitsPushed ||
+      !gitEvidence.repositoryIdentityVerified || !gitEvidence.baseAncestor)) {
+    fail('Successful worker process lacks clean, pushed, ancestry-bound Git evidence.');
   }
   record.state = completed ? 'completed' : 'failed';
   record.terminal = {
@@ -573,7 +709,7 @@ async function terminalResponse(record) {
     ...(Number.isInteger(record.processResult.exitCode) ? { exitCode: record.processResult.exitCode } : {}),
     ...(typeof record.processResult.signal === 'string' ? { signal: record.processResult.signal } : {}),
     validationEvidence: completed
-      ? 'Mac worker verified exit 0 with a clean worktree and matching pushed branch.'
+      ? 'Mac worker verified exit 0 with trusted repository identity, admitted ancestry, a clean worktree, and a matching pushed branch.'
       : 'Mac worker verified a non-success process result.',
     recordedAt: new Date().toISOString(),
   };
@@ -622,7 +758,8 @@ async function main() {
   const answer = ['reconcile', 'terminal'].includes(request.type)
     ? await withJobLock(request.job.jobId, async () => {
         const record = await load(request.job.jobId);
-        if (!record || record.digest !== digest(request.job)) fail('No matching job to reconcile.');
+        if (!record) return absentResponse(request.job);
+        if (record.digest !== digest(request.job)) fail('No matching job to reconcile.');
         return workerResponse(record);
       })
     : await dispatch(request.job);

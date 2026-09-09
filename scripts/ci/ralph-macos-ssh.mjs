@@ -39,6 +39,10 @@ function validIdentifier(value) {
   return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
 }
 
+function validJobIdentifier(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value);
+}
+
 function safeJson(value, name) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new RalphMacSshError(`${name} must be an object.`, 'INVALID_REQUEST');
@@ -51,7 +55,7 @@ function validateRemoteJob(job, { requireFence = false } = {}) {
   if (request.repository !== printFarmerRepository) {
     throw new RalphMacSshError('Remote macOS dispatch is limited to OlyForge3D/PrintFarmer.', 'UNSUPPORTED_REPOSITORY');
   }
-  if (!Number.isSafeInteger(request.issue) || request.issue <= 0 || !validIdentifier(request.jobId) ||
+  if (!Number.isSafeInteger(request.issue) || request.issue <= 0 || !validJobIdentifier(request.jobId) ||
       (requireFence && (!Number.isSafeInteger(request.fence) || request.fence <= 0)) ||
       !validIdentifier(request.owner) || !validSha(request.baseSha) || !Array.isArray(request.acceptanceCriteria) ||
       !['gpt-5.6-terra', 'gpt-5.6-luna'].includes(request.model) || request.effort !== 'medium' || request.agent !== 'squad') {
@@ -160,10 +164,12 @@ export function parseRemoteWorkerResponse(output, job) {
     const validEvidence = response.workerVerified === true && ['completed', 'failed'].includes(response.state) &&
       validProcessResult && validSha(response.headSha) && typeof response.validationEvidence === 'string' &&
       response.validationEvidence.trim() && typeof response.workingTreeClean === 'boolean' &&
-      typeof response.allCommitsPushed === 'boolean';
+      typeof response.allCommitsPushed === 'boolean' &&
+      typeof response.repositoryIdentityVerified === 'boolean' && typeof response.baseAncestor === 'boolean';
     const validSuccess = response.state !== 'completed' ||
       (response.exitCode === 0 && response.signal === undefined &&
-       response.workingTreeClean === true && response.allCommitsPushed === true);
+       response.workingTreeClean === true && response.allCommitsPushed === true &&
+       response.repositoryIdentityVerified === true && response.baseAncestor === true);
     const validFailure = response.state !== 'failed' || hasSignal || response.exitCode !== 0;
     if (!validEvidence || !validSuccess || !validFailure) {
       throw new RalphMacSshError('Remote terminal attestation is malformed.', 'MALFORMED_RESPONSE');
@@ -528,6 +534,8 @@ async function recordRemoteWorkerResponse(response, options = {}) {
       entry.validationEvidence = response.validationEvidence;
       entry.workingTreeClean = response.workingTreeClean;
       entry.allCommitsPushed = response.allCommitsPushed;
+      entry.repositoryIdentityVerified = response.repositoryIdentityVerified;
+      entry.baseAncestor = response.baseAncestor;
       entry.workerVerified = true;
     } else if (response.type === 'failed') {
       entry.state = 'failed';

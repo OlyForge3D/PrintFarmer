@@ -80,6 +80,10 @@ test('serializes untrusted content only as structured stdin and limits jobs to P
     (error) => error.code === 'UNSUPPORTED_REPOSITORY');
   assert.throws(() => createRemoteRequest({ ...job(), fence: 7, effort: 'high' }),
     (error) => error.code === 'INVALID_REQUEST');
+  assert.throws(() => createRemoteRequest({ ...job(), fence: 7, jobId: 'x'.repeat(65) }),
+    (error) => error.code === 'INVALID_REQUEST');
+  assert.throws(() => createRemoteRequest({ ...job(), fence: 7, jobId: 'invalid:git-ref' }),
+    (error) => error.code === 'INVALID_REQUEST');
   assert.throws(() => createRemoteRequest({ ...job(), fence: 7, jobId: undefined }),
     (error) => error.code === 'INVALID_REQUEST');
   assert.throws(() => createRemoteRequest({ ...job(), fence: 7, owner: 2605 }),
@@ -196,6 +200,35 @@ test('retains delivery ownership after lost acknowledgement and reconciles the s
   assert.equal(acknowledged.sessionId, 'session-1');
 });
 
+test('releases an uncertain delivery only from the worker attesting no durable job exists', async () => {
+  await reset();
+  const configuration = options();
+  await reserveJob({ job: job(), eligibility }, configuration);
+  await recordDeliveryIntent('job-2605', configuration);
+  await markUncertain('job-2605', configuration);
+  const child = fakeChild();
+  const failed = await dispatchMacJob({ job: job(), eligibility }, {
+    ...configuration,
+    spawn: () => {
+      queueMicrotask(() => {
+        child.stdout.end(JSON.stringify({
+          version: 1, type: 'failed', state: 'failed', workerVerified: true,
+          failureCode: 'JOB_NOT_FOUND',
+          failureMessage: 'Mac worker verified that no durable job record exists for this fenced request.',
+          jobId: 'job-2605', fence: 1, repository: 'OlyForge3D/PrintFarmer',
+          issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40),
+          host: 'trusted-mac.local', sessionId: 'absent-request-digest',
+        }));
+        child.emit('close', 0);
+      });
+      return child;
+    },
+  });
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.failureCode, 'JOB_NOT_FOUND');
+  assert.equal(failed.workerVerified, true);
+});
+
 test('recovers an expired delivery intent only after its controller is demonstrably dead', async () => {
   await reset();
   const configuration = options();
@@ -226,6 +259,8 @@ test('releases remote capacity only from a correlated worker terminal attestatio
     validationEvidence: 'Mac worker verified exit 0 with a clean worktree and matching pushed branch.',
     workingTreeClean: true,
     allCommitsPushed: true,
+    repositoryIdentityVerified: true,
+    baseAncestor: true,
   };
   const child = fakeChild();
   const completed = await reconcileMacJob({ job: job() }, {
@@ -263,7 +298,7 @@ test('accepts a correlated worker signal attestation only as failure', () => {
     jobId: 'job-2605', fence: 3, repository: 'OlyForge3D/PrintFarmer', issue: 2605,
     owner: 'hudson', baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1',
     headSha: 'b'.repeat(40), signal: 'SIGTERM', validationEvidence: 'Mac worker verified a non-success process result.',
-    workingTreeClean: false, allCommitsPushed: false,
+    workingTreeClean: false, allCommitsPushed: false, repositoryIdentityVerified: true, baseAncestor: true,
   };
   const response = parseRemoteWorkerResponse(JSON.stringify(signalFailure), expectedJob);
   assert.equal(response.state, 'failed');
@@ -271,6 +306,8 @@ test('accepts a correlated worker signal attestation only as failure', () => {
   for (const invalid of [
     { ...signalFailure, signal: undefined, exitCode: 0 },
     { ...signalFailure, exitCode: 9 },
+    { ...signalFailure, repositoryIdentityVerified: undefined },
+    { ...signalFailure, baseAncestor: undefined },
   ]) {
     assert.throws(() => parseRemoteWorkerResponse(JSON.stringify(invalid), expectedJob),
       (error) => error.code === 'MALFORMED_RESPONSE');
