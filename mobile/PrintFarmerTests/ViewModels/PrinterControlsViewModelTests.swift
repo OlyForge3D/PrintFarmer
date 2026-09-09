@@ -1,5 +1,6 @@
 import Combine
 import KeychainSwift
+import Observation
 import XCTest
 @testable import PrintFarmer
 
@@ -318,6 +319,38 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await attemptRoutineCommands(on: old)
         XCTAssertFalse(old.canControl)
         XCTAssertTrue(printerMutations(fixture.api).isEmpty)
+    }
+
+    func test_compositionSnapshot_hidesDemoTransitionAndPublishesRestoredAvailability() async throws {
+        let printer = try idlePrinter()
+        let fixture = try compositionFixture(printer: printer)
+        let original = try XCTUnwrap(fixture.services.printerControlsComposition)
+        let model = PrinterControlsViewModel(composition: original, printer: printer)
+        bindComposition(model, services: fixture.services, registry: fixture.registry)
+        await model.loadCapabilities()
+        let transition = Task { await fixture.services.switchToDemo() }
+        await fixture.disconnect.waitUntilArrived()
+        XCTAssertEqual(fixture.services.activeServerGeneration, original.identity.generation)
+        XCTAssertEqual(fixture.registry.activeServerID, fixture.first.id)
+        XCTAssertNil(fixture.services.printerControlsComposition, "A demo intent cannot expose the still-real service")
+        await model.homeAll()
+        XCTAssertTrue(printerMutations(fixture.api).isEmpty)
+        fixture.disconnect.release()
+        let switched = await transition.value
+        XCTAssertTrue(switched)
+        XCTAssertNil(fixture.services.printerControlsComposition, "Demo services have no production registered context")
+        let generation = fixture.services.activeServerGeneration
+        let restored = expectation(description: "Composition availability publishes without a generation change")
+        withObservationTracking {
+            _ = fixture.services.printerControlsComposition
+        } onChange: {
+            restored.fulfill()
+        }
+        fixture.services.switchToReal()
+        await fulfillment(of: [restored], timeout: 5)
+        XCTAssertEqual(fixture.services.activeServerGeneration, generation)
+        XCTAssertEqual(fixture.services.printerControlsComposition?.identity.serverID, fixture.first.id)
+        XCTAssertFalse(model.canControl)
     }
 
     func test_sharedLease_survivesOwnerAndServiceRecreationUntilResponseSettles() async throws {

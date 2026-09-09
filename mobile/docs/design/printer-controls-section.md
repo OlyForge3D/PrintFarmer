@@ -176,9 +176,11 @@ the current user, or a transient service generation. The existing
 `ServiceContainer.printerControlsComposition` exposes an immutable MainActor
 bundle of the **actual composed** registered UUID, generation, transition
 revision and exact printer service. It is unavailable during reconciliation or
-when eager registry selection differs from the composed server. The private
-worker handle is observed only so this read-only availability updates on
-settlement; service initialization and switch ordering are unchanged.
+when eager registry selection differs from the composed server, including
+pending demo transitions. The private composition ID, target and worker handle
+are observed so read-only availability updates on settlement and restoration
+even without a generation change; service initialization and switch ordering
+are unchanged.
 
 The detail host captures that bundle alongside its detail-data service after
 the existing settlement barrier, checks cancellation/generation, and retains

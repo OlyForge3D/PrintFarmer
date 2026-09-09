@@ -69,7 +69,8 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored private let offlineReplayProviderResolutionHook: @Sendable () async -> Void
     @ObservationIgnored private let activeGeneration: ActiveServerGeneration
     @ObservationIgnored private var observesRegistry: Bool
-    @ObservationIgnored private var activeServerID: UUID?
+    // Actual composition inputs are observed for the read-only controls snapshot.
+    private var activeServerID: UUID?
     // Observed so the read-only controls composition announces settlement,
     // including when no further service-generation change is needed.
     private var activeServerSwitchTask: Task<Void, Never>?
@@ -83,7 +84,7 @@ final class ServiceContainer: @unchecked Sendable {
     /// worker reconciles ONLY this captured target and NEVER re-reads the registry to
     /// infer intent after a suspension — so a suspended real switch can never resume
     /// and undo a newer demo/logout intent.
-    @ObservationIgnored private var desiredTarget: DesiredTarget = .none
+    private var desiredTarget: DesiredTarget = .none
 
     /// An immutable snapshot of the intended composition. `.server` carries the
     /// captured server so the worker never re-derives it from the mutable registry.
@@ -773,6 +774,14 @@ final class ServiceContainer: @unchecked Sendable {
         guard activeServerSwitchTask == nil,
               let activeServerID,
               serverRegistry?.activeServerID == activeServerID else { return nil }
+        switch desiredTarget {
+        case .demo:
+            return nil
+        case .server(let target) where target.id != activeServerID:
+            return nil
+        default:
+            break
+        }
         return PrinterControlsComposition(
             identity: .init(
                 serverID: activeServerID, generation: activeServerGeneration,
