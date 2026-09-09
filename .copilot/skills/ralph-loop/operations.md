@@ -38,9 +38,11 @@ enabled verified SSH adapter; it never performs mobile work, reviews, or merges 
 ## Ready Queue
 
 READY means open, exactly one valid owner, unassigned/unclaimed, non-epic, not in-progress,
-not needs-analysis, non-mobile on Windows, and no live blocker. Read GitHub native
-`blocked_by`/`blocking` edges as authoritative. Resolve “blocked by”/dependency prose markers
-live as an additional decaying claim; either live source blocks. Closed blockers do not.
+not needs-analysis, and no live blocker. On Windows, mobile work is READY only when the verified
+SSH adapter is explicitly enabled and its trusted configuration/readiness checks pass; otherwise
+it remains deferred to macOS. Read GitHub native `blocked_by`/`blocking` edges as authoritative.
+Resolve “blocked by”/dependency prose markers live as an additional decaying claim; either live
+source blocks. Closed blockers do not.
 
 Build the complete dependency graph before selecting READY candidates. Detect cycles, deduplicate
 transitive descendants, inherit the highest downstream priority, then sort READY candidates by

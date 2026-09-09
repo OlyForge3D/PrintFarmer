@@ -498,6 +498,8 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
     'test-ralph-round-cache.mjs',
   ]) assert.match(skill, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   assert.doesNotMatch(skill, /\.squad\/templates\/ralph-reference\.md/i);
+  assert.match(operations, /mobile work is READY only when the verified\s+SSH adapter is explicitly enabled/i);
+  assert.doesNotMatch(operations, /not needs-analysis,\s+non-mobile on Windows/i);
   for (const reference of [
     'GitHub native', 'dependency prose markers', 'Detect cycles', 'five live',
     'fresh eligibility', 'apply claim label and comment', 'verify that exact claim landed',
