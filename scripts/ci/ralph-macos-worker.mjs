@@ -2,7 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';
-import { mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
+import { link, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -118,6 +118,28 @@ async function releaseOwnedFile(file, lock) {
   }
 }
 
+async function publishOwnedFile(file, metadata) {
+  const candidate = `${file}.candidate.${metadata.token}`;
+  const handle = await open(candidate, 'wx', 0o600);
+  try {
+    await handle.writeFile(JSON.stringify(metadata));
+    await handle.sync();
+    await link(candidate, file);
+  } catch (error) {
+    await handle.close();
+    await rm(candidate, { force: true });
+    throw error;
+  }
+  try {
+    await rm(candidate, { force: true });
+  } catch (error) {
+    await releaseOwnedFile(file, { handle, metadata });
+    await rm(candidate, { force: true });
+    throw error;
+  }
+  return { handle, metadata };
+}
+
 async function staleLock(file, leaseMs) {
   try {
     const [content, details] = await Promise.all([readFile(file, 'utf8'), stat(file)]);
@@ -154,17 +176,8 @@ async function reclaimObservedGeneration(file, observed, leaseMs, suffix) {
     staleTargets.push({ file: targetFile, generation: target.generation });
     const claimFile = `${targetFile}.${suffix}.${encodeURIComponent(target.generation)}`;
     try {
-      const handle = await open(claimFile, 'wx', 0o600);
       const metadata = lockMetadata(leaseMs);
-      try {
-        await handle.writeFile(JSON.stringify(metadata));
-        await handle.sync();
-      } catch (error) {
-        await handle.close();
-        await rm(claimFile, { force: true });
-        throw error;
-      }
-      claim = { file: claimFile, handle, metadata };
+      claim = { file: claimFile, ...await publishOwnedFile(claimFile, metadata) };
       break;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
@@ -180,18 +193,12 @@ async function reclaimObservedGeneration(file, observed, leaseMs, suffix) {
   try {
     for (const staleTarget of staleTargets) {
       const holdFile = `${staleTarget.file}.hold.${encodeURIComponent(staleTarget.generation)}`;
-      let handle;
+      let hold;
       try {
-        handle = await open(holdFile, 'wx', 0o600);
         const metadata = lockMetadata(leaseMs);
-        await handle.writeFile(JSON.stringify(metadata));
-        await handle.sync();
-        holds.push({ file: holdFile, handle, metadata });
+        hold = { file: holdFile, ...await publishOwnedFile(holdFile, metadata) };
+        holds.push(hold);
       } catch (error) {
-        if (handle) {
-          await handle.close();
-          await rm(holdFile, { force: true });
-        }
         if (error.code === 'EEXIST') {
           const orphan = await staleLock(holdFile, leaseMs);
           if (orphan) await reclaimObservedGeneration(holdFile, orphan, leaseMs, 'recover');
@@ -214,18 +221,10 @@ async function reclaimObservedGeneration(file, observed, leaseMs, suffix) {
 }
 
 async function acquireReclaimGuard(guardFile, leaseMs) {
-  let handle;
   const metadata = lockMetadata(leaseMs);
   try {
-    handle = await open(guardFile, 'wx', 0o600);
-    await handle.writeFile(JSON.stringify(metadata));
-    await handle.sync();
-    return { handle, metadata };
+    return await publishOwnedFile(guardFile, metadata);
   } catch (error) {
-    if (handle) {
-      await handle.close();
-      await rm(guardFile, { force: true });
-    }
     if (error.code !== 'EEXIST') throw error;
     const observed = await staleLock(guardFile, leaseMs);
     if (observed) await reclaimObservedGeneration(guardFile, observed, leaseMs, 'recover');
@@ -276,12 +275,10 @@ async function reclaimDeadLock(lockFile) {
 async function withJobLock(jobId, action) {
   await mkdir(path.dirname(lockFor(jobId)), { recursive: true, mode: 0o700 });
   const lockFile = lockFor(jobId);
-  let handle;
+  let lock;
   for (let attempt = 0; attempt < 200; attempt += 1) {
     try {
-      handle = await open(lockFile, 'wx', 0o600);
-      await handle.writeFile(JSON.stringify(lockMetadata(testMode ? 100 : 30_000)));
-      await handle.sync();
+      lock = await publishOwnedFile(lockFile, lockMetadata(testMode ? 100 : 30_000));
       break;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
@@ -289,12 +286,15 @@ async function withJobLock(jobId, action) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
   }
-  if (!handle) fail('Another worker process owns this job record.');
+  if (!lock) fail('Another worker process owns this job record.');
+  if (testMode && process.env.RALPH_MAC_WORKER_TEST_CRASH_AT === 'after-lock-publication') process.exit(84);
+  if (testMode && process.env.RALPH_MAC_WORKER_TEST_LOCK_HOLD_MS) {
+    await new Promise((resolve) => setTimeout(resolve, Number(process.env.RALPH_MAC_WORKER_TEST_LOCK_HOLD_MS)));
+  }
   try {
     return await action();
   } finally {
-    await handle.close();
-    await rm(lockFile, { force: true });
+    await releaseOwnedFile(lockFile, lock);
   }
 }
 

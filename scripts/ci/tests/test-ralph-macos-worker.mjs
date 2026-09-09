@@ -451,6 +451,47 @@ test('reclaims an old malformed worker lock without overlapping a live generatio
   assert.equal((await waitForInvocations(fixture.invocations, 1)).length, 1);
 });
 
+test('publishes complete lock ownership atomically before a crash', async () => {
+  const fixture = await createFixture('atomic-lock-publication');
+  const request = { version: 1, type: 'reconcile', job: fixture.job };
+  const crashed = await invoke(
+    request,
+    { ...fixture.env, RALPH_MAC_WORKER_TEST_CRASH_AT: 'after-lock-publication' },
+  );
+  assert.equal(crashed.code, 84, crashed.stderr);
+  const lockFile = path.join(fixture.state, '.locks', `${fixture.job.jobId}.lock`);
+  const lock = JSON.parse(await readFile(lockFile, 'utf8'));
+  assert.match(lock.token, /^[0-9a-f-]{36}$/);
+  assert.ok(Number.isInteger(lock.pid));
+  assert.ok(Number.isFinite(Date.parse(lock.expiresAt)));
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  const recovered = await invoke(request, fixture.env);
+  assert.equal(recovered.code, 0, recovered.stderr);
+  assert.equal(JSON.parse(recovered.stdout).failureCode, 'JOB_NOT_FOUND');
+});
+
+test('a lock owner cannot delete a replacement generation when it resumes', async () => {
+  const fixture = await createFixture('lock-replacement');
+  const lockFile = path.join(fixture.state, '.locks', `${fixture.job.jobId}.lock`);
+  const request = { version: 1, type: 'reconcile', job: fixture.job };
+  const invocation = invoke(
+    request,
+    { ...fixture.env, RALPH_MAC_WORKER_TEST_LOCK_HOLD_MS: '250' },
+  );
+  await waitForRecord(lockFile, (lock) => typeof lock.token === 'string', 'published worker lock');
+  const replacement = {
+    token: 'replacement-generation',
+    pid: process.pid,
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  };
+  await rm(lockFile);
+  await writeFile(lockFile, JSON.stringify(replacement));
+  const result = await invocation;
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(await readFile(lockFile, 'utf8')).token, replacement.token);
+});
+
 test('recovers stale reclaim guards and orphaned recovery claims before reclaiming a dead lock', async () => {
   const fixture = await createFixture('stale-reclaim-guard');
   const lockDirectory = path.join(fixture.state, '.locks');
