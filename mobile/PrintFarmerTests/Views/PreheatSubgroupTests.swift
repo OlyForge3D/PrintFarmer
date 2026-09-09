@@ -8,6 +8,14 @@ import SwiftUI
 @MainActor
 final class PreheatSubgroupTests: XCTestCase {
 
+    func test_individualHeaterLabels_preserveUnknownVersusZero() {
+        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(nil), "Unknown")
+        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(.nan), "Unknown")
+        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(0), "0 °C")
+        XCTAssertEqual(Heater.hotend.title, "Hotend")
+        XCTAssertEqual(Heater.bed.title, "Bed")
+    }
+
     // MARK: - presets
 
     func test_presets_containsAllFourInFixedOrder() {

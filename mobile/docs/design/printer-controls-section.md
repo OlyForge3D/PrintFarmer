@@ -4,7 +4,7 @@
 **Issue:** #283
 **Implementers:** #284 (Preheat), #285 (Home), #286 (Jog)
 **Owner:** Newt (UX) → Hudson (iOS)
-**Last updated:** 2026-05-21
+**Last updated:** 2026-09-08
 
 This spec defines the visual hierarchy, component anatomy, interaction model, accessibility, and edge cases for the **Printer Controls** section that lives inside `PrinterDetailView`. Three subgroups in fixed order: **Preheat → Home → Jog**.
 
@@ -12,8 +12,8 @@ This spec defines the visual hierarchy, component anatomy, interaction model, ac
 
 `Views/PrinterControls/PrinterSetupControlsContent.swift` exports
 `PrinterSetupControlsContent(printer:viewModel:)`. It observes an externally
-owned `PrinterControlsViewModel` and only renders Preheat, Home, Jog, lockout and
-error presentation. It does not create services/models, load capabilities or
+owned `PrinterControlsViewModel` and renders thermal/motion, lockout and
+command outcome presentation. It does not create services/models, load capabilities or
 subscribe to updates. `JogSubgroup` likewise no longer loads capabilities;
 its initial capability observation normalizes selection for preloaded limited axes.
 
@@ -43,14 +43,18 @@ read feature flags. Replace the owner when the real server/printer target change
 | --- | --- | --- |
 | Preheat PLA/PETG/ABS | `setTemperatures` | Temperature capability; omit unsupported bed; acknowledge exact supported targets |
 | Cool Down | Same preheat command, 0/0 preset | Shown only with temperature subgroup; unsupported confirmation targets ignored |
-| Home All/XY/Z | `home`, `homeXY`, `homeZ` | Movement + homing capability; matching axes acknowledgement |
+| Home All/XY/Z | `home`, `homeXY`, `homeZ` | Independent All/XY/Z capability; requested homed axes acknowledgement |
 | Jog | `move` | Movement + supported axes; matching-axis position update; existing distances/feedrates |
+| Individual hotend/bed | `setTemperatures` | Specific heater support; other heater omitted; exact setpoint acknowledgement |
+| Absolute XYZ | `moveTo` | Absolute support + supported axes; every requested coordinate must match |
+| Disable motors | `disableMotors` | Specific motor-release support + explicit confirmation; acceptance only, no motor telemetry |
 
 All operations retain model-wide single-flight and online/idle gating. Printing
 and paused printers keep the explanatory lockout. Unrelated telemetry and
 other-printer updates do not acknowledge pending commands; offline/state changes
-invalidate them. Existing errors, dismissal and retry-by-tapping behavior remain.
-Z-offset, motor disabling and console are not implemented native operations.
+invalidate them. Network/server failures can have uncertain physical outcomes;
+inspect the printer before another request. Z-offset, physical filament and
+console are not part of this child.
 Earlier design proposals below are not evidence of additional command support
 or per-subgroup concurrency.
 
@@ -63,6 +67,44 @@ dismissal remains a separately accessible button with a minimum 44-point target.
 The controls snapshot suite includes hosted observer-remount, wrapper-offline,
 retained-owner, preloaded-axis and large-text regressions; model/correlation
 suites continue to exercise native dispatch through mock services.
+
+### Individual thermal and motion controls (#2598)
+
+- Presets remain PLA **200/60**, PETG **240/80**, ABS **240/100** and
+  Cool Down **0/0** °C. Presets require proven hotend support; unsupported or
+  explicitly bed-less hardware omits the bed, including during Cool Down.
+- Separate target editors send only the chosen heater. Zero explicitly turns
+  that heater off; blank is not zero. Actual temperature and reported setpoint
+  are separate labels; missing/nonfinite measurements read **Unknown**.
+- Targets must be finite and nonnegative and may not exceed a known configured
+  `maxHotendTemp`/`maxBedTemp` from the typed details contract. Missing maxima
+  remain unknown with a visible warning, not fabricated limits. Capability
+  loading also reads these optional hardware details; failed reads add no proof.
+- Absolute coordinates are signed millimetres, with blank axes omitted and
+  zero preserved. Optional feedrate is a positive whole number in **mm/min**;
+  blank uses the server default. No mm/s conversion or relative-move fallback
+  occurs. Build-volume dimensions are not firmware travel limits or proof of
+  a zero origin. Position and homing labels preserve unknown telemetry.
+- Relative jog retains **0.1/1/10/100 mm**, XY **3000 mm/min**, Z **600 mm/min**.
+  Unknown/false specific movement flags hide movement controls. The #2597
+  handoff currently proves neither relative nor absolute motion on production
+  backends; synthetic UI fixtures are not capability evidence.
+- Motor release warns about loss of holding force, gravity, re-homing, and
+  heaters remaining on. `success:false` is an error. `success:true` means the
+  request was accepted, not that motors are physically released.
+- The persistent command owner uses invocation UUIDs and keeps single-flight
+  until the request returns even when matching telemetry arrives first.
+  Other-axis, measured-temperature and unrelated setpoint noise do not
+  acknowledge an individual target or absolute move.
+- The access-lifecycle modifier belongs on the **detail host**, not a pager
+  child. It fences server generation, signed-in user, per-server preference,
+  readiness and Queue.Start permission. Leaving the detail, losing authority,
+  going offline or changing printer state cancels waiting and fences late
+  results. **Stop waiting** cancels the local request but cannot undo commands
+  already received by the printer. Nothing is automatically replayed.
+- Emergency Stop remains shell-owned above both tabs, with its own confirmation
+  and no dependency on pending setup commands. The shared owner/composition
+  seam remains available for #2599; no filament or Z-offset transport is added.
 
 ---
 

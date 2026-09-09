@@ -59,17 +59,33 @@ struct PrinterSetupControlsContent: View {
                     : AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
                 // Keep Jog's axis/distance state when width or text size reflows.
                 layout {
-                    PreheatSubgroup(viewModel: viewModel)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 16) {
+                        PreheatSubgroup(viewModel: viewModel)
+                        PreheatSubgroup.IndividualHeaterControls(viewModel: viewModel)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     VStack(alignment: .leading, spacing: 12) {
                         HomeSubgroup(viewModel: viewModel)
                         Divider()
                             .background(Color.pfBorder)
                         JogSubgroup(viewModel: viewModel)
+                        JogSubgroup.AbsolutePositionControls(viewModel: viewModel)
+                        HomeSubgroup.MotorReleaseControls(viewModel: viewModel)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                if let notice = viewModel.commandNotice {
+                    Text(notice)
+                        .font(.footnote)
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .padding(.top, 12)
+                }
+                if viewModel.isExecuting {
+                    Button("Stop waiting for command") { viewModel.cancelPendingCommand() }
+                        .frame(minHeight: 44)
+                        .accessibilityHint("Does not stop the printer. Physical execution may continue.")
+                }
                 if let error = viewModel.lastError {
                     errorBanner(error)
                         .padding(.top, 12)

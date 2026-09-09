@@ -18,6 +18,7 @@ struct PrinterControlsSection: View {
 
     let printer: Printer
     @StateObject private var viewModel: PrinterControlsViewModel
+    private let enforcesAccess: Bool
 
     /// Production init. `StateObject(wrappedValue:)` takes an `@autoclosure
     /// @escaping` argument, so wrapping the view-model construction directly
@@ -33,6 +34,7 @@ struct PrinterControlsSection: View {
     /// only for deterministic snapshot / unit-test injection.
     init(printer: Printer, printerService: any PrinterServiceProtocol) {
         self.printer = printer
+        self.enforcesAccess = true
         _viewModel = StateObject(
             wrappedValue: PrinterControlsViewModel(printerService: printerService, printer: printer)
         )
@@ -43,6 +45,7 @@ struct PrinterControlsSection: View {
     /// so `@StateObject`'s autoclosure semantics keep VM construction lazy.
     init(printer: Printer, viewModel: PrinterControlsViewModel) {
         self.printer = printer
+        self.enforcesAccess = false
         _viewModel = StateObject(wrappedValue: viewModel)
     }
 
@@ -65,7 +68,12 @@ struct PrinterControlsSection: View {
         // re-renders triggered by the VM's own `@Published` state cannot
         // re-fire `.onChange` — no update loop.
         ZStack {
-            PrinterSetupControlsContent(printer: printer, viewModel: viewModel)
+            if enforcesAccess {
+                PrinterSetupControlsContent(printer: printer, viewModel: viewModel)
+                    .modifier(PrinterControlsAccessLifecycle(viewModel: viewModel))
+            } else {
+                PrinterSetupControlsContent(printer: printer, viewModel: viewModel)
+            }
         }
         .task { await viewModel.loadCapabilities() }
         // Forward every meaningful live snapshot to the VM so

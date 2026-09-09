@@ -51,6 +51,224 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     // MARK: - Tests
 
+    func test_individualHeaters_preserveOmissionAndZero() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        await vm.setHeaterTarget(.hotend, target: 0)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 0)
+        XCTAssertNil(mockService.setTemperaturesCalledWith?.bed)
+        vm.cancelPendingCommand()
+        await vm.setHeaterTarget(.bed, target: 75)
+        XCTAssertNil(mockService.setTemperaturesCalledWith?.hotend)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, 75)
+        XCTAssertEqual(vm.printer.hotendTemp, try idlePrinter().hotendTemp)
+        XCTAssertEqual(vm.printer.bedTarget, try idlePrinter().bedTarget, "HTTP must not manufacture telemetry")
+    }
+
+    func test_heaters_rejectInvalidValuesAndConfiguredMaxima() async throws {
+        let printer = try idlePrinter()
+        mockService.detailsToReturn = PrinterDetails(
+            id: printer.id, name: printer.name, backend: printer.backend,
+            capabilities: PrinterHardwareCapabilities(
+                maxBuildVolumeX: nil, maxBuildVolumeY: nil, maxBuildVolumeZ: nil,
+                maxHotendTemp: 260, maxBedTemp: 110, hasHeatedBed: true
+            )
+        )
+        let vm = try makeViewModel(printer: printer, capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        for (heater, value) in [(Heater.hotend, -1.0), (.hotend, .nan), (.bed, .infinity),
+                                (.hotend, 261), (.bed, 111)] {
+            await vm.setHeaterTarget(heater, target: value)
+            XCTAssertNil(mockService.setTemperaturesCalledWith)
+            XCTAssertNotNil(vm.lastError)
+            XCTAssertNil(vm.pendingCommand)
+        }
+        await vm.setHeaterTarget(.hotend, target: 260)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 260)
+    }
+
+    func test_bedlessHardware_omitsPresetBedAndRejectsBedEditor() async throws {
+        let printer = try idlePrinter()
+        mockService.detailsToReturn = PrinterDetails(
+            id: printer.id, name: printer.name, backend: printer.backend,
+            capabilities: PrinterHardwareCapabilities(
+                maxBuildVolumeX: nil, maxBuildVolumeY: nil, maxBuildVolumeZ: nil,
+                maxHotendTemp: nil, maxBedTemp: nil, hasHeatedBed: false
+            )
+        )
+        let vm = try makeViewModel(printer: printer, capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        XCTAssertFalse(vm.supports(.bed))
+        await vm.setHeaterTarget(.bed, target: 0)
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        await vm.preheat(.pla)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, 200)
+        XCTAssertNil(mockService.setTemperaturesCalledWith?.bed)
+    }
+
+    func test_individualHeater_specificSupportDoesNotRequireOtherHeater() async throws {
+        let caps = PrinterBackendCapabilities(
+            supportsMovement: false, supportsTemperatureControl: false,
+            supportsBedTemperature: true, supportsFanControl: false,
+            supportsHoming: false, supportedAxes: []
+        )
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await vm.loadCapabilities()
+        await vm.setHeaterTarget(.hotend, target: 200)
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        await vm.setHeaterTarget(.bed, target: 60)
+        XCTAssertNil(mockService.setTemperaturesCalledWith?.hotend)
+        XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, 60)
+    }
+
+    func test_absoluteDispatch_omitsBlankAxesPreservesZeroAndFeedrate() async throws {
+        var caps = Self.fullCaps
+        caps.supportsAbsoluteMovement = true
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await vm.loadCapabilities()
+        await vm.moveTo(x: 0, y: nil, z: -2.5, feedrateMmMin: 600)
+        XCTAssertEqual(mockService.moveToCalledWith?.x, 0)
+        XCTAssertNil(mockService.moveToCalledWith?.y)
+        XCTAssertEqual(mockService.moveToCalledWith?.z, -2.5, "Do not invent a zero-origin travel bound")
+        XCTAssertEqual(mockService.moveToCalledWith?.feedrateMmMin, 600)
+        XCTAssertNil(mockService.moveCalledWith)
+    }
+
+    func test_absoluteValidation_rejectsEmptyNonfiniteUnsupportedAxesAndFeedrate() async throws {
+        var caps = PrinterBackendCapabilities(
+            supportsMovement: true, supportsTemperatureControl: true,
+            supportsBedTemperature: true, supportsFanControl: false,
+            supportsHoming: true, supportedAxes: ["X"]
+        )
+        caps.supportsAbsoluteMovement = true
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await vm.loadCapabilities()
+        for (x, y, f) in [(nil, nil, nil), (Double.nan, nil, nil),
+                           (1, nil, 0), (1, nil, -10), (nil, 2, 600)] as [(Double?, Double?, Int?)] {
+            await vm.moveTo(x: x, y: y, z: nil, feedrateMmMin: f)
+            XCTAssertNil(mockService.moveToCalledWith)
+            XCTAssertNotNil(vm.lastError)
+            XCTAssertNil(vm.pendingCommand)
+        }
+    }
+
+    func test_newCommands_requireSpecificCapabilities() async throws {
+        for caps in [Self.fullCaps, PrinterBackendCapabilities.fallback(for: .moonraker)] {
+            let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+            await vm.loadCapabilities()
+            await vm.moveTo(x: 0, y: nil, z: nil, feedrateMmMin: nil)
+            await vm.disableMotors()
+            XCTAssertNil(mockService.moveToCalledWith)
+            XCTAssertNil(mockService.disableMotorsCalledWith)
+        }
+        let unknown = try makeViewModel(printer: idlePrinter())
+        await unknown.setHeaterTarget(.hotend, target: 200)
+        await unknown.moveTo(x: 0, y: nil, z: nil, feedrateMmMin: nil)
+        await unknown.disableMotors()
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertNil(mockService.moveToCalledWith)
+        XCTAssertNil(mockService.disableMotorsCalledWith)
+    }
+
+    func test_motorReleaseAndAbsolute_failureResultsAreNotSuccess() async throws {
+        var caps = Self.fullCaps
+        caps.supportsAbsoluteMovement = true
+        caps.supportsDisableMotors = true
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await vm.loadCapabilities()
+        mockService.commandResultToReturn = CommandResult(success: false, message: "Guard rejected")
+        await vm.disableMotors()
+        XCTAssertEqual(vm.lastError?.message, "Guard rejected")
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertNil(vm.commandNotice)
+        await vm.moveTo(x: 1, y: nil, z: nil, feedrateMmMin: nil)
+        XCTAssertEqual(vm.lastError?.message, "Guard rejected")
+        XCTAssertNil(vm.pendingCommand)
+    }
+
+    func test_motorRelease_acceptanceDoesNotInventMotorOrPositionTelemetry() async throws {
+        var caps = Self.fullCaps
+        caps.supportsDisableMotors = true
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await vm.loadCapabilities()
+        let previous = vm.printer
+        await vm.disableMotors()
+        XCTAssertEqual(mockService.disableMotorsCalledWith, previous.id)
+        XCTAssertNil(vm.pendingCommand, "No motor-state callback exists")
+        XCTAssertTrue(vm.commandNotice?.contains("Motor state is not reported") == true)
+        XCTAssertEqual(vm.printer.homedAxes, previous.homedAxes)
+        XCTAssertEqual(vm.printer.x, previous.x)
+    }
+
+    func test_newCommands_blockAllUnsafeStatesBeforeDispatch() async throws {
+        var caps = Self.fullCaps
+        caps.supportsAbsoluteMovement = true
+        caps.supportsDisableMotors = true
+        for (state, online) in [("printing", true), ("paused", true), ("starting", true), ("ready", false)] {
+            var printer = try idlePrinter()
+            printer.state = state
+            printer.isOnline = online
+            let vm = try makeViewModel(printer: printer, capabilities: caps)
+            await vm.loadCapabilities()
+            await vm.setHeaterTarget(.hotend, target: 200)
+            await vm.moveTo(x: 1, y: nil, z: nil, feedrateMmMin: nil)
+            await vm.disableMotors()
+            XCTAssertNil(mockService.setTemperaturesCalledWith)
+            XCTAssertNil(mockService.moveToCalledWith)
+            XCTAssertNil(mockService.disableMotorsCalledWith)
+        }
+    }
+
+    func test_accessRevocationAndDismissal_preventDispatchAndIgnoreLateResult() async throws {
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        mockService.beforeSetTemperatures = { await barrier.arriveAndWait() }
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        var allowed = true
+        vm.configureAccess { allowed ? nil : "Preference or permission revoked" }
+        let task = Task { await vm.setHeaterTarget(.hotend, target: 200) }
+        await barrier.waitUntilArrived()
+        allowed = false
+        vm.refreshAccess()
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertTrue(vm.commandNotice?.contains("may still execute") == true)
+        barrier.release()
+        await task.value
+        XCTAssertNil(vm.lastError)
+        mockService.setTemperaturesCalledWith = nil
+        await vm.setHeaterTarget(.hotend, target: 205)
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        allowed = true
+        vm.deactivate()
+        await vm.preheat(.pla)
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+    }
+
+    func test_cancelledCaller_neverDispatches() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        let task = Task {
+            await vm.setHeaterTarget(.hotend, target: 200)
+            await vm.jog(axis: "X", distanceMm: 10)
+        }
+        task.cancel()
+        await task.value
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertNil(mockService.moveCalledWith)
+        XCTAssertNil(vm.pendingCommand)
+    }
+
+    func test_relativeValidation_rejectsInvalidAxisNonfiniteAndZero() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        for (axis, distance) in [("E", 1.0), ("X", .nan), ("Z", .infinity), ("Y", 0)] {
+            await vm.jog(axis: axis, distanceMm: distance)
+            XCTAssertNil(mockService.moveCalledWith)
+            XCTAssertNotNil(vm.lastError)
+        }
+    }
+
     func test_capabilityReadsAreSingleFlightAndCancellationDoesNotPublishSupport() async throws {
         let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
         let barrier = AsyncBarrier()

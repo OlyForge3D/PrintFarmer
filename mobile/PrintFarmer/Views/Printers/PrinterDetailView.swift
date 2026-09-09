@@ -388,6 +388,7 @@ struct PrinterDetailView: View {
         .onChange(of: PrinterControlsUpdateSignal(printer: printer)) { _, _ in
             controlsViewModel?.handlePrinterUpdate(printer)
         }
+        .modifier(PrinterControlsAccessLifecycle(viewModel: controlsViewModel))
         .safeAreaInset(edge: .top, spacing: 0) {
             let presentation = runActionPresentation(for: printer)
             VStack(alignment: .trailing, spacing: 4) {

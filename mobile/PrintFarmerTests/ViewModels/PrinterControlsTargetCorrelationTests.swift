@@ -135,7 +135,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
 
     // MARK: - Single-flight identity under a stale response race
 
-    func test_staleSuccessResponse_doesNotClearNewerPendingCommand() async throws {
+    func test_telemetryBeforeResponse_doesNotPermitOverlappingDispatch() async throws {
         let service = MockPrinterService()
         let gate = AsyncGate()
         service.beforeSetTemperatures = { await gate.wait() }
@@ -147,21 +147,21 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         async let first: Void = vm.preheat(.pla)
         while await !gate.hasWaiters { await Task.yield() }
 
-        // Live evidence confirms and clears C1 *before* its HTTP response lands.
+        // Telemetry alone must not release the transport's single-flight slot.
         var warmed = base
         warmed.hotendTarget = 200
         vm.handlePrinterUpdate(warmed)
-        XCTAssertFalse(vm.isExecuting, "Live evidence cleared C1")
+        XCTAssertTrue(vm.isExecuting)
 
         // C2: a new jog begins and becomes the pending command.
         await vm.jog(axis: "X", distanceMm: 10)
-        guard case .jog = vm.pendingCommand?.kind else {
-            return XCTFail("Expected a pending jog (C2) after the preheat cleared")
-        }
+        XCTAssertNil(service.moveCalledWith)
 
         // C1's stale success finally returns; it must not clear the newer C2.
         await gate.open()
         await first
+        XCTAssertNil(vm.pendingCommand)
+        await vm.jog(axis: "X", distanceMm: 10)
         guard case .jog = vm.pendingCommand?.kind else {
             return XCTFail("A stale preheat response cleared the newer jog command")
         }
@@ -179,11 +179,13 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         async let first: Void = vm.preheat(.pla)
         while await !gate.hasWaiters { await Task.yield() }
 
-        // Live evidence confirms and clears C1 *before* its HTTP response lands.
+        // Explicit cancellation abandons waiting, not physical execution.
         var warmed = base
         warmed.hotendTarget = 200
         vm.handlePrinterUpdate(warmed)
-        XCTAssertFalse(vm.isExecuting, "Live evidence cleared C1")
+        XCTAssertTrue(vm.isExecuting)
+        vm.cancelPendingCommand()
+        XCTAssertFalse(vm.isExecuting)
 
         // C2: a new jog begins and becomes the pending command (its move
         // succeeds because no error is armed yet).
@@ -219,6 +221,83 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         XCTAssertNil(vm.pendingCommand, "The current command's failure clears pending for retry")
         XCTAssertFalse(vm.isExecuting)
         XCTAssertEqual(vm.lastError?.isRetryable, true, "The current command's error is surfaced")
+        XCTAssertTrue(vm.lastError?.message.contains("Outcome may be unknown") == true)
+    }
+
+    func test_individualTarget_ignoresMeasurementsOtherHeaterAndPosition() async throws {
+        let service = MockPrinterService()
+        let base = try idlePrinter()
+        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
+        await vm.loadCapabilities()
+        await vm.setHeaterTarget(.hotend, target: 220)
+        var update = base
+        update.hotendTemp = 220
+        update.bedTarget = 220
+        update.x = 99
+        vm.handlePrinterUpdate(update)
+        XCTAssertNotNil(vm.pendingCommand)
+        update.hotendTarget = 220
+        vm.handlePrinterUpdate(update)
+        XCTAssertNil(vm.pendingCommand)
+    }
+
+    func test_absolute_requiresAllRequestedAxes_notUnrelatedNoise() async throws {
+        let service = MockPrinterService()
+        let base = try idlePrinter()
+        var caps = Self.fullCaps
+        caps.supportsAbsoluteMovement = true
+        let vm = makeViewModel(printer: base, capabilities: caps, service: service)
+        await vm.loadCapabilities()
+        await vm.moveTo(x: 0, y: nil, z: 2, feedrateMmMin: nil)
+        var update = base
+        update.y = 50
+        update.hotendTarget = 0
+        vm.handlePrinterUpdate(update)
+        XCTAssertNotNil(vm.pendingCommand)
+        update.x = 0
+        update.z = 1
+        vm.handlePrinterUpdate(update)
+        XCTAssertNotNil(vm.pendingCommand)
+        update.z = 2
+        vm.handlePrinterUpdate(update)
+        XCTAssertNil(vm.pendingCommand)
+    }
+
+    func test_homeZ_doesNotResolveOnUnrelatedHomingOrMissingTelemetry() throws {
+        let base = try idlePrinter()
+        let command = ControlCommand(kind: .home(axes: ["Z"]), startedAt: Date())
+        var update = base
+        update.homedAxes = "xy"
+        XCTAssertFalse(PrinterControlsViewModel.transition(from: base, to: update, resolves: command))
+        update.homedAxes = nil
+        XCTAssertFalse(PrinterControlsViewModel.transition(from: base, to: update, resolves: command))
+        update.homedAxes = "xyz"
+        XCTAssertTrue(PrinterControlsViewModel.transition(from: base, to: update, resolves: command))
+    }
+
+    func test_offlineReconnect_abandonsPendingWithoutReplaying() async throws {
+        let service = MockPrinterService()
+        let base = try idlePrinter()
+        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
+        await vm.loadCapabilities()
+        await vm.setHeaterTarget(.hotend, target: 220)
+        var offline = base
+        offline.isOnline = false
+        vm.handlePrinterUpdate(offline)
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertTrue(vm.commandNotice?.contains("may still execute") == true)
+        service.setTemperaturesCalledWith = nil
+        vm.handlePrinterUpdate(base)
+        XCTAssertNil(service.setTemperaturesCalledWith)
+        XCTAssertNil(vm.pendingCommand)
+    }
+
+    func test_sameTimestampCommands_haveDistinctInvocationIdentity() {
+        let date = Date()
+        let first = ControlCommand(kind: .heater(.bed, target: 60), startedAt: date)
+        let second = ControlCommand(kind: .heater(.bed, target: 60), startedAt: date)
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(first, first)
     }
 }
 

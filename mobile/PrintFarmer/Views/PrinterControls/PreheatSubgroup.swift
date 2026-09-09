@@ -98,10 +98,7 @@ struct PreheatSubgroup: View {
         // Per spec §3.1 single-flight queue: if any preheat command is in
         // flight, *all* preheat siblings disable so the user can't stack
         // burst commands like "PLA then ABS".
-        let isAnyPreheatInProgress: Bool = {
-            guard case .preheat = viewModel.pendingCommand?.kind else { return false }
-            return true
-        }()
+        let isAnyPreheatInProgress = viewModel.pendingCommand != nil
         let isInteractive = canControl && !isAnyPreheatInProgress
 
         let hasError = isErrored(preset: preset)
@@ -121,6 +118,81 @@ struct PreheatSubgroup: View {
         .accessibilityValue(accessibilityValue(isPending: isPending, hasError: hasError))
         .accessibilityAddTraits(isPending ? .updatesFrequently : [])
         .help(viewModel.blockedReason ?? "")
+    }
+
+    struct IndividualHeaterControls: View {
+        @ObservedObject var viewModel: PrinterControlsViewModel
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Heater.allCases, id: \.self) { heater in
+                    if viewModel.supports(heater) {
+                        HeaterTargetEditor(viewModel: viewModel, heater: heater)
+                    }
+                }
+            }
+        }
+    }
+
+    struct HeaterTargetEditor: View {
+        @ObservedObject var viewModel: PrinterControlsViewModel
+        let heater: Heater
+        @State private var target = ""
+        @State private var inputError: String?
+
+        static func temperatureText(_ value: Double?) -> String {
+            guard let value, value.isFinite else { return "Unknown" }
+            return "\(value.formatted(.number.precision(.fractionLength(0...1)))) °C"
+        }
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("\(heater.title) target")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Actual: \(Self.temperatureText(actual))")
+                Text("Setpoint: \(Self.temperatureText(setpoint))")
+                if let maximum = viewModel.maximum(for: heater) {
+                    Text("Configured range: 0–\(maximum) °C. Zero switches this heater off.")
+                        .font(.footnote)
+                } else {
+                    Text("Maximum temperature is unknown. Confirm the printer's safe limit before setting a target. Zero switches this heater off.")
+                        .font(.footnote)
+                }
+                TextField("Target (°C)", text: $target)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(minHeight: 44)
+                    .accessibilityLabel("\(heater.title) target in degrees Celsius")
+                    .accessibilityIdentifier("printer.controls.\(heater.rawValue).target")
+                Button("Set \(heater.title.lowercased()) target") {
+                    do {
+                        guard let value = try ControlNumberInput.optional(target) else {
+                            throw PrinterControlError.invalidRequest("Enter a target; use zero to switch off.")
+                        }
+                        inputError = nil
+                        Task { await viewModel.setHeaterTarget(heater, target: value) }
+                    } catch {
+                        inputError = error.localizedDescription
+                    }
+                }
+                .frame(minHeight: 44)
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("printer.controls.\(heater.rawValue).set")
+                if let inputError {
+                    Text(inputError).font(.footnote).foregroundStyle(Color.pfError)
+                }
+            }
+            .foregroundStyle(Color.pfTextPrimary)
+            .disabled(!viewModel.canControl || viewModel.isExecuting)
+        }
+
+        private var actual: Double? {
+            heater == .hotend ? viewModel.printer.hotendTemp : viewModel.printer.bedTemp
+        }
+
+        private var setpoint: Double? {
+            heater == .hotend ? viewModel.printer.hotendTarget : viewModel.printer.bedTarget
+        }
     }
 
     private var blockedReasonMessage: String? {

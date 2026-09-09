@@ -8,6 +8,28 @@ import SwiftUI
 @MainActor
 final class JogSubgroupTests: XCTestCase {
 
+    func test_absoluteInputs_blankIsOmittedZeroIsRealAndUnitsAreUnchanged() throws {
+        XCTAssertNil(try ControlNumberInput.optional("  "))
+        XCTAssertEqual(try ControlNumberInput.optional("0"), 0)
+        XCTAssertEqual(try ControlNumberInput.optional("-1.25"), -1.25)
+        XCTAssertEqual(try ControlNumberInput.feedrate("600"), 600)
+        XCTAssertNil(try ControlNumberInput.feedrate(""))
+        for input in ["nan", "inf", "-inf", "1e999", "abc"] {
+            XCTAssertThrowsError(try ControlNumberInput.optional(input))
+        }
+        for input in ["0", "-1", "1.5", "1e100"] {
+            XCTAssertThrowsError(try ControlNumberInput.feedrate(input))
+        }
+    }
+
+    func test_absoluteVisibility_requiresSpecificSupportAndKnownAxes() {
+        XCTAssertFalse(JogSubgroup.AbsolutePositionControls.isVisible(nil))
+        var caps = Self.fullCaps
+        XCTAssertFalse(JogSubgroup.AbsolutePositionControls.isVisible(caps))
+        caps.supportsAbsoluteMovement = true
+        XCTAssertTrue(JogSubgroup.AbsolutePositionControls.isVisible(caps))
+    }
+
     private static let fullCaps = PrinterBackendCapabilities(
         supportsMovement: true,
         supportsTemperatureControl: true,
@@ -53,7 +75,7 @@ final class JogSubgroupTests: XCTestCase {
     // MARK: - visibleAxes
 
     func test_visibleAxes_whenCapabilitiesNil_returnsAllCanonicalAxes() {
-        XCTAssertEqual(JogSubgroup.visibleAxes(for: nil), ["X", "Y", "Z"])
+        XCTAssertEqual(JogSubgroup.visibleAxes(for: nil), [])
     }
 
     func test_visibleAxes_filtersByCapabilities() {
@@ -68,7 +90,7 @@ final class JogSubgroupTests: XCTestCase {
     // MARK: - isHidden
 
     func test_isHidden_whenCapabilitiesNil_returnsFalse() {
-        XCTAssertFalse(JogSubgroup.isHidden(for: nil))
+        XCTAssertTrue(JogSubgroup.isHidden(for: nil))
     }
 
     func test_isHidden_whenSupportsMovementFalse_returnsTrue() {

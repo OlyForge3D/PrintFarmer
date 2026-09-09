@@ -41,8 +41,41 @@ struct HomeSubgroup: View {
     }
 
     private var anyPending: Bool {
-        if case .home = viewModel.pendingCommand?.kind { return true }
-        return false
+        viewModel.pendingCommand != nil
+    }
+
+    struct MotorReleaseControls: View {
+        @ObservedObject var viewModel: PrinterControlsViewModel
+        @State private var confirmsRelease = false
+
+        static let warning = "Disabling motors removes holding force. Axes may move or drop under gravity. Support the mechanism and re-home before moving again. This is not Emergency Stop and does not turn heaters off."
+
+        var body: some View {
+            if viewModel.capabilities?.supportsDisableMotors == true {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Motor maintenance")
+                        .font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(Self.warning).font(.footnote)
+                    Button("Disable motors", role: .destructive) {
+                        confirmsRelease = true
+                    }
+                    .frame(minHeight: 44)
+                    .buttonStyle(.bordered)
+                    .disabled(!viewModel.canControl || viewModel.isExecuting)
+                    .accessibilityIdentifier("printer.controls.disable-motors")
+                }
+                .foregroundStyle(Color.pfTextPrimary)
+                .confirmationDialog("Disable motors?", isPresented: $confirmsRelease, titleVisibility: .visible) {
+                    Button("Disable motors", role: .destructive) {
+                        Task { await viewModel.disableMotors() }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text(Self.warning)
+                }
+            }
+        }
     }
 
     private var isDisabled: Bool {
