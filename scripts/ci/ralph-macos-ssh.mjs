@@ -46,6 +46,20 @@ function safeJson(value, name) {
   return value;
 }
 
+function validateRemoteJob(job, { requireFence = false } = {}) {
+  const request = safeJson(job, 'Job');
+  if (request.repository !== printFarmerRepository) {
+    throw new RalphMacSshError('Remote macOS dispatch is limited to OlyForge3D/PrintFarmer.', 'UNSUPPORTED_REPOSITORY');
+  }
+  if (!Number.isSafeInteger(request.issue) || request.issue <= 0 || !validIdentifier(request.jobId) ||
+      (requireFence && (!Number.isSafeInteger(request.fence) || request.fence <= 0)) ||
+      !validIdentifier(request.owner) || !validSha(request.baseSha) || !Array.isArray(request.acceptanceCriteria) ||
+      !['gpt-5.6-terra', 'gpt-5.6-luna'].includes(request.model) || request.effort !== 'medium' || request.agent !== 'squad') {
+    throw new RalphMacSshError('Remote job is malformed.', 'INVALID_REQUEST');
+  }
+  return request;
+}
+
 export function loadMacSshConfiguration({ env = process.env, platform = process.platform } = {}) {
   if (platform !== 'win32') throw new RalphMacSshError('The macOS SSH dispatcher may run only on Windows.', 'WRONG_PLATFORM');
   if (env.RALPH_MAC_SSH_ENABLED !== 'true') {
@@ -88,22 +102,13 @@ export function createSshInvocation(configuration) {
 }
 
 export function createRemoteRequest(job, type = 'dispatch') {
-  const request = safeJson(job, 'Job');
-  if (request.repository !== printFarmerRepository) {
-    throw new RalphMacSshError('Remote macOS dispatch is limited to OlyForge3D/PrintFarmer.', 'UNSUPPORTED_REPOSITORY');
-  }
-  if (!Number.isSafeInteger(request.issue) || request.issue <= 0 || !validIdentifier(request.jobId) ||
-      !validIdentifier(request.owner) || !validSha(request.baseSha) || !Array.isArray(request.acceptanceCriteria)) {
-    throw new RalphMacSshError('Remote job is malformed.', 'INVALID_REQUEST');
-  }
-  if (!['gpt-5.6-terra', 'gpt-5.6-luna'].includes(request.model) || request.effort !== 'medium' || request.agent !== 'squad') {
-    throw new RalphMacSshError('Remote implementation jobs must use the approved model, effort, and squad agent.', 'INVALID_REQUEST');
-  }
+  const request = validateRemoteJob(job, { requireFence: true });
   return `${JSON.stringify({
     version: 1,
     type,
     job: {
       jobId: request.jobId,
+      fence: request.fence,
       repository: request.repository,
       issue: request.issue,
       owner: request.owner,
@@ -307,7 +312,7 @@ function assertFreshEligibility(eligibility, job) {
 }
 
 export async function reserveJob({ job, eligibility, mode = 'remote', now = new Date().toISOString(), reservationLeaseMs = 60_000, reservationOwnerPid = process.pid }, options = {}) {
-  createRemoteRequest(job);
+  validateRemoteJob(job);
   assertFreshEligibility(eligibility, job);
   return mutateLedger((ledger) => {
     const existing = ledger.jobs[job.jobId];
@@ -530,6 +535,7 @@ export async function dispatchMacJob({ job, eligibility }, options = {}) {
     await recoverRemoteDelivery(request.jobId, options);
     reservation = await reserveJob({ job: request, eligibility }, options);
   }
+  request.fence = reservation.fence;
   const reconciling = reservation.state === 'uncertain';
   if (['reserved', 'uncertain'].includes(reservation.state)) await recordDeliveryIntent(request.jobId, options);
   else {

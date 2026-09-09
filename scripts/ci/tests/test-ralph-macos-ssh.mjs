@@ -71,18 +71,20 @@ test('requires explicit trusted Windows configuration and strict SSH options', (
 });
 
 test('serializes untrusted content only as structured stdin and limits jobs to PrintFarmer', () => {
-  const malicious = job();
+  const malicious = { ...job(), fence: 7 };
   malicious.acceptanceCriteria = ['"; rm -rf / #'];
   const input = createRemoteRequest(malicious);
   assert.match(input, /rm -rf/);
-  assert.throws(() => createRemoteRequest({ ...job(), repository: 'OlyForge3D/PrintFarmerDesktop' }),
+  assert.equal(JSON.parse(input).job.fence, 7);
+  assert.throws(() => createRemoteRequest({ ...job(), fence: 7, repository: 'OlyForge3D/PrintFarmerDesktop' }),
     (error) => error.code === 'UNSUPPORTED_REPOSITORY');
-  assert.throws(() => createRemoteRequest({ ...job(), effort: 'high' }),
+  assert.throws(() => createRemoteRequest({ ...job(), fence: 7, effort: 'high' }),
     (error) => error.code === 'INVALID_REQUEST');
-  assert.throws(() => createRemoteRequest({ ...job(), jobId: undefined }),
+  assert.throws(() => createRemoteRequest({ ...job(), fence: 7, jobId: undefined }),
     (error) => error.code === 'INVALID_REQUEST');
-  assert.throws(() => createRemoteRequest({ ...job(), owner: 2605 }),
+  assert.throws(() => createRemoteRequest({ ...job(), fence: 7, owner: 2605 }),
     (error) => error.code === 'INVALID_REQUEST');
+  assert.throws(() => createRemoteRequest(job()), (error) => error.code === 'INVALID_REQUEST');
 });
 
 test('rejects malformed, wrong-host, and uncorrelated remote acknowledgements', () => {
