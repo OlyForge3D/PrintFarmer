@@ -78,7 +78,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         printer: Printer,
         service: MockPrinterService
     ) async -> PrinterControlsSection {
-        let viewModel = PrinterControlsViewModel(printerService: service, printer: printer)
+        let viewModel = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await viewModel.loadCapabilities()
         return PrinterControlsSection(printer: printer, viewModel: viewModel)
     }
@@ -112,7 +112,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     func test_embeddedContent_mountAndRemount_doNotLoadOrDispatch() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.layoutCaps)
-        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         let content = PrinterSetupControlsContent(printer: printer, viewModel: model)
         XCTAssertTrue(content.viewModel === model)
         let (window, controller) = install(content)
@@ -130,10 +130,51 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertNil(service.moveCalledWith)
     }
 
+    func test_recreatedContent_observesSharedRequestLockAndRelease() async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        let serverID = UUID()
+        let originalService = makeService(caps: Self.layoutCaps)
+        let original = PrinterControlsViewModel.configuredForTests(
+            printerService: originalService, printer: printer, serverID: serverID
+        )
+        await original.loadCapabilities()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        originalService.beforeSetTemperatures = { await barrier.arriveAndWait() }
+        let request = Task { await original.setHeaterTarget(.hotend, target: 200) }
+        await barrier.waitUntilArrived()
+        original.deactivate()
+
+        let service = makeService(caps: Self.layoutCaps)
+        let model = PrinterControlsViewModel.configuredForTests(
+            printerService: service, printer: printer, serverID: serverID
+        )
+        await model.loadCapabilities()
+        let (window, controller) = install(PrinterSetupControlsContent(printer: printer, viewModel: model))
+        defer { window.isHidden = true }
+        try await settle(controller)
+        let controls = nativeControls(in: controller.view)
+        let editor = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.target" })
+        XCTAssertFalse(editor.isEnabled)
+        XCTAssertTrue(model.blockedReason?.contains("Another controls view") == true)
+        XCTAssertFalse(controls.contains { $0.accessibilityIdentifier == "printer.controls.stop-waiting" },
+                       "A replacement must not offer a no-op Stop waiting for someone else's request")
+        XCTAssertNil(service.setTemperaturesCalledWith)
+        barrier.release()
+        await request.value
+        try await settle(controller)
+        let releasedEditor = try XCTUnwrap(nativeControls(in: controller.view).first {
+            $0.accessibilityIdentifier == "printer.controls.hotend.target"
+        })
+        XCTAssertTrue(releasedEditor.isEnabled, "Shared lease changes must invalidate the replacement's observed UI")
+        XCTAssertNil(model.blockedReason)
+        XCTAssertNil(model.commandNotice, "Old owner outcomes must not be presented as replacement outcomes")
+    }
+
     func test_embeddedContent_remount_preservesPendingAndErrorOnExternalOwner() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.layoutCaps)
-        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
         await model.jog(axis: "X", distanceMm: 10)
         let pending = try XCTUnwrap(model.pendingCommand)
@@ -178,7 +219,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     func test_standaloneOwner_forwardsOfflineSnapshotOutsideHiddenContent() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.layoutCaps)
-        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
         let (window, controller) = install(PrinterControlsSection(printer: printer, viewModel: model))
         defer { window.isHidden = true }
@@ -200,7 +241,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         var printer = try makePrinter(backend: .moonraker)
         printer.hotendTarget = 215
         let service = makeService(caps: Self.layoutCaps)
-        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
         let (window, controller) = install(PrinterControlsSection(printer: printer, viewModel: model))
         defer { window.isHidden = true }
@@ -208,7 +249,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         await model.preheat(.pla)
         let pending = try XCTUnwrap(model.pendingCommand)
 
-        let replacement = PrinterControlsViewModel(printerService: service, printer: printer)
+        let replacement = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         var noisy = printer
         noisy.hotendTemp = 199
         controller.rootView = AnyView(PrinterControlsSection(printer: noisy, viewModel: replacement))
@@ -236,7 +277,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             supportedAxes: ["Y", "Z"]
         )
         let service = makeService(caps: caps)
-        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
         service.getBackendCapabilitiesCalledWith = nil
         let (window, controller) = install(PrinterSetupControlsContent(printer: printer, viewModel: model))
@@ -261,7 +302,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     func test_embeddedContent_largeType_reflowsAtPhoneAndTabletWidths() async throws {
         let printer = try makePrinter(backend: .moonraker, state: "paused")
         let service = makeService(caps: Self.layoutCaps)
-        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
         for width: CGFloat in [390, 1024] {
             let content = PrinterSetupControlsContent(printer: printer, viewModel: model)
@@ -296,7 +337,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         caps.supportsAbsoluteMovement = true
         let service = makeService(caps: caps)
         service.detailsToReturn = nil
-        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
         let content = PrinterSetupControlsContent(printer: printer, viewModel: model)
             .frame(width: 390).fixedSize(horizontal: false, vertical: true)
@@ -372,7 +413,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         var caps = Self.layoutCaps
         caps.supportsAbsoluteMovement = true
         let service = makeService(caps: caps)
-        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
         let content = PrinterSetupControlsContent(printer: printer, viewModel: model)
             .frame(width: 390)
@@ -442,7 +483,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     func test_pendingCommand_disablesNativeActionsButKeepsStopWaitingEnabled() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.layoutCaps)
-        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
         await model.setHeaterTarget(.hotend, target: 220)
         XCTAssertNotNil(model.pendingCommand)
@@ -480,7 +521,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             let service = makeService(caps: caps)
             let model = PrinterControlsViewModel(printerService: service, printer: printer)
             await model.loadCapabilities()
-            if printer.isOnline { model.configureAccess { reason } }
+            model.configureAccess(serverID: UUID()) { printer.isOnline ? reason : nil }
             XCTAssertEqual(model.blockedReason, reason)
             let content = PrinterSetupControlsContent(printer: printer, viewModel: model)
                 .frame(width: 390)
@@ -530,7 +571,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 maxHotendTemp: 280, maxBedTemp: 110, hasHeatedBed: true
             )
         )
-        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
         let content = PrinterSetupControlsContent(
             printer: printer, viewModel: model,
@@ -643,7 +684,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let barrier = AsyncBarrier()
         addTeardownBlock { barrier.close() }
         svc.beforeGetBackendCapabilities = { await barrier.arriveAndWait() }
-        let model = PrinterControlsViewModel(printerService: svc, printer: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: svc, printer: printer)
         let section = PrinterControlsSection(printer: printer, viewModel: model)
         assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
     }

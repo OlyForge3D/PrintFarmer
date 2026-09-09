@@ -136,7 +136,7 @@ final class JogSubgroupTests: XCTestCase {
     // MARK: - Accessibility labels and hints (spec §4.1)
 
     func test_jogAccessibilityLabel_positive_isJogForward() throws {
-        let vm = PrinterControlsViewModel(
+        let vm = PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(),
             printer: try TestData.decodePrinter()
         )
@@ -145,7 +145,7 @@ final class JogSubgroupTests: XCTestCase {
     }
 
     func test_jogAccessibilityLabel_negative_isJogBackward() throws {
-        let vm = PrinterControlsViewModel(
+        let vm = PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(),
             printer: try TestData.decodePrinter()
         )
@@ -154,7 +154,7 @@ final class JogSubgroupTests: XCTestCase {
     }
 
     func test_jogAccessibilityHint_positive_usesPositiveDirection() throws {
-        let vm = PrinterControlsViewModel(
+        let vm = PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(),
             printer: try Self.idlePrinter()
         )
@@ -164,7 +164,7 @@ final class JogSubgroupTests: XCTestCase {
     }
 
     func test_jogAccessibilityHint_negative_usesNegativeDirection() throws {
-        let vm = PrinterControlsViewModel(
+        let vm = PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(),
             printer: try Self.idlePrinter()
         )
@@ -175,7 +175,7 @@ final class JogSubgroupTests: XCTestCase {
 
     func test_jogAccessibilityHint_disabled_returnsSpec41Text() throws {
         // Default printer state is "printing" -> canControl = false
-        let vm = PrinterControlsViewModel(
+        let vm = PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(),
             printer: try TestData.decodePrinter()
         )
@@ -185,7 +185,7 @@ final class JogSubgroupTests: XCTestCase {
     }
 
     func test_jogAccessibilityValue_pending_returnsPending() throws {
-        let vm = PrinterControlsViewModel(
+        let vm = PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(),
             printer: try TestData.decodePrinter()
         )
@@ -194,7 +194,7 @@ final class JogSubgroupTests: XCTestCase {
     }
 
     func test_jogAccessibilityValue_idle_isEmpty() throws {
-        let vm = PrinterControlsViewModel(
+        let vm = PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(),
             printer: try TestData.decodePrinter()
         )

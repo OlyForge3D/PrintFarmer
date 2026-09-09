@@ -49,7 +49,7 @@ read feature flags. Replace the owner when the real server/printer target change
 | Absolute XYZ | `moveTo` | Absolute support + supported axes; every requested coordinate must match |
 | Disable motors | `disableMotors` | Specific motor-release support + explicit confirmation; acceptance only, no motor telemetry |
 
-All operations retain model-wide single-flight and online/idle gating. Printing
+All operations retain shared transport single-flight and online/idle gating. Printing
 and paused printers keep the explanatory lockout. Unrelated telemetry and
 other-printer updates do not acknowledge pending commands. Becoming offline or
 entering an unsafe state invalidates physical confirmation, not an outstanding
@@ -151,8 +151,8 @@ suites continue to exercise native dispatch through mock services.
   ends telemetry waiting with an uncertainty warning.
   **Stop waiting**, caller cancellation, access revocation and deactivation
   never cancel a dispatched transport task or free its unresolved response's
-  single-flight slot. Routine actions remain locked even if the same owner is
-  reactivated or permission is restored. Matching telemetry cannot release this
+  single-flight slot. Routine actions remain locked even if an owner is
+  recreated, reactivated or permission is restored. Matching telemetry cannot release this
   lock early. The eventual response releases its own slot: acceptance after
   stopping observation reports an unknown physical outcome, while rejection
   remains visible when authority is unchanged. After a lifecycle change,
@@ -169,19 +169,31 @@ suites continue to exercise native dispatch through mock services.
   and no dependency on pending setup commands. The shared owner/composition
   seam remains available for #2599; no filament or Z-offset transport is added.
 
-**Owner-lifetime boundary:** this single-flight lock belongs to one view model.
-An outstanding call retains that owner until its response settles, including
-across disappearance and reactivation of that same instance. Dismissing and
-recreating the detail can create a *different* owner; no shared command lease
-currently prevents that new owner from sending to the same machine. A complete
-cross-owner solution requires a coordinator above the view models (for example,
-owned by `ServiceContainer`), keyed by registered server and printer UUID, with
-invocation-bound leases surviving navigation, access changes and service rebuilds
-until the original response settles. Every routine-control owner must acquire
-that same lease; Emergency Stop must bypass it. That service/lifecycle seam is
-outside #2598's allowed files. A static view-model dictionary or UI-only timer
-would not provide the required identity/lifetime guarantee. Do not treat the
-VM-local correction as resolution of this cross-owner safety gap.
+**Owner-lifetime contract:** a MainActor registry in
+`PrinterControlsViewModel.swift` owns invocation-token leases keyed by immutable
+**registered server UUID + printer UUID**, never by a service object's identity,
+the current user, or a transient service generation. The existing
+`PrinterControlsAccessLifecycle` supplies the registered UUID together with its
+captured access/generation check. A model cannot dispatch before identity is
+configured and cannot later rebind to a different registered server.
+Tests and previews configure explicit synthetic identities; production has no
+permissive default identity.
+
+All thermal/motion owners acquire the same lease in the existing command
+pipeline. It survives detail dismissal, replacement view models, and service
+reconstruction until the original response settles. Different servers/printers
+remain independent. Every terminal path, including failed validation and proven
+pre-dispatch cancellation, releases only its matching invocation token. Old
+telemetry cancellation cannot release a replacement's lease. An outstanding call
+retains its cleanup owner, but the registry stores only UUIDs and observes views
+weakly, so settled owners are not leaked.
+
+A replacement explains the shared lock and disables routine inputs; it does
+not offer Stop waiting for another owner's request. Shared-state observation
+updates the replacement UI when the lease is released. Local post-response
+telemetry waiting remains separate from transport ownership. This is a
+**process-local** guarantee, not cross-device/server-side serialization or proof
+of physical completion; Emergency Stop remains independent.
 
 ---
 

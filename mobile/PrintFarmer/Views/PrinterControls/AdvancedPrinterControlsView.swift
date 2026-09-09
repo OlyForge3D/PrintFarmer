@@ -24,7 +24,7 @@ enum AdvancedPrinterControlsAccess {
 
 /// Installed on the owner host, not a pager child: changing tabs never cancels
 /// routine work. Leaving the detail or changing authority invalidates observation,
-/// but the retained owner keeps an outstanding request single-flight.
+/// but an outstanding request's registered-server/printer lease survives new owners.
 struct PrinterControlsAccessLifecycle: ViewModifier {
     let viewModel: PrinterControlsViewModel?
     @Environment(ServerRegistry.self) private var registry
@@ -47,7 +47,7 @@ struct PrinterControlsAccessLifecycle: ViewModifier {
         let serverID = registry.activeServerID
         let generation = services.activeServerGeneration
         let userID = auth.currentUser?.id
-        viewModel?.configureAccess { [registry, services, auth] in
+        viewModel?.configureAccess(serverID: serverID) { [registry, services, auth] in
             AdvancedPrinterControlsAccess.blockedReason(
                 enabled: registry.advancedPrinterControlsEnabled,
                 authenticated: auth.isAuthenticated,

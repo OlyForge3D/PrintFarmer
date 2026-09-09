@@ -26,7 +26,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
     ) -> PrinterControlsViewModel {
         service.capabilitiesToReturn = capabilities
         service.detailsToReturn = .controlsLimitsFixture(for: printer)
-        return PrinterControlsViewModel(printerService: service, printer: printer)
+        return PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
     }
 
     /// Online + idle (state="ready") printer; base targets are 215/60.

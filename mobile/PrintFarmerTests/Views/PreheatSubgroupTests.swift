@@ -80,21 +80,21 @@ final class PreheatSubgroupTests: XCTestCase {
         // state. We assert the gate the view consumes; the visual treatment is
         // covered by the upcoming snapshot tests (#289).
         let printer = try Self.makePrinter(state: "printing", isOnline: true)
-        let vm = PrinterControlsViewModel(printerService: PreheatSubgroupTestService(), printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: PreheatSubgroupTestService(), printer: printer)
         XCTAssertFalse(vm.canControl)
         XCTAssertNotNil(vm.blockedReason)
     }
 
     func test_canControl_falseWhenOffline() throws {
         let printer = try Self.makePrinter(state: "ready", isOnline: false)
-        let vm = PrinterControlsViewModel(printerService: PreheatSubgroupTestService(), printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: PreheatSubgroupTestService(), printer: printer)
         XCTAssertFalse(vm.canControl)
         XCTAssertEqual(vm.blockedReason, "Printer is offline.")
     }
 
     func test_canControl_trueWhenOnlineAndIdle() throws {
         let printer = try Self.makePrinter(state: "ready", isOnline: true)
-        let vm = PrinterControlsViewModel(printerService: PreheatSubgroupTestService(), printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: PreheatSubgroupTestService(), printer: printer)
         XCTAssertTrue(vm.canControl)
         XCTAssertNil(vm.blockedReason)
     }
@@ -103,7 +103,7 @@ final class PreheatSubgroupTests: XCTestCase {
 
     func test_body_doesNotCrashWhenVisible() throws {
         let printer = try Self.makePrinter(state: "ready", isOnline: true)
-        let vm = PrinterControlsViewModel(printerService: PreheatSubgroupTestService(), printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: PreheatSubgroupTestService(), printer: printer)
         let subgroup = PreheatSubgroup(viewModel: vm)
         // SwiftUI body evaluation should not throw or trap.
         _ = subgroup.body
@@ -213,7 +213,7 @@ final class PreheatSubgroupTests: XCTestCase {
 
     private func makeVM(state: String, isOnline: Bool) throws -> PrinterControlsViewModel {
         let printer = try Self.makePrinter(state: state, isOnline: isOnline)
-        return PrinterControlsViewModel(printerService: PreheatSubgroupTestService(), printer: printer)
+        return PrinterControlsViewModel.configuredForTests(printerService: PreheatSubgroupTestService(), printer: printer)
     }
 
     // MARK: - Helpers

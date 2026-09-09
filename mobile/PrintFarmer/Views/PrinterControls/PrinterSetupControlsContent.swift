@@ -102,7 +102,7 @@ struct PrinterSetupControlsContent: View {
                         .foregroundStyle(Color.pfTextSecondary)
                         .padding(.top, 12)
                 }
-                if viewModel.isExecuting {
+                if viewModel.pendingCommand != nil {
                     ControlActionButton(
                         title: "Stop waiting for command", identifier: "printer.controls.stop-waiting",
                         hint: "Does not stop the printer. Physical execution may continue."

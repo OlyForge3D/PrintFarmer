@@ -2,6 +2,20 @@ import Combine
 import XCTest
 @testable import PrintFarmer
 
+extension PrinterControlsViewModel {
+    static func configuredForTests(
+        printerService: any PrinterServiceProtocol,
+        printer: Printer,
+        clock: @escaping @Sendable () -> Date = Date.init,
+        serverID: UUID = UUID(),
+        accessCheck: @escaping @MainActor () -> String? = { nil }
+    ) -> PrinterControlsViewModel {
+        let model = PrinterControlsViewModel(printerService: printerService, printer: printer, clock: clock)
+        model.configureAccess(serverID: serverID, accessCheck)
+        return model
+    }
+}
+
 extension PrinterDetails {
     static func controlsLimitsFixture(
         for printer: Printer, hotend: Int? = 280, bed: Int? = 120, hasBed: Bool? = true
@@ -40,7 +54,8 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     private func makeViewModel(
         printer: Printer? = nil,
-        capabilities: PrinterBackendCapabilities? = nil
+        capabilities: PrinterBackendCapabilities? = nil,
+        accessCheck: @escaping @MainActor () -> String? = { nil }
     ) throws -> PrinterControlsViewModel {
         let p = try printer ?? TestData.decodePrinter() // online + state="printing" by default
         if let caps = capabilities {
@@ -49,7 +64,9 @@ final class PrinterControlsViewModelTests: XCTestCase {
         if mockService.detailsToReturn == nil {
             mockService.detailsToReturn = .controlsLimitsFixture(for: p)
         }
-        return PrinterControlsViewModel(printerService: mockService, printer: p)
+        return PrinterControlsViewModel.configuredForTests(
+            printerService: mockService, printer: p, accessCheck: accessCheck
+        )
     }
 
     /// Returns a printer that is online and idle (state="ready").
@@ -72,7 +89,236 @@ final class PrinterControlsViewModelTests: XCTestCase {
     // Synthetic field-omission case, not a FlashForge backend profile.
     private static let hotendOnlyCaps = PrinterBackendCapabilities.hotendOnlyFixture
 
+    private func leaseOwner(
+        serverID: UUID, printer: Printer? = nil
+    ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
+        let printer = try printer ?? idlePrinter()
+        let service = MockPrinterService()
+        var caps = Self.fullCaps
+        caps.supportsAbsoluteMovement = true
+        caps.supportsDisableMotors = true
+        service.capabilitiesToReturn = caps
+        service.detailsToReturn = .controlsLimitsFixture(for: printer)
+        let model = PrinterControlsViewModel.configuredForTests(
+            printerService: service, printer: printer, serverID: serverID
+        )
+        await model.loadCapabilities()
+        return (model, service)
+    }
+
+    private func attemptRoutineCommands(on model: PrinterControlsViewModel) async {
+        await model.setHeaterTarget(.bed, target: 70)
+        await model.preheat(.coolDown)
+        await model.jog(axis: "X", distanceMm: 1)
+        await model.homeAll()
+        await model.homeXY()
+        await model.homeZ()
+        await model.moveTo(x: 0, y: nil, z: nil, feedrateMmMin: nil)
+        await model.disableMotors()
+    }
+
+    private func assertNoRoutineDispatch(_ service: MockPrinterService) {
+        XCTAssertNil(service.setTemperaturesCalledWith)
+        XCTAssertNil(service.moveCalledWith)
+        XCTAssertNil(service.homeCalledWith)
+        XCTAssertNil(service.homeXYCalledWith)
+        XCTAssertNil(service.homeZCalledWith)
+        XCTAssertNil(service.moveToCalledWith)
+        XCTAssertNil(service.disableMotorsCalledWith)
+    }
+
     // MARK: - Tests
+
+    func test_sharedLease_survivesOwnerAndServiceRecreationUntilResponseSettles() async throws {
+        for rejects in [false, true] {
+            let serverID = UUID()
+            let (original, originalService) = try await leaseOwner(serverID: serverID)
+            let barrier = AsyncBarrier()
+            addTeardownBlock { barrier.close() }
+            originalService.beforeSetTemperatures = { await barrier.arriveAndWait() }
+            let request = Task { await original.setHeaterTarget(.hotend, target: 200) }
+            await barrier.waitUntilArrived()
+            let token = try XCTUnwrap(original.pendingCommand)
+            original.deactivate()
+            let (replacement, replacementService) = try await leaseOwner(
+                serverID: serverID, printer: original.printer
+            )
+            XCTAssertFalse(originalService === replacementService)
+            XCTAssertTrue(replacement.isExecuting)
+            XCTAssertNil(replacement.pendingCommand, "The replacement must not create a second local command owner")
+            XCTAssertTrue(replacement.blockedReason?.contains("Another controls view") == true)
+            for _ in 0..<2 {
+                replacement.cancelPendingCommand()
+                await attemptRoutineCommands(on: replacement)
+            }
+            assertNoRoutineDispatch(replacementService)
+            XCTAssertEqual(original.pendingCommand, token)
+
+            let released = expectation(description: "Replacement observes shared lease release")
+            let observation = replacement.objectWillChange.prefix(1).sink { _ in released.fulfill() }
+            defer { observation.cancel() }
+            if rejects { originalService.errorToThrow = NetworkError.forbidden }
+            barrier.release()
+            await request.value
+            await fulfillment(of: [released], timeout: 5)
+            XCTAssertFalse(replacement.isExecuting)
+            XCTAssertNil(replacement.blockedReason)
+            XCTAssertNil(replacement.lastError)
+            XCTAssertNil(replacement.commandNotice, "Old success or failure must not become replacement feedback")
+            XCTAssertNil(original.lastError)
+            await replacement.setHeaterTarget(.bed, target: 70)
+            XCTAssertEqual(replacementService.setTemperaturesCalledWith?.bed, 70)
+            XCTAssertNotEqual(replacement.pendingCommand?.id, token.id)
+        }
+    }
+
+    func test_sharedLease_independentRegisteredServersAndPrintersDoNotBlockEachOther() async throws {
+        let serverID = UUID()
+        let (original, service) = try await leaseOwner(serverID: serverID)
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        service.beforeSetTemperatures = { await barrier.arriveAndWait() }
+        let request = Task { await original.setHeaterTarget(.hotend, target: 200) }
+        await barrier.waitUntilArrived()
+        let (otherServer, otherServerService) = try await leaseOwner(
+            serverID: UUID(), printer: original.printer
+        )
+        var otherPrinter = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        otherPrinter.isOnline = true
+        otherPrinter.state = "idle"
+        XCTAssertNotEqual(otherPrinter.id, original.printer.id)
+        let (otherMachine, otherMachineService) = try await leaseOwner(serverID: serverID, printer: otherPrinter)
+        await otherServer.setHeaterTarget(.bed, target: 70)
+        await otherMachine.setHeaterTarget(.bed, target: 70)
+        XCTAssertEqual(otherServerService.setTemperaturesCalledWith?.printerId, original.printer.id)
+        XCTAssertEqual(otherMachineService.setTemperaturesCalledWith?.printerId, otherPrinter.id)
+        let (sameMachine, sameService) = try await leaseOwner(serverID: serverID, printer: original.printer)
+        await sameMachine.homeAll()
+        XCTAssertNil(sameService.homeCalledWith)
+        barrier.release()
+        await request.value
+        XCTAssertFalse(sameMachine.isExecuting, "A settled response must release the shared lease, not wait for telemetry")
+        XCTAssertNotNil(original.pendingCommand, "The old view's telemetry observation is separate from transport ownership")
+    }
+
+    func test_sharedLease_staleTelemetryOwnerCannotReleaseReplacementToken() async throws {
+        let serverID = UUID()
+        let (original, _) = try await leaseOwner(serverID: serverID)
+        await original.setHeaterTarget(.hotend, target: 200)
+        let originalToken = try XCTUnwrap(original.pendingCommand)
+        let (replacement, service) = try await leaseOwner(serverID: serverID, printer: original.printer)
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        service.beforeSetTemperatures = { await barrier.arriveAndWait() }
+        let request = Task { await replacement.setHeaterTarget(.hotend, target: 220) }
+        await barrier.waitUntilArrived()
+        let replacementToken = try XCTUnwrap(replacement.pendingCommand)
+        XCTAssertNotEqual(originalToken.id, replacementToken.id)
+        original.cancelPendingCommand()
+        original.deactivate()
+        original.configureAccess(serverID: serverID) { nil }
+        XCTAssertNil(original.pendingCommand)
+        XCTAssertTrue(original.isExecuting, "Old-token cleanup must not release the replacement lease")
+        await original.homeAll()
+        let (third, thirdService) = try await leaseOwner(serverID: serverID, printer: original.printer)
+        await attemptRoutineCommands(on: third)
+        assertNoRoutineDispatch(thirdService)
+        XCTAssertEqual(replacement.pendingCommand, replacementToken)
+        barrier.release()
+        await request.value
+        XCTAssertFalse(third.isExecuting)
+        await third.jog(axis: "X", distanceMm: 1)
+        XCTAssertNotNil(thirdService.moveCalledWith)
+    }
+
+    func test_sharedLease_validationFailureAndPreDispatchCancellationReleaseForOtherOwners() async throws {
+        let serverID = UUID()
+        let (observer, _) = try await leaseOwner(serverID: serverID)
+        let service = MockPrinterService()
+        service.capabilitiesToReturn = Self.fullCaps
+        service.detailsToReturn = .controlsLimitsFixture(for: observer.printer)
+        let original = PrinterControlsViewModel(printerService: service, printer: observer.printer)
+        let cancelAtDispatch = AccessGate()
+        cancelAtDispatch.isAllowed = false
+        original.configureAccess(serverID: serverID) { [weak original] in
+            if cancelAtDispatch.isAllowed, original?.pendingCommand != nil {
+                original?.cancelPendingCommand()
+            }
+            return nil
+        }
+        await original.loadCapabilities()
+        await original.setHeaterTarget(.hotend, target: .nan)
+        XCTAssertNotNil(original.lastError)
+        XCTAssertFalse(observer.isExecuting, "Validation failure must not strand a lease")
+        cancelAtDispatch.isAllowed = true
+        await original.setHeaterTarget(.hotend, target: 200)
+        XCTAssertNil(service.setTemperaturesCalledWith)
+        XCTAssertFalse(observer.isExecuting)
+        XCTAssertEqual(original.commandNotice, "Request canceled before dispatch. No printer command was sent.")
+        await observer.jog(axis: "X", distanceMm: 1)
+        XCTAssertNotNil(observer.pendingCommand)
+    }
+
+    func test_sharedLease_missingIdentityFailsClosedAndConfiguredIdentityCannotBeRebound() async throws {
+        let printer = try idlePrinter()
+        mockService.capabilitiesToReturn = Self.fullCaps
+        mockService.detailsToReturn = .controlsLimitsFixture(for: printer)
+        let model = PrinterControlsViewModel(printerService: mockService, printer: printer)
+        await model.loadCapabilities()
+        XCTAssertNil(model.registeredServerID)
+        XCTAssertFalse(model.canControl)
+        await attemptRoutineCommands(on: model)
+        assertNoRoutineDispatch(mockService)
+        XCTAssertEqual(model.blockedReason, "Controls require a registered server identity.")
+        model.configureAccess(serverID: nil) { nil }
+        XCTAssertFalse(model.canControl)
+        let serverID = UUID()
+        model.configureAccess(serverID: serverID) { nil }
+        XCTAssertTrue(model.canControl)
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        mockService.beforeSetTemperatures = { await barrier.arriveAndWait() }
+        let request = Task { await model.setHeaterTarget(.hotend, target: 200) }
+        await barrier.waitUntilArrived()
+        model.configureAccess(serverID: UUID()) { nil }
+        XCTAssertEqual(model.registeredServerID, serverID)
+        XCTAssertFalse(model.canControl)
+        let (replacement, _) = try await leaseOwner(serverID: serverID, printer: printer)
+        XCTAssertTrue(replacement.isExecuting)
+        barrier.release()
+        await request.value
+        XCTAssertFalse(replacement.isExecuting)
+    }
+
+    func test_sharedLease_retainsUnresolvedCallButDoesNotLeakCompletedOwner() async throws {
+        let printer = try idlePrinter()
+        let serverID = UUID()
+        mockService.capabilitiesToReturn = Self.fullCaps
+        mockService.detailsToReturn = .controlsLimitsFixture(for: printer)
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        mockService.beforeSetTemperatures = { await barrier.arriveAndWait() }
+        weak var releasedOwner: PrinterControlsViewModel?
+        var request: Task<Void, Never>?
+        do {
+            let model = PrinterControlsViewModel.configuredForTests(
+                printerService: mockService, printer: printer, serverID: serverID
+            )
+            releasedOwner = model
+            await model.loadCapabilities()
+            request = Task { await model.setHeaterTarget(.hotend, target: 200) }
+            await barrier.waitUntilArrived()
+            model.deactivate()
+        }
+        XCTAssertNotNil(releasedOwner, "An unresolved call must retain its cleanup owner")
+        let (replacement, _) = try await leaseOwner(serverID: serverID, printer: printer)
+        XCTAssertTrue(replacement.isExecuting)
+        barrier.release()
+        await request?.value
+        request = nil
+        XCTAssertNil(releasedOwner, "Neither the registry nor its weak observation relay may retain completed owners")
+        XCTAssertFalse(replacement.isExecuting)
+    }
 
     func test_missingOrInvalidHeaterMaxima_blockPositiveTargetsAndPresetsButPermitSupportedZero() async throws {
         for limit in [nil, 0, -1] as [Int?] {
@@ -80,7 +326,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             let service = MockPrinterService()
             service.capabilitiesToReturn = Self.fullCaps
             service.detailsToReturn = .controlsLimitsFixture(for: printer, hotend: limit, bed: limit)
-            let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+            let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
             await vm.loadCapabilities()
             XCTAssertTrue(vm.needsHeaterLimits)
             for heater in Heater.allCases {
@@ -118,7 +364,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let service = MockPrinterService()
         service.capabilitiesToReturn = Self.fullCaps
         service.detailsToReturn = .controlsLimitsFixture(for: printer, bed: nil)
-        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await vm.loadCapabilities()
         await vm.preheat(.pla)
         XCTAssertNil(service.setTemperaturesCalledWith, "A safe hotend does not authorize an unbounded bed")
@@ -139,7 +385,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let printer = try idlePrinter()
         let service = MockPrinterService()
         service.capabilitiesToReturn = Self.fullCaps
-        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await vm.loadCapabilities()
         for preset in [PreheatPreset.pla, .petg, .abs] {
             for insufficientHotend in [true, false] {
@@ -166,7 +412,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let printer = try idlePrinter()
         let service = MockPrinterService()
         service.capabilitiesToReturn = Self.fullCaps
-        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await vm.loadCapabilities()
         XCTAssertNotNil(vm.hardwareLoadError)
         XCTAssertTrue(vm.needsHeaterLimits)
@@ -192,7 +438,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let barrier = AsyncBarrier()
         addTeardownBlock { barrier.close() }
         let service = ControlsDelayedService(base: base, beforeDetails: { await barrier.arriveAndWait() })
-        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         let read = Task { await vm.loadCapabilities() }
         await barrier.waitUntilArrived()
         XCTAssertTrue(vm.isLoadingHardware)
@@ -357,7 +603,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let barrier = AsyncBarrier()
         addTeardownBlock { barrier.close() }
         let service = ControlsDelayedService(base: mockService, beforeMoveTo: { await barrier.arriveAndWait() })
-        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await vm.loadCapabilities()
         let command = Task { await vm.moveTo(x: 1.001, y: 0, z: -1.234, feedrateMmMin: nil) }
         await barrier.waitUntilArrived()
@@ -407,7 +653,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let barrier = AsyncBarrier()
         addTeardownBlock { barrier.close() }
         let service = ControlsDelayedService(base: mockService, beforeDetails: { await barrier.arriveAndWait() })
-        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         let read = Task { await vm.loadCapabilities() }
         await barrier.waitUntilArrived()
         printer.state = "idle"
@@ -430,7 +676,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             let read = Task { await vm.loadCapabilities() }
             await barrier.waitUntilArrived()
             vm.deactivate()
-            vm.configureAccess { nil }
+            vm.configureAccess(serverID: vm.registeredServerID) { nil }
             mockService.errorToThrow = error
             barrier.release()
             await read.value
@@ -450,11 +696,11 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let barrier = AsyncBarrier()
         addTeardownBlock { barrier.close() }
         let service = ControlsDelayedService(base: mockService, beforeDetails: { await barrier.arriveAndWait() })
-        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         let read = Task { await vm.loadCapabilities() }
         await barrier.waitUntilArrived()
         vm.deactivate()
-        vm.configureAccess { nil }
+        vm.configureAccess(serverID: vm.registeredServerID) { nil }
         barrier.release()
         await read.value
         XCTAssertEqual(vm.capabilities, Self.fullCaps)
@@ -476,14 +722,16 @@ final class PrinterControlsViewModelTests: XCTestCase {
             let service = ControlsDelayedService(base: base, beforeDetails: {
                 if delayHardware { await barrier.arriveAndWait() }
             })
-            let vm = PrinterControlsViewModel(printerService: service, printer: printer)
             let access = AccessGate()
-            vm.configureAccess { access.isAllowed ? nil : "Server changed" }
+            let vm = PrinterControlsViewModel.configuredForTests(
+                printerService: service, printer: printer,
+                accessCheck: { access.isAllowed ? nil : "Server changed" }
+            )
             let read = Task { await vm.loadCapabilities() }
             await barrier.waitUntilArrived()
             access.isAllowed = false
             vm.refreshAccess()
-            vm.configureAccess { nil }
+            vm.configureAccess(serverID: vm.registeredServerID) { nil }
             barrier.release()
             await read.value
             XCTAssertNil(vm.hardware)
@@ -532,7 +780,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let barrier = AsyncBarrier()
         addTeardownBlock { barrier.close() }
         let service = ControlsDelayedService(base: mockService, beforeHome: { await barrier.arriveAndWait() })
-        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await vm.loadCapabilities()
         let command = Task { await vm.homeAll() }
         await barrier.waitUntilArrived()
@@ -640,7 +888,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let barrier = AsyncBarrier()
         addTeardownBlock { barrier.close() }
         let service = ControlsDelayedService(base: mockService, beforeHome: { await barrier.arriveAndWait() })
-        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await vm.loadCapabilities()
         let command = Task { await vm.homeAll() }
         await barrier.waitUntilArrived()
@@ -881,9 +1129,11 @@ final class PrinterControlsViewModelTests: XCTestCase {
                 let printer = try idlePrinter()
                 service.capabilitiesToReturn = Self.fullCaps
                 service.detailsToReturn = .controlsLimitsFixture(for: printer)
-                let vm = PrinterControlsViewModel(printerService: service, printer: printer)
                 let access = AccessGate()
-                vm.configureAccess { access.isAllowed ? nil : "Preference or permission revoked" }
+                let vm = PrinterControlsViewModel.configuredForTests(
+                    printerService: service, printer: printer,
+                    accessCheck: { access.isAllowed ? nil : "Preference or permission revoked" }
+                )
                 await vm.loadCapabilities()
                 let barrier = AsyncBarrier()
                 addTeardownBlock { barrier.close() }
@@ -903,7 +1153,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
                 await vm.homeAll()
                 XCTAssertNil(service.homeCalledWith)
                 access.isAllowed = true
-                vm.configureAccess { nil }
+                vm.configureAccess(serverID: vm.registeredServerID) { nil }
                 XCTAssertTrue(vm.canControl)
                 await vm.setHeaterTarget(.bed, target: 70)
                 await vm.homeAll()
@@ -955,10 +1205,13 @@ final class PrinterControlsViewModelTests: XCTestCase {
     }
 
     func test_stopBeforeDispatch_releasesSafelyAndDoesNotClobberNextInvocation() async throws {
-        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        let printer = try idlePrinter()
+        mockService.capabilitiesToReturn = Self.fullCaps
+        mockService.detailsToReturn = .controlsLimitsFixture(for: printer)
+        let vm = PrinterControlsViewModel(printerService: mockService, printer: printer)
         await vm.loadCapabilities()
         let stopBeforeDispatch = AccessGate()
-        vm.configureAccess { [weak vm] in
+        vm.configureAccess(serverID: UUID()) { [weak vm] in
             // The dispatch-time access check runs after the slot is acquired,
             // but before the service is called. No scheduling guesses needed.
             if stopBeforeDispatch.isAllowed, vm?.pendingCommand != nil {
@@ -978,10 +1231,12 @@ final class PrinterControlsViewModelTests: XCTestCase {
     }
 
     func test_serverChange_lateResponseCannotRebindOldOwnerOrMutateDifferentPrinterOwner() async throws {
-        let old = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
-        await old.loadCapabilities()
         let access = AccessGate()
-        old.configureAccess { access.isAllowed ? nil : "Server changed" }
+        let old = try makeViewModel(
+            printer: idlePrinter(), capabilities: Self.fullCaps,
+            accessCheck: { access.isAllowed ? nil : "Server changed" }
+        )
+        await old.loadCapabilities()
         let barrier = AsyncBarrier()
         addTeardownBlock { barrier.close() }
         mockService.beforeSetTemperatures = { await barrier.arriveAndWait() }
@@ -989,7 +1244,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await barrier.waitUntilArrived()
         access.isAllowed = false
         old.refreshAccess()
-        old.configureAccess { nil }
+        old.configureAccess(serverID: old.registeredServerID) { nil }
         XCTAssertFalse(old.canControl)
         XCTAssertNotNil(old.pendingCommand)
 
@@ -1000,7 +1255,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let otherService = MockPrinterService()
         otherService.capabilitiesToReturn = Self.fullCaps
         otherService.detailsToReturn = .controlsLimitsFixture(for: otherPrinter)
-        let other = PrinterControlsViewModel(printerService: otherService, printer: otherPrinter)
+        let other = PrinterControlsViewModel.configuredForTests(printerService: otherService, printer: otherPrinter)
         await other.loadCapabilities()
         await other.setHeaterTarget(.bed, target: 70)
         let otherOwner = try XCTUnwrap(other.pendingCommand)
@@ -1034,15 +1289,17 @@ final class PrinterControlsViewModelTests: XCTestCase {
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
         caps.supportsDisableMotors = true
-        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
-        await vm.loadCapabilities()
         let access = AccessGate()
-        vm.configureAccess { access.isAllowed ? nil : "Server changed" }
+        let vm = try makeViewModel(
+            printer: idlePrinter(), capabilities: caps,
+            accessCheck: { access.isAllowed ? nil : "Server changed" }
+        )
+        await vm.loadCapabilities()
         await vm.setHeaterTarget(.bed, target: 70)
         access.isAllowed = false
         vm.refreshAccess()
         XCTAssertNil(vm.pendingCommand)
-        vm.configureAccess { nil }
+        vm.configureAccess(serverID: vm.registeredServerID) { nil }
         XCTAssertFalse(vm.canControl, "Reappearing must not silently rebind an old service to a new server")
         mockService.setTemperaturesCalledWith = nil
         await vm.setHeaterTarget(.hotend, target: 200)
@@ -1150,7 +1407,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             printer.isOnline = online
             let service = MockPrinterService()
             service.capabilitiesToReturn = Self.fullCaps
-            let model = PrinterControlsViewModel(printerService: service, printer: printer)
+            let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
             await model.loadCapabilities()
 
             await model.preheat(.pla)
@@ -1382,7 +1639,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     func test_canControlFalse_whilePrinting() async throws {
         let printer = try TestData.decodePrinter() // state="printing"
-        let vm = PrinterControlsViewModel(printerService: mockService, printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: mockService, printer: printer)
 
         XCTAssertFalse(vm.canControl)
         XCTAssertNotNil(vm.blockedReason)
@@ -1588,7 +1845,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             .replacingOccurrences(of: "\"state\": \"printing\"", with: "\"state\": \"ready\"")
             .replacingOccurrences(of: "\"homedAxes\": \"xyz\"", with: "\"homedAxes\": \"\"")
         let base = try TestData.decoder.decode(Printer.self, from: unhomedJSON.data(using: .utf8)!)
-        let vm = PrinterControlsViewModel(printerService: mockService, printer: base)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: mockService, printer: base)
         mockService.capabilitiesToReturn = Self.fullCaps
         await vm.loadCapabilities()
 

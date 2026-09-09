@@ -642,6 +642,7 @@ private enum PreheatSubgroupPreviewFactory {
         let printer = Printer.previewFallbackPrinter(state: printerState, isOnline: isOnline)
         let service = PreheatSubgroupPreviewService(capabilities: capabilities, hangForever: startPendingPreset != nil)
         let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        vm.configureAccess(serverID: UUID()) { nil }
         // Asynchronously load preview capabilities immediately so the canvas
         // settles on the configured visibility state.
         vm.previewLoadCapabilitiesAsync()

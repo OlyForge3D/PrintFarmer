@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 // MARK: - Public Types
@@ -124,6 +125,34 @@ struct ControlsError: Error, Equatable, Sendable {
     let isRetryable: Bool
 }
 
+private struct PrinterControlsIdentity: Hashable {
+    let serverID: UUID
+    let printerID: UUID
+}
+
+/// Process-wide physical-request ownership, independent of view/service lifetime.
+/// Only tokens are retained; neither command tasks nor view models live here.
+@MainActor
+private final class PrinterControlsLeases: ObservableObject {
+    static let shared = PrinterControlsLeases()
+    @Published private var owners: [PrinterControlsIdentity: UUID] = [:]
+
+    func contains(_ identity: PrinterControlsIdentity) -> Bool {
+        owners[identity] != nil
+    }
+
+    func acquire(_ identity: PrinterControlsIdentity, token: UUID) -> Bool {
+        guard owners[identity] == nil else { return false }
+        owners[identity] = token
+        return true
+    }
+
+    func release(_ identity: PrinterControlsIdentity, token: UUID) {
+        guard owners[identity] == token else { return }
+        owners.removeValue(forKey: identity)
+    }
+}
+
 // MARK: - View Model
 
 /// Owns capability fetching + caching, single-flight command dispatch, and
@@ -147,9 +176,12 @@ final class PrinterControlsViewModel: ObservableObject {
     @Published private(set) var hardwareLoadError: String?
     @Published private(set) var commandNotice: String?
     @Published private(set) var isActive = true
+    private(set) var registeredServerID: UUID?
 
     private var accessCheck: @MainActor () -> String? = { nil }
     private var hasConfiguredAccess = false
+    private let commandLeases = PrinterControlsLeases.shared
+    private var leaseObservation: AnyCancellable?
     private var commandTask: Task<Void, Error>?
     private var commandWasDispatched = false
     private var telemetryConfirmed = false
@@ -169,6 +201,9 @@ final class PrinterControlsViewModel: ObservableObject {
         self.printerService = printerService
         self.printer = printer
         self.clock = clock
+        leaseObservation = commandLeases.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
     }
 
     // MARK: - Capabilities
@@ -220,8 +255,14 @@ final class PrinterControlsViewModel: ObservableObject {
         generation == lifecycleGeneration && isActive && accessCheck() == nil
     }
 
-    func configureAccess(_ check: @escaping @MainActor () -> String?) {
+    func configureAccess(serverID: UUID?, _ check: @escaping @MainActor () -> String?) {
+        guard let serverID,
+              registeredServerID == nil || registeredServerID == serverID else {
+            deactivate()
+            return
+        }
         if !hasConfiguredAccess {
+            registeredServerID = serverID
             accessCheck = check
             hasConfiguredAccess = true
         }
@@ -243,7 +284,7 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     func cancelPendingCommand() {
-        guard pendingCommand != nil else { return }
+        guard let command = pendingCommand else { return }
         telemetryConfirmed = false
         commandStateInvalidated = true
         if commandTask != nil, commandWasDispatched {
@@ -255,6 +296,7 @@ final class PrinterControlsViewModel: ObservableObject {
         commandTask?.cancel()
         commandTask = nil
         pendingCommand = nil
+        releaseLease(for: command)
         commandNotice = commandWasDispatched
             ? "Stopped waiting. The printer may still execute the request. Check the machine before another action."
             : "Request canceled before dispatch. No printer command was sent."
@@ -557,17 +599,27 @@ final class PrinterControlsViewModel: ObservableObject {
 
     // MARK: - Computed
 
-    var isExecuting: Bool { pendingCommand != nil }
+    private var commandIdentity: PrinterControlsIdentity? {
+        registeredServerID.map { PrinterControlsIdentity(serverID: $0, printerID: printer.id) }
+    }
+
+    var isExecuting: Bool {
+        pendingCommand != nil || commandIdentity.map(commandLeases.contains) == true
+    }
 
     var canControl: Bool {
-        isActive && accessCheck() == nil && printer.isOnline && !isPrintingOrPaused
+        commandIdentity != nil && isActive && accessCheck() == nil && printer.isOnline && !isPrintingOrPaused
     }
 
     var blockedReason: String? {
+        if commandIdentity == nil { return "Controls require a registered server identity." }
         if !isActive { return "Controls are no longer active." }
         if let reason = accessCheck() { return reason }
         if !printer.isOnline { return "Printer is offline." }
         if isPrintingOrPaused { return "Controls are locked while a print is active." }
+        if pendingCommand == nil, isExecuting {
+            return "Another controls view is waiting for this printer's request outcome. Routine controls remain locked."
+        }
         return nil
     }
 
@@ -598,8 +650,8 @@ final class PrinterControlsViewModel: ObservableObject {
         }
     }
 
-    /// Single-flight: rejects new commands while one is pending. Also enforces
-    /// the lockout when the printer is printing or offline.
+    /// One pipeline acquires the registered-server/printer lease before any
+    /// dispatch. Local pending state additionally preserves telemetry observation.
     private func beginCommand(_ command: ControlCommand) -> Bool {
         guard !Task.isCancelled else { return false }
         guard pendingCommand == nil else { return false }
@@ -612,6 +664,8 @@ final class PrinterControlsViewModel: ObservableObject {
             )
             return false
         }
+        guard let identity = commandIdentity,
+              commandLeases.acquire(identity, token: command.id) else { return false }
         lastError = nil
         commandNotice = nil
         telemetryConfirmed = false
@@ -699,7 +753,10 @@ final class PrinterControlsViewModel: ObservableObject {
     ///     further delta would hang forever, so we clear now. Only a fresh
     ///     post-dispatch snapshot permits telemetry wording; cached matches
     ///     report request acceptance without physical confirmation.
+    /// Every exit releases only this invocation's shared lease. Post-response
+    /// telemetry observation does not retain a transport lease.
     private func endCommand(_ command: ControlCommand) {
+        defer { releaseLease(for: command) }
         guard pendingCommand == command else { return }
         if lastError?.command == command {
             pendingCommand = nil
@@ -712,6 +769,11 @@ final class PrinterControlsViewModel: ObservableObject {
             pendingCommand = nil
             commandNotice = "Request accepted. Previously reported values already match; fresh physical completion is not confirmed. Check the machine before further setup."
         }
+    }
+
+    private func releaseLease(for command: ControlCommand) {
+        guard let identity = commandIdentity else { return }
+        commandLeases.release(identity, token: command.id)
     }
 
     private static func confirmationNotice(for command: ControlCommand) -> String {
