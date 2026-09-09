@@ -275,6 +275,74 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
     // MARK: - Backend profile snapshots
 
+    func test_individualControls_phoneFullContentEvidence() async throws {
+        try await captureIndividualControls(width: 390, dynamicType: .large, name: "phone")
+    }
+
+    func test_individualControls_regularWidthFullContentEvidence() async throws {
+        try await captureIndividualControls(width: 1024, dynamicType: .large, name: "regular")
+    }
+
+    func test_individualControls_narrowSplitLargeTypeEvidence() async throws {
+        try await captureIndividualControls(width: 500, dynamicType: .accessibility3, name: "narrow-accessibility")
+    }
+
+    private func captureIndividualControls(width: CGFloat, dynamicType: DynamicTypeSize, name: String) async throws {
+        var printer = try makePrinter(backend: .moonraker)
+        printer.hotendTemp = nil
+        printer.bedTemp = 0
+        printer.homedAxes = nil
+        var caps = Self.layoutCaps
+        caps.supportsAbsoluteMovement = true
+        caps.supportsDisableMotors = true
+        let service = makeService(caps: caps)
+        service.detailsToReturn = PrinterDetails(
+            id: printer.id, name: printer.name, backend: printer.backend,
+            capabilities: PrinterHardwareCapabilities(
+                maxBuildVolumeX: 256, maxBuildVolumeY: 256, maxBuildVolumeZ: 256,
+                maxHotendTemp: 280, maxBedTemp: 110, hasHeatedBed: true
+            )
+        )
+        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        let content = PrinterSetupControlsContent(
+            printer: printer, viewModel: model,
+            usesColumns: PrinterDetailLayout.usesColumns(width: width, dynamicTypeSize: dynamicType)
+        )
+        .environment(\.horizontalSizeClass, width >= 760 ? .regular : .compact)
+        .environment(\.dynamicTypeSize, dynamicType)
+        .frame(width: width)
+        .fixedSize(horizontal: false, vertical: true)
+        let controller = UIHostingController(rootView: content)
+        let size = controller.sizeThatFits(in: CGSize(width: width, height: 10000))
+        XCTAssertGreaterThan(size.height, 500)
+        XCTAssertLessThan(size.height, 10000, "The complete layout must fit without clipping")
+        XCTAssertEqual(size.width, width, accuracy: 1)
+        let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        window.rootViewController = controller
+        window.isHidden = false
+        defer { window.isHidden = true }
+        controller.view.frame = window.bounds
+        try await settle(controller)
+        let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+            controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "issue-2598-\(snapshotName ?? "iPhone")-\(name)"
+        attachment.lifetime = XCTAttachment.Lifetime.keepAlways
+        add(attachment)
+        XCTAssertTrue(model.supports(.hotend))
+        XCTAssertTrue(model.supports(.bed))
+        XCTAssertTrue(JogSubgroup.AbsolutePositionControls.isVisible(model.capabilities))
+        XCTAssertEqual(model.hardware?.maxHotendTemp, 280)
+        XCTAssertNil(model.printer.hotendTemp)
+        XCTAssertEqual(model.printer.bedTemp, 0)
+        XCTAssertNil(model.printer.homedAxes)
+        XCTAssertNil(service.setTemperaturesCalledWith)
+        XCTAssertNil(service.moveToCalledWith)
+        XCTAssertNil(service.disableMotorsCalledWith)
+    }
+
     func test_snapshot_moonrakerProfile() async throws {
         let printer = try makePrinter(backend: .moonraker)
         // Resolved current Moonraker interfaces: homing/heaters, never jogging.
@@ -289,7 +357,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertTrue(caps.supportsHome(axes: ["X", "Y", "Z"]))
         let svc = makeService(caps: caps)
         let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
+        assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
     }
 
     func test_snapshot_flashForgeProfile() async throws {
@@ -304,7 +372,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertFalse(PreheatSubgroup.isVisible(capabilities: caps))
         let svc = makeService(caps: caps)
         let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
+        assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
     }
 
     func test_snapshot_sdcpProfile() async throws {
@@ -316,7 +384,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         """)
         let svc = makeService(caps: caps)
         let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
+        assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
     }
 
     // MARK: - State snapshots
@@ -330,8 +398,9 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let barrier = AsyncBarrier()
         addTeardownBlock { barrier.close() }
         svc.beforeGetBackendCapabilities = { await barrier.arriveAndWait() }
-        let section = PrinterControlsSection(printer: printer, printerService: svc)
-        assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
+        let model = PrinterControlsViewModel(printerService: svc, printer: printer)
+        let section = PrinterControlsSection(printer: printer, viewModel: model)
+        assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
     }
 
     /// The starting state keeps the section visible while `canControl` is false,
@@ -340,7 +409,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let printer = try makePrinter(backend: .moonraker, state: "starting")
         let svc = makeService(caps: Self.layoutCaps)
         let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
+        assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
     }
     // MARK: - Lockout banner (spec §2.2 — visible during print with disabled controls)
 
@@ -351,7 +420,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let printer = try makePrinter(backend: .moonraker, state: "printing")
         let svc = makeService(caps: Self.layoutCaps)
         let section = await loadedSection(printer: printer, service: svc)
-        assertSnapshot(of: host(section), as: .image(on: .iPhone13), named: snapshotName)
+        assertSnapshot(of: host(ScrollView { section }), as: .image(on: .iPhone13), named: snapshotName)
     }
 
     func test_snapshot_printerDetailBorderedDestructiveControls_darkMode() {

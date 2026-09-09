@@ -406,7 +406,8 @@ final class PrinterControlsViewModel: ObservableObject {
         case .home(let axes):
             // `homedAxes` is the authoritative homing confirmation; position
             // resets are a side effect and must not couple homing to jog noise.
-            guard let homed = updated.homedAxes?.uppercased() else { return false }
+            guard previous.homedAxes != updated.homedAxes,
+                  let homed = updated.homedAxes?.uppercased() else { return false }
             return axes.allSatisfy { homed.contains($0.uppercased()) }
         }
     }
@@ -567,7 +568,18 @@ final class PrinterControlsViewModel: ObservableObject {
 
     private func setError(command: ControlCommand, error: Error) {
         let mapped = Self.mapError(error)
-        let message = mapped.isRetryable
+        let uncertainResponse: Bool
+        if let network = error as? NetworkError {
+            switch network {
+            case .invalidResponse, .decodingFailed, .unexpectedStatus, .staleServerResponse:
+                uncertainResponse = true
+            default:
+                uncertainResponse = false
+            }
+        } else {
+            uncertainResponse = false
+        }
+        let message = mapped.isRetryable || uncertainResponse
             ? "\(mapped.message) Outcome may be unknown. Check the printer before sending another request."
             : mapped.message
         setError(command: command, message: message, isRetryable: mapped.isRetryable)

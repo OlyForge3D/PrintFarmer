@@ -259,6 +259,52 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(vm.pendingCommand)
     }
 
+    func test_serverChange_cannotRebindOldOwnerAndBlocksEveryNewOperation() async throws {
+        var caps = Self.fullCaps
+        caps.supportsAbsoluteMovement = true
+        caps.supportsDisableMotors = true
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await vm.loadCapabilities()
+        var sameServer = true
+        vm.configureAccess { sameServer ? nil : "Server changed" }
+        await vm.setHeaterTarget(.bed, target: 70)
+        sameServer = false
+        vm.refreshAccess()
+        XCTAssertNil(vm.pendingCommand)
+        vm.configureAccess { nil }
+        XCTAssertFalse(vm.canControl, "Reappearing must not silently rebind an old service to a new server")
+        mockService.setTemperaturesCalledWith = nil
+        await vm.setHeaterTarget(.hotend, target: 200)
+        await vm.moveTo(x: 1, y: nil, z: nil, feedrateMmMin: nil)
+        await vm.disableMotors()
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertNil(mockService.moveToCalledWith)
+        XCTAssertNil(mockService.disableMotorsCalledWith)
+    }
+
+    func test_pendingIndividualTarget_serializesAllRoutineCommands() async throws {
+        var caps = Self.fullCaps
+        caps.supportsAbsoluteMovement = true
+        caps.supportsDisableMotors = true
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await vm.loadCapabilities()
+        await vm.setHeaterTarget(.hotend, target: 220)
+        let pending = vm.pendingCommand
+        mockService.setTemperaturesCalledWith = nil
+        await vm.setHeaterTarget(.bed, target: 70)
+        await vm.moveTo(x: 1, y: nil, z: nil, feedrateMmMin: nil)
+        await vm.disableMotors()
+        await vm.preheat(.pla)
+        await vm.jog(axis: "X", distanceMm: 1)
+        await vm.homeAll()
+        XCTAssertEqual(vm.pendingCommand, pending)
+        XCTAssertNil(mockService.setTemperaturesCalledWith)
+        XCTAssertNil(mockService.moveToCalledWith)
+        XCTAssertNil(mockService.disableMotorsCalledWith)
+        XCTAssertNil(mockService.moveCalledWith)
+        XCTAssertNil(mockService.homeCalledWith)
+    }
+
     func test_relativeValidation_rejectsInvalidAxisNonfiniteAndZero() async throws {
         let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()

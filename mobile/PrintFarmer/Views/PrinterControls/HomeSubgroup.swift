@@ -16,6 +16,7 @@ struct HomeSubgroup: View {
     @State private var disabledTapMessage: String?
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Returns true when the entire subgroup must be removed from layout
     /// (capability gating per spec §3.5). The Controls section reflows the
@@ -56,12 +57,14 @@ struct HomeSubgroup: View {
                     Text("Motor maintenance")
                         .font(.headline)
                         .accessibilityAddTraits(.isHeader)
-                    Text(Self.warning).font(.footnote)
+                    Text(Self.warning).font(.footnote).fixedSize(horizontal: false, vertical: true)
                     Button("Disable motors", role: .destructive) {
                         confirmsRelease = true
                     }
                     .frame(minHeight: 44)
                     .buttonStyle(.bordered)
+                    .tint(Color.pfError)
+                    .foregroundStyle(Color.pfError)
                     .disabled(!viewModel.canControl || viewModel.isExecuting)
                     .accessibilityIdentifier("printer.controls.disable-motors")
                 }
@@ -102,7 +105,9 @@ struct HomeSubgroup: View {
                     homeAllButton
                 }
 
-                HStack(spacing: 8) {
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+                layout {
                     if viewModel.capabilities?.supportsHomingXY == true {
                         homeAxisButton(
                             label: String(localized: "Home XY", comment: "Home subgroup: Home X and Y axes button"),

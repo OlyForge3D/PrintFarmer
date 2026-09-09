@@ -126,8 +126,9 @@ final class PreheatSubgroupTests: XCTestCase {
 
     // MARK: - Accessibility hints (spec §4.1)
 
-    func test_accessibilityHint_idle_pla_withBed() throws {
+    func test_accessibilityHint_idle_pla_withBed() async throws {
         let vm = try makeVM(state: "ready", isOnline: true)
+        await vm.loadCapabilities()
         let view = PreheatSubgroup(viewModel: vm)
         XCTAssertEqual(
             view.accessibilityHint(preset: .pla, canControl: true, hasError: false),
@@ -135,8 +136,9 @@ final class PreheatSubgroupTests: XCTestCase {
         )
     }
 
-    func test_accessibilityHint_idle_petg_withBed() throws {
+    func test_accessibilityHint_idle_petg_withBed() async throws {
         let vm = try makeVM(state: "ready", isOnline: true)
+        await vm.loadCapabilities()
         let view = PreheatSubgroup(viewModel: vm)
         XCTAssertEqual(
             view.accessibilityHint(preset: .petg, canControl: true, hasError: false),
@@ -144,8 +146,9 @@ final class PreheatSubgroupTests: XCTestCase {
         )
     }
 
-    func test_accessibilityHint_idle_coolDown() throws {
+    func test_accessibilityHint_idle_coolDown() async throws {
         let vm = try makeVM(state: "ready", isOnline: true)
+        await vm.loadCapabilities()
         let view = PreheatSubgroup(viewModel: vm)
         XCTAssertEqual(
             view.accessibilityHint(preset: .coolDown, canControl: true, hasError: false),

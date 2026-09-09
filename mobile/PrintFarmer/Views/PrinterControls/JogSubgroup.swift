@@ -18,6 +18,7 @@ struct JogSubgroup: View {
     @State private var disabledTapMessage: String?
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     static let stepOptions: [Double] = [0.1, 1, 10, 100]
     private static let canonicalAxes: [String] = ["X", "Y", "Z"]
@@ -80,29 +81,42 @@ struct JogSubgroup: View {
 
     private var axisPicker: some View {
         let axes = Self.visibleAxes(for: viewModel.capabilities)
-        return Picker(String(localized: "Jog axis", comment: "Jog subgroup axis picker label"), selection: $selectedAxis) {
+        return selectionLayout {
             ForEach(axes, id: \.self) { axis in
-                Text(axis).tag(axis)
+                Button { selectedAxis = axis } label: {
+                    Text(axis).frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.bordered)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(
+                    selectedAxis == axis ? Color.pfTextPrimary : Color.clear
+                ))
+                .accessibilityLabel("Jog axis \(axis)")
+                .accessibilityAddTraits(selectedAxis == axis ? .isSelected : [])
             }
         }
-        .pickerStyle(.segmented)
-        .frame(minHeight: 44)
-        .accessibilityLabel(String(localized: "Jog axis", comment: "VoiceOver label for jog axis picker"))
-        .accessibilityHint(String(localized: "Choose X, Y, or Z axis to move.", comment: "VoiceOver hint for jog axis picker"))
         .disabled(!viewModel.canControl || viewModel.pendingCommand != nil)
     }
 
     private var stepPicker: some View {
-        Picker(String(localized: "Jog step distance", comment: "Jog subgroup step picker label"), selection: $selectedStep) {
+        selectionLayout {
             ForEach(Self.stepOptions, id: \.self) { step in
-                Text(stepLabel(step)).tag(step)
+                Button { selectedStep = step } label: {
+                    Text(stepLabel(step)).frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.bordered)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(
+                    selectedStep == step ? Color.pfTextPrimary : Color.clear
+                ))
+                .accessibilityLabel("Jog step \(stepLabel(step)) millimeters")
+                .accessibilityAddTraits(selectedStep == step ? .isSelected : [])
             }
         }
-        .pickerStyle(.segmented)
-        .frame(minHeight: 44)
-        .accessibilityLabel(String(localized: "Jog step distance", comment: "VoiceOver label for jog step picker"))
-        .accessibilityHint(String(localized: "Choose how many millimeters each tap moves.", comment: "VoiceOver hint for jog step picker"))
         .disabled(!viewModel.canControl || viewModel.pendingCommand != nil)
+    }
+
+    private var selectionLayout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
     }
 
     struct AbsolutePositionControls: View {
@@ -126,6 +140,7 @@ struct JogSubgroup: View {
                         .accessibilityAddTraits(.isHeader)
                     Text("Coordinates are in mm. Blank axes stay unchanged; zero is an explicit destination. Travel limits and origin are not reported. Verify clearance and homing before moving.")
                         .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
                     ForEach(JogSubgroup.visibleAxes(for: viewModel.capabilities), id: \.self) { axis in
                         Text("\(axis) reported: \(positionText(axis))")
                             .font(.footnote)

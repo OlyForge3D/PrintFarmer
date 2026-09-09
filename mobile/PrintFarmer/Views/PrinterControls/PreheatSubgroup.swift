@@ -44,7 +44,7 @@ struct PreheatSubgroup: View {
                 .foregroundStyle(Color.pfTextPrimary)
                 .accessibilityAddTraits(.isHeader)
 
-            if viewModel.capabilities?.supportsBedTemperature == false {
+            if !viewModel.supports(.bed) {
                 Text("Hotend only — bed temperature control is unavailable.")
                     .font(.caption)
                     .foregroundStyle(Color.pfTextSecondary)
@@ -79,7 +79,7 @@ struct PreheatSubgroup: View {
         if dynamicTypeSize.isAccessibilitySize {
             count = 1
         } else if horizontalSizeClass == .regular {
-            count = 4
+            return [GridItem(.adaptive(minimum: 120), spacing: 8)]
         } else {
             count = 2
         }
@@ -158,6 +158,7 @@ struct PreheatSubgroup: View {
                 } else {
                     Text("Maximum temperature is unknown. Confirm the printer's safe limit before setting a target. Zero switches this heater off.")
                         .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 TextField("Target (°C)", text: $target)
                     .textFieldStyle(.roundedBorder)
@@ -219,7 +220,7 @@ struct PreheatSubgroup: View {
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
             }
-            Text(preset.temperatureLabel)
+            Text(viewModel.supports(.bed) ? preset.temperatureLabel : "\(Int(preset.hotend))°")
                 .font(.caption.monospacedDigit())
                 .lineLimit(1)
                 .opacity(isPending ? 0 : 1) // hide values during pending; spinner takes over
@@ -280,7 +281,7 @@ struct PreheatSubgroup: View {
         if !canControl {
             return String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1")
         }
-        return preset.a11yHint(hasBed: viewModel.capabilities?.supportsBedTemperature != false)
+        return preset.a11yHint(hasBed: viewModel.supports(.bed))
     }
 
     func accessibilityValue(isPending: Bool, hasError: Bool) -> String {

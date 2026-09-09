@@ -264,7 +264,8 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
     }
 
     func test_homeZ_doesNotResolveOnUnrelatedHomingOrMissingTelemetry() throws {
-        let base = try idlePrinter()
+        var base = try idlePrinter()
+        base.homedAxes = nil
         let command = ControlCommand(kind: .home(axes: ["Z"]), startedAt: Date())
         var update = base
         update.homedAxes = "xy"
