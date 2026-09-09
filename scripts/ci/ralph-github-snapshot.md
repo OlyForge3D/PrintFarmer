@@ -49,6 +49,14 @@ other API, pagination, shape, and parse failures exit nonzero before the
 helper writes a new cache record. Unknown CodeQL or any uncollected comparison
 group forces `deep-scan-required`, even when its value is unchanged.
 
+PR comments, reviews, check runs, and statuses are validated entry by entry
+before normalization: IDs must be positive safe integers, and fingerprint
+fields must have their expected string types. Empty comment/review bodies are
+valid. Review commit IDs may be null; pending reviews may omit their submission
+time. Check conclusions and completion times may be null while unfinished.
+Malformed entries abort collection before `writeRoundCache`, preserving the
+entire previous helper-managed baseline.
+
 The collector is observation-only. It never claims, comments, labels, opens
 sessions, reviews, merges, deletes, or treats any cache field as action
 authority. A Ralph action must re-fetch its issue or PR live before acting.

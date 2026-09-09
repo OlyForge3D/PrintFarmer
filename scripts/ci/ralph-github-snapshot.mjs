@@ -95,24 +95,57 @@ function normalizeDependencies(entries) {
     left.repository.localeCompare(right.repository) || left.number - right.number || left.state.localeCompare(right.state));
 }
 
+function hasEntryId(entry) {
+  return entry && typeof entry === 'object' && !Array.isArray(entry) &&
+    Number.isSafeInteger(entry.id) && entry.id > 0;
+}
+
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function isNullableString(value) {
+  return value === null || isNonEmptyString(value);
+}
+
 function compactTimeline(entries, context) {
-  return requireArray(entries, context).map((entry) => ({
-    id: entry.id,
-    state: entry.state ?? '',
-    updatedAt: entry.updated_at ?? entry.submitted_at ?? '',
-    body: entry.body ?? '',
-    commitId: entry.commit_id ?? '',
-  })).sort((left, right) => String(left.id).localeCompare(String(right.id)));
+  const isReview = context === 'reviews';
+  return requireArray(entries, context).map((entry) => {
+    if (!hasEntryId(entry) || typeof entry.body !== 'string' ||
+      (isReview
+        ? !isNonEmptyString(entry.state) || !isNullableString(entry.commit_id) ||
+          !(isNonEmptyString(entry.submitted_at) || (entry.state === 'PENDING' && entry.submitted_at == null))
+        : !isNonEmptyString(entry.updated_at))) {
+      fail(`${context} returned incomplete data.`);
+    }
+    return {
+      id: entry.id,
+      state: isReview ? entry.state : '',
+      updatedAt: isReview ? entry.submitted_at ?? '' : entry.updated_at,
+      body: entry.body,
+      commitId: isReview ? entry.commit_id ?? '' : '',
+    };
+  }).sort((left, right) => String(left.id).localeCompare(String(right.id)));
 }
 
 function compactChecks(entries, context) {
-  return requireArray(entries, context).map((entry) => ({
-    id: entry.id,
-    name: entry.name ?? entry.context ?? '',
-    status: entry.status ?? entry.state ?? '',
-    conclusion: entry.conclusion ?? '',
-    updatedAt: entry.completed_at ?? entry.updated_at ?? '',
-  })).sort((left, right) => left.id - right.id);
+  const isCheckRun = context === 'checks';
+  return requireArray(entries, context).map((entry) => {
+    if (!hasEntryId(entry) ||
+      (isCheckRun
+        ? !isNonEmptyString(entry.name) || !isNonEmptyString(entry.status) ||
+          !isNullableString(entry.conclusion) || !isNullableString(entry.completed_at)
+        : !isNonEmptyString(entry.context) || !isNonEmptyString(entry.state) || !isNonEmptyString(entry.updated_at))) {
+      fail(`${context} returned incomplete data.`);
+    }
+    return {
+      id: entry.id,
+      name: isCheckRun ? entry.name : entry.context,
+      status: isCheckRun ? entry.status : entry.state,
+      conclusion: isCheckRun ? entry.conclusion ?? '' : '',
+      updatedAt: isCheckRun ? entry.completed_at ?? '' : entry.updated_at,
+    };
+  }).sort((left, right) => left.id - right.id);
 }
 
 function compactAlerts(entries) {
