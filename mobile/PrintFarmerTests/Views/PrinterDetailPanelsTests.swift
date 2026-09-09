@@ -7,6 +7,15 @@ import KeychainSwift
 @MainActor
 final class PrinterDetailPanelsTests: XCTestCase {
 
+    private final class DetailHostingController<Content: View>: UIHostingController<Content> {
+        private(set) var hasAppeared = false
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            hasAppeared = true
+        }
+    }
+
     func testProductionDetailHostCreatesControlsWhenPendingCompositionSettles() async throws {
         executionTimeAllowance = 60
         let fixture = try detailHostFixture()
@@ -24,7 +33,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         detail.configure(printerService: fixture.services.printerService)
         await detail.loadPrinter()
         XCTAssertNotNil(detail.printer)
-        let controller = UIHostingController(rootView: try host(
+        let controller = DetailHostingController(rootView: try host(
             PrinterDetailView(viewModel: detail), services: fixture.services, registry: fixture.registry
         ))
         let window = show(controller)
@@ -65,7 +74,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         executionTimeAllowance = 60
         let fixture = try detailHostFixture()
         fixture.registry.setAdvancedPrinterControlsEnabled(true)
-        let controller = UIHostingController(rootView: try host(
+        let controller = DetailHostingController(rootView: try host(
             PrinterDetailView(printerId: fixture.printer.id), services: fixture.services, registry: fixture.registry
         ))
         let window = show(controller)
@@ -163,12 +172,13 @@ final class PrinterDetailPanelsTests: XCTestCase {
             .environment(auth)
             .environment(AppRouter())
             .environment(\.scenePhase, .active)
+            .transaction { $0.disablesAnimations = true }
     }
 
     private func show<Content: View>(_ controller: UIHostingController<Content>) -> UIWindow {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 900, height: 1200))
         window.rootViewController = controller
-        window.makeKeyAndVisible()
+        window.isHidden = false
         controller.view.frame = window.bounds
         controller.view.setNeedsLayout()
         controller.view.layoutIfNeeded()
@@ -187,9 +197,9 @@ final class PrinterDetailPanelsTests: XCTestCase {
         api.capturedRequests.filter { $0.url?.path.hasSuffix("/backend-capabilities") == true }
     }
 
-    private func selectControls<Content: View>(in controller: UIHostingController<Content>) async throws {
+    private func selectControls<Content: View>(in controller: DetailHostingController<Content>) async throws {
         try await waitForHost("The production detail pager must appear", in: controller.view) {
-            !self.views(UISegmentedControl.self, in: controller.view).isEmpty
+            controller.hasAppeared && !self.views(UISegmentedControl.self, in: controller.view).isEmpty
         }
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
         selector.selectedSegmentIndex = 1
