@@ -15,7 +15,7 @@ const root = path.resolve('fixtures', 'ralph-macos-ssh-validation');
 const options = () => ({
   platform: 'win32',
   env: {
-    RALPH_MAC_SSH_ENABLED: 'true', RALPH_MAC_SSH_DESTINATION: 'operator@trusted-mac.local',
+    RALPH_MAC_SSH_ENABLED: 'true', RALPH_MAC_SSH_DESTINATION: 'operator@10.0.0.72',
     RALPH_MAC_SSH_EXPECTED_HOST: 'trusted-mac.local', RALPH_MAC_SSH_WORKER_PATH: '/opt/printfarmer/ralph-worker',
     RALPH_MAC_SSH_KNOWN_HOSTS: path.join(root, 'known_hosts'), RALPH_ADMISSION_LEDGER_DIR: root,
   },
@@ -65,6 +65,8 @@ test('requires explicit trusted Windows configuration and strict SSH options', (
     '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o',
     `UserKnownHostsFile=${configuration.knownHosts}`, '-o', 'ConnectTimeout=10',
   ]);
+  assert.equal(configuration.destination, 'operator@10.0.0.72');
+  assert.equal(configuration.expectedHost, 'trusted-mac.local');
   assert.match(invocation.args.at(-1), /^zsh -lic /);
   assert.throws(() => loadMacSshConfiguration({ ...options(), env: { ...options().env, RALPH_MAC_SSH_DESTINATION: 'x;whoami' } }),
     (error) => error.code === 'INVALID_CONFIGURATION');

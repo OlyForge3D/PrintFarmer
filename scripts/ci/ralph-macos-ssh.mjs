@@ -78,7 +78,7 @@ export function loadMacSshConfiguration({ env = process.env, platform = process.
   if (!validDestination(destination) || !validHost(expectedHost) || !validAbsolutePosixPath(workerPath)) {
     throw new RalphMacSshError('macOS SSH configuration has an invalid trusted identifier.', 'INVALID_CONFIGURATION');
   }
-  if (destination.split('@')[1] !== expectedHost || !path.isAbsolute(knownHosts) || /\s/.test(knownHosts)) {
+  if (!path.isAbsolute(knownHosts) || /\s/.test(knownHosts)) {
     throw new RalphMacSshError('RALPH_MAC_SSH_KNOWN_HOSTS must be an absolute local path.', 'INVALID_CONFIGURATION');
   }
   return { destination, expectedHost, workerPath, knownHosts };
