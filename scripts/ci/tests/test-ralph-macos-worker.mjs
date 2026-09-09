@@ -11,7 +11,7 @@ const fixtureScript = path.join(suiteRoot, 'fake-copilot.mjs');
 const exactCleanupPids = new Set();
 
 await writeFile(fixtureScript, `
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 const invocation = {
@@ -49,6 +49,9 @@ if (process.env.RALPH_MAC_WORKER_FAKE_REWRITE_ORIGIN === 'true') {
   );
   const roguePush = spawnSync('git', ['push', '-u', 'origin', 'HEAD'], { cwd: process.cwd(), encoding: 'utf8' });
   if (rewritten.status !== 0 || roguePush.status !== 0) process.exit(93);
+}
+if (process.env.RALPH_MAC_WORKER_FAKE_DELETE_GIT === 'true') {
+  rmSync(process.cwd() + '/.git', { force: true });
 }
 if (process.env.RALPH_MAC_WORKER_FAKE_SIGNAL) {
   process.kill(process.pid, process.env.RALPH_MAC_WORKER_FAKE_SIGNAL);
@@ -348,10 +351,35 @@ test('nonzero Copilot exit cannot be converted into success by terminal prose', 
   const failed = await invoke({ version: 1, type: 'reconcile', job: fixture.job }, env);
   assert.equal(failed.code, 0, failed.stderr);
   const attestation = JSON.parse(failed.stdout);
+  assert.equal(attestation.type, 'failed');
   assert.equal(attestation.state, 'failed');
+  assert.equal(attestation.failureCode, 'COPILOT_EXIT_NONZERO');
   assert.equal(attestation.workerVerified, true);
   assert.equal(attestation.exitCode, 9);
   assert.equal(attestation.sessionId, acknowledgement.sessionId);
+});
+
+test('nonzero exit remains attestable after the child destroys Git inspection evidence', async () => {
+  const fixture = await createFixture('nonzero-without-git');
+  const env = {
+    ...fixture.env,
+    RALPH_MAC_WORKER_FAKE_EXIT_CODE: '9',
+    RALPH_MAC_WORKER_FAKE_DELETE_GIT: 'true',
+  };
+  const request = { version: 1, type: 'dispatch', job: fixture.job };
+  const accepted = await invoke(request, env);
+  assert.equal(accepted.code, 0, accepted.stderr);
+  await waitForRecord(
+    path.join(fixture.state, `${fixture.job.jobId}.json`),
+    (record) => record.state === 'awaiting-terminal-evidence',
+    'nonzero result after Git destruction',
+  );
+  const failed = await invoke({ ...request, type: 'reconcile' }, env);
+  assert.equal(failed.code, 0, failed.stderr);
+  const response = JSON.parse(failed.stdout);
+  assert.equal(response.type, 'failed');
+  assert.equal(response.failureCode, 'COPILOT_EXIT_NONZERO');
+  assert.equal(response.exitCode, 9);
 });
 
 test('exit 0 without a pushed branch remains held for terminal evidence', async () => {
@@ -412,6 +440,7 @@ test('signal termination produces a worker-verified failure attestation', async 
   const status = await invoke({ ...request, type: 'reconcile' }, env);
   assert.equal(status.code, 0, status.stderr);
   const attestation = JSON.parse(status.stdout);
+  assert.equal(attestation.type, 'failed');
   assert.equal(attestation.state, 'failed');
   if (process.platform === 'win32') assert.notEqual(attestation.exitCode, 0);
   else {

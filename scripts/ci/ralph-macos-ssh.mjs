@@ -186,9 +186,12 @@ export function parseRemoteWorkerResponse(output, job) {
     return response;
   }
   if (response.type === 'failed') {
+    const hasExitCode = Number.isInteger(response.exitCode);
+    const hasSignal = validIdentifier(response.signal);
     if (response.state !== 'failed' || response.workerVerified !== true ||
         !validIdentifier(response.failureCode) || typeof response.failureMessage !== 'string' ||
-        !response.failureMessage.trim() || response.failureMessage.length > 1024) {
+        !response.failureMessage.trim() || response.failureMessage.length > 1024 ||
+        (hasExitCode && hasSignal) || (hasExitCode && response.exitCode === 0)) {
       throw new RalphMacSshError('Remote failure attestation is malformed.', 'MALFORMED_RESPONSE');
     }
     return response;
@@ -550,6 +553,8 @@ async function recordRemoteWorkerResponse(response, options = {}) {
       entry.state = 'failed';
       entry.failureCode = response.failureCode;
       entry.failureReason = response.failureMessage;
+      entry.exitCode = response.exitCode;
+      entry.signal = response.signal;
       entry.workerVerified = true;
     } else {
       throw new RalphMacSshError('Worker response type is invalid.', 'MALFORMED_RESPONSE');

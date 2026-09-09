@@ -351,14 +351,31 @@ function correlation(record) {
 
 function failedResponse(record) {
   if (!record || record.state !== 'failed' || !identifier(record.sessionId)) fail('Job is not a correlated worker failure.');
+  const exitCode = record.processResult?.exitCode;
+  const signal = record.processResult?.signal;
+  const processFailure = Number.isInteger(exitCode)
+    ? {
+        failureCode: 'COPILOT_EXIT_NONZERO',
+        failureMessage: `Mac Copilot process exited with status ${exitCode}.`,
+        exitCode,
+      }
+    : typeof signal === 'string'
+      ? {
+          failureCode: 'COPILOT_SIGNAL',
+          failureMessage: `Mac Copilot process terminated from signal ${signal}.`,
+          signal,
+        }
+      : {
+          failureCode: identifier(record.processResult?.errorCode) ? record.processResult.errorCode : 'WORKER_FAILURE',
+          failureMessage: 'Mac worker failed before a terminal process result was available.',
+        };
   return {
     ...correlation(record),
     version: 1,
     type: 'failed',
     state: 'failed',
     workerVerified: true,
-    failureCode: identifier(record.processResult?.errorCode) ? record.processResult.errorCode : 'WORKER_FAILURE',
-    failureMessage: 'Mac worker failed before a terminal process result was available.',
+    ...processFailure,
   };
 }
 
@@ -708,25 +725,27 @@ async function terminalResponse(record) {
       (!Number.isInteger(record.processResult?.exitCode) && typeof record.processResult?.signal !== 'string')) {
     fail('Job does not have a terminal process result.');
   }
-  const gitEvidence = await inspectTerminalRepository(record);
   const completed = record.processResult.exitCode === 0 && record.processResult.signal === undefined;
-  if (completed && (!gitEvidence.workingTreeClean || !gitEvidence.allCommitsPushed ||
-      !gitEvidence.repositoryIdentityVerified || !gitEvidence.baseAncestor)) {
+  if (!completed) {
+    record.state = 'failed';
+    await persist(record.job.jobId, record);
+    return failedResponse(record);
+  }
+  const gitEvidence = await inspectTerminalRepository(record);
+  if (!gitEvidence.workingTreeClean || !gitEvidence.allCommitsPushed ||
+      !gitEvidence.repositoryIdentityVerified || !gitEvidence.baseAncestor) {
     fail('Successful worker process lacks clean, pushed, ancestry-bound Git evidence.');
   }
-  record.state = completed ? 'completed' : 'failed';
+  record.state = 'completed';
   record.terminal = {
     ...correlation(record),
     ...gitEvidence,
     version: 1,
     type: 'terminal',
-    state: record.state,
+    state: 'completed',
     workerVerified: true,
-    ...(Number.isInteger(record.processResult.exitCode) ? { exitCode: record.processResult.exitCode } : {}),
-    ...(typeof record.processResult.signal === 'string' ? { signal: record.processResult.signal } : {}),
-    validationEvidence: completed
-      ? 'Mac worker verified exit 0 with trusted repository identity, admitted ancestry, a clean worktree, and a matching pushed branch.'
-      : 'Mac worker verified a non-success process result.',
+    exitCode: 0,
+    validationEvidence: 'Mac worker verified exit 0 with trusted repository identity, admitted ancestry, a clean worktree, and a matching pushed branch.',
     recordedAt: new Date().toISOString(),
   };
   await persist(record.job.jobId, record);
