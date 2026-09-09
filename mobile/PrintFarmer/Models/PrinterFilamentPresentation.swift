@@ -29,6 +29,25 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
         /// `toolheadSlotRow` never showed one for those either. Preserves
         /// the retired per-toolhead detail this section's rows replaced.
         let nozzleDiameter: Double?
+        let hasAssignment: Bool
+        let colorText: String?
+
+        var swatchHex: String? {
+            guard let colorText else { return nil }
+            let hex = colorText.hasPrefix("#") ? String(colorText.dropFirst()) : colorText
+            guard [3, 6].contains(hex.count),
+                  hex.allSatisfy({ $0.isASCII && $0.isHexDigit }) else { return nil }
+            return "#" + hex
+        }
+
+        var materialSummary: String {
+            if isCoverageOnly { return "Filament status unknown" }
+            if hasAssignment {
+                return material.map { "Assigned: \($0)" } ?? "Spool assigned"
+            }
+            // These inputs describe assignment metadata, not a filament sensor.
+            return material.map { "Reported material: \($0)" } ?? "No spool assigned"
+        }
 
         var notice: String? {
             guard let coverage else { return nil }
@@ -54,6 +73,40 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
     let summary: String?
     let supportedActions: Set<PrinterFilamentAction.Kind>
     let integrityNotices: [String]
+    let hasRelevantDemand: Bool
+
+    var compactRows: [Row] {
+        let current = rows.filter { !$0.isCoverageOnly }
+        let tools = current.filter { $0.index != nil }
+        if tools.count == 1, let tool = tools.first,
+           !tool.hasAssignment, tool.material == nil, (tool.colorText ?? "").isEmpty,
+           current.contains(where: { $0.index == nil }) {
+            return current.filter { $0.index == nil }
+        }
+        return current
+    }
+
+    func compactTitle(for row: Row) -> String? {
+        if row.index == nil {
+            return compactRows.count > 1 ? row.title : nil
+        }
+        let tools = rows.filter { $0.index != nil && !$0.isCoverageOnly }
+        guard tools.count > 1 else { return nil }
+        let title = "\(row.title) · T\(row.index ?? 0)"
+        if tools.filter({ $0.title == row.title && $0.index == row.index }).count > 1,
+           let id = row.toolheadID {
+            return "\(title) · \(id)"
+        }
+        return title
+    }
+
+    var attentionText: String? {
+        if isStale { return "Filament data may be out of date" }
+        if summary?.contains("Insufficient filament") == true { return summary }
+        if hasRelevantDemand { return statusText ?? (summary == "Coverage unknown" ? summary : nil) }
+        if case .failed = coverageState { return "Coverage unavailable" }
+        return nil
+    }
 
     var statusText: String? {
         switch coverageState {
@@ -98,10 +151,23 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
         self.supportedActions = notices.isEmpty && !self.isStale ? supportedActions : []
         let snapshot = coverageState == .disabled || !coverageIdentityIsValid ? nil : coverage
         evaluatedAt = snapshot?.evaluatedAtUtc
+        hasRelevantDemand = snapshot.map {
+            $0.activeJobId != nil || $0.assignedQueuedJobCount > 0
+                || $0.toolheads.contains { ($0.totalDemandGrams ?? 0).isFinite && ($0.totalDemandGrams ?? 0) > 0 }
+        } ?? false
         if let snapshot {
             let prefix = self.isStale ? "Last confirmed: " : ""
             switch snapshot.status {
-            case .covers: summary = prefix + "Covers active and assigned queued demand"
+            case .covers:
+                let knownDemand = !snapshot.toolheads.isEmpty && snapshot.toolheads.allSatisfy {
+                    guard let grams = $0.totalDemandGrams else { return false }
+                    return grams.isFinite && grams >= 0
+                }
+                let positiveDemand = snapshot.toolheads.contains { ($0.totalDemandGrams ?? 0) > 0 }
+                summary = hasRelevantDemand
+                    ? prefix + (knownDemand && positiveDemand
+                        ? "Covers active and assigned queued demand" : "Coverage unknown")
+                    : nil
             case .runout: summary = prefix + "Insufficient filament for active and assigned queued demand"
             case .unknown: summary = prefix + "Coverage unknown"
             }
@@ -130,7 +196,9 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
                 spoolName: nil,
                 remainingGrams: nil,
                 coverage: slot, isLastConfirmed: self.isStale, isCoverageOnly: false,
-                nozzleDiameter: toolhead.nozzleDiameter
+                nozzleDiameter: toolhead.nozzleDiameter,
+                hasAssignment: toolhead.currentSpoolId != nil,
+                colorText: toolhead.currentFilamentColor
             ))
         }
         for offset in slots.indices where !used.contains(offset) {
@@ -145,7 +213,7 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
                 title: slot.toolheadName,
                 material: nil, spoolID: nil, spoolName: nil,
                 remainingGrams: nil, coverage: slot, isLastConfirmed: self.isStale, isCoverageOnly: true,
-                nozzleDiameter: nil
+                nozzleDiameter: nil, hasAssignment: false, colorText: nil
             ))
         }
         // Printer-level spool data has no slot authority. Keep it once, explicitly
@@ -162,7 +230,8 @@ struct PrinterFilamentPresentation: Equatable, Sendable {
                     : "No printer-level spool assigned",
                 remainingGrams: spool.hasActiveSpool ? spool.remainingWeightG : nil,
                 coverage: nil, isLastConfirmed: false, isCoverageOnly: false,
-                nozzleDiameter: nil
+                nozzleDiameter: nil, hasAssignment: spool.hasActiveSpool,
+                colorText: spool.hasActiveSpool ? spool.colorHex : nil
             ))
         }
         rows = result

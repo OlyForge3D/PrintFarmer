@@ -71,8 +71,61 @@ final class PrinterFilamentSectionTests: XCTestCase {
         let proposal = CGSize(width: 320, height: 10_000)
         let normalSize = normal.sizeThatFits(in: proposal)
         let largeSize = large.sizeThatFits(in: proposal)
-        XCTAssertGreaterThan(normalSize.height, CGFloat(actions.count * 44))
+        XCTAssertGreaterThan(normalSize.height, 88)
         XCTAssertGreaterThan(largeSize.height, normalSize.height)
         XCTAssertLessThanOrEqual(largeSize.width, proposal.width)
+    }
+
+    func testDefaultKeepsOnlyCompactAssignmentActionAndDisclosesNFCAndClearing() throws {
+        let printer = try TestData.decodePrinter()
+        let actions: [PrinterFilamentAction] = [
+            .init(kind: .change, target: .printer(printer.id), disabledReason: nil),
+            .init(kind: .clearAssignment, target: .printer(printer.id), disabledReason: nil),
+            .init(kind: .scanNFC, target: .printer(printer.id), disabledReason: "NFC unavailable")
+        ]
+        var received: [PrinterFilamentAction] = []
+        let view = PrinterFilamentSection(presentation: try presentation(printer: printer), actions: actions) {
+            received.append($0)
+        }
+        XCTAssertFalse(view.detailsExpanded)
+        XCTAssertEqual(view.primaryAction, actions[0])
+        XCTAssertEqual(view.detailActions, Array(actions.dropFirst()))
+        view.select(actions[1])
+        view.select(actions[2])
+        XCTAssertEqual(received, [actions[1]])
+    }
+
+    func testStaleAssignmentActionsRemainDisclosedButNeverEnabled() throws {
+        let printer = try TestData.decodePrinter()
+        let action = PrinterFilamentAction(kind: .set, target: .printer(printer.id), disabledReason: nil)
+        let view = PrinterFilamentSection(presentation: try presentation(printer: printer, stale: true), actions: [action]) { _ in
+            XCTFail("Stale data must not dispatch")
+        }
+        XCTAssertNil(view.primaryAction)
+        XCTAssertEqual(view.detailActions, [action])
+        view.select(action)
+    }
+
+    func testExpandedDetailsAreProgressivelyDisclosedAtPhoneAndTabletWidths() throws {
+        let printer = try TestData.decodePrinter()
+        let model = try presentation(printer: printer)
+        let actions = PrinterFilamentAction.Kind.allCases.map {
+            PrinterFilamentAction(kind: $0, target: .printer(printer.id), disabledReason: nil)
+        }
+        let collapsed = PrinterFilamentSection(presentation: model, actions: actions) { _ in }
+        let expanded = PrinterFilamentSection(
+            presentation: model, actions: actions, onAction: { _ in }, detailsExpanded: true
+        )
+        for width: CGFloat in [320, 700] {
+            for size in [DynamicTypeSize.large, .accessibility5] {
+                let proposal = CGSize(width: width, height: 10_000)
+                let small = UIHostingController(rootView: collapsed.environment(\.dynamicTypeSize, size))
+                    .sizeThatFits(in: proposal)
+                let full = UIHostingController(rootView: expanded.environment(\.dynamicTypeSize, size))
+                    .sizeThatFits(in: proposal)
+                XCTAssertGreaterThan(full.height, small.height)
+                XCTAssertLessThanOrEqual(full.width, width)
+            }
+        }
     }
 }

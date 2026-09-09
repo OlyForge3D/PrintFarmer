@@ -5,6 +5,17 @@ struct PrinterFilamentSection: View {
     let presentation: PrinterFilamentPresentation
     let actions: [PrinterFilamentAction]
     let onAction: @MainActor (PrinterFilamentAction) -> Void
+    @State var detailsExpanded = false
+
+    var primaryAction: PrinterFilamentAction? {
+        actions.first {
+            ($0.kind == .set || $0.kind == .change) && presentation.disabledReason(for: $0) == nil
+        }
+    }
+
+    var detailActions: [PrinterFilamentAction] {
+        actions.filter { $0 != primaryAction }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -16,42 +27,28 @@ struct PrinterFilamentSection: View {
                 Label(notice, systemImage: "exclamationmark.triangle")
                     .font(.subheadline)
             }
-            if let status = presentation.statusText {
-                Text(status).font(.subheadline).foregroundStyle(.secondary)
+            if presentation.compactRows.isEmpty {
+                Text("Filament status unknown").font(.subheadline)
             }
-            if let summary = presentation.summary {
-                Text(summary)
+            ForEach(presentation.compactRows) { row in
+                compactRow(row)
+            }
+            if let attention = presentation.attentionText {
+                Label(attention, systemImage: "exclamationmark.triangle")
                     .font(.subheadline)
-                    .accessibilityIdentifier("printer.filament.summary")
+                    .accessibilityIdentifier("printer.filament.attention")
             }
-            if let date = presentation.evaluatedAt {
-                Text("\(presentation.isStale ? "Last confirmed" : "Evaluated") \(date.formatted(date: .abbreviated, time: .shortened))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            if let action = primaryAction {
+                actionButton(action)
             }
-            if presentation.rows.isEmpty {
-                Text("Material information unavailable").font(.subheadline)
+            DisclosureGroup(isExpanded: $detailsExpanded) {
+                details
+            } label: {
+                Text("Filament details")
+                    .font(.subheadline)
+                    .frame(minHeight: 44, alignment: .leading)
             }
-            ForEach(presentation.rows) { row in
-                rowContent(row)
-            }
-            ForEach(actions) { action in
-                VStack(alignment: .leading, spacing: 4) {
-                    Button { select(action) } label: {
-                        Text(action.kind.title)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(presentation.disabledReason(for: action) != nil)
-                    .accessibilityLabel("\(action.kind.title), \(action.target.label)")
-                    .accessibilityHint(presentation.disabledReason(for: action) ?? "")
-                    .accessibilityIdentifier("printer.filament.action.\(action.id)")
-                    if let reason = presentation.disabledReason(for: action) {
-                        Text(reason).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
+            .accessibilityIdentifier("printer.filament.disclosure")
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding()
@@ -65,32 +62,92 @@ struct PrinterFilamentSection: View {
         onAction(action)
     }
 
-    private func rowContent(_ row: PrinterFilamentPresentation.Row) -> some View {
+    private func compactRow(_ row: PrinterFilamentPresentation.Row) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            if let hex = row.swatchHex {
+                Circle()
+                    .fill(Color(hex: hex))
+                    .frame(width: 18, height: 18)
+                    .overlay(Circle().strokeBorder(Color.pfBorder, lineWidth: 1))
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                if let title = presentation.compactTitle(for: row) {
+                    Text(title).font(.subheadline.weight(.semibold))
+                }
+                Text(row.materialSummary).font(.subheadline)
+                if let color = row.colorText, !color.isEmpty {
+                    Text("Color: \(color)").font(.caption).foregroundStyle(.secondary)
+                }
+                if row.coverage?.status == .runout, let notice = row.notice {
+                    Text(notice).font(.caption)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("printer.filament.row.\(row.id)")
+    }
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Spool assignments do not confirm physical loading.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let status = presentation.statusText {
+                Text(status).font(.subheadline).foregroundStyle(.secondary)
+            }
+            if let summary = presentation.summary {
+                Text(summary).font(.subheadline)
+                    .accessibilityIdentifier("printer.filament.summary")
+            }
+            if let date = presentation.evaluatedAt {
+                Text("\(presentation.isStale ? "Last confirmed" : "Evaluated") \(date.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(presentation.rows) { row in
+                rowDetails(row)
+            }
+            ForEach(detailActions) { action in
+                VStack(alignment: .leading, spacing: 4) {
+                    actionButton(action)
+                    if let reason = presentation.disabledReason(for: action) {
+                        Text(reason).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func actionButton(_ action: PrinterFilamentAction) -> some View {
+        Button { select(action) } label: {
+            Text(action.kind.title)
+                .frame(minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .disabled(presentation.disabledReason(for: action) != nil)
+        .accessibilityLabel("\(action.kind.title), \(action.target.label)")
+        .accessibilityHint(presentation.disabledReason(for: action) ?? "")
+        .accessibilityIdentifier("printer.filament.action.\(action.id)")
+    }
+
+    private func rowDetails(_ row: PrinterFilamentPresentation.Row) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Divider()
             Text(row.title).font(.subheadline.weight(.semibold))
             if let index = row.index {
                 Text("T\(index)").font(.caption).foregroundStyle(.secondary)
             }
-            // Retained toolhead detail (issue #2522, Hicks review finding
-            // 21): the pre-#2522 `toolheadSlotRow` this section replaced
-            // showed nozzle diameter per slot; carried through
-            // `PrinterFilamentPresentation.Row.nozzleDiameter` so it isn't
-            // lost.
             if let nozzleDiameter = row.nozzleDiameter {
-                Text("\(nozzleDiameter, specifier: "%.1f") mm nozzle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("\(nozzleDiameter, specifier: "%.1f") mm nozzle").font(.caption)
             }
             if row.isCoverageOnly {
                 Text("Coverage-only slot; current assignment unavailable").font(.caption)
             } else {
-                Text(row.material ?? "Material unknown").font(.subheadline)
                 if let spool = row.spoolID {
                     Text("Assigned spool #\(spool)").font(.caption)
                 }
+                if let name = row.spoolName { Text(name).font(.subheadline) }
             }
-            if let name = row.spoolName { Text(name).font(.subheadline) }
             if row.index == nil {
                 quantity("Remaining", row.remainingGrams)
             }
@@ -118,7 +175,7 @@ struct PrinterFilamentSection: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("printer.filament.row.\(row.id)")
+        .accessibilityIdentifier("printer.filament.details.\(row.id)")
     }
 
     private func quantity(_ label: String, _ grams: Double?) -> some View {
