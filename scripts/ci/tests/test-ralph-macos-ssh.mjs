@@ -5,7 +5,7 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import {
-  RalphMacSshError, acknowledgeJob, createRemoteRequest, createSshInvocation, dispatchMacJob,
+  RalphMacSshError, acknowledgeJob, acknowledgeLocalJob, createRemoteRequest, createSshInvocation, dispatchMacJob,
   loadMacSshConfiguration, markUncertain, parseRemoteAcknowledgement, recordDeliveryIntent,
   recordTerminalResult, reserveJob, reserveLocalJob, runSsh,
 } from '../ralph-macos-ssh.mjs';
@@ -190,6 +190,19 @@ test('requires correlated terminal evidence before capacity is released', async 
     (error) => error.code === 'INVALID_TERMINAL_EVIDENCE');
   const completed = await recordTerminalResult({ jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1', headSha: 'b'.repeat(40), exitCode: 0, validationEvidence: 'mobile/PrintFarmerTests: passed', workingTreeClean: true, allCommitsPushed: true }, configuration);
   assert.equal(completed.state, 'completed');
+});
+
+test('keeps local reservations out of the remote terminal lifecycle', async () => {
+  await reset();
+  const configuration = options();
+  await reserveLocalJob({ job: job(), eligibility }, configuration);
+  await acknowledgeLocalJob('job-2605', 'local-session-1', configuration);
+
+  await assert.rejects(() => recordTerminalResult({
+    jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, baseSha: 'a'.repeat(40),
+    host: undefined, sessionId: 'local-session-1', headSha: 'b'.repeat(40), exitCode: 0,
+    validationEvidence: 'not remote', workingTreeClean: true, allCommitsPushed: true,
+  }, configuration), (error) => error.code === 'INVALID_TRANSITION');
 });
 
 test('contains SSH stream errors, nonzero exits, and wall-clock timeout', async () => {

@@ -24,7 +24,7 @@ function validDestination(value) {
 }
 
 function validHost(value) {
-  return /^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(value);
+  return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(value);
 }
 
 function validAbsolutePosixPath(value) {
@@ -380,7 +380,7 @@ export async function recordDeliveryIntent(jobId, options = {}) {
 export async function acknowledgeJob(jobId, acknowledgement, options = {}) {
   return mutateLedger((ledger) => {
     const entry = ledger.jobs[jobId];
-    if (!entry || !['delivery-intent', 'uncertain'].includes(entry.state)) {
+    if (!entry || entry.mode !== 'remote' || !['delivery-intent', 'uncertain'].includes(entry.state)) {
       throw new RalphMacSshError('Only a delivered or uncertain job may be acknowledged.', 'INVALID_TRANSITION');
     }
     if (acknowledgement.jobId !== entry.jobId || acknowledgement.issue !== entry.issue || acknowledgement.baseSha !== entry.baseSha) {
@@ -408,7 +408,9 @@ export async function recordTerminalResult(result, options = {}) {
   const value = safeJson(result, 'Terminal result');
   return mutateLedger((ledger) => {
     const entry = ledger.jobs[value.jobId];
-    if (!entry || !['accepted', 'running'].includes(entry.state)) throw new RalphMacSshError('Terminal result has no accepted remote reservation.', 'INVALID_TRANSITION');
+    if (!entry || entry.mode !== 'remote' || !['accepted', 'running'].includes(entry.state)) {
+      throw new RalphMacSshError('Terminal result has no accepted remote reservation.', 'INVALID_TRANSITION');
+    }
     if (value.repository !== printFarmerRepository || value.issue !== entry.issue || value.baseSha !== entry.baseSha ||
         value.host !== entry.host || !validHost(value.host) || value.sessionId !== entry.sessionId || !validIdentifier(value.sessionId) ||
         !validSha(value.headSha) || !Number.isInteger(value.exitCode) ||
