@@ -62,6 +62,11 @@ publication location. Before every spawn, perform this exact claim protocol: fre
 fetch; apply claim label and comment; re-fetch; verify that exact claim landed; then spawn. Abort
 on any failed or stale claim.
 
+Every enabled local or SSH implementation/analysis dispatch reserves the same PrintFarmer
+admission ledger before delivery. The SSH adapter's `reserveJob` and `reserveLocalJob` are the
+only admission entry points; controllers must not create a local session or send a remote request
+without their returned reservation and fence.
+
 ## Round Report
 
 Report triage, every accounting bucket, epic/analysis status, dispatch order and blockers,

@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import {
   RalphMacSshError, acknowledgeJob, createRemoteRequest, createSshInvocation, dispatchMacJob,
   loadMacSshConfiguration, markUncertain, parseRemoteAcknowledgement, recordDeliveryIntent,
-  recordTerminalResult, reserveJob,
+  recordTerminalResult, reserveJob, reserveLocalJob, runSsh,
 } from '../ralph-macos-ssh.mjs';
 
 const root = path.resolve('fixtures', 'ralph-macos-ssh-validation');
@@ -27,6 +29,15 @@ const eligibility = { repository: 'OlyForge3D/PrintFarmer', issue: 2605, open: t
 async function reset() {
   await rm(root, { recursive: true, force: true });
   await mkdir(root, { recursive: true });
+}
+
+function fakeChild() {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => child.emit('close', 143);
+  return child;
 }
 
 test('requires explicit trusted Windows configuration and strict SSH options', () => {
@@ -65,15 +76,27 @@ test('rejects malformed, wrong-host, and uncorrelated remote acknowledgements', 
 test('enforces five shared slots, one owner per issue, and stable job fencing', async () => {
   await reset();
   const configuration = options();
-  await Promise.all(Array.from({ length: 5 }, (_, index) => reserveJob({
+  await Promise.all(Array.from({ length: 4 }, (_, index) => reserveJob({
     job: { ...job(`job-${index}`), issue: index + 1 }, eligibility: { ...eligibility, issue: index + 1 },
   }, configuration)));
+  await reserveLocalJob({
+    job: { ...job('local-job'), issue: 5 }, eligibility: { ...eligibility, issue: 5 },
+  }, configuration);
   await assert.rejects(() => reserveJob({ job: { ...job('job-overflow'), issue: 99 }, eligibility: { ...eligibility, issue: 99 } }, configuration),
     (error) => error.code === 'SLOT_EXHAUSTED');
   await assert.rejects(() => reserveJob({ job: { ...job('job-other'), issue: 1 }, eligibility: { ...eligibility, issue: 1 } }, configuration),
     (error) => error.code === 'ISSUE_OWNED');
   await assert.rejects(() => reserveJob({ job: { ...job('job-0'), issue: 99 }, eligibility: { ...eligibility, issue: 99 } }, configuration),
     (error) => error.code === 'FENCED');
+});
+
+test('fences request changes under an existing job identifier', async () => {
+  await reset();
+  const configuration = options();
+  await reserveJob({ job: job(), eligibility }, configuration);
+  await assert.rejects(() => reserveJob({
+    job: { ...job(), acceptanceCriteria: ['Different request'] }, eligibility,
+  }, configuration), (error) => error.code === 'FENCED');
 });
 
 test('recovers a crashed controller lock without allowing a live controller overlap', async () => {
@@ -97,10 +120,20 @@ test('retains delivery ownership after lost acknowledgement and reconciles the s
   await reserveJob({ job: job(), eligibility }, configuration);
   await recordDeliveryIntent('job-2605', configuration);
   await markUncertain('job-2605', configuration);
-  const acknowledged = await acknowledgeJob('job-2605', {
-    version: 1, type: 'accepted', jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer',
-    issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1',
-  }, configuration);
+  const child = fakeChild();
+  const acknowledged = await dispatchMacJob({ job: job(), eligibility }, {
+    ...configuration,
+    spawn: () => {
+      queueMicrotask(() => {
+        child.stdout.end(JSON.stringify({
+          version: 1, type: 'accepted', jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer',
+          issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1',
+        }));
+        child.emit('close', 0);
+      });
+      return child;
+    },
+  });
   assert.equal(acknowledged.state, 'accepted');
   assert.equal(acknowledged.sessionId, 'session-1');
 });
@@ -109,13 +142,39 @@ test('requires correlated terminal evidence before capacity is released', async 
   await reset();
   const configuration = options();
   await reserveJob({ job: job(), eligibility }, configuration);
+  await assert.rejects(() => recordTerminalResult({
+    jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, baseSha: 'a'.repeat(40),
+    host: 'trusted-mac.local', sessionId: 'session-1', headSha: 'b'.repeat(40), exitCode: 0,
+    validationEvidence: 'not accepted', workingTreeClean: true, allCommitsPushed: true,
+  }, configuration), (error) => error.code === 'INVALID_TRANSITION');
   await recordDeliveryIntent('job-2605', configuration);
   const acknowledgement = { version: 1, type: 'accepted', jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1' };
   await acknowledgeJob('job-2605', acknowledgement, configuration);
   await assert.rejects(() => recordTerminalResult({ jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, baseSha: 'a'.repeat(40), host: 'trusted-mac.local', headSha: 'b'.repeat(40), exitCode: 0 }, configuration),
     (error) => error.code === 'INVALID_TERMINAL_EVIDENCE');
-  const completed = await recordTerminalResult({ jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, baseSha: 'a'.repeat(40), host: 'trusted-mac.local', headSha: 'b'.repeat(40), exitCode: 0, validationEvidence: 'mobile/PrintFarmerTests: passed', workingTreeClean: true, allCommitsPushed: true }, configuration);
+  const completed = await recordTerminalResult({ jobId: 'job-2605', repository: 'OlyForge3D/PrintFarmer', issue: 2605, baseSha: 'a'.repeat(40), host: 'trusted-mac.local', sessionId: 'session-1', headSha: 'b'.repeat(40), exitCode: 0, validationEvidence: 'mobile/PrintFarmerTests: passed', workingTreeClean: true, allCommitsPushed: true }, configuration);
   assert.equal(completed.state, 'completed');
+});
+
+test('contains SSH stream errors, nonzero exits, and wall-clock timeout', async () => {
+  const invocation = createSshInvocation(loadMacSshConfiguration(options()));
+  const broken = fakeChild();
+  await assert.rejects(() => runSsh(invocation, '{}', {
+    spawn: () => {
+      queueMicrotask(() => broken.stdin.emit('error', new Error('EPIPE')));
+      return broken;
+    },
+  }), (error) => error.code === 'SSH_FAILURE');
+  const nonzero = fakeChild();
+  await assert.rejects(() => runSsh(invocation, '{}', {
+    spawn: () => {
+      queueMicrotask(() => nonzero.emit('close', 255));
+      return nonzero;
+    },
+  }), (error) => error.code === 'SSH_FAILURE');
+  const stalled = fakeChild();
+  await assert.rejects(() => runSsh(invocation, '{}', { spawn: () => stalled, timeoutMs: 1 }),
+    (error) => error.code === 'SSH_TIMEOUT');
 });
 
 test('marks SSH failure uncertain instead of retrying locally or releasing its slot', async () => {

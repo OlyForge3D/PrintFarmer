@@ -1,5 +1,5 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { copyFile, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn as nodeSpawn } from 'node:child_process';
@@ -58,7 +58,7 @@ export function loadMacSshConfiguration({ env = process.env, platform = process.
   if (!validDestination(destination) || !validHost(expectedHost) || !validAbsolutePosixPath(workerPath)) {
     throw new RalphMacSshError('macOS SSH configuration has an invalid trusted identifier.', 'INVALID_CONFIGURATION');
   }
-  if (!path.isAbsolute(knownHosts)) {
+  if (destination.split('@')[1] !== expectedHost || !path.isAbsolute(knownHosts) || /\s/.test(knownHosts)) {
     throw new RalphMacSshError('RALPH_MAC_SSH_KNOWN_HOSTS must be an absolute local path.', 'INVALID_CONFIGURATION');
   }
   return { destination, expectedHost, workerPath, knownHosts };
@@ -79,13 +79,15 @@ export function createSshInvocation(configuration) {
       '-o', 'StrictHostKeyChecking=yes',
       '-o', `UserKnownHostsFile=${configuration.knownHosts}`,
       '-o', 'ConnectTimeout=10',
+      '-o', 'ServerAliveInterval=10',
+      '-o', 'ServerAliveCountMax=3',
       configuration.destination,
       createRemoteWorkerCommand(configuration.workerPath),
     ],
   };
 }
 
-export function createRemoteRequest(job) {
+export function createRemoteRequest(job, type = 'dispatch') {
   const request = safeJson(job, 'Job');
   if (request.repository !== printFarmerRepository) {
     throw new RalphMacSshError('Remote macOS dispatch is limited to OlyForge3D/PrintFarmer.', 'UNSUPPORTED_REPOSITORY');
@@ -99,7 +101,7 @@ export function createRemoteRequest(job) {
   }
   return `${JSON.stringify({
     version: 1,
-    type: 'dispatch',
+    type,
     job: {
       jobId: request.jobId,
       repository: request.repository,
@@ -113,6 +115,13 @@ export function createRemoteRequest(job) {
       charter: request.charter,
     },
   })}\n`;
+}
+
+function requestDigest(job) {
+  return createHash('sha256').update(JSON.stringify({
+    issue: job.issue, owner: job.owner, baseSha: job.baseSha, model: job.model,
+    effort: job.effort, agent: job.agent, acceptanceCriteria: job.acceptanceCriteria, charter: job.charter,
+  })).digest('hex');
 }
 
 export function parseRemoteAcknowledgement(output, job) {
@@ -170,7 +179,13 @@ async function reclaimStaleLock(lockFile, { isOwnerAlive = ownerIsAlive } = {}) 
   try {
     observed = JSON.parse(await readFile(lockFile, 'utf8'));
   } catch {
-    return false;
+    try {
+      const details = await stat(lockFile);
+      if (Date.now() - details.mtimeMs < 5 * 60 * 1000) return false;
+    } catch {
+      return false;
+    }
+    observed = { token: `incomplete-${Date.now()}`, pid: 1, expiresAt: '1970-01-01T00:00:00Z' };
   }
   if (
     typeof observed.token !== 'string' || !Number.isInteger(observed.pid) ||
@@ -182,13 +197,24 @@ async function reclaimStaleLock(lockFile, { isOwnerAlive = ownerIsAlive } = {}) 
   try {
     reclaim = await open(reclaimFile, 'wx');
   } catch (error) {
-    if (error.code === 'EEXIST') return false;
+    if (error.code === 'EEXIST') {
+      try {
+        const details = await stat(reclaimFile);
+        if (Date.now() - details.mtimeMs >= 5 * 60 * 1000) await rm(reclaimFile, { force: true });
+      } catch { /* another controller owns or removed the guard */ }
+      return false;
+    }
     throw error;
   }
   try {
     await reclaim.writeFile(JSON.stringify({ token: randomUUID(), observed: observed.token }));
-    const current = JSON.parse(await readFile(lockFile, 'utf8'));
-    if (current.token !== observed.token) return false;
+    let current;
+    try {
+      current = JSON.parse(await readFile(lockFile, 'utf8'));
+    } catch {
+      return false;
+    }
+    if (current.token !== observed.token && !current.token?.startsWith('incomplete-')) return false;
     await rm(lockFile, { force: true });
     return true;
   } finally {
@@ -220,6 +246,7 @@ async function acquireLock(file, { retries = 40, retryMs = 10, ...options } = {}
 
 async function mutateLedger(mutator, options = {}) {
   const file = ledgerFile(options);
+  const backup = `${file}.bak`;
   await mkdir(path.dirname(file), { recursive: true });
   const lock = await acquireLock(file, options);
   const temp = `${file}.${process.pid}.${randomUUID()}.tmp`;
@@ -228,14 +255,31 @@ async function mutateLedger(mutator, options = {}) {
     try {
       ledger = JSON.parse(await readFile(file, 'utf8'));
     } catch (error) {
-      if (error.code !== 'ENOENT') throw new RalphMacSshError('Admission ledger is corrupt.', 'CORRUPT_LEDGER');
+      if (error.code !== 'ENOENT') {
+        try {
+          ledger = JSON.parse(await readFile(backup, 'utf8'));
+        } catch {
+          throw new RalphMacSshError('Admission ledger is corrupt.', 'CORRUPT_LEDGER');
+        }
+      }
     }
     if (ledger.version !== 1 || ledger.repository !== printFarmerRepository || !ledger.jobs || typeof ledger.jobs !== 'object') {
       throw new RalphMacSshError('Admission ledger has an invalid schema.', 'CORRUPT_LEDGER');
     }
     const result = await mutator(ledger);
     ledger.generation += 1;
-    await writeFile(temp, `${JSON.stringify(ledger)}\n`, { encoding: 'utf8', flag: 'wx' });
+    const temporary = await open(temp, 'wx');
+    try {
+      await temporary.writeFile(`${JSON.stringify(ledger)}\n`, 'utf8');
+      await temporary.sync();
+    } finally {
+      await temporary.close();
+    }
+    try {
+      await copyFile(file, backup);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
     await rename(temp, file);
     return result;
   } finally {
@@ -259,7 +303,7 @@ export async function reserveJob({ job, eligibility, now = new Date().toISOStrin
   return mutateLedger((ledger) => {
     const existing = ledger.jobs[job.jobId];
     if (existing) {
-      if (existing.issue !== job.issue || existing.owner !== job.owner || existing.baseSha !== job.baseSha) {
+      if (existing.requestDigest !== requestDigest(job)) {
         throw new RalphMacSshError('Job identifier is already fenced to different work.', 'FENCED');
       }
       return existing;
@@ -269,11 +313,16 @@ export async function reserveJob({ job, eligibility, now = new Date().toISOStrin
     if (active.length >= 5) throw new RalphMacSshError('All five PrintFarmer Ralph slots are reserved.', 'SLOT_EXHAUSTED');
     const entry = {
       jobId: job.jobId, repository: printFarmerRepository, issue: job.issue, owner: job.owner, baseSha: job.baseSha,
-      state: 'reserved', fence: ledger.generation + 1, createdAt: now, updatedAt: now,
+      state: 'reserved', fence: ledger.generation + 1, requestDigest: requestDigest(job), createdAt: now, updatedAt: now,
     };
     ledger.jobs[job.jobId] = entry;
     return entry;
   }, options);
+}
+
+export async function reserveLocalJob({ job, eligibility, now = new Date().toISOString() }, options = {}) {
+  const localJob = { ...job, repository: printFarmerRepository, model: 'gpt-5.6-terra', effort: 'medium', agent: 'squad' };
+  return reserveJob({ job: localJob, eligibility, now }, options);
 }
 
 export async function recordDeliveryIntent(jobId, options = {}) {
@@ -317,9 +366,10 @@ export async function recordTerminalResult(result, options = {}) {
   const value = safeJson(result, 'Terminal result');
   return mutateLedger((ledger) => {
     const entry = ledger.jobs[value.jobId];
-    if (!entry || !activeJobStates.has(entry.state)) throw new RalphMacSshError('Terminal result has no active reservation.', 'INVALID_TRANSITION');
+    if (!entry || !['accepted', 'running'].includes(entry.state)) throw new RalphMacSshError('Terminal result has no accepted remote reservation.', 'INVALID_TRANSITION');
     if (value.repository !== printFarmerRepository || value.issue !== entry.issue || value.baseSha !== entry.baseSha ||
-        value.host !== entry.host || !validSha(value.headSha) || !Number.isInteger(value.exitCode) ||
+        value.host !== entry.host || !validHost(value.host) || value.sessionId !== entry.sessionId || !validIdentifier(value.sessionId) ||
+        !validSha(value.headSha) || !Number.isInteger(value.exitCode) ||
         !value.validationEvidence || value.workingTreeClean !== true || value.allCommitsPushed !== true) {
       throw new RalphMacSshError('Terminal result lacks correlated evidence.', 'INVALID_TERMINAL_EVIDENCE');
     }
@@ -334,25 +384,38 @@ export async function recordTerminalResult(result, options = {}) {
   }, options);
 }
 
-export function runSsh(invocation, input, { spawn = nodeSpawn } = {}) {
+export function runSsh(invocation, input, { spawn = nodeSpawn, timeoutMs = 45_000 } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(invocation.command, invocation.args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const timeout = setTimeout(() => {
+      finish(new RalphMacSshError('SSH worker timed out.', 'SSH_TIMEOUT'));
+      child.kill();
+    }, timeoutMs);
     const append = (current, chunk) => {
       const next = current + chunk;
       if (next.length > 64 * 1024) {
         child.kill();
-        reject(new RalphMacSshError('SSH protocol output exceeds the limit.', 'MALFORMED_RESPONSE'));
+        finish(new RalphMacSshError('SSH protocol output exceeds the limit.', 'MALFORMED_RESPONSE'));
       }
       return next;
     };
     child.stdout.on('data', (chunk) => { stdout = append(stdout, chunk.toString('utf8')); });
     child.stderr.on('data', (chunk) => { stderr = append(stderr, chunk.toString('utf8')); });
-    child.on('error', (error) => reject(new RalphMacSshError(`SSH execution failed: ${error.message}`, 'SSH_FAILURE')));
+    child.stdin.on('error', (error) => finish(new RalphMacSshError(`SSH input failed: ${error.message}`, 'SSH_FAILURE')));
+    child.on('error', (error) => finish(new RalphMacSshError(`SSH execution failed: ${error.message}`, 'SSH_FAILURE')));
     child.on('close', (code) => {
-      if (code !== 0) reject(new RalphMacSshError(`SSH worker exited with status ${code}: ${stderr}`, 'SSH_FAILURE'));
-      else resolve(stdout);
+      if (code !== 0) finish(new RalphMacSshError(`SSH worker exited with status ${code}: ${stderr}`, 'SSH_FAILURE'));
+      else finish(undefined, stdout);
     });
     child.stdin.end(input, 'utf8');
   });
@@ -361,14 +424,21 @@ export function runSsh(invocation, input, { spawn = nodeSpawn } = {}) {
 export async function dispatchMacJob({ job, eligibility }, options = {}) {
   const configuration = loadMacSshConfiguration(options);
   const request = { ...job, expectedHost: configuration.expectedHost };
-  await reserveJob({ job: request, eligibility }, options);
-  await recordDeliveryIntent(request.jobId, options);
+  const reservation = await reserveJob({ job: request, eligibility }, options);
+  if (reservation.state === 'reserved') await recordDeliveryIntent(request.jobId, options);
+  else if (reservation.state !== 'uncertain') {
+    throw new RalphMacSshError('Job is already delivered and must be reconciled by its existing session.', 'INVALID_TRANSITION');
+  }
   try {
-    const output = await runSsh(createSshInvocation(configuration), createRemoteRequest(request), options);
+    const output = await runSsh(
+      createSshInvocation(configuration),
+      createRemoteRequest(request, reservation.state === 'uncertain' ? 'reconcile' : 'dispatch'),
+      options,
+    );
     const acknowledgement = parseRemoteAcknowledgement(output, request);
     return acknowledgeJob(request.jobId, acknowledgement, options);
   } catch (error) {
-    await markUncertain(request.jobId, options);
+    if (reservation.state === 'reserved') await markUncertain(request.jobId, options);
     throw error;
   }
 }
