@@ -74,7 +74,9 @@ delivery:
    `create_session` kickoff as the stable job marker.
 2. Create the local app session only after `reserve-local` succeeds. If creation times out or
    returns no session ID, retain the reservation; a later round must discover the marker in the
-   session inventory and run `acknowledge-local`, never create a duplicate or release the slot.
+   session inventory and run `acknowledge-local`, never create a duplicate. If authoritative
+   inventory proves no matching session exists, the reservation lease has expired, and its
+   controller PID is dead, run `recover-local` with `{"jobId":...,"sessionAbsent":true}`.
 3. Once the app returns the real session ID, run `acknowledge-local` with
    `{"jobId":...,"sessionId":...}`. On terminal completion, run `terminal-local` with the
    matching session ID and verified head, exit, validation, clean-worktree, and pushed-commit

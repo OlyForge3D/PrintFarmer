@@ -306,7 +306,7 @@ function assertFreshEligibility(eligibility, job) {
   }
 }
 
-export async function reserveJob({ job, eligibility, mode = 'remote', now = new Date().toISOString() }, options = {}) {
+export async function reserveJob({ job, eligibility, mode = 'remote', now = new Date().toISOString(), reservationLeaseMs = 60_000 }, options = {}) {
   createRemoteRequest(job);
   assertFreshEligibility(eligibility, job);
   return mutateLedger((ledger) => {
@@ -326,6 +326,7 @@ export async function reserveJob({ job, eligibility, mode = 'remote', now = new 
     const entry = {
       jobId: job.jobId, repository: printFarmerRepository, issue: job.issue, owner: job.owner, baseSha: job.baseSha,
       state: 'reserved', mode, fence: ledger.generation + 1, requestDigest: requestDigest(job), createdAt: now, updatedAt: now,
+      reservationOwnerPid: process.pid, reservationExpiresAt: new Date(Date.parse(now) + reservationLeaseMs).toISOString(),
     };
     ledger.jobs[job.jobId] = entry;
     return entry;
@@ -345,7 +346,27 @@ export async function acknowledgeLocalJob(jobId, sessionId, options = {}) {
     entry.state = 'accepted';
     entry.sessionId = sessionId;
     entry.local = true;
+    delete entry.reservationOwnerPid;
+    delete entry.reservationExpiresAt;
     entry.updatedAt = new Date().toISOString();
+    return entry;
+  }, options);
+}
+
+export async function recoverLocalReservation(jobId, { isOwnerAlive = ownerIsAlive, now = Date.now(), sessionAbsent, ...options } = {}) {
+  if (sessionAbsent !== true) throw new RalphMacSshError('Authoritative session absence is required.', 'INVALID_REQUEST');
+  return mutateLedger((ledger) => {
+    const entry = ledger.jobs[jobId];
+    if (!entry || entry.mode !== 'local' || entry.state !== 'reserved' ||
+        !Number.isInteger(entry.reservationOwnerPid) || !Number.isFinite(Date.parse(entry.reservationExpiresAt)) ||
+        Date.parse(entry.reservationExpiresAt) > now || isOwnerAlive(entry.reservationOwnerPid) !== false) {
+      throw new RalphMacSshError('Local reservation is still owned by a live controller.', 'RESERVATION_ACTIVE');
+    }
+    entry.state = 'failed';
+    entry.failureReason = 'session-creation-absent';
+    delete entry.reservationOwnerPid;
+    delete entry.reservationExpiresAt;
+    entry.updatedAt = new Date(now).toISOString();
     return entry;
   }, options);
 }
@@ -498,8 +519,8 @@ export function runSsh(invocation, input, { spawn = nodeSpawn, timeoutMs = 45_00
 export async function dispatchMacJob({ job, eligibility }, options = {}) {
   const configuration = loadMacSshConfiguration(options);
   const request = { ...job, expectedHost: configuration.expectedHost };
-  if (request.model !== 'gpt-5.6-terra' || request.effort !== 'medium' || request.agent !== 'squad') {
-    throw new RalphMacSshError('Remote implementation jobs must use the approved model, effort, and squad agent.', 'INVALID_REQUEST');
+  if (!['gpt-5.6-terra', 'gpt-5.6-luna'].includes(request.model) || request.effort !== 'medium' || request.agent !== 'squad') {
+    throw new RalphMacSshError('Remote jobs must use an approved model, effort, and squad agent.', 'INVALID_REQUEST');
   }
   let reservation = await reserveJob({ job: request, eligibility }, options);
   if (reservation.state === 'delivery-intent') {

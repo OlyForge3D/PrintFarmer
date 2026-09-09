@@ -1,11 +1,12 @@
 import {
   RalphMacSshError, acknowledgeLocalJob, dispatchMacJob, recordLocalTerminalResult,
-  recordTerminalResult, recoverRemoteDelivery, reserveLocalJob,
+  recordTerminalResult, recoverLocalReservation, recoverRemoteDelivery, reserveLocalJob,
 } from './ralph-macos-ssh.mjs';
 
 const commands = Object.assign(Object.create(null), {
   'reserve-local': ({ job, eligibility }) => reserveLocalJob({ job, eligibility }),
   'acknowledge-local': ({ jobId, sessionId }) => acknowledgeLocalJob(jobId, sessionId),
+  'recover-local': ({ jobId, sessionAbsent }) => recoverLocalReservation(jobId, { sessionAbsent }),
   'terminal-local': ({ result }) => recordLocalTerminalResult(result),
   'dispatch-remote': ({ job, eligibility }) => dispatchMacJob({ job, eligibility }),
   'recover-remote': ({ jobId }) => recoverRemoteDelivery(jobId),
@@ -37,7 +38,7 @@ async function main() {
   const command = process.argv[2];
   const execute = commands[command];
   if (!execute || process.argv.length !== 3) {
-    throw new RalphMacSshError('Usage: ralph-admission.mjs <reserve-local|acknowledge-local|terminal-local|dispatch-remote|recover-remote|terminal-remote>.', 'INVALID_COMMAND');
+    throw new RalphMacSshError('Usage: ralph-admission.mjs <reserve-local|acknowledge-local|recover-local|terminal-local|dispatch-remote|recover-remote|terminal-remote>.', 'INVALID_COMMAND');
   }
   const request = await readRequest();
   const result = await execute(request);
