@@ -42,6 +42,11 @@ function host(value) {
   return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$/.test(value);
 }
 
+function trustedOrigin(value) {
+  if (testMode) return absolute(value);
+  return /^(?:https:\/\/github\.com\/OlyForge3D\/PrintFarmer(?:\.git)?|git@github\.com:OlyForge3D\/PrintFarmer(?:\.git)?)$/.test(value);
+}
+
 function outsideRepository(value) {
   const relative = path.relative(repositoryRoot, value);
   return relative.startsWith('..') && !path.isAbsolute(relative);
@@ -52,7 +57,7 @@ function validateConfiguration() {
       ![stateRoot, repositoryRoot, worktreeRoot, copilotPath].every(absolute) ||
       !outsideRepository(stateRoot) || !outsideRepository(worktreeRoot) ||
       !host(expectedHost) || actualHost !== expectedHost ||
-      typeof expectedOrigin !== 'string' || !expectedOrigin || /[\r\n]/.test(expectedOrigin) ||
+      !trustedOrigin(expectedOrigin) ||
       typeof baseRef !== 'string' || !/^origin\/[A-Za-z0-9][A-Za-z0-9._/-]{0,120}$/.test(baseRef) ||
       baseRef.includes('..') || baseRef.includes('//')) {
     fail('Mac worker configuration does not match its trusted host, repository, or absolute paths.');
@@ -320,7 +325,7 @@ async function mutate(jobId, mutator) {
 
 function acknowledgement(record) {
   if (!record || !identifier(record.sessionId) ||
-      !['accepted', 'supervisor-launching', 'launching', 'running'].includes(record.state)) {
+      !['preparing', 'accepted', 'supervisor-launching', 'launching', 'running', 'orphan-running'].includes(record.state)) {
     fail('Job has not reached durable acceptance.');
   }
   return {
@@ -376,9 +381,10 @@ function absentResponse(job) {
   };
 }
 
-function copilotPrompt(job) {
+function copilotPrompt(job, launchToken) {
   return [
     `Ralph job ${job.jobId}, fence ${job.fence}. Work only in this isolated PrintFarmer worktree.`,
+    `Ralph launch token ${launchToken}.`,
     `Issue #${job.issue}; base SHA ${job.baseSha}. Read ${job.charter || '.github/copilot-instructions.md'} before work.`,
     'Keep the job marker and actual session identity in the final report. Do not create another session or worktree.',
     ...job.acceptanceCriteria,
@@ -498,6 +504,7 @@ async function runJob(jobId, launchToken) {
     current.state = 'launching';
     current.supervisorPid = process.pid;
     current.launchStartedAt = new Date().toISOString();
+    current.launchStateAt = current.launchStartedAt;
     return current;
   });
   if (testMode && process.env.RALPH_MAC_WORKER_TEST_CRASH_AT === 'after-launch-intent') process.exit(86);
@@ -532,7 +539,7 @@ async function runJob(jobId, launchToken) {
       '--no-remote',
       '--no-remote-export',
       '--silent',
-      '--prompt', copilotPrompt(record.job),
+      '--prompt', copilotPrompt(record.job, launchToken),
     ], {
       cwd: record.worktree,
       detached: true,
@@ -549,6 +556,7 @@ async function runJob(jobId, launchToken) {
       current.state = 'running';
       current.pid = child.pid;
       current.startedAt = new Date().toISOString();
+      current.launchStateAt = current.startedAt;
       return current;
     });
     const outcome = await outcomePromise;
@@ -639,18 +647,22 @@ async function dispatch(job) {
       branch,
       state: 'preparing',
       preparedAt: new Date().toISOString(),
+      launchStateAt: new Date().toISOString(),
+      launchToken: randomUUID(),
       terminal: undefined,
     };
     await persist(job.jobId, record);
+    if (testMode && process.env.RALPH_MAC_WORKER_TEST_CRASH_AT === 'after-preparing') process.exit(85);
     try {
       await mkdir(worktreeRoot, { recursive: true, mode: 0o700 });
       await runGit(['-C', repositoryRoot, 'worktree', 'add', '-b', branch, worktree, job.baseSha]);
       record.state = 'accepted';
       record.acceptedAt = new Date().toISOString();
+      record.launchStateAt = record.acceptedAt;
       await persist(job.jobId, record);
       record.state = 'supervisor-launching';
-      record.launchToken = randomUUID();
       record.supervisorRequestedAt = new Date().toISOString();
+      record.launchStateAt = record.supervisorRequestedAt;
       await persist(job.jobId, record);
       return { record, launchToken: record.launchToken };
     } catch (error) {
@@ -717,10 +729,68 @@ async function terminalResponse(record) {
   return record.terminal;
 }
 
+async function matchingProcessIds(marker) {
+  if (testMode) {
+    try {
+      const pid = Number(await readFile(process.env.RALPH_MAC_WORKER_FAKE_PID_FILE, 'utf8'));
+      return ownerIsAlive(pid) === true ? [pid] : [];
+    } catch {
+      return [];
+    }
+  }
+  const output = await runProcess('/bin/ps', ['-ww', '-axo', 'pid=,command='], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeoutMs: 10_000,
+  });
+  return output.split(/\r?\n/).flatMap((line) => {
+    const match = /^\s*(\d+)\s+(.*)$/.exec(line);
+    const pid = Number(match?.[1]);
+    return match?.[2].includes(marker) && pid !== process.pid ? [pid] : [];
+  });
+}
+
+async function supervisorIsFencedAlive(record) {
+  if (!Number.isInteger(record.supervisorPid)) return false;
+  if (testMode) return ownerIsAlive(record.supervisorPid) === true;
+  const matches = await matchingProcessIds(`--run ${record.job.jobId} ${record.launchToken}`);
+  return matches.includes(record.supervisorPid);
+}
+
+function launchLeaseExpired(record) {
+  const leaseMs = testMode ? 100 : 60_000;
+  return Number.isFinite(Date.parse(record.launchStateAt)) &&
+    Date.now() - Date.parse(record.launchStateAt) >= leaseMs;
+}
+
+async function recoverLaunchState(record) {
+  if (!['preparing', 'accepted', 'supervisor-launching', 'launching', 'running', 'orphan-running'].includes(record.state)) {
+    fail('Worker job record has an unknown non-terminal state.');
+  }
+  if (await supervisorIsFencedAlive(record)) return acknowledgement(record);
+  const matches = await matchingProcessIds(`Ralph launch token ${record.launchToken}.`);
+  if (matches.length === 1) {
+    record.state = 'orphan-running';
+    record.pid = matches[0];
+    record.orphanDetectedAt = new Date().toISOString();
+    record.launchStateAt = record.orphanDetectedAt;
+    await persist(record.job.jobId, record);
+    return acknowledgement(record);
+  }
+  if (matches.length > 1 || !launchLeaseExpired(record)) return acknowledgement(record);
+  record.state = 'failed';
+  record.processResult = {
+    error: 'Mac worker supervisor and fenced child process are no longer running.',
+    errorCode: 'SUPERVISOR_LOST',
+    completedAt: new Date().toISOString(),
+  };
+  await persist(record.job.jobId, record);
+  return failedResponse(record);
+}
+
 async function workerResponse(record) {
   if (record.state === 'awaiting-terminal-evidence' || record.terminal) return terminalResponse(record);
   if (record.state === 'failed') return failedResponse(record);
-  return acknowledgement(record);
+  return recoverLaunchState(record);
 }
 
 async function readRequest() {
@@ -758,7 +828,15 @@ async function main() {
   const answer = ['reconcile', 'terminal'].includes(request.type)
     ? await withJobLock(request.job.jobId, async () => {
         const record = await load(request.job.jobId);
-        if (!record) return absentResponse(request.job);
+        if (!record) {
+          const worktreeExists = await stat(path.join(worktreeRoot, request.job.jobId))
+            .then(() => true, (error) => error.code === 'ENOENT' ? false : Promise.reject(error));
+          const matchingProcesses = await matchingProcessIds(`Ralph job ${request.job.jobId}, fence ${request.job.fence}.`);
+          if (worktreeExists || matchingProcesses.length > 0) {
+            fail('Missing worker state has residual worktree or process evidence.');
+          }
+          return absentResponse(request.job);
+        }
         if (record.digest !== digest(request.job)) fail('No matching job to reconcile.');
         return workerResponse(record);
       })

@@ -92,7 +92,10 @@ delivery:
    attestation, correlated pre-launch failure, or explicit attestation that no durable worker
    record exists for an uncertain delivery. Successful terminal evidence must bind the configured
    origin, admitted base ancestry, clean worktree, and exact pushed branch. Never submit
-   caller-authored remote terminal claims.
+   caller-authored remote terminal claims. If a supervisor is lost, reconciliation discovers the
+   child by its unguessable launch token and retains the slot while that exact process is alive;
+   only the trusted worker may emit `SUPERVISOR_LOST` after the launch lease and fenced process
+   have both ended.
 
 The ledger is authoritative for these cooperating configured Ralph dispatch paths, not arbitrary
 manual app sessions that bypass this policy. Before enabling remote dispatch, drain or account for

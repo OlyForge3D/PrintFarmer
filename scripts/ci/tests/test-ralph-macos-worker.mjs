@@ -264,7 +264,7 @@ test('concurrent duplicate dispatches launch Copilot exactly once', async () => 
   assert.equal((await waitForInvocations(fixture.invocations, 1)).length, 1);
 });
 
-test('a crash after launch intent remains ambiguous and reconcile never spawns Copilot', async () => {
+test('a crash after launch intent becomes a worker-verified failure after its lease', async () => {
   const fixture = await createFixture('launch-intent-crash');
   const env = { ...fixture.env, RALPH_MAC_WORKER_TEST_CRASH_AT: 'after-launch-intent' };
   const request = { version: 1, type: 'dispatch', job: fixture.job };
@@ -272,14 +272,17 @@ test('a crash after launch intent remains ambiguous and reconcile never spawns C
   assert.equal(accepted.code, 0, accepted.stderr);
   const recordFile = path.join(fixture.state, `${fixture.job.jobId}.json`);
   await waitForRecord(recordFile, (record) => record.state === 'launching', 'ambiguous launch state');
+  await new Promise((resolve) => setTimeout(resolve, 150));
   const reconciled = await invoke({ ...request, type: 'reconcile' }, env);
   assert.equal(reconciled.code, 0, reconciled.stderr);
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  const response = JSON.parse(reconciled.stdout);
+  assert.equal(response.type, 'failed');
+  assert.equal(response.failureCode, 'SUPERVISOR_LOST');
   await assert.rejects(() => readFile(fixture.invocations, 'utf8'), (error) => error.code === 'ENOENT');
-  assert.equal(JSON.parse(await readFile(recordFile, 'utf8')).state, 'launching');
+  assert.equal(JSON.parse(await readFile(recordFile, 'utf8')).state, 'failed');
 });
 
-test('a crash after child spawn retains one live child and reconcile does not launch another', async () => {
+test('a crash after child spawn discovers and holds the fenced child until exact-PID termination', async () => {
   const fixture = await createFixture('spawn-crash');
   const env = {
     ...fixture.env,
@@ -297,11 +300,34 @@ test('a crash after child spawn retains one live child and reconcile does not la
   assert.equal(reconciled.code, 0, reconciled.stderr);
   await new Promise((resolve) => setTimeout(resolve, 200));
   assert.equal((await waitForInvocations(fixture.invocations, 1)).length, 1);
-  const record = JSON.parse(await readFile(path.join(fixture.state, `${fixture.job.jobId}.json`), 'utf8'));
-  assert.equal(record.state, 'launching');
-  assert.equal(record.pid, undefined);
+  let record = JSON.parse(await readFile(path.join(fixture.state, `${fixture.job.jobId}.json`), 'utf8'));
+  assert.equal(record.state, 'orphan-running');
+  assert.equal(record.pid, pid);
   process.kill(pid, 'SIGTERM');
   exactCleanupPids.delete(pid);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  const terminal = await invoke({ ...request, type: 'reconcile' }, env);
+  assert.equal(terminal.code, 0, terminal.stderr);
+  const response = JSON.parse(terminal.stdout);
+  assert.equal(response.type, 'failed');
+  assert.equal(response.failureCode, 'SUPERVISOR_LOST');
+  record = JSON.parse(await readFile(path.join(fixture.state, `${fixture.job.jobId}.json`), 'utf8'));
+  assert.equal(record.state, 'failed');
+});
+
+test('a crash after preparing expires to failure without launching Copilot', async () => {
+  const fixture = await createFixture('preparing-crash');
+  const env = { ...fixture.env, RALPH_MAC_WORKER_TEST_CRASH_AT: 'after-preparing' };
+  const request = { version: 1, type: 'dispatch', job: fixture.job };
+  const crashed = await invoke(request, env);
+  assert.equal(crashed.code, 85, crashed.stderr);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  const reconciled = await invoke({ ...request, type: 'reconcile' }, env);
+  assert.equal(reconciled.code, 0, reconciled.stderr);
+  const response = JSON.parse(reconciled.stdout);
+  assert.equal(response.type, 'failed');
+  assert.equal(response.failureCode, 'SUPERVISOR_LOST');
+  await assert.rejects(() => readFile(fixture.invocations, 'utf8'), (error) => error.code === 'ENOENT');
 });
 
 test('nonzero Copilot exit cannot be converted into success by terminal prose', async () => {
@@ -455,6 +481,15 @@ test('reconcile attests absence without launching a missing job', async () => {
   assert.equal(response.type, 'failed');
   assert.equal(response.failureCode, 'JOB_NOT_FOUND');
   assert.equal(response.workerVerified, true);
+  await assert.rejects(() => readFile(fixture.invocations, 'utf8'), (error) => error.code === 'ENOENT');
+});
+
+test('reconcile does not attest absence while residual worktree evidence exists', async () => {
+  const fixture = await createFixture('absent-with-worktree');
+  await mkdir(path.join(fixture.worktrees, fixture.job.jobId), { recursive: true });
+  const result = await invoke({ version: 1, type: 'reconcile', job: fixture.job }, fixture.env);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /residual worktree or process evidence/);
   await assert.rejects(() => readFile(fixture.invocations, 'utf8'), (error) => error.code === 'ENOENT');
 });
 

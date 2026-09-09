@@ -152,7 +152,7 @@ export function parseRemoteWorkerResponse(output, job) {
     validIdentifier(response.sessionId);
   if (!correlated) throw new RalphMacSshError('Remote worker response does not match the dispatched job.', 'MALFORMED_RESPONSE');
   if (response.type === 'accepted') {
-    if (!['accepted', 'supervisor-launching', 'launching', 'running'].includes(response.state)) {
+    if (!['preparing', 'accepted', 'supervisor-launching', 'launching', 'running', 'orphan-running'].includes(response.state)) {
       throw new RalphMacSshError('Remote acknowledgement has an invalid live state.', 'MALFORMED_RESPONSE');
     }
     return response;
