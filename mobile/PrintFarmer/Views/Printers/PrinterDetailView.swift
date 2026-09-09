@@ -47,9 +47,13 @@ struct PrinterDetailView: View {
     }
 
     init(printerId: UUID) {
-        self.printerId = printerId
-        _viewModel = State(initialValue: PrinterDetailViewModel(printerId: printerId))
-        _coverageViewModel = State(initialValue: PrinterFilamentCoverageViewModel(printerId: printerId))
+        self.init(viewModel: PrinterDetailViewModel(printerId: printerId))
+    }
+
+    init(viewModel: PrinterDetailViewModel) {
+        self.printerId = viewModel.printerId
+        _viewModel = State(initialValue: viewModel)
+        _coverageViewModel = State(initialValue: PrinterFilamentCoverageViewModel(printerId: viewModel.printerId))
     }
 
     var body: some View {
@@ -386,6 +390,10 @@ struct PrinterDetailView: View {
         // Construction remains authorization-gated even though both pages exist.
         .task(id: printer.id) {
             await ensureControlsOwnerIfAvailable(for: printer)
+        }
+        .onChange(of: controlsComposition?.identity) { _, _ in
+            let task = Task { await ensureControlsOwnerIfAvailable(for: printer) }
+            activeTasks.append(task)
         }
         .onChange(of: controlsAvailable(for: printer)) { _, isAvailable in
             guard isAvailable else { return }

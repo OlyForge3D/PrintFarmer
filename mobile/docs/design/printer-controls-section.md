@@ -185,7 +185,12 @@ are unchanged.
 The detail host captures that bundle alongside its detail-data service after
 the existing settlement barrier, checks cancellation/generation, and retains
 it for controls-owner construction. A registry change is never used to relabel
-an earlier captured service. The standalone owner also receives the whole
+an earlier captured service. A captured composition identity change retries
+owner creation when a child page mounted before settlement. The retry uses
+the same current-composition/access guards and retains any existing owner;
+nil or stale contexts do not create owners or refetch capabilities. These
+tasks participate in the detail host's existing disappearance cleanup.
+The standalone owner also receives the whole
 bundle. `PrinterControlsAccessLifecycle` only checks the immutable binding
 against current registry/composition and existing user/permission gates; it
 never assigns identity. A bare-service model remains unable to dispatch even
