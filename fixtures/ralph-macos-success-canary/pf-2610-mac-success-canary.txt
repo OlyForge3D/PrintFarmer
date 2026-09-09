@@ -1,0 +1,3 @@
+job: pf-2610-mac-success-canary
+issue: 2610
+purpose: macOS Ralph successful terminal canary
