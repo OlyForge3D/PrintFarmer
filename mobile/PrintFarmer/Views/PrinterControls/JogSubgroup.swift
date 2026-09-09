@@ -83,15 +83,11 @@ struct JogSubgroup: View {
         let axes = Self.visibleAxes(for: viewModel.capabilities)
         return selectionLayout {
             ForEach(axes, id: \.self) { axis in
-                Button { selectedAxis = axis } label: {
-                    Text(axis).frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .buttonStyle(.bordered)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(
-                    selectedAxis == axis ? Color.pfTextPrimary : Color.clear
-                ))
-                .accessibilityLabel("Jog axis \(axis)")
-                .accessibilityAddTraits(selectedAxis == axis ? .isSelected : [])
+                ControlActionButton(
+                    title: axis, identifier: "printer.controls.jog.axis.\(axis.lowercased())",
+                    accessibilityTitle: "Jog axis \(axis)",
+                    selected: selectedAxis == axis
+                ) { selectedAxis = axis }
             }
         }
         .disabled(!viewModel.canControl || viewModel.pendingCommand != nil)
@@ -100,15 +96,11 @@ struct JogSubgroup: View {
     private var stepPicker: some View {
         selectionLayout {
             ForEach(Self.stepOptions, id: \.self) { step in
-                Button { selectedStep = step } label: {
-                    Text(stepLabel(step)).frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .buttonStyle(.bordered)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(
-                    selectedStep == step ? Color.pfTextPrimary : Color.clear
-                ))
-                .accessibilityLabel("Jog step \(stepLabel(step)) millimeters")
-                .accessibilityAddTraits(selectedStep == step ? .isSelected : [])
+                ControlActionButton(
+                    title: stepLabel(step), identifier: "printer.controls.jog.step.\(stepLabel(step))",
+                    accessibilityTitle: "Jog step \(stepLabel(step)) millimeters",
+                    selected: selectedStep == step
+                ) { selectedStep = step }
             }
         }
         .disabled(!viewModel.canControl || viewModel.pendingCommand != nil)
@@ -144,21 +136,22 @@ struct JogSubgroup: View {
                     ForEach(JogSubgroup.visibleAxes(for: viewModel.capabilities), id: \.self) { axis in
                         Text("\(axis) reported: \(positionText(axis))")
                             .font(.footnote)
-                        TextField("\(axis) destination (mm)", text: binding(axis))
-                            .textFieldStyle(.roundedBorder)
-                            .frame(minHeight: 44)
-                            .accessibilityLabel("\(axis) absolute destination in millimeters")
-                            .accessibilityIdentifier("printer.controls.absolute.\(axis.lowercased())")
+                        ControlNumberField(
+                            placeholder: "\(axis) destination (mm)", text: binding(axis),
+                            label: "\(axis) absolute destination in millimeters",
+                            identifier: "printer.controls.absolute.\(axis.lowercased())"
+                        )
                     }
                     Text("Homed axes: \(viewModel.printer.homedAxes ?? "Unknown")")
                         .font(.footnote)
-                    TextField("Feedrate (mm/min, optional)", text: $feedrate)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(minHeight: 44)
-                        .accessibilityLabel("Absolute movement feedrate in millimeters per minute")
+                    ControlNumberField(
+                        placeholder: "Feedrate (mm/min, optional)", text: $feedrate,
+                        label: "Absolute movement feedrate in millimeters per minute",
+                        identifier: "printer.controls.absolute.feedrate"
+                    )
                     Text("Blank feedrate uses the server default.")
                         .font(.footnote)
-                    Button("Move to position") {
+                    ControlActionButton(title: "Move to position", identifier: "printer.controls.absolute.move") {
                         do {
                             let axes = JogSubgroup.visibleAxes(for: viewModel.capabilities)
                             let x = try axes.contains("X") ? ControlNumberInput.optional(x) : nil
@@ -171,9 +164,6 @@ struct JogSubgroup: View {
                             inputError = error.localizedDescription
                         }
                     }
-                    .frame(minHeight: 44)
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("printer.controls.absolute.move")
                     if let inputError {
                         Text(inputError).font(.footnote).foregroundStyle(Color.pfError)
                     }

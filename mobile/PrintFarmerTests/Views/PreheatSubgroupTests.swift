@@ -16,6 +16,20 @@ final class PreheatSubgroupTests: XCTestCase {
         XCTAssertEqual(Heater.bed.title, "Bed")
     }
 
+    func test_nativeNumberFieldCoordinator_preservesBlankZeroAndSignedInput() {
+        var value = ""
+        let coordinator = ControlNumberField.Coordinator(text: Binding(get: { value }, set: { value = $0 }))
+        let field = UITextField()
+        for input in ["0", "-1.25", "240", ""] {
+            field.text = input
+            coordinator.changed(field)
+            XCTAssertEqual(value, input)
+        }
+        field.text = nil
+        coordinator.changed(field)
+        XCTAssertEqual(value, "")
+    }
+
     // MARK: - presets
 
     func test_presets_containsAllFourInFixedOrder() {

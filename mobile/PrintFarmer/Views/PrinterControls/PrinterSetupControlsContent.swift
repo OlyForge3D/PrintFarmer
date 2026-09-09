@@ -37,10 +37,9 @@ struct PrinterSetupControlsContent: View {
                             .font(.headline)
                         Text(error)
                             .font(.footnote)
-                        Button("Retry capability check") {
+                        ControlActionButton(title: "Retry capability check") {
                             Task { await viewModel.loadCapabilities() }
                         }
-                        .frame(minHeight: 44)
                         .disabled(viewModel.isLoadingCapabilities)
                     }
                     .foregroundStyle(Color.pfTextPrimary)
@@ -82,9 +81,10 @@ struct PrinterSetupControlsContent: View {
                         .padding(.top, 12)
                 }
                 if viewModel.isExecuting {
-                    Button("Stop waiting for command") { viewModel.cancelPendingCommand() }
-                        .frame(minHeight: 44)
-                        .accessibilityHint("Does not stop the printer. Physical execution may continue.")
+                    ControlActionButton(
+                        title: "Stop waiting for command", identifier: "printer.controls.stop-waiting",
+                        hint: "Does not stop the printer. Physical execution may continue."
+                    ) { viewModel.cancelPendingCommand() }
                 }
                 if let error = viewModel.lastError {
                     errorBanner(error)

@@ -4,6 +4,11 @@ import XCTest
 @MainActor
 final class PrinterControlsViewModelTests: XCTestCase {
 
+    @MainActor
+    private final class AccessGate {
+        var isAllowed = true
+    }
+
     private var mockService: MockPrinterService!
 
     override func setUp() async throws {
@@ -225,11 +230,11 @@ final class PrinterControlsViewModelTests: XCTestCase {
         mockService.beforeSetTemperatures = { await barrier.arriveAndWait() }
         let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()
-        var allowed = true
-        vm.configureAccess { allowed ? nil : "Preference or permission revoked" }
+        let access = AccessGate()
+        vm.configureAccess { access.isAllowed ? nil : "Preference or permission revoked" }
         let task = Task { await vm.setHeaterTarget(.hotend, target: 200) }
         await barrier.waitUntilArrived()
-        allowed = false
+        access.isAllowed = false
         vm.refreshAccess()
         XCTAssertNil(vm.pendingCommand)
         XCTAssertTrue(vm.commandNotice?.contains("may still execute") == true)
@@ -239,7 +244,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         mockService.setTemperaturesCalledWith = nil
         await vm.setHeaterTarget(.hotend, target: 205)
         XCTAssertNil(mockService.setTemperaturesCalledWith)
-        allowed = true
+        access.isAllowed = true
         vm.deactivate()
         await vm.preheat(.pla)
         XCTAssertNil(mockService.setTemperaturesCalledWith)
@@ -265,10 +270,10 @@ final class PrinterControlsViewModelTests: XCTestCase {
         caps.supportsDisableMotors = true
         let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
         await vm.loadCapabilities()
-        var sameServer = true
-        vm.configureAccess { sameServer ? nil : "Server changed" }
+        let access = AccessGate()
+        vm.configureAccess { access.isAllowed ? nil : "Server changed" }
         await vm.setHeaterTarget(.bed, target: 70)
-        sameServer = false
+        access.isAllowed = false
         vm.refreshAccess()
         XCTAssertNil(vm.pendingCommand)
         vm.configureAccess { nil }

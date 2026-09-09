@@ -93,8 +93,10 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     private func install(_ view: some View) -> (UIWindow, UIHostingController<AnyView>) {
         let controller = UIHostingController(rootView: AnyView(view))
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
         window.rootViewController = controller
-        window.isHidden = false
+        window.makeKeyAndVisible()
         controller.view.layoutIfNeeded()
         return (window, controller)
     }
@@ -240,13 +242,17 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         defer { window.isHidden = true }
         try await settle(controller)
 
-        func segmentedControls(in view: UIView) -> [UISegmentedControl] {
-            (view as? UISegmentedControl).map { [$0] } ?? view.subviews.flatMap { segmentedControls(in: $0) }
-        }
-        let axisPicker = try XCTUnwrap(segmentedControls(in: controller.view).first {
-            $0.numberOfSegments == 2 && $0.titleForSegment(at: 0) == "Y"
+        window.frame.size.height = 3000
+        controller.view.frame = window.bounds
+        try await settle(controller)
+        let controls = nativeControls(in: controller.view)
+        let y = try XCTUnwrap(controls.compactMap { $0 as? UIButton }.first {
+            $0.accessibilityIdentifier == "printer.controls.jog.axis.y"
         })
-        XCTAssertEqual(axisPicker.selectedSegmentIndex, 0, "An already-loaded YZ-only backend must not retain the unsupported X default")
+        XCTAssertTrue(y.isSelected, "A loaded YZ-only backend must select Y, not the unsupported X default")
+        XCTAssertEqual(y.accessibilityLabel, "Jog axis Y")
+        XCTAssertGreaterThanOrEqual(y.bounds.height, 44)
+        XCTAssertFalse(controls.contains { $0.accessibilityIdentifier == "printer.controls.jog.axis.x" })
         XCTAssertNil(service.getBackendCapabilitiesCalledWith)
         XCTAssertNil(service.moveCalledWith)
     }
@@ -275,8 +281,37 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
     // MARK: - Backend profile snapshots
 
+    private func nativeControls(in view: UIView) -> [UIControl] {
+        (view as? UIControl).map { [$0] } ?? view.subviews.flatMap { nativeControls(in: $0) }
+    }
+
     func test_individualControls_phoneFullContentEvidence() async throws {
         try await captureIndividualControls(width: 390, dynamicType: .large, name: "phone")
+    }
+
+    func test_pendingCommand_disablesNativeActionsButKeepsStopWaitingEnabled() async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        let service = makeService(caps: Self.layoutCaps)
+        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        await model.setHeaterTarget(.hotend, target: 220)
+        XCTAssertNotNil(model.pendingCommand)
+        let (window, controller) = install(PrinterSetupControlsContent(printer: printer, viewModel: model))
+        defer { window.isHidden = true }
+        window.frame.size.height = 3000
+        controller.view.frame = window.bounds
+        try await settle(controller)
+        let controls = nativeControls(in: controller.view)
+        let apply = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.set" })
+        let input = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.target" })
+        let stop = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.stop-waiting" })
+        XCTAssertFalse(apply.isEnabled)
+        XCTAssertFalse(input.isEnabled)
+        XCTAssertTrue(stop.isEnabled)
+        XCTAssertGreaterThanOrEqual(stop.bounds.height, 44)
+        stop.sendActions(for: .touchUpInside)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertTrue(model.commandNotice?.contains("may still execute") == true)
     }
 
     func test_individualControls_regularWidthFullContentEvidence() async throws {
@@ -319,11 +354,27 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertLessThan(size.height, 10000, "The complete layout must fit without clipping")
         XCTAssertEqual(size.width, width, accuracy: 1)
         let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        window.windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        window.frame = CGRect(origin: .zero, size: size)
         window.rootViewController = controller
-        window.isHidden = false
+        window.makeKeyAndVisible()
         defer { window.isHidden = true }
         controller.view.frame = window.bounds
         try await settle(controller)
+        let controls = nativeControls(in: controller.view)
+        for label in [
+            "Hotend target in degrees Celsius", "Bed target in degrees Celsius",
+            "X absolute destination in millimeters", "Y absolute destination in millimeters",
+            "Z absolute destination in millimeters",
+            "Absolute movement feedrate in millimeters per minute",
+            "Set hotend target", "Set bed target", "Move to position", "Disable motors"
+        ] {
+            let target = try XCTUnwrap(controls.first { $0.accessibilityLabel == label }, label)
+            XCTAssertGreaterThanOrEqual(target.bounds.height, 44, label)
+            XCTAssertGreaterThanOrEqual(target.bounds.width, 44, label)
+            XCTAssertTrue(target.isEnabled, label)
+            XCTAssertTrue(target.point(inside: CGPoint(x: 1, y: 1), with: nil), label)
+        }
         let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
             controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
         }

@@ -58,15 +58,12 @@ struct HomeSubgroup: View {
                         .font(.headline)
                         .accessibilityAddTraits(.isHeader)
                     Text(Self.warning).font(.footnote).fixedSize(horizontal: false, vertical: true)
-                    Button("Disable motors", role: .destructive) {
+                    ControlActionButton(
+                        title: "Disable motors", identifier: "printer.controls.disable-motors", isDestructive: true
+                    ) {
                         confirmsRelease = true
                     }
-                    .frame(minHeight: 44)
-                    .buttonStyle(.bordered)
-                    .tint(Color.pfError)
-                    .foregroundStyle(Color.pfError)
                     .disabled(!viewModel.canControl || viewModel.isExecuting)
-                    .accessibilityIdentifier("printer.controls.disable-motors")
                 }
                 .foregroundStyle(Color.pfTextPrimary)
                 .confirmationDialog("Disable motors?", isPresented: $confirmsRelease, titleVisibility: .visible) {

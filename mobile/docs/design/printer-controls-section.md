@@ -89,6 +89,14 @@ suites continue to exercise native dispatch through mock services.
   Unknown/false specific movement flags hide movement controls. The #2597
   handoff currently proves neither relative nor absolute motion on production
   backends; synthetic UI fixtures are not capability evidence.
+- Native input editors and action buttons have measured native hit bounds
+  of at least **44 × 44 points**, not just taller outer containers. The numeric
+  editor retains standard UIKit text entry, signed/decimal input and Done.
+  Axis/step choices stack at accessibility text sizes. Hosted tests measure
+  every new control's bounds, enabled state and hit testing (without depending
+  on the simulator's global accessibility-service activation), and retain
+  full-content phone, regular and narrow-split
+  screenshots independently on the approved iPhone and iPad hosts.
 - Motor release warns about loss of holding force, gravity, re-homing, and
   heaters remaining on. `success:false` is an error. `success:true` means the
   request was accepted, not that motors are physically released.

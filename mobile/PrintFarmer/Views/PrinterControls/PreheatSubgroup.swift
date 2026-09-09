@@ -1,5 +1,112 @@
 import SwiftUI
 
+/// Rounded SwiftUI fields keep a 34-point UIKit editor even inside a taller
+/// frame. Size the native editor itself so both touch and VoiceOver get 44pt.
+struct ControlNumberField: UIViewRepresentable {
+    let placeholder: String
+    @Binding var text: String
+    let label: String
+    let identifier: String
+    @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 17
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = UITextField()
+        field.borderStyle = .roundedRect
+        field.keyboardType = .numbersAndPunctuation
+        field.returnKeyType = .done
+        field.autocorrectionType = .no
+        field.delegate = context.coordinator
+        field.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .editingChanged)
+        return field
+    }
+
+    func updateUIView(_ field: UITextField, context: Context) {
+        context.coordinator.text = $text
+        if field.text != text { field.text = text }
+        field.placeholder = placeholder
+        field.font = .systemFont(ofSize: fontSize)
+        field.isEnabled = isEnabled
+        field.accessibilityLabel = label
+        field.accessibilityIdentifier = identifier
+        field.textColor = UIColor(Color.pfTextPrimary)
+        field.backgroundColor = UIColor(Color.pfBackgroundTertiary)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextField, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 200, height: max(44, ceil(uiView.font?.lineHeight ?? fontSize) + 16))
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    final class Coordinator: NSObject, UITextFieldDelegate {
+        var text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+        @objc func changed(_ field: UITextField) { text.wrappedValue = field.text ?? "" }
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            textField.resignFirstResponder()
+            return true
+        }
+    }
+}
+
+struct ControlActionButton: UIViewRepresentable {
+    let title: String
+    var identifier = ""
+    var accessibilityTitle: String?
+    var hint: String?
+    var selected = false
+    var isDestructive = false
+    let action: () -> Void
+    @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 17
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(type: .system)
+        button.addTarget(context.coordinator, action: #selector(Coordinator.activate), for: .touchUpInside)
+        return button
+    }
+
+    func updateUIView(_ button: UIButton, context: Context) {
+        context.coordinator.action = action
+        var configuration = UIButton.Configuration.gray()
+        configuration.title = title
+        configuration.buttonSize = .large
+        configuration.cornerStyle = .medium
+        configuration.baseForegroundColor = UIColor(isDestructive ? Color.pfError : Color.pfTextPrimary)
+        configuration.background.strokeColor = UIColor(selected ? Color.pfTextPrimary : Color.clear)
+        configuration.background.strokeWidth = 1
+        let font = UIFont.systemFont(ofSize: fontSize)
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer {
+            var attributes = $0
+            attributes.font = font
+            return attributes
+        }
+        button.configuration = configuration
+        button.titleLabel?.numberOfLines = 0
+        button.isSelected = selected
+        button.isEnabled = isEnabled
+        button.accessibilityLabel = accessibilityTitle ?? title
+        button.accessibilityHint = hint
+        button.accessibilityIdentifier = identifier
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIButton, context: Context) -> CGSize? {
+        let size = uiView.sizeThatFits(CGSize(
+            width: proposal.width ?? .greatestFiniteMagnitude, height: .greatestFiniteMagnitude
+        ))
+        return CGSize(width: max(44, proposal.width ?? size.width), height: max(44, size.height))
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+
+    final class Coordinator: NSObject {
+        var action: () -> Void
+        init(action: @escaping () -> Void) { self.action = action }
+        @objc func activate() { action() }
+    }
+}
+
 /// Standalone Preheat subgroup of the Printer Controls section. Renders four
 /// buttons (PLA, PETG, ABS, Cool Down) bound to `PrinterControlsViewModel`.
 ///
@@ -160,12 +267,15 @@ struct PreheatSubgroup: View {
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                TextField("Target (°C)", text: $target)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(minHeight: 44)
-                    .accessibilityLabel("\(heater.title) target in degrees Celsius")
-                    .accessibilityIdentifier("printer.controls.\(heater.rawValue).target")
-                Button("Set \(heater.title.lowercased()) target") {
+                ControlNumberField(
+                    placeholder: "Target (°C)", text: $target,
+                    label: "\(heater.title) target in degrees Celsius",
+                    identifier: "printer.controls.\(heater.rawValue).target"
+                )
+                ControlActionButton(
+                    title: "Set \(heater.title.lowercased()) target",
+                    identifier: "printer.controls.\(heater.rawValue).set"
+                ) {
                     do {
                         guard let value = try ControlNumberInput.optional(target) else {
                             throw PrinterControlError.invalidRequest("Enter a target; use zero to switch off.")
@@ -176,9 +286,6 @@ struct PreheatSubgroup: View {
                         inputError = error.localizedDescription
                     }
                 }
-                .frame(minHeight: 44)
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("printer.controls.\(heater.rawValue).set")
                 if let inputError {
                     Text(inputError).font(.footnote).foregroundStyle(Color.pfError)
                 }
