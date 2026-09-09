@@ -490,7 +490,7 @@ function copilotCommand() {
 function childEnvironment() {
   const allowed = [
     'HOME', 'PATH', 'SHELL', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'LC_CTYPE',
-    'TERM', 'USER', 'LOGNAME', 'SSH_AUTH_SOCK', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME',
+    'TERM', 'USER', 'LOGNAME', 'SSH_AUTH_SOCK', 'DEVELOPER_DIR', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME',
     'XDG_STATE_HOME', 'NVM_DIR',
   ];
   const env = Object.fromEntries(allowed.filter((name) => process.env[name] !== undefined).map((name) => [name, process.env[name]]));
@@ -556,6 +556,7 @@ async function runJob(jobId, launchToken) {
       '--reasoning-effort', record.job.effort,
       '--mode', 'autopilot',
       '--allow-all-tools',
+      '--allow-all-paths',
       '--no-ask-user',
       '--no-remote',
       '--no-remote-export',
