@@ -4,7 +4,7 @@ import {
 } from './ralph-macos-ssh.mjs';
 
 const commands = Object.assign(Object.create(null), {
-  'reserve-local': ({ job, eligibility }) => reserveLocalJob({ job, eligibility }),
+  'reserve-local': ({ job, eligibility, controllerPid }) => reserveLocalJob({ job, eligibility, controllerPid }),
   'acknowledge-local': ({ jobId, sessionId }) => acknowledgeLocalJob(jobId, sessionId),
   'recover-local': ({ jobId, sessionAbsent }) => recoverLocalReservation(jobId, { sessionAbsent }),
   'terminal-local': ({ result }) => recordLocalTerminalResult(result),

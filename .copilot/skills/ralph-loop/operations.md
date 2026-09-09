@@ -70,7 +70,8 @@ prompt must use only these one-shot JSON-stdin commands—never a naked `create_
 delivery:
 
 1. After the fresh claim re-fetch, run `node scripts/ci/ralph-admission.mjs reserve-local` with
-   `{"job":...,"eligibility":...}` on stdin. Preserve the returned `jobId` and `fence` in the
+   `{"job":...,"eligibility":...,"controllerPid":...}` on stdin, using the app Ralph controller's
+   own process ID—not the one-shot command's PID. Preserve the returned `jobId` and `fence` in the
    `create_session` kickoff as the stable job marker.
 2. Create the local app session only after `reserve-local` succeeds. If creation times out or
    returns no session ID, retain the reservation; a later round must discover the marker in the

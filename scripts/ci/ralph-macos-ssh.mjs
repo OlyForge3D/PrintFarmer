@@ -306,7 +306,7 @@ function assertFreshEligibility(eligibility, job) {
   }
 }
 
-export async function reserveJob({ job, eligibility, mode = 'remote', now = new Date().toISOString(), reservationLeaseMs = 60_000 }, options = {}) {
+export async function reserveJob({ job, eligibility, mode = 'remote', now = new Date().toISOString(), reservationLeaseMs = 60_000, reservationOwnerPid = process.pid }, options = {}) {
   createRemoteRequest(job);
   assertFreshEligibility(eligibility, job);
   return mutateLedger((ledger) => {
@@ -326,16 +326,19 @@ export async function reserveJob({ job, eligibility, mode = 'remote', now = new 
     const entry = {
       jobId: job.jobId, repository: printFarmerRepository, issue: job.issue, owner: job.owner, baseSha: job.baseSha,
       state: 'reserved', mode, fence: ledger.generation + 1, requestDigest: requestDigest(job), createdAt: now, updatedAt: now,
-      reservationOwnerPid: process.pid, reservationExpiresAt: new Date(Date.parse(now) + reservationLeaseMs).toISOString(),
+      reservationOwnerPid, reservationExpiresAt: new Date(Date.parse(now) + reservationLeaseMs).toISOString(),
     };
     ledger.jobs[job.jobId] = entry;
     return entry;
   }, options);
 }
 
-export async function reserveLocalJob({ job, eligibility, now = new Date().toISOString() }, options = {}) {
+export async function reserveLocalJob({ job, eligibility, now = new Date().toISOString(), controllerPid = process.pid }, options = {}) {
+  if (!Number.isInteger(controllerPid) || controllerPid <= 0) {
+    throw new RalphMacSshError('Local controller process identifier is invalid.', 'INVALID_REQUEST');
+  }
   const localJob = { ...job, repository: printFarmerRepository };
-  return reserveJob({ job: localJob, eligibility, mode: 'local', now }, options);
+  return reserveJob({ job: localJob, eligibility, mode: 'local', now, reservationOwnerPid: controllerPid }, options);
 }
 
 export async function acknowledgeLocalJob(jobId, sessionId, options = {}) {

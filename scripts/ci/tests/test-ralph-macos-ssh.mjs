@@ -251,7 +251,9 @@ test('does not reuse a terminal job identifier as an active reservation', async 
 
 test('executes the local create-session admission lifecycle through the CLI', async () => {
   await reset();
-  const reserve = await runAdmission('reserve-local', { job: job(), eligibility });
+  const reserve = await runAdmission('reserve-local', {
+    job: job(), eligibility, controllerPid: process.pid,
+  });
   assert.equal(reserve.code, 0, reserve.stderr);
   assert.equal(JSON.parse(reserve.stdout).result.state, 'reserved');
 
