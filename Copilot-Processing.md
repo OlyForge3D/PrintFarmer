@@ -9,8 +9,8 @@ Issue #2582: produce bounded native-input-versus-XCUI evidence on the resolver-a
 - [x] Attempt the approved iPad evidence workflow; native Xcode/simulator access was rejected by the worker terminal before execution.
 - [x] Analyze the available native-input versus XCUI evidence without changing product behavior or assertions; paired fresh evidence was not produced.
 - [ ] Publish bounded evidence/disposition to #2582; no issue-write tool is available in this session.
-- [ ] Commit and push the durable evidence/disposition.
-- [ ] Record final terminal proof, including job marker and session identity.
+- [x] Commit and push the durable evidence/disposition.
+- [x] Record final terminal proof, including job marker and session identity.
 
 ## Summary
 
