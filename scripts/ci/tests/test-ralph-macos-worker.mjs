@@ -66,6 +66,7 @@ const baseJob = {
   issue: 2605,
   owner: 'hudson',
   baseSha: 'a'.repeat(40),
+  expectedHost: 'trusted-mac.local',
   model: 'gpt-5.6-terra',
   effort: 'medium',
   agent: 'squad',
@@ -606,5 +607,15 @@ test('rejects malformed requests, untrusted hosts, repositories, models, and bas
   );
   assert.equal(wrongHost.code, 1);
   assert.match(wrongHost.stderr, /trusted host/);
+  const mismatchedRequestHost = await invoke(
+    {
+      version: 1,
+      type: 'dispatch',
+      job: { ...fixture.job, jobId: 'wrong-request-host-2605', expectedHost: 'impostor.local' },
+    },
+    fixture.env,
+  );
+  assert.equal(mismatchedRequestHost.code, 1);
+  assert.match(mismatchedRequestHost.stderr, /Malformed remote job/);
   await assert.rejects(() => readFile(fixture.invocations, 'utf8'), (error) => error.code === 'ENOENT');
 });

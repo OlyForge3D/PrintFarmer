@@ -22,7 +22,8 @@ const options = () => ({
 });
 const job = (id = 'job-2605') => ({
   jobId: id, repository: 'OlyForge3D/PrintFarmer', issue: 2605, owner: 'hudson',
-  baseSha: 'a'.repeat(40), model: 'gpt-5.6-terra', effort: 'medium', agent: 'squad',
+  baseSha: 'a'.repeat(40), expectedHost: 'trusted-mac.local',
+  model: 'gpt-5.6-terra', effort: 'medium', agent: 'squad',
   acceptanceCriteria: ['Run the targeted iOS test'], charter: 'mobile/AGENTS.md',
 });
 const eligibility = { repository: 'OlyForge3D/PrintFarmer', issue: 2605, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false };
@@ -78,6 +79,7 @@ test('serializes untrusted content only as structured stdin and limits jobs to P
   const input = createRemoteRequest(malicious);
   assert.match(input, /rm -rf/);
   assert.equal(JSON.parse(input).job.fence, 7);
+  assert.equal(JSON.parse(input).job.expectedHost, 'trusted-mac.local');
   assert.throws(() => createRemoteRequest({ ...job(), fence: 7, repository: 'OlyForge3D/PrintFarmerDesktop' }),
     (error) => error.code === 'UNSUPPORTED_REPOSITORY');
   assert.throws(() => createRemoteRequest({ ...job(), fence: 7, effort: 'high' }),

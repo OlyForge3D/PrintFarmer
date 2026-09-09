@@ -67,7 +67,7 @@ function validateConfiguration() {
 function validateJob(job) {
   if (!job || job.repository !== repository || !Number.isSafeInteger(job.issue) || job.issue <= 0 ||
       !jobIdentifier(job.jobId) || !Number.isSafeInteger(job.fence) || job.fence <= 0 ||
-      !identifier(job.owner) || !sha(job.baseSha) ||
+      !identifier(job.owner) || !sha(job.baseSha) || !host(job.expectedHost) || job.expectedHost !== expectedHost ||
       !['gpt-5.6-terra', 'gpt-5.6-luna'].includes(job.model) || job.effort !== 'medium' ||
       job.agent !== 'squad' || !Array.isArray(job.acceptanceCriteria) ||
       job.acceptanceCriteria.some((criterion) => typeof criterion !== 'string' || !criterion.trim()) ||

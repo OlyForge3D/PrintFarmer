@@ -60,6 +60,7 @@ function validateRemoteJob(job, { requireFence = false } = {}) {
       !validIdentifier(request.owner) || !validSha(request.baseSha) || !Array.isArray(request.acceptanceCriteria) ||
       request.acceptanceCriteria.some((criterion) => typeof criterion !== 'string' || !criterion.trim()) ||
       (request.charter !== undefined && (typeof request.charter !== 'string' || !request.charter.trim())) ||
+      !validHost(request.expectedHost) ||
       !['gpt-5.6-terra', 'gpt-5.6-luna'].includes(request.model) || request.effort !== 'medium' || request.agent !== 'squad') {
     throw new RalphMacSshError('Remote job is malformed.', 'INVALID_REQUEST');
   }
@@ -122,6 +123,7 @@ export function createRemoteRequest(job, type = 'dispatch') {
       issue: request.issue,
       owner: request.owner,
       baseSha: request.baseSha,
+      expectedHost: request.expectedHost,
       model: request.model,
       effort: request.effort,
       agent: request.agent,
@@ -137,7 +139,7 @@ export function createRemoteRequest(job, type = 'dispatch') {
 
 function requestDigest(job) {
   return createHash('sha256').update(JSON.stringify({
-    issue: job.issue, owner: job.owner, baseSha: job.baseSha, model: job.model,
+    issue: job.issue, owner: job.owner, baseSha: job.baseSha, expectedHost: job.expectedHost, model: job.model,
     effort: job.effort, agent: job.agent, acceptanceCriteria: job.acceptanceCriteria, charter: job.charter,
   })).digest('hex');
 }
