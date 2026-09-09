@@ -62,6 +62,10 @@ test('serializes untrusted content only as structured stdin and limits jobs to P
     (error) => error.code === 'UNSUPPORTED_REPOSITORY');
   assert.throws(() => createRemoteRequest({ ...job(), effort: 'high' }),
     (error) => error.code === 'INVALID_REQUEST');
+  assert.throws(() => createRemoteRequest({ ...job(), jobId: undefined }),
+    (error) => error.code === 'INVALID_REQUEST');
+  assert.throws(() => createRemoteRequest({ ...job(), owner: 2605 }),
+    (error) => error.code === 'INVALID_REQUEST');
 });
 
 test('rejects malformed, wrong-host, and uncorrelated remote acknowledgements', () => {
@@ -69,6 +73,13 @@ test('rejects malformed, wrong-host, and uncorrelated remote acknowledgements', 
   assert.deepEqual(parseRemoteAcknowledgement(JSON.stringify(expected), { ...job(), expectedHost: expected.host }), expected);
   for (const output of ['not-json', `${JSON.stringify(expected)}\nextra`, JSON.stringify({ ...expected, host: 'wrong-host.local' })]) {
     assert.throws(() => parseRemoteAcknowledgement(output, { ...job(), expectedHost: expected.host }),
+      (error) => error.code === 'MALFORMED_RESPONSE');
+  }
+  for (const acknowledgement of [
+    { ...expected, sessionId: undefined },
+    { ...expected, sessionId: 1 },
+  ]) {
+    assert.throws(() => parseRemoteAcknowledgement(JSON.stringify(acknowledgement), { ...job(), expectedHost: expected.host }),
       (error) => error.code === 'MALFORMED_RESPONSE');
   }
 });
