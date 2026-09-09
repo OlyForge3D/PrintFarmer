@@ -124,9 +124,10 @@ suites continue to exercise native dispatch through mock services.
   ends telemetry waiting with an uncertainty warning.
   **Stop waiting** cancels the local request but cannot undo commands
   already received by the printer. Nothing is automatically replayed.
-  Disabled editors expose the offline/preference/permission reason in the
+  Disabled editors expose the preference/permission reason in the
   shared group for sighted and VoiceOver users. New failures clear stale
-  success/acceptance notices.
+  success/acceptance notices. Offline controls remain hidden, with the
+  explanation supplied by the detail host.
 - Emergency Stop remains shell-owned above both tabs, with its own confirmation
   and no dependency on pending setup commands. The shared owner/composition
   seam remains available for #2599; no filament or Z-offset transport is added.

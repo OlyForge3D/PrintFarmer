@@ -318,7 +318,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await captureIndividualControls(width: 1024, dynamicType: .large, name: "regular")
     }
 
-    func test_blockedEditors_explainOfflinePreferenceAndPermissionGates() async throws {
+    func test_blockedEditors_hideOfflineAndExplainPreferenceAndPermissionGates() async throws {
         for reason in [
             "Printer is offline.",
             "Enable printer controls for this server in Settings.",
@@ -337,9 +337,14 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             window.frame.size.height = 3000
             controller.view.frame = window.bounds
             try await settle(controller)
-            for label in ["Hotend target in degrees Celsius", "X absolute destination in millimeters"] {
-                let control = try XCTUnwrap(nativeControls(in: controller.view).first { $0.accessibilityLabel == label })
-                XCTAssertFalse(control.isEnabled)
+            let controls = nativeControls(in: controller.view)
+            if !printer.isOnline {
+                XCTAssertTrue(controls.isEmpty, "Offline setup controls remain hidden by the host contract")
+            } else {
+                for label in ["Hotend target in degrees Celsius", "X absolute destination in millimeters"] {
+                    let control = try XCTUnwrap(controls.first { $0.accessibilityLabel == label })
+                    XCTAssertFalse(control.isEnabled)
+                }
             }
             let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
                 controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
