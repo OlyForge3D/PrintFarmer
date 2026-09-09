@@ -218,7 +218,7 @@ export async function collectComparisons(repository, reader, sessionsFile) {
     claims: { availability: 'not-cached-live-action-required' },
     linkedPrs: { availability: 'not-cached-live-action-required' },
     codeql: Array.isArray(codeql) ? { availability: 'available', alerts: codeql } : codeql,
-    holds: [],
+    holds: { availability: 'not-collected-live-action-required' },
   });
 }
 
@@ -226,14 +226,17 @@ export async function runSnapshot({ scope, policyVersion, sessionsFile, reader =
   const previous = await readRoundCache(scope, cacheOptions);
   const comparisons = await collectComparisons(scope.repository, reader, sessionsFile);
   const baselineCurrent = previous.cache && isCacheCurrent(previous.cache, policyVersion);
+  const coverageComplete = comparisons.codeql.availability === 'available';
   const comparison = compareSnapshots(
     baselineCurrent ? previous.cache.comparisons : {},
     comparisons,
   );
   const conclusions = {
-    observation: baselineCurrent ? 'delta' : 'deep-scan-required',
-    cacheReason: baselineCurrent ? undefined : previous.reason ?? 'policy-version-changed',
+    observation: baselineCurrent && coverageComplete ? 'delta' : 'deep-scan-required',
+    cacheReason: !coverageComplete ? 'codeql-unavailable' :
+      baselineCurrent ? undefined : previous.reason ?? 'policy-version-changed',
     changed: comparison.changed,
+    coverage: { codeql: comparisons.codeql.availability },
     metrics: reader.metrics,
   };
   const cache = createRoundCache({ scope, policyVersion, comparisons, conclusions });

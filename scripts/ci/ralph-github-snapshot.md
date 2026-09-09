@@ -36,14 +36,16 @@ through `collectPaginated`. It records normalized open issue dependencies,
 assignments and labels; open PR heads, comments, reviews, checks and statuses;
 and CodeQL alerts. Cache comparisons also explicitly retain unavailable
 sessions, uncached action authority, uncached linked PRs, uncollected base
-state, and empty holds, ensuring those values cannot be mistaken for approval.
+state, and uncollected holds, ensuring those values cannot be mistaken for
+approval.
 
 Output is one compact JSON object with `complete`, `baseline`, and
 `conclusions`. `conclusions.changed` identifies changed top-level comparison
 groups and `conclusions.metrics` provides actual request, page, and response
 byte counts. CodeQL permission denial produces explicit unknown evidence; all
 other API, pagination, shape, and parse failures exit nonzero before the
-helper writes a new cache record.
+helper writes a new cache record. Unknown CodeQL evidence forces
+`deep-scan-required` even when the unknown response itself is unchanged.
 
 The collector is observation-only. It never claims, comments, labels, opens
 sessions, reviews, merges, deletes, or treats any cache field as action

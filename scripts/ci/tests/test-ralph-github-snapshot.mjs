@@ -69,6 +69,11 @@ test('CodeQL permission denial is explicit while other CodeQL failures fail clos
   };
   const result = await runSnapshot({ ...input, reader: denied });
   assert.equal(result.complete, true);
+  assert.equal(result.conclusions.observation, 'deep-scan-required');
+  assert.equal(result.conclusions.coverage.codeql, 'unknown');
+  const steadyDenied = await runSnapshot({ ...input, reader: denied });
+  assert.equal(steadyDenied.conclusions.observation, 'deep-scan-required');
+  assert.equal(steadyDenied.conclusions.cacheReason, 'codeql-unavailable');
 
   const failed = reader();
   const failingOriginal = failed.page;
