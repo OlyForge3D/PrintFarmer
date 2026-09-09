@@ -1,6 +1,20 @@
 import XCTest
 @testable import PrintFarmer
 
+extension PrinterDetails {
+    static func controlsLimitsFixture(
+        for printer: Printer, hotend: Int? = 280, bed: Int? = 120, hasBed: Bool? = true
+    ) -> PrinterDetails {
+        PrinterDetails(
+            id: printer.id, name: printer.name, backend: printer.backend,
+            capabilities: PrinterHardwareCapabilities(
+                maxBuildVolumeX: nil, maxBuildVolumeY: nil, maxBuildVolumeZ: nil,
+                maxHotendTemp: hotend, maxBedTemp: bed, hasHeatedBed: hasBed
+            )
+        )
+    }
+}
+
 @MainActor
 final class PrinterControlsViewModelTests: XCTestCase {
 
@@ -31,6 +45,9 @@ final class PrinterControlsViewModelTests: XCTestCase {
         if let caps = capabilities {
             mockService.capabilitiesToReturn = caps
         }
+        if mockService.detailsToReturn == nil {
+            mockService.detailsToReturn = .controlsLimitsFixture(for: p)
+        }
         return PrinterControlsViewModel(printerService: mockService, printer: p)
     }
 
@@ -55,6 +72,161 @@ final class PrinterControlsViewModelTests: XCTestCase {
     private static let hotendOnlyCaps = PrinterBackendCapabilities.hotendOnlyFixture
 
     // MARK: - Tests
+
+    func test_missingOrInvalidHeaterMaxima_blockPositiveTargetsAndPresetsButPermitSupportedZero() async throws {
+        for limit in [nil, 0, -1] as [Int?] {
+            let printer = try idlePrinter()
+            let service = MockPrinterService()
+            service.capabilitiesToReturn = Self.fullCaps
+            service.detailsToReturn = .controlsLimitsFixture(for: printer, hotend: limit, bed: limit)
+            let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+            await vm.loadCapabilities()
+            XCTAssertTrue(vm.needsHeaterLimits)
+            for heater in Heater.allCases {
+                XCTAssertNil(vm.maximum(for: heater))
+                for value in [1.0, 200, 1e100] {
+                    await vm.setHeaterTarget(heater, target: value)
+                    XCTAssertNil(service.setTemperaturesCalledWith)
+                    XCTAssertNotNil(vm.lastError)
+                    XCTAssertNil(vm.pendingCommand)
+                }
+            }
+            for preset in [PreheatPreset.pla, .petg, .abs] {
+                XCTAssertNotNil(vm.preheatBlockedReason(preset))
+                await vm.preheat(preset)
+                XCTAssertNil(service.setTemperaturesCalledWith)
+                XCTAssertNotNil(vm.lastError)
+            }
+            for heater in Heater.allCases {
+                await vm.setHeaterTarget(heater, target: 0)
+                XCTAssertNil(vm.lastError)
+                XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, heater == .hotend ? 0 : nil)
+                XCTAssertEqual(service.setTemperaturesCalledWith?.bed, heater == .bed ? 0 : nil)
+                vm.cancelPendingCommand()
+            }
+            XCTAssertNil(vm.preheatBlockedReason(.coolDown))
+            await vm.preheat(.coolDown)
+            XCTAssertNil(vm.lastError)
+            XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
+            XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 0)
+        }
+    }
+
+    func test_partialMaxima_blockWholePresetWithoutPartialHeaterDispatch() async throws {
+        let printer = try idlePrinter()
+        let service = MockPrinterService()
+        service.capabilitiesToReturn = Self.fullCaps
+        service.detailsToReturn = .controlsLimitsFixture(for: printer, bed: nil)
+        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        await vm.loadCapabilities()
+        await vm.preheat(.pla)
+        XCTAssertNil(service.setTemperaturesCalledWith, "A safe hotend does not authorize an unbounded bed")
+        await vm.setHeaterTarget(.hotend, target: 280)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 280)
+        vm.cancelPendingCommand()
+        service.setTemperaturesCalledWith = nil
+        await vm.setHeaterTarget(.hotend, target: 281)
+        XCTAssertNil(service.setTemperaturesCalledWith)
+        service.detailsToReturn = .controlsLimitsFixture(for: printer, bed: nil, hasBed: false)
+        await vm.loadHardware()
+        await vm.preheat(.pla)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 200)
+        XCTAssertNil(service.setTemperaturesCalledWith?.bed)
+    }
+
+    func test_presets_requireBoundsAtBothHeatersAndKeepOriginalTargets() async throws {
+        let printer = try idlePrinter()
+        let service = MockPrinterService()
+        service.capabilitiesToReturn = Self.fullCaps
+        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        await vm.loadCapabilities()
+        for preset in [PreheatPreset.pla, .petg, .abs] {
+            for insufficientHotend in [true, false] {
+                service.detailsToReturn = .controlsLimitsFixture(
+                    for: printer, hotend: Int(preset.hotend) - (insufficientHotend ? 1 : 0),
+                    bed: Int(preset.bed) - (insufficientHotend ? 0 : 1)
+                )
+                await vm.loadHardware()
+                service.setTemperaturesCalledWith = nil
+                await vm.preheat(preset)
+                XCTAssertNil(service.setTemperaturesCalledWith)
+            }
+            service.detailsToReturn = .controlsLimitsFixture(for: printer, hotend: Int(preset.hotend), bed: Int(preset.bed))
+            await vm.loadHardware()
+            await vm.preheat(preset)
+            XCTAssertNil(vm.lastError)
+            XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, preset.hotend)
+            XCTAssertEqual(service.setTemperaturesCalledWith?.bed, preset.bed)
+            vm.cancelPendingCommand()
+        }
+    }
+
+    func test_hardwareFailureAndMissingPayload_areExplicitAndCanRetryWithoutActuation() async throws {
+        let printer = try idlePrinter()
+        let service = MockPrinterService()
+        service.capabilitiesToReturn = Self.fullCaps
+        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        await vm.loadCapabilities()
+        XCTAssertNotNil(vm.hardwareLoadError)
+        XCTAssertTrue(vm.needsHeaterLimits)
+        await vm.setHeaterTarget(.hotend, target: 200)
+        XCTAssertNil(service.setTemperaturesCalledWith)
+        service.detailsToReturn = PrinterDetails(id: printer.id, name: printer.name, backend: printer.backend)
+        await vm.loadHardware()
+        XCTAssertNil(vm.hardwareLoadError)
+        XCTAssertTrue(vm.needsHeaterLimits, "A successful response with no maxima is not proof")
+        service.detailsToReturn = .controlsLimitsFixture(for: printer)
+        await vm.loadHardware()
+        XCTAssertFalse(vm.needsHeaterLimits)
+        XCTAssertNil(service.setTemperaturesCalledWith, "Read retry must not replay a failed physical command")
+        await vm.setHeaterTarget(.hotend, target: 200)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 200)
+    }
+
+    func test_loadingHardware_blocksPositiveTargetsButAllowsZeroAndReadIsSingleFlight() async throws {
+        let printer = try idlePrinter()
+        let base = MockPrinterService()
+        base.capabilitiesToReturn = Self.fullCaps
+        base.detailsToReturn = .controlsLimitsFixture(for: printer)
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        let service = ControlsDelayedService(base: base, beforeDetails: { await barrier.arriveAndWait() })
+        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        let read = Task { await vm.loadCapabilities() }
+        await barrier.waitUntilArrived()
+        XCTAssertTrue(vm.isLoadingHardware)
+        XCTAssertNil(vm.maximum(for: .hotend))
+        await vm.loadHardware()
+        await vm.preheat(.pla)
+        XCTAssertNil(base.setTemperaturesCalledWith)
+        await vm.setHeaterTarget(.hotend, target: 0)
+        XCTAssertEqual(base.setTemperaturesCalledWith?.hotend, 0)
+        vm.cancelPendingCommand()
+        barrier.release()
+        await read.value
+        XCTAssertFalse(vm.isLoadingHardware)
+        XCTAssertEqual(vm.maximum(for: .hotend), 280)
+    }
+
+    func test_absoluteFeedrate_rejectsEveryCustomValueAndUsesEstablishedAxisRates() async throws {
+        var caps = Self.fullCaps
+        caps.supportsAbsoluteMovement = true
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await vm.loadCapabilities()
+        for rate in [Int.min, -1, 0, 1, 600, 3000, 3001, Int.max] {
+            await vm.moveTo(x: 1, y: nil, z: nil, feedrateMmMin: rate)
+            XCTAssertNil(mockService.moveToCalledWith)
+            XCTAssertNil(vm.pendingCommand)
+            XCTAssertEqual(vm.lastError?.message, ControlNumberInput.customFeedrateMessage)
+        }
+        for z in [nil, 0.0, -1.0] as [Double?] {
+            await vm.moveTo(x: 1, y: 0, z: z, feedrateMmMin: nil)
+            XCTAssertNil(vm.lastError)
+            XCTAssertEqual(mockService.moveToCalledWith?.feedrateMmMin, z == nil ? 3000 : 600)
+            XCTAssertEqual(mockService.moveToCalledWith?.z, z)
+            vm.cancelPendingCommand()
+        }
+    }
 
     func test_heaterPrecision_rejectsFractionalValuesWithoutDispatchOrRounding() async throws {
         let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
@@ -113,12 +285,12 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
         await vm.loadCapabilities()
         for value in [1.001, -1.234, 0.1, 0.0] {
-            await vm.moveTo(x: value, y: nil, z: nil, feedrateMmMin: 600)
+            await vm.moveTo(x: value, y: nil, z: nil, feedrateMmMin: nil)
             XCTAssertNil(vm.lastError)
             XCTAssertEqual(mockService.moveToCalledWith?.x, value)
             XCTAssertNil(mockService.moveToCalledWith?.y)
             XCTAssertNil(mockService.moveToCalledWith?.z)
-            XCTAssertEqual(mockService.moveToCalledWith?.feedrateMmMin, 600)
+            XCTAssertEqual(mockService.moveToCalledWith?.feedrateMmMin, 3000)
             XCTAssertNotNil(vm.pendingCommand)
             var reported = vm.printer
             reported.x = value
@@ -493,7 +665,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             id: printer.id, name: printer.name, backend: printer.backend,
             capabilities: PrinterHardwareCapabilities(
                 maxBuildVolumeX: nil, maxBuildVolumeY: nil, maxBuildVolumeZ: nil,
-                maxHotendTemp: nil, maxBedTemp: nil, hasHeatedBed: false
+                maxHotendTemp: 280, maxBedTemp: nil, hasHeatedBed: false
             )
         )
         let vm = try makeViewModel(printer: printer, capabilities: Self.fullCaps)
@@ -526,7 +698,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         caps.supportsAbsoluteMovement = true
         let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
         await vm.loadCapabilities()
-        await vm.moveTo(x: 0, y: nil, z: -2.5, feedrateMmMin: 600)
+        await vm.moveTo(x: 0, y: nil, z: -2.5, feedrateMmMin: nil)
         XCTAssertEqual(mockService.moveToCalledWith?.x, 0)
         XCTAssertNil(mockService.moveToCalledWith?.y)
         XCTAssertEqual(mockService.moveToCalledWith?.z, -2.5, "Do not invent a zero-origin travel bound")

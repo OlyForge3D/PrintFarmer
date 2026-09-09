@@ -146,11 +146,13 @@ struct JogSubgroup: View {
                     Text("Homed axes: \(viewModel.printer.homedAxes ?? "Unknown")")
                         .font(.footnote)
                     ControlNumberField(
-                        placeholder: "Feedrate (mm/min, optional)", text: $feedrate,
+                        placeholder: "Custom feedrate unavailable", text: $feedrate,
                         label: "Absolute movement feedrate in millimeters per minute",
-                        identifier: "printer.controls.absolute.feedrate"
+                        identifier: "printer.controls.absolute.feedrate",
+                        hint: ControlNumberInput.customFeedrateMessage
                     )
-                    Text("Blank feedrate uses the server default.")
+                    .disabled(true)
+                    Text("No verified custom feedrate maximum. Uses \(PrinterControlsViewModel.xyFeedrateMmMin) mm/min for XY-only moves or \(PrinterControlsViewModel.zFeedrateMmMin) mm/min when Z is included.")
                         .font(.footnote)
                     ControlActionButton(title: "Move to position", identifier: "printer.controls.absolute.move") {
                         do {

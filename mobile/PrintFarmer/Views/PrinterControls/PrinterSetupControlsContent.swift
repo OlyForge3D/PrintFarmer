@@ -31,6 +31,20 @@ struct PrinterSetupControlsContent: View {
                 .accessibilityAddTraits(.isHeader)
 
             VStack(alignment: .leading, spacing: 0) {
+                if viewModel.needsHeaterLimits {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(viewModel.isLoadingHardware ? "Loading heater limits…" : "Heater limits unavailable")
+                            .font(.headline)
+                        Text(viewModel.hardwareLoadError ?? "Positive targets require valid reported maxima. Supported zero-off commands remain available.")
+                            .font(.footnote)
+                        ControlActionButton(title: "Retry heater limits", identifier: "printer.controls.retry-limits") {
+                            Task { await viewModel.loadHardware() }
+                        }
+                        .disabled(viewModel.isLoadingHardware || viewModel.isLoadingCapabilities)
+                    }
+                    .foregroundStyle(Color.pfTextPrimary)
+                    .padding(.bottom, 12)
+                }
                 if let error = viewModel.capabilityLoadError {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Control capabilities unavailable")

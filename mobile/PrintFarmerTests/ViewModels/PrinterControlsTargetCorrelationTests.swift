@@ -25,6 +25,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         service: MockPrinterService
     ) -> PrinterControlsViewModel {
         service.capabilitiesToReturn = capabilities
+        service.detailsToReturn = .controlsLimitsFixture(for: printer)
         return PrinterControlsViewModel(printerService: service, printer: printer)
     }
 
@@ -136,7 +137,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         XCTAssertEqual(service.moveToCalledWith?.x, 0)
         XCTAssertNil(service.moveToCalledWith?.y)
         XCTAssertNil(service.moveToCalledWith?.z)
-        XCTAssertNil(service.moveToCalledWith?.feedrateMmMin)
+        XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 3000)
     }
 
     private func assertAcceptanceOnly(

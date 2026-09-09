@@ -25,12 +25,12 @@ final class JogSubgroupTests: XCTestCase {
         XCTAssertNil(try ControlNumberInput.optional("  "))
         XCTAssertEqual(try ControlNumberInput.optional("0"), 0)
         XCTAssertEqual(try ControlNumberInput.optional("-1.25"), -1.25)
-        XCTAssertEqual(try ControlNumberInput.feedrate("600"), 600)
         XCTAssertNil(try ControlNumberInput.feedrate(""))
+        XCTAssertNil(try ControlNumberInput.feedrate(" "))
         for input in ["nan", "inf", "-inf", "1e999", "abc"] {
             XCTAssertThrowsError(try ControlNumberInput.optional(input))
         }
-        for input in ["0", "-1", "1.5", "1e100"] {
+        for input in ["0", "-1", "1", "600", "3000", "\(Int.max)", "1.5", "1e100"] {
             XCTAssertThrowsError(try ControlNumberInput.feedrate(input))
         }
     }

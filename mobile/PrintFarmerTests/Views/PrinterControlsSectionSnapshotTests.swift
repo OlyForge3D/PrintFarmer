@@ -70,6 +70,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     private func makeService(caps: PrinterBackendCapabilities?) -> MockPrinterService {
         let svc = MockPrinterService()
         svc.capabilitiesToReturn = caps
+        svc.detailsToReturn = try? .controlsLimitsFixture(for: TestData.decodePrinter())
         return svc
     }
 
@@ -289,6 +290,83 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await captureIndividualControls(width: 390, dynamicType: .large, name: "phone")
     }
 
+    func test_unknownLimits_editorBlocksHeatingAllowsZeroAndRetryDoesNotReplay() async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        var caps = Self.layoutCaps
+        caps.supportsAbsoluteMovement = true
+        let service = makeService(caps: caps)
+        service.detailsToReturn = nil
+        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        let content = PrinterSetupControlsContent(printer: printer, viewModel: model)
+            .frame(width: 390).fixedSize(horizontal: false, vertical: true)
+        let (window, controller) = install(content)
+        defer { window.isHidden = true }
+        window.frame.size = controller.sizeThatFits(in: CGSize(width: 390, height: 10000))
+        controller.view.frame = window.bounds
+        try await settle(controller)
+        func control(_ id: String) throws -> UIControl {
+            try XCTUnwrap(nativeControls(in: controller.view).first { $0.accessibilityIdentifier == id })
+        }
+        let heater = try XCTUnwrap(try control("printer.controls.hotend.target") as? UITextField)
+        heater.text = "200"
+        heater.sendActions(for: .editingChanged)
+        try await settle(controller)
+        try control("printer.controls.hotend.set").sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertNil(service.setTemperaturesCalledWith)
+        XCTAssertNil(model.lastError, "The editor rejects before VM dispatch")
+        XCTAssertNotNil(model.preheatBlockedReason(.pla))
+        XCTAssertNil(model.preheatBlockedReason(.coolDown))
+        XCTAssertNotNil(model.hardwareLoadError)
+
+        window.frame.size = controller.sizeThatFits(in: CGSize(width: 390, height: 10000))
+        controller.view.frame = window.bounds
+        try await settle(controller)
+        let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+            XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "unknown-heater-limits-fail-closed"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        heater.text = "0"
+        heater.sendActions(for: .editingChanged)
+        try await settle(controller)
+        try control("printer.controls.hotend.set").sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
+        model.cancelPendingCommand()
+        service.setTemperaturesCalledWith = nil
+        service.detailsToReturn = .controlsLimitsFixture(for: printer, hotend: 260, bed: 110)
+        try control("printer.controls.retry-limits").sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertEqual(model.maximum(for: .hotend), 260)
+        XCTAssertNil(model.hardwareLoadError)
+        XCTAssertNil(service.setTemperaturesCalledWith, "A read retry never replays a target")
+        heater.text = "261"
+        heater.sendActions(for: .editingChanged)
+        try await settle(controller)
+        try control("printer.controls.hotend.set").sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertNil(service.setTemperaturesCalledWith)
+        XCTAssertNil(model.lastError)
+
+        let rate = try XCTUnwrap(try control("printer.controls.absolute.feedrate") as? UITextField)
+        XCTAssertFalse(rate.isEnabled)
+        rate.text = "\(Int.max)"
+        rate.sendActions(for: .editingChanged)
+        let x = try XCTUnwrap(try control("printer.controls.absolute.x") as? UITextField)
+        x.text = "1"
+        x.sendActions(for: .editingChanged)
+        try await settle(controller)
+        try control("printer.controls.absolute.move").sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertNil(service.moveToCalledWith)
+        XCTAssertNil(model.lastError, "The disabled custom input is also guarded in the editor action")
+    }
+
     func test_editorPrecision_rejectsBeforeDispatchAndExposesNativeGuidance() async throws {
         let printer = try makePrinter(backend: .moonraker)
         var caps = Self.layoutCaps
@@ -480,7 +558,6 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             "Hotend target in degrees Celsius", "Bed target in degrees Celsius",
             "X absolute destination in millimeters", "Y absolute destination in millimeters",
             "Z absolute destination in millimeters",
-            "Absolute movement feedrate in millimeters per minute",
             "Set hotend target", "Set bed target", "Move to position", "Disable motors"
         ] {
             let target = try XCTUnwrap(controls.first { $0.accessibilityLabel == label }, label)
@@ -489,6 +566,9 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             XCTAssertTrue(target.isEnabled, label)
             XCTAssertTrue(target.point(inside: CGPoint(x: 1, y: 1), with: nil), label)
         }
+        let feedrate = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.feedrate" })
+        XCTAssertFalse(feedrate.isEnabled, "No custom feedrate is safe without an authoritative limit")
+        XCTAssertEqual(feedrate.accessibilityHint, ControlNumberInput.customFeedrateMessage)
         let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
             controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
         }

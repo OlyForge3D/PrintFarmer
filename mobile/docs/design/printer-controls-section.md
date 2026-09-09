@@ -41,7 +41,7 @@ read feature flags. Replace the owner when the real server/printer target change
 
 | Task | Existing dispatch | Preserved gate/confirmation |
 | --- | --- | --- |
-| Preheat PLA/PETG/ABS | `setTemperatures` | Temperature capability; omit unsupported bed; acknowledge exact supported targets |
+| Preheat PLA/PETG/ABS | `setTemperatures` | Temperature capability and valid reported maxima for every included heater; omit unsupported bed |
 | Cool Down | Same preheat command, 0/0 preset | Shown only with temperature subgroup; unsupported confirmation targets ignored |
 | Home All/XY/Z | `home`, `homeXY`, `homeZ` | Independent capability; fresh requested-axis acknowledgement, or acceptance-only when already homed |
 | Jog | `move` | Movement + supported axes; matching-axis position update; existing distances/feedrates |
@@ -79,14 +79,26 @@ suites continue to exercise native dispatch through mock services.
   are separate labels; missing/nonfinite measurements read **Unknown**.
 - Targets must be finite, nonnegative **whole degrees Celsius**, and may not exceed a known configured
   `maxHotendTemp`/`maxBedTemp` from the typed details contract. Missing maxima
-  remain unknown with a visible warning, not fabricated limits. Capability
+  remain unknown, not fabricated limits: **positive heating is blocked** when
+  the heater's maximum is missing, zero/negative, loading or failed to load.
+  A supported zero-off command remains available under the existing online,
+  authority and idle gates. Presets dispatch neither heater unless every
+  included positive target is within its reported maximum. Capability
   loading also reads these optional hardware details; failed reads add no proof.
   Read results survive normal online/state changes (including initial unknown
   to idle). Deactivation or authority changes fence both successful and failed
-  late reads. Reopening can retry missing hardware with cached capabilities.
+  late reads. Missing/failed limits are explained in the shared group with a
+  **Retry heater limits** read-only action. Missing fields can also be retried;
+  retry never replays a target. Reopening can retry missing hardware with cached capabilities.
 - Absolute coordinates are signed millimetres, with blank axes omitted and
-  zero preserved, and accept **at most three decimal places**. Optional feedrate is a positive whole number in **mm/min**;
-  blank uses the server default. No mm/s conversion or relative-move fallback
+  zero preserved, and accept **at most three decimal places**. **Custom feedrate
+  input is disabled** because the shared contract provides no authoritative
+  feedrate maximum. Both the editor and VM reject any custom value, including
+  otherwise reasonable rates and extreme integers. An omitted custom rate
+  selects and explicitly sends the existing relative-jog rate: **3000 mm/min**
+  for XY-only moves, **600 mm/min** for any move including Z (even Z=0).
+  These are the established native axis-specific rates, not a newly invented
+  custom range or an unbounded server default. No mm/s conversion or relative-move fallback
   occurs. Build-volume dimensions are not firmware travel limits or proof of
   a zero origin. Position and homing labels preserve unknown telemetry.
 - Precision is checked in both the editor and command owner before dispatch:

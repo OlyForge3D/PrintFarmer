@@ -204,11 +204,12 @@ struct PreheatSubgroup: View {
             return false
         }()
         let canControl = viewModel.canControl
+        let limitsReason = viewModel.preheatBlockedReason(preset)
         // Per spec §3.1 single-flight queue: if any preheat command is in
         // flight, *all* preheat siblings disable so the user can't stack
         // burst commands like "PLA then ABS".
         let isAnyPreheatInProgress = viewModel.pendingCommand != nil
-        let isInteractive = canControl && !isAnyPreheatInProgress
+        let isInteractive = canControl && !isAnyPreheatInProgress && limitsReason == nil
 
         let hasError = isErrored(preset: preset)
         Button {
@@ -217,16 +218,16 @@ struct PreheatSubgroup: View {
             buttonLabel(preset: preset, isPending: isPending)
         }
         .buttonStyle(PreheatButtonStyle(preset: preset, isEnabled: isInteractive, isPending: isPending))
-        .disabled(isAnyPreheatInProgress || isBlockedWithoutTapReveal(canControl: canControl))
+        .disabled(isAnyPreheatInProgress || limitsReason != nil || isBlockedWithoutTapReveal(canControl: canControl))
         // On compact layouts we keep blocked buttons tappable so the user can
         // reveal the disabled reason; regular width shows the reason inline.
         .disabledControlStyle(isDisabled: !isInteractive && !isPending, cornerRadius: 8)
         .errorBorderHighlight(isActive: hasError, cornerRadius: 8)
         .accessibilityLabel(accessibilityLabel(preset: preset, isPending: isPending))
-        .accessibilityHint(accessibilityHint(preset: preset, canControl: canControl, hasError: hasError))
+        .accessibilityHint(limitsReason ?? accessibilityHint(preset: preset, canControl: canControl, hasError: hasError))
         .accessibilityValue(accessibilityValue(isPending: isPending, hasError: hasError))
         .accessibilityAddTraits(isPending ? .updatesFrequently : [])
-        .help(viewModel.blockedReason ?? "")
+        .help(limitsReason ?? viewModel.blockedReason ?? "")
     }
 
     struct IndividualHeaterControls: View {
@@ -265,7 +266,7 @@ struct PreheatSubgroup: View {
                     Text("Configured range: 0–\(maximum) °C. Zero switches this heater off.")
                         .font(.footnote)
                 } else {
-                    Text("Maximum temperature is unknown. Confirm the printer's safe limit before setting a target. Zero switches this heater off.")
+                    Text("No valid maximum is available. Heating is blocked; only zero-off is allowed. Retry the heater limits check.")
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -282,6 +283,9 @@ struct PreheatSubgroup: View {
                     do {
                         guard let value = try ControlNumberInput.heaterTarget(target) else {
                             throw PrinterControlError.invalidRequest("Enter a target; use zero to switch off.")
+                        }
+                        if let message = viewModel.heaterTargetError(heater, target: value) {
+                            throw PrinterControlError.invalidRequest(message)
                         }
                         inputError = nil
                         Task { await viewModel.setHeaterTarget(heater, target: value) }
@@ -346,6 +350,7 @@ struct PreheatSubgroup: View {
     }
 
     private func handleTap(preset: PreheatPreset, canControl: Bool) {
+        guard viewModel.preheatBlockedReason(preset) == nil else { return }
         guard canControl else {
             // Disabled tap: surface the blocked reason as a transient caption
             // (phone) and let `.help()` cover iPad/Mac hover.

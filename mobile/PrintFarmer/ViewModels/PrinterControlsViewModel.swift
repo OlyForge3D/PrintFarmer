@@ -55,6 +55,7 @@ enum Heater: String, CaseIterable, Sendable {
 enum ControlNumberInput {
     static let heaterPrecisionMessage = "Use whole degrees Celsius. Fractional targets are not supported; no rounding is applied."
     static let coordinatePrecisionMessage = "Use at most 3 decimal places in millimetres. No rounding is applied."
+    static let customFeedrateMessage = "Custom feedrates are unavailable without a verified maximum. Leave this field blank to use the established axis-specific rate."
 
     static func optional(_ text: String) throws -> Double? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -66,11 +67,10 @@ enum ControlNumberInput {
     }
 
     static func feedrate(_ text: String) throws -> Int? {
-        guard let value = try optional(text) else { return nil }
-        guard value > 0, value < Double(Int.max), value.rounded() == value else {
-            throw PrinterControlError.invalidRequest("Feedrate must be a positive whole number in mm/min.")
+        guard text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw PrinterControlError.invalidRequest(customFeedrateMessage)
         }
-        return Int(value)
+        return nil
     }
 
     static func heaterTarget(_ text: String) throws -> Double? {
@@ -143,6 +143,8 @@ final class PrinterControlsViewModel: ObservableObject {
     @Published private(set) var isLoadingCapabilities: Bool = false
     @Published private(set) var capabilityLoadError: String?
     @Published private(set) var hardware: PrinterHardwareCapabilities?
+    @Published private(set) var isLoadingHardware = false
+    @Published private(set) var hardwareLoadError: String?
     @Published private(set) var commandNotice: String?
     @Published private(set) var isActive = true
 
@@ -183,7 +185,7 @@ final class PrinterControlsViewModel: ObservableObject {
                 guard canPublishRead(generation) else { return }
                 capabilities = loaded
             }
-            if hardware == nil { await loadHardware() }
+            if hardware == nil || hardwareLoadError != nil { await loadHardware() }
         } catch {
             guard !Task.isCancelled, canPublishRead(generation) else { return }
             // Failed reads are not cached as proof of unsupported hardware.
@@ -193,15 +195,23 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     func loadHardware() async {
-        guard isActive, accessCheck() == nil else { return }
+        guard isActive, accessCheck() == nil, !isLoadingHardware else { return }
         let generation = lifecycleGeneration
+        isLoadingHardware = true
+        hardwareLoadError = nil
+        defer { isLoadingHardware = false }
         do {
             let details = try await printerService.getDetails(id: printer.id)
             try Task.checkCancellation()
-            guard canPublishRead(generation), details.id == printer.id else { return }
+            guard canPublishRead(generation) else { return }
+            guard details.id == printer.id else {
+                hardwareLoadError = "Heater limits belong to a different printer. Reopen this printer."
+                return
+            }
             hardware = details.capabilities
         } catch {
-            // Unknown catalog limits are not replaced with illustrative defaults.
+            guard !Task.isCancelled, canPublishRead(generation) else { return }
+            hardwareLoadError = "Heater limits could not be read. Retry the limits check. \(error.localizedDescription)"
         }
     }
 
@@ -323,7 +333,33 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     func maximum(for heater: Heater) -> Int? {
-        heater == .hotend ? hardware?.maxHotendTemp : hardware?.maxBedTemp
+        guard !isLoadingHardware, hardwareLoadError == nil,
+              let maximum = heater == .hotend ? hardware?.maxHotendTemp : hardware?.maxBedTemp,
+              maximum > 0 else { return nil }
+        return maximum
+    }
+
+    var needsHeaterLimits: Bool {
+        Heater.allCases.contains { supports($0) && maximum(for: $0) == nil }
+    }
+
+    func heaterTargetError(_ heater: Heater, target: Double) -> String? {
+        guard ControlNumberInput.isWholeDegree(target) else { return ControlNumberInput.heaterPrecisionMessage }
+        guard target >= 0 else { return "\(heater.title) target must be nonnegative." }
+        if target == 0 { return nil }
+        guard let maximum = maximum(for: heater) else {
+            return "A valid reported \(heater.title.lowercased()) maximum is required for heating. Only zero-off is available; retry the heater limits check."
+        }
+        guard target <= Double(maximum) else {
+            return "\(heater.title) target must not exceed the reported maximum of \(maximum) °C."
+        }
+        return nil
+    }
+
+    func preheatBlockedReason(_ preset: PreheatPreset) -> String? {
+        if let reason = heaterTargetError(.hotend, target: preset.hotend) { return reason }
+        if supports(.bed) { return heaterTargetError(.bed, target: preset.bed) }
+        return nil
     }
 
     func setHeaterTarget(_ heater: Heater, target: Double) async {
@@ -344,16 +380,20 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     func moveTo(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async {
+        let automaticFeedrate = z == nil ? Self.xyFeedrateMmMin : Self.zFeedrateMmMin
         let command = ControlCommand(
-            kind: .moveTo(x: x, y: y, z: z, feedrateMmMin: feedrateMmMin), startedAt: clock()
+            kind: .moveTo(x: x, y: y, z: z, feedrateMmMin: automaticFeedrate), startedAt: clock()
         )
         guard beginCommand(command) else { return }
         defer { endCommand(command) }
+        guard feedrateMmMin == nil else {
+            setError(command: command, message: ControlNumberInput.customFeedrateMessage, isRetryable: false)
+            return
+        }
         let coordinates = [("X", x), ("Y", y), ("Z", z)].filter { $0.1 != nil }
         guard capabilities?.supportsAbsoluteMovement == true, !coordinates.isEmpty,
-              coordinates.allSatisfy({ capabilities?.supportedAxes.contains($0.0) == true && $0.1!.isFinite }),
-              feedrateMmMin.map({ $0 > 0 }) ?? true else {
-            setError(command: command, message: "Provide finite coordinates on supported axes and a positive feedrate.", isRetryable: false)
+              coordinates.allSatisfy({ capabilities?.supportedAxes.contains($0.0) == true && $0.1!.isFinite }) else {
+            setError(command: command, message: "Provide finite coordinates on supported axes.", isRetryable: false)
             return
         }
         guard coordinates.allSatisfy({ ControlNumberInput.hasCoordinatePrecision($0.1!) }) else {
@@ -362,7 +402,7 @@ final class PrinterControlsViewModel: ObservableObject {
         }
         await perform(command) { [printerService, printer] in
             let result = try await printerService.moveTo(
-                printerId: printer.id, x: x, y: y, z: z, feedrateMmMin: feedrateMmMin
+                printerId: printer.id, x: x, y: y, z: z, feedrateMmMin: automaticFeedrate
             )
             guard result.success else {
                 throw PrinterControlError.invalidRequest(result.message ?? "Absolute movement was rejected.")
@@ -571,13 +611,8 @@ final class PrinterControlsViewModel: ObservableObject {
 
     private func validateTemperature(_ target: Double?, heater: Heater, command: ControlCommand) -> Bool {
         guard let target else { return true }
-        guard ControlNumberInput.isWholeDegree(target) else {
-            setError(command: command, message: ControlNumberInput.heaterPrecisionMessage, isRetryable: false)
-            return false
-        }
-        guard target.isFinite, target >= 0,
-              maximum(for: heater).map({ target <= Double($0) }) ?? true else {
-            setError(command: command, message: "\(heater.title) target must be nonnegative and within the configured maximum.", isRetryable: false)
+        if let message = heaterTargetError(heater, target: target) {
+            setError(command: command, message: message, isRetryable: false)
             return false
         }
         return true
