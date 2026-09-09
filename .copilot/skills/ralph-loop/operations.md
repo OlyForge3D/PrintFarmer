@@ -82,11 +82,13 @@ delivery:
    `{"jobId":...,"sessionId":...}`. On terminal completion, run `terminal-local` with the
    matching session ID and verified head, exit, validation, clean-worktree, and pushed-commit
    evidence.
-4. For an eligible mobile issue only, run `dispatch-remote` with `{"job":...,"eligibility":...}`
-   instead of local session creation. It reserves, records a PID-and-lease-fenced intent, and sends
-   SSH in one durable operation; lost acknowledgement/timeouts remain reserved and the same job is
-   reconciled on a later invocation. A later round must run `recover-remote` only after the lease
-   expires and the owning controller is demonstrably dead, then re-run `dispatch-remote`. For an
+4. For an eligible mobile issue only, run `dispatch-remote` with
+   `{"job":...,"eligibility":...,"controllerPid":...}` using the app Ralph controller's own
+   process ID instead of local session creation. It reserves, records a PID-and-lease-fenced
+   intent, and sends SSH in one durable operation; lost acknowledgement/timeouts remain reserved
+   and the same job is reconciled on a later invocation. A later round must run `recover-remote`
+   only after the lease expires and the owning controller is demonstrably dead, then re-run
+   `dispatch-remote`. For an
    accepted remote job, run `status-remote` with the original `{"job":...}`. That command queries
    the trusted worker and releases the reservation only from its fence-bound process/Git terminal
    attestation, correlated pre-launch failure, or explicit attestation that no durable worker
