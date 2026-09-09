@@ -8,6 +8,41 @@ import SwiftUI
 @MainActor
 final class JogSubgroupTests: XCTestCase {
 
+    func test_coordinateInput_limitsPrecisionWithoutBinaryNoiseOrSilentRounding() throws {
+        XCTAssertNil(try ControlNumberInput.coordinate(" "))
+        for (text, value) in [
+            ("0", 0.0), ("-1.234", -1.234), ("1.001", 1.001), ("1.234000", 1.234),
+            (".001", 0.001), ("1e-3", 0.001), ("1000e-4", 0.1), ("-0.000", 0.0)
+        ] {
+            XCTAssertEqual(try ControlNumberInput.coordinate(text), value)
+        }
+        for text in ["1.2345", "-0.0001", "1e-4", "1e-999", "1.00100000000000001", "NaN", "inf"] {
+            XCTAssertThrowsError(try ControlNumberInput.coordinate(text), text)
+        }
+    }
+
+    func test_absoluteInputs_blankIsOmittedZeroIsRealAndUnitsAreUnchanged() throws {
+        XCTAssertNil(try ControlNumberInput.optional("  "))
+        XCTAssertEqual(try ControlNumberInput.optional("0"), 0)
+        XCTAssertEqual(try ControlNumberInput.optional("-1.25"), -1.25)
+        XCTAssertNil(try ControlNumberInput.feedrate(""))
+        XCTAssertNil(try ControlNumberInput.feedrate(" "))
+        for input in ["nan", "inf", "-inf", "1e999", "abc"] {
+            XCTAssertThrowsError(try ControlNumberInput.optional(input))
+        }
+        for input in ["0", "-1", "1", "600", "3000", "\(Int.max)", "1.5", "1e100"] {
+            XCTAssertThrowsError(try ControlNumberInput.feedrate(input))
+        }
+    }
+
+    func test_absoluteVisibility_requiresSpecificSupportAndKnownAxes() {
+        XCTAssertFalse(JogSubgroup.AbsolutePositionControls.isVisible(nil))
+        var caps = Self.fullCaps
+        XCTAssertFalse(JogSubgroup.AbsolutePositionControls.isVisible(caps))
+        caps.supportsAbsoluteMovement = true
+        XCTAssertTrue(JogSubgroup.AbsolutePositionControls.isVisible(caps))
+    }
+
     private static let fullCaps = PrinterBackendCapabilities(
         supportsMovement: true,
         supportsTemperatureControl: true,
@@ -53,7 +88,7 @@ final class JogSubgroupTests: XCTestCase {
     // MARK: - visibleAxes
 
     func test_visibleAxes_whenCapabilitiesNil_returnsAllCanonicalAxes() {
-        XCTAssertEqual(JogSubgroup.visibleAxes(for: nil), ["X", "Y", "Z"])
+        XCTAssertEqual(JogSubgroup.visibleAxes(for: nil), [])
     }
 
     func test_visibleAxes_filtersByCapabilities() {
@@ -68,7 +103,7 @@ final class JogSubgroupTests: XCTestCase {
     // MARK: - isHidden
 
     func test_isHidden_whenCapabilitiesNil_returnsFalse() {
-        XCTAssertFalse(JogSubgroup.isHidden(for: nil))
+        XCTAssertTrue(JogSubgroup.isHidden(for: nil))
     }
 
     func test_isHidden_whenSupportsMovementFalse_returnsTrue() {
@@ -101,7 +136,7 @@ final class JogSubgroupTests: XCTestCase {
     // MARK: - Accessibility labels and hints (spec §4.1)
 
     func test_jogAccessibilityLabel_positive_isJogForward() throws {
-        let vm = PrinterControlsViewModel(
+        let vm = PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(),
             printer: try TestData.decodePrinter()
         )
@@ -110,7 +145,7 @@ final class JogSubgroupTests: XCTestCase {
     }
 
     func test_jogAccessibilityLabel_negative_isJogBackward() throws {
-        let vm = PrinterControlsViewModel(
+        let vm = PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(),
             printer: try TestData.decodePrinter()
         )
@@ -119,7 +154,7 @@ final class JogSubgroupTests: XCTestCase {
     }
 
     func test_jogAccessibilityHint_positive_usesPositiveDirection() throws {
-        let vm = PrinterControlsViewModel(
+        let vm = PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(),
             printer: try Self.idlePrinter()
         )
@@ -129,7 +164,7 @@ final class JogSubgroupTests: XCTestCase {
     }
 
     func test_jogAccessibilityHint_negative_usesNegativeDirection() throws {
-        let vm = PrinterControlsViewModel(
+        let vm = PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(),
             printer: try Self.idlePrinter()
         )
@@ -140,7 +175,7 @@ final class JogSubgroupTests: XCTestCase {
 
     func test_jogAccessibilityHint_disabled_returnsSpec41Text() throws {
         // Default printer state is "printing" -> canControl = false
-        let vm = PrinterControlsViewModel(
+        let vm = PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(),
             printer: try TestData.decodePrinter()
         )
@@ -150,7 +185,7 @@ final class JogSubgroupTests: XCTestCase {
     }
 
     func test_jogAccessibilityValue_pending_returnsPending() throws {
-        let vm = PrinterControlsViewModel(
+        let vm = PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(),
             printer: try TestData.decodePrinter()
         )
@@ -159,7 +194,7 @@ final class JogSubgroupTests: XCTestCase {
     }
 
     func test_jogAccessibilityValue_idle_isEmpty() throws {
-        let vm = PrinterControlsViewModel(
+        let vm = PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(),
             printer: try TestData.decodePrinter()
         )

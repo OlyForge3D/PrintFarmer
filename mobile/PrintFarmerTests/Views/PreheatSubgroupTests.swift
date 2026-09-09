@@ -8,6 +8,38 @@ import SwiftUI
 @MainActor
 final class PreheatSubgroupTests: XCTestCase {
 
+    func test_heaterInput_requiresWholeDegreesWithoutSilentRounding() throws {
+        XCTAssertNil(try ControlNumberInput.heaterTarget(" "))
+        for (text, value) in [("0", 0.0), ("200", 200.0), ("240.000", 240.0), ("2e2", 200.0)] {
+            XCTAssertEqual(try ControlNumberInput.heaterTarget(text), value)
+        }
+        for text in ["200.5", "0.1", "200.00000000000000001", "1e-999", "NaN", "inf"] {
+            XCTAssertThrowsError(try ControlNumberInput.heaterTarget(text), text)
+        }
+    }
+
+    func test_individualHeaterLabels_preserveUnknownVersusZero() {
+        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(nil), "Unknown")
+        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(.nan), "Unknown")
+        XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(0), "0 °C")
+        XCTAssertEqual(Heater.hotend.title, "Hotend")
+        XCTAssertEqual(Heater.bed.title, "Bed")
+    }
+
+    func test_nativeNumberFieldCoordinator_preservesBlankZeroAndSignedInput() {
+        var value = ""
+        let coordinator = ControlNumberField.Coordinator(text: Binding(get: { value }, set: { value = $0 }))
+        let field = UITextField()
+        for input in ["0", "-1.25", "240", ""] {
+            field.text = input
+            coordinator.changed(field)
+            XCTAssertEqual(value, input)
+        }
+        field.text = nil
+        coordinator.changed(field)
+        XCTAssertEqual(value, "")
+    }
+
     // MARK: - presets
 
     func test_presets_containsAllFourInFixedOrder() {
@@ -48,21 +80,21 @@ final class PreheatSubgroupTests: XCTestCase {
         // state. We assert the gate the view consumes; the visual treatment is
         // covered by the upcoming snapshot tests (#289).
         let printer = try Self.makePrinter(state: "printing", isOnline: true)
-        let vm = PrinterControlsViewModel(printerService: PreheatSubgroupTestService(), printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: PreheatSubgroupTestService(), printer: printer)
         XCTAssertFalse(vm.canControl)
         XCTAssertNotNil(vm.blockedReason)
     }
 
     func test_canControl_falseWhenOffline() throws {
         let printer = try Self.makePrinter(state: "ready", isOnline: false)
-        let vm = PrinterControlsViewModel(printerService: PreheatSubgroupTestService(), printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: PreheatSubgroupTestService(), printer: printer)
         XCTAssertFalse(vm.canControl)
         XCTAssertEqual(vm.blockedReason, "Printer is offline.")
     }
 
     func test_canControl_trueWhenOnlineAndIdle() throws {
         let printer = try Self.makePrinter(state: "ready", isOnline: true)
-        let vm = PrinterControlsViewModel(printerService: PreheatSubgroupTestService(), printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: PreheatSubgroupTestService(), printer: printer)
         XCTAssertTrue(vm.canControl)
         XCTAssertNil(vm.blockedReason)
     }
@@ -71,7 +103,7 @@ final class PreheatSubgroupTests: XCTestCase {
 
     func test_body_doesNotCrashWhenVisible() throws {
         let printer = try Self.makePrinter(state: "ready", isOnline: true)
-        let vm = PrinterControlsViewModel(printerService: PreheatSubgroupTestService(), printer: printer)
+        let vm = PrinterControlsViewModel.configuredForTests(printerService: PreheatSubgroupTestService(), printer: printer)
         let subgroup = PreheatSubgroup(viewModel: vm)
         // SwiftUI body evaluation should not throw or trap.
         _ = subgroup.body
@@ -118,8 +150,9 @@ final class PreheatSubgroupTests: XCTestCase {
 
     // MARK: - Accessibility hints (spec §4.1)
 
-    func test_accessibilityHint_idle_pla_withBed() throws {
+    func test_accessibilityHint_idle_pla_withBed() async throws {
         let vm = try makeVM(state: "ready", isOnline: true)
+        await vm.loadCapabilities()
         let view = PreheatSubgroup(viewModel: vm)
         XCTAssertEqual(
             view.accessibilityHint(preset: .pla, canControl: true, hasError: false),
@@ -127,8 +160,9 @@ final class PreheatSubgroupTests: XCTestCase {
         )
     }
 
-    func test_accessibilityHint_idle_petg_withBed() throws {
+    func test_accessibilityHint_idle_petg_withBed() async throws {
         let vm = try makeVM(state: "ready", isOnline: true)
+        await vm.loadCapabilities()
         let view = PreheatSubgroup(viewModel: vm)
         XCTAssertEqual(
             view.accessibilityHint(preset: .petg, canControl: true, hasError: false),
@@ -136,8 +170,9 @@ final class PreheatSubgroupTests: XCTestCase {
         )
     }
 
-    func test_accessibilityHint_idle_coolDown() throws {
+    func test_accessibilityHint_idle_coolDown() async throws {
         let vm = try makeVM(state: "ready", isOnline: true)
+        await vm.loadCapabilities()
         let view = PreheatSubgroup(viewModel: vm)
         XCTAssertEqual(
             view.accessibilityHint(preset: .coolDown, canControl: true, hasError: false),
@@ -178,7 +213,7 @@ final class PreheatSubgroupTests: XCTestCase {
 
     private func makeVM(state: String, isOnline: Bool) throws -> PrinterControlsViewModel {
         let printer = try Self.makePrinter(state: state, isOnline: isOnline)
-        return PrinterControlsViewModel(printerService: PreheatSubgroupTestService(), printer: printer)
+        return PrinterControlsViewModel.configuredForTests(printerService: PreheatSubgroupTestService(), printer: printer)
     }
 
     // MARK: - Helpers

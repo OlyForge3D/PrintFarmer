@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Presentation-only setup controls. The host owns the model, capability loading,
 /// access gating and live-update forwarding even while this content is offscreen.
-/// Use `PrinterControlsSection(printer:printerService:)` for standalone ownership.
+/// Use `PrinterControlsSection(printer:composition:)` for standalone ownership.
 struct PrinterSetupControlsContent: View {
     let printer: Printer
     @ObservedObject var viewModel: PrinterControlsViewModel
@@ -31,16 +31,29 @@ struct PrinterSetupControlsContent: View {
                 .accessibilityAddTraits(.isHeader)
 
             VStack(alignment: .leading, spacing: 0) {
+                if viewModel.needsHeaterLimits {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(viewModel.isLoadingHardware ? "Loading heater limits…" : "Heater limits unavailable")
+                            .font(.headline)
+                        Text(viewModel.hardwareLoadError ?? "Positive targets require valid reported maxima. Supported zero-off commands remain available.")
+                            .font(.footnote)
+                        ControlActionButton(title: "Retry heater limits", identifier: "printer.controls.retry-limits") {
+                            Task { await viewModel.loadHardware() }
+                        }
+                        .disabled(viewModel.isLoadingHardware || viewModel.isLoadingCapabilities)
+                    }
+                    .foregroundStyle(Color.pfTextPrimary)
+                    .padding(.bottom, 12)
+                }
                 if let error = viewModel.capabilityLoadError {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Control capabilities unavailable")
                             .font(.headline)
                         Text(error)
                             .font(.footnote)
-                        Button("Retry capability check") {
+                        ControlActionButton(title: "Retry capability check") {
                             Task { await viewModel.loadCapabilities() }
                         }
-                        .frame(minHeight: 44)
                         .disabled(viewModel.isLoadingCapabilities)
                     }
                     .foregroundStyle(Color.pfTextPrimary)
@@ -50,6 +63,14 @@ struct PrinterSetupControlsContent: View {
                 if isPrintingOrPaused {
                     lockoutBanner
                         .padding(.bottom, 12)
+                } else if let reason = viewModel.blockedReason {
+                    Label(reason, systemImage: "lock.fill")
+                        .font(.footnote)
+                        .foregroundStyle(Color.pfTextPrimary)
+                        .padding(.bottom, 12)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(reason)
+                        .accessibilityIdentifier("printer.controls.blocked-reason")
                 }
 
                 let columns = (usesColumns ?? (horizontalSizeClass == .regular))
@@ -59,17 +80,34 @@ struct PrinterSetupControlsContent: View {
                     : AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
                 // Keep Jog's axis/distance state when width or text size reflows.
                 layout {
-                    PreheatSubgroup(viewModel: viewModel)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 16) {
+                        PreheatSubgroup(viewModel: viewModel)
+                        PreheatSubgroup.IndividualHeaterControls(viewModel: viewModel)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     VStack(alignment: .leading, spacing: 12) {
                         HomeSubgroup(viewModel: viewModel)
                         Divider()
                             .background(Color.pfBorder)
                         JogSubgroup(viewModel: viewModel)
+                        JogSubgroup.AbsolutePositionControls(viewModel: viewModel)
+                        HomeSubgroup.MotorReleaseControls(viewModel: viewModel)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                if let notice = viewModel.commandNotice {
+                    Text(notice)
+                        .font(.footnote)
+                        .foregroundStyle(Color.pfTextSecondary)
+                        .padding(.top, 12)
+                }
+                if viewModel.pendingCommand != nil {
+                    ControlActionButton(
+                        title: "Stop waiting for command", identifier: "printer.controls.stop-waiting",
+                        hint: "Does not stop the printer. Physical execution may continue."
+                    ) { viewModel.cancelPendingCommand() }
+                }
                 if let error = viewModel.lastError {
                     errorBanner(error)
                         .padding(.top, 12)
