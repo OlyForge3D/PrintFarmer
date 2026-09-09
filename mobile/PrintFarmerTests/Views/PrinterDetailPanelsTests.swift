@@ -55,7 +55,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         try fixture.registry.setActive(id: fixture.first.id)
         XCTAssertNil(fixture.services.printerControlsComposition)
         try await waitForHost("A retained old-server editor must fail closed", in: controller.view) {
-            !field.isEnabled
+            self.heaterTarget(in: controller.view)?.isEnabled != true
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1, "Identity churn cannot rebind or replace this host's owner")
         XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
