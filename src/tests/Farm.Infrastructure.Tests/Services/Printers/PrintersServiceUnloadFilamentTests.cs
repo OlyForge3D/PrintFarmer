@@ -190,6 +190,54 @@ public class PrintersServiceUnloadFilamentTests
         result.FailureKind.Should().Be(FilamentUnloadFailureKind.PrinterNotFound);
     }
 
+    [Fact]
+    public async Task UnloadFilamentAsync_CancelledBackend_RethrowsCancellation()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter();
+        var printersRepository = new Mock<IPrintersRepository>();
+        printersRepository
+            .Setup(r => r.FindByIdWithToolheadsAsync(
+                printer.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printer);
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(u => u.Printers).Returns(printersRepository.Object);
+        var backendClient = new Mock<IBackendClient>();
+        backendClient.As<ISupportsFilamentControl>()
+            .Setup(value => value.UnloadFilamentAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException());
+        var backendFactory = new Mock<IBackendClientFactory>();
+        backendFactory.Setup(value => value.GetClient(PrinterBackend.Moonraker))
+            .Returns(backendClient.Object);
+        PrintersService service = new(
+            unitOfWork.Object,
+            db,
+            backendFactory.Object,
+            Mock.Of<IBackendCapabilityFactory>(),
+            Mock.Of<Farm.Infrastructure.Services.Catalog.ICatalogService>(),
+            Mock.Of<IHttpClientFactory>(),
+            NullLogger<PrintersService>.Instance,
+            Mock.Of<IPrinterStatusBroadcaster>(),
+            Mock.Of<IMultiPrinterStatusCoordinator>(),
+            Mock.Of<IPrinterStatusClientFactory>(),
+            Mock.Of<IPrinterStatusCacheReader>(),
+            Mock.Of<Farm.Infrastructure.Services.Locations.ILocationService>(),
+            Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>(),
+            Mock.Of<ISpoolmanService>(),
+            Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),
+            Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>(),
+            Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver>());
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            service.UnloadFilamentAsync(
+                printer.Id,
+                null,
+                CancellationToken.None));
+    }
+
     private static SpoolmanSpoolDto Spool(int id, string material, double? remainingG) =>
         new(id, $"spool-{id}", material, remainingG, ColorHex: null, InUse: true);
 

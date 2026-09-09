@@ -44,6 +44,9 @@ using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersi
 using MoonrakerEndpointResolution = Farm.Infrastructure.Services.Printers.MoonrakerEndpointResolution;
 using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.MoonrakerOnboardingResolver;
 using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerToolAttributionCapability;
+using PrinterSafetyMoveRequest = Farm.Infrastructure.Services.Printers.PrinterSafetyMoveRequest;
+using PrinterSafetyOperation = Farm.Infrastructure.Services.Printers.PrinterSafetyOperation;
+using PrinterSafetyValidationResult = Farm.Infrastructure.Services.Printers.PrinterSafetyValidationResult;
 
 namespace Farm.Modules.Printers.Controllers;
 
@@ -78,7 +81,8 @@ public class PrintersController(
     Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService? queueResourceAuthorization = null,
     Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService? physicalActuationService = null,
     AppDbContext? appDbContext = null,
-    Farm.Infrastructure.Services.Printers.IPrinterCacheInvalidator? printerCacheInvalidator = null)
+    Farm.Infrastructure.Services.Printers.IPrinterCacheInvalidator? printerCacheInvalidator = null,
+    Farm.Infrastructure.Services.Printers.IPrinterSafetyGuard? printerSafetyGuard = null)
     : ControllerBase
 {
     private const int MaxHistoryQueryEntries = 2000;
@@ -88,6 +92,7 @@ public class PrintersController(
     private readonly Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService? _physicalActuationService = physicalActuationService;
     private readonly AppDbContext? _appDbContext = appDbContext;
     private readonly Farm.Infrastructure.Services.Printers.IPrinterCacheInvalidator? _printerCacheInvalidator = printerCacheInvalidator;
+    private readonly Farm.Infrastructure.Services.Printers.IPrinterSafetyGuard? _printerSafetyGuard = printerSafetyGuard;
     private readonly ILogger<PrintersController> _logger = logger;
     private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
@@ -2260,6 +2265,7 @@ public class PrintersController(
         // cached copy of this printer so the very next poll tick re-reads the row (with fresh
         // credentials/URL/backend) instead of polling stale data for up to 30 seconds (#1763).
         _printerCacheInvalidator?.Invalidate(p.Id);
+        _printerBackendCapabilitiesService.InvalidateVerifiedSafety(p.Id);
 
         WritePrinterEtag(p);
 
@@ -2596,7 +2602,9 @@ public class PrintersController(
             "move_to",
             "move_to",
             token => _printersService.MoveToAsync(id, req.X, req.Y, req.Z, req.F, token),
-            ct);
+            ct,
+            PrinterSafetyOperation.AbsoluteMovement,
+            new PrinterSafetyMoveRequest(req.X, req.Y, req.Z));
     }
 
     private async Task<ActionResult<CommandResult>> ExecuteDirectBooleanControlAsync(
@@ -2605,7 +2613,9 @@ public class PrintersController(
         string telemetryOperation,
         Func<CancellationToken, Task<bool>> backendCall,
         CancellationToken ct,
-        PrinterActuationResult? acquired = null)
+        PrinterActuationResult? acquired = null,
+        PrinterSafetyOperation? safetyOperation = null,
+        PrinterSafetyMoveRequest? move = null)
     {
         PrinterActuationResult begin = acquired ?? await BeginPhysicalControlAsync(
             printerId,
@@ -2614,6 +2624,16 @@ public class PrintersController(
         if (!begin.Success || begin.Lease is null)
         {
             return MapActuationDenial(begin);
+        }
+
+        ActionResult? validationFailure = await ValidateBeforeDispatchAsync(
+            begin.Lease,
+            safetyOperation,
+            move,
+            ct);
+        if (validationFailure is not null)
+        {
+            return validationFailure;
         }
 
         try
@@ -2674,7 +2694,9 @@ public class PrintersController(
         string operation,
         string telemetryOperation,
         Func<CancellationToken, Task<Farm.Infrastructure.Services.Printers.PrinterControlOutcome>> backendCall,
-        CancellationToken ct)
+        CancellationToken ct,
+        PrinterSafetyOperation? safetyOperation = null,
+        PrinterSafetyMoveRequest? move = null)
     {
         PrinterActuationResult begin = await BeginPhysicalControlAsync(
             printerId,
@@ -2683,6 +2705,16 @@ public class PrintersController(
         if (!begin.Success || begin.Lease is null)
         {
             return MapActuationDenial(begin);
+        }
+
+        ActionResult? validationFailure = await ValidateBeforeDispatchAsync(
+            begin.Lease,
+            safetyOperation,
+            move,
+            ct);
+        if (validationFailure is not null)
+        {
+            return validationFailure;
         }
 
         try
@@ -2713,6 +2745,14 @@ public class PrintersController(
 
             return MapControlOutcome(outcome);
         }
+        catch (OperationCanceledException)
+        {
+            await _physicalActuationService!.MarkDirectUnknownAsync(
+                begin.Lease,
+                "backend_control_cancelled_after_send",
+                CancellationToken.None);
+            throw;
+        }
         catch (Exception) when (!ct.IsCancellationRequested)
         {
             await _physicalActuationService!.MarkDirectUnknownAsync(
@@ -2732,7 +2772,8 @@ public class PrintersController(
         string operation,
         string telemetryOperation,
         Func<CancellationToken, Task<CommandResult>> backendCall,
-        CancellationToken ct)
+        CancellationToken ct,
+        PrinterSafetyOperation? safetyOperation = null)
     {
         PrinterActuationResult begin = await BeginPhysicalControlAsync(
             printerId,
@@ -2741,6 +2782,16 @@ public class PrintersController(
         if (!begin.Success || begin.Lease is null)
         {
             return MapActuationDenial(begin);
+        }
+
+        ActionResult? validationFailure = await ValidateBeforeDispatchAsync(
+            begin.Lease,
+            safetyOperation,
+            move: null,
+            ct);
+        if (validationFailure is not null)
+        {
+            return validationFailure;
         }
 
         try
@@ -2766,6 +2817,14 @@ public class PrintersController(
             }
 
             return MapCommandResult(result);
+        }
+        catch (OperationCanceledException)
+        {
+            await _physicalActuationService!.MarkDirectUnknownAsync(
+                begin.Lease,
+                "backend_control_cancelled_after_send",
+                CancellationToken.None);
+            throw;
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {
@@ -2861,6 +2920,85 @@ public class PrintersController(
             operation,
             ct);
     }
+
+    private async Task<ActionResult?> ValidateBeforeDispatchAsync(
+        PrinterActuationLease lease,
+        PrinterSafetyOperation? safetyOperation,
+        PrinterSafetyMoveRequest? move,
+        CancellationToken ct)
+    {
+        try
+        {
+            ct.ThrowIfCancellationRequested();
+            if (safetyOperation.HasValue)
+            {
+                if (_printerSafetyGuard is null)
+                {
+                    await _physicalActuationService!.CompleteDirectAsync(
+                        lease,
+                        accepted: false,
+                        "printer_safety_evidence_unknown",
+                        CancellationToken.None);
+                    return SafetyProblem(
+                        PrinterSafetyValidationResult.Reject(
+                            StatusCodes.Status503ServiceUnavailable,
+                            "printer_safety_evidence_unknown",
+                            "The printer safety guard is unavailable."));
+                }
+
+                PrinterSafetyValidationResult safety =
+                    await _printerSafetyGuard.ValidateAsync(
+                        lease.PrinterId,
+                        safetyOperation.Value,
+                        move,
+                        ct);
+                if (!safety.Success)
+                {
+                    await _physicalActuationService!.CompleteDirectAsync(
+                        lease,
+                        accepted: false,
+                        safety.Code,
+                        CancellationToken.None);
+                    return SafetyProblem(safety);
+                }
+            }
+
+            ct.ThrowIfCancellationRequested();
+            PrinterActuationResult revalidated =
+                await _physicalActuationService!.RevalidateDirectAsync(lease, ct);
+            if (!revalidated.Success)
+            {
+                await _physicalActuationService.CompleteDirectAsync(
+                    lease,
+                    accepted: false,
+                    "printer_actuation_revalidation_failed",
+                    CancellationToken.None);
+                return MapActuationDenial(revalidated).Result;
+            }
+
+            ct.ThrowIfCancellationRequested();
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            await _physicalActuationService!.CompleteDirectAsync(
+                lease,
+                accepted: false,
+                "printer_operation_cancelled_before_dispatch",
+                CancellationToken.None);
+            throw;
+        }
+    }
+
+    private ObjectResult SafetyProblem(PrinterSafetyValidationResult result) =>
+        Problem(
+            statusCode: result.StatusCode,
+            title: result.Detail,
+            type: $"https://printfarmer.dev/problems/{result.Code}",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = result.Code,
+            });
 
     private async Task<ActionResult<CommandResult>> QueueLifecycleControlAsync(
         Guid printerId,
@@ -3086,6 +3224,7 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> FirmwareRestartAsync(Guid id, CancellationToken ct)
     {
+        _printerBackendCapabilitiesService.InvalidateVerifiedSafety(id);
         return await ExecuteDirectBooleanControlAsync(
             id,
             "firmware_restart",
@@ -3173,6 +3312,15 @@ public class PrintersController(
             }
 
             physicalLease = begin.Lease;
+            ActionResult? validationFailure = await ValidateBeforeDispatchAsync(
+                physicalLease,
+                PrinterSafetyOperation.FirmwareZOffsetSave,
+                move: null,
+                ct);
+            if (validationFailure is not null)
+            {
+                return validationFailure;
+            }
 
             PrinterBackend backend = (PrinterBackend)p.Backend;
             string saveCommands = backend switch
@@ -3181,22 +3329,41 @@ public class PrintersController(
                 _ => $"M851 Z{offsetMm:F3}\nM500"
             };
 
-            foreach (string cmd in saveCommands.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            try
             {
-                bool sent = await _printersService.SendGcodeAsync(id, cmd.Trim(), ct);
-                if (!sent)
+                foreach (string cmd in saveCommands.Split(
+                             '\n',
+                             StringSplitOptions.RemoveEmptyEntries))
                 {
-                    await _physicalActuationService!.MarkDirectUnknownAsync(
-                        physicalLease,
-                        "z_offset_firmware_outcome_unknown",
-                        CancellationToken.None);
-                    _telemetryService.RecordPrinterOperation("save_z_offset", id.ToString(), false);
-                    return StatusCode(
-                        StatusCodes.Status503ServiceUnavailable,
-                        new CommandResult(
-                            false,
-                            "The firmware did not prove whether the Z-offset command was applied."));
+                    bool sent = await _printersService.SendGcodeAsync(
+                        id,
+                        cmd.Trim(),
+                        ct);
+                    if (!sent)
+                    {
+                        await _physicalActuationService!.MarkDirectUnknownAsync(
+                            physicalLease,
+                            "z_offset_firmware_outcome_unknown",
+                            CancellationToken.None);
+                        _telemetryService.RecordPrinterOperation(
+                            "save_z_offset",
+                            id.ToString(),
+                            false);
+                        return StatusCode(
+                            StatusCodes.Status503ServiceUnavailable,
+                            new CommandResult(
+                                false,
+                                "The firmware did not prove whether the Z-offset command was applied."));
+                    }
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                await _physicalActuationService!.MarkDirectUnknownAsync(
+                    physicalLease,
+                    "z_offset_firmware_cancelled_after_send",
+                    CancellationToken.None);
+                throw;
             }
         }
 
@@ -3219,13 +3386,25 @@ public class PrintersController(
 
             return PrinterRevisionConflict();
         }
+        catch (OperationCanceledException)
+        {
+            if (physicalLease is not null)
+            {
+                await _physicalActuationService!.MarkDirectUnknownAsync(
+                    physicalLease,
+                    "z_offset_persistence_cancelled_after_physical_control",
+                    CancellationToken.None);
+            }
+
+            throw;
+        }
 
         if (physicalLease is not null)
         {
             await _physicalActuationService!.CompleteDirectAsync(
                 physicalLease,
                 accepted: true,
-                ct: ct);
+                ct: CancellationToken.None);
         }
 
         WritePrinterEtag(p);
@@ -3257,7 +3436,8 @@ public class PrintersController(
             "filament_load",
             "load_filament",
             token => _printersService.LoadFilamentAsync(id, token),
-            ct);
+            ct,
+            PrinterSafetyOperation.FilamentLoad);
     }
 
     /// <summary>
@@ -3292,9 +3472,62 @@ public class PrintersController(
             return NotFound();
         }
 
-        FilamentUnloadResult result = await _printersService.UnloadFilamentAsync(id, toolheadIndex, ct);
-        _telemetryService.RecordPrinterOperation("unload_filament", id.ToString(), result.Success);
-        return MapFilamentUnloadResult(result);
+        PrinterActuationResult begin = await BeginPhysicalControlAsync(
+            id,
+            "filament_unload",
+            ct);
+        if (!begin.Success || begin.Lease is null)
+        {
+            return MapActuationDenial(begin).Result!;
+        }
+
+        ActionResult? validationFailure = await ValidateBeforeDispatchAsync(
+            begin.Lease,
+            PrinterSafetyOperation.FilamentUnload,
+            move: null,
+            ct);
+        if (validationFailure is not null)
+        {
+            return validationFailure;
+        }
+
+        try
+        {
+            FilamentUnloadResult result =
+                await _printersService.UnloadFilamentAsync(
+                    id,
+                    toolheadIndex,
+                    ct);
+            _telemetryService.RecordPrinterOperation(
+                "unload_filament",
+                id.ToString(),
+                result.Success);
+            if (result.FailureKind == FilamentUnloadFailureKind.OutcomeUnknown)
+            {
+                await _physicalActuationService!.MarkDirectUnknownAsync(
+                    begin.Lease,
+                    "filament_unload_outcome_unknown",
+                    CancellationToken.None);
+            }
+            else
+            {
+                await _physicalActuationService!.CompleteDirectAsync(
+                    begin.Lease,
+                    result.Success,
+                    result.Success ? null : "filament_unload_rejected",
+                    CancellationToken.None);
+            }
+
+            return MapFilamentUnloadResult(result);
+        }
+        catch (OperationCanceledException)
+        {
+            await _physicalActuationService!.MarkDirectUnknownAsync(
+                begin.Lease,
+                "filament_unload_cancelled_after_dispatch",
+                CancellationToken.None);
+            throw;
+        }
     }
 
     /// <summary>
@@ -3318,7 +3551,8 @@ public class PrintersController(
             "filament_change",
             "change_filament",
             token => _printersService.ChangeFilamentAsync(id, token),
-            ct);
+            ct,
+            PrinterSafetyOperation.FilamentChange);
     }
 
     /// <summary>Performs a bounded relative extrusion or retraction for maintenance.</summary>
@@ -3357,7 +3591,8 @@ public class PrintersController(
             "extrude_filament",
             "extrude_filament",
             token => _printersService.SendGcodeAsync(id, command, token),
-            ct);
+            ct,
+            safetyOperation: PrinterSafetyOperation.Extrusion);
     }
 
     // ── MMU (Multi-Material Unit) control endpoints ──
@@ -5776,6 +6011,8 @@ public class PrintersController(
         {
             FilamentUnloadFailureKind.PrinterNotFound => NotFound(result),
             FilamentUnloadFailureKind.InvalidToolhead => BadRequest(result),
+            FilamentUnloadFailureKind.OutcomeUnknown =>
+                StatusCode(StatusCodes.Status503ServiceUnavailable, result),
             _ => BadRequest(result),
         };
     }

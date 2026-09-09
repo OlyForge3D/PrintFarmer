@@ -624,6 +624,7 @@ public static class ServiceCollectionExtensions
 
         // Register the backend capabilities service for exposing plugin capabilities to the UI
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService, Farm.Infrastructure.Services.Printers.PrinterBackendCapabilitiesService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterSafetyGuard, Farm.Infrastructure.Services.Printers.PrinterSafetyGuard>();
 
         // Register the multi-printer status coordinator for parallel operation orchestration
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IMultiPrinterStatusCoordinator, Farm.Infrastructure.Services.Printers.MultiPrinterStatusCoordinator>();

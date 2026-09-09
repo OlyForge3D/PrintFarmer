@@ -9,5 +9,25 @@
   "bedTemp": 60.2,
   "hotendTarget": 220,
   "bedTarget": 60,
-  "speedMultiplier": 100
+  "speedMultiplier": 100,
+  "safetyTelemetry": {
+    "measuredHotendTemperatureC": {
+      "value": 215.4,
+      "observedAtUtc": "2026-09-09T18:00:00Z",
+      "staleAfterSeconds": 15,
+      "source": "backend.status.hotendTemp"
+    },
+    "targetHotendTemperatureC": {
+      "value": 220,
+      "observedAtUtc": "2026-09-09T18:00:00Z",
+      "staleAfterSeconds": 15,
+      "source": "backend.status.hotendTarget"
+    },
+    "homedAxes": {
+      "staleAfterSeconds": 15
+    },
+    "coordinateOriginOffsetMm": {
+      "staleAfterSeconds": 15
+    }
+  }
 }

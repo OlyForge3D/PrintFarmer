@@ -80,7 +80,12 @@ public sealed class PrinterStatusContractTests : IAsyncLifetime
         JsonContractAssertions.AssertMissingKey(received, "mmuStatus");
 
         string json = received.GetRawText();
-        var volatilePaths = new HashSet<string> { "$.id" };
+        var volatilePaths = new HashSet<string>
+        {
+            "$.id",
+            "$.safetyTelemetry.measuredHotendTemperatureC.observedAtUtc",
+            "$.safetyTelemetry.targetHotendTemperatureC.observedAtUtc",
+        };
         await WireContractFixtureWriter.CaptureOrVerifyAsync(
             WireContractCorpusPaths.ApiRoot,
             "printer-status/printerupdated.populated.json",

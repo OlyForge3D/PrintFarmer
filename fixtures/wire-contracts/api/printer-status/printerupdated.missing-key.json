@@ -1,4 +1,18 @@
 {
   "id": "1e929c0d-bb3d-4f63-8a28-e175deda2947",
-  "isOnline": false
+  "isOnline": false,
+  "safetyTelemetry": {
+    "measuredHotendTemperatureC": {
+      "staleAfterSeconds": 15
+    },
+    "targetHotendTemperatureC": {
+      "staleAfterSeconds": 15
+    },
+    "homedAxes": {
+      "staleAfterSeconds": 15
+    },
+    "coordinateOriginOffsetMm": {
+      "staleAfterSeconds": 15
+    }
+  }
 }

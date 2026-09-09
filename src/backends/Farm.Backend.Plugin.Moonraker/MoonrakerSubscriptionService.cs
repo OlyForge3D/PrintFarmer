@@ -1263,6 +1263,11 @@ public sealed class MoonrakerSubscriptionService(
             HandleHeaterBedUpdate(state, hb);
         }
 
+        if (statusObj.TryGetProperty("gcode_move", out JsonElement gcodeMove))
+        {
+            HandleGcodeMoveUpdate(state, gcodeMove);
+        }
+
         // MMU (Happy Hare) status updates
         if (statusObj.TryGetProperty("mmu", out JsonElement mmu))
         {
@@ -1544,6 +1549,7 @@ public sealed class MoonrakerSubscriptionService(
         if (homedAxes is not null)
         {
             state.HomedAxes = homedAxes;
+            state.HomedAxesObservedAtUtc = DateTime.UtcNow;
         }
     }
 
@@ -1584,12 +1590,37 @@ public sealed class MoonrakerSubscriptionService(
         if (temperature.HasValue)
         {
             state.HotendTemp = temperature;
+            state.HotendTempObservedAtUtc = DateTime.UtcNow;
         }
 
         if (target.HasValue)
         {
             state.HotendTarget = target;
+            state.HotendTargetObservedAtUtc = DateTime.UtcNow;
         }
+    }
+
+    private static void HandleGcodeMoveUpdate(
+        PrinterState state,
+        JsonElement gcodeMove)
+    {
+        if (!gcodeMove.TryGetProperty(
+                "homing_origin",
+                out JsonElement homingOrigin) ||
+            homingOrigin.ValueKind != JsonValueKind.Array ||
+            homingOrigin.GetArrayLength() < 3 ||
+            !homingOrigin[0].TryGetDouble(out double x) ||
+            !homingOrigin[1].TryGetDouble(out double y) ||
+            !homingOrigin[2].TryGetDouble(out double z) ||
+            !double.IsFinite(x) ||
+            !double.IsFinite(y) ||
+            !double.IsFinite(z))
+        {
+            return;
+        }
+
+        state.CoordinateOriginOffsetMm = new SafetyVector3Dto(x, y, z);
+        state.CoordinateOriginOffsetObservedAtUtc = DateTime.UtcNow;
     }
 
     /// <summary>
@@ -2662,6 +2693,31 @@ public sealed class MoonrakerSubscriptionService(
 
             // Build MMU status if detected
             MmuStatusDto? mmuStatus = state.BuildMmuStatus();
+            PrinterSafetyTelemetryDto safetyTelemetry = new(
+                new SafetyScalarTelemetryFactDto(
+                    state.HotendTemp,
+                    state.HotendTempObservedAtUtc,
+                    PrinterSafetyTelemetryDto.DefaultStaleAfterSeconds,
+                    "moonraker:extruder.temperature"),
+                new SafetyScalarTelemetryFactDto(
+                    state.HotendTarget,
+                    state.HotendTargetObservedAtUtc,
+                    PrinterSafetyTelemetryDto.DefaultStaleAfterSeconds,
+                    "moonraker:extruder.target"),
+                new SafetyAxesTelemetryFactDto(
+                    state.HomedAxes?
+                        .Where(char.IsAsciiLetter)
+                        .Select(axis => char.ToLowerInvariant(axis).ToString())
+                        .Distinct(StringComparer.Ordinal)
+                        .ToArray(),
+                    state.HomedAxesObservedAtUtc,
+                    PrinterSafetyTelemetryDto.DefaultStaleAfterSeconds,
+                    "moonraker:toolhead.homed_axes"),
+                new SafetyVectorTelemetryFactDto(
+                    state.CoordinateOriginOffsetMm,
+                    state.CoordinateOriginOffsetObservedAtUtc,
+                    PrinterSafetyTelemetryDto.DefaultStaleAfterSeconds,
+                    "moonraker:gcode_move.homing_origin"));
 
             // Send consolidated update for offline status and overall state sync
             PrinterStatusUpdate update = new PrinterStatusUpdate(
@@ -2682,7 +2738,8 @@ public sealed class MoonrakerSubscriptionService(
                 HomedAxes: state.HomedAxes,
                 SpoolInfo: spoolInfo,
                 MmuStatus: mmuStatus,
-                FileName: PrinterStatusDto.ExtractFileName(state.JobName));
+                FileName: PrinterStatusDto.ExtractFileName(state.JobName),
+                SafetyTelemetry: safetyTelemetry);
 
             _logger.LogDebug("Emitting consolidated status for printer {PrinterId}: IsOnline={IsOnline}, X={StateX}, Y={StateY}, Z={StateZ}, HotendTemp={StateHotendTemp}, HotendTarget={StateHotendTarget}, BedTemp={StateBedTemp}, BedTarget={StateBedTarget}, HomedAxes={StateHomedAxes}", printerId, isOnline, state.X, state.Y, state.Z, state.HotendTemp, state.HotendTarget, state.BedTemp, state.BedTarget, state.HomedAxes);
 
@@ -2713,7 +2770,9 @@ public sealed class MoonrakerSubscriptionService(
                 BedTarget: state.BedTarget,
                 SpoolInfo: spoolInfo,
                 MmuStatus: mmuStatus,
-                PrintTimeLeftSeconds: printTimeLeftSeconds);
+                PrintTimeLeftSeconds: printTimeLeftSeconds,
+                HomedAxes: state.HomedAxes,
+                SafetyTelemetry: safetyTelemetry);
             _statusCacheWriter.UpdateStatus(cacheUpdate, state.OriginWatermark);
 
             _logger.LogDebug("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);

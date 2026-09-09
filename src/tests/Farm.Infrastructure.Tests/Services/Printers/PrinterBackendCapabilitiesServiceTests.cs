@@ -78,6 +78,12 @@ public class PrinterBackendCapabilitiesServiceTests
         Assert.False(dto.SupportsFilamentLoad);
         Assert.False(dto.SupportsFilamentUnload);
         Assert.False(dto.SupportsFilamentChange);
+        Assert.Equal(
+            VerifiedSafetyDiscoveryState.Unavailable,
+            dto.VerifiedSafety.Discovery.State);
+        Assert.Equal(
+            VerifiedSafetySupport.Unknown,
+            dto.VerifiedSafety.Operations.AbsoluteMovement.Support);
 
         if (backend == PrinterBackend.Moonraker)
         {
@@ -153,6 +159,65 @@ public class PrinterBackendCapabilitiesServiceTests
     }
 
     [Fact]
+    public async Task GetByPrinterIdAsync_AuthoritativeDiscovery_ProjectsSupportedOperations()
+    {
+        Guid printerId = Guid.NewGuid();
+        DateTime observedAtUtc = DateTime.UtcNow;
+        var supported = new VerifiedSafetyOperationCapabilityDto(
+            VerifiedSafetySupport.Supported,
+            "test.discovery",
+            observedAtUtc);
+        PrinterVerifiedSafetyDto discovered = PrinterVerifiedSafetyDto.Unknown(
+            discoveryState: VerifiedSafetyDiscoveryState.Partial) with
+        {
+            Operations = PrinterVerifiedSafetyDto.Unknown().Operations with
+            {
+                AbsoluteMovement = supported,
+                FilamentLoad = supported,
+            },
+        };
+        var printer = new Printer
+        {
+            Id = printerId,
+            Name = "discovered",
+            Backend = (int)PrinterBackend.Moonraker,
+            ServerUrl = "http://printer.local",
+            BackendPort = 7125,
+        };
+        var repo = new Mock<IPrintersRepository>();
+        repo.Setup(repository => repository.FindByIdAsync(
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printer);
+        var client = new Mock<IBackendClient>();
+        client.As<ISupportsVerifiedSafetyDiscovery>()
+            .Setup(value => value.DiscoverVerifiedSafetyAsync(
+                printer.BackendUrl,
+                It.IsAny<PrinterCredential?>(),
+                "1",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(discovered);
+        var backendFactory = new Mock<IBackendClientFactory>();
+        backendFactory.Setup(value => value.GetClient(PrinterBackend.Moonraker))
+            .Returns(client.Object);
+        var service = new PrinterBackendCapabilitiesService(
+            repo.Object,
+            Mock.Of<IBackendCapabilityFactory>(),
+            backendFactory.Object);
+
+        PrinterBackendCapabilitiesDto result =
+            Assert.IsType<PrinterBackendCapabilitiesDto>(
+                await service.GetByPrinterIdAsync(
+                    printerId,
+                    CancellationToken.None));
+
+        Assert.True(result.SupportsAbsoluteMovement);
+        Assert.True(result.SupportsFilamentLoad);
+        Assert.False(result.SupportsFilamentUnload);
+        Assert.Same(discovered, result.VerifiedSafety);
+    }
+
+    [Fact]
     public void Serialize_AdditiveCapabilities_PreservesLegacyNamesAndUsesCamelCase()
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
@@ -188,6 +253,15 @@ public class PrinterBackendCapabilitiesServiceTests
         Assert.False(json.RootElement.GetProperty("supportsFilamentUnload").GetBoolean());
         Assert.False(json.RootElement.GetProperty("supportsFilamentChange").GetBoolean());
         Assert.Equal(3, json.RootElement.GetProperty("supportedAxes").GetArrayLength());
+        JsonElement safety = json.RootElement.GetProperty("verifiedSafety");
+        Assert.Equal(1, safety.GetProperty("contractVersion").GetInt32());
+        Assert.Equal(
+            "Unavailable",
+            safety.GetProperty("discovery").GetProperty("state").GetString());
+        Assert.Equal(
+            "Unknown",
+            safety.GetProperty("operations").GetProperty("absoluteMovement")
+                .GetProperty("support").GetString());
     }
 
     [Fact]

@@ -4212,6 +4212,10 @@ public class PrintersService(
                 outgoingMaterial,
                 residualWeightG);
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to unload filament on printer {PName} ({Id})", p.Name, id);
@@ -4220,7 +4224,8 @@ public class PrintersService(
                 $"Failed to unload filament: {ex.Message}",
                 outgoingSpoolId,
                 outgoingMaterial,
-                residualWeightG);
+                residualWeightG,
+                FilamentUnloadFailureKind.OutcomeUnknown);
         }
     }
 

@@ -20,9 +20,13 @@ internal sealed class PrinterState
 
     public double? HotendTemp { get; set; }
 
+    public DateTime? HotendTempObservedAtUtc { get; set; }
+
     public double? BedTemp { get; set; }
 
     public double? HotendTarget { get; set; }
+
+    public DateTime? HotendTargetObservedAtUtc { get; set; }
 
     public double? BedTarget { get; set; }
 
@@ -40,6 +44,12 @@ internal sealed class PrinterState
     public string? JobName { get; set; }
 
     public string? HomedAxes { get; set; }
+
+    public DateTime? HomedAxesObservedAtUtc { get; set; }
+
+    public SafetyVector3Dto? CoordinateOriginOffsetMm { get; set; }
+
+    public DateTime? CoordinateOriginOffsetObservedAtUtc { get; set; }
 
     /// <summary>
     /// Active Klipper extruder index parsed from the <c>toolhead.extruder</c> field

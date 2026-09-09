@@ -62,8 +62,51 @@ public class PrintersControllerSwapFlowTests
                 It.IsAny<PrinterGroupAccessLevel>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
+        var actuation = new Mock<Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService>();
+        actuation.Setup(service => service.AcquireDirectAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid printerId, string actor, string operation, CancellationToken _) =>
+                new Farm.Infrastructure.Services.Queue.PrinterActuationResult(
+                    Farm.Infrastructure.Services.Queue.PrinterActuationResultCode.Accepted,
+                    new Farm.Infrastructure.Services.Queue.PrinterActuationLease(
+                        Guid.NewGuid(),
+                        printerId,
+                        null,
+                        operation,
+                        actor)));
+        actuation.Setup(service => service.RevalidateDirectAsync(
+                It.IsAny<Farm.Infrastructure.Services.Queue.PrinterActuationLease>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((
+                Farm.Infrastructure.Services.Queue.PrinterActuationLease lease,
+                CancellationToken _) =>
+                new Farm.Infrastructure.Services.Queue.PrinterActuationResult(
+                    Farm.Infrastructure.Services.Queue.PrinterActuationResultCode.Accepted,
+                    lease,
+                    lease.CommandId));
+        actuation.Setup(service => service.CompleteDirectAsync(
+                It.IsAny<Farm.Infrastructure.Services.Queue.PrinterActuationLease>(),
+                It.IsAny<bool>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        actuation.Setup(service => service.MarkDirectUnknownAsync(
+                It.IsAny<Farm.Infrastructure.Services.Queue.PrinterActuationLease>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var safetyGuard = new Mock<IPrinterSafetyGuard>();
+        safetyGuard.Setup(service => service.ValidateAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<PrinterSafetyOperation>(),
+                It.IsAny<PrinterSafetyMoveRequest?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterSafetyValidationResult.Allowed);
 
-        return new PrintersController(
+        var controller = new PrintersController(
             logger: Mock.Of<ILogger<PrintersController>>(),
             printersService: printersService.Object,
             catalogService: Mock.Of<Farm.Modules.Printers.Services.Catalog.ICatalogService>(),
@@ -80,7 +123,22 @@ public class PrintersControllerSwapFlowTests
             telemetryService: telemetry.Object,
             bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>(),
             appDbContext: db,
-            queueResourceAuthorization: resourceAuthorization.Object);
+            queueResourceAuthorization: resourceAuthorization.Object,
+            physicalActuationService: actuation.Object,
+            printerSafetyGuard: safetyGuard.Object);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(
+                        ClaimTypes.NameIdentifier,
+                        Guid.NewGuid().ToString()),
+                ], "test")),
+            },
+        };
+        return controller;
     }
 
     /// <summary>
