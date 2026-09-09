@@ -25,7 +25,8 @@ public static class PrinterBackendEndpointResolver
                 .Uri.ToString()
                 .TrimEnd('/');
         }
-        catch (UriFormatException)
+        catch (Exception exception) when (
+            exception is UriFormatException or ArgumentOutOfRangeException)
         {
             return serverUrl;
         }

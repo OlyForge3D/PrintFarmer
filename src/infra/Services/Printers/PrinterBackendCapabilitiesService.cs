@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.Printers;
@@ -171,8 +172,20 @@ public class PrinterBackendCapabilitiesService(
             return cached;
         }
 
-        if (_backendClientFactory?.GetClient(backend) is not
-            ISupportsVerifiedSafetyDiscovery discovery)
+        IBackendClient? backendClient;
+        try
+        {
+            backendClient = _backendClientFactory?.GetClient(backend);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or InvalidOperationException)
+        {
+            return PrinterVerifiedSafetyDto.Unknown(
+                source: "backend.discovery.client-unavailable",
+                sourceRevision: sourceRevision);
+        }
+
+        if (backendClient is not ISupportsVerifiedSafetyDiscovery discovery)
         {
             return PrinterVerifiedSafetyDto.Unknown(
                 source: "backend.discovery.not-implemented",

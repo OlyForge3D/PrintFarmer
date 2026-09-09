@@ -3009,6 +3009,34 @@ public class PrintersController(
                 CancellationToken.None);
             throw;
         }
+        catch (Exception exception)
+        {
+            try
+            {
+                await _physicalActuationService!.CompleteDirectAsync(
+                    lease,
+                    accepted: false,
+                    "printer_safety_revalidation_failed",
+                    CancellationToken.None);
+            }
+            catch (Exception cleanupException)
+            {
+                _logger.LogError(
+                    cleanupException,
+                    "Failed to release physical lease {CommandId} after safety revalidation failure",
+                    lease.CommandId);
+            }
+
+            _logger.LogWarning(
+                exception,
+                "Safety revalidation failed before dispatch for printer {PrinterId}",
+                lease.PrinterId);
+            return SafetyProblem(
+                PrinterSafetyValidationResult.Reject(
+                    StatusCodes.Status503ServiceUnavailable,
+                    "printer_safety_evidence_unknown",
+                    "Printer safety evidence could not be revalidated."));
+        }
     }
 
     private ObjectResult SafetyProblem(PrinterSafetyValidationResult result) =>
@@ -3667,7 +3695,8 @@ public class PrintersController(
             "mmu_eject",
             "mmu_eject",
             token => _printersService.SendGcodeAsync(id, "MMU_EJECT", token),
-            ct);
+            ct,
+            safetyOperation: PrinterSafetyOperation.FilamentUnload);
     }
 
     /// <summary>
@@ -3815,7 +3844,8 @@ public class PrintersController(
         {
             ("qidibox", "load") => PrinterSafetyOperation.FilamentLoad,
             ("afc", "load") => PrinterSafetyOperation.FilamentChange,
-            (_, "unload") => PrinterSafetyOperation.FilamentUnload,
+            (_, "unload" or "eject") =>
+                PrinterSafetyOperation.FilamentUnload,
             _ => null,
         };
         return await ExecuteDirectBooleanControlAsync(

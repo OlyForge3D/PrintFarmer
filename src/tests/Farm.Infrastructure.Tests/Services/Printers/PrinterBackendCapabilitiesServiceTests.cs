@@ -299,6 +299,55 @@ public class PrinterBackendCapabilitiesServiceTests
     }
 
     [Fact]
+    public async Task GetByPrinterIdAsync_UnknownBackend_ReturnsUnknownSafety()
+    {
+        Guid printerId = Guid.NewGuid();
+        var printer = new Printer
+        {
+            Id = printerId,
+            Backend = 999,
+            ServerUrl = "http://printer.local",
+        };
+        var repo = new Mock<IPrintersRepository>();
+        repo.Setup(repository => repository.FindByIdAsync(
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printer);
+        var backendFactory = new Mock<IBackendClientFactory>();
+        backendFactory.Setup(value => value.GetClient((PrinterBackend)999))
+            .Throws(new ArgumentException("Unsupported backend."));
+        var service = new PrinterBackendCapabilitiesService(
+            repo.Object,
+            Mock.Of<IBackendCapabilityFactory>(),
+            backendFactory.Object);
+
+        PrinterBackendCapabilitiesDto result =
+            (await service.GetByPrinterIdAsync(
+                printerId,
+                CancellationToken.None))!;
+
+        Assert.Equal(
+            VerifiedSafetyDiscoveryState.Unavailable,
+            result.VerifiedSafety.Discovery.State);
+        Assert.Equal(
+            VerifiedSafetySupport.Unknown,
+            result.VerifiedSafety.Operations.AbsoluteMovement.Support);
+    }
+
+    [Fact]
+    public void ResolveMoonrakerDispatchUrl_InvalidFrontendPort_ReturnsOriginalUrl()
+    {
+        const string serverUrl = "http://printer.local";
+
+        string result =
+            PrinterBackendEndpointResolver.ResolveMoonrakerDispatchUrl(
+                serverUrl,
+                70_000);
+
+        Assert.Equal(serverUrl, result);
+    }
+
+    [Fact]
     public void Serialize_AdditiveCapabilities_PreservesLegacyNamesAndUsesCamelCase()
     {
         var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);

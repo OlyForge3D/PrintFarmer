@@ -161,7 +161,9 @@ public class PrintersControllerControlGuardsTests
     [Theory]
     [InlineData("change", PrinterSafetyOperation.FilamentChange)]
     [InlineData("load", PrinterSafetyOperation.FilamentLoad)]
+    [InlineData("eject", PrinterSafetyOperation.FilamentUnload)]
     [InlineData("qidibox-unload", PrinterSafetyOperation.FilamentUnload)]
+    [InlineData("qidibox-eject", PrinterSafetyOperation.FilamentUnload)]
     [InlineData("afc-load", PrinterSafetyOperation.FilamentChange)]
     public async Task MmuPhysicalFilamentRoute_RevalidatesSafetyBeforeBackendIo(
         string route,
@@ -201,12 +203,24 @@ public class PrintersControllerControlGuardsTests
             "load" => await controller.MmuLoadAsync(
                 id,
                 CancellationToken.None),
+            "eject" => await controller.MmuEjectAsync(
+                id,
+                CancellationToken.None),
             "qidibox-unload" => await controller.MmuGateActionAsync(
                 id,
                 new MmuGateActionRequest
                 {
                     Protocol = "Qidibox",
                     Action = "Unload",
+                    GateIndex = 1,
+                },
+                CancellationToken.None),
+            "qidibox-eject" => await controller.MmuGateActionAsync(
+                id,
+                new MmuGateActionRequest
+                {
+                    Protocol = "Qidibox",
+                    Action = "Eject",
                     GateIndex = 1,
                 },
                 CancellationToken.None),
@@ -398,6 +412,48 @@ public class PrintersControllerControlGuardsTests
                 It.IsAny<double?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    public async Task LoadFilamentAsync_SafetyGuardThrows_ReleasesLeaseAndReturns503()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.FindByIdAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, true, "Idle"));
+        var guard = new Mock<IPrinterSafetyGuard>();
+        guard.Setup(service => service.ValidateAsync(
+                id,
+                PrinterSafetyOperation.FilamentLoad,
+                null,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("probe failed"));
+        var actuation = new Mock<IPrinterPhysicalActuationService>();
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out _,
+            guard,
+            actuation);
+
+        ActionResult<CommandResult> result =
+            await controller.LoadFilamentAsync(id, CancellationToken.None);
+
+        ObjectResult problem = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(503, problem.StatusCode);
+        actuation.Verify(service => service.CompleteDirectAsync(
+            It.IsAny<PrinterActuationLease>(),
+            false,
+            "printer_safety_revalidation_failed",
+            CancellationToken.None), Times.Once);
+        printersService.Verify(service => service.LoadFilamentAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     private static IPrinterSafetyGuard CreatePermissiveSafetyGuard()

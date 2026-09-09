@@ -465,7 +465,7 @@ public sealed class PrinterAggregate
     ///   <item><c>EXCLUDE_OBJECT NAME=...</c> — adds to <see cref="ExcludedObjects"/> (existing behavior).</item>
     ///   <item><c>G28</c>, <c>G28 X Y</c>, <c>G28 Z</c> — homes the specified axes (all three when bare) into <see cref="HomedAxes"/> and updates <see cref="Position"/>; still refused with <see cref="PrinterBusyException"/> while printing.</item>
     ///   <item><c>M104 S...</c> / <c>M140 S...</c> — set <see cref="ExtruderTarget"/> / <see cref="BedTarget"/>.</item>
-    ///   <item><c>G91 G0 X.. Y.. Z.. F..</c> followed by a bare <c>G90</c> (relative move, <c>MoveAsync</c>'s shape) and bare <c>G90 G0 X.. Y.. Z.. F..</c> (absolute move, <c>MoveToAsync</c>'s shape) — both update <see cref="Position"/> and <see cref="AbsoluteCoordinates"/>.</item>
+    ///   <item><c>G91 G0 X.. Y.. Z.. F..</c> followed by a bare <c>G90</c> (relative move, <c>MoveAsync</c>'s shape), plus separate <c>G90</c> and <c>G0 X.. Y.. Z.. F..</c> lines (absolute move, <c>MoveToAsync</c>'s shape) — both update <see cref="Position"/> and <see cref="AbsoluteCoordinates"/>.</item>
     /// </list>
     /// <b>Documented fidelity boundary:</b> <c>M84</c> (disable motors), <c>LOAD_FILAMENT</c>,
     /// <c>UNLOAD_FILAMENT</c>, and <c>M600</c> (filament change) are acknowledged as
@@ -555,6 +555,15 @@ public sealed class PrinterAggregate
                 if (trimmed.StartsWith("G90 G0", StringComparison.OrdinalIgnoreCase))
                 {
                     ApplyMoveLocked(trimmed, relative: false);
+                    continue;
+                }
+
+                if (trimmed.Equals("G0", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith("G0 ", StringComparison.OrdinalIgnoreCase))
+                {
+                    ApplyMoveLocked(
+                        trimmed,
+                        relative: !AbsoluteCoordinates);
                     continue;
                 }
 

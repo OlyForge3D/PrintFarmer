@@ -213,8 +213,10 @@ public sealed class GcodeCommandTests : IClassFixture<ReadyPrinterFactory>
     {
         using HttpClient client = await ClientWithScenarioAsync("Ready");
 
-        // Exact shape MoonrakerClient.MoveToAsync sends: a single "G90 G0 ..." line.
-        using HttpResponseMessage response = await SendScriptAsync(client, "G90 G0 X42 Y17 Z3 F1500");
+        // Exact shape MoonrakerClient.MoveToAsync sends: separate mode and move lines.
+        using HttpResponseMessage response = await SendScriptAsync(
+            client,
+            "G90\nG0 X42 Y17 Z3 F1500");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         JsonElement status = await QueryObjectsAsync(client, "toolhead&gcode_move");
