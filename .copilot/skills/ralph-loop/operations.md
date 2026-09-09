@@ -32,8 +32,8 @@ the plain form to new claims. An emoji/plain pair is one owner, not an ownership
 
 For a non-mobile epic needing decomposition, unmet architecture gate, or under-specified issue,
 apply `status:needs-analysis` and dispatch Dallas for child issues or an issue sign-off—not code.
-Do not re-dispatch a live analysis session. Windows only triages mobile work; it never dispatches,
-reviews, or merges it.
+Do not re-dispatch a live analysis session. Windows only dispatches mobile work through the
+enabled verified SSH adapter; it never performs mobile work, reviews, or merges it locally.
 
 ## Ready Queue
 

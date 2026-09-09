@@ -96,7 +96,7 @@ export function createRemoteRequest(job, type = 'dispatch') {
       !validIdentifier(request.owner) || !validSha(request.baseSha) || !Array.isArray(request.acceptanceCriteria)) {
     throw new RalphMacSshError('Remote job is malformed.', 'INVALID_REQUEST');
   }
-  if (request.model !== 'gpt-5.6-terra' || request.effort !== 'medium' || request.agent !== 'squad') {
+  if (!['gpt-5.6-terra', 'gpt-5.6-luna'].includes(request.model) || request.effort !== 'medium' || request.agent !== 'squad') {
     throw new RalphMacSshError('Remote implementation jobs must use the approved model, effort, and squad agent.', 'INVALID_REQUEST');
   }
   return `${JSON.stringify({
@@ -182,16 +182,16 @@ async function reclaimStaleLock(lockFile, { isOwnerAlive = ownerIsAlive } = {}) 
     try {
       const details = await stat(lockFile);
       if (Date.now() - details.mtimeMs < 5 * 60 * 1000) return false;
+      observed = { malformed: true, mtimeMs: details.mtimeMs, size: details.size };
     } catch {
       return false;
     }
-    observed = { token: `incomplete-${Date.now()}`, pid: 1, expiresAt: '1970-01-01T00:00:00Z' };
   }
-  if (
+  if (!observed.malformed && (
     typeof observed.token !== 'string' || !Number.isInteger(observed.pid) ||
     !Number.isFinite(Date.parse(observed.expiresAt)) || Date.parse(observed.expiresAt) >= Date.now() ||
     isOwnerAlive(observed.pid) !== false
-  ) return false;
+  )) return false;
   const reclaimFile = `${lockFile}.reclaim`;
   let reclaim;
   try {
@@ -212,9 +212,13 @@ async function reclaimStaleLock(lockFile, { isOwnerAlive = ownerIsAlive } = {}) 
     try {
       current = JSON.parse(await readFile(lockFile, 'utf8'));
     } catch {
-      return false;
+      if (!observed.malformed) return false;
+      const details = await stat(lockFile).catch(() => undefined);
+      if (!details || details.mtimeMs !== observed.mtimeMs || details.size !== observed.size) return false;
+      await rm(lockFile, { force: true });
+      return true;
     }
-    if (current.token !== observed.token && !current.token?.startsWith('incomplete-')) return false;
+    if (observed.malformed || current.token !== observed.token) return false;
     await rm(lockFile, { force: true });
     return true;
   } finally {
@@ -321,14 +325,47 @@ export async function reserveJob({ job, eligibility, now = new Date().toISOStrin
 }
 
 export async function reserveLocalJob({ job, eligibility, now = new Date().toISOString() }, options = {}) {
-  const localJob = { ...job, repository: printFarmerRepository, model: 'gpt-5.6-terra', effort: 'medium', agent: 'squad' };
+  const localJob = { ...job, repository: printFarmerRepository };
   return reserveJob({ job: localJob, eligibility, now }, options);
+}
+
+export async function acknowledgeLocalJob(jobId, sessionId, options = {}) {
+  if (!validIdentifier(sessionId)) throw new RalphMacSshError('Local session identifier is invalid.', 'INVALID_REQUEST');
+  return mutateLedger((ledger) => {
+    const entry = ledger.jobs[jobId];
+    if (!entry || entry.state !== 'reserved') throw new RalphMacSshError('Only a reserved local job may be acknowledged.', 'INVALID_TRANSITION');
+    entry.state = 'accepted';
+    entry.sessionId = sessionId;
+    entry.local = true;
+    entry.updatedAt = new Date().toISOString();
+    return entry;
+  }, options);
+}
+
+export async function recordLocalTerminalResult(result, options = {}) {
+  const value = safeJson(result, 'Local terminal result');
+  return mutateLedger((ledger) => {
+    const entry = ledger.jobs[value.jobId];
+    if (!entry?.local || !['accepted', 'running'].includes(entry.state) || value.sessionId !== entry.sessionId ||
+        !validSha(value.headSha) || !Number.isInteger(value.exitCode) || !value.validationEvidence ||
+        value.workingTreeClean !== true || value.allCommitsPushed !== true) {
+      throw new RalphMacSshError('Local terminal result lacks correlated evidence.', 'INVALID_TERMINAL_EVIDENCE');
+    }
+    entry.state = value.exitCode === 0 ? 'completed' : 'failed';
+    entry.headSha = value.headSha;
+    entry.exitCode = value.exitCode;
+    entry.validationEvidence = value.validationEvidence;
+    entry.workingTreeClean = true;
+    entry.allCommitsPushed = true;
+    entry.updatedAt = new Date().toISOString();
+    return entry;
+  }, options);
 }
 
 export async function recordDeliveryIntent(jobId, options = {}) {
   return mutateLedger((ledger) => {
     const entry = ledger.jobs[jobId];
-    if (!entry || entry.state !== 'reserved') throw new RalphMacSshError('Only a reserved job may be delivered.', 'INVALID_TRANSITION');
+    if (!entry || !['reserved', 'uncertain'].includes(entry.state)) throw new RalphMacSshError('Only a reserved or uncertain job may be delivered.', 'INVALID_TRANSITION');
     entry.state = 'delivery-intent';
     entry.updatedAt = new Date().toISOString();
     return entry;
@@ -424,21 +461,25 @@ export function runSsh(invocation, input, { spawn = nodeSpawn, timeoutMs = 45_00
 export async function dispatchMacJob({ job, eligibility }, options = {}) {
   const configuration = loadMacSshConfiguration(options);
   const request = { ...job, expectedHost: configuration.expectedHost };
+  if (request.model !== 'gpt-5.6-terra' || request.effort !== 'medium' || request.agent !== 'squad') {
+    throw new RalphMacSshError('Remote implementation jobs must use the approved model, effort, and squad agent.', 'INVALID_REQUEST');
+  }
   const reservation = await reserveJob({ job: request, eligibility }, options);
-  if (reservation.state === 'reserved') await recordDeliveryIntent(request.jobId, options);
-  else if (reservation.state !== 'uncertain') {
+  const reconciling = reservation.state === 'uncertain';
+  if (['reserved', 'uncertain'].includes(reservation.state)) await recordDeliveryIntent(request.jobId, options);
+  else {
     throw new RalphMacSshError('Job is already delivered and must be reconciled by its existing session.', 'INVALID_TRANSITION');
   }
   try {
     const output = await runSsh(
       createSshInvocation(configuration),
-      createRemoteRequest(request, reservation.state === 'uncertain' ? 'reconcile' : 'dispatch'),
+      createRemoteRequest(request, reconciling ? 'reconcile' : 'dispatch'),
       options,
     );
     const acknowledgement = parseRemoteAcknowledgement(output, request);
     return acknowledgeJob(request.jobId, acknowledgement, options);
   } catch (error) {
-    if (reservation.state === 'reserved') await markUncertain(request.jobId, options);
+    await markUncertain(request.jobId, options);
     throw error;
   }
 }

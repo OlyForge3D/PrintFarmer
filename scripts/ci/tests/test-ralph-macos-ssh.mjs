@@ -60,7 +60,7 @@ test('serializes untrusted content only as structured stdin and limits jobs to P
   assert.match(input, /rm -rf/);
   assert.throws(() => createRemoteRequest({ ...job(), repository: 'OlyForge3D/PrintFarmerDesktop' }),
     (error) => error.code === 'UNSUPPORTED_REPOSITORY');
-  assert.throws(() => createRemoteRequest({ ...job(), model: 'gpt-5.6-luna' }),
+  assert.throws(() => createRemoteRequest({ ...job(), effort: 'high' }),
     (error) => error.code === 'INVALID_REQUEST');
 });
 
