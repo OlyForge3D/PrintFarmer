@@ -139,7 +139,8 @@ struct JogSubgroup: View {
                         ControlNumberField(
                             placeholder: "\(axis) destination (mm)", text: binding(axis),
                             label: "\(axis) absolute destination in millimeters",
-                            identifier: "printer.controls.absolute.\(axis.lowercased())"
+                            identifier: "printer.controls.absolute.\(axis.lowercased())",
+                            hint: ControlNumberInput.coordinatePrecisionMessage
                         )
                     }
                     Text("Homed axes: \(viewModel.printer.homedAxes ?? "Unknown")")
@@ -154,9 +155,9 @@ struct JogSubgroup: View {
                     ControlActionButton(title: "Move to position", identifier: "printer.controls.absolute.move") {
                         do {
                             let axes = JogSubgroup.visibleAxes(for: viewModel.capabilities)
-                            let x = try axes.contains("X") ? ControlNumberInput.optional(x) : nil
-                            let y = try axes.contains("Y") ? ControlNumberInput.optional(y) : nil
-                            let z = try axes.contains("Z") ? ControlNumberInput.optional(z) : nil
+                            let x = try axes.contains("X") ? ControlNumberInput.coordinate(x) : nil
+                            let y = try axes.contains("Y") ? ControlNumberInput.coordinate(y) : nil
+                            let z = try axes.contains("Z") ? ControlNumberInput.coordinate(z) : nil
                             let f = try ControlNumberInput.feedrate(feedrate)
                             inputError = nil
                             Task { await viewModel.moveTo(x: x, y: y, z: z, feedrateMmMin: f) }

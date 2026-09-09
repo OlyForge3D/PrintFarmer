@@ -53,6 +53,9 @@ enum Heater: String, CaseIterable, Sendable {
 }
 
 enum ControlNumberInput {
+    static let heaterPrecisionMessage = "Use whole degrees Celsius. Fractional targets are not supported; no rounding is applied."
+    static let coordinatePrecisionMessage = "Use at most 3 decimal places in millimetres. No rounding is applied."
+
     static func optional(_ text: String) throws -> Double? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -68,6 +71,50 @@ enum ControlNumberInput {
             throw PrinterControlError.invalidRequest("Feedrate must be a positive whole number in mm/min.")
         }
         return Int(value)
+    }
+
+    static func heaterTarget(_ text: String) throws -> Double? {
+        guard let value = try optional(text) else { return nil }
+        guard hasTextPrecision(text, places: 0), isWholeDegree(value) else {
+            throw PrinterControlError.invalidRequest(heaterPrecisionMessage)
+        }
+        return value
+    }
+
+    static func coordinate(_ text: String) throws -> Double? {
+        guard let value = try optional(text) else { return nil }
+        guard hasTextPrecision(text, places: 3), hasCoordinatePrecision(value) else {
+            throw PrinterControlError.invalidRequest(coordinatePrecisionMessage)
+        }
+        return value
+    }
+
+    static func isWholeDegree(_ value: Double) -> Bool {
+        value.isFinite && value.rounded() == value
+    }
+
+    static func hasCoordinatePrecision(_ value: Double) -> Bool {
+        guard value.isFinite else { return false }
+        // The shared backend emits 0.### mm. Compare the decimal round-trip,
+        // not value * 1000 (binary noise rejects valid values such as 1.001).
+        // This only validates: the caller's original value is sent unchanged.
+        return Double(String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), value)) == value
+    }
+
+    private static func hasTextPrecision(_ text: String, places: Int) -> Bool {
+        // Check the entered decimal before Double can erase tiny fractions or
+        // underflow to zero. Trailing zeros and exact scientific notation are OK.
+        let parts = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased().split(separator: "e", omittingEmptySubsequences: false)
+        guard parts.count <= 2,
+              let exponent = Int(parts.count == 2 ? String(parts[1]) : "0"),
+              parts[0].allSatisfy({ "0123456789.+-".contains($0) }) else { return false }
+        let digits = parts[0].filter { $0.isNumber }
+        if digits.allSatisfy({ $0 == "0" }) { return true }
+        let fraction = parts[0].split(separator: ".", omittingEmptySubsequences: false)
+        let decimalPlaces = fraction.count == 2 ? fraction[1].count : 0
+        let trailingZeros = digits.reversed().prefix { $0 == "0" }.count
+        return exponent >= decimalPlaces - trailingZeros - places
     }
 }
 
@@ -251,6 +298,10 @@ final class PrinterControlsViewModel: ObservableObject {
             setError(command: command, message: "Movement is unavailable without confirmed backend support.", isRetryable: false)
             return
         }
+        guard ControlNumberInput.hasCoordinatePrecision(distanceMm) else {
+            setError(command: command, message: ControlNumberInput.coordinatePrecisionMessage, isRetryable: false)
+            return
+        }
 
         let normalized = axis.uppercased()
         let feedrate = (normalized == "Z") ? Self.zFeedrateMmMin : Self.xyFeedrateMmMin
@@ -303,6 +354,10 @@ final class PrinterControlsViewModel: ObservableObject {
               coordinates.allSatisfy({ capabilities?.supportedAxes.contains($0.0) == true && $0.1!.isFinite }),
               feedrateMmMin.map({ $0 > 0 }) ?? true else {
             setError(command: command, message: "Provide finite coordinates on supported axes and a positive feedrate.", isRetryable: false)
+            return
+        }
+        guard coordinates.allSatisfy({ ControlNumberInput.hasCoordinatePrecision($0.1!) }) else {
+            setError(command: command, message: ControlNumberInput.coordinatePrecisionMessage, isRetryable: false)
             return
         }
         await perform(command) { [printerService, printer] in
@@ -516,6 +571,10 @@ final class PrinterControlsViewModel: ObservableObject {
 
     private func validateTemperature(_ target: Double?, heater: Heater, command: ControlCommand) -> Bool {
         guard let target else { return true }
+        guard ControlNumberInput.isWholeDegree(target) else {
+            setError(command: command, message: ControlNumberInput.heaterPrecisionMessage, isRetryable: false)
+            return false
+        }
         guard target.isFinite, target >= 0,
               maximum(for: heater).map({ target <= Double($0) }) ?? true else {
             setError(command: command, message: "\(heater.title) target must be nonnegative and within the configured maximum.", isRetryable: false)
@@ -574,16 +633,21 @@ final class PrinterControlsViewModel: ObservableObject {
     ///     confirmation domain — e.g. a same-preset preheat on a printer already
     ///     at the requested targets, an already-zero cool-down, or a confirming
     ///     snapshot that landed before the HTTP response — where waiting for a
-    ///     further delta would hang forever, so we clear now.
+    ///     further delta would hang forever, so we clear now. Only a fresh
+    ///     post-dispatch snapshot permits telemetry wording; cached matches
+    ///     report request acceptance without physical confirmation.
     private func endCommand(_ command: ControlCommand) {
         guard pendingCommand == command else { return }
         if lastError?.command == command {
             pendingCommand = nil
             return
         }
-        if telemetryConfirmed || Self.transition(from: printer, to: printer, resolves: command) {
+        if telemetryConfirmed {
             pendingCommand = nil
             commandNotice = Self.confirmationNotice(for: command)
+        } else if Self.transition(from: printer, to: printer, resolves: command) {
+            pendingCommand = nil
+            commandNotice = "Request accepted. Previously reported values already match; fresh physical completion is not confirmed. Check the machine before further setup."
         }
     }
 

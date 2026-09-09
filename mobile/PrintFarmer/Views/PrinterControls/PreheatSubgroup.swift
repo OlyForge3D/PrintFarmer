@@ -7,6 +7,7 @@ struct ControlNumberField: UIViewRepresentable {
     @Binding var text: String
     let label: String
     let identifier: String
+    var hint: String?
     @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 17
     @Environment(\.isEnabled) private var isEnabled
 
@@ -29,6 +30,7 @@ struct ControlNumberField: UIViewRepresentable {
         field.isEnabled = isEnabled
         field.accessibilityLabel = label
         field.accessibilityIdentifier = identifier
+        field.accessibilityHint = hint
         field.textColor = UIColor(Color.pfTextPrimary)
         field.backgroundColor = UIColor(Color.pfBackgroundTertiary)
     }
@@ -270,14 +272,15 @@ struct PreheatSubgroup: View {
                 ControlNumberField(
                     placeholder: "Target (°C)", text: $target,
                     label: "\(heater.title) target in degrees Celsius",
-                    identifier: "printer.controls.\(heater.rawValue).target"
+                    identifier: "printer.controls.\(heater.rawValue).target",
+                    hint: ControlNumberInput.heaterPrecisionMessage
                 )
                 ControlActionButton(
                     title: "Set \(heater.title.lowercased()) target",
                     identifier: "printer.controls.\(heater.rawValue).set"
                 ) {
                     do {
-                        guard let value = try ControlNumberInput.optional(target) else {
+                        guard let value = try ControlNumberInput.heaterTarget(target) else {
                             throw PrinterControlError.invalidRequest("Enter a target; use zero to switch off.")
                         }
                         inputError = nil

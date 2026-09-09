@@ -8,6 +8,16 @@ import SwiftUI
 @MainActor
 final class PreheatSubgroupTests: XCTestCase {
 
+    func test_heaterInput_requiresWholeDegreesWithoutSilentRounding() throws {
+        XCTAssertNil(try ControlNumberInput.heaterTarget(" "))
+        for (text, value) in [("0", 0.0), ("200", 200.0), ("240.000", 240.0), ("2e2", 200.0)] {
+            XCTAssertEqual(try ControlNumberInput.heaterTarget(text), value)
+        }
+        for text in ["200.5", "0.1", "200.00000000000000001", "1e-999", "NaN", "inf"] {
+            XCTAssertThrowsError(try ControlNumberInput.heaterTarget(text), text)
+        }
+    }
+
     func test_individualHeaterLabels_preserveUnknownVersusZero() {
         XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(nil), "Unknown")
         XCTAssertEqual(PreheatSubgroup.HeaterTargetEditor.temperatureText(.nan), "Unknown")

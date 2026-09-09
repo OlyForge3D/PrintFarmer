@@ -8,6 +8,19 @@ import SwiftUI
 @MainActor
 final class JogSubgroupTests: XCTestCase {
 
+    func test_coordinateInput_limitsPrecisionWithoutBinaryNoiseOrSilentRounding() throws {
+        XCTAssertNil(try ControlNumberInput.coordinate(" "))
+        for (text, value) in [
+            ("0", 0.0), ("-1.234", -1.234), ("1.001", 1.001), ("1.234000", 1.234),
+            (".001", 0.001), ("1e-3", 0.001), ("1000e-4", 0.1), ("-0.000", 0.0)
+        ] {
+            XCTAssertEqual(try ControlNumberInput.coordinate(text), value)
+        }
+        for text in ["1.2345", "-0.0001", "1e-4", "1e-999", "1.00100000000000001", "NaN", "inf"] {
+            XCTAssertThrowsError(try ControlNumberInput.coordinate(text), text)
+        }
+    }
+
     func test_absoluteInputs_blankIsOmittedZeroIsRealAndUnitsAreUnchanged() throws {
         XCTAssertNil(try ControlNumberInput.optional("  "))
         XCTAssertEqual(try ControlNumberInput.optional("0"), 0)

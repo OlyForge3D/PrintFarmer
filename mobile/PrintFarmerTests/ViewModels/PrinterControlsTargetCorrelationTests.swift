@@ -6,7 +6,8 @@ import XCTest
 /// Confirmation compares the live snapshot's commanded *targets* against the
 /// concrete targets carried on the pending command — not a delta — so a
 /// same-preset preheat or an already-zero cool-down can't hang forever when no
-/// target field changes. Measured temperatures are irrelevant, and an
+/// target field changes. Cached matches report acceptance, never fresh telemetry.
+/// Measured temperatures are irrelevant, and an
 /// uncontrollable setpoint (`nil` target, e.g. a bed-less backend) is treated
 /// as already satisfied.
 @MainActor
@@ -55,33 +56,40 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
 
     // MARK: - Already-at-target confirmation (the core regression)
 
-    func test_preheat_alreadyAtRequestedTargets_confirmsOnSuccess_notStuck() async throws {
-        let service = MockPrinterService()
-        var base = try idlePrinter()
-        base.hotendTarget = 200
-        base.bedTarget = 60 // already exactly at PLA targets — no delta will ever arrive
-        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
-        await vm.loadCapabilities()
-
-        await vm.preheat(.pla)
-
-        XCTAssertFalse(vm.isExecuting,
-                       "A same-preset preheat on a printer already at target must confirm on success, not hang")
-        XCTAssertNil(vm.lastError)
+    func test_repeatedPresets_alreadyAtRequestedTargets_reportAcceptanceOnly_notStuck() async throws {
+        for preset in [PreheatPreset.pla, .petg, .abs] {
+            let service = MockPrinterService()
+            var base = try idlePrinter()
+            base.hotendTarget = preset.hotend
+            base.bedTarget = preset.bed
+            let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
+            await vm.loadCapabilities()
+            for _ in 0..<2 {
+                await vm.preheat(preset)
+                assertAcceptanceOnly(vm)
+                XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, preset.hotend)
+                XCTAssertEqual(service.setTemperaturesCalledWith?.bed, preset.bed)
+                XCTAssertEqual(vm.printer.hotendTemp, base.hotendTemp)
+            }
+        }
     }
 
-    func test_coolDown_alreadyAtZero_confirmsOnSuccess_notStuck() async throws {
-        let service = MockPrinterService()
-        var base = try idlePrinter()
-        base.hotendTarget = 0
-        base.bedTarget = 0 // already cooled — Cool Down commands 0/0
-        let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
-        await vm.loadCapabilities()
-
-        await vm.preheat(.coolDown)
-
-        XCTAssertFalse(vm.isExecuting, "An already-zero Cool Down must not stick")
-        XCTAssertNil(vm.lastError)
+    func test_coolDown_alreadyAtZero_reportsAcceptanceOnly_regardlessOfMeasuredHeat() async throws {
+        for measured in [0.0, 84.0] {
+            let service = MockPrinterService()
+            var base = try idlePrinter()
+            base.hotendTarget = 0
+            base.bedTarget = 0
+            base.hotendTemp = measured
+            base.bedTemp = measured
+            let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
+            await vm.loadCapabilities()
+            await vm.preheat(.coolDown)
+            assertAcceptanceOnly(vm)
+            XCTAssertEqual(vm.printer.hotendTemp, measured)
+            XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
+            XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 0)
+        }
     }
 
     func test_preheat_bedUnsupported_hotendTargetConfirms_bedIgnored() async throws {
@@ -96,6 +104,49 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         XCTAssertFalse(vm.isExecuting,
                        "Hotend target alone must confirm when the bed is uncontrollable — never wait on an impossible bed value")
         XCTAssertNil(vm.lastError)
+        assertAcceptanceOnly(vm)
+    }
+
+    func test_individualHeaters_cachedTargets_reportAcceptanceOnly() async throws {
+        for heater in Heater.allCases {
+            let service = MockPrinterService()
+            var base = try idlePrinter()
+            base.hotendTarget = 200
+            base.bedTarget = 0
+            let target = heater == .hotend ? 200.0 : 0.0
+            let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
+            await vm.loadCapabilities()
+            await vm.setHeaterTarget(heater, target: target)
+            assertAcceptanceOnly(vm)
+            XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, heater == .hotend ? target : nil)
+            XCTAssertEqual(service.setTemperaturesCalledWith?.bed, heater == .bed ? target : nil)
+        }
+    }
+
+    func test_absoluteCachedZero_reportsAcceptanceOnlyAndPreservesOmissions() async throws {
+        let service = MockPrinterService()
+        var base = try idlePrinter()
+        base.x = 0
+        var caps = Self.fullCaps
+        caps.supportsAbsoluteMovement = true
+        let vm = makeViewModel(printer: base, capabilities: caps, service: service)
+        await vm.loadCapabilities()
+        await vm.moveTo(x: 0, y: nil, z: nil, feedrateMmMin: nil)
+        assertAcceptanceOnly(vm)
+        XCTAssertEqual(service.moveToCalledWith?.x, 0)
+        XCTAssertNil(service.moveToCalledWith?.y)
+        XCTAssertNil(service.moveToCalledWith?.z)
+        XCTAssertNil(service.moveToCalledWith?.feedrateMmMin)
+    }
+
+    private func assertAcceptanceOnly(
+        _ vm: PrinterControlsViewModel, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        XCTAssertNil(vm.pendingCommand, file: file, line: line)
+        XCTAssertNil(vm.lastError, file: file, line: line)
+        XCTAssertTrue(vm.commandNotice?.hasPrefix("Request accepted.") == true, file: file, line: line)
+        XCTAssertTrue(vm.commandNotice?.contains("fresh physical completion is not confirmed") == true, file: file, line: line)
+        XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true, file: file, line: line)
     }
 
     // MARK: - Non-matching cached targets keep waiting for live evidence
@@ -161,6 +212,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         await gate.open()
         await first
         XCTAssertNil(vm.pendingCommand)
+        XCTAssertEqual(vm.commandNotice, "Matching telemetry received. A heater target is a setpoint, not a measured temperature.")
         await vm.jog(axis: "X", distanceMm: 10)
         guard case .jog = vm.pendingCommand?.kind else {
             return XCTFail("A stale preheat response cleared the newer jog command")

@@ -56,6 +56,124 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     // MARK: - Tests
 
+    func test_heaterPrecision_rejectsFractionalValuesWithoutDispatchOrRounding() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        for heater in Heater.allCases {
+            for value in [200.5, 0.5, 200.0001, Double.leastNonzeroMagnitude] {
+                await vm.setHeaterTarget(heater, target: value)
+                XCTAssertNil(mockService.setTemperaturesCalledWith)
+                XCTAssertNil(vm.pendingCommand)
+                XCTAssertEqual(vm.lastError?.message, ControlNumberInput.heaterPrecisionMessage)
+            }
+        }
+    }
+
+    func test_wholeDegreeHeaters_matchExactReportedTargetsAndPreserveOmissions() async throws {
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        for heater in Heater.allCases {
+            for target in [0.0, 200.0, 240.0] {
+                await vm.setHeaterTarget(heater, target: target)
+                XCTAssertNil(vm.lastError)
+                XCTAssertEqual(mockService.setTemperaturesCalledWith?.hotend, heater == .hotend ? target : nil)
+                XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, heater == .bed ? target : nil)
+                var reported = vm.printer
+                if heater == .hotend { reported.hotendTarget = target } else { reported.bedTarget = target }
+                vm.handlePrinterUpdate(reported)
+                XCTAssertNil(vm.pendingCommand)
+                XCTAssertEqual(vm.commandNotice, "Matching telemetry received. A heater target is a setpoint, not a measured temperature.")
+            }
+        }
+    }
+
+    func test_coordinatePrecision_rejectsExcessOnEveryAxisAndRelativeJog() async throws {
+        var caps = Self.fullCaps
+        caps.supportsAbsoluteMovement = true
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await vm.loadCapabilities()
+        for value in [1.2345, -0.0001, Double.leastNonzeroMagnitude, (1.001).nextUp] {
+            for axis in ["X", "Y", "Z"] {
+                await vm.moveTo(x: axis == "X" ? value : nil, y: axis == "Y" ? value : nil,
+                                z: axis == "Z" ? value : nil, feedrateMmMin: nil)
+                XCTAssertNil(mockService.moveToCalledWith)
+                XCTAssertNil(vm.pendingCommand)
+                XCTAssertEqual(vm.lastError?.message, ControlNumberInput.coordinatePrecisionMessage)
+                await vm.jog(axis: axis, distanceMm: value)
+                XCTAssertNil(mockService.moveCalledWith)
+                XCTAssertNil(vm.pendingCommand)
+                XCTAssertEqual(vm.lastError?.message, ControlNumberInput.coordinatePrecisionMessage)
+            }
+        }
+    }
+
+    func test_coordinatePrecision_preservesDecimalValuesAndExactReportedPosition() async throws {
+        var caps = Self.fullCaps
+        caps.supportsAbsoluteMovement = true
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        await vm.loadCapabilities()
+        for value in [1.001, -1.234, 0.1, 0.0] {
+            await vm.moveTo(x: value, y: nil, z: nil, feedrateMmMin: 600)
+            XCTAssertNil(vm.lastError)
+            XCTAssertEqual(mockService.moveToCalledWith?.x, value)
+            XCTAssertNil(mockService.moveToCalledWith?.y)
+            XCTAssertNil(mockService.moveToCalledWith?.z)
+            XCTAssertEqual(mockService.moveToCalledWith?.feedrateMmMin, 600)
+            XCTAssertNotNil(vm.pendingCommand)
+            var reported = vm.printer
+            reported.x = value
+            vm.handlePrinterUpdate(reported)
+            XCTAssertNil(vm.pendingCommand)
+            XCTAssertEqual(vm.commandNotice, "Matching telemetry received. Check the machine before further setup.")
+        }
+    }
+
+    func test_freshIndividualTelemetryBeforeResponse_isStillReportedAsTelemetry() async throws {
+        let printer = try idlePrinter()
+        let vm = try makeViewModel(printer: printer, capabilities: Self.fullCaps)
+        await vm.loadCapabilities()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        mockService.beforeSetTemperatures = { await barrier.arriveAndWait() }
+        let command = Task { await vm.setHeaterTarget(.hotend, target: 200) }
+        await barrier.waitUntilArrived()
+        var reported = printer
+        reported.hotendTarget = 200
+        vm.handlePrinterUpdate(reported)
+        XCTAssertNotNil(vm.pendingCommand)
+        barrier.release()
+        await command.value
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertEqual(vm.commandNotice, "Matching telemetry received. A heater target is a setpoint, not a measured temperature.")
+    }
+
+    func test_freshAbsoluteTelemetryBeforeResponse_isStillReportedAsTelemetry() async throws {
+        let printer = try idlePrinter()
+        var caps = Self.fullCaps
+        caps.supportsAbsoluteMovement = true
+        mockService.capabilitiesToReturn = caps
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        let service = ControlsDelayedService(base: mockService, beforeMoveTo: { await barrier.arriveAndWait() })
+        let vm = PrinterControlsViewModel(printerService: service, printer: printer)
+        await vm.loadCapabilities()
+        let command = Task { await vm.moveTo(x: 1.001, y: 0, z: -1.234, feedrateMmMin: nil) }
+        await barrier.waitUntilArrived()
+        var reported = printer
+        reported.x = 1.001
+        reported.y = 0
+        reported.z = -1.234
+        vm.handlePrinterUpdate(reported)
+        XCTAssertNotNil(vm.pendingCommand)
+        await vm.homeAll()
+        XCTAssertNil(mockService.homeCalledWith)
+        barrier.release()
+        await command.value
+        XCTAssertNil(vm.pendingCommand)
+        XCTAssertNil(vm.lastError)
+        XCTAssertEqual(vm.commandNotice, "Matching telemetry received. Check the machine before further setup.")
+    }
+
     func test_delayedCapabilities_surviveInitialStateAndReadinessChanges() async throws {
         for state in ["idle", "printing"] {
             var printer = try idlePrinter()
@@ -294,7 +412,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(vm.commandNotice)
     }
 
-    func test_motionTelemetry_noticesAreNotHeaterSpecific() async throws {
+    func test_motionNotices_distinguishCachedAcceptanceAndFreshTelemetry() async throws {
         let printer = try idlePrinter()
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
@@ -302,7 +420,9 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await vm.loadCapabilities()
         await vm.moveTo(x: try XCTUnwrap(printer.x), y: nil, z: nil, feedrateMmMin: nil)
         XCTAssertNil(vm.pendingCommand)
-        XCTAssertEqual(vm.commandNotice, "Matching telemetry received. Check the machine before further setup.")
+        XCTAssertTrue(vm.commandNotice?.hasPrefix("Request accepted.") == true)
+        XCTAssertTrue(vm.commandNotice?.contains("fresh physical completion is not confirmed") == true)
+        XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true)
         await vm.jog(axis: "X", distanceMm: 10)
         var moved = printer
         moved.x = (printer.x ?? 0) + 10
@@ -1356,6 +1476,7 @@ private struct ControlsDelayedService: PrinterServiceProtocol {
     let base: MockPrinterService
     var beforeDetails: @Sendable () async -> Void = {}
     var beforeHome: @Sendable () async -> Void = {}
+    var beforeMoveTo: @Sendable () async -> Void = {}
 
     func getDetails(id: UUID) async throws -> PrinterDetails {
         await beforeDetails()
@@ -1406,7 +1527,8 @@ private struct ControlsDelayedService: PrinterServiceProtocol {
         try await base.move(printerId: printerId, axis: axis, distanceMm: distanceMm, feedrateMmMin: feedrateMmMin)
     }
     func moveTo(printerId: UUID, x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async throws -> CommandResult {
-        try await base.moveTo(printerId: printerId, x: x, y: y, z: z, feedrateMmMin: feedrateMmMin)
+        await beforeMoveTo()
+        return try await base.moveTo(printerId: printerId, x: x, y: y, z: z, feedrateMmMin: feedrateMmMin)
     }
     func extrude(printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int) async throws -> CommandResult {
         try await base.extrude(printerId: printerId, distanceMm: distanceMm, feedrateMmPerMinute: feedrateMmPerMinute)

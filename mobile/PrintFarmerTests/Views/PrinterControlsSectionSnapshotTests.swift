@@ -289,6 +289,78 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await captureIndividualControls(width: 390, dynamicType: .large, name: "phone")
     }
 
+    func test_editorPrecision_rejectsBeforeDispatchAndExposesNativeGuidance() async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        var caps = Self.layoutCaps
+        caps.supportsAbsoluteMovement = true
+        let service = makeService(caps: caps)
+        let model = PrinterControlsViewModel(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        let content = PrinterSetupControlsContent(printer: printer, viewModel: model)
+            .frame(width: 390)
+            .fixedSize(horizontal: false, vertical: true)
+        let (window, controller) = install(content)
+        defer { window.isHidden = true }
+        window.frame.size = controller.sizeThatFits(in: CGSize(width: 390, height: 10000))
+        controller.view.frame = window.bounds
+        try await settle(controller)
+        let controls = nativeControls(in: controller.view)
+        let heater = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.target" } as? UITextField)
+        let setHeater = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.set" })
+        let coordinate = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.x" } as? UITextField)
+        let move = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.move" })
+        XCTAssertEqual(heater.accessibilityHint, ControlNumberInput.heaterPrecisionMessage)
+        XCTAssertEqual(coordinate.accessibilityHint, ControlNumberInput.coordinatePrecisionMessage)
+
+        heater.text = "200.5"
+        heater.sendActions(for: .editingChanged)
+        try await settle(controller)
+        setHeater.sendActions(for: .touchUpInside)
+        try await settle(controller)
+        coordinate.text = "1.2345"
+        coordinate.sendActions(for: .editingChanged)
+        try await settle(controller)
+        move.sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertNil(service.setTemperaturesCalledWith)
+        XCTAssertNil(service.moveToCalledWith)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertNil(model.lastError, "Editor validation must reject before constructing a routine command")
+        XCTAssertEqual(heater.text, "200.5")
+        XCTAssertEqual(coordinate.text, "1.2345", "Do not silently round the entered physical target")
+
+        window.frame.size = controller.sizeThatFits(in: CGSize(width: 390, height: 10000))
+        controller.view.frame = window.bounds
+        try await settle(controller)
+        let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+            XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "explicit-precision-validation"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        heater.text = "200"
+        heater.sendActions(for: .editingChanged)
+        try await settle(controller)
+        setHeater.sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 200)
+        XCTAssertNil(service.setTemperaturesCalledWith?.bed)
+        var reported = printer
+        reported.hotendTarget = 200
+        model.handlePrinterUpdate(reported)
+        try await settle(controller)
+        coordinate.text = "1.001"
+        coordinate.sendActions(for: .editingChanged)
+        try await settle(controller)
+        move.sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertEqual(service.moveToCalledWith?.x, 1.001)
+        XCTAssertNil(service.moveToCalledWith?.y)
+        XCTAssertNil(service.moveToCalledWith?.z)
+    }
+
     func test_pendingCommand_disablesNativeActionsButKeepsStopWaitingEnabled() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.layoutCaps)

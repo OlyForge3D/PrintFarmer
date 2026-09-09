@@ -77,7 +77,7 @@ suites continue to exercise native dispatch through mock services.
 - Separate target editors send only the chosen heater. Zero explicitly turns
   that heater off; blank is not zero. Actual temperature and reported setpoint
   are separate labels; missing/nonfinite measurements read **Unknown**.
-- Targets must be finite and nonnegative and may not exceed a known configured
+- Targets must be finite, nonnegative **whole degrees Celsius**, and may not exceed a known configured
   `maxHotendTemp`/`maxBedTemp` from the typed details contract. Missing maxima
   remain unknown with a visible warning, not fabricated limits. Capability
   loading also reads these optional hardware details; failed reads add no proof.
@@ -85,10 +85,18 @@ suites continue to exercise native dispatch through mock services.
   to idle). Deactivation or authority changes fence both successful and failed
   late reads. Reopening can retry missing hardware with cached capabilities.
 - Absolute coordinates are signed millimetres, with blank axes omitted and
-  zero preserved. Optional feedrate is a positive whole number in **mm/min**;
+  zero preserved, and accept **at most three decimal places**. Optional feedrate is a positive whole number in **mm/min**;
   blank uses the server default. No mm/s conversion or relative-move fallback
   occurs. Build-volume dimensions are not firmware travel limits or proof of
   a zero origin. Position and homing labels preserve unknown telemetry.
+- Precision is checked in both the editor and command owner before dispatch:
+  shared Moonraker/FlashForge temperature formatting emits whole degrees, and
+  Moonraker movement formatting emits at most three decimal millimetres.
+  Excess precision is rejected with explicit inline guidance and native
+  VoiceOver hints, not silently rounded. The original valid value is sent
+  unchanged, including signed coordinates and zero; no firmware tolerance is
+  invented. Decimal validation also rejects tiny entered fractions that would
+  otherwise disappear during numeric parsing.
 - Relative jog retains **0.1/1/10/100 mm**, XY **3000 mm/min**, Z **600 mm/min**.
   Unknown/false specific movement flags hide movement controls. The #2597
   handoff currently proves neither relative nor absolute motion on production
@@ -108,6 +116,13 @@ suites continue to exercise native dispatch through mock services.
   until the request returns even when matching telemetry arrives first.
   Other-axis, measured-temperature and unrelated setpoint noise do not
   acknowledge an individual target or absolute move.
+- Only a matching **post-dispatch** update permits “Matching telemetry received.”
+  If cached heater setpoints or absolute coordinates already match, successful
+  HTTP acceptance ends waiting with an explicit notice that fresh physical
+  completion is **not confirmed**. This applies equally to repeated presets,
+  already-zero Cool Down, individual heaters and already-matching destinations.
+  A fresh update arriving before the HTTP response retains telemetry wording,
+  but never releases the response's single-flight slot early.
 - Home All/XY/Z on axes already reported homed completes local waiting after
   successful request acceptance, explicitly **without confirming fresh physical
   completion**. Otherwise homing waits for a fresh requested-axis report.
