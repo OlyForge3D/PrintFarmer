@@ -5,13 +5,14 @@ final class PrinterFilamentPresentationTests: XCTestCase {
     private func snapshot(
         printer: Printer,
         status: FilamentCoverageStatus = .covers,
-        slots: [ToolheadFilamentCoverage] = []
+        slots: [ToolheadFilamentCoverage] = [],
+        queuedJobs: Int = 2
     ) -> PrinterFilamentCoverage {
         PrinterFilamentCoverage(
             printerId: printer.id, printerName: printer.name, status: status,
             toolheads: slots, activeJobId: nil, activeJobName: nil,
             activeJobProgress: nil, earliestPredictedRunoutAt: nil,
-            assignedQueuedJobCount: 2, evaluatedAtUtc: Date(timeIntervalSince1970: 1_700_000_000)
+            assignedQueuedJobCount: queuedJobs, evaluatedAtUtc: Date(timeIntervalSince1970: 1_700_000_000)
         )
     }
 
@@ -74,7 +75,7 @@ final class PrinterFilamentPresentationTests: XCTestCase {
             let model = try build(
                 printer: printer, coverage: snapshot(printer: printer), state: state, stale: state == .available
             )
-            XCTAssertEqual(model.summary, "Last confirmed: Covers active and assigned queued demand")
+            XCTAssertEqual(model.summary, "Last confirmed: Coverage unknown")
             XCTAssertTrue(model.isStale)
             XCTAssertTrue(model.supportedActions.isEmpty)
             XCTAssertNotNil(model.disabledReason(for: .init(kind: .set, target: .printer(printer.id), disabledReason: nil)))
@@ -255,5 +256,129 @@ final class PrinterFilamentPresentationTests: XCTestCase {
         XCTAssertNil(duplicateCoverage.rows[0].coverage)
         XCTAssertFalse(duplicateCoverage.integrityNotices.isEmpty)
         XCTAssertTrue(duplicateCoverage.supportedActions.isEmpty)
+    }
+
+    func testIdleZeroDemandHasOneAssignmentSummaryAndNoCoverageClaim() throws {
+        let printer = try TestData.decodePrinter()
+        let tool = Toolhead(id: UUID(), name: "Primary", index: 0, isPrimary: true, nozzleDiameter: 0.4)
+        let slot = ToolheadFilamentCoverage(
+            toolheadIndex: 0, toolheadId: tool.id, toolheadName: "Primary",
+            currentJobRemainingGrams: 0, queuedRequiredGrams: 0, totalDemandGrams: 0, status: .covers
+        )
+        let model = try build(
+            printer: printer, roster: [tool], spool: PrinterSpoolInfo(hasActiveSpool: false),
+            coverage: snapshot(printer: printer, slots: [slot], queuedJobs: 0)
+        )
+        XCTAssertFalse(model.hasRelevantDemand)
+        XCTAssertNil(model.summary)
+        XCTAssertNil(model.attentionText)
+        XCTAssertEqual(model.compactRows.count, 1)
+        XCTAssertEqual(model.compactRows[0].materialSummary, "No spool assigned")
+        XCTAssertNil(model.compactTitle(for: model.compactRows[0]))
+        XCTAssertEqual(model.rows[0].nozzleDiameter, 0.4)
+        XCTAssertNotNil(model.evaluatedAt) // Still available inside disclosure.
+    }
+
+    func testUnknownOrInvalidDemandCannotClaimCoverage() throws {
+        let printer = try TestData.decodePrinter()
+        for demand: Double? in [nil, -.infinity, .nan, -1, 0] {
+            let slot = ToolheadFilamentCoverage(
+                toolheadIndex: 0, toolheadName: "Primary", totalDemandGrams: demand, status: .covers
+            )
+            let model = try build(printer: printer, coverage: snapshot(printer: printer, slots: [slot]))
+            XCTAssertEqual(model.summary, "Coverage unknown")
+            XCTAssertEqual(model.attentionText, "Coverage unknown")
+        }
+    }
+
+    func testAssignmentAndReportedMaterialNeverClaimPhysicalLoading() throws {
+        let printer = try TestData.decodePrinter()
+        for inUse: Bool? in [true, false, nil] {
+            let model = try build(printer: printer, spool: PrinterSpoolInfo(
+                hasActiveSpool: true, activeSpoolId: 4, material: "PLA", colorHex: "#123abc", spoolInUse: inUse
+            ))
+            XCTAssertEqual(model.compactRows[0].materialSummary, "Assigned: PLA")
+            XCTAssertEqual(model.compactRows[0].swatchHex, "#123abc")
+        }
+        let tool = Toolhead(
+            id: UUID(), name: "Primary", index: 0, isPrimary: true,
+            currentMaterial: "PETG", currentFilamentColor: "Blue"
+        )
+        let model = try build(printer: printer, roster: [tool])
+        XCTAssertEqual(model.compactRows[0].materialSummary, "Reported material: PETG")
+        XCTAssertEqual(model.compactRows[0].colorText, "Blue")
+        XCTAssertNil(model.compactRows[0].swatchHex)
+        XCTAssertNil(model.compactTitle(for: model.compactRows[0]))
+    }
+
+    func testSwatchesRequireRealValidRGBAndClearedAssignmentDropsColor() throws {
+        let printer = try TestData.decodePrinter()
+        for color in [nil, "", "Blue", "#xyz", "#12345", "#00000000", "123456junk"] as [String?] {
+            let model = try build(printer: printer, spool: PrinterSpoolInfo(
+                hasActiveSpool: true, material: "PLA", colorHex: color
+            ))
+            XCTAssertNil(model.compactRows[0].swatchHex)
+            XCTAssertEqual(model.compactRows[0].materialSummary, "Assigned: PLA")
+        }
+        for color in ["#abc", "FFFFFF", "#123456"] {
+            let model = try build(printer: printer, spool: PrinterSpoolInfo(
+                hasActiveSpool: true, material: "PLA", colorHex: color
+            ))
+            XCTAssertNotNil(model.compactRows[0].swatchHex)
+        }
+        let cleared = try build(printer: printer, spool: PrinterSpoolInfo(
+            hasActiveSpool: false, material: "Old", colorHex: "#123456"
+        ))
+        XCTAssertNil(cleared.compactRows[0].colorText)
+        XCTAssertEqual(cleared.compactRows[0].materialSummary, "No spool assigned")
+    }
+
+    func testMultiToolTitlesDistinguishDuplicateNamesAndIndicesWithoutCopyingSpool() throws {
+        let printer = try TestData.decodePrinter()
+        let tools = (0..<2).map { _ in Toolhead(id: UUID(), name: "Same", index: 0, isPrimary: false) }
+        let model = try build(
+            printer: printer, roster: tools,
+            spool: PrinterSpoolInfo(hasActiveSpool: true, material: "PLA", colorHex: "#ffffff")
+        )
+        XCTAssertEqual(model.compactRows.count, 3)
+        XCTAssertNotEqual(model.compactTitle(for: model.rows[0]), model.compactTitle(for: model.rows[1]))
+        XCTAssertTrue(model.rows.prefix(2).allSatisfy { $0.colorText == nil && !$0.hasAssignment })
+        XCTAssertEqual(model.compactTitle(for: model.rows[2]), "Printer-level spool (slot not specified)")
+    }
+
+    func testColorOnlyToolIsRetainedBesideUnassignedPrinterSpool() throws {
+        let printer = try TestData.decodePrinter()
+        for color in ["#123456", "Blue"] {
+            let tool = Toolhead(
+                id: UUID(), name: "Primary", index: 0, isPrimary: true,
+                currentFilamentColor: color
+            )
+            let model = try build(
+                printer: printer, roster: [tool], spool: PrinterSpoolInfo(hasActiveSpool: false)
+            )
+            XCTAssertEqual(model.compactRows.count, 2)
+            XCTAssertEqual(model.compactRows[0].toolheadID, tool.id)
+            XCTAssertEqual(model.compactRows[0].colorText, color)
+            XCTAssertEqual(model.compactRows[0].swatchHex, color.hasPrefix("#") ? color : nil)
+            XCTAssertFalse(model.compactRows[0].hasAssignment)
+            XCTAssertNil(model.compactRows[1].colorText)
+        }
+    }
+
+    func testCoverageOnlyCannotBecomeCurrentMaterialAndShortageStaysVisible() throws {
+        let printer = try TestData.decodePrinter()
+        let slot = ToolheadFilamentCoverage(
+            toolheadIndex: 0, toolheadName: "Old tool", spoolId: 8, material: "Old PLA",
+            filamentColor: "#ffffff", status: .runout
+        )
+        let model = try build(printer: printer, coverage: snapshot(printer: printer, status: .runout, slots: [slot]))
+        XCTAssertTrue(model.compactRows.isEmpty)
+        XCTAssertNil(model.rows[0].colorText)
+        XCTAssertEqual(model.attentionText, "Insufficient filament for active and assigned queued demand")
+        let stale = try build(
+            printer: printer, coverage: snapshot(printer: printer, status: .runout, slots: [slot]), stale: true
+        )
+        XCTAssertEqual(stale.attentionText, "Filament data may be out of date")
+        XCTAssertEqual(stale.rows[0].notice, "Last confirmed: Insufficient filament for active and assigned queued demand")
     }
 }
