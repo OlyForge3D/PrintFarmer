@@ -28,4 +28,5 @@ public record PrinterStatusUpdate(
     string? HomedAxes,
     PrinterSpoolInfoDto? SpoolInfo,
     MmuStatusDto? MmuStatus = null,
-    string? FileName = null);
+    string? FileName = null,
+    PrinterSafetyTelemetryDto? SafetyTelemetry = null);

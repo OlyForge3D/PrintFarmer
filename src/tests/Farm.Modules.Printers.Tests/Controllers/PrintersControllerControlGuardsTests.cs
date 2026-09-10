@@ -31,11 +31,15 @@ public class PrintersControllerControlGuardsTests
     private static PrintersController CreateController(
         Mock<IPrintersService> printersService,
         Mock<IPrinterStatusCacheReader> statusCache,
-        out Mock<IPrintFarmerTelemetryService> telemetry)
+        out Mock<IPrintFarmerTelemetryService> telemetry,
+        Mock<IPrinterSafetyGuard>? safetyGuard = null,
+        Mock<IPrinterPhysicalActuationService>? actuation = null,
+        Mock<IQueueResourceAuthorizationService>? resourceAuthorization = null,
+        Mock<IPrinterBackendCapabilitiesService>? capabilitiesService = null)
     {
         telemetry = new Mock<IPrintFarmerTelemetryService>();
 
-        var actuation = new Mock<IPrinterPhysicalActuationService>();
+        actuation ??= new Mock<IPrinterPhysicalActuationService>();
         actuation.Setup(service => service.AcquireDirectAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<string>(),
@@ -95,13 +99,22 @@ public class PrintersControllerControlGuardsTests
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        actuation.Setup(service => service.RevalidateDirectAsync(
+                It.IsAny<PrinterActuationLease>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrinterActuationLease lease, CancellationToken _) =>
+                new PrinterActuationResult(
+                    PrinterActuationResultCode.Accepted,
+                    lease,
+                    lease.CommandId));
         actuation.Setup(service => service.MarkDirectUnknownAsync(
                 It.IsAny<PrinterActuationLease>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        var resourceAuthorization = new Mock<Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService>();
+        resourceAuthorization ??=
+            new Mock<IQueueResourceAuthorizationService>();
         resourceAuthorization
             .Setup(service => service.CanAccessPrinterAsync(
                 It.IsAny<ClaimsPrincipal>(),
@@ -117,7 +130,9 @@ public class PrintersControllerControlGuardsTests
             validator: Mock.Of<IValidator<CreatePrinterFromDiscoveryDto>>(),
             discoveryProxyService: Mock.Of<Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService>(),
             discoverySessions: Mock.Of<Farm.Infrastructure.Services.Discovery.IDiscoverySessionRegistry>(),
-            printerBackendCapabilitiesService: Mock.Of<IPrinterBackendCapabilitiesService>(),
+            printerBackendCapabilitiesService:
+                capabilitiesService?.Object ??
+                Mock.Of<IPrinterBackendCapabilitiesService>(),
             backendClientFactory: Mock.Of<IBackendClientFactory>(),
             httpClientFactory: Mock.Of<IHttpClientFactory>(),
             egressGuard: Farm.Testing.Shared.AppDbTestHelpers.PermissiveEgressGuard(),
@@ -127,7 +142,9 @@ public class PrintersControllerControlGuardsTests
             telemetryService: telemetry.Object,
             bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>(),
             physicalActuationService: actuation.Object,
-            queueResourceAuthorization: resourceAuthorization.Object);
+            queueResourceAuthorization: resourceAuthorization.Object,
+            printerSafetyGuard:
+                safetyGuard?.Object ?? CreatePermissiveSafetyGuard());
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext
@@ -139,6 +156,314 @@ public class PrintersControllerControlGuardsTests
             },
         };
         return controller;
+    }
+
+    [Theory]
+    [InlineData("change", PrinterSafetyOperation.FilamentChange)]
+    [InlineData("load", PrinterSafetyOperation.FilamentLoad)]
+    [InlineData("eject", PrinterSafetyOperation.FilamentUnload)]
+    [InlineData("qidibox-unload", PrinterSafetyOperation.FilamentUnload)]
+    [InlineData("qidibox-eject", PrinterSafetyOperation.FilamentUnload)]
+    [InlineData("afc-load", PrinterSafetyOperation.FilamentChange)]
+    public async Task MmuPhysicalFilamentRoute_RevalidatesSafetyBeforeBackendIo(
+        string route,
+        PrinterSafetyOperation expectedOperation)
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.FindByIdAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, true, "Idle"));
+        var guard = new Mock<IPrinterSafetyGuard>();
+        guard.Setup(service => service.ValidateAsync(
+                id,
+                expectedOperation,
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterSafetyValidationResult.Reject(
+                503,
+                "printer_safety_evidence_unknown",
+                "Unknown."));
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out _,
+            guard);
+
+        ActionResult<CommandResult> result = route switch
+        {
+            "change" => await controller.MmuChangeToolAsync(
+                id,
+                1,
+                CancellationToken.None),
+            "load" => await controller.MmuLoadAsync(
+                id,
+                CancellationToken.None),
+            "eject" => await controller.MmuEjectAsync(
+                id,
+                CancellationToken.None),
+            "qidibox-unload" => await controller.MmuGateActionAsync(
+                id,
+                new MmuGateActionRequest
+                {
+                    Protocol = "Qidibox",
+                    Action = "Unload",
+                    GateIndex = 1,
+                },
+                CancellationToken.None),
+            "qidibox-eject" => await controller.MmuGateActionAsync(
+                id,
+                new MmuGateActionRequest
+                {
+                    Protocol = "Qidibox",
+                    Action = "Eject",
+                    GateIndex = 1,
+                },
+                CancellationToken.None),
+            _ => await controller.MmuGateActionAsync(
+                id,
+                new MmuGateActionRequest
+                {
+                    Protocol = "Afc",
+                    Action = "Load",
+                    LaneName = "lane_1",
+                },
+                CancellationToken.None),
+        };
+
+        ObjectResult problem = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(503, problem.StatusCode);
+        guard.Verify(service => service.ValidateAsync(
+            id,
+            expectedOperation,
+            null,
+            It.IsAny<CancellationToken>()), Times.Once);
+        printersService.Verify(service => service.SendGcodeAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetBackendCapabilitiesAsync_FiltersAccessBeforeDiscovery()
+    {
+        Guid allowedId = Guid.NewGuid();
+        Guid deniedId = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.GetAllAsync(
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                SamplePrinter(allowedId),
+                SamplePrinter(deniedId),
+            ]);
+        var authorization = new Mock<IQueueResourceAuthorizationService>();
+        authorization.Setup(service => service.FilterAccessiblePrinterIdsAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid> { allowedId });
+        var capabilities = new Mock<IPrinterBackendCapabilitiesService>();
+        capabilities.Setup(service => service.GetByIdsAsync(
+                It.Is<Guid[]>(ids =>
+                    ids.Length == 1 &&
+                    ids[0] == allowedId),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new PrinterBackendCapabilitiesDto(
+                    allowedId,
+                    "allowed",
+                    PrinterBackend.Moonraker),
+            ]);
+        PrintersController controller = CreateController(
+            printersService,
+            new Mock<IPrinterStatusCacheReader>(),
+            out _,
+            resourceAuthorization: authorization,
+            capabilitiesService: capabilities);
+
+        ActionResult<IEnumerable<PrinterBackendCapabilitiesDto>> result =
+            await controller.GetBackendCapabilitiesAsync(
+                CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        PrinterBackendCapabilitiesDto[] body =
+            Assert.IsAssignableFrom<IEnumerable<PrinterBackendCapabilitiesDto>>(
+                ok.Value).ToArray();
+        Assert.Single(body);
+        Assert.Equal(allowedId, body[0].PrinterId);
+        capabilities.Verify(service => service.GetAllAsync(
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task LoadFilamentAsync_UnsupportedSafetyEvidence_Returns422WithoutBackendIo()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.FindByIdAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, true, "Idle"));
+        var guard = new Mock<IPrinterSafetyGuard>();
+        guard.Setup(service => service.ValidateAsync(
+                id,
+                PrinterSafetyOperation.FilamentLoad,
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterSafetyValidationResult.Reject(
+                422,
+                "printer_operation_unsupported",
+                "Unsupported."));
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out _,
+            guard);
+
+        ActionResult<CommandResult> result =
+            await controller.LoadFilamentAsync(id, CancellationToken.None);
+
+        ObjectResult problem = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(422, problem.StatusCode);
+        ProblemDetails details = Assert.IsType<ProblemDetails>(problem.Value);
+        Assert.Equal(
+            "https://printfarmer.dev/problems/printer_operation_unsupported",
+            details.Type);
+        printersService.Verify(
+            service => service.LoadFilamentAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task MoveToAsync_LeaseRevalidationConflict_Returns409WithoutBackendIo()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.FindByIdAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, true, "Idle"));
+        var actuation = new Mock<IPrinterPhysicalActuationService>();
+        actuation.Setup(service => service.AcquireDirectAsync(
+                id,
+                It.IsAny<string>(),
+                "move_to",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid printerId, string actor, string operation, CancellationToken _) =>
+                new PrinterActuationResult(
+                    PrinterActuationResultCode.Accepted,
+                    new PrinterActuationLease(
+                        Guid.NewGuid(),
+                        printerId,
+                        null,
+                        operation,
+                        actor)));
+        actuation.Setup(service => service.RevalidateDirectAsync(
+                It.IsAny<PrinterActuationLease>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterActuationResult(
+                PrinterActuationResultCode.ConcurrencyConflict,
+                Detail: "Ownership changed."));
+        actuation.Setup(service => service.CompleteDirectAsync(
+                It.IsAny<PrinterActuationLease>(),
+                false,
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out _,
+            actuation: actuation);
+        actuation.Setup(service => service.RevalidateDirectAsync(
+                It.IsAny<PrinterActuationLease>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterActuationResult(
+                PrinterActuationResultCode.ConcurrencyConflict,
+                Detail: "Ownership changed."));
+
+        ActionResult<CommandResult> result = await controller.MoveToAsync(
+            id,
+            new MoveRequest(10, 10, 10, null),
+            CancellationToken.None);
+
+        Assert.IsType<ConflictObjectResult>(result.Result);
+        printersService.Verify(
+            service => service.MoveToAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<double?>(),
+                It.IsAny<double?>(),
+                It.IsAny<double?>(),
+                It.IsAny<double?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task LoadFilamentAsync_SafetyGuardThrows_ReleasesLeaseBeforeRethrow()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.FindByIdAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, true, "Idle"));
+        var guard = new Mock<IPrinterSafetyGuard>();
+        guard.Setup(service => service.ValidateAsync(
+                id,
+                PrinterSafetyOperation.FilamentLoad,
+                null,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("probe failed"));
+        var actuation = new Mock<IPrinterPhysicalActuationService>();
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out _,
+            guard,
+            actuation);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            controller.LoadFilamentAsync(id, CancellationToken.None));
+
+        actuation.Verify(service => service.CompleteDirectAsync(
+            It.IsAny<PrinterActuationLease>(),
+            false,
+            "printer_safety_revalidation_failed",
+            CancellationToken.None), Times.Once);
+        printersService.Verify(service => service.LoadFilamentAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    private static IPrinterSafetyGuard CreatePermissiveSafetyGuard()
+    {
+        var guard = new Mock<IPrinterSafetyGuard>();
+        guard.Setup(service => service.ValidateAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<PrinterSafetyOperation>(),
+                It.IsAny<PrinterSafetyMoveRequest?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterSafetyValidationResult.Allowed);
+        return guard.Object;
     }
 
     private static Printer SamplePrinter(Guid id) => new()

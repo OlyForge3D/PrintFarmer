@@ -71,6 +71,10 @@ public record PrinterBackendCapabilitiesDto(
     /// <summary>Lowercase axes accepted by proven movement or homing routes, not travel bounds or homed state.</summary>
     public string[] SupportedAxes { get; init; } = [];
 
+    /// <summary>Authoritative per-printer facts for safety-sensitive operations.</summary>
+    public PrinterVerifiedSafetyDto VerifiedSafety { get; init; } =
+        PrinterVerifiedSafetyDto.Unknown();
+
     /// <summary>
     /// Gets a summary of all supported capabilities as a formatted string.
     /// </summary>

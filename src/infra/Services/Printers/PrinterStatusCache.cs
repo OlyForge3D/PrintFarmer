@@ -182,7 +182,10 @@ public class PrinterStatusCache :
             _cache.TryGetValue(status.Id, out PrinterStatusCacheSnapshot? existingSnapshot);
             PrinterStatusDto? existing = existingSnapshot?.Status;
             DateTime observedAtUtc = DateTime.UtcNow;
-            PrinterStatusDto normalized = status.WithNormalizedFileName();
+            PrinterStatusDto normalized = PrinterSafetyTelemetryNormalizer.Normalize(
+                status.WithNormalizedFileName(),
+                existing,
+                observedAtUtc);
             _cache[status.Id] = new PrinterStatusCacheSnapshot(
                 normalized,
                 observedAtUtc,
@@ -211,7 +214,10 @@ public class PrinterStatusCache :
                 _cache.TryGetValue(status.Id, out PrinterStatusCacheSnapshot? existingSnapshot);
                 PrinterStatusDto? existing = existingSnapshot?.Status;
                 DateTime observedAtUtc = DateTime.UtcNow;
-                PrinterStatusDto normalized = status.WithNormalizedFileName();
+                PrinterStatusDto normalized = PrinterSafetyTelemetryNormalizer.Normalize(
+                    status.WithNormalizedFileName(),
+                    existing,
+                    observedAtUtc);
                 _cache[status.Id] = new PrinterStatusCacheSnapshot(
                     normalized,
                     observedAtUtc,

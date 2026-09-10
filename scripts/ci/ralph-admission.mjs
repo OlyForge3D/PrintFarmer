@@ -13,7 +13,7 @@ const commands = Object.assign(Object.create(null), {
   'acknowledge-local': ({ jobId, sessionId }) => acknowledgeLocalJob(jobId, sessionId),
   'recover-local': ({ jobId, sessionAbsent }) => recoverLocalReservation(jobId, { sessionAbsent }),
   'terminal-local': ({ result }) => recordLocalTerminalResult(result),
-  'dispatch-remote': ({ job, eligibility }) => dispatchMacJob({ job, eligibility }),
+  'dispatch-remote': ({ job, eligibility, controllerPid }) => dispatchMacJob({ job, eligibility, controllerPid }),
   'status-remote': ({ job }) => reconcileMacJob({ job }),
   'recover-remote': ({ jobId }) => recoverRemoteDelivery(jobId),
 });

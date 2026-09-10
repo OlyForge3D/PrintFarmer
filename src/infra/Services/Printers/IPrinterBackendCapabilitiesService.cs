@@ -35,4 +35,8 @@ public interface IPrinterBackendCapabilitiesService
     /// <param name="ct">Cancellation token</param>
     /// <returns>Backend capabilities for the specified printers</returns>
     Task<IEnumerable<PrinterBackendCapabilitiesDto>> GetByIdsAsync(Guid[] printerIds, CancellationToken ct);
+
+    /// <summary>Invalidates cached per-printer discovery after endpoint or firmware changes.</summary>
+    /// <param name="printerId">Printer whose discovery evidence is no longer current.</param>
+    void InvalidateVerifiedSafety(Guid printerId);
 }

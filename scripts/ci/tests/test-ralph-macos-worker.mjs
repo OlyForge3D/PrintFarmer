@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process';
 const invocation = {
   pid: process.pid,
   args: process.argv.slice(2),
+  developerDirectory: process.env.DEVELOPER_DIR,
   secretPresent: process.env.GH_TOKEN !== undefined || process.env.COPILOT_GITHUB_TOKEN !== undefined,
 };
 appendFileSync(process.env.RALPH_MAC_WORKER_FAKE_INVOCATIONS, JSON.stringify(invocation) + '\\n');
@@ -100,6 +101,7 @@ async function createFixture(name) {
   const baseSha = git(repository, 'rev-parse', 'HEAD');
   const env = {
     ...process.env,
+    DEVELOPER_DIR: '/Applications/Xcode.app/Contents/Developer',
     GH_TOKEN: 'must-not-reach-child',
     COPILOT_GITHUB_TOKEN: 'must-not-reach-child',
     RALPH_MAC_WORKER_TEST_MODE: 'true',
@@ -231,6 +233,9 @@ test('worker survives dispatch exit, isolates output, pushes its deterministic b
   assert.ok(invocation.args.includes('squad'));
   assert.ok(invocation.args.includes('--reasoning-effort'));
   assert.ok(invocation.args.includes('medium'));
+  assert.ok(invocation.args.includes('--allow-all-tools'));
+  assert.ok(invocation.args.includes('--allow-all-paths'));
+  assert.equal(invocation.developerDirectory, '/Applications/Xcode.app/Contents/Developer');
   const prompt = invocation.args[invocation.args.indexOf('--prompt') + 1];
   assert.ok(prompt.split('\n')[0].startsWith(`Ralph launch token ${running.launchToken}.`));
   assert.equal(git(record.worktree, 'branch', '--show-current'), `ralph/${fixture.job.jobId}`);
