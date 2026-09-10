@@ -128,6 +128,15 @@ final class UIWaitBudget {
         }
 
         var descendants: [ShellNode] { children.flatMap { [$0] + $0.descendants } }
+
+        var liveIdentityPredicate: NSPredicate {
+            // Badge counts can change after capture; a stable ID owns identity.
+            identifier.isEmpty
+                ? NSPredicate(format: "elementType == %lu AND identifier == '' AND label == %@",
+                              type.rawValue, label)
+                : NSPredicate(format: "elementType == %lu AND identifier == %@",
+                              type.rawValue, identifier)
+        }
     }
 
     @MainActor
@@ -349,6 +358,41 @@ final class UIWaitBudgetTests: XCTestCase {
         XCTAssertNil(observation.destination(
             tab: "tab.oversight", sidebar: "sidebar.overview", title: "Oversight"
         ))
+    }
+
+    func testLiveIdentitySurvivesBadgeLabelMutationButRejectsWrongIDOrType() {
+        let captured = ShellNode(.button, identifier: "sidebar.farm", label: "Farm, 3 ready")
+        var live: [String: Any] = [
+            "elementType": XCUIElement.ElementType.button.rawValue,
+            "identifier": "sidebar.farm",
+            "label": "Farm, 3 ready"
+        ]
+        XCTAssertTrue(captured.liveIdentityPredicate.evaluate(with: live))
+        live["label"] = "Farm, 4 ready"
+        XCTAssertTrue(captured.liveIdentityPredicate.evaluate(with: live))
+        live["identifier"] = "sidebar.tasks"
+        XCTAssertFalse(captured.liveIdentityPredicate.evaluate(with: live))
+        live["identifier"] = "sidebar.farm"
+        live["elementType"] = XCUIElement.ElementType.staticText.rawValue
+        XCTAssertFalse(captured.liveIdentityPredicate.evaluate(with: live))
+    }
+
+    func testIdentifierlessLiveFallbackStillRequiresItsCapturedTitleAndType() {
+        let captured = ShellNode(.button, label: "Farm")
+        var live: [String: Any] = [
+            "elementType": XCUIElement.ElementType.button.rawValue,
+            "identifier": "",
+            "label": "Farm"
+        ]
+        XCTAssertTrue(captured.liveIdentityPredicate.evaluate(with: live))
+        live["label"] = "Tasks"
+        XCTAssertFalse(captured.liveIdentityPredicate.evaluate(with: live))
+        live["label"] = "Farm"
+        live["identifier"] = "tab.tasks"
+        XCTAssertFalse(captured.liveIdentityPredicate.evaluate(with: live))
+        live["identifier"] = ""
+        live["elementType"] = XCUIElement.ElementType.staticText.rawValue
+        XCTAssertFalse(captured.liveIdentityPredicate.evaluate(with: live))
     }
 
     func testOffscreenDisabledAndUnscopedNodesDoNotAuthorizeNavigation() {
@@ -675,10 +719,8 @@ class PrintFarmerUITestCase: XCTestCase {
         }) == true
     }
 
-    private func observedElement(_ node: ShellNode, within scope: XCUIElementQuery) -> XCUIElement {
-        scope.matching(NSPredicate(
-            format: "identifier == %@ AND label == %@", node.identifier, node.label
-        )).firstMatch
+    func observedElement(_ node: ShellNode, within scope: XCUIElementQuery) -> XCUIElement {
+        scope.matching(node.liveIdentityPredicate).firstMatch
     }
 
     private func observedToggle(_ node: ShellNode) -> XCUIElement {

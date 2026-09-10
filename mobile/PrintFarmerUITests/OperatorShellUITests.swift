@@ -62,6 +62,26 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         )
     }
 
+    func testObservedDestinationResolvesWithStaleCapturedBadgeLabel() throws {
+        let farm = shellDestinationButton(tabIdentifier: "tab.farm", timeout: 5)
+        var captured = ShellNode(try farm.snapshot())
+        XCTAssertFalse(captured.identifier.isEmpty)
+        // Inject an old badge label into the captured value, not the product UI.
+        captured.label += ", stale badge count"
+        let scope = captured.identifier.hasPrefix("tab.")
+            ? app.tabBars.descendants(matching: captured.type)
+            : app.descendants(matching: captured.type)
+        let resolved = observedElement(captured, within: scope)
+        let budget = UIWaitBudget(timeout: 5)
+        XCTAssertEqual(budget.perform("resolve stale-label destination") { resolved.isHittable }, true)
+        XCTAssertEqual(resolved.identifier, captured.identifier)
+        XCTAssertNotEqual(resolved.label, captured.label)
+        resolved.tap()
+        XCTAssertTrue(app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "farm-card-")
+        ).firstMatch.waitForExistence(timeout: 5))
+    }
+
     func testRetiredTabsAreNotVisible() {
         for retired in ["tab.notifications", "tab.settings", "tab.scan"] {
             XCTAssertFalse(
