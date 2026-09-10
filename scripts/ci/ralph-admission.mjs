@@ -1,6 +1,6 @@
 import {
   RalphMacSshError, acknowledgeLocalJob, dispatchMacJob, recordLocalTerminalResult,
-  reconcileMacJob, recoverLocalReservation, recoverRemoteDelivery, reserveLocalJob,
+  reconcileMacJob, recoverLocalReservation, recoverLostLocalSession, recoverRemoteDelivery, reserveLocalJob,
 } from './ralph-macos-ssh.mjs';
 
 const commands = Object.assign(Object.create(null), {
@@ -12,6 +12,7 @@ const commands = Object.assign(Object.create(null), {
   },
   'acknowledge-local': ({ jobId, sessionId }) => acknowledgeLocalJob(jobId, sessionId),
   'recover-local': ({ jobId, sessionAbsent }) => recoverLocalReservation(jobId, { sessionAbsent }),
+  'recover-local-session': ({ jobId, sessionAbsent }) => recoverLostLocalSession(jobId, { sessionAbsent }),
   'terminal-local': ({ result }) => recordLocalTerminalResult(result),
   'dispatch-remote': ({ job, eligibility, controllerPid }) => dispatchMacJob({ job, eligibility, controllerPid }),
   'status-remote': ({ job }) => reconcileMacJob({ job }),

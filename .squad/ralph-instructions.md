@@ -65,3 +65,12 @@ After completing work on each issue:
 
 If you are blocked on an issue, comment on it explaining why, add a `status:blocked`
 label, and move to the next actionable item.  Do not halt the loop.
+
+### Mobile Job Admission & Evidence
+
+For any issue gated on mobile/iOS QA evidence or a `<!-- ralph-claim -->` comment, follow
+`.github/ralph-reference.md`'s "Mobile/iOS Job Admission & Evidence Reconciliation"
+section before acting: never treat session-local evidence as recoverable, always
+reconcile a claim against the `scripts/ci/ralph-macos-ssh.mjs` ledger rather than trusting
+the comment text, and never fabricate evidence, close the issue, or merge a PR to clear a
+block.

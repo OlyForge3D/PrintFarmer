@@ -386,9 +386,21 @@ export async function reserveJob({ job, eligibility, mode = 'remote', now = new 
     const active = Object.values(ledger.jobs).filter((entry) => activeJobStates.has(entry.state));
     if (active.some((entry) => entry.issue === job.issue)) throw new RalphMacSshError('Issue already has an active Ralph job.', 'ISSUE_OWNED');
     if (active.length >= 5) throw new RalphMacSshError('All five PrintFarmer Ralph slots are reserved.', 'SLOT_EXHAUSTED');
+    // Xcode/CoreSimulator concurrency is a per-Mac constraint, independent of the shared 5-slot
+    // pool: a physical Mac can only run one xcodebuild/simctl invocation at a time no matter how
+    // many total slots the pool has free, and a git worktree does not isolate that host-wide
+    // state. Every remote (mac-dispatched) job is an Xcode/CoreSimulator job, so reject a second
+    // active remote job targeting the same expectedHost outright — the caller (Ralph's own poll
+    // loop) naturally retries later, which is the "queued" behavior; nothing here builds a
+    // separate in-process queue. This reuses the same active-state/stale-reclamation machinery
+    // (recoverRemoteDelivery, reconcileMacJob) other reservations already rely on for freshness.
+    if (mode === 'remote' && active.some((entry) => entry.mode === 'remote' && entry.expectedHost === job.expectedHost)) {
+      throw new RalphMacSshError(`Mac host ${job.expectedHost} already has an active Xcode/CoreSimulator job.`, 'XCODE_HOST_BUSY');
+    }
     const entry = {
       jobId: job.jobId, repository: printFarmerRepository, issue: job.issue, owner: job.owner, baseSha: job.baseSha,
       state: 'reserved', mode, fence: ledger.generation + 1, requestDigest: requestDigest(job), createdAt: now, updatedAt: now,
+      expectedHost: job.expectedHost,
       reservationOwnerPid, reservationExpiresAt: new Date(Date.parse(now) + reservationLeaseMs).toISOString(),
     };
     ledger.jobs[job.jobId] = entry;
@@ -432,6 +444,31 @@ export async function recoverLocalReservation(jobId, { isOwnerAlive = ownerIsAli
     entry.failureReason = 'session-creation-absent';
     delete entry.reservationOwnerPid;
     delete entry.reservationExpiresAt;
+    entry.updatedAt = new Date(now).toISOString();
+    return entry;
+  }, options);
+}
+
+// A local job that reached 'accepted'/'running' has a claimed session, but the ledger has no
+// way to observe that session's liveness itself (it is an app-managed Copilot session, not an
+// OS process the ledger owns a PID for). If that session is later confirmed gone — e.g. it never
+// produced a correlated terminal result and no longer appears in the session store — the claim
+// must not block the issue's slot forever, and it must not silently vanish or be deleted either.
+// This is a fail-closed, explicit "abandoned" disposition: it requires the caller to assert
+// authoritative absence (verified externally, the same contract recoverLocalReservation already
+// uses), it never runs any destructive cleanup of the session's worktree or artifacts, and it
+// keeps the ledger entry (with its sessionId) as a permanent, inspectable audit record distinct
+// from a genuine 'failed' terminal result.
+export async function recoverLostLocalSession(jobId, { sessionAbsent, now = Date.now(), ...options } = {}) {
+  if (sessionAbsent !== true) throw new RalphMacSshError('Authoritative session absence is required.', 'INVALID_REQUEST');
+  return mutateLedger((ledger) => {
+    const entry = ledger.jobs[jobId];
+    if (!entry || entry.mode !== 'local' || !entry.local || !['accepted', 'running'].includes(entry.state) ||
+        !validIdentifier(entry.sessionId)) {
+      throw new RalphMacSshError('Only an accepted or running local job with a claimed session may be reconciled as abandoned.', 'INVALID_TRANSITION');
+    }
+    entry.state = 'abandoned';
+    entry.failureReason = 'session-lost';
     entry.updatedAt = new Date(now).toISOString();
     return entry;
   }, options);

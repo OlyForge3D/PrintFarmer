@@ -8,7 +8,8 @@ import test from 'node:test';
 import {
   RalphMacSshError, acknowledgeJob, acknowledgeLocalJob, createRemoteRequest, createSshInvocation, dispatchMacJob,
   loadMacSshConfiguration, markUncertain, parseRemoteAcknowledgement, parseRemoteWorkerResponse, reconcileMacJob,
-  recordDeliveryIntent, recordLocalTerminalResult, recoverRemoteDelivery, reserveJob, reserveLocalJob, runSsh,
+  recordDeliveryIntent, recordLocalTerminalResult, recoverLocalReservation, recoverLostLocalSession,
+  recoverRemoteDelivery, reserveJob, reserveLocalJob, runSsh,
 } from '../ralph-macos-ssh.mjs';
 
 const root = path.resolve('fixtures', 'ralph-macos-ssh-validation');
@@ -142,7 +143,8 @@ test('enforces five shared slots, one owner per issue, and stable job fencing', 
   await reset();
   const configuration = options();
   await Promise.all(Array.from({ length: 4 }, (_, index) => reserveJob({
-    job: { ...job(`job-${index}`), issue: index + 1 }, eligibility: { ...eligibility, issue: index + 1 },
+    job: { ...job(`job-${index}`), issue: index + 1, expectedHost: `mac-${index}.local` },
+    eligibility: { ...eligibility, issue: index + 1 },
   }, configuration)));
   await reserveLocalJob({
     job: { ...job('local-job'), issue: 5 }, eligibility: { ...eligibility, issue: 5 },
@@ -430,4 +432,131 @@ test('marks SSH failure uncertain instead of retrying locally or releasing its s
   assert.equal(ledger.jobs['job-2605'].reservationOwnerPid, controllerPid);
   await assert.rejects(() => reserveJob({ job: { ...job('duplicate'), issue: 2605 }, eligibility }, configuration),
     (error) => error.code === 'ISSUE_OWNED');
+});
+
+// --- Lost-session / stale-claim reconciliation (issues #2577, #2578, #2599, #2582) ---
+
+test('missing durable artifact: a stale reserved-but-never-acknowledged local job recovers only on authoritative absence', async () => {
+  await reset();
+  const configuration = options();
+  await reserveLocalJob({ job: job(), eligibility, controllerPid: process.pid + 200_000 }, configuration);
+
+  // Fails closed while the session might still be created: absence is not yet authoritative.
+  await assert.rejects(() => recoverLocalReservation('job-2605', { ...configuration }),
+    (error) => error.code === 'INVALID_REQUEST');
+  // Fails closed while the reservation owner PID could still be alive.
+  await assert.rejects(() => recoverLocalReservation('job-2605', { sessionAbsent: true, isOwnerAlive: () => true, ...configuration }),
+    (error) => error.code === 'RESERVATION_ACTIVE');
+
+  const recovered = await recoverLocalReservation('job-2605', {
+    sessionAbsent: true, isOwnerAlive: () => false, now: Date.parse('2999-01-01T00:00:00Z'), ...configuration,
+  });
+  assert.equal(recovered.state, 'failed');
+  assert.equal(recovered.failureReason, 'session-creation-absent');
+
+  // The issue slot is free: a fresh jobId (fresh reproduction) may be reserved for the same issue.
+  const fresh = await reserveLocalJob({ job: job('job-2605-retry'), eligibility, controllerPid: process.pid }, configuration);
+  assert.equal(fresh.state, 'reserved');
+  // The old terminal jobId itself remains fenced.
+  await assert.rejects(() => reserveLocalJob({ job: job(), eligibility }, configuration),
+    (error) => error.code === 'FENCED');
+});
+
+test('lost session: an accepted/running local job with a confirmed-absent session reconciles to abandoned, not silently cleaned up', async () => {
+  await reset();
+  const configuration = options();
+  await reserveLocalJob({ job: job(), eligibility }, configuration);
+  await acknowledgeLocalJob('job-2605', 'session-370ca864', configuration);
+
+  // Fails closed: caller must authoritatively assert absence, never inferred.
+  await assert.rejects(() => recoverLostLocalSession('job-2605', { ...configuration }),
+    (error) => error.code === 'INVALID_REQUEST');
+
+  const abandoned = await recoverLostLocalSession('job-2605', { sessionAbsent: true, ...configuration });
+  assert.equal(abandoned.state, 'abandoned');
+  assert.equal(abandoned.failureReason, 'session-lost');
+  // The ledger entry (and its sessionId) is preserved as an audit record, never deleted.
+  assert.equal(abandoned.sessionId, 'session-370ca864');
+
+  // Abandonment frees the issue's slot: a genuinely new jobId can be reserved (explicit
+  // re-admission / fresh reproduction), while the old identifier stays fenced forever.
+  const reAdmitted = await reserveLocalJob({ job: job('job-2605-reproduce'), eligibility }, configuration);
+  assert.equal(reAdmitted.state, 'reserved');
+  await assert.rejects(() => reserveLocalJob({ job: job(), eligibility }, configuration),
+    (error) => error.code === 'FENCED');
+});
+
+test('stale pending admission: reconciliation is rejected for jobs that never reached an accepted session', async () => {
+  await reset();
+  const configuration = options();
+  await reserveLocalJob({ job: job(), eligibility }, configuration);
+
+  // Still only 'reserved' (no acknowledged session) — this is the recoverLocalReservation case,
+  // not recoverLostLocalSession's. A "pending-admission" claim with no session must not be
+  // waved through as an abandoned session.
+  await assert.rejects(() => recoverLostLocalSession('job-2605', { sessionAbsent: true, ...configuration }),
+    (error) => error.code === 'INVALID_TRANSITION');
+
+  await acknowledgeLocalJob('job-2605', 'session-1', configuration);
+  await recordLocalTerminalResult({
+    jobId: 'job-2605', sessionId: 'session-1', headSha: 'b'.repeat(40), exitCode: 0,
+    validationEvidence: 'targeted tests passed', workingTreeClean: true, allCommitsPushed: true,
+  }, configuration);
+
+  // A genuinely completed job is not eligible for lost-session reconciliation either.
+  await assert.rejects(() => recoverLostLocalSession('job-2605', { sessionAbsent: true, ...configuration }),
+    (error) => error.code === 'INVALID_TRANSITION');
+});
+
+test('rejects Xcode/CoreSimulator host over-subscription independent of the shared slot pool', async () => {
+  await reset();
+  const configuration = options();
+  await reserveJob({ job: job(), eligibility }, configuration);
+
+  // A second remote (mac-dispatched) job targeting the SAME host is rejected outright, even
+  // though only 1 of 5 shared slots is in use — Xcode/CoreSimulator concurrency=1 per Mac is a
+  // stricter, independent constraint. The caller's own poll loop is expected to retry later.
+  await assert.rejects(() => reserveJob({
+    job: { ...job('job-second-xcode'), issue: 9001 }, eligibility: { ...eligibility, issue: 9001 },
+  }, configuration), (error) => error.code === 'XCODE_HOST_BUSY');
+
+  // A local (non-Xcode) job is unaffected by the host lock and still consumes only the shared pool.
+  const local = await reserveLocalJob({
+    job: { ...job('job-local-unaffected'), issue: 9002 }, eligibility: { ...eligibility, issue: 9002 },
+  }, configuration);
+  assert.equal(local.state, 'reserved');
+
+  // A remote job targeting a DIFFERENT host is unaffected by the first host's lock.
+  const otherHost = await reserveJob({
+    job: { ...job('job-other-host'), issue: 9003, expectedHost: 'second-mac.local' },
+    eligibility: { ...eligibility, issue: 9003 },
+  }, configuration);
+  assert.equal(otherHost.state, 'reserved');
+
+  // Once the first host's job reaches a terminal state, the host lock releases.
+  await recordDeliveryIntent('job-2605', configuration);
+  await markUncertain('job-2605', configuration);
+  const releaseChild = fakeChild();
+  await dispatchMacJob({ job: job(), eligibility, controllerPid: process.pid }, {
+    ...configuration,
+    spawn: () => {
+      queueMicrotask(() => {
+        releaseChild.stdout.end(JSON.stringify({
+          version: 1, type: 'failed', state: 'failed', workerVerified: true,
+          failureCode: 'JOB_NOT_FOUND',
+          failureMessage: 'Mac worker verified that no durable job record exists for this fenced request.',
+          jobId: 'job-2605', fence: 1, repository: 'OlyForge3D/PrintFarmer',
+          issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40),
+          host: 'trusted-mac.local', sessionId: 'absent-request-digest',
+        }));
+        releaseChild.emit('close', 0);
+      });
+      return releaseChild;
+    },
+  });
+  const freed = await reserveJob({
+    job: { ...job('job-second-xcode-retry'), issue: 9001, expectedHost: 'trusted-mac.local' },
+    eligibility: { ...eligibility, issue: 9001 },
+  }, configuration);
+  assert.equal(freed.state, 'reserved');
 });
