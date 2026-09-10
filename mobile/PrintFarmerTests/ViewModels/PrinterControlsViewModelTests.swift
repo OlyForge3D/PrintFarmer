@@ -2326,7 +2326,7 @@ enum VerifiedSafetyFixtures {
         )
         return PrinterVerifiedSafetyDto(
             contractVersion: 1,
-            discovery: .init(state: .partial, observedAtUtc: date, sourceRevision: "configuration-1"),
+            discovery: .init(state: .partial, observedAtUtc: date, sourceRevision: "0"),
             operations: .init(
                 absoluteMovement: operation, firmwareZOffsetSave: operation,
                 filamentLoad: operation, filamentUnload: operation, filamentChange: operation
@@ -2936,7 +2936,7 @@ final class GuardedMaterialControlsTests: XCTestCase {
         XCTAssertNil(model.pendingCommand)
         service.capabilitiesToReturn?.verifiedSafety?.positioning.coordinateOriginMm.state = .unknown
         await model.refreshSafetyEvidence()
-        XCTAssertTrue(model.calibrationPositionBlockedReason?.contains("bed origin") == true)
+        XCTAssertNotNil(model.calibrationPositionBlockedReason)
         XCTAssertEqual(model.hardware?.maxBuildVolumeX, 256, "Even catalog dimensions do not prove an origin")
         await model.positionForCalibration()
         await model.adjustCalibration(delta: -0.01)

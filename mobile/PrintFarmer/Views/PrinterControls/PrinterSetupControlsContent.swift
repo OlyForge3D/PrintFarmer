@@ -289,6 +289,7 @@ struct PrinterMaterialControls: View {
 struct PrinterZOffsetCalibrationControls: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
     @State private var increment = 0.05
+    @AccessibilityFocusState private var stepFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -304,6 +305,7 @@ struct PrinterZOffsetCalibrationControls: View {
                     .font(.headline)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("printer.controls.calibration-step")
+                    .accessibilityFocused($stepFocused)
                 steps(step)
                 if let message = viewModel.calibrationMessage {
                     Text(message).font(.footnote)
@@ -325,6 +327,9 @@ struct PrinterZOffsetCalibrationControls: View {
             }
         }
         .foregroundStyle(Color.pfTextPrimary)
+        .onChange(of: viewModel.calibrationStep) { _, step in
+            stepFocused = step != nil
+        }
         .onDisappear { viewModel.cancelCalibration() }
     }
 
@@ -374,18 +379,24 @@ struct PrinterZOffsetCalibrationControls: View {
                 }
             }
             .frame(minHeight: 44)
-            ControlActionButton(title: "Closer −\(increment.formatted()) mm") {
+            ControlActionButton(title: "Closer −\(increment.formatted()) mm", identifier: "printer.controls.calibration-closer") {
                 Task { await viewModel.adjustCalibration(delta: -increment) }
             }
-            .disabled(viewModel.isExecuting || viewModel.calibrationPositionBlockedReason != nil)
-            ControlActionButton(title: "Farther +\(increment.formatted()) mm") {
+            .disabled(viewModel.isExecuting || viewModel.calibrationAdjustmentBlockedReason(delta: -increment) != nil)
+            if let reason = viewModel.calibrationAdjustmentBlockedReason(delta: -increment) {
+                Text("Closer: \(reason)").font(.footnote)
+            }
+            ControlActionButton(title: "Farther +\(increment.formatted()) mm", identifier: "printer.controls.calibration-farther") {
                 Task { await viewModel.adjustCalibration(delta: increment) }
             }
-            .disabled(viewModel.isExecuting || viewModel.calibrationPositionBlockedReason != nil)
-            ControlActionButton(title: "Refresh and review save") {
+            .disabled(viewModel.isExecuting || viewModel.calibrationAdjustmentBlockedReason(delta: increment) != nil)
+            if let reason = viewModel.calibrationAdjustmentBlockedReason(delta: increment) {
+                Text("Farther: \(reason)").font(.footnote)
+            }
+            ControlActionButton(title: "Refresh and review save", identifier: "printer.controls.calibration-review") {
                 Task { await viewModel.reviewCalibration() }
             }
-            .disabled(viewModel.isExecuting || viewModel.isReviewingCalibration)
+            .disabled(viewModel.isExecuting || viewModel.isReviewingCalibration || viewModel.calibrationPositionBlockedReason != nil)
         case .save:
             Text(
                 "Save \(viewModel.calibrationOffset?.formatted() ?? "unknown") mm to firmware and PrintFarmer. A stale review will not be retried. The printer may restart or disconnect; inspect it before printing."
@@ -397,7 +408,7 @@ struct PrinterZOffsetCalibrationControls: View {
             ControlActionButton(title: "Save reviewed offset to firmware", identifier: "printer.controls.calibration-save") {
                 Task { await viewModel.saveCalibration() }
             }
-            .disabled(viewModel.isExecuting || viewModel.calibrationReview == nil || viewModel.calibrationBlockedReason != nil)
+            .disabled(viewModel.isExecuting || viewModel.calibrationReview == nil || viewModel.calibrationPositionBlockedReason != nil)
         case .done:
             Text(
                 "Save request accepted. Verify the firmware offset and first layer at the printer. This app has not measured nozzle clearance or proven calibration quality."

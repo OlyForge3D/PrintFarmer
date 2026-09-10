@@ -699,7 +699,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             XCTAssertEqual(button.isEnabled, suffix == "calibration-start" || supported)
         }
         let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
-            controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+            XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
         }
         let attachment = XCTAttachment(image: image)
         attachment.name = "issue-2599-\(snapshotName ?? "iPhone")-\(Int(width))-\(dynamicType)-\(supported)"
@@ -708,6 +708,76 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertTrue(service.physicalFilamentCalls.isEmpty)
         XCTAssertNil(service.extrudeCalledWith)
         XCTAssertNil(service.saveZOffsetCalledWith)
+    }
+
+    func test_guardedCalibration_supportedFlowHasAccessibleActionsAndRetainedStages() async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        var caps = Self.layoutCaps
+        caps.supportsAbsoluteMovement = true
+        caps.supportsZOffset = true
+        caps.supportsZOffsetFirmwareSave = true
+        caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
+        let service = makeService(caps: caps)
+        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
+        service.detailsToReturn = PrinterDetails(
+            id: printer.id, name: printer.name, backend: printer.backend,
+            rowVersion: "reviewed-native-flow", zOffsetMm: 0.12
+        )
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        let (window, controller) = install(PrinterZOffsetCalibrationControls(viewModel: model))
+        defer { window.isHidden = true; model.cancelCalibration() }
+
+        func action(_ suffix: String) throws -> UIControl {
+            let button = try XCTUnwrap(nativeControls(in: controller.view).first {
+                $0.accessibilityIdentifier == "printer.controls.calibration-\(suffix)"
+            })
+            XCTAssertTrue(button.isEnabled, suffix)
+            XCTAssertGreaterThanOrEqual(button.bounds.height, 44)
+            XCTAssertFalse(button.accessibilityLabel?.isEmpty ?? true)
+            return button
+        }
+        func capture(_ step: ZOffsetCalibrationStep) async throws {
+            try await settle(controller)
+            XCTAssertEqual(model.calibrationStep, step)
+            let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+                XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
+            }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "verified-calibration-\(snapshotName ?? "iPhone")-\(step.rawValue)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+
+        try await settle(controller)
+        try action("start").sendActions(for: .touchUpInside)
+        try await capture(.introduction)
+        model.beginCalibrationHome()
+        try await capture(.home)
+        try action("home").sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertNotNil(service.homeCalledWith)
+        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
+        await model.refreshSafetyEvidence()
+        try await capture(.position)
+        try action("position").sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertEqual(service.moveToCalledWith?.x, 40)
+        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id, position: .init(x: 40, y: 30, z: 10))
+        await model.refreshSafetyEvidence()
+        try await capture(.adjust)
+        try action("closer").sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertEqual(service.moveToCalledWith?.z, 9.95)
+        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id, position: .init(x: 40, y: 30, z: 9.95))
+        await model.refreshSafetyEvidence()
+        try await settle(controller)
+        try action("review").sendActions(for: .touchUpInside)
+        try await capture(.save)
+        try action("save").sendActions(for: .touchUpInside)
+        try await capture(.done)
+        XCTAssertEqual(service.saveZOffsetCalledWith?.reviewedRowVersion, "reviewed-native-flow")
+        XCTAssertEqual(service.saveZOffsetCalledWith?.offsetMm, 0.07)
     }
 
     func test_guardedCalibration_cancelRemovesInlineFlowWithoutSendingCommands() async throws {

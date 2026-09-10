@@ -377,9 +377,14 @@ final class PrinterControlsViewModel: ObservableObject {
             try Task.checkCancellation()
             guard canPublishRead(generation), safetyReadID == readID else { return }
             if refreshDiscovery {
-                if let old = capabilities?.verifiedSafety, let new = loaded?.verifiedSafety,
-                   !Self.sameSafetyConfiguration(old, new), calibrationStep != nil {
-                    interruptCalibration("Safety discovery changed. Cancel and review calibration again.")
+                if let old = capabilities?.verifiedSafety, calibrationStep != nil {
+                    if let new = loaded?.verifiedSafety {
+                        if !Self.sameSafetyConfiguration(old, new) {
+                            interruptCalibration("Safety discovery changed. Cancel and review calibration again.")
+                        }
+                    } else {
+                        interruptCalibration("Safety discovery is no longer available. Cancel and review again.")
+                    }
                 }
                 capabilities = loaded
             }
@@ -403,12 +408,17 @@ final class PrinterControlsViewModel: ObservableObject {
             safetyStatus = nil
             safetyCheckedAt = nil
             safetyReadError = "Safety evidence could not be read. Refresh safety checks. \(error.localizedDescription)"
+            interruptCalibration("Safety evidence could not be read. Check the machine, then cancel and review again.")
         }
     }
 
     private static func sameSafetyConfiguration(_ a: PrinterVerifiedSafetyDto, _ b: PrinterVerifiedSafetyDto) -> Bool {
         a.contractVersion == b.contractVersion &&
         a.discovery.sourceRevision == b.discovery.sourceRevision &&
+        a.discovery.state == b.discovery.state &&
+        a.positioning.coordinateOriginMm.state == b.positioning.coordinateOriginMm.state &&
+        a.positioning.travelEnvelopeMm.state == b.positioning.travelEnvelopeMm.state &&
+        a.positioning.minimumClearanceZMm.state == b.positioning.minimumClearanceZMm.state &&
         a.positioning.coordinateOriginMm.value == b.positioning.coordinateOriginMm.value &&
         a.positioning.travelEnvelopeMm.value == b.positioning.travelEnvelopeMm.value &&
         a.positioning.minimumClearanceZMm.value == b.positioning.minimumClearanceZMm.value &&
@@ -432,7 +442,7 @@ final class PrinterControlsViewModel: ObservableObject {
     private var safetyEvidenceBlockedReason: String? {
         guard let safety = capabilities?.verifiedSafety, safety.contractVersion == 1,
               safety.discovery.state != .unavailable,
-              let revision = safety.discovery.sourceRevision, !revision.isEmpty,
+              let revision = safety.discovery.sourceRevision, revision == String(printer.configurationRevision),
               let observed = safety.discovery.observedAtUtc, observed <= clock() else {
             return "Verified safety discovery is unavailable. Refresh safety checks or use the printer's supported procedure."
         }
@@ -833,9 +843,20 @@ final class PrinterControlsViewModel: ObservableObject {
         }
     }
 
+    func calibrationAdjustmentBlockedReason(delta: Double) -> String? {
+        if let reason = calibrationPositionBlockedReason { return reason }
+        guard let offset = calibrationOffset, let current = reportedSafetyPosition, current == calibrationPosition else {
+            return "Position changed or is unavailable. Cancel and re-position before adjusting."
+        }
+        do { _ = try MaterialControlInput.adjustedOffset(offset, delta: delta) }
+        catch { return error.localizedDescription }
+        let z = (current.z * 1000 + delta * 1000).rounded() / 1000
+        return safeMoveReason(.init(x: current.x, y: current.y, z: z))
+    }
+
     func adjustCalibration(delta: Double) async {
         guard calibrationStep == .adjust, !isExecuting, let offset = calibrationOffset else { return }
-        if let reason = calibrationPositionBlockedReason { calibrationMessage = reason; return }
+        if let reason = calibrationAdjustmentBlockedReason(delta: delta) { calibrationMessage = reason; return }
         guard let current = reportedSafetyPosition, current == calibrationPosition else {
             calibrationMessage = "Position changed or is unavailable. Cancel and re-position before adjusting."
             return
