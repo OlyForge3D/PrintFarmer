@@ -408,7 +408,10 @@ DB_PROVIDER=mysql
 ConnectionStrings__Default=Server=mysql;Database=printfarmer;User=root;Password=your_password;
 ```
 **Important:** Both supported database providers use the unified
-`ConnectionStrings__Default` environment variable. The connection string
+`ConnectionStrings__Default` environment variable. Compose validation rejects
+unset or empty values for both the API and slicer host. Run
+`scripts/deploy-docker.sh` to generate the value, or supply it through your
+environment or deployment `.env` file. The connection string
 format varies based on the selected provider.
 
 ## Network Configuration

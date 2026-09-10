@@ -40,7 +40,7 @@ services:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
       - ASPNETCORE_URLS=http://+:5246
       - DB_PROVIDER=${DB_PROVIDER:-Postgres}
-      - ConnectionStrings__Default=${ConnectionStrings__Default}
+      - ConnectionStrings__Default=${ConnectionStrings__Default:?ConnectionStrings__Default must be set to a non-empty database connection string. Run scripts/deploy-docker.sh to generate one, or set it in your environment/.env file.}
       # URL of the main API for cross-domain lookups (printers, catalog models, manufacturers)
       - MainApi__BaseUrl=${MAIN_API_URL:-http://api:5245}
       - WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY:-}

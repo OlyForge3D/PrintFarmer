@@ -68,6 +68,19 @@ else
     check_result false "Compose generator execution"
 fi
 
+# Test 3: Both database consumers require a non-empty connection string
+echo
+echo "Test 3: Required database connection strings"
+# Check each service so one guard cannot mask a regression in the other.
+for template_name in docker-compose.yml docker-compose.slicer-host.yml; do
+    connection_required=false
+    if grep -Fq 'ConnectionStrings__Default=${ConnectionStrings__Default:?' \
+        "$REPO_ROOT/scripts/docker/compose-templates/$template_name"; then
+        connection_required=true
+    fi
+    check_result "$connection_required" "$template_name requires a non-empty connection string"
+done
+
 # Test 4: No Redis references in generated files
 echo
 echo "Test 4: Redis references removed from templates"
@@ -276,7 +289,8 @@ if "$REPO_ROOT/scripts/docker/compose-generator.sh" \
             check_result true "Telemetry and monitoring stack merge cleanly"
             if command -v docker >/dev/null 2>&1; then
                 # docker compose config performs strict interpolation, and Jwt__Key is a
-                # required variable with no default since #1301. This stack also includes
+                # required variable with no default since #1301. ConnectionStrings__Default
+                # is also required since #2622. This stack also includes
                 # the monitoring overlay, whose GRAFANA_ADMIN_PASSWORD is a required
                 # variable with no default since #1295. compose-generator.sh is invoked
                 # directly here (bypassing scripts/deploy-docker.sh, which is what normally
@@ -287,11 +301,30 @@ if "$REPO_ROOT/scripts/docker/compose-generator.sh" \
                     echo "Jwt__Key=test-only-throwaway-key-for-ci-validation-0123456789ab"
                     echo "GRAFANA_ADMIN_PASSWORD=test-only-throwaway-password-for-ci-0123456789"
                 } > "$STACK_DIR/.env"
+                cp "$STACK_DIR/.env" "$STACK_DIR/.env.required"
+                # Ignore an inherited connection string and use only the isolated env
+                # file, otherwise a developer's shell can defeat the negative controls.
+                for connection_state in unset empty; do
+                    if [ "$connection_state" = empty ]; then
+                        echo "ConnectionStrings__Default=" >> "$STACK_DIR/.env"
+                    fi
+                    connection_rejected=false
+                    if connection_output=$(cd "$STACK_DIR" && env -u ConnectionStrings__Default \
+                        docker compose --env-file .env -f docker-compose.yml config --quiet 2>&1); then
+                        connection_rejected=false
+                    elif grep -Fq 'ConnectionStrings__Default must be set' <<<"$connection_output"; then
+                        connection_rejected=true
+                    fi
+                    check_result "$connection_rejected" "docker compose rejects $connection_state ConnectionStrings__Default"
+                done
+                cp "$STACK_DIR/.env.required" "$STACK_DIR/.env"
+                echo "ConnectionStrings__Default=Host=database;Database=printfarmer;Username=postgres;Password=test-only-throwaway-db-password" >> "$STACK_DIR/.env"
                 # Use an if/else to capture output+status so a failing `docker compose
                 # config` (a plain assignment from a failing command substitution) does
                 # not trigger `set -e` and abort the script before it can be reported.
                 compose_config_status=0
-                compose_config_output=$(cd "$STACK_DIR" && docker compose -f docker-compose.yml config --quiet 2>&1) || compose_config_status=$?
+                compose_config_output=$(cd "$STACK_DIR" && env -u ConnectionStrings__Default \
+                    docker compose --env-file .env -f docker-compose.yml config --quiet 2>&1) || compose_config_status=$?
                 if [ "$compose_config_status" -ne 0 ]; then
                     echo -e "${YELLOW}⚠️  docker compose config failed:${NC}"
                     echo "$compose_config_output" | sed 's/^/    /'
@@ -304,7 +337,8 @@ if "$REPO_ROOT/scripts/docker/compose-generator.sh" \
                     # and confirming validation now fails.
                     cp "$STACK_DIR/docker-compose.yml" "$STACK_DIR/docker-compose.yml.bak"
                     printf '\n  this is not valid yaml: [\n' >> "$STACK_DIR/docker-compose.yml"
-                    if (cd "$STACK_DIR" && docker compose -f docker-compose.yml config --quiet >/dev/null 2>&1); then
+                    if (cd "$STACK_DIR" && env -u ConnectionStrings__Default \
+                        docker compose --env-file .env -f docker-compose.yml config --quiet >/dev/null 2>&1); then
                         check_result false "docker compose config validation detects a malformed compose file"
                     else
                         check_result true "docker compose config validation detects a malformed compose file"
