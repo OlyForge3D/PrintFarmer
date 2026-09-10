@@ -202,6 +202,8 @@ final class ShiftTasksUITests: ShiftTasksUITestBase {
 /// grouped presentation and server ordering on both device classes.
 @MainActor
 final class ShiftTasksGroupedUITests: ShiftTasksUITestBase {
+    override var waitsForNavigationReadiness: Bool { true }
+
     private let nowTaskID = "78200000-0000-0000-0000-000000000001"
     private let timelineTaskID = "78200000-0000-0000-0000-000000000002"
     private let anytimeTaskID = "78200000-0000-0000-0000-000000000003"

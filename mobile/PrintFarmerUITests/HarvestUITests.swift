@@ -11,6 +11,7 @@ import XCTest
 /// seeded as `Completed`, giving a deterministic target without depending
 /// on Recent-page sort order.
 final class HarvestUITests: ShiftTasksUITestBase {
+    override var waitsForNavigationReadiness: Bool { true }
 
     private let completedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000007"
     private let failedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000009"

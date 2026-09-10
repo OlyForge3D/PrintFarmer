@@ -258,9 +258,7 @@ final class UIWaitBudget {
             switch state {
             case .compact(let nodes), .sidebar(let nodes):
                 nodes.contains { $0.type == .button && $0.enabled }
-            case .collapsed:
-                true
-            case .notReady:
+            case .notReady, .collapsed:
                 false
             }
         }
@@ -451,21 +449,53 @@ final class UIWaitBudgetTests: XCTestCase {
         clock = 6 // Launch consumed the same overall test allowance.
         var snapshots = [
             ShellObservation(ShellNode(.application)),
-            collapsed()
+            collapsed(),
+            sidebar()
         ]
+        var reveals = 0
         let ready = testBudget.waitForShell(
             observe: { clock += 0.5; return snapshots.removeFirst() },
             resolve: { $0.isLaunchReady ? true : nil },
-            reveal: { _ in XCTFail("Setup must not navigate"); return false },
-            leadingEdge: { _ in XCTFail("Setup must not navigate"); return false },
+            reveal: { _ in reveals += 1; clock += 0.5; return true },
+            leadingEdge: { _ in XCTFail("No additional chrome action is needed"); return false },
             pause: { clock += 0.2 }
         )
         XCTAssertEqual(ready, true)
+        XCTAssertEqual(reveals, 1)
         let action = testBudget.child(timeout: 5)
-        XCTAssertEqual(action.remaining, 2.8, accuracy: 0.001)
+        XCTAssertEqual(action.remaining, 1.6, accuracy: 0.001)
         XCTAssertNil(action.perform("overrun") { clock = 10.1; return true })
         XCTAssertEqual(testBudget.child(timeout: 5).remaining, 0,
                        "Starting another action must never renew the overall allowance")
+    }
+
+    func testNavigationReadinessIncludesSidebarRevealBeforeDestinationBudgetStarts() {
+        var clock: TimeInterval = 0
+        let testBudget = UIWaitBudget(timeout: 60, now: { clock })
+        clock = 46
+        var snapshots = [collapsed(), sidebar()]
+        var operations: [String] = []
+        let ready = testBudget.waitForShell(
+            observe: {
+                operations.append("snapshot")
+                clock += 0.3
+                return snapshots.removeFirst()
+            },
+            resolve: { $0.isLaunchReady ? true : nil },
+            reveal: {
+                XCTAssertEqual($0.label, "Show Sidebar")
+                operations.append("reveal")
+                clock += 5.1
+                return true
+            },
+            leadingEdge: { _ in XCTFail("No additional chrome action is needed"); return false },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(ready, true)
+        XCTAssertEqual(operations, ["snapshot", "reveal", "snapshot"],
+                       "Setup reveals navigation chrome without selecting a destination")
+        XCTAssertEqual(testBudget.child(timeout: 5).remaining, 5)
+        XCTAssertEqual(testBudget.remaining, 8.1, accuracy: 0.001)
     }
 
     func testReadyLaunchDoesNotExtendAnActionBudgetOrAcceptUnreadyChrome() {
@@ -475,6 +505,7 @@ final class UIWaitBudgetTests: XCTestCase {
         let action = testBudget.child(timeout: 5)
         XCTAssertEqual(action.remaining, 5)
         XCTAssertFalse(compact([]).isLaunchReady)
+        XCTAssertFalse(collapsed().isLaunchReady)
         XCTAssertFalse(compact([ShellNode(.button, label: "Farm", enabled: false)]).isLaunchReady)
         XCTAssertFalse(ShellObservation(ShellNode(.application, children: [
             ShellNode(.other, identifier: "navigation.shellLoading"),

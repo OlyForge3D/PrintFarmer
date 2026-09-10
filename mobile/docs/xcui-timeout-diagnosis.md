@@ -119,12 +119,15 @@ and zero-budget behavior. The XCTest watchdog, not this polling logic, bounds
 an operation that has already entered a blocking remote accessibility call.
 
 The authenticated Operator Shell, Feature Visibility, Printer List, Parts
-Inventory, Filament Coverage, Shift Tasks, Task Action Routing and Shift Tasks Failed Refresh suites
+Inventory, Filament Coverage, Harvest, Scan Station, Shift Tasks (including
+Grouped), Task Action Routing and Shift Tasks Failed Refresh suites
 establish navigation readiness in setup before starting an action's existing
 five-, eight- or ten-second budget. Readiness requires a rendered,
-enabled tab/sidebar button or a positively observed collapsed-sidebar toggle,
-and rejects the launch/navigation loading markers. Setup does not navigate.
-Launch and readiness consume the existing setup-time XCTest allowance; destination
+enabled tab/sidebar button and rejects the launch/navigation loading markers.
+A positively observed collapsed-sidebar toggle authorizes the existing bounded
+chrome reveal, but setup completes only after navigation buttons appear. Setup
+never selects a destination. Launch, chrome reveal and readiness consume the
+existing setup-time XCTest allowance; destination
 resolution is capped by that same absolute deadline and cannot renew it. XCTest
 also enforces any tighter allowance assigned in a test body. No XCTest
 allowance or action timeout is increased, and unauthenticated/loading-scenario
