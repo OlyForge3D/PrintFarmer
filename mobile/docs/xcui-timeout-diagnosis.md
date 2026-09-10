@@ -278,12 +278,15 @@ through `tee` unchanged.
 
 Subsequent CI failures in #2619 exposed the opposite cold-layout problem:
 missing compact-tab child queries spent the iPad budget before opening its
-sidebar. Destination lookup and root enumeration now inspect the rendered
-surface before querying its children, under the same monotonic deadline.
+sidebar. Destination lookup and root enumeration check the compact tab-bar root
+first, then the sidebar's own navigation bar, before querying either surface's
+children under the same monotonic deadline. Fake-clock cases protect this order
+from an absent-sidebar overrun and forbid further probes after a root overrun.
 The matrix also selects the current `OperatorFeatureVisibilityUITests` rather
 than the retired `AttentionDisabledFallbackUITests`; zero executed tests still
 fail with exit 70. Runner regressions check matrix class names against source.
-Filament XCUI assertions open the actual details disclosure and retain stable
+Filament XCUI assertions find the Overview panel by its identifier regardless of
+accessibility element type, open its details disclosure and retain stable
 printer/slot IDs; the disclosure label's identifier must not overwrite its
 coverage rows, summary, Clear assignment or NFC action identifiers.
 

@@ -33,6 +33,19 @@ final class UIWaitBudget {
         perform("exists: \(identifier)") { element.exists } == true
     }
 
+    func shellSurface(
+        compactTabBarExists: () -> Bool,
+        sidebarNavigationBarExists: () -> Bool
+    ) -> RenderedShellRoot.Surface? {
+        if perform("exists: compact tab bar", compactTabBarExists) == true {
+            return .tabBar
+        }
+        if perform("exists: sidebar navigation bar", sidebarNavigationBarExists) == true {
+            return .sidebar
+        }
+        return nil
+    }
+
     func waitFor(
         _ element: XCUIElement,
         named identifier: String,
@@ -56,6 +69,72 @@ final class UIWaitBudget {
 
 @MainActor
 final class UIWaitBudgetTests: XCTestCase {
+    func testCompactShellSkipsAbsentSidebarProbeThatWouldOverrun() {
+        var clock: TimeInterval = 0
+        var operations: [String] = []
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        let surface = budget.shellSurface(
+            compactTabBarExists: {
+                operations.append("compact root")
+                clock += 1
+                return true
+            },
+            sidebarNavigationBarExists: {
+                operations.append("absent sidebar")
+                clock += 6
+                return false
+            }
+        )
+        XCTAssertEqual(surface, .tabBar)
+        XCTAssertEqual(budget.remaining, 4)
+        XCTAssertEqual(budget.perform("compact children") {
+            operations.append("compact children")
+            return "tab.farm"
+        }, "tab.farm")
+        XCTAssertEqual(operations, ["compact root", "compact children"])
+    }
+
+    func testRegularShellChecksCompactRootBeforeSidebarRoot() {
+        var clock: TimeInterval = 0
+        var operations: [String] = []
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        let surface = budget.shellSurface(
+            compactTabBarExists: {
+                operations.append("compact root")
+                clock += 1
+                return false
+            },
+            sidebarNavigationBarExists: {
+                operations.append("sidebar root")
+                clock += 1
+                return true
+            }
+        )
+        XCTAssertEqual(surface, .sidebar)
+        XCTAssertEqual(operations, ["compact root", "sidebar root"])
+        XCTAssertEqual(budget.remaining, 3)
+    }
+
+    func testShellRootOverrunDoesNotProbeAnotherSurface() {
+        var clock: TimeInterval = 0
+        var sidebarQueried = false
+        let budget = UIWaitBudget(timeout: 2, now: { clock })
+        XCTAssertNil(budget.shellSurface(
+            compactTabBarExists: { clock = 3; return false },
+            sidebarNavigationBarExists: { sidebarQueried = true; return true }
+        ))
+        XCTAssertFalse(sidebarQueried)
+        XCTAssertEqual(budget.lastOperation, "exists: compact tab bar")
+    }
+
+    func testMissingShellRootsDoNotIdentifyASurface() {
+        let budget = UIWaitBudget(timeout: 5, now: { 0 })
+        XCTAssertNil(budget.shellSurface(
+            compactTabBarExists: { false },
+            sidebarNavigationBarExists: { false }
+        ))
+    }
+
     func testCompositeOperationsShareOneDeadline() {
         var clock: TimeInterval = 10
         let budget = UIWaitBudget(timeout: 5, now: { clock })
@@ -180,7 +259,8 @@ class PrintFarmerUITestCase: XCTestCase {
             .matching(identifier: "printer.detail.root.\(printerID)").firstMatch
         XCTAssertTrue(root.waitForExistence(timeout: 10),
                       "Navigation must reach the exact printer's detail, not a same-name sibling.")
-        let overview = root.scrollViews["printer.detail.panel.overview"]
+        let overview = root.descendants(matching: .any)
+            .matching(identifier: "printer.detail.panel.overview").firstMatch
         XCTAssertTrue(overview.waitForExistence(timeout: 5))
         let heading = overview.descendants(matching: .any)
             .matching(identifier: "printer.filament.heading").firstMatch
@@ -198,6 +278,12 @@ class PrintFarmerUITestCase: XCTestCase {
 
     // MARK: - Adaptive shell navigation (iPhone tab bar / iPad sidebar)
 
+    // ContentView's split-view sidebar owns this navigation title; destination
+    // buttons are not surface probes because they may not exist on compact UI.
+    private var sidebarNavigationBar: XCUIElement {
+        app.navigationBars["PrintFarmer"]
+    }
+
     /// Reveal the iPad NavigationSplitView sidebar via the system-provided
     /// nav-bar toggle if it appears to be collapsed. No-op on compact width
     /// (iPhone) or when the sidebar is already visible.
@@ -207,10 +293,8 @@ class PrintFarmerUITestCase: XCTestCase {
     }
 
     private func revealSidebarIfCollapsed(budget: UIWaitBudget, toggleWait: TimeInterval) -> Bool {
-        let sidebar = app.buttons
-            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
-            .firstMatch
-        if budget.exists(sidebar, named: "sidebar.*") {
+        let sidebar = sidebarNavigationBar
+        if budget.exists(sidebar, named: "sidebar navigation bar") {
             return true
         }
         let labels = ["Sidebar", "Toggle Sidebar", "Show Sidebar"]
@@ -226,7 +310,7 @@ class PrintFarmerUITestCase: XCTestCase {
         }) == true else {
             return false
         }
-        if budget.waitFor(sidebar, named: "sidebar.*", upTo: min(1, budget.remaining)) {
+        if budget.waitFor(sidebar, named: "sidebar navigation bar", upTo: min(1, budget.remaining)) {
             return true
         }
 
@@ -252,10 +336,7 @@ class PrintFarmerUITestCase: XCTestCase {
             start.press(forDuration: 0.1, thenDragTo: end)
             return true
         }) == true else { return false }
-        let sidebar = app.buttons
-            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
-            .firstMatch
-        return budget.waitFor(sidebar, named: "sidebar.*", upTo: budget.remaining)
+        return budget.waitFor(sidebarNavigationBar, named: "sidebar navigation bar", upTo: budget.remaining)
     }
 
     /// Adaptive locator for a shell destination using its shipped identifier.
@@ -292,17 +373,21 @@ class PrintFarmerUITestCase: XCTestCase {
         )
         let sidebar = app.buttons[sidebarIdentifier]
         while budget.remaining > 0 {
-            if budget.exists(sidebar, named: sidebarIdentifier) { return sidebar }
-            if budget.exists(tabBar, named: "compact tab bar") {
+            switch budget.shellSurface(
+                compactTabBarExists: { tabBar.exists },
+                sidebarNavigationBarExists: { self.sidebarNavigationBar.exists }
+            ) {
+            case .tabBar:
                 if budget.exists(tabButton, named: tabIdentifier) { return tabButton }
                 if budget.exists(tabElement, named: "\(tabIdentifier) descendant") { return tabElement }
                 if budget.exists(tabLabel, named: "\(tabIdentifier) title fallback") {
                     recordTabIdentifierCompatibilityFallback(tabIdentifier)
                     return tabLabel
                 }
-            } else {
-                _ = revealSidebarIfCollapsed(budget: budget, toggleWait: 1)
+            case .sidebar:
                 if budget.exists(sidebar, named: sidebarIdentifier) { return sidebar }
+            case nil:
+                _ = revealSidebarIfCollapsed(budget: budget, toggleWait: 1)
             }
             budget.pause()
         }
@@ -373,7 +458,11 @@ class PrintFarmerUITestCase: XCTestCase {
         let sidebar = app.buttons
             .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
         while budget.remaining > 0 {
-            if budget.exists(sidebar.firstMatch, named: "sidebar.*") {
+            switch budget.shellSurface(
+                compactTabBarExists: { tabBar.exists },
+                sidebarNavigationBarExists: { self.sidebarNavigationBar.exists }
+            ) {
+            case .sidebar:
                 let buttons = budget.perform("enumerate sidebar buttons") {
                     sidebar.allElementsBoundByIndex
                 } ?? []
@@ -383,16 +472,17 @@ class PrintFarmerUITestCase: XCTestCase {
                         identifiers.insert($0.identifier).inserted
                     }
                 }
-            }
-            if budget.exists(tabBar, named: "compact tab bar") {
+            case .tabBar:
                 let buttons = budget.perform("enumerate tab buttons") {
                     tabBar.buttons.allElementsBoundByIndex
                 } ?? []
                 if !buttons.isEmpty {
                     return shellRoots(buttons, surface: .tabBar, budget: budget)
                 }
-            } else if revealSidebarIfCollapsed(budget: budget, toggleWait: 0.5) {
-                continue
+            case nil:
+                if revealSidebarIfCollapsed(budget: budget, toggleWait: 0.5) {
+                    continue
+                }
             }
             budget.pause()
         }
