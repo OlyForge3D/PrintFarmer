@@ -276,6 +276,17 @@ for ShiftTasks and OperatorShell: suite selection remains intact, only ShiftTask
 gets the budget selector, logs are retained, and exit codes 0 and 42 propagate
 through `tee` unchanged.
 
+Subsequent CI failures in #2619 exposed the opposite cold-layout problem:
+missing compact-tab child queries spent the iPad budget before opening its
+sidebar. Destination lookup and root enumeration now inspect the rendered
+surface before querying its children, under the same monotonic deadline.
+The matrix also selects the current `OperatorFeatureVisibilityUITests` rather
+than the retired `AttentionDisabledFallbackUITests`; zero executed tests still
+fail with exit 70. Runner regressions check matrix class names against source.
+Filament XCUI assertions open the actual details disclosure and retain stable
+printer/slot IDs; the disclosure label's identifier must not overwrite its
+coverage rows, summary, Clear assignment or NFC action identifiers.
+
 ### Retained artifacts
 
 Local artifacts live outside the worktree, in the Copilot session

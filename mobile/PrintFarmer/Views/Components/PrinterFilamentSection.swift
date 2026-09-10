@@ -72,8 +72,8 @@ struct PrinterFilamentSection: View {
                     Text("Filament details")
                         .font(.subheadline)
                         .frame(minHeight: 44, alignment: .leading)
+                        .accessibilityIdentifier("printer.filament.disclosure")
                 }
-                .accessibilityIdentifier("printer.filament.disclosure")
             }
         }
         .fixedSize(horizontal: false, vertical: true)

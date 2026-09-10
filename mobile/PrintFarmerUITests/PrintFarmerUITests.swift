@@ -174,6 +174,28 @@ class PrintFarmerUITestCase: XCTestCase {
         }
     }
 
+    /// Coverage facts are disclosed separately from the compact assignment summary.
+    func openPrinterFilamentDetails(printerID: String) -> XCUIElement {
+        let root = app.descendants(matching: .any)
+            .matching(identifier: "printer.detail.root.\(printerID)").firstMatch
+        XCTAssertTrue(root.waitForExistence(timeout: 10),
+                      "Navigation must reach the exact printer's detail, not a same-name sibling.")
+        let overview = root.scrollViews["printer.detail.panel.overview"]
+        XCTAssertTrue(overview.waitForExistence(timeout: 5))
+        let heading = overview.descendants(matching: .any)
+            .matching(identifier: "printer.filament.heading").firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 10))
+        let disclosure = overview.buttons["printer.filament.disclosure"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+        for _ in 0..<3 {
+            if disclosure.isHittable { break }
+            overview.swipeUp()
+        }
+        XCTAssertTrue(disclosure.isHittable, "Coverage remains reachable through Filament details.")
+        disclosure.tap()
+        return overview
+    }
+
     // MARK: - Adaptive shell navigation (iPhone tab bar / iPad sidebar)
 
     /// Reveal the iPad NavigationSplitView sidebar via the system-provided
@@ -241,8 +263,9 @@ class PrintFarmerUITestCase: XCTestCase {
     /// otherwise the iPad `NavigationSplitView` sidebar button — revealing a
     /// collapsed sidebar via the system toggle if needed.
     ///
-    /// Gives the compact tab a brief chance to appear, then proactively
-    /// reveals a collapsed iPad sidebar before polling both surfaces.
+    /// Inspect the rendered surface before querying its children. Repeated
+    /// missing compact-tab queries can exhaust the budget on a cold iPad
+    /// before its sidebar toggle is ever tapped.
     ///
     /// - Parameters:
     ///   - tabIdentifier: The compact tab identifier (e.g. `tab.attention`).
@@ -257,6 +280,7 @@ class PrintFarmerUITestCase: XCTestCase {
         line: UInt = #line
     ) -> XCUIElement {
         let budget = UIWaitBudget(timeout: timeout)
+        let tabBar = app.tabBars.firstMatch
         let tabButton = app.tabBars.buttons[tabIdentifier]
         let tabElement = app.tabBars.descendants(matching: .any)
             .matching(identifier: tabIdentifier)
@@ -267,29 +291,19 @@ class PrintFarmerUITestCase: XCTestCase {
             with: "sidebar."
         )
         let sidebar = app.buttons[sidebarIdentifier]
-        if budget.waitFor(tabButton, named: tabIdentifier, upTo: min(1, timeout)) {
-            return tabButton
-        }
-        if budget.exists(tabElement, named: "\(tabIdentifier) descendant") {
-            return tabElement
-        }
-        if budget.exists(tabLabel, named: "\(tabIdentifier) title fallback") {
-            recordTabIdentifierCompatibilityFallback(tabIdentifier)
-            return tabLabel
-        }
-        if budget.exists(sidebar, named: sidebarIdentifier) {
-            return sidebar
-        }
-
-        _ = revealSidebarIfCollapsed(budget: budget, toggleWait: 1)
         while budget.remaining > 0 {
-            if budget.exists(tabButton, named: tabIdentifier) { return tabButton }
-            if budget.exists(tabElement, named: "\(tabIdentifier) descendant") { return tabElement }
-            if budget.exists(tabLabel, named: "\(tabIdentifier) title fallback") {
-                recordTabIdentifierCompatibilityFallback(tabIdentifier)
-                return tabLabel
-            }
             if budget.exists(sidebar, named: sidebarIdentifier) { return sidebar }
+            if budget.exists(tabBar, named: "compact tab bar") {
+                if budget.exists(tabButton, named: tabIdentifier) { return tabButton }
+                if budget.exists(tabElement, named: "\(tabIdentifier) descendant") { return tabElement }
+                if budget.exists(tabLabel, named: "\(tabIdentifier) title fallback") {
+                    recordTabIdentifierCompatibilityFallback(tabIdentifier)
+                    return tabLabel
+                }
+            } else {
+                _ = revealSidebarIfCollapsed(budget: budget, toggleWait: 1)
+                if budget.exists(sidebar, named: sidebarIdentifier) { return sidebar }
+            }
             budget.pause()
         }
         recordQueryFailure(
@@ -355,27 +369,30 @@ class PrintFarmerUITestCase: XCTestCase {
 
     func renderedShellRoots(timeout: TimeInterval = 8) -> [RenderedShellRoot] {
         let budget = UIWaitBudget(timeout: timeout)
+        let tabBar = app.tabBars.firstMatch
+        let sidebar = app.buttons
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
         while budget.remaining > 0 {
-            let tabButtons = budget.perform("enumerate tab buttons") {
-                app.tabBars.firstMatch.buttons.allElementsBoundByIndex
-            } ?? []
-            if !tabButtons.isEmpty {
-                return shellRoots(tabButtons, surface: .tabBar, budget: budget)
-            }
-
-            // A cold compact shell may still be loading. A missing iPad toggle
-            // must not consume the budget before we inspect the tab bar again.
-            _ = revealSidebarIfCollapsed(budget: budget, toggleWait: 0.5)
-            let sidebarButtons = budget.perform("enumerate sidebar buttons") {
-                app.buttons
-                    .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
-                    .allElementsBoundByIndex
-            } ?? []
-            if !sidebarButtons.isEmpty {
-                var identifiers = Set<String>()
-                return shellRoots(sidebarButtons, surface: .sidebar, budget: budget).filter {
-                    identifiers.insert($0.identifier).inserted
+            if budget.exists(sidebar.firstMatch, named: "sidebar.*") {
+                let buttons = budget.perform("enumerate sidebar buttons") {
+                    sidebar.allElementsBoundByIndex
+                } ?? []
+                if !buttons.isEmpty {
+                    var identifiers = Set<String>()
+                    return shellRoots(buttons, surface: .sidebar, budget: budget).filter {
+                        identifiers.insert($0.identifier).inserted
+                    }
                 }
+            }
+            if budget.exists(tabBar, named: "compact tab bar") {
+                let buttons = budget.perform("enumerate tab buttons") {
+                    tabBar.buttons.allElementsBoundByIndex
+                } ?? []
+                if !buttons.isEmpty {
+                    return shellRoots(buttons, surface: .tabBar, budget: budget)
+                }
+            } else if revealSidebarIfCollapsed(budget: budget, toggleWait: 0.5) {
+                continue
             }
             budget.pause()
         }

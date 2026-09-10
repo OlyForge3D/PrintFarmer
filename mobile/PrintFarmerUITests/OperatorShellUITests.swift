@@ -413,6 +413,7 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
         XCTAssertFalse(app.descendants(matching: .any)["filament-coverage-badge-runout-eta"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["filament-coverage-badge-runout-no-eta"].exists)
 
+        let printerID = String(firstCard.identifier.dropFirst("farm-card-".count))
         firstCard.tap()
         XCTAssertTrue(
             app.descendants(matching: .any)
@@ -428,21 +429,15 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
         XCTAssertFalse(app.descendants(matching: .any)["filament-coverage-badge-runout-eta"].exists)
         XCTAssertFalse(app.descendants(matching: .any)["filament-coverage-badge-runout-no-eta"].exists)
 
-        // Assert the new component's actual presentation rather than only
-        // the absence of legacy identifiers: it must render and must show
-        // the explicit "Coverage disabled" state, with no coverage summary
-        // or aggregate verdict data.
-        let filamentHeading = app.descendants(matching: .any)["printer.filament.heading"]
+        // The explicit coverage state lives in Filament details, not the
+        // compact assignment summary. Inspect it on this exact printer.
+        let overview = openPrinterFilamentDetails(printerID: printerID)
         XCTAssertTrue(
-            filamentHeading.waitForExistence(timeout: 8),
-            "PrinterFilamentSection must render on printer detail"
-        )
-        XCTAssertTrue(
-            app.staticTexts["Coverage disabled"].waitForExistence(timeout: 5),
+            overview.staticTexts["Coverage disabled"].waitForExistence(timeout: 5),
             "PrinterFilamentSection must show the explicit feature-disabled coverage state"
         )
         XCTAssertFalse(
-            app.descendants(matching: .any)["printer.filament.summary"].exists,
+            overview.descendants(matching: .any)["printer.filament.summary"].exists,
             "No coverage summary/aggregate verdict may render while coverage is disabled"
         )
     }
