@@ -134,7 +134,7 @@ read feature flags. Replace the owner when the real server/printer target change
 | Home All/XY/Z | `home`, `homeXY`, `homeZ` | Independent capability; fresh requested-axis acknowledgement, or acceptance-only when already homed |
 | Jog | `move` | Movement + supported axes; matching-axis position update; existing distances/feedrates |
 | Individual hotend/bed | `setTemperatures` | Specific heater support; other heater omitted; exact setpoint acknowledgement |
-| Absolute XYZ | `moveTo` | Absolute support + supported axes; every requested coordinate must match |
+| Absolute XYZ | `moveTo` | All XYZ required; verified operation, frame, bounds, homing and clearance; every coordinate must match |
 | Disable motors | `disableMotors` | Specific motor-release support + explicit confirmation; acceptance only, no motor telemetry |
 
 All operations retain shared command single-flight and online/idle gating. Printing
@@ -283,17 +283,22 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   late reads. Missing/failed limits are explained in the shared group with a
   **Retry heater limits** read-only action. Missing fields can also be retried;
   retry never replays a target. Reopening can retry missing hardware with cached capabilities.
-- Absolute coordinates are signed millimetres, with blank axes omitted and
-  zero preserved, and accept **at most three decimal places**. **Custom feedrate
+- Absolute coordinates require **explicit X, Y and Z**, in signed millimetres,
+  with zero preserved and **at most three decimal places**. Blank coordinates
+  block both the form and owner; cached position never fills them. **Custom feedrate
   input is disabled** because the shared contract provides no authoritative
   feedrate maximum. Both the editor and VM reject any custom value, including
   otherwise reasonable rates and extreme integers. An omitted custom rate
-  selects and explicitly sends the existing relative-jog rate: **3000 mm/min**
-  for XY-only moves, **600 mm/min** for any move including Z (even Z=0).
+  selects and explicitly sends **600 mm/min**, the existing rate for a move
+  including Z (even Z=0). Partial XY-only absolute requests are not supported.
   These are the established native axis-specific rates, not a newly invented
   custom range or an unbounded server default. No mm/s conversion or relative-move fallback
   occurs. Build-volume dimensions are not firmware travel limits or proof of
   a zero origin. Position and homing labels preserve unknown telemetry.
+  The owner requires shared verified absolute-operation support, origin, travel
+  envelope and clearance, plus fresh homing and matching coordinate-frame telemetry.
+  It checks the effective destination against those bounds and clearance again
+  immediately before transport; backend preflight remains authoritative.
 - Precision is checked in both the editor and command owner before dispatch:
   shared Moonraker/FlashForge temperature formatting emits whole degrees, and
   Moonraker movement formatting emits at most three decimal millimetres.

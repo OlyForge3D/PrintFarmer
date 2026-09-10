@@ -622,7 +622,9 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let printer = try makePrinter(backend: .moonraker)
         var caps = Self.layoutCaps
         caps.supportsAbsoluteMovement = true
+        caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
         let service = makeService(caps: caps)
+        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
         let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
         let content = PrinterSetupControlsContent(printer: printer, viewModel: model)
@@ -687,12 +689,77 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await settle(controller)
         coordinate.text = "1.001"
         coordinate.sendActions(for: .editingChanged)
+        for (id, text) in [("y", "0"), ("z", "10")] {
+            let field = try XCTUnwrap(controls.first {
+                $0.accessibilityIdentifier == "printer.controls.absolute.\(id)"
+            } as? UITextField)
+            field.text = text
+            field.sendActions(for: .editingChanged)
+        }
         try await settle(controller)
         move.sendActions(for: .touchUpInside)
         try await settle(controller)
         XCTAssertEqual(service.moveToCalledWith?.x, 1.001)
-        XCTAssertNil(service.moveToCalledWith?.y)
-        XCTAssertNil(service.moveToCalledWith?.z)
+        XCTAssertEqual(service.moveToCalledWith?.y, 0)
+        XCTAssertEqual(service.moveToCalledWith?.z, 10)
+    }
+
+    func test_absoluteEditorRequiresEveryAxisAndVerifiedSafetyBeforeDispatch() async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        var caps = Self.layoutCaps
+        caps.supportsAbsoluteMovement = true
+        caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
+        let service = makeService(caps: caps)
+        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        let content = JogSubgroup.AbsolutePositionControls(viewModel: model)
+            .frame(width: 390).fixedSize(horizontal: false, vertical: true)
+        let (window, controller) = install(content)
+        defer { window.isHidden = true }
+        window.frame.size = controller.sizeThatFits(in: CGSize(width: 390, height: 10000))
+        controller.view.frame = window.bounds
+        try await settle(controller)
+        let controls = nativeControls(in: controller.view)
+        let fields = try ["x", "y", "z"].map { axis in
+            try XCTUnwrap(controls.first {
+                $0.accessibilityIdentifier == "printer.controls.absolute.\(axis)"
+            } as? UITextField)
+        }
+        let move = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.move" })
+        XCTAssertFalse(move.isEnabled)
+        for missing in fields.indices {
+            for index in fields.indices {
+                fields[index].text = index == missing ? "" : ["0", "-2.5", "10"][index]
+                fields[index].sendActions(for: .editingChanged)
+            }
+            try await settle(controller)
+            XCTAssertFalse(move.isEnabled)
+            move.sendActions(for: .touchUpInside)
+            try await settle(controller)
+            XCTAssertNil(service.moveToCalledWith)
+            XCTAssertNil(model.lastError, "Missing coordinates are blocked in the editor before the owner")
+        }
+        for index in fields.indices {
+            fields[index].text = ["0", "-2.5", "10"][index]
+            fields[index].sendActions(for: .editingChanged)
+        }
+        try await settle(controller)
+        XCTAssertTrue(move.isEnabled)
+        service.capabilitiesToReturn?.verifiedSafety?.operations.absoluteMovement.support = .unknown
+        await model.refreshSafetyEvidence()
+        try await settle(controller)
+        XCTAssertFalse(move.isEnabled)
+        service.capabilitiesToReturn = caps
+        await model.refreshSafetyEvidence()
+        try await settle(controller)
+        XCTAssertTrue(move.isEnabled)
+        move.sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertEqual(service.moveToCalledWith?.x, 0)
+        XCTAssertEqual(service.moveToCalledWith?.y, -2.5)
+        XCTAssertEqual(service.moveToCalledWith?.z, 10)
+        XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 600)
     }
 
     func test_pendingCommand_disablesNativeActionsButKeepsStopWaitingEnabled() async throws {
@@ -756,7 +823,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 XCTAssertTrue(controls.isEmpty, "Offline setup controls remain hidden by the host contract")
                 continue
             } else {
-                for label in ["Hotend target in degrees Celsius", "X absolute destination in millimeters"] {
+                for label in ["Hotend target in degrees Celsius", "X required absolute destination in millimeters"] {
                     let control = try XCTUnwrap(controls.first { $0.accessibilityLabel == label })
                     XCTAssertFalse(control.isEnabled)
                 }
@@ -818,14 +885,14 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let controls = nativeControls(in: controller.view)
         for label in [
             "Hotend target in degrees Celsius", "Bed target in degrees Celsius",
-            "X absolute destination in millimeters", "Y absolute destination in millimeters",
-            "Z absolute destination in millimeters",
+            "X required absolute destination in millimeters", "Y required absolute destination in millimeters",
+            "Z required absolute destination in millimeters",
             "Set targets", "Move to position", "Disable motors"
         ] {
             let target = try XCTUnwrap(controls.first { $0.accessibilityLabel == label }, label)
             XCTAssertGreaterThanOrEqual(target.bounds.height, 44, label)
             XCTAssertGreaterThanOrEqual(target.bounds.width, 44, label)
-            XCTAssertTrue(target.isEnabled, label)
+            XCTAssertEqual(target.isEnabled, label != "Move to position", label)
             XCTAssertTrue(target.point(inside: CGPoint(x: 1, y: 1), with: nil), label)
         }
         let feedrate = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.feedrate" })

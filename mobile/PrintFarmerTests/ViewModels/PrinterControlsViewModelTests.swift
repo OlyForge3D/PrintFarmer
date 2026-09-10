@@ -61,11 +61,16 @@ final class PrinterControlsViewModelTests: XCTestCase {
     private func makeViewModel(
         printer: Printer? = nil,
         capabilities: PrinterBackendCapabilities? = nil,
+        verifiedAbsolute: Bool = false,
         accessCheck: @escaping @MainActor () -> String? = { nil }
     ) throws -> PrinterControlsViewModel {
         let p = try printer ?? TestData.decodePrinter() // online + state="printing" by default
         if let caps = capabilities {
             mockService.capabilitiesToReturn = caps
+        }
+        if verifiedAbsolute {
+            mockService.capabilitiesToReturn?.verifiedSafety = VerifiedSafetyFixtures.discovery()
+            mockService.statusToReturn = VerifiedSafetyFixtures.status(id: p.id)
         }
         if mockService.detailsToReturn == nil {
             mockService.detailsToReturn = .controlsLimitsFixture(for: p)
@@ -103,7 +108,9 @@ final class PrinterControlsViewModelTests: XCTestCase {
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
         caps.supportsDisableMotors = true
+        caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
         service.capabilitiesToReturn = caps
+        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
         service.detailsToReturn = .controlsLimitsFixture(for: printer)
         let model = PrinterControlsViewModel.configuredForTests(
             printerService: service, printer: printer, serverID: serverID
@@ -436,7 +443,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             .preheat(.pla, hotendTarget: 200, bedTarget: 60),
             .jog(axis: "X", distanceMm: 1),
             .home(axes: ["X", "Y", "Z"]), .home(axes: ["X", "Y"]), .home(axes: ["Z"]),
-            .moveTo(x: 50, y: nil, z: nil, feedrateMmMin: nil)
+            .moveTo(x: 50, y: 30, z: 10, feedrateMmMin: nil)
         ]
         for kind in kinds {
             var printer = try idlePrinter()
@@ -470,6 +477,8 @@ final class PrinterControlsViewModelTests: XCTestCase {
             case .moveTo(let x, let y, let z, let feedrate):
                 await original.moveTo(x: x, y: y, z: z, feedrateMmMin: feedrate)
                 confirmed.x = x
+                confirmed.y = y
+                confirmed.z = z
             default:
                 XCTFail("Unexpected command domain")
             }
@@ -875,10 +884,10 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertEqual(vm.maximum(for: .hotend), 280)
     }
 
-    func test_absoluteFeedrate_rejectsEveryCustomValueAndUsesEstablishedAxisRates() async throws {
+    func test_absoluteFeedrate_rejectsEveryCustomValueAndUsesEstablishedZRate() async throws {
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
-        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps, verifiedAbsolute: true)
         await vm.loadCapabilities()
         for rate in [Int.min, -1, 0, 1, 600, 3000, 3001, Int.max] {
             await vm.moveTo(x: 1, y: nil, z: nil, feedrateMmMin: rate)
@@ -886,10 +895,10 @@ final class PrinterControlsViewModelTests: XCTestCase {
             XCTAssertNil(vm.pendingCommand)
             XCTAssertEqual(vm.lastError?.message, ControlNumberInput.customFeedrateMessage)
         }
-        for z in [nil, 0.0, -1.0] as [Double?] {
+        for z in [0.0, -0.5, 10.0] {
             await vm.moveTo(x: 1, y: 0, z: z, feedrateMmMin: nil)
             XCTAssertNil(vm.lastError)
-            XCTAssertEqual(mockService.moveToCalledWith?.feedrateMmMin, z == nil ? 3000 : 600)
+            XCTAssertEqual(mockService.moveToCalledWith?.feedrateMmMin, 600)
             XCTAssertEqual(mockService.moveToCalledWith?.z, z)
             vm.cancelPendingCommand()
         }
@@ -962,8 +971,8 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await vm.loadCapabilities()
         for value in [1.2345, -0.0001, Double.leastNonzeroMagnitude, (1.001).nextUp] {
             for axis in ["X", "Y", "Z"] {
-                await vm.moveTo(x: axis == "X" ? value : nil, y: axis == "Y" ? value : nil,
-                                z: axis == "Z" ? value : nil, feedrateMmMin: nil)
+                await vm.moveTo(x: axis == "X" ? value : 0, y: axis == "Y" ? value : 0,
+                                z: axis == "Z" ? value : 0, feedrateMmMin: nil)
                 XCTAssertNil(mockService.moveToCalledWith)
                 XCTAssertNil(vm.pendingCommand)
                 XCTAssertEqual(vm.lastError?.message, ControlNumberInput.coordinatePrecisionMessage)
@@ -978,18 +987,20 @@ final class PrinterControlsViewModelTests: XCTestCase {
     func test_coordinatePrecision_preservesDecimalValuesAndExactReportedPosition() async throws {
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
-        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps, verifiedAbsolute: true)
         await vm.loadCapabilities()
         for value in [1.001, -1.234, 0.1, 0.0] {
-            await vm.moveTo(x: value, y: nil, z: nil, feedrateMmMin: nil)
+            await vm.moveTo(x: value, y: 0, z: 10, feedrateMmMin: nil)
             XCTAssertNil(vm.lastError)
             XCTAssertEqual(mockService.moveToCalledWith?.x, value)
-            XCTAssertNil(mockService.moveToCalledWith?.y)
-            XCTAssertNil(mockService.moveToCalledWith?.z)
-            XCTAssertEqual(mockService.moveToCalledWith?.feedrateMmMin, 3000)
+            XCTAssertEqual(mockService.moveToCalledWith?.y, 0)
+            XCTAssertEqual(mockService.moveToCalledWith?.z, 10)
+            XCTAssertEqual(mockService.moveToCalledWith?.feedrateMmMin, 600)
             XCTAssertNotNil(vm.pendingCommand)
             var reported = vm.printer
             reported.x = value
+            reported.y = 0
+            reported.z = 10
             vm.handlePrinterUpdate(reported)
             XCTAssertNil(vm.pendingCommand)
             XCTAssertEqual(vm.commandNotice, "Matching telemetry received. Check the machine before further setup.")
@@ -1019,18 +1030,20 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let printer = try idlePrinter()
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
+        caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
         mockService.capabilitiesToReturn = caps
+        mockService.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
         let barrier = AsyncBarrier()
         addTeardownBlock { barrier.close() }
         let service = ControlsDelayedService(base: mockService, beforeMoveTo: { await barrier.arriveAndWait() })
         let vm = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await vm.loadCapabilities()
-        let command = Task { await vm.moveTo(x: 1.001, y: 0, z: -1.234, feedrateMmMin: nil) }
+        let command = Task { await vm.moveTo(x: 1.001, y: 0, z: -0.234, feedrateMmMin: nil) }
         await barrier.waitUntilArrived()
         var reported = printer
         reported.x = 1.001
         reported.y = 0
-        reported.z = -1.234
+        reported.z = -0.234
         vm.handlePrinterUpdate(reported)
         XCTAssertNotNil(vm.pendingCommand)
         await vm.homeAll()
@@ -1283,12 +1296,14 @@ final class PrinterControlsViewModelTests: XCTestCase {
     }
 
     func test_motionNotices_distinguishCachedAcceptanceAndFreshTelemetry() async throws {
-        let printer = try idlePrinter()
+        var printer = try idlePrinter()
+        printer.y = 0
+        printer.z = 10
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
-        let vm = try makeViewModel(printer: printer, capabilities: caps)
+        let vm = try makeViewModel(printer: printer, capabilities: caps, verifiedAbsolute: true)
         await vm.loadCapabilities()
-        await vm.moveTo(x: try XCTUnwrap(printer.x), y: nil, z: nil, feedrateMmMin: nil)
+        await vm.moveTo(x: try XCTUnwrap(printer.x), y: 0, z: 10, feedrateMmMin: nil)
         XCTAssertNil(vm.pendingCommand)
         XCTAssertTrue(vm.commandNotice?.hasPrefix("Request accepted.") == true)
         XCTAssertTrue(vm.commandNotice?.contains("fresh physical completion is not confirmed") == true)
@@ -1391,15 +1406,15 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertEqual(mockService.setTemperaturesCalledWith?.bed, 60)
     }
 
-    func test_absoluteDispatch_omitsBlankAxesPreservesZeroAndFeedrate() async throws {
+    func test_absoluteDispatch_requiresXYZPreservesZeroSignedValuesAndFeedrate() async throws {
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
-        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps, verifiedAbsolute: true)
         await vm.loadCapabilities()
-        await vm.moveTo(x: 0, y: nil, z: -2.5, feedrateMmMin: nil)
+        await vm.moveTo(x: 0, y: -2.5, z: -0.5, feedrateMmMin: nil)
         XCTAssertEqual(mockService.moveToCalledWith?.x, 0)
-        XCTAssertNil(mockService.moveToCalledWith?.y)
-        XCTAssertEqual(mockService.moveToCalledWith?.z, -2.5, "Do not invent a zero-origin travel bound")
+        XCTAssertEqual(mockService.moveToCalledWith?.y, -2.5)
+        XCTAssertEqual(mockService.moveToCalledWith?.z, -0.5, "The verified frame, not a guessed zero origin, sets bounds")
         XCTAssertEqual(mockService.moveToCalledWith?.feedrateMmMin, 600)
         XCTAssertNil(mockService.moveCalledWith)
     }
@@ -1444,14 +1459,14 @@ final class PrinterControlsViewModelTests: XCTestCase {
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
         caps.supportsDisableMotors = true
-        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps, verifiedAbsolute: true)
         await vm.loadCapabilities()
         mockService.commandResultToReturn = CommandResult(success: false, message: "Guard rejected")
         await vm.disableMotors()
         XCTAssertEqual(vm.lastError?.message, "Guard rejected")
         XCTAssertNil(vm.pendingCommand)
         XCTAssertNil(vm.commandNotice)
-        await vm.moveTo(x: 1, y: nil, z: nil, feedrateMmMin: nil)
+        await vm.moveTo(x: 1, y: 0, z: 10, feedrateMmMin: nil)
         XCTAssertEqual(vm.lastError?.message, "Guard rejected")
         XCTAssertNil(vm.pendingCommand)
     }
@@ -2594,6 +2609,85 @@ final class GuardedMaterialControlsTests: XCTestCase {
         return (model, service)
     }
 
+    func test_absoluteMoveRequiresEveryCoordinateAndNeverFillsFromTelemetry() async throws {
+        let (model, service) = try await fixture()
+        for point in [(nil, 30.0, 10.0), (20.0, nil, 10.0), (20.0, 30.0, nil)]
+            as [(Double?, Double?, Double?)] {
+            XCTAssertEqual(model.absoluteMoveBlockedReason(x: point.0, y: point.1, z: point.2),
+                           ControlNumberInput.absoluteCoordinatesMessage)
+            await model.moveTo(x: point.0, y: point.1, z: point.2, feedrateMmMin: nil)
+            XCTAssertNil(service.moveToCalledWith)
+            XCTAssertNil(model.pendingCommand)
+            XCTAssertEqual(model.lastError?.message, ControlNumberInput.absoluteCoordinatesMessage)
+        }
+        await model.moveTo(x: 0, y: -2.5, z: 10, feedrateMmMin: nil)
+        XCTAssertNil(model.lastError)
+        XCTAssertEqual(service.moveToCalledWith?.x, 0)
+        XCTAssertEqual(service.moveToCalledWith?.y, -2.5)
+        XCTAssertEqual(service.moveToCalledWith?.z, 10)
+        XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 600)
+        XCTAssertNil(service.moveCalledWith)
+    }
+
+    func test_absoluteMoveRejectsUnknownUnsupportedOrStaleVerifiedEvidence() async throws {
+        for variant in 0..<17 {
+            let (model, service) = try await fixture()
+            switch variant {
+            case 0: service.capabilitiesToReturn?.verifiedSafety = nil
+            case 1: service.capabilitiesToReturn?.verifiedSafety?.operations.absoluteMovement.support = .unknown
+            case 2: service.capabilitiesToReturn?.verifiedSafety?.operations.absoluteMovement.support = .unsupported
+            case 3: service.capabilitiesToReturn?.verifiedSafety?.positioning.coordinateOriginMm.state = .unknown
+            case 4: service.capabilitiesToReturn?.verifiedSafety?.positioning.travelEnvelopeMm.state = .unknown
+            case 5: service.capabilitiesToReturn?.verifiedSafety?.positioning.minimumClearanceZMm.state = .unknown
+            case 6: service.statusToReturn?.safetyTelemetry?.homedAxes.value = nil
+            case 7: service.statusToReturn?.safetyTelemetry?.homedAxes.value = ["X", "Y"]
+            case 8: service.statusToReturn?.safetyTelemetry?.homedAxes.observedAtUtc = Date().addingTimeInterval(-60)
+            case 9: service.statusToReturn?.safetyTelemetry?.coordinateOriginOffsetMm.value = nil
+            case 10: service.statusToReturn?.safetyTelemetry?.coordinateOriginOffsetMm.observedAtUtc = Date().addingTimeInterval(-60)
+            case 11: service.statusToReturn?.safetyTelemetry?.coordinateOriginOffsetMm.value?.x = 11
+            case 12: service.capabilitiesToReturn?.verifiedSafety?.discovery.sourceRevision = "other-revision"
+            case 13: service.capabilitiesToReturn?.verifiedSafety?.positioning.travelEnvelopeMm.value?.minimum.x = 1000
+            case 14: service.capabilitiesToReturn?.verifiedSafety?.operations.absoluteMovement.source = nil
+            case 15: service.statusToReturn?.safetyTelemetry?.coordinateOriginOffsetMm.observedAtUtc = Date().addingTimeInterval(60)
+            default:
+                var limited = PrinterBackendCapabilities(
+                    supportsMovement: true, supportsTemperatureControl: true,
+                    supportsBedTemperature: true, supportsFanControl: false,
+                    supportsHoming: true, supportedAxes: ["X", "Y"]
+                )
+                limited.supportsAbsoluteMovement = true
+                limited.verifiedSafety = VerifiedSafetyFixtures.discovery()
+                service.capabilitiesToReturn = limited
+            }
+            await model.refreshSafetyEvidence()
+            XCTAssertNotNil(model.absoluteMoveBlockedReason(x: 20, y: 30, z: 10), "\(variant)")
+            await model.moveTo(x: 20, y: 30, z: 10, feedrateMmMin: nil)
+            XCTAssertNil(service.moveToCalledWith, "\(variant)")
+            XCTAssertNotNil(model.lastError, "\(variant)")
+            XCTAssertNil(model.pendingCommand, "\(variant)")
+        }
+    }
+
+    func test_absoluteMoveChecksEffectiveEnvelopeClearanceAndManualPrecision() async throws {
+        let (model, service) = try await fixture()
+        for point in [
+            SafetyVector3Dto(x: -111, y: 30, z: 10), .init(x: 191, y: 30, z: 10),
+            .init(x: 20, y: -71, z: 10), .init(x: 20, y: 131, z: 10),
+            .init(x: 20, y: 30, z: 100), .init(x: 20, y: 30, z: -0.9),
+            .init(x: 1.2345, y: 30, z: 10), .init(x: .nan, y: 30, z: 10)
+        ] {
+            await model.moveTo(x: point.x, y: point.y, z: point.z, feedrateMmMin: nil)
+            XCTAssertNil(service.moveToCalledWith)
+            XCTAssertNotNil(model.lastError)
+        }
+        await model.moveTo(x: -1.234, y: 0, z: -0.5, feedrateMmMin: nil)
+        XCTAssertNil(model.lastError)
+        XCTAssertEqual(service.moveToCalledWith?.x, -1.234)
+        XCTAssertEqual(service.moveToCalledWith?.y, 0)
+        XCTAssertEqual(service.moveToCalledWith?.z, -0.5)
+        XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 600)
+    }
+
     func test_signedChoicesConvertFeedrateExactlyOnceAndRejectUnboundedInputs() throws {
         for distance in MaterialControlInput.distances {
             for speed in MaterialControlInput.speeds {
@@ -2892,7 +2986,7 @@ final class GuardedMaterialControlsTests: XCTestCase {
         let (model, service) = try await fixture()
         XCTAssertThrowsError(try ControlNumberInput.coordinate("0.15000000000000002"))
         XCTAssertEqual(try ControlNumberInput.coordinate("0.150"), 0.15)
-        await model.moveTo(x: 0.2 - 0.05, y: nil, z: nil, feedrateMmMin: nil)
+        await model.moveTo(x: 0.2 - 0.05, y: 0, z: 10, feedrateMmMin: nil)
         XCTAssertNil(service.moveToCalledWith)
         XCTAssertEqual(model.lastError?.message, ControlNumberInput.coordinatePrecisionMessage)
 

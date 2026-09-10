@@ -121,7 +121,25 @@ struct JogSubgroup: View {
 
         static func isVisible(_ capabilities: PrinterBackendCapabilities?) -> Bool {
             capabilities?.supportsAbsoluteMovement == true
-                && !(capabilities?.supportedAxes.filter { ["X", "Y", "Z"].contains($0) }.isEmpty ?? true)
+                && Set(capabilities?.supportedAxes ?? []).isSuperset(of: ["X", "Y", "Z"])
+        }
+
+        static func destination(x: String, y: String, z: String) throws -> SafetyVector3Dto {
+            try ControlNumberInput.absolutePosition(
+                x: ControlNumberInput.coordinate(x),
+                y: ControlNumberInput.coordinate(y),
+                z: ControlNumberInput.coordinate(z)
+            )
+        }
+
+        private var validationMessage: String? {
+            do {
+                let point = try Self.destination(x: x, y: y, z: z)
+                return viewModel.absoluteMoveBlockedReason(
+                    x: point.x, y: point.y, z: point.z,
+                    feedrateMmMin: try ControlNumberInput.feedrate(feedrate)
+                )
+            } catch { return error.localizedDescription }
         }
 
         var body: some View {
@@ -130,7 +148,7 @@ struct JogSubgroup: View {
                     Text("Absolute position")
                         .font(.headline)
                         .accessibilityAddTraits(.isHeader)
-                    Text("Coordinates are in mm. Blank axes stay unchanged; zero is an explicit destination. The server verifies the coordinate frame, travel limits and homing before dispatch.")
+                    Text("Enter all X, Y and Z destinations in mm; zero is explicit. Verified frame, travel bounds, homing and clearance are required. The server rechecks before dispatch.")
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
                     ForEach(JogSubgroup.visibleAxes(for: viewModel.capabilities), id: \.self) { axis in
@@ -138,7 +156,7 @@ struct JogSubgroup: View {
                             .font(.footnote)
                         ControlNumberField(
                             placeholder: "\(axis) destination (mm)", text: binding(axis),
-                            label: "\(axis) absolute destination in millimeters",
+                            label: "\(axis) required absolute destination in millimeters",
                             identifier: "printer.controls.absolute.\(axis.lowercased())",
                             hint: ControlNumberInput.coordinatePrecisionMessage
                         )
@@ -154,23 +172,27 @@ struct JogSubgroup: View {
                         hint: ControlNumberInput.customFeedrateMessage
                     )
                     .disabled(true)
-                    Text("No verified custom feedrate maximum. Uses \(PrinterControlsViewModel.xyFeedrateMmMin) mm/min for XY-only moves or \(PrinterControlsViewModel.zFeedrateMmMin) mm/min when Z is included.")
+                    Text("No verified custom feedrate maximum. Uses \(PrinterControlsViewModel.zFeedrateMmMin) mm/min because every absolute move includes Z.")
                         .font(.footnote)
                     ControlActionButton(title: "Move to position", identifier: "printer.controls.absolute.move") {
                         do {
-                            let axes = JogSubgroup.visibleAxes(for: viewModel.capabilities)
-                            let x = try axes.contains("X") ? ControlNumberInput.coordinate(x) : nil
-                            let y = try axes.contains("Y") ? ControlNumberInput.coordinate(y) : nil
-                            let z = try axes.contains("Z") ? ControlNumberInput.coordinate(z) : nil
+                            let point = try Self.destination(x: x, y: y, z: z)
                             let f = try ControlNumberInput.feedrate(feedrate)
+                            if let reason = viewModel.absoluteMoveBlockedReason(
+                                x: point.x, y: point.y, z: point.z, feedrateMmMin: f
+                            ) {
+                                inputError = reason
+                                return
+                            }
                             inputError = nil
-                            Task { await viewModel.moveTo(x: x, y: y, z: z, feedrateMmMin: f) }
+                            Task { await viewModel.moveTo(x: point.x, y: point.y, z: point.z, feedrateMmMin: f) }
                         } catch {
                             inputError = error.localizedDescription
                         }
                     }
-                    if let inputError {
-                        Text(inputError).font(.footnote).foregroundStyle(Color.pfError)
+                    .disabled(validationMessage != nil)
+                    if let message = validationMessage ?? inputError {
+                        Text(message).font(.footnote).foregroundStyle(Color.pfError)
                     }
                 }
                 .foregroundStyle(Color.pfTextPrimary)

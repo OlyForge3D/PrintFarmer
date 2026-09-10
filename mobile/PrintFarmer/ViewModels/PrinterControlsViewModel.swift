@@ -96,6 +96,7 @@ enum Heater: String, CaseIterable, Sendable {
 }
 
 enum ControlNumberInput {
+    static let absoluteCoordinatesMessage = "Enter finite X, Y and Z destinations. All three coordinates are required; no current position is filled in."
     static let heaterPrecisionMessage = "Use whole degrees Celsius. Fractional targets are not supported; no rounding is applied."
     static let coordinatePrecisionMessage = "Use at most 3 decimal places in millimetres. No rounding is applied."
     static let customFeedrateMessage = "Custom feedrates are unavailable without a verified maximum. Leave this field blank to use the established axis-specific rate."
@@ -130,6 +131,16 @@ enum ControlNumberInput {
             throw PrinterControlError.invalidRequest(coordinatePrecisionMessage)
         }
         return value
+    }
+
+    static func absolutePosition(x: Double?, y: Double?, z: Double?) throws -> SafetyVector3Dto {
+        guard let x, let y, let z, x.isFinite, y.isFinite, z.isFinite else {
+            throw PrinterControlError.invalidRequest(absoluteCoordinatesMessage)
+        }
+        guard [x, y, z].allSatisfy(hasCoordinatePrecision) else {
+            throw PrinterControlError.invalidRequest(coordinatePrecisionMessage)
+        }
+        return SafetyVector3Dto(x: x, y: y, z: z)
     }
 
     static func isWholeDegree(_ value: Double) -> Bool {
@@ -749,7 +760,7 @@ final class PrinterControlsViewModel: ObservableObject {
         let effective = SafetyVector3Dto(x: point.x + frame.x, y: point.y + frame.y, z: point.z + frame.z)
         guard [point.x, point.y, point.z].allSatisfy(ControlNumberInput.hasCoordinatePrecision),
               envelope.contains(effective), effective.z >= clearance else {
-            return "Move exceeds verified travel bounds, minimum clearance or supported coordinate precision. Use the printer's supported calibration procedure."
+            return "Move exceeds verified travel bounds, minimum clearance or supported coordinate precision. Use the printer's supported procedure."
         }
         return nil
     }
@@ -1211,28 +1222,36 @@ final class PrinterControlsViewModel: ObservableObject {
         }
     }
 
+    func absoluteMoveBlockedReason(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int? = nil) -> String? {
+        if let reason = blockedReason { return reason }
+        guard feedrateMmMin == nil else { return ControlNumberInput.customFeedrateMessage }
+        let point: SafetyVector3Dto
+        do {
+            point = try ControlNumberInput.absolutePosition(x: x, y: y, z: z)
+        } catch { return error.localizedDescription }
+        guard capabilities?.supportsAbsoluteMovement == true,
+              Set(capabilities?.supportedAxes ?? []).isSuperset(of: ["X", "Y", "Z"]) else {
+            return "Absolute movement requires confirmed support for all X, Y and Z axes."
+        }
+        return supportReason(capabilities?.verifiedSafety?.operations.absoluteMovement, title: "Absolute positioning")
+            ?? safeMoveReason(point)
+    }
+
     func moveTo(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async {
-        let automaticFeedrate = z == nil ? Self.xyFeedrateMmMin : Self.zFeedrateMmMin
+        let automaticFeedrate = Self.zFeedrateMmMin
         let command = ControlCommand(
             kind: .moveTo(x: x, y: y, z: z, feedrateMmMin: automaticFeedrate), startedAt: clock()
         )
         guard beginCommand(command) else { return }
         defer { endCommand(command) }
-        guard feedrateMmMin == nil else {
-            setError(command: command, message: ControlNumberInput.customFeedrateMessage, isRetryable: false)
+        if let reason = absoluteMoveBlockedReason(x: x, y: y, z: z, feedrateMmMin: feedrateMmMin) {
+            setError(command: command, message: reason, isRetryable: false)
             return
         }
-        let coordinates = [("X", x), ("Y", y), ("Z", z)].filter { $0.1 != nil }
-        guard capabilities?.supportsAbsoluteMovement == true, !coordinates.isEmpty,
-              coordinates.allSatisfy({ capabilities?.supportedAxes.contains($0.0) == true && $0.1!.isFinite }) else {
-            setError(command: command, message: "Provide finite coordinates on supported axes.", isRetryable: false)
-            return
-        }
-        guard coordinates.allSatisfy({ ControlNumberInput.hasCoordinatePrecision($0.1!) }) else {
-            setError(command: command, message: ControlNumberInput.coordinatePrecisionMessage, isRetryable: false)
-            return
-        }
-        await perform(command) { [printerService, printer] in
+        await perform(command) { [self] in
+            if let reason = absoluteMoveBlockedReason(x: x, y: y, z: z, feedrateMmMin: feedrateMmMin) {
+                throw PrinterControlError.invalidRequest(reason)
+            }
             let result = try await printerService.moveTo(
                 printerId: printer.id, x: x, y: y, z: z, feedrateMmMin: automaticFeedrate
             )
