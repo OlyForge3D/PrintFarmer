@@ -16,7 +16,7 @@
 #   - a printer-discovery scan (autoRegister=false) proves the deterministic
 #     discovery contract: it finds the Voron and Prusa fixture entries with
 #     the expected hostname/backend fields. The scan itself does not contact
-# moonraker-discovery-voron/-prusa or perform any Moonraker handshake —
+#     moonraker-discovery-voron/-prusa or perform any Moonraker handshake —
 #     those hostnames are network aliases of moonraker-ready so that a
 #     printer subsequently added from a discovered candidate connects for
 #     real via the unchanged backend plugin (covered by UI add/card E2E, not

@@ -722,6 +722,15 @@ test_postgres_runtime_secrets_not_baked() {
     connection_placeholder_count="$(printf '%s\n' "$compose_content" | grep -F 'ConnectionStrings__Default=${ConnectionStrings__Default}' | wc -l | tr -d '[:space:]')"
     assert_equals "2" "$connection_placeholder_count" "API and slicer-host should both defer connection-string interpolation to Docker Compose"
 
+    local expected_orcaslicer_sha
+    expected_orcaslicer_sha="$(
+        source "$REPO_ROOT/scripts/docker/container-versions.conf"
+        printf '%s' "$ORCASLICER_SHA256"
+    )"
+    assert_not_equals "" "$expected_orcaslicer_sha" "Container versions should provide an OrcaSlicer checksum"
+    assert_contains "$compose_content" "ORCASLICER_SHA256: $expected_orcaslicer_sha" "OrcaSlicer checksum should be baked from container-versions.conf"
+    assert_not_contains "$compose_content" 'ORCASLICER_SHA256: ${ORCASLICER_SHA256}' "OrcaSlicer checksum should not remain a runtime placeholder"
+
     pass_test
 }
 
