@@ -119,8 +119,9 @@ and zero-budget behavior. The XCTest watchdog, not this polling logic, bounds
 an operation that has already entered a blocking remote accessibility call.
 
 The authenticated Operator Shell, Feature Visibility, Printer List, Parts
-Inventory and Shift Tasks Failed Refresh suites establish navigation readiness in setup before starting an
-action's existing five- or eight-second budget. Readiness requires a rendered,
+Inventory, Filament Coverage, Shift Tasks, Task Action Routing and Shift Tasks Failed Refresh suites
+establish navigation readiness in setup before starting an action's existing
+five-, eight- or ten-second budget. Readiness requires a rendered,
 enabled tab/sidebar button or a positively observed collapsed-sidebar toggle,
 and rejects the launch/navigation loading markers. Setup does not navigate.
 Launch and readiness consume the existing setup-time XCTest allowance; destination
@@ -128,6 +129,21 @@ resolution is capped by that same absolute deadline and cannot renew it. XCTest
 also enforces any tighter allowance assigned in a test body. No XCTest
 allowance or action timeout is increased, and unauthenticated/loading-scenario
 suites do not opt into this precondition.
+
+Login navigation explicitly dismisses an observed "Save Password?" alert using
+"Not Now". The password prompt can arrive after the sidebar opens; snapshot-only
+polling otherwise cannot trigger XCTest's implicit interruption handler. The
+login-only allowlist permits a public alert-root query when the app snapshot
+exposes no ready navigation or alert. Only an existing alert is then snapshotted;
+the query stays in the target application's public accessibility context.
+Other suites and already-observed navigation do not perform that extra query.
+The same original action deadline covers dismissal and navigation. Only this
+named alert/button pair is allowed. Login permits one conditional repeat of this
+idempotent dismissal only if a new snapshot still shows the same alert identity
+and frame and its Not Now button remains enabled and hittable. Disappearance,
+changed alerts and expired budgets never authorize another tap. Other suites
+do not opt into that repeat. No credentials are saved, no physical command is
+retried, and no product behavior changes.
 
 ### After-correction evidence
 

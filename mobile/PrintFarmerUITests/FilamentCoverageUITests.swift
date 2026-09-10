@@ -38,6 +38,7 @@ import XCTest
 /// a real observation, not a race).
 @MainActor
 final class FilamentCoverageUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
 
     // Stable UUIDs shared with UITestBootstrap. UI-test targets
     // cannot `import PrintFarmer`, so we hardcode the literals —

@@ -34,6 +34,8 @@ class ShiftTasksUITestBase: PrintFarmerUITestCase {
 
 @MainActor
 final class ShiftTasksUITests: ShiftTasksUITestBase {
+    override var waitsForNavigationReadiness: Bool { true }
+
     private let taskID = "78200000-0000-0000-0000-000000000001"
 
     override var shiftTaskScenarioLaunchArguments: [String] {

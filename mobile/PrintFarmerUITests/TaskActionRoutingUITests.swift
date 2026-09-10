@@ -13,6 +13,8 @@ import XCTest
 /// iPhone + iPad parity from one implementation.
 @MainActor
 final class TaskActionRoutingUITests: ShiftTasksUITestBase {
+    override var waitsForNavigationReadiness: Bool { true }
+
     // Stable task IDs seeded by `DemoShiftTaskService.routingTasks`.
     private let harvestTaskID = "78810000-0000-0000-0000-000000000001"
     private let swapTaskID = "78810000-0000-0000-0000-000000000002"
