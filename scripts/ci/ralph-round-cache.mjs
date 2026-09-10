@@ -34,7 +34,9 @@ export async function collectPaginated(fetchPage, { perPage = 100, maxPages = 10
     try {
       result = await fetchPage({ page, perPage });
     } catch (error) {
-      throw new RalphCacheError(`Snapshot API failed on page ${page}: ${error.message}`, 'API_FAILURE');
+      const wrapped = new RalphCacheError(`Snapshot API failed on page ${page}: ${error.message}`, 'API_FAILURE');
+      wrapped.sourceCode = error.code;
+      throw wrapped;
     }
     if (!Array.isArray(result)) {
       throw new RalphCacheError(`Snapshot API returned incomplete data on page ${page}.`, 'INCOMPLETE_DATA');
