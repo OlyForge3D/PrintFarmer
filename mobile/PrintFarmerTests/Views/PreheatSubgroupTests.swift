@@ -95,7 +95,10 @@ final class PreheatSubgroupTests: XCTestCase {
         field.text = "205"
         field.sendActions(for: .editingChanged)
         try await settle(controller)
+        let hotendDispatched = expectation(description: "Hotend target dispatched")
+        service.afterSetTemperatures = { hotendDispatched.fulfill() }
         set.sendActions(for: .touchUpInside)
+        await fulfillment(of: [hotendDispatched], timeout: 1)
         try await settle(controller)
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 205)
         XCTAssertNil(service.setTemperaturesCalledWith?.bed)
@@ -111,7 +114,10 @@ final class PreheatSubgroupTests: XCTestCase {
         bed.text = "0"
         bed.sendActions(for: .editingChanged)
         try await settle(controller)
+        let bedDispatched = expectation(description: "Zero bed target dispatched")
+        service.afterSetTemperatures = { bedDispatched.fulfill() }
         set.sendActions(for: .touchUpInside)
+        await fulfillment(of: [bedDispatched], timeout: 1)
         try await settle(controller)
         XCTAssertNil(service.setTemperaturesCalledWith?.hotend)
         XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 0)
