@@ -23,6 +23,11 @@ TEMP_DIR=$(mktemp -d -t "printfarmer-validation-XXXXXX")
 trap 'rm -rf "$TEMP_DIR"' EXIT
 echo "Using temp directory: $TEMP_DIR"
 
+# Dry-runs prepare storage directories too; never use the developer's paths.
+for storage_kind in GCODE MODELS PROFILES APP_DATA DATABASE DATAPROTECTION PGADMIN; do
+    export "EXTERNAL_${storage_kind}_PATH=$TEMP_DIR/storage/$storage_kind"
+done
+
 # Record an explicit assertion result without aborting the remaining validations.
 check_result() {
     local passed="$1"
@@ -213,7 +218,7 @@ ENABLE_SPOOLMAN=no
 EOF
 
 set +e
-host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" \
+host_output=$(timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" \
     --config-file "$MS_DIR/.deploy-config" \
     --env-file "$MS_DIR/.env" \
     --output-dir "$MS_DIR/generated" \
