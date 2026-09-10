@@ -421,8 +421,185 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertNil(sameService.homeCalledWith)
         barrier.release()
         await request.value
-        XCTAssertFalse(sameMachine.isExecuting, "A settled response must release the shared lease, not wait for telemetry")
-        XCTAssertNotNil(original.pendingCommand, "The old view's telemetry observation is separate from transport ownership")
+        XCTAssertTrue(sameMachine.isExecuting, "HTTP acceptance must not bypass another owner's pending telemetry")
+        XCTAssertNotNil(original.pendingCommand)
+        var confirmed = original.printer
+        confirmed.hotendTarget = 200
+        original.handlePrinterUpdate(confirmed)
+        XCTAssertFalse(sameMachine.isExecuting)
+    }
+
+    func test_sharedLease_pendingTelemetryBlocksSecondOwnerAcrossCommandDomains() async throws {
+        let kinds: [ControlCommand.Kind] = [
+            .heater(.hotend, target: 200),
+            .heaterTargets(hotend: 210, bed: 70),
+            .preheat(.pla, hotendTarget: 200, bedTarget: 60),
+            .jog(axis: "X", distanceMm: 1),
+            .home(axes: ["X", "Y", "Z"]), .home(axes: ["X", "Y"]), .home(axes: ["Z"]),
+            .moveTo(x: 50, y: nil, z: nil, feedrateMmMin: nil)
+        ]
+        for kind in kinds {
+            var printer = try idlePrinter()
+            printer.hotendTarget = 0
+            printer.bedTarget = 0
+            printer.homedAxes = nil
+            printer.x = 10
+            let serverID = UUID()
+            let (original, _) = try await leaseOwner(serverID: serverID, printer: printer)
+            var confirmed = printer
+            switch kind {
+            case .heater(let heater, let target):
+                await original.setHeaterTarget(heater, target: target)
+                confirmed.hotendTarget = target
+            case .heaterTargets(let hotend, let bed):
+                await original.setHeaterTargets(hotend: hotend, bed: bed)
+                confirmed.hotendTarget = hotend
+                confirmed.bedTarget = bed
+            case .preheat(let preset, let hotend, let bed):
+                await original.preheat(preset)
+                confirmed.hotendTarget = hotend
+                confirmed.bedTarget = bed
+            case .jog(let axis, let distance):
+                await original.jog(axis: axis, distanceMm: distance)
+                confirmed.x = 11
+            case .home(let axes):
+                if axes == ["X", "Y"] { await original.homeXY() }
+                else if axes == ["Z"] { await original.homeZ() }
+                else { await original.homeAll() }
+                confirmed.homedAxes = axes.joined()
+            case .moveTo(let x, let y, let z, let feedrate):
+                await original.moveTo(x: x, y: y, z: z, feedrateMmMin: feedrate)
+                confirmed.x = x
+            default:
+                XCTFail("Unexpected command domain")
+            }
+            let token = try XCTUnwrap(original.pendingCommand, "\(kind)")
+            XCTAssertNil(original.lastError, "\(kind)")
+            let (replacement, service) = try await leaseOwner(serverID: serverID, printer: printer)
+            var notifications = 0
+            let observation = replacement.objectWillChange.sink { notifications += 1 }
+            defer { observation.cancel() }
+            XCTAssertTrue(replacement.isExecuting, "\(kind)")
+            await attemptRoutineCommands(on: replacement)
+            assertNoRoutineDispatch(service)
+
+            var noise = printer
+            noise.hotendTemp = 55
+            noise.y = 21
+            original.handlePrinterUpdate(noise)
+            original.handlePrinterUpdate(try TestData.decodePrinter(from: TestJSON.printerMinimal))
+            XCTAssertEqual(original.pendingCommand, token, "\(kind)")
+            XCTAssertTrue(replacement.isExecuting, "\(kind)")
+            _ = try await service.emergencyStop(id: printer.id)
+            XCTAssertEqual(service.emergencyStopCalledWith, printer.id)
+            XCTAssertTrue(replacement.isExecuting, "Emergency dispatch does not clear routine ownership")
+
+            notifications = 0
+            original.handlePrinterUpdate(confirmed)
+            XCTAssertNil(original.pendingCommand, "\(kind)")
+            XCTAssertFalse(replacement.isExecuting, "\(kind)")
+            XCTAssertGreaterThan(notifications, 0, "The second owner must observe telemetry-based release")
+            await replacement.disableMotors()
+            XCTAssertEqual(service.disableMotorsCalledWith, printer.id)
+        }
+    }
+
+    func test_sharedLease_matchingTelemetryBeforeHTTPCannotUnlockSecondOwner() async throws {
+        for rejects in [false, true] {
+            let serverID = UUID()
+            let (original, service) = try await leaseOwner(serverID: serverID)
+            let (replacement, replacementService) = try await leaseOwner(
+                serverID: serverID, printer: original.printer
+            )
+            let barrier = AsyncBarrier()
+            addTeardownBlock { barrier.close() }
+            service.beforeSetTemperatures = { await barrier.arriveAndWait() }
+            let request = Task { await original.setHeaterTarget(.hotend, target: 200) }
+            await barrier.waitUntilArrived()
+            var confirmed = original.printer
+            confirmed.hotendTarget = 200
+            original.handlePrinterUpdate(confirmed)
+            XCTAssertNotNil(original.pendingCommand)
+            XCTAssertTrue(replacement.isExecuting)
+            await attemptRoutineCommands(on: replacement)
+            assertNoRoutineDispatch(replacementService)
+            if rejects { service.errorToThrow = NetworkError.forbidden }
+            barrier.release()
+            await request.value
+            XCTAssertNil(original.pendingCommand)
+            XCTAssertEqual(original.lastError != nil, rejects)
+            XCTAssertFalse(replacement.isExecuting)
+        }
+    }
+
+    func test_sharedLease_endingSettledObservationDoesNotClaimPhysicalCancellation() async throws {
+        for deactivate in [false, true] {
+            let serverID = UUID()
+            let (original, service) = try await leaseOwner(serverID: serverID)
+            await original.setHeaterTarget(.hotend, target: 200)
+            let (replacement, replacementService) = try await leaseOwner(
+                serverID: serverID, printer: original.printer
+            )
+            XCTAssertNotNil(original.pendingCommand)
+            XCTAssertTrue(replacement.isExecuting)
+            if deactivate { original.deactivate() }
+            else { original.cancelPendingCommand() }
+            XCTAssertNil(original.pendingCommand)
+            XCTAssertFalse(replacement.isExecuting, "Only settled observation ended, not physical execution")
+            XCTAssertTrue(original.commandNotice?.contains("printer may still execute") == true)
+            XCTAssertFalse(original.commandNotice?.contains("No printer command was sent") == true)
+            XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 200, "Cancellation cannot undo dispatch")
+            await replacement.jog(axis: "X", distanceMm: 1)
+            XCTAssertNotNil(replacementService.moveCalledWith)
+            replacement.cancelPendingCommand()
+        }
+    }
+
+    func test_sharedLease_droppedSettledObserverCannotStrandReplacement() async throws {
+        for calibration in [false, true] {
+            var printer = try idlePrinter()
+            printer.hotendTarget = 0
+            let serverID = UUID()
+            let service = MockPrinterService()
+            service.capabilitiesToReturn = Self.fullCaps
+            service.detailsToReturn = .controlsLimitsFixture(for: printer)
+            var original: PrinterControlsViewModel? = .configuredForTests(
+                printerService: service, printer: printer, serverID: serverID
+            )
+            weak var releasedOwner = original
+            await original?.loadCapabilities()
+            if calibration { await original?.startCalibration() }
+            else { await original?.setHeaterTarget(.hotend, target: 200) }
+            let (replacement, replacementService) = try await leaseOwner(serverID: serverID, printer: printer)
+            XCTAssertTrue(replacement.isExecuting)
+            let released = expectation(description: "Dropped observer releases only its own token")
+            let observation = replacement.objectWillChange.prefix(1).sink { _ in released.fulfill() }
+            defer { observation.cancel() }
+            original = nil
+            await fulfillment(of: [released], timeout: 5)
+            XCTAssertNil(releasedOwner, "The lease registry must not retain a completed observer")
+            XCTAssertFalse(replacement.isExecuting)
+            await replacement.disableMotors()
+            XCTAssertEqual(replacementService.disableMotorsCalledWith, printer.id)
+        }
+    }
+
+    func test_sharedLease_deferredLifetimeCleanupCannotUnlockNewPendingToken() async throws {
+        let serverID = UUID()
+        let (original, _) = try await leaseOwner(serverID: serverID)
+        let (replacement, _) = try await leaseOwner(serverID: serverID, printer: original.printer)
+        let (third, service) = try await leaseOwner(serverID: serverID, printer: original.printer)
+        await original.setHeaterTarget(.hotend, target: 200)
+        var confirmed = original.printer
+        confirmed.hotendTarget = 200
+        original.handlePrinterUpdate(confirmed)
+        // Acquire the new token before yielding to the old handle's cleanup.
+        await replacement.setHeaterTarget(.hotend, target: 220)
+        XCTAssertNotNil(replacement.pendingCommand)
+        XCTAssertTrue(third.isExecuting)
+        await attemptRoutineCommands(on: third)
+        assertNoRoutineDispatch(service)
+        replacement.cancelPendingCommand()
     }
 
     func test_sharedLease_staleTelemetryOwnerCannotReleaseReplacementToken() async throws {
@@ -430,6 +607,10 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let (original, _) = try await leaseOwner(serverID: serverID)
         await original.setHeaterTarget(.hotend, target: 200)
         let originalToken = try XCTUnwrap(original.pendingCommand)
+        var originalConfirmation = original.printer
+        originalConfirmation.hotendTarget = 200
+        original.handlePrinterUpdate(originalConfirmation)
+        XCTAssertNil(original.pendingCommand)
         let (replacement, service) = try await leaseOwner(serverID: serverID, printer: original.printer)
         let barrier = AsyncBarrier()
         addTeardownBlock { barrier.close() }
@@ -450,6 +631,10 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertEqual(replacement.pendingCommand, replacementToken)
         barrier.release()
         await request.value
+        XCTAssertTrue(third.isExecuting, "The replacement token remains owned during its telemetry wait")
+        var replacementConfirmation = replacement.printer
+        replacementConfirmation.hotendTarget = 220
+        replacement.handlePrinterUpdate(replacementConfirmation)
         XCTAssertFalse(third.isExecuting)
         await third.jog(axis: "X", distanceMm: 1)
         XCTAssertNotNil(thirdService.moveCalledWith)

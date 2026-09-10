@@ -137,7 +137,7 @@ read feature flags. Replace the owner when the real server/printer target change
 | Absolute XYZ | `moveTo` | Absolute support + supported axes; every requested coordinate must match |
 | Disable motors | `disableMotors` | Specific motor-release support + explicit confirmation; acceptance only, no motor telemetry |
 
-All operations retain shared transport single-flight and online/idle gating. Printing
+All operations retain shared command single-flight and online/idle gating. Printing
 and paused printers keep the explanatory lockout. Unrelated telemetry and
 other-printer updates do not acknowledge pending commands. Becoming offline or
 entering an unsafe state invalidates physical confirmation, not an outstanding
@@ -399,17 +399,28 @@ fixtures.
 
 All thermal/motion owners acquire the same lease in the existing command
 pipeline. It survives detail dismissal, replacement view models, and service
-reconstruction until the original response settles. Different servers/printers
+reconstruction until the original response settles, and remains held while an
+active owner subsequently awaits matching telemetry. HTTP acceptance alone
+cannot let another owner bypass that pending state. Different servers/printers
 remain independent. Every terminal path, including failed validation and proven
 pre-dispatch cancellation, releases only its matching invocation token. Old
 telemetry cancellation cannot release a replacement's lease. An outstanding call
 retains its cleanup owner, but the registry stores only UUIDs and observes views
-weakly, so settled owners are not leaked.
+weakly, so settled owners are not leaked. Owner-held cancellation handles also
+release matching command/workflow tokens when a settled observer is destroyed;
+an abandoned view cannot strand the process-wide registry. An in-flight call
+still retains its cleanup owner until the response returns.
 
 A replacement explains the shared lock and disables preset, home, jog and other routine inputs; it does
 not offer Stop waiting for another owner's request. Shared-state observation
-updates the replacement UI when the lease is released. Local post-response
-telemetry waiting remains separate from transport ownership. This is a
+updates the replacement UI when matching telemetry clears the original pending
+command. Stop waiting/deactivation after HTTP settlement explicitly ends
+observation and releases that token with an uncertainty warning; it does not
+cancel, reverse or prove completion of the physical action. Before settlement,
+neither cancellation nor matching telemetry releases the outstanding request.
+Two-owner tests cover all observable thermal/motion command domains, unrelated
+and wrong-printer updates, pre-response telemetry/rejection, cancellation and
+stale-token cleanup. This is a
 **process-local** guarantee, not cross-device/server-side serialization or proof
 of physical completion; Emergency Stop remains independent.
 
