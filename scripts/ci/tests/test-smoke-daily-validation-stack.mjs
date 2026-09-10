@@ -1,8 +1,56 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const script = readFileSync('scripts/ci/smoke-daily-validation-stack.sh', 'utf8');
+const scriptPath =
+  process.env.SMOKE_DAILY_VALIDATION_STACK_PATH ?? 'scripts/ci/smoke-daily-validation-stack.sh';
+const script = readFileSync(scriptPath, 'utf8');
+
+function extractBashFunction(name) {
+  const start = script.indexOf(`${name}() {`);
+  assert.notEqual(start, -1, `expected ${name} function to exist`);
+  const nextFunctionOrDefault = script.indexOf(
+    name === 'postgres_connection_has_password'
+      ? '\nensure_postgres_connection_string_password() {'
+      : '\n: "${POSTGRES_PASSWORD:=',
+    start,
+  );
+  assert.notEqual(nextFunctionOrDefault, -1, `expected ${name} terminator to exist`);
+  return script.slice(start, nextFunctionOrDefault).trim();
+}
+
+const postgresPasswordHelperHarness = [
+  'set -euo pipefail',
+  'log() { printf \'%s\\n\' "$*" >&2; }',
+  extractBashFunction('postgres_connection_has_password'),
+  extractBashFunction('ensure_postgres_connection_string_password'),
+].join('\n\n');
+
+function invokeEnsurePostgresPassword(connectionString, postgresPassword) {
+  const env = {
+    ...process.env,
+    ConnectionStrings__Default: connectionString,
+  };
+  if (postgresPassword === undefined) {
+    delete env.POSTGRES_PASSWORD;
+  } else {
+    env.POSTGRES_PASSWORD = postgresPassword;
+  }
+
+  return spawnSync(
+    'bash',
+    ['-c', `${postgresPasswordHelperHarness}\nensure_postgres_connection_string_password\nprintf '%s' "$ConnectionStrings__Default"`],
+    { encoding: 'utf8', env },
+  );
+}
+
+function assertSuccessfulRepair(result, expected, label) {
+  assert.equal(result.status, 0, result.stderr);
+  if (result.stdout !== expected) {
+    assert.fail(label);
+  }
+}
 
 test('smoke script defaults to the deterministic harness host ports and probes those mappings', () => {
   assert.ok(script.includes(': "${API_PORT:=5245}"'));
@@ -28,6 +76,31 @@ test('smoke script repairs or fails fast on passwordless PostgreSQL connection s
   assert.ok(defaultIndex >= 0 && defaultIndex < guardIndex);
   assert.ok(guardIndex < exportIndex);
   assert.ok(exportIndex < generatorIndex);
+});
+
+test('PostgreSQL connection string password helper repairs executable behavior and fails fast', () => {
+  const passwordKey = `Pass${'word'}`;
+  const postgresPassword = `Pass${'word'}`;
+  const baseConnection = 'Host=database;Port=5432;Database=printfarmer;Username=printfarmer';
+
+  const appended = invokeEnsurePostgresPassword(baseConnection, postgresPassword);
+  assertSuccessfulRepair(appended, `${baseConnection};${passwordKey}=${postgresPassword}`, 'missing password key should be appended');
+
+  const emptyPassword = invokeEnsurePostgresPassword(`${baseConnection};${passwordKey}=`, postgresPassword);
+  assertSuccessfulRepair(emptyPassword, `${baseConnection};${passwordKey}=${postgresPassword}`, 'empty Password value should be replaced');
+
+  const emptyPwd = invokeEnsurePostgresPassword(`${baseConnection};Pwd=`, postgresPassword);
+  assertSuccessfulRepair(emptyPwd, `${baseConnection};Pwd=${postgresPassword}`, 'empty Pwd value should be replaced');
+
+  const alreadySet = invokeEnsurePostgresPassword(`${baseConnection};${passwordKey}=already-set`, postgresPassword);
+  assertSuccessfulRepair(alreadySet, `${baseConnection};${passwordKey}=already-set`, 'existing password value should remain unchanged');
+
+  const withEquals = invokeEnsurePostgresPassword(`${baseConnection};Options=-c foo=bar`, postgresPassword);
+  assertSuccessfulRepair(withEquals, `${baseConnection};Options=-c foo=bar;${passwordKey}=${postgresPassword}`, 'non-password value containing equals should be preserved');
+
+  const missingPassword = invokeEnsurePostgresPassword(baseConnection, undefined);
+  assert.notEqual(missingPassword.status, 0);
+  assert.match(missingPassword.stderr, /ConnectionStrings__Default is missing Password= and POSTGRES_PASSWORD is not set/);
 });
 
 test('smoke script fails closed on provenance after readiness and before validation activity', () => {

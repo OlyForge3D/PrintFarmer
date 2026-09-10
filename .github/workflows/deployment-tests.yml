@@ -88,11 +88,27 @@ jobs:
       # to run directly here without pulling in the full suite.
       - name: Run nginx 3d-models routing regression test
         run: |
+          set -euo pipefail
           source tests/test-framework.sh
           source tests/test-compose-generator.sh
           setup
+          trap teardown EXIT
           test_model_thumbnail_replacement_routing
-          teardown
+
+      # Issue #2620: the full test-compose-generator.sh suite remains excluded
+      # from this CI job per #1308, but these three regression functions are
+      # cheap and directly guard the PostgreSQL secret/connection-string
+      # placeholder behavior that daily validation depends on.
+      - name: Run PostgreSQL compose secret regression tests
+        run: |
+          set -euo pipefail
+          source tests/test-framework.sh
+          source tests/test-compose-generator.sh
+          setup
+          trap teardown EXIT
+          test_postgres_runtime_secrets_not_baked
+          test_postgres_compose_config_resolves_password_for_api_and_slicer_host
+          test_postgres_passwordless_connection_string_fails_fast
 
   split-topology-route-smoke:
     # Issue #2239: tests/test-compose-generator.sh (above) proves the

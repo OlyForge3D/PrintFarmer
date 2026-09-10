@@ -27,6 +27,15 @@ postgres_connection_string() {
     printf 'Host=database;Port=5432;Database=printfarmer;Username=printfarmer;%s=%s' "$password_key" "$password"
 }
 
+assert_bare_placeholders_equal() {
+    local compose_content="$1"
+    local expected="$2"
+    local message="$3"
+    local actual
+    actual="$(printf '%s\n' "$compose_content" | grep -oE '[$][{][A-Za-z_][A-Za-z0-9_]*[}]' | sort -u | paste -sd ' ' - || true)"
+    assert_equals "$expected" "$actual" "$message"
+}
+
 # Resolve a Python interpreter that actually executes, mirroring
 # resolve_python_cmd() in compose-generator.sh (issue #1524). Used by tests
 # that check the *test environment's* Python/ruamel.yaml availability, so
@@ -686,6 +695,7 @@ test_provider_only_env_sqlserver() {
 
     # Must contain SQL Server password variable
     assert_contains "$compose_content" "MSSQL_SA_PASSWORD" "Should include MSSQL_SA_PASSWORD for SQL Server"
+    assert_bare_placeholders_equal "$compose_content" '${ConnectionStrings__Default} ${MSSQL_SA_PASSWORD}' "SQL Server compose should leave only the expected runtime placeholders"
 
     # Must not contain other providers' secret variables
     assert_not_contains "$compose_content" "POSTGRES_PASSWORD" "Should not include Postgres password when sqlserver is selected"
@@ -715,6 +725,7 @@ test_postgres_runtime_secrets_not_baked() {
 
     assert_contains "$compose_content" 'POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}' "Database password should remain a runtime placeholder"
     assert_contains "$compose_content" 'ConnectionStrings__Default=${ConnectionStrings__Default}' "API/slicer connection string should remain a runtime placeholder"
+    assert_bare_placeholders_equal "$compose_content" '${ConnectionStrings__Default} ${POSTGRES_PASSWORD}' "PostgreSQL compose should leave only expected runtime placeholders"
     assert_not_contains "$compose_content" "$pg_pw" "Generated compose should not contain the concrete database password"
     assert_not_contains "$compose_content" "$(postgres_connection_string "$pg_pw")" "Generated compose should not contain the concrete connection string"
 
