@@ -859,7 +859,7 @@ ensure_connection_string_password() {
     local conn
     conn=$(get_kv_from_file "$ENV_FILE" "ConnectionStrings__Default" || true)
     if [ -z "$conn" ]; then
-        print_warning "ConnectionStrings__Default missing from $ENV_FILE; API will reconstruct its own default connection string at runtime."
+        print_warning "ConnectionStrings__Default is missing or empty in $ENV_FILE; Docker Compose requires it. Run scripts/deploy-docker.sh --regenerate-config or set it before deployment."
         return 0
     fi
 

@@ -74,6 +74,11 @@ jobs:
           echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> $GITHUB_ENV
           echo "VAULT_DEV_ROOT_TOKEN=$(openssl rand -base64 24)" >> $GITHUB_ENV
 
+      - name: Provide throwaway database connection string for validation
+        # Both API and slicer-host require a non-empty connection string (#2622).
+        # This job only renders Compose; it never connects to a database.
+        run: echo "ConnectionStrings__Default=Host=database;Database=printfarmer;Username=printfarmer;Password=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+
       - name: Show Docker Compose version
         run: docker compose version
 
