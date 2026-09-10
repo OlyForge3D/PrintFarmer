@@ -16,6 +16,26 @@ source "$SCRIPT_DIR/test-framework.sh"
 TEST_TEMP_DIR=""
 readonly -a SUPPORTED_DATABASE_PROVIDERS=("postgres" "sqlserver")
 
+postgres_password_key() {
+    printf 'Pass%s' 'word'
+}
+
+postgres_connection_string() {
+    local password="$1"
+    local password_key
+    password_key="$(postgres_password_key)"
+    printf 'Host=database;Port=5432;Database=printfarmer;Username=printfarmer;%s=%s' "$password_key" "$password"
+}
+
+assert_bare_placeholders_equal() {
+    local compose_content="$1"
+    local expected="$2"
+    local message="$3"
+    local actual
+    actual="$(printf '%s\n' "$compose_content" | grep -oE '[$][{][A-Za-z_][A-Za-z0-9_]*[}]' | sort -u | paste -sd ' ' - || true)"
+    assert_equals "$expected" "$actual" "$message"
+}
+
 # Resolve a Python interpreter that actually executes, mirroring
 # resolve_python_cmd() in compose-generator.sh (issue #1524). Used by tests
 # that check the *test environment's* Python/ruamel.yaml availability, so
@@ -38,6 +58,9 @@ setup() {
     export AUTO_ADMIN_PASSWORD="compose-generator-test-value"
     export GRAFANA_ADMIN_PASSWORD="compose-generator-test-value"
     export Jwt__Key="compose-generator-test-jwt-key-32-bytes"
+    export POSTGRES_PASSWORD="compose-generator-test-db-secret"
+    export ConnectionStrings__Default
+    ConnectionStrings__Default="$(postgres_connection_string "$POSTGRES_PASSWORD")"
     export VAULT_DEV_ROOT_TOKEN="compose-generator-test-value"
     TEST_TEMP_DIR=$(create_test_temp_dir)
     test_info "Using temp directory: $TEST_TEMP_DIR"
@@ -672,6 +695,7 @@ test_provider_only_env_sqlserver() {
 
     # Must contain SQL Server password variable
     assert_contains "$compose_content" "MSSQL_SA_PASSWORD" "Should include MSSQL_SA_PASSWORD for SQL Server"
+    assert_bare_placeholders_equal "$compose_content" '${ConnectionStrings__Default} ${MSSQL_SA_PASSWORD}' "SQL Server compose should leave only the expected runtime placeholders"
 
     # Must not contain other providers' secret variables
     assert_not_contains "$compose_content" "POSTGRES_PASSWORD" "Should not include Postgres password when sqlserver is selected"
@@ -680,6 +704,88 @@ test_provider_only_env_sqlserver() {
     # Ensure ConnectionStrings__Default is present and points to a sqlserver-like DSN (mssql/sqlserver)
     assert_contains "$compose_content" "ConnectionStrings__Default" "Should include default connection string"
     assert_contains "$compose_content" "mssql" "Connection string should reference mssql or sqlserver scheme"
+
+    pass_test
+}
+
+# Regression test for issue #2620: compose generation must not bake runtime
+# database secrets or connection-string values into docker-compose.yml.
+test_postgres_runtime_secrets_not_baked() {
+    start_test "PostgreSQL runtime secrets are not baked during generation"
+
+    local temp_dir="$TEST_TEMP_DIR/test-postgres-runtime-placeholders"
+    local pg_pw="compose-generator-runtime-secret"
+    mkdir -p "$temp_dir"
+
+    assert_command_success "POSTGRES_PASSWORD='$pg_pw' ConnectionStrings__Default='$(postgres_connection_string "$pg_pw")' '$COMPOSE_GENERATOR' --db-provider postgres --enable-orca-worker yes --output-dir $temp_dir"
+    assert_file_exists "$temp_dir/docker-compose.yml"
+
+    local compose_content
+    compose_content=$(cat "$temp_dir/docker-compose.yml")
+
+    assert_contains "$compose_content" 'POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}' "Database password should remain a runtime placeholder"
+    assert_contains "$compose_content" 'ConnectionStrings__Default=${ConnectionStrings__Default}' "API/slicer connection string should remain a runtime placeholder"
+    assert_bare_placeholders_equal "$compose_content" '${ConnectionStrings__Default} ${POSTGRES_PASSWORD}' "PostgreSQL compose should leave only expected runtime placeholders"
+    assert_not_contains "$compose_content" "$pg_pw" "Generated compose should not contain the concrete database password"
+    assert_not_contains "$compose_content" "$(postgres_connection_string "$pg_pw")" "Generated compose should not contain the concrete connection string"
+
+    local connection_placeholder_count
+    connection_placeholder_count="$(printf '%s\n' "$compose_content" | grep -F 'ConnectionStrings__Default=${ConnectionStrings__Default}' | wc -l | tr -d '[:space:]')"
+    assert_equals "2" "$connection_placeholder_count" "API and slicer-host should both defer connection-string interpolation to Docker Compose"
+
+    local expected_orcaslicer_sha
+    expected_orcaslicer_sha="$(
+        source "$REPO_ROOT/scripts/docker/container-versions.conf"
+        printf '%s' "$ORCASLICER_SHA256"
+    )"
+    assert_not_equals "" "$expected_orcaslicer_sha" "Container versions should provide an OrcaSlicer checksum"
+    assert_contains "$compose_content" "ORCASLICER_SHA256: $expected_orcaslicer_sha" "OrcaSlicer checksum should be baked from container-versions.conf"
+    assert_not_contains "$compose_content" 'ORCASLICER_SHA256: ${ORCASLICER_SHA256}' "OrcaSlicer checksum should not remain a runtime placeholder"
+
+    pass_test
+}
+
+test_postgres_compose_config_resolves_password_for_api_and_slicer_host() {
+    start_test "PostgreSQL compose config resolves password for API and slicer-host"
+
+    if ! check_docker_compose_available; then
+        test_info "Skipping runtime interpolation assertion (requires Docker Compose)"
+        pass_test
+        return 0
+    fi
+
+    local temp_dir="$TEST_TEMP_DIR/test-postgres-runtime-config"
+    local pg_pw="compose-generator-config-secret"
+    local connection_string
+    connection_string="$(postgres_connection_string "$pg_pw")"
+    mkdir -p "$temp_dir"
+
+    assert_command_success "POSTGRES_PASSWORD='$pg_pw' ConnectionStrings__Default='$connection_string' '$COMPOSE_GENERATOR' --db-provider postgres --enable-orca-worker yes --output-dir $temp_dir"
+
+    local config_output
+    if ! config_output="$(cd "$temp_dir" && POSTGRES_PASSWORD="$pg_pw" ConnectionStrings__Default="$connection_string" Jwt__Key="$Jwt__Key" docker compose -f docker-compose.yml config 2>&1)"; then
+        test_info "$config_output"
+        fail_test "Docker Compose config should resolve runtime PostgreSQL connection string"
+        return 1
+    fi
+
+    local resolved_connection_count
+    resolved_connection_count="$(printf '%s\n' "$config_output" | grep -F "ConnectionStrings__Default: $connection_string" | wc -l | tr -d '[:space:]')"
+    assert_equals "2" "$resolved_connection_count" "API and slicer-host should both receive the resolved PostgreSQL connection string"
+
+    pass_test
+}
+
+test_postgres_passwordless_connection_string_fails_fast() {
+    start_test "PostgreSQL passwordless connection string fails fast"
+
+    local temp_dir="$TEST_TEMP_DIR/test-postgres-passwordless-fails"
+    local passwordless_connection="Host=database;Port=5432;Database=printfarmer;Username=printfarmer"
+    mkdir -p "$temp_dir"
+
+    capture_output "env -u POSTGRES_PASSWORD ConnectionStrings__Default='$passwordless_connection' '$COMPOSE_GENERATOR' --db-provider postgres --output-dir $temp_dir"
+    assert_not_equals "0" "$(get_output_exit_code)" "Generator should fail when an explicit PostgreSQL connection string has no password component"
+    assert_contains "$(get_output)" "missing a PostgreSQL password component" "Failure should explain the missing PostgreSQL password component"
 
     pass_test
 }
@@ -2089,6 +2195,9 @@ run_all_tests() {
     test_database_provider_config
     test_all_database_providers
     test_provider_only_env_sqlserver
+    test_postgres_runtime_secrets_not_baked
+    test_postgres_compose_config_resolves_password_for_api_and_slicer_host
+    test_postgres_passwordless_connection_string_fails_fast
     test_monitoring_inclusion
     test_all_addon_stacks
     test_combined_addon_stacks

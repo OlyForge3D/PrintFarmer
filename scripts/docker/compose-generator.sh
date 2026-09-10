@@ -14,10 +14,27 @@ SYSTEM_ARCH="${TARGET_ARCH:-$(uname -m)}"
 
 # Source container versions from single source of truth
 VERSIONS_FILE="$DOCKER_DIR/container-versions.conf"
+# Build/version/image pins owned by container-versions.conf. Keep this single
+# list as the source for both exported names and envsubst scope so runtime
+# secrets/configuration remain Docker Compose placeholders.
+readonly -a CONTAINER_VERSION_VARS=(
+    SDK_TAG
+    ASPNET_TAG
+    NODE_TAG
+    NGINX_TAG
+    UBUNTU_TAG
+    SUPPORTED_ORCASLICER_VERSION
+    SUPPORTED_ORCASLICER_SHA256
+    ORCASLICER_VERSION
+    ORCASLICER_SHA256
+    ORCASLICER_CONTAINER_DIGEST
+    BUILD_VERBOSITY
+    OBICO_ML_IMAGE
+    GO2RTC_IMAGE
+)
 if [[ -f "$VERSIONS_FILE" ]]; then
     source "$VERSIONS_FILE"
-    # Export all sourced variables so envsubst can use them
-    export SDK_TAG ASPNET_TAG NODE_TAG NGINX_TAG UBUNTU_TAG ORCASLICER_VERSION BUILD_VERBOSITY
+    export "${CONTAINER_VERSION_VARS[@]}"
 fi
 
 # Ensure required compose templates exist
@@ -127,6 +144,59 @@ resolve_python_cmd() {
 }
 
 PYTHON_CMD="$(resolve_python_cmd || true)"
+
+postgres_connection_has_password() {
+    local connection_string="$1"
+    local normalized password_pattern pwd_pattern
+    normalized="$(printf '%s' "$connection_string" | tr '[:upper:]' '[:lower:]')"
+    password_pattern='(^|;)password=[^;]+'
+    pwd_pattern='(^|;)pwd=[^;]+'
+
+    [[ "$normalized" =~ $password_pattern ]] || [[ "$normalized" =~ $pwd_pattern ]]
+}
+
+validate_database_environment() {
+    local provider_raw="${DB_PROVIDER:-postgres}"
+    local provider
+    provider="$(printf '%s' "$provider_raw" | tr '[:upper:]' '[:lower:]')"
+
+    case "$provider" in
+        postgres|postgresql)
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+
+    if [[ -n "${ConnectionStrings__Default:-}" ]] && ! postgres_connection_has_password "$ConnectionStrings__Default"; then
+        log_error "ConnectionStrings__Default is missing a PostgreSQL password component."
+        log_error "Set ConnectionStrings__Default with a non-empty password value, or let deploy-docker.sh generate it from POSTGRES_PASSWORD."
+        return 1
+    fi
+}
+
+populate_container_version_variables() {
+    local compose_file="$1"
+
+    if ! command -v envsubst >/dev/null 2>&1; then
+        return 0
+    fi
+
+    log_info "Populating container image versions from container-versions.conf..."
+    local container_version_envsubst_vars
+    container_version_envsubst_vars="$(printf '${%s} ' "${CONTAINER_VERSION_VARS[@]}")"
+    container_version_envsubst_vars="${container_version_envsubst_vars% }"
+
+    local envsubst_output
+    envsubst_output="$(mktemp)"
+    if ! envsubst "$container_version_envsubst_vars" < "$compose_file" > "$envsubst_output"; then
+        rm -f "$envsubst_output"
+        log_error "Failed to populate container image versions"
+        return 1
+    fi
+
+    mv "$envsubst_output" "$compose_file"
+}
 
 # Get the host IP for Docker extra_hosts configuration
 get_host_ip() {
@@ -726,21 +796,10 @@ generate_compose() {
         return 1
     fi
     
-    # Populate container version variables using envsubst
-    # This ensures the single source of truth (container-versions.conf) is used
-    if command -v envsubst >/dev/null 2>&1; then
-        log_info "Populating container image versions from container-versions.conf..."
-        local envsubst_output
-        envsubst_output="$(mktemp)"
-        if ! envsubst < "$compose_file" > "$envsubst_output"; then
-            rm -f "$envsubst_output"
-            log_error "Failed to populate container image versions"
-            return 1
-        fi
-
-        mv "$envsubst_output" "$compose_file"
+    if ! validate_database_environment; then
+        return 1
     fi
-    
+
     # Inject health check anchors from common compose file
     if ! inject_health_check_anchors "$compose_file"; then
         log_error "Failed to inject health check anchors"
@@ -976,6 +1035,10 @@ generate_compose() {
     
     if [[ "$addons_merged" == "true" ]]; then
         log_info "Successfully merged addon services into compose file"
+    fi
+
+    if ! populate_container_version_variables "$compose_file"; then
+        return 1
     fi
 
     # Validate the generated compose file when Docker Compose is available
