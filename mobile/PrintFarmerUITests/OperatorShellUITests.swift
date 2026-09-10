@@ -310,15 +310,9 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let hasTabBar = app.tabBars.firstMatch.waitForExistence(timeout: 3)
-        let tabIdentifier = hasTabBar
-            ? "tab.oversight"
-            : sidebarRootIdentifier.replacingOccurrences(
-                of: "sidebar.",
-                with: "tab."
-            )
         let root = shellDestinationButton(
-            tabIdentifier: tabIdentifier,
+            tabIdentifier: "tab.oversight",
+            sidebarIdentifier: sidebarRootIdentifier,
             timeout: 5
         )
         XCTAssertTrue(root.exists, file: file, line: line)

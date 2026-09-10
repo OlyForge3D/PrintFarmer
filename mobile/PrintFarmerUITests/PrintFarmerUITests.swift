@@ -22,10 +22,10 @@ final class UIWaitBudget {
         "elapsed=\(now() - started)s; last operation=\(lastOperation); remaining=\(remaining)s"
     }
 
-    func perform<T>(_ operation: String, _ body: () -> T) -> T? {
+    func perform<T>(_ operation: String, _ body: () throws -> T) rethrows -> T? {
         guard remaining > 0 else { return nil }
         lastOperation = operation
-        let result = body()
+        let result = try body()
         return remaining > 0 ? result : nil
     }
 
@@ -33,15 +33,39 @@ final class UIWaitBudget {
         perform("exists: \(identifier)") { element.exists } == true
     }
 
-    func shellSurface(
-        compactTabBarExists: () -> Bool,
-        sidebarNavigationBarExists: () -> Bool
-    ) -> RenderedShellRoot.Surface? {
-        if perform("exists: compact tab bar", compactTabBarExists) == true {
-            return .tabBar
-        }
-        if perform("exists: sidebar navigation bar", sidebarNavigationBarExists) == true {
-            return .sidebar
+    private(set) var lastShellObservation = "not observed"
+
+    func waitForShell<T>(
+        observe: () throws -> ShellObservation,
+        resolve: (ShellObservation) -> T?,
+        reveal: (ShellNode) -> Bool,
+        leadingEdge: (ShellNode) -> Bool,
+        pause: (() -> Void)? = nil
+    ) rethrows -> T? {
+        var revealedAt: TimeInterval?
+        var usedLeadingEdge = false
+        while remaining > 0 {
+            guard let observation = try perform("shell snapshot", observe) else { return nil }
+            lastShellObservation = observation.diagnostic
+            if let result = perform("resolve observed shell", { resolve(observation) }) ?? nil {
+                return result
+            }
+            if case .collapsed(let toggle) = observation.state {
+                if revealedAt == nil {
+                    if perform("reveal observed sidebar", { reveal(toggle) }) == true {
+                        revealedAt = now()
+                    }
+                } else if toggle.label == "Show Sidebar",
+                          now() - (revealedAt ?? now()) >= 1, !usedLeadingEdge {
+                    // A second observation must still advertise Show Sidebar.
+                    // Never toggle a now-visible sidebar closed.
+                    usedLeadingEdge = true
+                    _ = perform("reveal observed sidebar from edge", { leadingEdge(toggle) })
+                }
+            }
+            if remaining > 0 {
+                if let pause { pause() } else { self.pause() }
+            }
         }
         return nil
     }
@@ -67,71 +91,403 @@ final class UIWaitBudget {
     }
 }
 
+    /// Values copied from XCTest's public snapshot API. All tree traversal below
+    /// is local: identifier misses never initiate additional accessibility queries.
+    @MainActor
+    struct ShellNode {
+        let type: XCUIElement.ElementType
+        var identifier = ""
+        var label = ""
+        var enabled = true
+        var frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        var children: [ShellNode] = []
+
+        init(
+            _ type: XCUIElement.ElementType,
+            identifier: String = "",
+            label: String = "",
+            enabled: Bool = true,
+            frame: CGRect = CGRect(x: 0, y: 0, width: 100, height: 100),
+            children: [ShellNode] = []
+        ) {
+            self.type = type
+            self.identifier = identifier
+            self.label = label
+            self.enabled = enabled
+            self.frame = frame
+            self.children = children
+        }
+
+        init(_ snapshot: any XCUIElementSnapshot) {
+            type = snapshot.elementType
+            identifier = snapshot.identifier
+            label = snapshot.label
+            enabled = snapshot.isEnabled
+            frame = snapshot.frame
+            children = snapshot.children.map(ShellNode.init)
+        }
+
+        var descendants: [ShellNode] { children.flatMap { [$0] + $0.descendants } }
+    }
+
+    @MainActor
+    struct ShellObservation {
+        enum State {
+            case notReady
+            case compact([ShellNode])
+            case sidebar([ShellNode])
+            case collapsed(ShellNode)
+        }
+
+        struct Destination {
+            let node: ShellNode
+            let surface: RenderedShellRoot.Surface
+            var titleFallback = false
+        }
+
+        let state: State
+
+        init(_ root: ShellNode) {
+            let visible = root.descendants.filter {
+                !$0.frame.isEmpty && $0.frame.intersects(root.frame)
+            }
+            if visible.contains(where: {
+                $0.identifier == "launchSplash" || $0.identifier == "navigation.shellLoading"
+            }) {
+                state = .notReady
+            } else if let tabBar = visible.first(where: { $0.type == .tabBar }) {
+                let nodes = tabBar.descendants.filter {
+                    !$0.frame.isEmpty && $0.frame.intersects(tabBar.frame)
+                        && $0.frame.intersects(root.frame)
+                }
+                state = nodes.isEmpty ? .notReady : .compact(nodes)
+            } else if visible.contains(where: {
+                $0.type == .navigationBar && $0.identifier == "PrintFarmer"
+            }) {
+                let buttons = visible.filter {
+                    $0.type == .button && $0.identifier.hasPrefix("sidebar.")
+                }
+                state = buttons.isEmpty ? .notReady : .sidebar(buttons)
+            } else if let toggle = visible.filter({ $0.type == .navigationBar })
+                .flatMap(\.descendants).first(where: {
+                    $0.type == .button && $0.enabled
+                        && ["Sidebar", "Toggle Sidebar", "Show Sidebar"].contains($0.label)
+                        && !$0.frame.isEmpty && $0.frame.intersects(root.frame)
+                }) {
+                state = .collapsed(toggle)
+            } else {
+                state = .notReady
+            }
+        }
+
+        func destination(tab: String, sidebar: String, title: String) -> Destination? {
+            switch state {
+            case .compact(let nodes):
+                if let node = nodes.first(where: { $0.enabled && $0.type == .button && $0.identifier == tab })
+                    ?? nodes.first(where: { $0.enabled && $0.identifier == tab }) {
+                    return Destination(node: node, surface: .tabBar)
+                }
+                if let node = nodes.first(where: {
+                    $0.enabled && $0.type == .button && $0.label == title
+                        && ($0.identifier.isEmpty || $0.identifier == title)
+                }) {
+                    return Destination(node: node, surface: .tabBar, titleFallback: true)
+                }
+            case .sidebar(let nodes):
+                if let node = nodes.first(where: { $0.identifier == sidebar && $0.enabled }) {
+                    return Destination(node: node, surface: .sidebar)
+                }
+            case .notReady, .collapsed:
+                break
+            }
+            return nil
+        }
+
+        var roots: [RenderedShellRoot] {
+            let nodes: [ShellNode]
+            let surface: RenderedShellRoot.Surface
+            switch state {
+            case .compact(let elements):
+                nodes = elements.filter { $0.type == .button }
+                surface = .tabBar
+            case .sidebar(let elements):
+                nodes = elements
+                surface = .sidebar
+            case .notReady, .collapsed:
+                return []
+            }
+            var identifiers = Set<String>()
+            return nodes.map {
+                RenderedShellRoot(title: $0.label, identifier: $0.identifier, surface: surface)
+            }.filter { surface == .tabBar || identifiers.insert($0.key).inserted }
+        }
+
+        var diagnostic: String {
+            switch state {
+            case .notReady: "not ready"
+            case .collapsed(let toggle): "collapsed; toggle=\(toggle.label)"
+            case .compact: "compact; roots=\(roots.map(\.key))"
+            case .sidebar: "sidebar; roots=\(roots.map(\.key))"
+            }
+        }
+    }
+
 @MainActor
 final class UIWaitBudgetTests: XCTestCase {
-    func testCompactShellSkipsAbsentSidebarProbeThatWouldOverrun() {
+    private func compact(_ nodes: [ShellNode]) -> ShellObservation {
+        ShellObservation(ShellNode(.application, children: [
+            ShellNode(.tabBar, children: nodes)
+        ]))
+    }
+
+    private func sidebar() -> ShellObservation {
+        ShellObservation(ShellNode(.application, children: [
+            ShellNode(.navigationBar, identifier: "PrintFarmer"),
+            ShellNode(.button, identifier: "sidebar.overview", label: "Overview")
+        ]))
+    }
+
+    private func collapsed() -> ShellObservation {
+        ShellObservation(ShellNode(.application, children: [
+            ShellNode(.navigationBar, children: [
+                ShellNode(.button, label: "Show Sidebar")
+            ])
+        ]))
+    }
+
+    func testLoadingThenEmptyCompactRootThenDestinationUsesOnlySnapshots() {
         var clock: TimeInterval = 0
         var operations: [String] = []
         let budget = UIWaitBudget(timeout: 5, now: { clock })
-        let surface = budget.shellSurface(
-            compactTabBarExists: {
-                operations.append("compact root")
-                clock += 1
-                return true
+        var observations = [
+            ShellObservation(ShellNode(.application, children: [
+                ShellNode(.other, identifier: "navigation.shellLoading")
+            ])),
+            compact([]),
+            compact([ShellNode(.button, identifier: "tab.farm", label: "Farm")])
+        ]
+        let destination = budget.waitForShell(
+            observe: {
+                operations.append("snapshot")
+                clock += 0.5
+                return observations.removeFirst()
             },
-            sidebarNavigationBarExists: {
-                operations.append("absent sidebar")
+            resolve: { $0.destination(tab: "tab.farm", sidebar: "sidebar.farm", title: "Farm") },
+            reveal: { _ in
+                operations.append("absent sidebar toggle")
                 clock += 6
                 return false
-            }
-        )
-        XCTAssertEqual(surface, .tabBar)
-        XCTAssertEqual(budget.remaining, 4)
-        XCTAssertEqual(budget.perform("compact children") {
-            operations.append("compact children")
-            return "tab.farm"
-        }, "tab.farm")
-        XCTAssertEqual(operations, ["compact root", "compact children"])
-    }
-
-    func testRegularShellChecksCompactRootBeforeSidebarRoot() {
-        var clock: TimeInterval = 0
-        var operations: [String] = []
-        let budget = UIWaitBudget(timeout: 5, now: { clock })
-        let surface = budget.shellSurface(
-            compactTabBarExists: {
-                operations.append("compact root")
-                clock += 1
-                return false
             },
-            sidebarNavigationBarExists: {
-                operations.append("sidebar root")
-                clock += 1
-                return true
-            }
+            leadingEdge: { _ in XCTFail("No collapsed sidebar was observed"); return false },
+            pause: { clock += 0.2 }
         )
-        XCTAssertEqual(surface, .sidebar)
-        XCTAssertEqual(operations, ["compact root", "sidebar root"])
-        XCTAssertEqual(budget.remaining, 3)
+        XCTAssertEqual(destination?.node.identifier, "tab.farm")
+        XCTAssertEqual(destination?.surface, .tabBar)
+        XCTAssertEqual(operations, ["snapshot", "snapshot", "snapshot"])
+        XCTAssertEqual(budget.remaining, 3.1, accuracy: 0.001)
     }
 
-    func testShellRootOverrunDoesNotProbeAnotherSurface() {
+    func testLoadingThenCollapsedThenVisibleSidebarRequiresPositiveToggleEvidence() {
         var clock: TimeInterval = 0
-        var sidebarQueried = false
-        let budget = UIWaitBudget(timeout: 2, now: { clock })
-        XCTAssertNil(budget.shellSurface(
-            compactTabBarExists: { clock = 3; return false },
-            sidebarNavigationBarExists: { sidebarQueried = true; return true }
-        ))
-        XCTAssertFalse(sidebarQueried)
-        XCTAssertEqual(budget.lastOperation, "exists: compact tab bar")
+        var reveals: [String] = []
+        var observations = [ShellObservation(ShellNode(.application)), collapsed(), sidebar()]
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        let destination = budget.waitForShell(
+            observe: { clock += 0.5; return observations.removeFirst() },
+            resolve: {
+                $0.destination(tab: "tab.oversight", sidebar: "sidebar.overview", title: "Oversight")
+            },
+            reveal: { reveals.append($0.label); return true },
+            leadingEdge: { _ in XCTFail("The sidebar opened after its toggle"); return false },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(destination?.node.identifier, "sidebar.overview")
+        XCTAssertEqual(destination?.surface, .sidebar)
+        XCTAssertEqual(reveals, ["Show Sidebar"])
     }
 
-    func testMissingShellRootsDoNotIdentifyASurface() {
-        let budget = UIWaitBudget(timeout: 5, now: { 0 })
-        XCTAssertNil(budget.shellSurface(
-            compactTabBarExists: { false },
-            sidebarNavigationBarExists: { false }
+    func testSnapshotOverrunDoesNotResolveRevealOrPause() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 2, now: { clock })
+        let result: Bool? = budget.waitForShell(
+            observe: { clock = 3; return self.collapsed() },
+            resolve: { _ in XCTFail("Expired snapshot"); return true },
+            reveal: { _ in XCTFail("Expired snapshot"); return true },
+            leadingEdge: { _ in XCTFail("Expired snapshot"); return true },
+            pause: { XCTFail("Expired deadline") }
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(budget.lastOperation, "shell snapshot")
+        XCTAssertEqual(budget.lastShellObservation, "not observed")
+    }
+
+    func testTitleFallbackAndIdentifierPriorityAreResolvedInTheSameTree() {
+        let observation = compact([
+            ShellNode(.button, label: "Farm"),
+            ShellNode(.button, identifier: "tab.farm", label: "Farm"),
+            ShellNode(.button, label: "Oversight")
+        ])
+        let farm = observation.destination(tab: "tab.farm", sidebar: "sidebar.farm", title: "Farm")
+        XCTAssertEqual(farm?.node.identifier, "tab.farm")
+        XCTAssertEqual(farm?.titleFallback, false)
+        let oversight = observation.destination(
+            tab: "tab.oversight", sidebar: "sidebar.overview", title: "Oversight"
+        )
+        XCTAssertEqual(oversight?.node.label, "Oversight")
+        XCTAssertEqual(oversight?.surface, .tabBar)
+        XCTAssertEqual(oversight?.titleFallback, true)
+    }
+
+    func testAnyTypeIdentifierIsPreservedAndWrongIdentifiedTitleIsNotAFallback() {
+        let observation = compact([
+            ShellNode(.other, identifier: "tab.farm", label: "Farm"),
+            ShellNode(.button, identifier: "tab.jobs", label: "Oversight")
+        ])
+        XCTAssertEqual(observation.destination(
+            tab: "tab.farm", sidebar: "sidebar.farm", title: "Farm"
+        )?.node.type, .other)
+        XCTAssertNil(observation.destination(
+            tab: "tab.oversight", sidebar: "sidebar.overview", title: "Oversight"
+        ))
+    }
+
+    func testOffscreenDisabledAndUnscopedNodesDoNotAuthorizeNavigation() {
+        let observation = compact([
+            ShellNode(.button, identifier: "tab.farm", label: "Farm", enabled: false),
+            ShellNode(.button, identifier: "tab.oversight", label: "Oversight",
+                      frame: CGRect(x: 1000, y: 0, width: 44, height: 44))
+        ])
+        XCTAssertNil(observation.destination(tab: "tab.farm", sidebar: "sidebar.farm", title: "Farm"))
+        XCTAssertNil(observation.destination(
+            tab: "tab.oversight", sidebar: "sidebar.overview", title: "Oversight"
+        ))
+        let unscoped = ShellObservation(ShellNode(.application, children: [
+            ShellNode(.button, label: "Show Sidebar"),
+            ShellNode(.button, identifier: "tab.farm", label: "Farm")
+        ]))
+        if case .notReady = unscoped.state {} else { XCTFail("No navigation surface exists") }
+    }
+
+    func testLoadingMarkerOverridesUnreadyNavigationChrome() {
+        let observation = ShellObservation(ShellNode(.application, children: [
+            ShellNode(.other, identifier: "launchSplash"),
+            ShellNode(.tabBar, children: [ShellNode(.button, identifier: "tab.farm", label: "Farm")]),
+            ShellNode(.navigationBar, children: [ShellNode(.button, label: "Show Sidebar")])
+        ]))
+        XCTAssertNil(observation.destination(tab: "tab.farm", sidebar: "sidebar.farm", title: "Farm"))
+        if case .notReady = observation.state {} else { XCTFail("Startup is not a ready shell") }
+    }
+
+    func testRootEnumerationPreservesDisabledAndDuplicateCompactRootsForAssertions() {
+        let farm = ShellNode(.button, identifier: "tab.farm", label: "Farm")
+        let observation = compact([
+            farm, farm,
+            ShellNode(.button, identifier: "tab.tasks", label: "Tasks", enabled: false)
+        ])
+        XCTAssertEqual(observation.roots.map(\.identifier), ["tab.farm", "tab.farm", "tab.tasks"])
+        XCTAssertNil(observation.destination(tab: "tab.tasks", sidebar: "sidebar.tasks", title: "Tasks"))
+    }
+
+    func testNonHittableCompactDestinationWaitsWithoutProbingSidebar() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        var hitTests = 0
+        let result = budget.waitForShell(
+            observe: {
+                clock += 0.5
+                return self.compact([ShellNode(.button, identifier: "tab.farm", label: "Farm")])
+            },
+            resolve: { observation -> ShellObservation.Destination? in
+                guard let destination = observation.destination(
+                    tab: "tab.farm", sidebar: "sidebar.farm", title: "Farm"
+                ) else { return nil }
+                let hittable = budget.perform("live hit test") { hitTests += 1; return hitTests == 2 }
+                return hittable == true ? destination : nil
+            },
+            reveal: { _ in XCTFail("An obstructed compact destination is not a sidebar"); return false },
+            leadingEdge: { _ in XCTFail("No sidebar gesture"); return false },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(hitTests, 2)
+        XCTAssertEqual(result?.node.identifier, "tab.farm")
+        XCTAssertEqual(budget.remaining, 3.8, accuracy: 0.001)
+    }
+
+    func testTitleFallbackDoesNotSpendBudgetOnMissingIdentifierQueries() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        var observations = 0
+        let destination = budget.waitForShell(
+            observe: {
+                observations += 1
+                clock += 4
+                return self.compact([ShellNode(.button, label: "Oversight")])
+            },
+            resolve: { $0.destination(tab: "tab.oversight", sidebar: "sidebar.overview", title: "Oversight") },
+            reveal: { _ in XCTFail("No sidebar query"); return false },
+            leadingEdge: { _ in XCTFail("No gesture"); return false },
+            pause: { XCTFail("Fallback is already in the captured tree") }
+        )
+        XCTAssertEqual(observations, 1)
+        XCTAssertEqual(destination?.titleFallback, true)
+        XCTAssertEqual(budget.remaining, 1)
+    }
+
+    func testPositiveMatchStillMustPassLiveResolutionBeforeDeadline() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 2, now: { clock })
+        var reveals = 0
+        let result: Bool? = budget.waitForShell(
+            observe: { clock += 1; return self.collapsed() },
+            resolve: { _ in clock += 2; return true },
+            reveal: { _ in reveals += 1; return true },
+            leadingEdge: { _ in reveals += 1; return true },
+            pause: { XCTFail("No pause after overrun") }
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(reveals, 0)
+    }
+
+    func testRevealOverrunNeverStartsGestureOrAnotherObservation() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 2, now: { clock })
+        var observations = 0
+        let result: Bool? = budget.waitForShell(
+            observe: { observations += 1; return self.collapsed() },
+            resolve: { _ in nil },
+            reveal: { _ in clock = 3; return true },
+            leadingEdge: { _ in XCTFail("Deadline elapsed"); return true },
+            pause: { XCTFail("Deadline elapsed") }
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(observations, 1)
+    }
+
+    func testPersistentPositiveShowSidebarAllowsOnlyOneTapAndOneEdgeGesture() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        var taps = 0
+        var gestures = 0
+        let result: Bool? = budget.waitForShell(
+            observe: { clock += 0.5; return self.collapsed() },
+            resolve: { _ in nil },
+            reveal: { _ in taps += 1; return true },
+            leadingEdge: { _ in gestures += 1; return true },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(taps, 1)
+        XCTAssertEqual(gestures, 1)
+    }
+
+    func testSnapshotErrorIsPropagatedWithoutFallback() {
+        enum SnapshotFailure: Error { case unavailable }
+        let budget = UIWaitBudget(timeout: 5)
+        XCTAssertThrowsError(try budget.waitForShell(
+            observe: { throw SnapshotFailure.unavailable },
+            resolve: { _ -> Bool? in XCTFail("No snapshot"); return nil },
+            reveal: { _ in XCTFail("No snapshot"); return true },
+            leadingEdge: { _ in XCTFail("No snapshot"); return true }
         ))
     }
 
@@ -289,38 +645,14 @@ class PrintFarmerUITestCase: XCTestCase {
     /// (iPhone) or when the sidebar is already visible.
     @discardableResult
     func revealSidebarIfCollapsed(timeout: TimeInterval = 3) -> Bool {
-        revealSidebarIfCollapsed(budget: UIWaitBudget(timeout: timeout), toggleWait: timeout)
-    }
-
-    private func revealSidebarIfCollapsed(budget: UIWaitBudget, toggleWait: TimeInterval) -> Bool {
-        let sidebar = sidebarNavigationBar
-        if budget.exists(sidebar, named: "sidebar navigation bar") {
-            return true
-        }
-        let labels = ["Sidebar", "Toggle Sidebar", "Show Sidebar"]
-        let toggle = app.buttons
-            .matching(NSPredicate(format: "label IN %@", labels))
-            .firstMatch
-        guard budget.waitFor(toggle, named: "sidebar toggle", upTo: toggleWait) else {
-            return false
-        }
-        guard budget.perform("tap sidebar toggle", {
-            toggle.tap()
-            return true
-        }) == true else {
-            return false
-        }
-        if budget.waitFor(sidebar, named: "sidebar navigation bar", upTo: min(1, budget.remaining)) {
-            return true
-        }
-
-        // On a cold iPad launch the native toggle can consume its first tap
-        // without opening. Only use the alternate gesture if it still says
-        // Show Sidebar; never blindly toggle again and close a visible sidebar.
-        guard budget.exists(app.buttons["Show Sidebar"], named: "Show Sidebar") else {
-            return false
-        }
-        return revealSidebarFromLeadingEdge(budget: budget)
+        let budget = UIWaitBudget(timeout: timeout)
+        return waitForObservedShell(budget: budget) { observation in
+            switch observation.state {
+            case .sidebar: true
+            case .compact: false
+            case .notReady, .collapsed: nil
+            }
+        } ?? false
     }
 
     @discardableResult
@@ -329,14 +661,65 @@ class PrintFarmerUITestCase: XCTestCase {
     }
 
     private func revealSidebarFromLeadingEdge(budget: UIWaitBudget) -> Bool {
-        guard budget.perform("leading-edge sidebar gesture", {
+        guard performSidebarLeadingEdge(budget: budget) else { return false }
+        return budget.waitFor(sidebarNavigationBar, named: "sidebar navigation bar", upTo: budget.remaining)
+    }
+
+    private func performSidebarLeadingEdge(budget: UIWaitBudget) -> Bool {
+        budget.perform("leading-edge sidebar gesture", {
             let window = app.windows.firstMatch
             let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
             let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5))
             start.press(forDuration: 0.1, thenDragTo: end)
             return true
-        }) == true else { return false }
-        return budget.waitFor(sidebarNavigationBar, named: "sidebar navigation bar", upTo: budget.remaining)
+        }) == true
+    }
+
+    private func observedElement(_ node: ShellNode, within scope: XCUIElementQuery) -> XCUIElement {
+        scope.matching(NSPredicate(
+            format: "identifier == %@ AND label == %@", node.identifier, node.label
+        )).firstMatch
+    }
+
+    private func observedToggle(_ node: ShellNode) -> XCUIElement {
+        observedElement(node, within: app.navigationBars.descendants(matching: .button))
+    }
+
+    private func waitForObservedShell<T>(
+        budget: UIWaitBudget,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        resolve: (ShellObservation) -> T?
+    ) -> T? {
+        do {
+            return try budget.waitForShell(
+                observe: { ShellObservation(ShellNode(try self.app.snapshot())) },
+                resolve: resolve,
+                reveal: { node in
+                    let toggle = self.observedToggle(node)
+                    guard budget.perform("hittable observed sidebar toggle", {
+                        toggle.isHittable
+                    }) == true else { return false }
+                    return budget.perform("tap observed sidebar toggle", {
+                        toggle.tap()
+                        return true
+                    }) == true
+                },
+                leadingEdge: { node in
+                    guard budget.perform("hittable observed Show Sidebar", {
+                        self.observedToggle(node).isHittable
+                    }) == true else { return false }
+                    return self.performSidebarLeadingEdge(budget: budget)
+                }
+            )
+        } catch {
+            recordQueryFailure(
+                "Shell snapshot failed: \(error); \(budget.diagnostic); "
+                    + "last snapshot: \(budget.lastShellObservation)",
+                file: file, line: line
+            )
+            return nil
+        }
     }
 
     /// Adaptive locator for a shell destination using its shipped identifier.
@@ -344,9 +727,9 @@ class PrintFarmerUITestCase: XCTestCase {
     /// otherwise the iPad `NavigationSplitView` sidebar button — revealing a
     /// collapsed sidebar via the system toggle if needed.
     ///
-    /// Inspect the rendered surface before querying its children. Repeated
-    /// missing compact-tab queries can exhaust the budget on a cold iPad
-    /// before its sidebar toggle is ever tapped.
+    /// Resolve layout and ID/title compatibility from one public snapshot.
+    /// Startup is not evidence of a collapsed sidebar; only a positively
+    /// observed toggle can initiate reveal work.
     ///
     /// - Parameters:
     ///   - tabIdentifier: The compact tab identifier (e.g. `tab.attention`).
@@ -356,47 +739,39 @@ class PrintFarmerUITestCase: XCTestCase {
     ///   resolving another remote element or hierarchy after the deadline.
     func shellDestinationButton(
         tabIdentifier: String,
+        sidebarIdentifier: String? = nil,
         timeout: TimeInterval = 5,
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
         let budget = UIWaitBudget(timeout: timeout)
-        let tabBar = app.tabBars.firstMatch
-        let tabButton = app.tabBars.buttons[tabIdentifier]
-        let tabElement = app.tabBars.descendants(matching: .any)
-            .matching(identifier: tabIdentifier)
-            .firstMatch
-        let tabLabel = app.tabBars.buttons[tabTitle(for: tabIdentifier)]
-        let sidebarIdentifier = tabIdentifier.replacingOccurrences(
+        let sidebarIdentifier = sidebarIdentifier ?? tabIdentifier.replacingOccurrences(
             of: "tab.",
             with: "sidebar."
         )
-        let sidebar = app.buttons[sidebarIdentifier]
-        while budget.remaining > 0 {
-            switch budget.shellSurface(
-                compactTabBarExists: { tabBar.exists },
-                sidebarNavigationBarExists: { self.sidebarNavigationBar.exists }
-            ) {
-            case .tabBar:
-                if budget.exists(tabButton, named: tabIdentifier) { return tabButton }
-                if budget.exists(tabElement, named: "\(tabIdentifier) descendant") { return tabElement }
-                if budget.exists(tabLabel, named: "\(tabIdentifier) title fallback") {
-                    recordTabIdentifierCompatibilityFallback(tabIdentifier)
-                    return tabLabel
-                }
-            case .sidebar:
-                if budget.exists(sidebar, named: sidebarIdentifier) { return sidebar }
-            case nil:
-                _ = revealSidebarIfCollapsed(budget: budget, toggleWait: 1)
+        if let element = waitForObservedShell(budget: budget, file: file, line: line, resolve: { observation in
+            guard let destination = observation.destination(
+                tab: tabIdentifier, sidebar: sidebarIdentifier, title: self.tabTitle(for: tabIdentifier)
+            ) else { return nil as XCUIElement? }
+            let scope = destination.surface == .tabBar
+                ? self.app.tabBars.descendants(matching: destination.node.type)
+                : self.app.descendants(matching: destination.node.type)
+            let element = self.observedElement(destination.node, within: scope)
+            guard budget.perform("hittable observed \(destination.node.identifier)", {
+                element.isHittable
+            }) == true else { return nil }
+            if destination.titleFallback {
+                self.recordTabIdentifierCompatibilityFallback(tabIdentifier)
             }
-            budget.pause()
-        }
+            return element
+        }) { return element }
         recordQueryFailure(
-            "Missing \(tabIdentifier) or \(sidebarIdentifier); \(budget.diagnostic)",
+            "Missing \(tabIdentifier) or \(sidebarIdentifier); \(budget.diagnostic); "
+                + "last snapshot: \(budget.lastShellObservation)",
             file: file,
             line: line
         )
-        return tabButton
+        return app.tabBars.buttons[tabIdentifier]
     }
 
     private func recordQueryFailure(
@@ -454,57 +829,14 @@ class PrintFarmerUITestCase: XCTestCase {
 
     func renderedShellRoots(timeout: TimeInterval = 8) -> [RenderedShellRoot] {
         let budget = UIWaitBudget(timeout: timeout)
-        let tabBar = app.tabBars.firstMatch
-        let sidebar = app.buttons
-            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
-        while budget.remaining > 0 {
-            switch budget.shellSurface(
-                compactTabBarExists: { tabBar.exists },
-                sidebarNavigationBarExists: { self.sidebarNavigationBar.exists }
-            ) {
-            case .sidebar:
-                let buttons = budget.perform("enumerate sidebar buttons") {
-                    sidebar.allElementsBoundByIndex
-                } ?? []
-                if !buttons.isEmpty {
-                    var identifiers = Set<String>()
-                    return shellRoots(buttons, surface: .sidebar, budget: budget).filter {
-                        identifiers.insert($0.identifier).inserted
-                    }
-                }
-            case .tabBar:
-                let buttons = budget.perform("enumerate tab buttons") {
-                    tabBar.buttons.allElementsBoundByIndex
-                } ?? []
-                if !buttons.isEmpty {
-                    return shellRoots(buttons, surface: .tabBar, budget: budget)
-                }
-            case nil:
-                if revealSidebarIfCollapsed(budget: budget, toggleWait: 0.5) {
-                    continue
-                }
-            }
-            budget.pause()
-        }
-        recordQueryFailure("No rendered shell roots; \(budget.diagnostic)")
+        if let roots = waitForObservedShell(budget: budget, resolve: { observation in
+            let roots = observation.roots
+            return roots.isEmpty ? nil : roots
+        }) { return roots }
+        recordQueryFailure(
+            "No rendered shell roots; \(budget.diagnostic); last snapshot: \(budget.lastShellObservation)"
+        )
         return []
-    }
-
-    private func shellRoots(
-        _ buttons: [XCUIElement],
-        surface: RenderedShellRoot.Surface,
-        budget: UIWaitBudget
-    ) -> [RenderedShellRoot] {
-        var roots: [RenderedShellRoot] = []
-        for button in buttons {
-            guard let title = budget.perform("read root label", { button.label }),
-                  let identifier = budget.perform("read root identifier", { button.identifier }) else {
-                recordQueryFailure("Incomplete rendered shell roots; \(budget.diagnostic)")
-                return []
-            }
-            roots.append(RenderedShellRoot(title: title, identifier: identifier, surface: surface))
-        }
-        return roots
     }
 
     func selectRoot(_ root: RenderedShellRoot) {
