@@ -225,20 +225,29 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         }
     }
 
-    func test_absoluteCachedZero_reportsAcceptanceOnlyAndPreservesOmissions() async throws {
+    func test_absoluteCachedZero_reportsAcceptanceOnlyForCompleteXYZ() async throws {
         let service = MockPrinterService()
         var base = try idlePrinter()
         base.x = 0
+        base.y = 0
+        base.z = 0
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
+        caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
+        service.statusToReturn = VerifiedSafetyFixtures.status(
+            id: base.id, position: .init(x: 0, y: 0, z: 0)
+        )
         let vm = makeViewModel(printer: base, capabilities: caps, service: service)
         await vm.loadCapabilities()
-        await vm.moveTo(x: 0, y: nil, z: nil, feedrateMmMin: nil)
+        await vm.moveTo(x: 0, y: 0, z: 0, feedrateMmMin: nil)
         assertAcceptanceOnly(vm)
         XCTAssertEqual(service.moveToCalledWith?.x, 0)
-        XCTAssertNil(service.moveToCalledWith?.y)
-        XCTAssertNil(service.moveToCalledWith?.z)
-        XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 3000)
+        XCTAssertEqual(service.moveToCalledWith?.y, 0)
+        XCTAssertEqual(service.moveToCalledWith?.z, 0)
+        XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 600)
+        XCTAssertEqual(vm.printer.x, base.x)
+        XCTAssertEqual(vm.printer.y, base.y)
+        XCTAssertEqual(vm.printer.z, base.z)
     }
 
     private func assertAcceptanceOnly(
@@ -402,26 +411,56 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         XCTAssertNil(vm.pendingCommand)
     }
 
-    func test_absolute_requiresAllRequestedAxes_notUnrelatedNoise() async throws {
+    func test_absolute_requiresMatchingXYZ_notMissingAxesOrUnrelatedNoise() async throws {
         let service = MockPrinterService()
-        let base = try idlePrinter()
+        var base = try idlePrinter()
+        base.x = 5
+        base.y = 6
+        base.z = 7
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
+        caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
+        service.statusToReturn = VerifiedSafetyFixtures.status(
+            id: base.id, position: .init(x: 5, y: 6, z: 7)
+        )
         let vm = makeViewModel(printer: base, capabilities: caps, service: service)
         await vm.loadCapabilities()
-        await vm.moveTo(x: 0, y: nil, z: 2, feedrateMmMin: nil)
+        await vm.moveTo(x: 0, y: -2.5, z: 2, feedrateMmMin: nil)
+        let pending = try XCTUnwrap(vm.pendingCommand)
+        XCTAssertNil(vm.lastError)
+        XCTAssertEqual(pending.kind, .moveTo(x: 0, y: -2.5, z: 2, feedrateMmMin: 600))
+        XCTAssertEqual(service.moveToCalledWith?.x, 0)
+        XCTAssertEqual(service.moveToCalledWith?.y, -2.5)
+        XCTAssertEqual(service.moveToCalledWith?.z, 2)
+        XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 600)
+        service.moveToCalledWith = nil
+
         var update = base
-        update.y = 50
         update.hotendTarget = 0
+        update.hotendTemp = 0
+        update.bedTarget = 0
         vm.handlePrinterUpdate(update)
-        XCTAssertNotNil(vm.pendingCommand)
+        XCTAssertEqual(vm.pendingCommand, pending)
+
+        for axis in ["X", "Y", "Z"] {
+            for reported: Double? in [nil, 99] {
+                update.x = axis == "X" ? reported : 0
+                update.y = axis == "Y" ? reported : -2.5
+                update.z = axis == "Z" ? reported : 2
+                vm.handlePrinterUpdate(update)
+                XCTAssertEqual(vm.pendingCommand, pending,
+                               "Both missing and nonmatching \(axis) must leave the command pending")
+                XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true)
+            }
+        }
         update.x = 0
-        update.z = 1
-        vm.handlePrinterUpdate(update)
-        XCTAssertNotNil(vm.pendingCommand)
+        update.y = -2.5
         update.z = 2
         vm.handlePrinterUpdate(update)
         XCTAssertNil(vm.pendingCommand)
+        XCTAssertNil(vm.lastError)
+        XCTAssertEqual(vm.commandNotice, "Matching telemetry received. Check the machine before further setup.")
+        XCTAssertNil(service.moveToCalledWith, "Correlation must not retry the physical command")
     }
 
     func test_homeZ_doesNotResolveOnUnrelatedHomingOrMissingTelemetry() throws {

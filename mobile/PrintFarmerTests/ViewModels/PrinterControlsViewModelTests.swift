@@ -126,7 +126,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         await model.homeAll()
         await model.homeXY()
         await model.homeZ()
-        await model.moveTo(x: 0, y: nil, z: nil, feedrateMmMin: nil)
+        await model.moveTo(x: 0, y: 0, z: 10, feedrateMmMin: nil)
         await model.disableMotors()
     }
 
@@ -890,7 +890,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps, verifiedAbsolute: true)
         await vm.loadCapabilities()
         for rate in [Int.min, -1, 0, 1, 600, 3000, 3001, Int.max] {
-            await vm.moveTo(x: 1, y: nil, z: nil, feedrateMmMin: rate)
+            await vm.moveTo(x: 1, y: 0, z: 10, feedrateMmMin: rate)
             XCTAssertNil(mockService.moveToCalledWith)
             XCTAssertNil(vm.pendingCommand)
             XCTAssertEqual(vm.lastError?.message, ControlNumberInput.customFeedrateMessage)
@@ -1426,11 +1426,12 @@ final class PrinterControlsViewModelTests: XCTestCase {
             supportsHoming: true, supportedAxes: ["X"]
         )
         caps.supportsAbsoluteMovement = true
-        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps, verifiedAbsolute: true)
         await vm.loadCapabilities()
-        for (x, y, f) in [(nil, nil, nil), (Double.nan, nil, nil),
-                           (1, nil, 0), (1, nil, -10), (nil, 2, 600)] as [(Double?, Double?, Int?)] {
-            await vm.moveTo(x: x, y: y, z: nil, feedrateMmMin: f)
+        for (x, y, z, f) in [(nil, nil, nil, nil), (Double.nan, 0, 10, nil),
+                            (1, 0, 10, 0), (1, 0, 10, -10), (0, 2, 10, nil)]
+            as [(Double?, Double?, Double?, Int?)] {
+            await vm.moveTo(x: x, y: y, z: z, feedrateMmMin: f)
             XCTAssertNil(mockService.moveToCalledWith)
             XCTAssertNotNil(vm.lastError)
             XCTAssertNil(vm.pendingCommand)
@@ -1439,16 +1440,16 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     func test_newCommands_requireSpecificCapabilities() async throws {
         for caps in [Self.fullCaps, PrinterBackendCapabilities.fallback(for: .moonraker)] {
-            let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+            let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps, verifiedAbsolute: true)
             await vm.loadCapabilities()
-            await vm.moveTo(x: 0, y: nil, z: nil, feedrateMmMin: nil)
+            await vm.moveTo(x: 0, y: 0, z: 10, feedrateMmMin: nil)
             await vm.disableMotors()
             XCTAssertNil(mockService.moveToCalledWith)
             XCTAssertNil(mockService.disableMotorsCalledWith)
         }
         let unknown = try makeViewModel(printer: idlePrinter())
         await unknown.setHeaterTarget(.hotend, target: 200)
-        await unknown.moveTo(x: 0, y: nil, z: nil, feedrateMmMin: nil)
+        await unknown.moveTo(x: 0, y: 0, z: 10, feedrateMmMin: nil)
         await unknown.disableMotors()
         XCTAssertNil(mockService.setTemperaturesCalledWith)
         XCTAssertNil(mockService.moveToCalledWith)
@@ -1493,10 +1494,10 @@ final class PrinterControlsViewModelTests: XCTestCase {
             var printer = try idlePrinter()
             printer.state = state
             printer.isOnline = online
-            let vm = try makeViewModel(printer: printer, capabilities: caps)
+            let vm = try makeViewModel(printer: printer, capabilities: caps, verifiedAbsolute: true)
             await vm.loadCapabilities()
             await vm.setHeaterTarget(.hotend, target: 200)
-            await vm.moveTo(x: 1, y: nil, z: nil, feedrateMmMin: nil)
+            await vm.moveTo(x: 1, y: 0, z: 10, feedrateMmMin: nil)
             await vm.disableMotors()
             XCTAssertNil(mockService.setTemperaturesCalledWith)
             XCTAssertNil(mockService.moveToCalledWith)
@@ -1511,7 +1512,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
         caps.supportsDisableMotors = true
-        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps, verifiedAbsolute: true)
         await vm.loadCapabilities()
         let task = Task { await vm.setHeaterTarget(.hotend, target: 200) }
         await barrier.waitUntilArrived()
@@ -1529,7 +1530,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
             await vm.homeAll()
             await vm.homeXY()
             await vm.homeZ()
-            await vm.moveTo(x: 0, y: nil, z: nil, feedrateMmMin: nil)
+            await vm.moveTo(x: 0, y: 0, z: 10, feedrateMmMin: nil)
             await vm.disableMotors()
         }
         XCTAssertNil(mockService.setTemperaturesCalledWith)
@@ -1731,6 +1732,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         let access = AccessGate()
         let vm = try makeViewModel(
             printer: idlePrinter(), capabilities: caps,
+            verifiedAbsolute: true,
             accessCheck: { access.isAllowed ? nil : "Server changed" }
         )
         await vm.loadCapabilities()
@@ -1742,7 +1744,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertFalse(vm.canControl, "Reappearing must not silently rebind an old service to a new server")
         mockService.setTemperaturesCalledWith = nil
         await vm.setHeaterTarget(.hotend, target: 200)
-        await vm.moveTo(x: 1, y: nil, z: nil, feedrateMmMin: nil)
+        await vm.moveTo(x: 1, y: 0, z: 10, feedrateMmMin: nil)
         await vm.disableMotors()
         XCTAssertNil(mockService.setTemperaturesCalledWith)
         XCTAssertNil(mockService.moveToCalledWith)
@@ -1753,13 +1755,13 @@ final class PrinterControlsViewModelTests: XCTestCase {
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
         caps.supportsDisableMotors = true
-        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps)
+        let vm = try makeViewModel(printer: idlePrinter(), capabilities: caps, verifiedAbsolute: true)
         await vm.loadCapabilities()
         await vm.setHeaterTarget(.hotend, target: 220)
         let pending = vm.pendingCommand
         mockService.setTemperaturesCalledWith = nil
         await vm.setHeaterTarget(.bed, target: 70)
-        await vm.moveTo(x: 1, y: nil, z: nil, feedrateMmMin: nil)
+        await vm.moveTo(x: 1, y: 0, z: 10, feedrateMmMin: nil)
         await vm.disableMotors()
         await vm.preheat(.pla)
         await vm.jog(axis: "X", distanceMm: 1)

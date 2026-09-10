@@ -585,6 +585,8 @@ final class PrinterServiceTests: XCTestCase {
         XCTAssertFalse(caps.supportsFanControl)
     }
 
+    // Encoding-only coverage: nullable wire fields are preserved, not authorized.
+    // The Controls owner requires verified, complete XYZ before calling this service.
     func testMoveToPreservesOriginOmittedAxesAndFeedrateUnits() async throws {
         mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
         let result = try await printerService.moveTo(
