@@ -169,6 +169,14 @@ These tests prove native guards and typed synthetic shared-contract behavior,
 
 ### Individual thermal and motion controls (#2598)
 
+- Thermal controls use compact native Hotend/Bed rows: **Current** measurement,
+  reported **Target**, new-target input, **Set** and per-heater **Off**. Standard
+  phone widths keep the input and both actions together; insufficient width or
+  accessibility text stacks the editor without discarding its draft. The same
+  rows fit the iPad thermal column. Native fields and actions retain a 44-point
+  minimum and system Dynamic Type. Range guidance is in the field's VoiceOver
+  hint and specific validation errors, not repeated permanent range paragraphs.
+  Missing limits remain an explicit actionable state.
 - Presets remain PLA **200/60**, PETG **240/80**, ABS **240/100** and
   Cool Down **0/0** °C. Presets require proven hotend support; unsupported or
   explicitly bed-less hardware omits the bed, including during Cool Down.
@@ -385,8 +393,7 @@ PrinterDetailView (existing)
 
 | Action | SF Symbol |
 | --- | --- |
-| Preheat (PLA / PETG / ABS) | `thermometer.high` |
-| Cool Down | `thermometer.snowflake` |
+| Preheat / Cool Down | Text labels and temperature pairs (compact thermal row) |
 | Home All | `house.fill` |
 | Home XY | `move.3d` (fallback `arrow.up.left.and.arrow.down.right`) |
 | Home Z | `arrow.up.and.down` |
@@ -409,14 +416,11 @@ PrinterDetailView (existing)
 │ ⓘ Controls disabled while printing. │ ← lockout banner (only when state==printing|paused)
 ├─────────────────────────────────────┤
 │ Preheat                             │
-│ ┌──────────────┐  ┌──────────────┐ │
-│ │ 🌡 PLA       │  │ 🌡 PETG      │ │  ← 2-column grid, equal width
-│ │ 200° / 60°   │  │ 240° / 80°   │ │
-│ └──────────────┘  └──────────────┘ │
-│ ┌──────────────┐  ┌──────────────┐ │
-│ │ 🌡 ABS       │  │ ❄ Cool Down  │ │
-│ │ 240° / 100°  │  │ 0° / 0°      │ │
-│ └──────────────┘  └──────────────┘ │
+│ [PLA] [PETG] [ABS] [Cool]            │  ← temperature pair under each label
+│ Hotend        Target: 215 °C         │
+│ Current:192° [New °C] [Set] [Off]    │
+│ Bed           Target: 60 °C          │
+│ Current:37°  [New °C] [Set] [Off]    │
 ├─────────────────────────────────────┤
 │ Home                                │
 │ ┌─────────────────────────────────┐ │
@@ -467,7 +471,10 @@ Use `ViewThatFits` or `horizontalSizeClass` to switch layouts. No new breakpoint
 - Each button shows: icon, material label (`.subheadline.weight(.medium)`), temperatures `H°/B°` (`.caption.monospacedDigit()`).
 - Cool Down uses `pfSecondaryAccent` tint for icon + label to differentiate from heat actions.
 - Tap → calls `PrinterService.setTemperatures(printerId:hotend:bed:)` with the locked preset values.
-- Buttons are `.standard` (44pt) height. Phone: 2×2 grid. iPad: 1×4 row.
+- Presets use a compact four-button row on standard phone and iPad text sizes,
+  two columns at XX Large/XXX Large, and one column at accessibility sizes.
+  Labels and temperature pairs remain visible; the compact **Cool** label keeps
+  the full **Cool down** VoiceOver name. Hit targets remain at least 44pt.
 - **No custom temp input. No long-press. No swipe.**
 
 #### Home
@@ -605,7 +612,7 @@ If all three subgroups are empty, the whole Controls section hides (same as offl
 All controls must satisfy:
 
 - **Touch target ≥ 44×44pt.** Already enforced by `ActionButtonStyle.standard` / `.prominent`. Jog `±` use 60pt.
-- **Dynamic Type.** All labels use system text styles (`.subheadline`, `.caption`, etc.). At `.accessibility5`, the 2×2 Preheat grid collapses to a single column (1×4) via `ViewThatFits`.
+- **Dynamic Type.** All labels use system text styles (`.subheadline`, `.caption`, etc.). Accessibility sizes collapse Preheat to one column and stack each heater's reading, target editor and Set/Off row. `ViewThatFits` also stacks heater editors when the inline row cannot fit.
 - **VoiceOver labels and hints** on every control.
 - **Color contrast ≥ 4.5:1** for text, ≥ 3:1 for icon-only. The dark theme `pfButtonPrimary` (#047857) on `pfButtonPrimaryText` (#fff) measures 4.6:1 — passes.
 - **Reduce Motion** honored: pending crossfade and banner slide become instant when `accessibilityReduceMotion == true`.

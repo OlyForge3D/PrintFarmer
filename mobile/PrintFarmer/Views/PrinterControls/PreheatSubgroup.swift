@@ -59,6 +59,7 @@ struct ControlActionButton: UIViewRepresentable {
     var hint: String?
     var selected = false
     var isDestructive = false
+    var compact = false
     let action: () -> Void
     @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 17
     @Environment(\.isEnabled) private var isEnabled
@@ -74,6 +75,9 @@ struct ControlActionButton: UIViewRepresentable {
         var configuration = UIButton.Configuration.gray()
         configuration.title = title
         configuration.buttonSize = .large
+        if compact {
+            configuration.contentInsets = .init(top: 8, leading: 8, bottom: 8, trailing: 8)
+        }
         configuration.cornerStyle = .medium
         configuration.baseForegroundColor = UIColor(isDestructive ? Color.pfError : Color.pfTextPrimary)
         configuration.background.strokeColor = UIColor(selected ? Color.pfTextPrimary : Color.clear)
@@ -182,15 +186,13 @@ struct PreheatSubgroup: View {
     }
 
     private var gridColumns: [GridItem] {
-        // iPad regular: 4 columns. Accessibility type sizes: 1 column.
-        // Phone / compact: 2 columns per spec §4.1 (collapses at accessibility sizes).
         let count: Int
         if dynamicTypeSize.isAccessibilitySize {
             count = 1
-        } else if horizontalSizeClass == .regular {
-            return [GridItem(.adaptive(minimum: 120), spacing: 8)]
-        } else {
+        } else if dynamicTypeSize >= .xxLarge {
             count = 2
+        } else {
+            count = 4
         }
         return Array(repeating: GridItem(.flexible(), spacing: 8), count: count)
     }
@@ -217,7 +219,10 @@ struct PreheatSubgroup: View {
         } label: {
             buttonLabel(preset: preset, isPending: isPending)
         }
-        .buttonStyle(PreheatButtonStyle(preset: preset, isEnabled: isInteractive, isPending: isPending))
+        .buttonStyle(PreheatButtonStyle(
+            preset: preset, isEnabled: isInteractive, isPending: isPending,
+            compact: !dynamicTypeSize.isAccessibilitySize
+        ))
         .disabled(isAnyPreheatInProgress || limitsReason != nil || isBlockedWithoutTapReveal(canControl: canControl))
         // On compact layouts we keep blocked buttons tappable so the user can
         // reveal the disabled reason; regular width shows the reason inline.
@@ -234,7 +239,7 @@ struct PreheatSubgroup: View {
         @ObservedObject var viewModel: PrinterControlsViewModel
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 ForEach(Heater.allCases, id: \.self) { heater in
                     if viewModel.supports(heater) {
                         HeaterTargetEditor(viewModel: viewModel, heater: heater)
@@ -249,6 +254,7 @@ struct PreheatSubgroup: View {
         let heater: Heater
         @State private var target = ""
         @State private var inputError: String?
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
         static func temperatureText(_ value: Double?) -> String {
             guard let value, value.isFinite else { return "Unknown" }
@@ -257,32 +263,87 @@ struct PreheatSubgroup: View {
 
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
-                Text("\(heater.title) target")
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
-                Text("Actual: \(Self.temperatureText(actual))")
-                Text("Setpoint: \(Self.temperatureText(setpoint))")
-                if let maximum = viewModel.maximum(for: heater) {
-                    Text("Configured range: 0–\(maximum) °C. Zero switches this heater off.")
-                        .font(.footnote)
+                if dynamicTypeSize.isAccessibilitySize {
+                    stackedEditor
                 } else {
-                    Text("No valid maximum is available. Heating is blocked; only zero-off is allowed. Retry the heater limits check.")
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .bottom, spacing: 8) {
+                            reading
+                                .frame(minWidth: 112, alignment: .leading)
+                                .fixedSize(horizontal: true, vertical: false)
+                            targetEditor.frame(width: 88)
+                            actions.fixedSize(horizontal: true, vertical: false)
+                        }
+                        stackedEditor
+                    }
+                }
+                if viewModel.maximum(for: heater) == nil {
+                    Text("Heating unavailable. Retry heater limits; Off is still available.")
                         .font(.footnote)
+                        .foregroundStyle(Color.pfTextSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if let inputError {
+                    Text(inputError)
+                        .font(.footnote)
+                        .foregroundStyle(Color.pfError)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .foregroundStyle(Color.pfTextPrimary)
+            .disabled(!viewModel.canControl || viewModel.isExecuting)
+        }
+
+        private var reading: some View {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(heater.title)
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Text("Current: \(Self.temperatureText(actual))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .accessibilityLabel("\(heater.title) current temperature, \(Self.temperatureText(actual))")
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+
+        private var targetEditor: some View {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Target: \(Self.temperatureText(setpoint))")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(Color.pfTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 ControlNumberField(
-                    placeholder: "Target (°C)", text: $target,
+                    placeholder: "New °C", text: $target,
                     label: "\(heater.title) target in degrees Celsius",
                     identifier: "printer.controls.\(heater.rawValue).target",
-                    hint: ControlNumberInput.heaterPrecisionMessage
+                    hint: targetHint
                 )
+            }
+        }
+
+        private var targetHint: String {
+            let limit = viewModel.maximum(for: heater).map { "Maximum \($0) degrees. " } ?? ""
+            return limit + ControlNumberInput.heaterPrecisionMessage
+        }
+
+        private var stackedEditor: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                reading
+                targetEditor
+                actions
+            }
+        }
+
+        private var actions: some View {
+            HStack(spacing: 8) {
                 ControlActionButton(
-                    title: "Set \(heater.title.lowercased()) target",
-                    identifier: "printer.controls.\(heater.rawValue).set"
+                    title: "Set", identifier: "printer.controls.\(heater.rawValue).set",
+                    accessibilityTitle: "Set \(heater.title.lowercased()) target", compact: true
                 ) {
                     do {
                         guard let value = try ControlNumberInput.heaterTarget(target) else {
-                            throw PrinterControlError.invalidRequest("Enter a target; use zero to switch off.")
+                            throw PrinterControlError.invalidRequest("Enter a target or choose Off.")
                         }
                         if let message = viewModel.heaterTargetError(heater, target: value) {
                             throw PrinterControlError.invalidRequest(message)
@@ -293,12 +354,15 @@ struct PreheatSubgroup: View {
                         inputError = error.localizedDescription
                     }
                 }
-                if let inputError {
-                    Text(inputError).font(.footnote).foregroundStyle(Color.pfError)
+                ControlActionButton(
+                    title: "Off", identifier: "printer.controls.\(heater.rawValue).off",
+                    accessibilityTitle: "Turn \(heater.title.lowercased()) off",
+                    hint: "Sets only this heater to zero degrees.", compact: true
+                ) {
+                    inputError = nil
+                    Task { await viewModel.setHeaterTarget(heater, target: 0) }
                 }
             }
-            .foregroundStyle(Color.pfTextPrimary)
-            .disabled(!viewModel.canControl || viewModel.isExecuting)
         }
 
         private var actual: Double? {
@@ -327,16 +391,10 @@ struct PreheatSubgroup: View {
 
     private func buttonLabel(preset: PreheatPreset, isPending: Bool) -> some View {
         VStack(spacing: 2) {
-            HStack(spacing: 4) {
-                Image(systemName: preset.iconName)
-                    .imageScale(.medium)
-                Text(preset.displayLabel)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
-            }
+            Text(preset == .coolDown && !dynamicTypeSize.isAccessibilitySize ? "Cool" : preset.displayLabel)
+                .font(.subheadline.weight(.medium))
             Text(viewModel.supports(.bed) ? preset.temperatureLabel : "\(Int(preset.hotend))°")
-                .font(.caption.monospacedDigit())
-                .lineLimit(1)
+                .font(.caption2.monospacedDigit())
                 .opacity(isPending ? 0 : 1) // hide values during pending; spinner takes over
         }
         .frame(maxWidth: .infinity, minHeight: 44) // 44pt HIG hit target
@@ -433,13 +491,6 @@ private extension PreheatPreset {
         }
     }
 
-    var iconName: String {
-        switch self {
-        case .pla, .petg, .abs: return "thermometer.high"
-        case .coolDown: return "thermometer.snowflake"
-        }
-    }
-
     var temperatureLabel: String {
         "\(Int(hotend))° / \(Int(bed))°"
     }
@@ -468,11 +519,12 @@ private struct PreheatButtonStyle: ButtonStyle {
     let preset: PreheatPreset
     let isEnabled: Bool
     let isPending: Bool
+    let compact: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .padding(.horizontal, 8)
-            .padding(.vertical, 8)
+            .padding(.horizontal, compact ? 4 : 8)
+            .padding(.vertical, compact ? 0 : 8)
             .background(background)
             .foregroundStyle(foreground)
             .overlay(border)

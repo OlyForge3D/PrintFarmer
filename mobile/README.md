@@ -241,6 +241,13 @@ Controls includes absolute movement, motor release, guarded material controls
 and an inline calibration review. Availability is limited by the safety
 evidence described below. All paths below are relative to `/api/printers/{printerId}`.
 
+Thermal controls use compact Hotend/Bed rows with separate **Current** and
+**Target** readings, a new-target input, and adjacent **Set / Off** actions.
+Presets share a compact row. Large accessibility text and narrow widths stack
+the editors; iPad retains its adaptive thermal column. Off affects only the
+chosen heater, and all existing limits, permissions and pending-command gates
+still apply.
+
 | Native method | POST route | Request / response |
 | --- | --- | --- |
 | `setTemperatures` | `/temps` | Optional `hotend` / `bed` in Celsius; nil omitted, zero means off. Decodes `CommandResult` and throws on rejection. |

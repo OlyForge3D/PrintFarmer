@@ -6,6 +6,11 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Added
 
+- **Compact native thermal controls** — Replace tall repeated heater editors
+  with Hotend/Bed rows combining current/target readings, input and Set/Off.
+  Compact presets, adaptive accessibility stacking and 44-point native targets
+  preserve safety validation and pending-command locks.
+
 - **Guarded native material controls** — Separate physical filament requests
   from spool assignment and preserve NFC/Eject. Add signed extrusion choices,
   explicit unavailable reasons and an interruptible inline calibration review.

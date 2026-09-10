@@ -428,7 +428,10 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let setHeater = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.set" })
         let coordinate = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.x" } as? UITextField)
         let move = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.move" })
-        XCTAssertEqual(heater.accessibilityHint, ControlNumberInput.heaterPrecisionMessage)
+        XCTAssertEqual(
+            heater.accessibilityHint,
+            "Maximum \(try XCTUnwrap(model.maximum(for: .hotend))) degrees. " + ControlNumberInput.heaterPrecisionMessage
+        )
         XCTAssertEqual(coordinate.accessibilityHint, ControlNumberInput.coordinatePrecisionMessage)
 
         heater.text = "200.5"
