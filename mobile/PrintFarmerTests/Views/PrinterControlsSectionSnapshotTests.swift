@@ -675,7 +675,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         .environment(\.dynamicTypeSize, dynamicType)
         .frame(width: width)
         .fixedSize(horizontal: false, vertical: true)
-        let controller = UIHostingController(rootView: content)
+        let controller = UIHostingController(rootView: AnyView(content))
         let size = controller.sizeThatFits(in: CGSize(width: width, height: 20000))
         XCTAssertEqual(size.width, width, accuracy: 1)
         XCTAssertGreaterThan(size.height, 500)
@@ -698,13 +698,31 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             XCTAssertFalse(button.accessibilityLabel?.isEmpty ?? true, suffix)
             XCTAssertEqual(button.isEnabled, suffix == "calibration-start" || supported)
         }
-        let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
-            XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
+        // Capture actual scroll viewports rather than asking the render server
+        // for a many-thousand-point AX surface. Keep native scale and every tile.
+        controller.rootView = AnyView(ScrollView { content })
+        window.frame.size = CGSize(width: width, height: 844)
+        controller.view.frame = window.bounds
+        try await settle(controller)
+        func findScrollView(_ view: UIView) -> UIScrollView? {
+            if let scroll = view as? UIScrollView { return scroll }
+            return view.subviews.lazy.compactMap { findScrollView($0) }.first
         }
-        let attachment = XCTAttachment(image: image)
-        attachment.name = "issue-2599-\(snapshotName ?? "iPhone")-\(Int(width))-\(dynamicType)-\(supported)"
-        attachment.lifetime = .keepAlways
-        add(attachment)
+        let scroll = try XCTUnwrap(findScrollView(controller.view))
+        let lastOffset = max(0, scroll.contentSize.height - scroll.bounds.height)
+        let pageHeight = max(1, scroll.bounds.height - 44)
+        let pageCount = Int(ceil(lastOffset / pageHeight)) + 1
+        for page in 0..<pageCount {
+            scroll.setContentOffset(CGPoint(x: 0, y: min(CGFloat(page) * pageHeight, lastOffset)), animated: false)
+            try await settle(controller)
+            let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+                XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
+            }
+            let attachment = XCTAttachment(image: image)
+            attachment.name = "issue-2599-\(snapshotName ?? "iPhone")-\(Int(width))-\(dynamicType)-\(supported)-page\(page)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
         XCTAssertTrue(service.physicalFilamentCalls.isEmpty)
         XCTAssertNil(service.extrudeCalledWith)
         XCTAssertNil(service.saveZOffsetCalledWith)
