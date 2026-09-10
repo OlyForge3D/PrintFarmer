@@ -55,6 +55,15 @@ final class JogSubgroupTests: XCTestCase {
         XCTAssertFalse(JogSubgroup.AbsolutePositionControls.isVisible(limited))
     }
 
+    func test_absoluteGuidance_staysNeutralUntilDestinationInputExists() {
+        typealias Editor = JogSubgroup.AbsolutePositionControls
+        XCTAssertFalse(Editor.hasDestinationInput(x: "", y: "", z: ""))
+        XCTAssertFalse(Editor.hasDestinationInput(x: " ", y: "\n", z: "\t"))
+        XCTAssertTrue(Editor.hasDestinationInput(x: "0", y: "", z: ""))
+        XCTAssertTrue(Editor.hasDestinationInput(x: "", y: "-1", z: ""))
+        XCTAssertTrue(Editor.hasDestinationInput(x: "", y: "", z: "invalid"))
+    }
+
     private static let fullCaps = PrinterBackendCapabilities(
         supportsMovement: true,
         supportsTemperatureControl: true,

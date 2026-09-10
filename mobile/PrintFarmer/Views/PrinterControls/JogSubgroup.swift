@@ -132,6 +132,10 @@ struct JogSubgroup: View {
             )
         }
 
+        static func hasDestinationInput(x: String, y: String, z: String) -> Bool {
+            [x, y, z].contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        }
+
         private var validationMessage: String? {
             do {
                 let point = try Self.destination(x: x, y: y, z: z)
@@ -192,7 +196,13 @@ struct JogSubgroup: View {
                     }
                     .disabled(validationMessage != nil)
                     if let message = validationMessage ?? inputError {
-                        Text(message).font(.footnote).foregroundStyle(Color.pfError)
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(
+                                Self.hasDestinationInput(x: x, y: y, z: z) || inputError != nil
+                                    ? Color.pfError : Color.pfTextSecondary
+                            )
+                            .accessibilityAddTraits(.isStaticText)
                     }
                 }
                 .foregroundStyle(Color.pfTextPrimary)

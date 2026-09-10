@@ -381,8 +381,6 @@ struct PrinterDetailTemperatureReading: Equatable {
         guard isOnline, let measured, measured.isFinite else {
             return String(localized: "Unavailable")
         }
-
-
         return measured.temperatureFormatted
     }
 
