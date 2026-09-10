@@ -58,6 +58,9 @@ insets. Native system typography follows the reference hierarchy: 24-point
 readings, 17-point headings, 16-point actions, 13-point labels and 12-point
 secondary status, all scaling with Dynamic Type. ThemeColors supply surfaces,
 borders and semantic tint; SF Symbols replace the illustrative SVG strokes.
+At accessibility sizes, actual and explicitly labeled target readings stack
+instead of wrapping the compact slash notation. Motor release keeps the quiet
+entry-button treatment, with its destructive action and warning in confirmation.
 
 `test_essentialPrototype_matchedScrollViewportsAndNativeControlMetrics` retains
 native 386x612 phone and 1068x650 tablet scroll viewports, matching the unmodified

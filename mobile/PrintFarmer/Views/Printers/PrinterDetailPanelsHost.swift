@@ -451,13 +451,19 @@ struct PrinterDetailTemperatureStrip: View {
             Label(title, systemImage: symbol)
                 .font(.footnote).foregroundStyle(Color.pfTextSecondary)
                 .padding(.bottom, 5)
-            (
-                Text(compactTemperature(value.measured, isOnline: value.isOnline))
-                    .font(.system(size: essentialReadingSize))
-                + Text(" / " + compactTemperature(value.target, isOnline: value.isOnline))
-                    .font(.footnote).foregroundColor(.pfTextSecondary)
-            )
-            .monospacedDigit()
+            if dynamicTypeSize.isAccessibilitySize {
+                Text(value.measuredText).font(.system(size: essentialReadingSize)).monospacedDigit()
+                Text("Target: \(value.targetText)").font(.footnote).monospacedDigit()
+                    .foregroundStyle(Color.pfTextSecondary)
+            } else {
+                (
+                    Text(compactTemperature(value.measured, isOnline: value.isOnline))
+                        .font(.system(size: essentialReadingSize))
+                    + Text(" / " + compactTemperature(value.target, isOnline: value.isOnline))
+                        .font(.footnote).foregroundColor(.pfTextSecondary)
+                )
+                .monospacedDigit()
+            }
             Text(!value.isOnline || value.measured?.isFinite != true ? "Reading unavailable" :
                     value.target == 0 ? "Heater off" : value.target?.isFinite == true ? "Target set" : "Target unknown")
                 .font(.caption).foregroundStyle(Color.pfTextSecondary).padding(.top, 3)

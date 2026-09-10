@@ -429,7 +429,9 @@ struct PrinterMotionControls: View {
     }
 
     private func position(_ axis: String, value: Double?) -> some View {
-        let text = value.flatMap { $0.isFinite ? "\($0.formatted()) mm" : nil } ?? "Unknown"
+        let text = value.flatMap {
+            $0.isFinite ? "\($0.formatted(.number.precision(.fractionLength(1)))) mm" : nil
+        } ?? "Unknown"
         return Text("\(axis) \(text)").font(.caption.monospacedDigit())
             .foregroundStyle(Color.pfTextSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)

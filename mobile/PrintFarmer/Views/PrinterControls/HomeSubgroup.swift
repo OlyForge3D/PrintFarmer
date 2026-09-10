@@ -56,7 +56,7 @@ struct HomeSubgroup: View {
                 VStack(alignment: .leading, spacing: 8) {
                     ControlActionButton(
                         title: "Disable motors", identifier: "printer.controls.disable-motors",
-                        hint: Self.warning, isDestructive: true, compact: true
+                        hint: Self.warning, compact: true
                     ) {
                         confirmsRelease = true
                     }

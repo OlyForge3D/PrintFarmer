@@ -459,9 +459,15 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             let set = try frame("printer.controls.heat.set-targets")
             XCTAssertEqual(hotend.minX, tablet ? 42 : 34, accuracy: 1)
             XCTAssertEqual(set.minX, hotend.minX, accuracy: 1)
+            // Browser positions include 44px controls; native uses 45pt to
+            // guarantee actual >=44pt hit bounds after fractional placement.
+            XCTAssertEqual(hotend.minY, 217.09375, accuracy: 2)
+            XCTAssertEqual(set.minY, 275.09375, accuracy: 2.5)
+            XCTAssertEqual(set.width, tablet ? 485.703125 : 318, accuracy: 0.5)
             let up = try frame("printer.controls.jog.y.positive")
             let down = try frame("printer.controls.jog.y.negative")
             XCTAssertEqual(up.height, 48, accuracy: 1)
+            XCTAssertEqual(up.minY, tablet ? 166.09375 : 648.9375, accuracy: 4)
             XCTAssertEqual(down.minY - up.minY, 108, accuracy: 1)
             let motors = try frame("printer.controls.disable-motors")
             let calibration = try frame("printer.controls.calibration-start")
