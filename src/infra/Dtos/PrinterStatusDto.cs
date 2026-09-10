@@ -33,7 +33,9 @@ public record PrinterStatusDto(
     IReadOnlyDictionary<int, ExtruderTemperature>? ExtruderTemperatures = null,
     int? DetectedExtruderCount = null,
     double? PrintTimeLeftSeconds = null,
-    int? SpeedMultiplier = null)
+    int? SpeedMultiplier = null,
+    string? HomedAxes = null,
+    PrinterSafetyTelemetryDto? SafetyTelemetry = null)
 {
     /// <summary>
     /// Returns a copy with FileName derived from JobName (path stripped) and JobName preserved as-is.

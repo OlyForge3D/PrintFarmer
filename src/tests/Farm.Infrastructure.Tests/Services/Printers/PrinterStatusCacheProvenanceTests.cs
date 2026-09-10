@@ -85,6 +85,36 @@ public sealed class PrinterStatusCacheProvenanceTests
         OriginWatermark.Combine().Should().BeNull();
     }
 
+    [Fact]
+    public void UnrelatedStatusUpdate_DoesNotRefreshTemperatureFactTimestamp()
+    {
+        Guid printerId = Guid.NewGuid();
+        PrinterStatusCache cache = CreateCache();
+        cache.UpdateStatus(new PrinterStatusDto(
+            printerId,
+            true,
+            "Idle",
+            HotendTemp: 215,
+            HotendTarget: 240));
+        PrinterSafetyTelemetryDto first =
+            cache.GetStatus(printerId)!.SafetyTelemetry!;
+
+        cache.UpdateStatus(new PrinterStatusDto(
+            printerId,
+            true,
+            "Printing",
+            Progress: 10));
+        PrinterSafetyTelemetryDto second =
+            cache.GetStatus(printerId)!.SafetyTelemetry!;
+
+        second.MeasuredHotendTemperatureC.ObservedAtUtc.Should()
+            .Be(first.MeasuredHotendTemperatureC.ObservedAtUtc);
+        second.TargetHotendTemperatureC.ObservedAtUtc.Should()
+            .Be(first.TargetHotendTemperatureC.ObservedAtUtc);
+        second.MeasuredHotendTemperatureC.Value.Should().Be(215);
+        second.TargetHotendTemperatureC.Value.Should().Be(240);
+    }
+
     private static PrinterStatusCache CreateCache()
     {
         var diagnostics = new Mock<IDiagnosticChannelService>(MockBehavior.Loose);

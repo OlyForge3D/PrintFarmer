@@ -57,6 +57,10 @@ public interface IPrinterPhysicalActuationService
         string operation,
         CancellationToken ct = default);
 
+    Task<PrinterActuationResult> RevalidateDirectAsync(
+        PrinterActuationLease lease,
+        CancellationToken ct = default);
+
     Task CompleteDirectAsync(
         PrinterActuationLease lease,
         bool accepted,
@@ -323,6 +327,53 @@ public sealed class PrinterPhysicalActuationService(
                 operation,
                 actorSubject),
             commandId);
+    }
+
+    /// <inheritdoc />
+    public async Task<PrinterActuationResult> RevalidateDirectAsync(
+        PrinterActuationLease lease,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        ct.ThrowIfCancellationRequested();
+
+        PrinterDispatchState? state = await _db.PrinterDispatchStates
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                candidate => candidate.PrinterId == lease.PrinterId,
+                ct);
+        if (state?.PhysicalControlCommandId != lease.CommandId ||
+            state.PhysicalControlAttemptId is not null ||
+            !string.Equals(
+                state.PhysicalControlOperation,
+                lease.Operation,
+                StringComparison.Ordinal))
+        {
+            return Denied(
+                PrinterActuationResultCode.FenceConflict,
+                "The physical actuation lease is no longer current.");
+        }
+
+        bool activeDispatchAppeared =
+            state.ActiveDispatchAttemptId.HasValue ||
+            state.ActiveJobId.HasValue ||
+            await _db.PrintJobs
+                .WhereOccupiesPrinter()
+                .AsNoTracking()
+                .AnyAsync(
+                    job => job.AssignedPrinterId == lease.PrinterId,
+                    ct);
+        if (activeDispatchAppeared)
+        {
+            return Denied(
+                PrinterActuationResultCode.ConcurrencyConflict,
+                "Printer ownership changed after the physical actuation lease was acquired.");
+        }
+
+        return new PrinterActuationResult(
+            PrinterActuationResultCode.Accepted,
+            lease,
+            lease.CommandId);
     }
 
     /// <inheritdoc />

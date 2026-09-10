@@ -52,6 +52,9 @@ public enum FilamentUnloadFailureKind
 
     /// <summary>The requested toolhead / lane index is invalid. Maps to HTTP 400.</summary>
     InvalidToolhead = 2,
+
+    /// <summary>The backend may have received the physical command. Maps to HTTP 503.</summary>
+    OutcomeUnknown = 3,
 }
 
 /// <summary>

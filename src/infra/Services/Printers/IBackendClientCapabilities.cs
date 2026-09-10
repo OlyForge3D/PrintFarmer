@@ -748,6 +748,25 @@ public interface ISupportsConnectionTest
 }
 
 /// <summary>
+/// Backend capability for authoritative, per-printer safety discovery.
+/// Implementations must return unknown rather than infer support from transport methods.
+/// </summary>
+public interface ISupportsVerifiedSafetyDiscovery
+{
+    /// <summary>Discovers verified safety facts for one backend endpoint.</summary>
+    /// <param name="baseUrl">Credential-free backend endpoint URL.</param>
+    /// <param name="credential">Backend credential for the endpoint, when required.</param>
+    /// <param name="sourceRevision">Current printer configuration revision.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Authoritative safety facts, or an unavailable contract when discovery fails.</returns>
+    Task<PrinterVerifiedSafetyDto> DiscoverVerifiedSafetyAsync(
+        string baseUrl,
+        PrinterCredential? credential,
+        string sourceRevision,
+        CancellationToken ct = default);
+}
+
+/// <summary>
 /// Capability marker interface for backends that support firmware and system restart operations.
 /// Used for restarting the printer firmware or associated services.
 /// </summary>

@@ -44,7 +44,8 @@ public class MoonrakerClient(
     ISupportsGcodeExecution,
     ISupportsObjectExclusion,
     ISupportsFilamentUsageQuery,
-    ISupportsPerExtruderFilamentUsage
+    ISupportsPerExtruderFilamentUsage,
+    ISupportsVerifiedSafetyDiscovery
 {
     private const int MaxExcludeObjectNameLength = 256;
 
@@ -772,7 +773,7 @@ public class MoonrakerClient(
 
     public async Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
     {
-        List<string> parts = new() { "G90", "G0" };
+        List<string> parts = new() { "G0" };
         if (x is not null)
         {
             parts.Add($"X{x:0.###}");
@@ -793,7 +794,276 @@ public class MoonrakerClient(
             parts.Add($"F{f:0.###}");
         }
 
-        return await SendGcodePrivateAsync(baseUrl, string.Join(' ', parts), ct);
+        return await SendGcodePrivateAsync(
+            baseUrl,
+            ["G90", string.Join(' ', parts)],
+            ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<PrinterVerifiedSafetyDto> DiscoverVerifiedSafetyAsync(
+        string baseUrl,
+        PrinterCredential? credential,
+        string sourceRevision,
+        CancellationToken ct = default)
+    {
+        DateTime observedAtUtc = DateTime.UtcNow;
+
+        try
+        {
+            using CancellationTokenSource timeout =
+                CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(_timeouts.StatusPollTimeout);
+
+            using HttpRequestMessage objectsRequest = CreateSafetyDiscoveryRequest(
+                new Uri(new Uri(baseUrl.TrimEnd('/') + "/"), "printer/objects/list"),
+                credential);
+            using HttpResponseMessage objectsResponse =
+                await _http.SendAsync(objectsRequest, timeout.Token);
+            if (!objectsResponse.IsSuccessStatusCode)
+            {
+                return PrinterVerifiedSafetyDto.Unknown(
+                    "moonraker:printer.objects.list",
+                    observedAtUtc,
+                    sourceRevision: sourceRevision);
+            }
+
+            await using Stream objectsStream =
+                await objectsResponse.Content.ReadAsStreamAsync(timeout.Token);
+            using JsonDocument objectsDocument =
+                await JsonDocument.ParseAsync(
+                    objectsStream,
+                    cancellationToken: timeout.Token);
+            if (!TryReadMoonrakerObjects(objectsDocument.RootElement, out HashSet<string>? objects))
+            {
+                return PrinterVerifiedSafetyDto.Unknown(
+                    "moonraker:printer.objects.list:malformed",
+                    observedAtUtc,
+                    sourceRevision: sourceRevision);
+            }
+
+            using HttpRequestMessage geometryRequest = CreateSafetyDiscoveryRequest(
+                new Uri(
+                    new Uri(baseUrl.TrimEnd('/') + "/"),
+                    "printer/objects/query?toolhead=axis_minimum,axis_maximum&gcode_move=homing_origin&configfile=settings"),
+                credential);
+            using HttpResponseMessage geometryResponse =
+                await _http.SendAsync(geometryRequest, timeout.Token);
+
+            SafetyVector3Dto? origin = null;
+            SafetyTravelEnvelopeDto? envelope = null;
+            bool geometryObserved = geometryResponse.IsSuccessStatusCode;
+            if (geometryObserved)
+            {
+                await using Stream geometryStream =
+                    await geometryResponse.Content.ReadAsStreamAsync(timeout.Token);
+                using JsonDocument geometryDocument =
+                    await JsonDocument.ParseAsync(
+                        geometryStream,
+                        cancellationToken: timeout.Token);
+                TryReadMoonrakerGeometry(
+                    geometryDocument.RootElement,
+                    out origin,
+                    out envelope);
+            }
+
+            const string macroSource = "moonraker:printer.objects.list";
+            VerifiedSafetyOperationCapabilityDto Macro(string name) =>
+                new(
+                    objects.Contains($"gcode_macro {name}")
+                        ? VerifiedSafetySupport.Supported
+                        : VerifiedSafetySupport.Unsupported,
+                    macroSource,
+                    observedAtUtc);
+
+            bool hasMovementEvidence =
+                objects.Contains("toolhead") &&
+                objects.Contains("gcode_move") &&
+                origin is not null &&
+                envelope is not null;
+            VerifiedSafetySupport movementSupport = hasMovementEvidence
+                ? VerifiedSafetySupport.Supported
+                : VerifiedSafetySupport.Unknown;
+            string movementSource = hasMovementEvidence
+                ? "moonraker:toolhead+gcode_move geometry and separate G90/G0 adapter"
+                : "moonraker:authoritative movement geometry unavailable";
+            var absoluteMovement = new VerifiedSafetyOperationCapabilityDto(
+                movementSupport,
+                movementSource,
+                observedAtUtc);
+            var firmwareSave = new VerifiedSafetyOperationCapabilityDto(
+                VerifiedSafetySupport.Unsupported,
+                "moonraker:no dedicated verified firmware offset save",
+                observedAtUtc);
+            var unknownThreshold = new VerifiedSafetyScalarFactDto(
+                VerifiedSafetyFactState.Unknown,
+                null,
+                "moonraker:firmware min_extrude_temp is not a material-safe threshold",
+                observedAtUtc);
+            var unknownClearance = new VerifiedSafetyScalarFactDto(
+                VerifiedSafetyFactState.Unknown,
+                null,
+                "moonraker:no authoritative clearance source",
+                observedAtUtc);
+            string originSource = geometryObserved
+                ? "moonraker:gcode_move.homing_origin:malformed"
+                : "moonraker:gcode_move.homing_origin:unavailable";
+            VerifiedSafetyVectorFactDto originFact = origin is null
+                ? new VerifiedSafetyVectorFactDto(
+                    VerifiedSafetyFactState.Unknown,
+                    null,
+                    originSource,
+                    observedAtUtc)
+                : new VerifiedSafetyVectorFactDto(
+                    VerifiedSafetyFactState.Verified,
+                    origin,
+                    "moonraker:gcode_move.homing_origin",
+                    observedAtUtc);
+            string envelopeSource = geometryObserved
+                ? "moonraker:toolhead.axis_minimum/axis_maximum:malformed"
+                : "moonraker:toolhead.axis_minimum/axis_maximum:unavailable";
+            VerifiedSafetyEnvelopeFactDto envelopeFact = envelope is null
+                ? new VerifiedSafetyEnvelopeFactDto(
+                    VerifiedSafetyFactState.Unknown,
+                    null,
+                    envelopeSource,
+                    observedAtUtc)
+                : new VerifiedSafetyEnvelopeFactDto(
+                    VerifiedSafetyFactState.Verified,
+                    envelope,
+                    "moonraker:toolhead.axis_minimum/axis_maximum",
+                    observedAtUtc);
+
+            return new PrinterVerifiedSafetyDto(
+                1,
+                new VerifiedSafetyDiscoveryDto(
+                    VerifiedSafetyDiscoveryState.Partial,
+                    observedAtUtc,
+                    sourceRevision),
+                new VerifiedSafetyOperationsDto(
+                    absoluteMovement,
+                    firmwareSave,
+                    Macro("LOAD_FILAMENT"),
+                    Macro("UNLOAD_FILAMENT"),
+                    Macro("M600")),
+                new VerifiedSafetyExtrusionDto(unknownThreshold),
+                new VerifiedSafetyPositioningDto(
+                    originFact,
+                    envelopeFact,
+                    unknownClearance));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or
+                                   OperationCanceledException or InvalidOperationException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Moonraker verified safety discovery failed for {BaseUrl}",
+                baseUrl);
+            return PrinterVerifiedSafetyDto.Unknown(
+                "moonraker:discovery.failed",
+                observedAtUtc,
+                sourceRevision: sourceRevision);
+        }
+    }
+
+    private static HttpRequestMessage CreateSafetyDiscoveryRequest(
+        Uri uri,
+        PrinterCredential? credential)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        if (credential?.HasApiKey == true)
+        {
+            request.Headers.Add("X-Api-Key", credential.ApiKey);
+        }
+
+        return request;
+    }
+
+    private static bool TryReadMoonrakerObjects(
+        JsonElement root,
+        out HashSet<string> objects)
+    {
+        objects = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!root.TryGetProperty("result", out JsonElement result) ||
+            !result.TryGetProperty("objects", out JsonElement values) ||
+            values.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (JsonElement value in values.EnumerateArray())
+        {
+            if (value.ValueKind != JsonValueKind.String)
+            {
+                return false;
+            }
+
+            string? name = value.GetString();
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                _ = objects.Add(name);
+            }
+        }
+
+        return true;
+    }
+
+    private static void TryReadMoonrakerGeometry(
+        JsonElement root,
+        out SafetyVector3Dto? origin,
+        out SafetyTravelEnvelopeDto? envelope)
+    {
+        origin = null;
+        envelope = null;
+        if (!root.TryGetProperty("result", out JsonElement result) ||
+            !result.TryGetProperty("status", out JsonElement status))
+        {
+            return;
+        }
+
+        if (status.TryGetProperty("gcode_move", out JsonElement gcodeMove) &&
+            gcodeMove.TryGetProperty("homing_origin", out JsonElement originValue) &&
+            TryReadFiniteVector(originValue, out SafetyVector3Dto parsedOrigin))
+        {
+            origin = parsedOrigin;
+        }
+
+        if (status.TryGetProperty("toolhead", out JsonElement toolhead) &&
+            toolhead.TryGetProperty("axis_minimum", out JsonElement minimumValue) &&
+            toolhead.TryGetProperty("axis_maximum", out JsonElement maximumValue) &&
+            TryReadFiniteVector(minimumValue, out SafetyVector3Dto minimum) &&
+            TryReadFiniteVector(maximumValue, out SafetyVector3Dto maximum) &&
+            minimum.X <= maximum.X &&
+            minimum.Y <= maximum.Y &&
+            minimum.Z <= maximum.Z)
+        {
+            envelope = new SafetyTravelEnvelopeDto(minimum, maximum);
+        }
+    }
+
+    private static bool TryReadFiniteVector(
+        JsonElement value,
+        out SafetyVector3Dto vector)
+    {
+        vector = new SafetyVector3Dto(0, 0, 0);
+        if (value.ValueKind != JsonValueKind.Array ||
+            value.GetArrayLength() < 3 ||
+            !value[0].TryGetDouble(out double x) ||
+            !value[1].TryGetDouble(out double y) ||
+            !value[2].TryGetDouble(out double z) ||
+            !double.IsFinite(x) ||
+            !double.IsFinite(y) ||
+            !double.IsFinite(z))
+        {
+            return false;
+        }
+
+        vector = new SafetyVector3Dto(x, y, z);
+        return true;
     }
 
     public async Task<bool> PauseAsync(string baseUrl, CancellationToken ct = default)

@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure;
+﻿using System.Text.Json;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.Printers;
@@ -12,21 +14,25 @@ namespace Farm.Infrastructure.Services.Printers;
 /// </summary>
 public class PrinterBackendCapabilitiesService(
     IPrintersRepository repo,
-    IBackendCapabilityFactory capabilityFactory) : IPrinterBackendCapabilitiesService
+    IBackendCapabilityFactory capabilityFactory,
+    IBackendClientFactory? backendClientFactory = null,
+    IPrinterVerifiedSafetyCache? verifiedSafetyCache = null) : IPrinterBackendCapabilitiesService
 {
     private readonly IPrintersRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
     private readonly IBackendCapabilityFactory _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
+    private readonly IBackendClientFactory? _backendClientFactory = backendClientFactory;
+    private readonly IPrinterVerifiedSafetyCache? _verifiedSafetyCache = verifiedSafetyCache;
 
     public async Task<PrinterBackendCapabilitiesDto?> GetByPrinterIdAsync(Guid printerId, CancellationToken ct)
     {
         Printer? printer = await _repo.FindByIdAsync(printerId, ct);
-        return printer == null ? null : CreateCapabilitiesDto(printer);
+        return printer == null ? null : await CreateCapabilitiesDtoAsync(printer, ct);
     }
 
     public async Task<IEnumerable<PrinterBackendCapabilitiesDto>> GetAllAsync(CancellationToken ct)
     {
         List<Printer> printers = await _repo.GetAllAsync(ct);
-        return printers.Select(CreateCapabilitiesDto);
+        return await Task.WhenAll(printers.Select(printer => CreateCapabilitiesDtoAsync(printer, ct)));
     }
 
     public async Task<IEnumerable<PrinterBackendCapabilitiesDto>> GetByIdsAsync(Guid[] printerIds, CancellationToken ct)
@@ -37,19 +43,26 @@ public class PrinterBackendCapabilitiesService(
         }
 
         List<Printer> printers = await _repo.GetAllAsync(ct);
-        var result = printers
+        Printer[] selected = printers
             .Where(p => printerIds.Contains(p.Id))
-            .Select(CreateCapabilitiesDto)
-            .ToList();
+            .ToArray();
 
-        return result;
+        return await Task.WhenAll(selected.Select(printer => CreateCapabilitiesDtoAsync(printer, ct)));
+    }
+
+    /// <inheritdoc />
+    public void InvalidateVerifiedSafety(Guid printerId)
+    {
+        _verifiedSafetyCache?.Invalidate(printerId);
     }
 
     /// <summary>
     /// Converts a printer entity to backend capabilities DTO by checking
     /// which interfaces the backend client implements.
     /// </summary>
-    private PrinterBackendCapabilitiesDto CreateCapabilitiesDto(Printer printer)
+    private async Task<PrinterBackendCapabilitiesDto> CreateCapabilitiesDtoAsync(
+        Printer printer,
+        CancellationToken ct)
     {
         var backend = (PrinterBackend)printer.Backend;
         BackendCapabilities capabilities = _capabilityFactory.GetSupportedCapabilities(backend);
@@ -72,6 +85,9 @@ public class PrinterBackendCapabilitiesService(
             || (backend == PrinterBackend.OctoPrint && temperatureClient is ISupportsOctoPrintTemperature)
             || (backendPortMatches && temperature && backend is PrinterBackend.PrusaLink or PrinterBackend.FlashForge);
 
+        PrinterVerifiedSafetyDto verifiedSafety =
+            await GetVerifiedSafetyAsync(printer, backend, ct);
+
         return new PrinterBackendCapabilitiesDto(
             PrinterId: printer.Id,
             PrinterName: printer.Name,
@@ -90,11 +106,12 @@ public class PrinterBackendCapabilitiesService(
             SupportsFilamentControl: (capabilities & BackendCapabilities.FilamentControl) == BackendCapabilities.FilamentControl,
             SupportsObjectExclusion: (capabilities & BackendCapabilities.ObjectExclusion) == BackendCapabilities.ObjectExclusion)
         {
-            // Moonraker currently emits "G91 G0 ..." / "G90 G0 ..." on one line, not
-            // separate mode and move commands. Other MoveTo implementations are stubs;
-            // relative jog also drops OctoPrint/PrusaLink credentials in PrintersService.
+            // Relative jog still lacks a verified per-printer safety contract.
+            // Absolute movement is projected only from authoritative discovery.
             SupportsRelativeMovement = false,
-            SupportsAbsoluteMovement = false,
+            SupportsAbsoluteMovement =
+                verifiedSafety.Operations.AbsoluteMovement.Support ==
+                VerifiedSafetySupport.Supported,
 
             // Only Moonraker's current service route preserves its backend URL contract.
             SupportsDisableMotors = moonraker && gcode,
@@ -103,7 +120,9 @@ public class PrinterBackendCapabilitiesService(
 
             // SAVE_CONFIG does not persist SET_GCODE_OFFSET; M851/M500 is not universal
             // on OctoPrint firmware. Transport support alone cannot prove persistence.
-            SupportsZOffsetFirmwareSave = false,
+            SupportsZOffsetFirmwareSave =
+                verifiedSafety.Operations.FirmwareZOffsetSave.Support ==
+                VerifiedSafetySupport.Supported,
             SupportsHoming = homing,
             SupportsHomingXY = homing,
             SupportsHomingZ = homing && (moonraker || backendPortMatches),
@@ -113,10 +132,133 @@ public class PrinterBackendCapabilitiesService(
             // Moonraker calls configurable LOAD_FILAMENT/UNLOAD_FILAMENT/M600 macros.
             // No per-printer macro discovery exists here; preserve the legacy broad flag
             // without presenting it as evidence those individual commands are configured.
-            SupportsFilamentLoad = false,
-            SupportsFilamentUnload = false,
-            SupportsFilamentChange = false,
+            SupportsFilamentLoad =
+                verifiedSafety.Operations.FilamentLoad.Support ==
+                VerifiedSafetySupport.Supported,
+            SupportsFilamentUnload =
+                verifiedSafety.Operations.FilamentUnload.Support ==
+                VerifiedSafetySupport.Supported,
+            SupportsFilamentChange =
+                verifiedSafety.Operations.FilamentChange.Support ==
+                VerifiedSafetySupport.Supported,
             SupportedAxes = homing ? ["x", "y", "z"] : [],
+            VerifiedSafety = verifiedSafety,
         };
     }
+
+    private async Task<PrinterVerifiedSafetyDto> GetVerifiedSafetyAsync(
+        Printer printer,
+        PrinterBackend backend,
+        CancellationToken ct)
+    {
+        string sourceRevision = printer.ConfigurationRevision.ToString(
+            System.Globalization.CultureInfo.InvariantCulture);
+        string dispatchUrl =
+            PrinterBackendEndpointResolver.ResolveDispatchUrl(printer);
+        var key = new VerifiedSafetyCacheKey(
+            printer.Id,
+            backend,
+            dispatchUrl,
+            printer.Revision,
+            printer.ConfigurationRevision);
+        long cacheGeneration =
+            _verifiedSafetyCache?.GetGeneration(printer.Id) ?? 0;
+
+        if (_verifiedSafetyCache?.TryGet(
+                printer.Id,
+                key,
+                out PrinterVerifiedSafetyDto? cached) == true &&
+            cached is not null)
+        {
+            return cached;
+        }
+
+        IBackendClient? backendClient;
+        try
+        {
+            backendClient = _backendClientFactory?.GetClient(backend);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or InvalidOperationException)
+        {
+            return PrinterVerifiedSafetyDto.Unknown(
+                source: "backend.discovery.client-unavailable",
+                sourceRevision: sourceRevision);
+        }
+
+        if (backendClient is not ISupportsVerifiedSafetyDiscovery discovery)
+        {
+            return PrinterVerifiedSafetyDto.Unknown(
+                source: "backend.discovery.not-implemented",
+                sourceRevision: sourceRevision);
+        }
+
+        PrinterVerifiedSafetyDto result;
+        try
+        {
+            result = await discovery.DiscoverVerifiedSafetyAsync(
+                dispatchUrl,
+                printer.Credential,
+                sourceRevision,
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            result = CreateUnavailableSafety(sourceRevision);
+        }
+        catch (HttpRequestException)
+        {
+            result = CreateUnavailableSafety(sourceRevision);
+        }
+        catch (JsonException)
+        {
+            result = CreateUnavailableSafety(sourceRevision);
+        }
+        catch (TimeoutException)
+        {
+            result = CreateUnavailableSafety(sourceRevision);
+        }
+        catch (InvalidOperationException)
+        {
+            result = CreateUnavailableSafety(sourceRevision);
+        }
+        catch (UriFormatException)
+        {
+            result = CreateUnavailableSafety(sourceRevision);
+        }
+
+        TimeSpan cacheDuration = TimeSpan.FromSeconds(15);
+        if (_verifiedSafetyCache?.Set(
+                printer.Id,
+                key,
+                result,
+                cacheDuration,
+                cacheGeneration) == false)
+        {
+            return PrinterVerifiedSafetyDto.Unknown(
+                source: "backend.discovery.invalidated-during-probe",
+                observedAtUtc: DateTime.UtcNow,
+                sourceRevision: sourceRevision);
+        }
+
+        return result;
+    }
+
+    private static PrinterVerifiedSafetyDto CreateUnavailableSafety(
+        string sourceRevision) =>
+        PrinterVerifiedSafetyDto.Unknown(
+            source: "backend.discovery.failed",
+            observedAtUtc: DateTime.UtcNow,
+            sourceRevision: sourceRevision);
+
+    private sealed record VerifiedSafetyCacheKey(
+        Guid PrinterId,
+        PrinterBackend Backend,
+        string BackendUrl,
+        long Revision,
+        long ConfigurationRevision);
 }
