@@ -2948,6 +2948,9 @@ public class PrintersController(
         PrinterSafetyMoveRequest? move,
         CancellationToken ct)
     {
+        bool dispatchAuthorized = false;
+        bool leaseSettled = false;
+        string cleanupFailureCode = "printer_safety_revalidation_failed";
         try
         {
             ct.ThrowIfCancellationRequested();
@@ -2960,6 +2963,7 @@ public class PrintersController(
                         accepted: false,
                         "printer_safety_evidence_unknown",
                         CancellationToken.None);
+                    leaseSettled = true;
                     return SafetyProblem(
                         PrinterSafetyValidationResult.Reject(
                             StatusCodes.Status503ServiceUnavailable,
@@ -2980,6 +2984,7 @@ public class PrintersController(
                         accepted: false,
                         safety.Code,
                         CancellationToken.None);
+                    leaseSettled = true;
                     return SafetyProblem(safety);
                 }
             }
@@ -2994,48 +2999,63 @@ public class PrintersController(
                     accepted: false,
                     "printer_actuation_revalidation_failed",
                     CancellationToken.None);
+                leaseSettled = true;
                 return MapActuationDenial(revalidated).Result;
             }
 
             ct.ThrowIfCancellationRequested();
+            dispatchAuthorized = true;
             return null;
         }
         catch (OperationCanceledException)
         {
+            cleanupFailureCode =
+                "printer_operation_cancelled_before_dispatch";
+            throw;
+        }
+        finally
+        {
+            if (!dispatchAuthorized && !leaseSettled)
+            {
+                await TryReleasePreDispatchLeaseAsync(
+                    lease,
+                    cleanupFailureCode);
+            }
+        }
+    }
+
+    private async Task TryReleasePreDispatchLeaseAsync(
+        PrinterActuationLease lease,
+        string failureCode)
+    {
+        try
+        {
             await _physicalActuationService!.CompleteDirectAsync(
                 lease,
                 accepted: false,
-                "printer_operation_cancelled_before_dispatch",
+                failureCode,
                 CancellationToken.None);
-            throw;
         }
-        catch (Exception exception)
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException exception)
         {
-            try
-            {
-                await _physicalActuationService!.CompleteDirectAsync(
-                    lease,
-                    accepted: false,
-                    "printer_safety_revalidation_failed",
-                    CancellationToken.None);
-            }
-            catch (Exception cleanupException)
-            {
-                _logger.LogError(
-                    cleanupException,
-                    "Failed to release physical lease {CommandId} after safety revalidation failure",
-                    lease.CommandId);
-            }
-
             _logger.LogWarning(
                 exception,
-                "Safety revalidation failed before dispatch for printer {PrinterId}",
-                lease.PrinterId);
-            return SafetyProblem(
-                PrinterSafetyValidationResult.Reject(
-                    StatusCodes.Status503ServiceUnavailable,
-                    "printer_safety_evidence_unknown",
-                    "Printer safety evidence could not be revalidated."));
+                "Failed to release physical lease {CommandId} after safety revalidation failure",
+                lease.CommandId);
+        }
+        catch (InvalidOperationException exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Failed to release physical lease {CommandId} after safety revalidation failure",
+                lease.CommandId);
+        }
+        catch (OperationCanceledException exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Failed to release physical lease {CommandId} after safety revalidation failure",
+                lease.CommandId);
         }
     }
 

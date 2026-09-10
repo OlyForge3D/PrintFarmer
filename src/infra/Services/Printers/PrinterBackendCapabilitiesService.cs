@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure;
+﻿using System.Text.Json;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
@@ -205,12 +206,29 @@ public class PrinterBackendCapabilitiesService(
         {
             throw;
         }
-        catch (Exception)
+        catch (OperationCanceledException)
         {
-            result = PrinterVerifiedSafetyDto.Unknown(
-                source: "backend.discovery.failed",
-                observedAtUtc: DateTime.UtcNow,
-                sourceRevision: sourceRevision);
+            result = CreateUnavailableSafety(sourceRevision);
+        }
+        catch (HttpRequestException)
+        {
+            result = CreateUnavailableSafety(sourceRevision);
+        }
+        catch (JsonException)
+        {
+            result = CreateUnavailableSafety(sourceRevision);
+        }
+        catch (TimeoutException)
+        {
+            result = CreateUnavailableSafety(sourceRevision);
+        }
+        catch (InvalidOperationException)
+        {
+            result = CreateUnavailableSafety(sourceRevision);
+        }
+        catch (UriFormatException)
+        {
+            result = CreateUnavailableSafety(sourceRevision);
         }
 
         TimeSpan cacheDuration = TimeSpan.FromSeconds(15);
@@ -229,6 +247,13 @@ public class PrinterBackendCapabilitiesService(
 
         return result;
     }
+
+    private static PrinterVerifiedSafetyDto CreateUnavailableSafety(
+        string sourceRevision) =>
+        PrinterVerifiedSafetyDto.Unknown(
+            source: "backend.discovery.failed",
+            observedAtUtc: DateTime.UtcNow,
+            sourceRevision: sourceRevision);
 
     private sealed record VerifiedSafetyCacheKey(
         Guid PrinterId,

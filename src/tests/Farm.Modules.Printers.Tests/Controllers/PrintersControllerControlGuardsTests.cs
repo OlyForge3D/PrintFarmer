@@ -415,7 +415,7 @@ public class PrintersControllerControlGuardsTests
     }
 
     [Fact]
-    public async Task LoadFilamentAsync_SafetyGuardThrows_ReleasesLeaseAndReturns503()
+    public async Task LoadFilamentAsync_SafetyGuardThrows_ReleasesLeaseBeforeRethrow()
     {
         Guid id = Guid.NewGuid();
         var printersService = new Mock<IPrintersService>();
@@ -441,11 +441,9 @@ public class PrintersControllerControlGuardsTests
             guard,
             actuation);
 
-        ActionResult<CommandResult> result =
-            await controller.LoadFilamentAsync(id, CancellationToken.None);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            controller.LoadFilamentAsync(id, CancellationToken.None));
 
-        ObjectResult problem = Assert.IsType<ObjectResult>(result.Result);
-        Assert.Equal(503, problem.StatusCode);
         actuation.Verify(service => service.CompleteDirectAsync(
             It.IsAny<PrinterActuationLease>(),
             false,
