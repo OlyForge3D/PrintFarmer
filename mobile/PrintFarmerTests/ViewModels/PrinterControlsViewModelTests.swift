@@ -2585,6 +2585,142 @@ final class GuardedMaterialControlsTests: XCTestCase {
         }
     }
 
+    private func reachPositionWithGeometry(
+        frame: SafetyVector3Dto,
+        envelope: SafetyTravelEnvelopeDto,
+        clearance: Double,
+        position: SafetyVector3Dto
+    ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
+        let (model, service) = try await fixture()
+        service.capabilitiesToReturn?.verifiedSafety?.positioning.coordinateOriginMm.value = frame
+        service.capabilitiesToReturn?.verifiedSafety?.positioning.travelEnvelopeMm.value = envelope
+        service.capabilitiesToReturn?.verifiedSafety?.positioning.minimumClearanceZMm.value = clearance
+        func status() -> PrinterStatusDetail {
+            var value = VerifiedSafetyFixtures.status(id: model.printer.id, position: position)
+            value.safetyTelemetry?.coordinateOriginOffsetMm.value = frame
+            return value
+        }
+        service.statusToReturn = status()
+        await model.refreshSafetyEvidence()
+        await model.startCalibration()
+        model.beginCalibrationHome()
+        await model.homeForCalibration()
+        service.statusToReturn = status()
+        await model.refreshSafetyEvidence()
+        XCTAssertEqual(model.calibrationStep, .position)
+        return (model, service)
+    }
+
+    func test_derivedClearanceLiftsUseTransportPrecisionAndRoundOnlyUpward() async throws {
+        let cases: [(clearance: Double, frameZ: Double, expected: Double)] = [
+            (0.2, 0.05, 0.15), (0.3, 0.07, 0.23),
+            (0.2004, 0.05, 0.151), (0.3, -0.07, 0.37),
+            (-0.2004, 0.05, -0.25)
+        ]
+        let envelope = SafetyTravelEnvelopeDto(
+            minimum: .init(x: -100, y: -50, z: -1), maximum: .init(x: 200, y: 150, z: 100)
+        )
+        for item in cases {
+            let frame = SafetyVector3Dto(x: 10, y: 20, z: item.frameZ)
+            let (model, service) = try await reachPositionWithGeometry(
+                frame: frame, envelope: envelope, clearance: item.clearance,
+                position: .init(x: 20, y: 30, z: -0.5)
+            )
+            await model.positionForCalibration()
+            let request = try XCTUnwrap(service.moveToCalledWith)
+            let z = try XCTUnwrap(request.z)
+            XCTAssertEqual(z, item.expected)
+            XCTAssertTrue(ControlNumberInput.hasCoordinatePrecision(z))
+            XCTAssertGreaterThanOrEqual(z + frame.z, item.clearance)
+            XCTAssertEqual(request.x, 20, "Lift preserves reported X; never rounds a lateral coordinate")
+            XCTAssertEqual(request.y, 30)
+            XCTAssertNil(model.lastError)
+            XCTAssertEqual(model.calibrationStep, .position)
+
+            var status = VerifiedSafetyFixtures.status(id: model.printer.id, position: .init(x: 20, y: 30, z: z))
+            status.safetyTelemetry?.coordinateOriginOffsetMm.value = frame
+            service.statusToReturn = status
+            await model.refreshSafetyEvidence()
+            XCTAssertEqual(model.calibrationStep, .position, "Lift acknowledgement is not centering")
+            await model.positionForCalibration()
+            XCTAssertEqual(service.moveToCalledWith?.x, 40)
+            XCTAssertEqual(service.moveToCalledWith?.y, 30)
+            XCTAssertEqual(service.moveToCalledWith?.z, z)
+            status = VerifiedSafetyFixtures.status(id: model.printer.id, position: .init(x: 40, y: 30, z: z))
+            status.safetyTelemetry?.coordinateOriginOffsetMm.value = frame
+            service.statusToReturn = status
+            await model.refreshSafetyEvidence()
+            XCTAssertEqual(model.calibrationStep, .adjust, "Quantized targets correlate without widening equality")
+        }
+    }
+
+    func test_derivedCentersQuantizeInsideAwkwardAndNarrowBoundsOrBlock() async throws {
+        let cases: [(minimum: Double, maximum: Double, frame: Double, expected: Double?)] = [
+            (-100.0003, 200.0004, 10.0002, 40),
+            (20.0002, 20.0012, 10.00005, 10.001),
+            (0.0002, 0.001, 0, 0.001),
+            (-0.001, -0.0002, 0, -0.001),
+            (0.0002, 0.0008, 0, nil)
+        ]
+        for item in cases {
+            let frame = SafetyVector3Dto(x: item.frame, y: 20.00009, z: 0.07)
+            let envelope = SafetyTravelEnvelopeDto(
+                minimum: .init(x: item.minimum, y: -50.0004, z: 0),
+                maximum: .init(x: item.maximum, y: 50.0006, z: 100)
+            )
+            let (model, service) = try await reachPositionWithGeometry(
+                frame: frame, envelope: envelope, clearance: 0.3, position: .init(x: 20, y: 30, z: 1)
+            )
+            await model.positionForCalibration()
+            if let expected = item.expected {
+                let request = try XCTUnwrap(service.moveToCalledWith)
+                let point = SafetyVector3Dto(
+                    x: try XCTUnwrap(request.x), y: try XCTUnwrap(request.y), z: try XCTUnwrap(request.z)
+                )
+                XCTAssertEqual(point.x, expected)
+                XCTAssertEqual(point.y, -20)
+                XCTAssertEqual(point.z, 1, "Centering preserves reported Z")
+                XCTAssertTrue([point.x, point.y, point.z].allSatisfy(ControlNumberInput.hasCoordinatePrecision))
+                XCTAssertTrue(envelope.contains(.init(x: point.x + frame.x, y: point.y + frame.y, z: point.z + frame.z)))
+                XCTAssertNil(model.lastError)
+            } else {
+                XCTAssertNil(service.moveToCalledWith)
+                XCTAssertTrue(model.calibrationMessage?.contains("0.001 mm transport precision") == true)
+            }
+            XCTAssertEqual(model.calibrationStep, .position)
+        }
+    }
+
+    func test_derivedLiftBlocksWhenNoTransportQuantumFitsAboveClearance() async throws {
+        let (model, service) = try await reachPositionWithGeometry(
+            frame: .init(x: 10, y: 20, z: 0.05),
+            envelope: .init(minimum: .init(x: -100, y: -50, z: 0), maximum: .init(x: 200, y: 150, z: 0.2008)),
+            clearance: 0.2004, position: .init(x: 20, y: 30, z: 0)
+        )
+        await model.positionForCalibration()
+        XCTAssertNil(service.moveToCalledWith)
+        XCTAssertEqual(model.calibrationStep, .position)
+        XCTAssertTrue(model.calibrationMessage?.contains("clearance cannot be reached") == true)
+    }
+
+    func test_derivedQuantizationDoesNotRoundUserInputOrReportedLateralPosition() async throws {
+        let (model, service) = try await fixture()
+        XCTAssertThrowsError(try ControlNumberInput.coordinate("0.15000000000000002"))
+        XCTAssertEqual(try ControlNumberInput.coordinate("0.150"), 0.15)
+        await model.moveTo(x: 0.2 - 0.05, y: nil, z: nil, feedrateMmMin: nil)
+        XCTAssertNil(service.moveToCalledWith)
+        XCTAssertEqual(model.lastError?.message, ControlNumberInput.coordinatePrecisionMessage)
+
+        let (calibration, calibrationService) = try await reachPositionWithGeometry(
+            frame: .init(x: 10, y: 20, z: 0.05),
+            envelope: .init(minimum: .init(x: -100, y: -50, z: 0), maximum: .init(x: 200, y: 150, z: 100)),
+            clearance: 0.2, position: .init(x: 20.0001, y: 30, z: 0)
+        )
+        await calibration.positionForCalibration()
+        XCTAssertNil(calibrationService.moveToCalledWith, "A vertical lift must not silently round reported X/Y")
+        XCTAssertTrue(calibration.calibrationMessage?.contains("coordinate precision") == true)
+    }
+
     func test_failedAndUncertainSaveConsumeReviewWithoutAutomaticRetry() async throws {
         for variant in 0..<5 {
             let (model, service) = try await fixture()

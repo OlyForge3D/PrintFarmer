@@ -202,7 +202,12 @@ is necessary to advance Home. Position requires verified origin, travel envelope
 and minimum clearance, freshly homed XYZ, fresh matching origin-offset telemetry,
 and finite reported XYZ. It lifts vertically first when needed, then centers within
 the verified envelope after converting through the actual frame. No guessed bed
-size, zero baseline or paper-test height is used. Adjustments preserve XY and send
+size, zero baseline or paper-test height is used. Derived lift/center coordinates
+use the transport's 0.001 mm grid: lifts round upward to preserve effective
+clearance, and centers stay inside the verified envelope. If no representable
+position fits, positioning is blocked with an explanation. Entered coordinates
+and reported axes that must remain stationary are never silently rounded.
+Adjustments preserve XY and send
 all XYZ coordinates, respecting the server's effective-coordinate bounds and
 clearance. A reported matching position after dispatch is required before changing
 the draft; HTTP acceptance or unrelated legacy telemetry cannot advance it.

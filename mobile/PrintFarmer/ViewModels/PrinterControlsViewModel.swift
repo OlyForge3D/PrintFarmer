@@ -699,6 +699,33 @@ final class PrinterControlsViewModel: ObservableObject {
         return position.isFinite ? position : nil
     }
 
+    /// Quantize only internally derived positions, never entered or reported
+    /// coordinates. Check the effective frame after rounding; a clearance lift
+    /// must round upward and a center must stay inside the verified envelope.
+    private static func derivedCalibrationCoordinate(
+        _ desired: Double, frameOffset: Double, minimum: Double, maximum: Double
+    ) -> Double? {
+        guard desired.isFinite, frameOffset.isFinite, minimum.isFinite, maximum.isFinite,
+              minimum <= maximum else { return nil }
+        func quantized(_ value: Double) -> Double? {
+            guard value.isFinite else { return nil }
+            return Double(String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), value))
+        }
+        guard var value = quantized(desired) else { return nil }
+        // Comparing in the effective frame avoids treating .2 - .05's binary
+        // tail as a real extra micron, while never rounding below clearance.
+        if value + frameOffset < minimum {
+            guard let next = quantized(value + 0.001) else { return nil }
+            value = next
+        } else if value + frameOffset > maximum {
+            guard let next = quantized(value - 0.001) else { return nil }
+            value = next
+        }
+        guard ControlNumberInput.hasCoordinatePrecision(value),
+              (minimum...maximum).contains(value + frameOffset) else { return nil }
+        return value
+    }
+
     private func safeMoveReason(_ point: SafetyVector3Dto) -> String? {
         if let reason = positioningEvidenceBlockedReason { return reason }
         guard let frame = safetyStatus?.safetyTelemetry?.coordinateOriginOffsetMm.value,
@@ -815,13 +842,29 @@ final class PrinterControlsViewModel: ObservableObject {
         // Lift vertically before lateral motion. Never lower to an invented
         // paper-test height, or cross the verified minimum clearance.
         let needsLift = current.z + frame.z < clearance
-        let target = needsLift
-            ? SafetyVector3Dto(x: current.x, y: current.y, z: clearance - frame.z)
-            : SafetyVector3Dto(
-                x: envelope.minimum.x + (envelope.maximum.x - envelope.minimum.x) / 2 - frame.x,
-                y: envelope.minimum.y + (envelope.maximum.y - envelope.minimum.y) / 2 - frame.y,
-                z: current.z
-            )
+        let target: SafetyVector3Dto
+        if needsLift {
+            guard let z = Self.derivedCalibrationCoordinate(
+                clearance - frame.z, frameOffset: frame.z,
+                minimum: clearance, maximum: envelope.maximum.z
+            ) else {
+                calibrationMessage = "Verified clearance cannot be reached within travel bounds at 0.001 mm transport precision. Use the printer's supported calibration procedure."
+                return
+            }
+            target = .init(x: current.x, y: current.y, z: z)
+        } else {
+            guard let x = Self.derivedCalibrationCoordinate(
+                envelope.minimum.x + (envelope.maximum.x - envelope.minimum.x) / 2 - frame.x,
+                frameOffset: frame.x, minimum: envelope.minimum.x, maximum: envelope.maximum.x
+            ), let y = Self.derivedCalibrationCoordinate(
+                envelope.minimum.y + (envelope.maximum.y - envelope.minimum.y) / 2 - frame.y,
+                frameOffset: frame.y, minimum: envelope.minimum.y, maximum: envelope.maximum.y
+            ) else {
+                calibrationMessage = "Verified travel bounds contain no center at 0.001 mm transport precision. Use the printer's supported calibration procedure."
+                return
+            }
+            target = .init(x: x, y: y, z: current.z)
+        }
         if let reason = safeMoveReason(target) { calibrationMessage = reason; return }
         if target == current {
             calibrationPosition = current
