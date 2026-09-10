@@ -118,6 +118,17 @@ Fake-clock regressions cover aggregate budget consumption, in-flight overrun,
 and zero-budget behavior. The XCTest watchdog, not this polling logic, bounds
 an operation that has already entered a blocking remote accessibility call.
 
+The authenticated Operator Shell, Feature Visibility, Printer List, Parts
+Inventory and Shift Tasks Failed Refresh suites establish navigation readiness in setup before starting an
+action's existing five- or eight-second budget. Readiness requires a rendered,
+enabled tab/sidebar button or a positively observed collapsed-sidebar toggle,
+and rejects the launch/navigation loading markers. Setup does not navigate.
+Launch and readiness consume the existing setup-time XCTest allowance; destination
+resolution is capped by that same absolute deadline and cannot renew it. XCTest
+also enforces any tighter allowance assigned in a test body. No XCTest
+allowance or action timeout is increased, and unauthenticated/loading-scenario
+suites do not opt into this precondition.
+
 ### After-correction evidence
 
 `diagnostic-after-2573.xcresult` again records the deliberately stalled test

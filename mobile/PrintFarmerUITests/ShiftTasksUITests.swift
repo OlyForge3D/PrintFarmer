@@ -271,12 +271,18 @@ final class ShiftTasksGroupedUITests: ShiftTasksUITestBase {
 /// proven deterministically in `UITestBootstrapTests`.
 @MainActor
 final class ShiftTasksFailedRefreshUITests: ShiftTasksUITestBase {
+    override var waitsForNavigationReadiness: Bool { true }
+
+    override func setUp() async throws {
+        executionTimeAllowance = 60
+        try await super.setUp()
+    }
+
     override var shiftTaskScenarioLaunchArguments: [String] {
         ["--uitesting-shift-task-initial-load-failure"]
     }
 
     func testFailedStateHostsRefreshableScrollContainerAndRecoversCanonically() {
-        executionTimeAllowance = 60
         openTasksDestination()
 
         // The terminal `.failed` state renders inside a genuine refreshable

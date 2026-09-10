@@ -19,6 +19,7 @@ import XCTest
 /// mirroring `PrinterListUITests`.
 @MainActor
 final class OperatorShellUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
 
     // MARK: - Shell shape (tab bar on iPhone, sidebar on iPad)
 
@@ -352,6 +353,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
 // MARK: - #2117 capability-driven visibility
 @MainActor
 final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
 
     override var additionalLaunchArguments: [String] {
         // Contract with UITestBootstrap.operatorFeaturesDisabledLaunchArgument.

@@ -9,15 +9,18 @@ final class UIWaitBudget {
     private let deadline: TimeInterval
     private(set) var lastOperation = "none"
 
-    init(timeout: TimeInterval, now: @escaping () -> TimeInterval = {
+    init(timeout: TimeInterval, hardDeadline: TimeInterval? = nil, now: @escaping () -> TimeInterval = {
         ProcessInfo.processInfo.systemUptime
     }) {
         self.now = now
         started = now()
-        deadline = started + max(0, timeout)
+        deadline = min(started + max(0, timeout), hardDeadline ?? .infinity)
     }
 
     var remaining: TimeInterval { max(0, deadline - now()) }
+    func child(timeout: TimeInterval) -> UIWaitBudget {
+        UIWaitBudget(timeout: timeout, hardDeadline: deadline, now: now)
+    }
     var diagnostic: String {
         "elapsed=\(now() - started)s; last operation=\(lastOperation); remaining=\(remaining)s"
     }
@@ -225,6 +228,17 @@ final class UIWaitBudget {
             return nil
         }
 
+        var isLaunchReady: Bool {
+            switch state {
+            case .compact(let nodes), .sidebar(let nodes):
+                nodes.contains { $0.type == .button && $0.enabled }
+            case .collapsed:
+                true
+            case .notReady:
+                false
+            }
+        }
+
         var roots: [RenderedShellRoot] {
             let nodes: [ShellNode]
             let surface: RenderedShellRoot.Surface
@@ -238,6 +252,7 @@ final class UIWaitBudget {
             case .notReady, .collapsed:
                 return []
             }
+
             var identifiers = Set<String>()
             return nodes.map {
                 RenderedShellRoot(title: $0.label, identifier: $0.identifier, surface: surface)
@@ -256,6 +271,46 @@ final class UIWaitBudget {
 
 @MainActor
 final class UIWaitBudgetTests: XCTestCase {
+    func testLaunchReadinessAndActionShareAnAbsoluteTestDeadline() {
+        var clock: TimeInterval = 0
+        let testBudget = UIWaitBudget(timeout: 10, now: { clock })
+        clock = 6 // Launch consumed the same overall test allowance.
+        var snapshots = [
+            ShellObservation(ShellNode(.application)),
+            collapsed()
+        ]
+        let ready = testBudget.waitForShell(
+            observe: { clock += 0.5; return snapshots.removeFirst() },
+            resolve: { $0.isLaunchReady ? true : nil },
+            reveal: { _ in XCTFail("Setup must not navigate"); return false },
+            leadingEdge: { _ in XCTFail("Setup must not navigate"); return false },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(ready, true)
+        let action = testBudget.child(timeout: 5)
+        XCTAssertEqual(action.remaining, 2.8, accuracy: 0.001)
+        XCTAssertNil(action.perform("overrun") { clock = 10.1; return true })
+        XCTAssertEqual(testBudget.child(timeout: 5).remaining, 0,
+                       "Starting another action must never renew the overall allowance")
+    }
+
+    func testReadyLaunchDoesNotExtendAnActionBudgetOrAcceptUnreadyChrome() {
+        var clock: TimeInterval = 0
+        let testBudget = UIWaitBudget(timeout: 60, now: { clock })
+        clock = 7
+        let action = testBudget.child(timeout: 5)
+        XCTAssertEqual(action.remaining, 5)
+        XCTAssertFalse(compact([]).isLaunchReady)
+        XCTAssertFalse(compact([ShellNode(.button, label: "Farm", enabled: false)]).isLaunchReady)
+        XCTAssertFalse(ShellObservation(ShellNode(.application, children: [
+            ShellNode(.other, identifier: "navigation.shellLoading"),
+            ShellNode(.tabBar, children: [ShellNode(.button, identifier: "tab.farm")])
+        ])).isLaunchReady)
+        XCTAssertTrue(compact([ShellNode(.button, identifier: "tab.farm")]).isLaunchReady)
+        clock = 12
+        XCTAssertNil(action.perform("expired action") { XCTFail("No renewed wait"); return true })
+    }
+
     private func compact(_ nodes: [ShellNode]) -> ShellObservation {
         ShellObservation(ShellNode(.application, children: [
             ShellNode(.tabBar, children: nodes)
@@ -668,24 +723,35 @@ final class QueryTimeoutDiagnosticUITests: PrintFarmerUITestCase {
 class PrintFarmerUITestCase: XCTestCase {
 
     var app: XCUIApplication!
+    private var testBudget: UIWaitBudget?
 
     /// Extra launch arguments contributed by a subclass, applied before the
     /// app launches. Base tests run in the authenticated operator-shell
     /// bootstrap; override to select a different explicit launch mode.
     var additionalLaunchArguments: [String] { [] }
+    var waitsForNavigationReadiness: Bool { false }
 
     override func setUp() async throws {
         try await super.setUp()
         continueAfterFailure = false
+        testBudget = UIWaitBudget(timeout: executionTimeAllowance)
         app = XCUIApplication()
         app.launchEnvironment["PFARM_UI_TESTING"] = "1"
         app.launchArguments.append("--uitesting")
         app.launchArguments.append(contentsOf: additionalLaunchArguments)
         app.launch()
+        if waitsForNavigationReadiness, let testBudget {
+            let ready = waitForObservedShell(budget: testBudget) {
+                $0.isLaunchReady ? true : nil
+            }
+            XCTAssertEqual(ready, true,
+                           "Authenticated shell did not finish launching within the test allowance; \(testBudget.diagnostic)")
+        }
     }
 
     override func tearDown() async throws {
         app = nil
+        testBudget = nil
         try await super.tearDown()
     }
 
@@ -844,7 +910,7 @@ class PrintFarmerUITestCase: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let budget = UIWaitBudget(timeout: timeout)
+        let budget = testBudget?.child(timeout: timeout) ?? UIWaitBudget(timeout: timeout)
         let sidebarIdentifier = sidebarIdentifier ?? tabIdentifier.replacingOccurrences(
             of: "tab.",
             with: "sidebar."

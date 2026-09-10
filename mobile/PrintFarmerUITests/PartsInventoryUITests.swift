@@ -8,6 +8,7 @@ import XCTest
 /// genuine adjustment controls.
 @MainActor
 final class PartsInventoryUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
 
     private func openInventory() {
         let inventory = shellDestinationButton(

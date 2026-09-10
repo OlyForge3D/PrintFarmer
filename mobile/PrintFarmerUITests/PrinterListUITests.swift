@@ -3,6 +3,7 @@ import XCTest
 /// UI tests for deterministic Farm list rendering and stable-ID printer navigation.
 @MainActor
 final class PrinterListUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
     private let printerID = "10000000-0001-0000-0000-000000000001"
 
     private func openFarm() {
