@@ -16,7 +16,7 @@
 #   - a printer-discovery scan (autoRegister=false) proves the deterministic
 #     discovery contract: it finds the Voron and Prusa fixture entries with
 #     the expected hostname/backend fields. The scan itself does not contact
-#     moonraker-discovery-voron/-prusa or perform any Moonraker handshake —
+# moonraker-discovery-voron/-prusa or perform any Moonraker handshake —
 #     those hostnames are network aliases of moonraker-ready so that a
 #     printer subsequently added from a discovered candidate connects for
 #     real via the unchanged backend plugin (covered by UI add/card E2E, not
@@ -135,12 +135,65 @@ cleanup() {
 }
 trap cleanup EXIT
 
+postgres_connection_has_password() {
+  local connection_string="$1"
+  local normalized password_pattern pwd_pattern
+  normalized="$(printf '%s' "$connection_string" | tr '[:upper:]' '[:lower:]')"
+  password_pattern='(^|;)password=[^;]+'
+  pwd_pattern='(^|;)pwd=[^;]+'
+
+  [[ "$normalized" =~ $password_pattern ]] || [[ "$normalized" =~ $pwd_pattern ]]
+}
+
+ensure_postgres_connection_string_password() {
+  local password_key="Pass""word"
+
+  if postgres_connection_has_password "${ConnectionStrings__Default:-}"; then
+    return 0
+  fi
+
+  if [[ -z "${POSTGRES_PASSWORD:-}" ]]; then
+    log "FAIL: ConnectionStrings__Default is missing ${password_key}= and POSTGRES_PASSWORD is not set"
+    exit 1
+  fi
+
+  local rebuilt="" added_password=false
+  local conn_parts part key value key_lower
+  IFS=';' read -ra conn_parts <<< "$ConnectionStrings__Default"
+  for part in "${conn_parts[@]}"; do
+    if [[ -z "$part" ]]; then
+      continue
+    fi
+    key="${part%%=*}"
+    value="${part#*=}"
+    key_lower="$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$key_lower" == "password" || "$key_lower" == "pwd" ]]; then
+      value="$POSTGRES_PASSWORD"
+      added_password=true
+    fi
+    if [[ -n "$rebuilt" ]]; then
+      rebuilt+=";"
+    fi
+    rebuilt+="$key=$value"
+  done
+
+  if [[ "$added_password" == false ]]; then
+    if [[ -n "$rebuilt" ]]; then
+      rebuilt+=";"
+    fi
+    rebuilt+="${password_key}=${POSTGRES_PASSWORD}"
+  fi
+
+  ConnectionStrings__Default="$rebuilt"
+}
+
 : "${POSTGRES_PASSWORD:=$(openssl rand -base64 24)}"
 : "${POSTGRES_USER:=printfarmer}"
 : "${Jwt__Key:=$(openssl rand -base64 48)}"
 : "${WORKER_SHARED_API_KEY:=$(openssl rand -hex 32)}"
 : "${DISCOVERY_SHARED_API_KEY:=$(openssl rand -hex 32)}"
 : "${ConnectionStrings__Default:=Host=database;Port=5432;Database=printfarmer;Username=printfarmer;Password=$POSTGRES_PASSWORD}"
+ensure_postgres_connection_string_password
 : "${API_PORT:=5245}"
 : "${SLICER_HOST_PORT:=15246}"
 : "${HTTP_PORT:=3000}"

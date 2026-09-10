@@ -12,6 +12,24 @@ test('smoke script defaults to the deterministic harness host ports and probes t
   assert.match(script, /export [^\n]*(?:\\\n[^\n]*)*ConnectionStrings__Default API_PORT SLICER_HOST_PORT HTTP_PORT/);
 });
 
+test('smoke script repairs or fails fast on passwordless PostgreSQL connection strings before generation', () => {
+  assert.match(script, /postgres_connection_has_password\(\)/);
+  assert.match(script, /ensure_postgres_connection_string_password\(\)/);
+  assert.match(script, /local password_key="Pass""word"/);
+  assert.match(script, /\[\[ "\$key_lower" == "password" \|\| "\$key_lower" == "pwd" \]\]/);
+  assert.match(script, /rebuilt\+="\$\{password_key\}=\$\{POSTGRES_PASSWORD\}"/);
+  assert.match(script, /ConnectionStrings__Default="\$rebuilt"/);
+  assert.match(script, /FAIL: ConnectionStrings__Default is missing \$\{password_key\}= and POSTGRES_PASSWORD is not set/);
+
+  const defaultIndex = script.indexOf(': "${ConnectionStrings__Default:=');
+  const guardIndex = script.indexOf('ensure_postgres_connection_string_password', defaultIndex);
+  const exportIndex = script.indexOf('export POSTGRES_PASSWORD POSTGRES_USER Jwt__Key');
+  const generatorIndex = script.indexOf('compose-generator.sh');
+  assert.ok(defaultIndex >= 0 && defaultIndex < guardIndex);
+  assert.ok(guardIndex < exportIndex);
+  assert.ok(exportIndex < generatorIndex);
+});
+
 test('smoke script fails closed on provenance after readiness and before validation activity', () => {
   assert.match(script, /EXPECTED_ACCEPTANCE_SHA.*\^\[0-9a-fA-F\]\{40\}\$/);
   assert.match(script, /tr '\[:upper:\]' '\[:lower:\]'/);
