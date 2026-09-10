@@ -136,10 +136,11 @@ suites do not opt into this precondition.
 Login navigation explicitly dismisses an observed "Save Password?" alert using
 "Not Now". The password prompt can arrive after the sidebar opens; snapshot-only
 polling otherwise cannot trigger XCTest's implicit interruption handler. The
-login-only allowlist permits a public alert-root query when the app snapshot
-exposes no ready navigation or alert. Only an existing alert is then snapshotted;
+login-only allowlist checks the public alert root before taking a shell snapshot
+or revealing its sidebar. Only an existing alert is then snapshotted;
 the query stays in the target application's public accessibility context.
-Other suites and already-observed navigation do not perform that extra query.
+An observed interruption takes precedence over navigation behind it, even when
+the application's snapshot omits the alert. Other suites do not perform that extra query.
 The same original action deadline covers dismissal and navigation. Only this
 named alert/button pair is allowed. Login permits one conditional repeat of this
 idempotent dismissal only if a new snapshot still shows the same alert identity

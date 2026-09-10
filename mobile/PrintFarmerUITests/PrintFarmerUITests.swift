@@ -38,6 +38,24 @@ final class UIWaitBudget {
 
     private(set) var lastShellObservation = "not observed"
 
+    func observeShell(
+        observeInterruption: () throws -> ShellNode?,
+        observeApplication: () throws -> ShellObservation
+    ) rethrows -> ShellObservation {
+        // Login's password prompt is a separate accessibility root. Check it
+        // before resolving or revealing navigation behind that interruption.
+        guard let interruption = try perform("navigation interruption", observeInterruption) else {
+            return ShellObservation(ShellNode(.application))
+        }
+        if let interruption {
+            return ShellObservation(ShellNode(
+                .application, frame: interruption.frame, children: [interruption]
+            ))
+        }
+        return try perform("application shell snapshot", observeApplication)
+            ?? ShellObservation(ShellNode(.application))
+    }
+
     func waitForShell<T>(
         observe: () throws -> ShellObservation,
         resolve: (ShellObservation) -> T?,
@@ -263,11 +281,6 @@ final class UIWaitBudget {
             }
         }
 
-        var needsAlertObservation: Bool {
-            if case .notReady = state { return blockingAlert == nil }
-            return false
-        }
-
         var roots: [RenderedShellRoot] {
             let nodes: [ShellNode]
             let surface: RenderedShellRoot.Surface
@@ -333,13 +346,85 @@ final class UIWaitBudgetTests: XCTestCase {
         ]).dismissalButton(allowedTitles: allowed))
     }
 
-    func testAlertObservationIsNotAnAbsentLayoutProbe() {
-        XCTAssertFalse(compact([ShellNode(.button, identifier: "tab.attention")]).needsAlertObservation)
-        XCTAssertFalse(collapsed().needsAlertObservation)
-        XCTAssertFalse(ShellObservation(ShellNode(.application, children: [
-            passwordAlert()
-        ])).needsAlertObservation)
-        XCTAssertTrue(ShellObservation(ShellNode(.application)).needsAlertObservation)
+    func testSeparateAlertRootIsDismissedBeforeObservingOrRevealingShell() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        var operations: [String] = []
+        var dismissed = false
+        var observations = [collapsed(), sidebar()]
+        let result = budget.waitForShell(
+            observe: {
+                budget.observeShell(
+                    observeInterruption: {
+                        operations.append("alert")
+                        clock += 0.1
+                        return dismissed ? nil : self.passwordAlert()
+                    },
+                    observeApplication: {
+                        operations.append("shell")
+                        clock += 0.1
+                        return observations.removeFirst()
+                    }
+                )
+            },
+            resolve: { $0.isLaunchReady ? true : nil },
+            reveal: { _ in operations.append("reveal"); clock += 0.5; return true },
+            leadingEdge: { _ in XCTFail("No additional navigation"); return false },
+            dismissInterruption: {
+                XCTAssertEqual($0.dismissalButton(allowedTitles: ["Save Password?": "Not Now"])?.label, "Not Now")
+                operations.append("dismiss")
+                dismissed = true
+                clock += 0.5
+                return true
+            },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(result, true)
+        XCTAssertEqual(operations, ["alert", "dismiss", "alert", "shell", "reveal", "alert", "shell"])
+        XCTAssertEqual(budget.remaining, 3.1, accuracy: 0.001)
+    }
+
+    func testSeparateUnknownAlertFailsBeforeResolvingReadyNavigation() {
+        let budget = UIWaitBudget(timeout: 5)
+        let result: Bool? = budget.waitForShell(
+            observe: {
+                budget.observeShell(
+                    observeInterruption: { self.passwordAlert(title: "Allow access?") },
+                    observeApplication: {
+                        XCTFail("Do not inspect navigation behind an unknown alert")
+                        return self.sidebar()
+                    }
+                )
+            },
+            resolve: { $0.isLaunchReady ? true : nil },
+            reveal: { _ in XCTFail("No navigation"); return false },
+            leadingEdge: { _ in XCTFail("No navigation"); return false },
+            dismissInterruption: { $0.dismissalButton(allowedTitles: ["Save Password?": "Not Now"]) != nil },
+            pause: { XCTFail("Unknown interruptions fail closed") }
+        )
+        XCTAssertNil(result)
+    }
+
+    func testSeparateAlertQueryOverrunNeverStartsShellWorkEvenWhenAlertIsAbsent() {
+        for present in [false, true] {
+            var clock: TimeInterval = 0
+            let budget = UIWaitBudget(timeout: 1, now: { clock })
+            let result: Bool? = budget.waitForShell(
+                observe: {
+                    budget.observeShell(
+                        observeInterruption: { clock = 1.1; return present ? self.passwordAlert() : nil },
+                        observeApplication: { XCTFail("Expired deadline"); return self.sidebar() }
+                    )
+                },
+                resolve: { _ in XCTFail("Expired deadline"); return true },
+                reveal: { _ in XCTFail("Expired deadline"); return false },
+                leadingEdge: { _ in XCTFail("Expired deadline"); return false },
+                dismissInterruption: { _ in XCTFail("Expired deadline"); return false },
+                pause: { XCTFail("Expired deadline") }
+            )
+            XCTAssertNil(result)
+            XCTAssertEqual(budget.lastOperation, "navigation interruption")
+        }
     }
 
     func testLatePasswordPromptIsDismissedOnceWithinOriginalNavigationBudget() {
@@ -1065,19 +1150,19 @@ class PrintFarmerUITestCase: XCTestCase {
         resolve: (ShellObservation) -> T?
     ) -> T? {
         do {
+            let observeInterruption: () throws -> ShellNode? = navigationAlertDismissals.isEmpty ? { nil } : {
+                let alert = self.app.alerts.firstMatch
+                guard budget.exists(alert, named: "navigation interruption") else { return nil }
+                return try budget.perform("observed alert snapshot") {
+                    ShellNode(try alert.snapshot())
+                }
+            }
             return try budget.waitForShell(
                 observe: {
-                    let appNode = ShellNode(try self.app.snapshot())
-                    let observation = ShellObservation(appNode)
-                    guard observation.needsAlertObservation, !self.navigationAlertDismissals.isEmpty else {
-                        return observation
-                    }
-                    let alert = self.app.alerts.firstMatch
-                    guard budget.exists(alert, named: "navigation interruption"),
-                          let alertNode = try budget.perform("observed alert snapshot", {
-                              ShellNode(try alert.snapshot())
-                          }) else { return observation }
-                    return ShellObservation(ShellNode(.application, frame: appNode.frame, children: [alertNode]))
+                    try budget.observeShell(
+                        observeInterruption: observeInterruption,
+                        observeApplication: { ShellObservation(ShellNode(try self.app.snapshot())) }
+                    )
                 },
                 resolve: resolve,
                 reveal: { node in

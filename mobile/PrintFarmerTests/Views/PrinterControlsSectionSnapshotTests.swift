@@ -679,7 +679,10 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         heater.text = "200"
         heater.sendActions(for: .editingChanged)
         try await settle(controller)
+        let heaterDispatched = expectation(description: "Valid whole-degree target dispatched")
+        service.afterSetTemperatures = { heaterDispatched.fulfill() }
         setHeater.sendActions(for: .touchUpInside)
+        await fulfillment(of: [heaterDispatched], timeout: 1)
         try await settle(controller)
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 200)
         XCTAssertNil(service.setTemperaturesCalledWith?.bed)
@@ -697,7 +700,11 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             field.sendActions(for: .editingChanged)
         }
         try await settle(controller)
+        XCTAssertTrue(move.isEnabled)
+        let moveDispatched = expectation(description: "Valid precise absolute position dispatched")
+        service.beforeAbsoluteMove = { moveDispatched.fulfill() }
         move.sendActions(for: .touchUpInside)
+        await fulfillment(of: [moveDispatched], timeout: 1)
         try await settle(controller)
         XCTAssertEqual(service.moveToCalledWith?.x, 1.001)
         XCTAssertEqual(service.moveToCalledWith?.y, 0)
