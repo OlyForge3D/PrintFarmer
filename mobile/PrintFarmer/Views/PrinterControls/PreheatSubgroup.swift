@@ -1,5 +1,42 @@
 import SwiftUI
 
+/// Dimensions from the owner-selected Essential prototype, in native points.
+enum EssentialControlsStyle {
+    static let groupSpacing: CGFloat = 14
+    static let groupPadding: CGFloat = 18
+    static let columnSpacing: CGFloat = 24
+}
+
+struct EssentialControlHeading: View {
+    let title: String
+    var detail: String? = nil
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        layout {
+            Text(title).font(.headline).foregroundStyle(Color.pfTextPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityAddTraits(.isHeader)
+            if let detail {
+                Text(detail).font(.caption).foregroundStyle(Color.pfTextSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(minHeight: 22)
+    }
+}
+
+struct EssentialControlSeparator: View {
+    var body: some View {
+        Rectangle().fill(Color.pfBorder).frame(height: 1)
+            .padding(.top, 16).padding(.bottom, 14)
+            .accessibilityHidden(true)
+    }
+}
+
 /// Rounded SwiftUI fields keep a 34-point UIKit editor even inside a taller
 /// frame. Size the native editor itself so both touch and VoiceOver get 44pt.
 struct ControlNumberField: UIViewRepresentable {
@@ -8,7 +45,7 @@ struct ControlNumberField: UIViewRepresentable {
     let label: String
     let identifier: String
     var hint: String?
-    @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 17
+    @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 16
     @Environment(\.isEnabled) private var isEnabled
 
     func makeUIView(context: Context) -> UITextField {
@@ -64,34 +101,48 @@ struct ControlActionButton: UIViewRepresentable {
     var systemImage: String?
     var value: String?
     var menu: UIMenu?
+    var textSize: CGFloat = 16
+    var segmented = false
+    var tinted = false
+    var minimumHeight: CGFloat = 45
+    var textOnly = false
     let action: () -> Void
-    @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 17
+    @ScaledMetric(relativeTo: .body) private var fontScale: CGFloat = 16
     @Environment(\.isEnabled) private var isEnabled
 
     func makeUIView(context: Context) -> UIButton {
-        let button = UIButton(type: .system)
+        let button = NativeControlButton(type: .system)
         button.addTarget(context.coordinator, action: #selector(Coordinator.activate), for: .touchUpInside)
         return button
     }
 
     func updateUIView(_ button: UIButton, context: Context) {
         context.coordinator.action = action
-        var configuration = prominent ? UIButton.Configuration.filled() : .gray()
+        let fontSize = fontScale / 16 * textSize
+        var configuration = UIButton.Configuration.plain()
         configuration.title = title
-        configuration.image = systemImage.flatMap { UIImage(systemName: $0) }
-        configuration.preferredSymbolConfigurationForImage = .init(pointSize: fontSize)
+        configuration.image = menu == nil ? systemImage.flatMap { UIImage(systemName: $0) } : nil
+        configuration.preferredSymbolConfigurationForImage = .init(pointSize: fontScale, weight: .regular)
+        configuration.imagePlacement = menu == nil ? .leading : .trailing
+        configuration.imagePadding = menu == nil ? 0 : 8
         configuration.buttonSize = .large
         if compact {
             configuration.contentInsets = .init(top: 8, leading: 8, bottom: 8, trailing: 8)
         }
-        configuration.cornerStyle = .medium
+        if menu != nil { configuration.contentInsets.trailing = 30 }
+        configuration.background.cornerRadius = segmented ? 8 : 10
         configuration.baseForegroundColor = UIColor(
-            isDestructive ? Color.pfError : prominent ? Color.pfButtonPrimaryText : Color.pfTextPrimary
+            !isEnabled ? Color.pfTextTertiary :
+                isDestructive ? Color.pfError : prominent ? Color.pfButtonPrimaryText :
+                tinted ? Color.pfButtonPrimary : Color.pfTextPrimary
         )
-        if prominent { configuration.baseBackgroundColor = UIColor(Color.pfButtonPrimary) }
-        configuration.background.strokeColor = UIColor(selected ? Color.pfTextPrimary : Color.clear)
-        configuration.background.strokeWidth = 1
-        let font = UIFont.systemFont(ofSize: fontSize)
+        configuration.background.backgroundColor = UIColor(
+            textOnly ? Color.clear : !isEnabled ? Color.pfBackgroundTertiary : prominent ? Color.pfButtonPrimary :
+                segmented && !selected ? Color.clear : Color.pfBackground
+        )
+        configuration.background.strokeColor = UIColor(Color.pfBorder)
+        configuration.background.strokeWidth = segmented || prominent || textOnly ? 0 : 1
+        let font = UIFont.systemFont(ofSize: fontSize, weight: prominent || selected || textOnly ? .semibold : .regular)
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer {
             var attributes = $0
             attributes.font = font
@@ -99,7 +150,14 @@ struct ControlActionButton: UIViewRepresentable {
         }
         button.configuration = configuration
         button.menu = menu
+        if let button = button as? NativeControlButton {
+            button.menuChevron.image = menu == nil ? nil : UIImage(
+                systemName: "chevron.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: fontScale * 0.75)
+            )
+            button.menuChevron.tintColor = UIColor(isEnabled ? Color.pfTextPrimary : Color.pfTextTertiary)
+        }
         button.showsMenuAsPrimaryAction = menu != nil
+        button.contentHorizontalAlignment = menu == nil ? .center : .leading
         button.titleLabel?.numberOfLines = 0
         button.isSelected = selected
         button.isEnabled = isEnabled
@@ -114,7 +172,7 @@ struct ControlActionButton: UIViewRepresentable {
             width: proposal.width ?? .greatestFiniteMagnitude, height: .greatestFiniteMagnitude
         ))
         // A fractional parent origin can round a nominal 44pt child below 44.
-        return CGSize(width: max(44, proposal.width ?? size.width), height: max(45, ceil(size.height)))
+        return CGSize(width: max(44, proposal.width ?? size.width), height: max(minimumHeight, ceil(size.height)))
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(action: action) }
@@ -124,6 +182,26 @@ struct ControlActionButton: UIViewRepresentable {
         init(action: @escaping () -> Void) { self.action = action }
         @objc func activate() { action() }
     }
+}
+
+private final class NativeControlButton: UIButton {
+    let menuChevron = UIImageView()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        menuChevron.isAccessibilityElement = false
+        menuChevron.contentMode = .scaleAspectFit
+        menuChevron.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(menuChevron)
+        NSLayoutConstraint.activate([
+            menuChevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            menuChevron.centerYAnchor.constraint(equalTo: centerYAnchor),
+            menuChevron.widthAnchor.constraint(equalToConstant: 16),
+            menuChevron.heightAnchor.constraint(equalToConstant: 16)
+        ])
+    }
+
+    required init?(coder: NSCoder) { return nil }
 }
 
 /// Essential Heat group (#2593): paired target inputs, one guarded setter,
@@ -139,6 +217,7 @@ struct PreheatSubgroup: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .subheadline) private var presetFontSize: CGFloat = 14
 
     /// Fixed display order matching the UX spec.
     static let presets: [PreheatPreset] = [.pla, .petg, .abs, .coolDown]
@@ -157,11 +236,9 @@ struct PreheatSubgroup: View {
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Heat")
-                .font(.headline)
-                .foregroundStyle(Color.pfTextPrimary)
-                .accessibilityAddTraits(.isHeader)
+        VStack(alignment: .leading, spacing: 0) {
+            EssentialControlHeading(title: "Heat", detail: "Actual / target above")
+                .padding(.bottom, 14)
 
             if !viewModel.supports(.bed) {
                 Text("Hotend only — bed temperature control is unavailable.")
@@ -172,10 +249,17 @@ struct PreheatSubgroup: View {
             IndividualHeaterControls(viewModel: viewModel)
 
             if Self.isVisible(capabilities: viewModel.capabilities) {
-                grid
+                grid.padding(.top, 14).padding(.bottom, 8)
                 button(for: .coolDown)
             }
 
+            if let hotend = viewModel.maximum(for: .hotend) {
+                Text(viewModel.supports(.bed)
+                     ? "Hotend max \(hotend.formatted())° · Bed max \(viewModel.maximum(for: .bed).map { $0.formatted() + "°" } ?? "unknown")."
+                     : "Hotend max \(hotend.formatted())°.")
+                    .font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                    .padding(.top, 10)
+            }
             if let message = blockedReasonMessage {
                 Text(message)
                     .font(.footnote)
@@ -254,10 +338,10 @@ struct PreheatSubgroup: View {
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 14) {
                 let layout = dynamicTypeSize.isAccessibilitySize
                     ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                    : AnyLayout(HStackLayout(alignment: .bottom, spacing: 8))
+                    : AnyLayout(HStackLayout(alignment: .bottom, spacing: 12))
                 layout {
                     if viewModel.supports(.hotend) {
                         HeaterTargetEditor(viewModel: viewModel, heater: .hotend, target: $hotend)
@@ -308,17 +392,22 @@ struct PreheatSubgroup: View {
         }
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("\(heater.title) target (°C)")
-                    .font(.subheadline)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(heater.title) target")
+                    .font(.footnote)
                     .foregroundStyle(Color.pfTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
-                ControlNumberField(
-                    placeholder: "Unchanged", text: $target,
-                    label: "\(heater.title) target in degrees Celsius",
-                    identifier: "printer.controls.\(heater.rawValue).target",
-                    hint: targetHint
-                )
+                    .frame(minHeight: 20, alignment: .leading)
+                HStack(spacing: 6) {
+                    ControlNumberField(
+                        placeholder: "Unchanged", text: $target,
+                        label: "\(heater.title) target in degrees Celsius",
+                        identifier: "printer.controls.\(heater.rawValue).target",
+                        hint: targetHint
+                    )
+                    Text("°C").font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                        .accessibilityHidden(true)
+                }
             }
         }
 
@@ -345,16 +434,16 @@ struct PreheatSubgroup: View {
     }
 
     private func buttonLabel(preset: PreheatPreset, isPending: Bool) -> some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 3) {
             Text(preset.displayLabel)
-                .font(.subheadline.weight(.medium))
+                .font(preset == .coolDown ? .callout : .system(size: presetFontSize))
             if preset != .coolDown {
                 Text(viewModel.supports(.bed) ? preset.temperatureLabel : "\(Int(preset.hotend))°")
                     .font(.caption2.monospacedDigit())
                     .opacity(isPending ? 0 : 1)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 44) // 44pt HIG hit target
+        .frame(maxWidth: .infinity, minHeight: preset == .coolDown ? 45 : 54)
         .overlay {
             if isPending {
                 ProgressView()
@@ -435,7 +524,7 @@ private extension PreheatPreset {
         case .pla: return "PLA"
         case .petg: return "PETG"
         case .abs: return "ABS"
-        case .coolDown: return "Cool Down"
+        case .coolDown: return "Cool down"
         }
     }
 
@@ -485,7 +574,7 @@ private struct PreheatButtonStyle: ButtonStyle {
             .background(background)
             .foregroundStyle(foreground)
             .overlay(border)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .opacity(configuration.isPressed && isEnabled ? 0.7 : 1.0)
             .contentShape(Rectangle())
     }
@@ -497,7 +586,7 @@ private struct PreheatButtonStyle: ButtonStyle {
             } else if !isEnabled {
                 Color.pfBackgroundTertiary
             } else {
-                Color.pfBackgroundTertiary
+                Color.pfBackground
             }
         }
     }
@@ -509,10 +598,10 @@ private struct PreheatButtonStyle: ButtonStyle {
 
     @ViewBuilder
     private var border: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
             .strokeBorder(
-                isPending ? Color.pfAssigned : Color.clear,
-                lineWidth: isPending ? 1.5 : 0
+                isPending ? Color.pfAssigned : Color.pfBorder,
+                lineWidth: isPending ? 1.5 : 1
             )
     }
 }

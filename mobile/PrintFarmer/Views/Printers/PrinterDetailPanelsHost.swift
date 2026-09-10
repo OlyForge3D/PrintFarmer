@@ -399,18 +399,78 @@ struct PrinterDetailTemperatureStrip: View {
     let bed: PrinterDetailTemperatureReading
     var showsBed = true
     var identifier = "printer.detail.temperatures"
+    var essentialControls = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .title2) private var essentialReadingSize: CGFloat = 24
 
     var body: some View {
+        if essentialControls {
+            essentialStrip
+        } else {
+            originalStrip
+        }
+    }
+
+    private var originalStrip: some View {
         let layout = dynamicTypeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
             : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
-        layout {
+        return layout {
             reading(title: "Hotend", value: hotend)
             if showsBed { reading(title: "Bed", value: bed) }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(identifier)
+    }
+
+    private var essentialStrip: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 0))
+        return layout {
+            essentialReading(title: "Hotend", symbol: "thermometer", value: hotend)
+            if showsBed {
+                if dynamicTypeSize.isAccessibilitySize {
+                    Divider().padding(.horizontal, 18)
+                } else {
+                    Rectangle().fill(Color.pfBorder).frame(width: 1, height: 72)
+                        .accessibilityHidden(true)
+                }
+                essentialReading(title: "Bed", symbol: "square.3.layers.3d", value: bed)
+            }
+        }
+        .padding(.vertical, 16)
+        .frame(minHeight: dynamicTypeSize.isAccessibilitySize ? nil : 108)
+        .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func essentialReading(title: String, symbol: String, value: PrinterDetailTemperatureReading) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Label(title, systemImage: symbol)
+                .font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                .padding(.bottom, 5)
+            (
+                Text(compactTemperature(value.measured, isOnline: value.isOnline))
+                    .font(.system(size: essentialReadingSize))
+                + Text(" / " + compactTemperature(value.target, isOnline: value.isOnline))
+                    .font(.footnote).foregroundColor(.pfTextSecondary)
+            )
+            .monospacedDigit()
+            Text(!value.isOnline || value.measured?.isFinite != true ? "Reading unavailable" :
+                    value.target == 0 ? "Heater off" : value.target?.isFinite == true ? "Target set" : "Target unknown")
+                .font(.caption).foregroundStyle(Color.pfTextSecondary).padding(.top, 3)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 18)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title), measured \(value.measuredText), target \(value.targetText)")
+    }
+
+    private func compactTemperature(_ value: Double?, isOnline: Bool) -> String {
+        guard isOnline, let value, value.isFinite else { return "—" }
+        return "\(value.formatted(.number.precision(.fractionLength(0...1))))°"
     }
 
     private func reading(title: String, value: PrinterDetailTemperatureReading) -> some View {

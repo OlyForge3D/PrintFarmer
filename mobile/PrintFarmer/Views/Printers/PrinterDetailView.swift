@@ -497,7 +497,9 @@ struct PrinterDetailView: View {
                                 width: geometry.size.width, dynamicTypeSize: dynamicTypeSize
                             ),
                             materialPresentation: filamentPresentation(printer),
-                            observesSafety: true
+                            observesSafety: true,
+                            materialActions: filamentActions(printer),
+                            onMaterialAction: { handleFilamentAction($0) }
                         )
                     } else if controlsComposition == nil
                         || controlsComposition?.identity != services.printerControlsComposition?.identity {
@@ -508,8 +510,13 @@ struct PrinterDetailView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
+                .padding(.horizontal, PrinterDetailLayout.usesColumns(
+                    width: geometry.size.width, dynamicTypeSize: dynamicTypeSize
+                ) ? 24 : 16)
+                .padding(.top, 16)
+                .padding(.bottom, 22)
             }
+            .background(Color.pfBackgroundTertiary)
         }
     }
 

@@ -9,6 +9,8 @@ struct PrinterSetupControlsContent: View {
     var usesColumns: Bool? = nil
     var materialPresentation: PrinterFilamentPresentation? = nil
     var observesSafety = false
+    var materialActions: [PrinterFilamentAction] = []
+    var onMaterialAction: @MainActor (PrinterFilamentAction) -> Void = { _ in }
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
@@ -91,15 +93,15 @@ struct PrinterSetupControlsContent: View {
                     && !dynamicTypeSize.isAccessibilitySize
                 let layout = columns
                     ? AnyLayout(EssentialControlsColumnsLayout())
-                    : AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
+                    : AnyLayout(VStackLayout(alignment: .leading, spacing: EssentialControlsStyle.groupSpacing))
                 // Geometry changes, not view identity: retain drafts and disclosures.
                 layout {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: EssentialControlsStyle.groupSpacing) {
                         PrinterDetailTemperatureStrip(
                             hotend: .init(measured: printer.hotendTemp, target: printer.hotendTarget, isOnline: printer.isOnline),
                             bed: .init(measured: printer.bedTemp, target: printer.bedTarget, isOnline: printer.isOnline),
                             showsBed: viewModel.hardware?.hasHeatedBed != false,
-                            identifier: "printer.controls.temperatures"
+                            identifier: "printer.controls.temperatures", essentialControls: true
                         )
                         if Heater.allCases.contains(where: viewModel.supports) {
                             insetGroup { PreheatSubgroup(viewModel: viewModel) }
@@ -108,7 +110,10 @@ struct PrinterSetupControlsContent: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     insetGroup { PrinterMotionControls(viewModel: viewModel) }
                     insetGroup {
-                        PrinterMaterialControls(viewModel: viewModel, materialPresentation: materialPresentation)
+                        PrinterMaterialControls(
+                            viewModel: viewModel, materialPresentation: materialPresentation,
+                            materialActions: materialActions, onMaterialAction: onMaterialAction
+                        )
                     }
                 }
 
@@ -135,8 +140,8 @@ struct PrinterSetupControlsContent: View {
     private func insetGroup<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-            .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+            .padding(EssentialControlsStyle.groupPadding)
+            .background(Color.pfBackground, in: RoundedRectangle(cornerRadius: 16))
     }
 
     private var lockoutBanner: some View {
@@ -189,6 +194,8 @@ struct PrinterSetupControlsContent: View {
 struct PrinterMaterialControls: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
     var materialPresentation: PrinterFilamentPresentation? = nil
+    var materialActions: [PrinterFilamentAction] = []
+    var onMaterialAction: @MainActor (PrinterFilamentAction) -> Void = { _ in }
     @State private var distance = 10.0
     @State private var speed = 1
     @State private var confirmation: PhysicalFilamentOperation?
@@ -201,15 +208,15 @@ struct PrinterMaterialControls: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Filament tools")
-                .font(.headline)
-                .accessibilityAddTraits(.isHeader)
+        VStack(alignment: .leading, spacing: 0) {
+            EssentialControlHeading(title: "Filament tools").padding(.bottom, 14)
             if let materialPresentation {
                 PrinterFilamentSection(
-                    presentation: materialPresentation, actions: [], onAction: { _ in }, embedded: true
+                    presentation: materialPresentation, actions: materialActions,
+                    onAction: onMaterialAction, embedded: true
                 )
             }
+            EssentialControlSeparator()
             row {
                 ForEach(PhysicalFilamentOperation.allCases) { operation in
                     ControlActionButton(
@@ -224,39 +231,64 @@ struct PrinterMaterialControls: View {
                 }
             }
             row {
-                ControlActionButton(
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Extrusion length").font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                    ControlActionButton(
                     title: "\(Int(distance)) mm", identifier: "printer.controls.extrusion-distance",
                     accessibilityTitle: "Extrusion distance", compact: true, systemImage: "chevron.down",
                     value: "\(Int(distance)) millimeters",
                     menu: UIMenu(children: MaterialControlInput.distances.map { value in
                         UIAction(title: "\(Int(value)) mm", state: distance == value ? .on : .off) { _ in distance = value }
-                    })
-                ) {}
-                ControlActionButton(
+                    }), textSize: 14
+                    ) {}
+                }
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Rate").font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                    ControlActionButton(
                     title: "\(speed) mm/s", identifier: "printer.controls.extrusion-speed",
                     accessibilityTitle: "Extrusion speed", compact: true, systemImage: "chevron.down",
                     value: "\(speed) millimeters per second",
                     menu: UIMenu(children: MaterialControlInput.speeds.map { value in
                         UIAction(title: "\(value) mm/s", state: speed == value ? .on : .off) { _ in speed = value }
-                    })
-                ) {}
+                    }), textSize: 14
+                    ) {}
+                }
             }
+            .padding(.vertical, 12)
+            .disabled(!viewModel.canControl || viewModel.isExecuting)
             if let reason = viewModel.extrusionBlockedReason {
                 Text(reason)
                     .font(.footnote)
+                    .padding(11).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.pfWarning.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.bottom, 12)
                     .accessibilityIdentifier("printer.controls.extrusion-unavailable")
             }
             row {
-                ControlActionButton(title: "Extrude \(Int(distance)) mm", identifier: "printer.controls.extrude", compact: true) {
+                ControlActionButton(
+                    title: "Extrude", identifier: "printer.controls.extrude",
+                    accessibilityTitle: "Extrude \(Int(distance)) millimeters", compact: true
+                ) {
                     Task { await viewModel.extrude(distanceMm: distance, speedMmPerSecond: speed) }
                 }
-                ControlActionButton(title: "Retract \(Int(distance)) mm", identifier: "printer.controls.retract", compact: true) {
+                ControlActionButton(
+                    title: "Retract", identifier: "printer.controls.retract",
+                    accessibilityTitle: "Retract \(Int(distance)) millimeters", compact: true
+                ) {
                     Task { await viewModel.extrude(distanceMm: -distance, speedMmPerSecond: speed) }
                 }
             }
             .disabled(viewModel.isExecuting || viewModel.extrusionBlockedReason != nil)
+            Text("Assignment tracks a spool. It does not physically load filament.")
+                .font(.footnote).foregroundStyle(Color.pfTextSecondary).padding(.top, 10)
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 8) {
+                    if let materialPresentation {
+                        PrinterFilamentSection(
+                            presentation: materialPresentation, actions: materialActions,
+                            onAction: onMaterialAction, embedded: true
+                        ).details
+                    }
                     Text("Printer-level commands only; no tool or MMU slot is selected. Assignment and NFC do not physically load filament. A hot target is not a measured safe temperature.")
                         .font(.footnote)
                     ForEach(PhysicalFilamentOperation.allCases) { operation in
@@ -275,7 +307,7 @@ struct PrinterMaterialControls: View {
                     }
                 }
             } label: {
-                Text("Availability & safety").font(.subheadline).frame(minHeight: 44)
+                Text("Details & safety").font(.footnote).frame(minHeight: 44)
             }
         }
         .foregroundStyle(Color.pfTextPrimary)
@@ -306,6 +338,7 @@ struct PrinterMaterialControls: View {
 /// Emergency Stop remains reachable throughout calibration.
 struct PrinterZOffsetCalibrationControls: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
+    var showsEntry = true
     @State private var increment = 0.05
     @AccessibilityFocusState private var stepFocused: Bool
 
@@ -327,7 +360,7 @@ struct PrinterZOffsetCalibrationControls: View {
                     identifier: "printer.controls.calibration-cancel",
                     hint: "Stops the workflow, not physical motion. Emergency Stop remains separate."
                 ) { viewModel.cancelCalibration() }
-            } else {
+            } else if showsEntry {
                 ControlActionButton(title: "Z-offset…", identifier: "printer.controls.calibration-start", compact: true) {
                     Task { await viewModel.startCalibration() }
                 }
@@ -433,23 +466,28 @@ struct PrinterZOffsetCalibrationControls: View {
 /// The same three children read Heat / Move / Filament on phone, but place
 /// Heat + Filament in the leading iPad column without recreating child state.
 private struct EssentialControlsColumnsLayout: Layout {
-    private let spacing: CGFloat = 16
+    private let spacing = EssentialControlsStyle.columnSpacing
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? 760
-        let child = ProposedViewSize(width: max(0, (width - spacing) / 2), height: nil)
-        let sizes = subviews.map { $0.sizeThatFits(child) }
+        let unit = max(0, (width - spacing) / 2.1)
+        let sizes = subviews.enumerated().map {
+            $0.element.sizeThatFits(ProposedViewSize(width: unit * ($0.offset == 1 ? 1 : 1.1), height: nil))
+        }
         precondition(sizes.count == 3, "Essential controls requires thermal, motion and material children")
-        return CGSize(width: width, height: max(sizes[0].height + spacing + sizes[2].height, sizes[1].height))
+        return CGSize(width: width, height: max(sizes[0].height + EssentialControlsStyle.groupSpacing + sizes[2].height, sizes[1].height))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         precondition(subviews.count == 3, "Essential controls requires thermal, motion and material children")
-        let width = max(0, (bounds.width - spacing) / 2)
+        let unit = max(0, (bounds.width - spacing) / 2.1)
+        let width = unit * 1.1
         let child = ProposedViewSize(width: width, height: nil)
         let thermalHeight = subviews[0].sizeThatFits(child).height
         subviews[0].place(at: bounds.origin, anchor: .topLeading, proposal: child)
-        subviews[1].place(at: CGPoint(x: bounds.minX + width + spacing, y: bounds.minY), anchor: .topLeading, proposal: child)
-        subviews[2].place(at: CGPoint(x: bounds.minX, y: bounds.minY + thermalHeight + spacing), anchor: .topLeading, proposal: child)
+        subviews[1].place(at: CGPoint(x: bounds.minX + width + spacing, y: bounds.minY), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: unit, height: nil))
+        subviews[2].place(at: CGPoint(x: bounds.minX, y: bounds.minY + thermalHeight + EssentialControlsStyle.groupSpacing),
+                          anchor: .topLeading, proposal: child)
     }
 }

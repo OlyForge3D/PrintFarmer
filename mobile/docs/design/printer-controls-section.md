@@ -13,8 +13,9 @@ sections 1–7 below; it must not override this contract.
 
 ## Approved Essential composition
 
-The recovered `printer-ui/index.html` concept 1, specifically `heatGroup()`,
-`motionGroup()` and `controls(tablet)`, is the layout reference. Its companion
+The recovered `printer-ui/index.html` concept 1, including its complete applicable
+CSS, `temperatureStrip()`, `heatGroup()`, `motionGroup()`, `filamentControls()`
+and `controls(tablet)`, is the exact visual target, not inspiration. Its companion
 `concept-1-phone.png` and `concept-1-ipad.png` are local design evidence in
 session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
 
@@ -37,9 +38,34 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   shrinking the pad. Motor warnings remain in the confirmation and its hint.
 - Filament tools: existing truthful material summary, Load/Unload/Change row,
   distance/rate menus, Extrude/Retract row and a relevant blocked explanation.
-  Repeated operation/provenance prose moves under **Availability & safety**;
+  Repeated operation/provenance prose moves under **Details & safety**;
   per-operation disabled hints and read-only refresh remain available there.
   Calibration stays inline after entry so Emergency Stop remains reachable.
+
+### Native geometry and visual comparison
+
+Preserve the prototype's anatomy: one divided temperature surface with leading
+heater symbols and inline actual/target readings; Heat's trailing caption,
+external Celsius suffixes, bordered presets and buttons; a single inset increment
+selector; 48-point directional buttons separated by 6 points, a 68-point Z column,
+and ruled home/absolute/motor-calibration rows. The two final entry buttons share
+one row, rather than becoming separate full-width cards.
+
+Groups use 18-point insets, 16-point corner radii and 14-point vertical separation.
+The iPad columns have a 24-point gap and a 1.1:1 thermal-to-motion width ratio,
+not equal columns. The scroll surface has 16-point phone / 24-point tablet side
+insets. Native system typography follows the reference hierarchy: 24-point
+readings, 17-point headings, 16-point actions, 13-point labels and 12-point
+secondary status, all scaling with Dynamic Type. ThemeColors supply surfaces,
+borders and semantic tint; SF Symbols replace the illustrative SVG strokes.
+
+`test_essentialPrototype_matchedScrollViewportsAndNativeControlMetrics` retains
+native 386x612 phone and 1068x650 tablet scroll viewports, matching the unmodified
+browser artifact at a 1320-pixel review viewport. It asserts field alignment,
+48-point pad geometry, paired motor/calibration placement, native font sizes and
+minimum hit bounds, and emits placement metrics. Compare top, motion and material
+captures, not just the first viewport or a stretched phone screenshot. Retain
+separate approved iPhone/iPad host results and accessibility captures.
 
 Necessary runtime differences from the illustrative prototype:
 
@@ -55,8 +81,14 @@ Necessary runtime differences from the illustrative prototype:
 - Existing relative movement semantics/rates remain unchanged. Reported homing
   text is context, not new safety evidence; backend preflight remains authoritative.
   Calibration separately requires the verified timestamped safety contract.
-- Assignment, Clear, NFC and combined Eject keep their existing Overview flows;
-  the Controls material summary does not gain an inventory mutation owner.
+- The strip says **Target set**, not an unverified **At target** readiness claim.
+  Real maxima replace the prototype's illustrative-limit footnote. Native controls
+  have a 45-point minimum to avoid fractional layout rounding below 44 points.
+- The compact Controls assignment shortcut delegates to the existing detail
+  host's picker, not a second inventory owner. Clear/NFC and richer inventory
+  information remain under Details & safety; combined Eject keeps its existing
+  Overview flow. Assigned material is labeled as assigned, never physically loaded.
+  The extra native details disclosure preserves these non-illustrative actions.
   Missing support/read errors remain actionable, not hidden behind fake readiness.
 
 ## Embedding contract (#2521)

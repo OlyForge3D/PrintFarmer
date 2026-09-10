@@ -182,7 +182,8 @@ final class PreheatSubgroupTests: XCTestCase {
         VStack(alignment: .leading, spacing: 16) {
             PrinterDetailTemperatureStrip(
                 hotend: .init(measured: model.printer.hotendTemp, target: model.printer.hotendTarget, isOnline: model.printer.isOnline),
-                bed: .init(measured: model.printer.bedTemp, target: model.printer.bedTarget, isOnline: model.printer.isOnline)
+                bed: .init(measured: model.printer.bedTemp, target: model.printer.bedTarget, isOnline: model.printer.isOnline),
+                essentialControls: true
             )
             PreheatSubgroup(viewModel: model)
         }

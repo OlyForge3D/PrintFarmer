@@ -406,6 +406,101 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertNil(service.setTemperaturesCalledWith)
     }
 
+    func test_essentialPrototype_matchedScrollViewportsAndNativeControlMetrics() async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        var caps = Self.layoutCaps
+        caps.supportsAbsoluteMovement = true
+        caps.supportsDisableMotors = true
+        caps.supportsExtrusion = true
+        caps.supportsFilamentLoad = true
+        caps.supportsFilamentUnload = true
+        caps.supportsFilamentChange = true
+        caps.supportsZOffset = true
+        caps.supportsZOffsetFirmwareSave = true
+        caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
+        let service = makeService(caps: caps)
+        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        let actions = PrinterDetailFilamentActionMapping.actions(
+            printerID: printer.id, hasActiveSpool: true, isPerformingAction: false, nfcAvailable: true
+        )
+        let presentation = PrinterFilamentPresentation(
+            printer: printer, toolheads: [], spool: printer.spoolInfo, coverage: nil,
+            coverageState: .unavailable, isStale: false,
+            supportedActions: PrinterDetailFilamentActionMapping.supportedActions(hasActiveSpool: true)
+        )
+        // Exact scroll-surface sizes from the unmodified Essential HTML at 1320px.
+        for size in [CGSize(width: 386, height: 612), CGSize(width: 1068, height: 650)] {
+            let tablet = size.width > 760
+            let content = ScrollView {
+                PrinterSetupControlsContent(
+                    printer: printer, viewModel: model, usesColumns: tablet,
+                    materialPresentation: presentation, materialActions: actions
+                )
+                .padding(.horizontal, tablet ? 24 : 16)
+                .padding(.top, 16).padding(.bottom, tablet ? 24 : 22)
+            }
+            .background(Color.pfBackgroundTertiary)
+            .environment(\.dynamicTypeSize, .large)
+            .environment(\.colorScheme, .light)
+            .frame(width: size.width, height: size.height).ignoresSafeArea()
+            let (window, controller) = install(content)
+            defer { window.isHidden = true }
+            window.frame.size = size
+            controller.view.frame = window.bounds
+            try await settle(controller)
+            let native = nativeControls(in: controller.view)
+            func frame(_ id: String) throws -> CGRect {
+                let item = try XCTUnwrap(native.first { $0.accessibilityIdentifier == id }, id)
+                return item.convert(item.bounds, to: controller.view)
+            }
+            let hotend = try frame("printer.controls.hotend.target")
+            let set = try frame("printer.controls.heat.set-targets")
+            XCTAssertEqual(hotend.minX, tablet ? 42 : 34, accuracy: 1)
+            XCTAssertEqual(set.minX, hotend.minX, accuracy: 1)
+            let up = try frame("printer.controls.jog.y.positive")
+            let down = try frame("printer.controls.jog.y.negative")
+            XCTAssertEqual(up.height, 48, accuracy: 1)
+            XCTAssertEqual(down.minY - up.minY, 108, accuracy: 1)
+            let motors = try frame("printer.controls.disable-motors")
+            let calibration = try frame("printer.controls.calibration-start")
+            XCTAssertEqual(motors.minY, calibration.minY, accuracy: 1)
+            XCTAssertLessThan(motors.maxX, calibration.minX)
+            let step = try XCTUnwrap(native.first {
+                $0.accessibilityIdentifier == "printer.controls.jog.step.10"
+            } as? UIButton)
+            XCTAssertEqual(try XCTUnwrap(step.titleLabel?.font).pointSize, 13, accuracy: 0.1)
+            for control in native {
+                XCTAssertGreaterThanOrEqual(control.bounds.height, 44, control.accessibilityIdentifier ?? "")
+                XCTAssertGreaterThanOrEqual(control.bounds.width, 44, control.accessibilityIdentifier ?? "")
+                if let id = control.accessibilityIdentifier {
+                    print("ESSENTIAL_METRIC width=\(size.width) id=\(id) frame=\(control.convert(control.bounds, to: controller.view))")
+                }
+            }
+            func scrollView(_ view: UIView) -> UIScrollView? {
+                (view as? UIScrollView) ?? view.subviews.lazy.compactMap { scrollView($0) }.first
+            }
+            let scroll = try XCTUnwrap(scrollView(controller.view))
+            print("ESSENTIAL_CONTENT width=\(size.width) height=\(scroll.contentSize.height)")
+            let offsets: [CGFloat] = tablet ? [0, 420] : [0, 470, 1060]
+            for (page, offset) in offsets.enumerated() {
+                scroll.setContentOffset(CGPoint(x: 0, y: min(offset, max(0, scroll.contentSize.height - size.height))), animated: false)
+                try await settle(controller)
+                let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+                    XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
+                }
+                let attachment = XCTAttachment(image: image)
+                attachment.name = "essential-exact-\(Int(size.width))x\(Int(size.height))-page\(page)"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+        }
+        XCTAssertNil(service.setTemperaturesCalledWith)
+        XCTAssertNil(service.moveCalledWith)
+        XCTAssertTrue(service.physicalFilamentCalls.isEmpty)
+    }
+
     func test_essentialDirectionalButtons_sendCorrectAxesSignsAndExistingRates() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.layoutCaps)

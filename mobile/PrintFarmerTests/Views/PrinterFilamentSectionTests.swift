@@ -32,6 +32,45 @@ final class PrinterFilamentSectionTests: XCTestCase {
         XCTAssertEqual(PrinterFilamentAction.Kind.clearAssignment.title, "Clear spool assignment")
     }
 
+    func testEmbeddedNativeAssignmentDelegatesToHostAndRemovesStaleOrBusyEntry() async throws {
+        let printer = try TestData.decodePrinter()
+        var received: [PrinterFilamentAction] = []
+        for (stale, busy) in [(false, false), (true, false), (false, true)] {
+            let action = PrinterFilamentAction(
+                kind: .change, target: .printer(printer.id),
+                disabledReason: busy ? "Another action is in progress" : nil
+            )
+            let section = PrinterFilamentSection(
+                presentation: try presentation(printer: printer, stale: stale), actions: [action],
+                onAction: { received.append($0) }, embedded: true
+            )
+            let host = UIHostingController(rootView: section.frame(width: 318))
+            let window = UIWindow()
+            window.windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true }
+            try await Task.sleep(for: .milliseconds(100))
+            host.view.layoutIfNeeded()
+            func buttons(_ view: UIView) -> [UIButton] {
+                (view as? UIButton).map { [$0] } ?? view.subviews.flatMap { buttons($0) }
+            }
+            let entry = buttons(host.view).first { $0.accessibilityIdentifier == "printer.filament.action.\(action.id)" }
+            if !stale && !busy {
+                let button = try XCTUnwrap(entry)
+                XCTAssertGreaterThanOrEqual(button.bounds.height, 44)
+                button.sendActions(for: .touchUpInside)
+                XCTAssertEqual(received, [action])
+            } else {
+                XCTAssertNil(entry, "Unavailable assignment stays in details, never as an enabled compact shortcut")
+                XCTAssertEqual(section.detailActions, [action])
+                section.select(action)
+                XCTAssertEqual(received.count, 1)
+            }
+        }
+    }
+
     func testDisabledUnsupportedMismatchedSlotAndUnlistedActionsEmitNothing() throws {
         let printer = try TestData.decodePrinter()
         let actions: [PrinterFilamentAction] = [

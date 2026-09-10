@@ -12,6 +12,10 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   stay above Heat; iPad separates thermal/material and motion work. Preserve
   atomic validation, omitted/zero targets, lifecycle locks, native accessibility
   and genuine safety evidence rather than illustrative prototype readiness.
+  Match the original CSS geometry and typography hierarchy: divided temperature
+  strip, bordered controls, ruled motion rows, paired motor/calibration entries,
+  and 1.1:1 iPad columns. Compact assignment delegates to the existing host;
+  native Details & safety retains Clear/NFC and truthful inventory information.
 
 - **Guarded native material controls** — Separate physical filament requests
   from spool assignment and preserve NFC/Eject. Add signed extrusion choices,

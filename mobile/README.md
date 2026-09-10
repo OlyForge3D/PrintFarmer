@@ -250,6 +250,10 @@ request applies entered targets only after every value passes validation.
 absolute movement is disclosed. Phone reads Heat / Move / Filament; iPad places
 thermal/material work beside movement. Accessibility sizes stack without
 discarding drafts. Runtime safety is real server evidence, never prototype data.
+The recovered prototype is the visual target, including its divided temperature
+surface, compact bordered controls, ruled motion rows, paired motor/calibration
+entries and 1.1:1 iPad columns. The compact assignment shortcut reuses the existing
+picker; **Details & safety** retains Clear/NFC, inventory details and safety reads.
 
 | Native method | POST route | Request / response |
 | --- | --- | --- |
