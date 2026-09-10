@@ -9,10 +9,11 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 - **Guarded native material controls** — Separate physical filament requests
   from spool assignment and preserve NFC/Eject. Add signed extrusion choices,
   explicit unavailable reasons and an interruptible inline calibration review.
-  Missing safe-temperature/freshness, geometry, macro and firmware-persistence
-  evidence fail closed; current shared API limitations prevent production
-  extrusion and the full calibration workflow. No fake completion or
-  database-only calibration fallback is offered.
+  Integrate shared verified-safety v1 discovery and timestamped telemetry for
+  conditional extrusion, physical filament operations and the full calibration
+  flow. Missing temperature, geometry, macro or firmware-persistence evidence
+  still fails closed. Reviews are one-use, movement respects verified frames and
+  clearance, and interrupted/uncertain work never becomes fake completion.
 
 - **Typed Essential control transport** — Added absolute XYZ movement, signed
   extrusion/retraction, motor release and reviewed-revision Z-offset requests,

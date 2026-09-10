@@ -8,8 +8,10 @@ struct PrinterSetupControlsContent: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
     var usesColumns: Bool? = nil
     var materialPresentation: PrinterFilamentPresentation? = nil
+    var observesSafety = false
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.scenePhase) private var scenePhase
 
     private var isPrintingOrPaused: Bool {
         switch printer.state?.lowercased() {
@@ -21,6 +23,20 @@ struct PrinterSetupControlsContent: View {
     var body: some View {
         if !PrinterControlsSection.isHidden(for: printer) {
             content
+                .task(id: scenePhase) {
+                    guard observesSafety else { return }
+                    guard scenePhase == .active else {
+                        viewModel.suspendSafetyObservation()
+                        return
+                    }
+                    while !Task.isCancelled && viewModel.isActive {
+                        await viewModel.refreshSafetyEvidence()
+                        do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                    }
+                }
+                .onDisappear {
+                    if observesSafety { viewModel.suspendSafetyObservation() }
+                }
         }
     }
 
@@ -223,6 +239,15 @@ struct PrinterMaterialControls: View {
             )
             .font(.footnote)
             .foregroundStyle(Color.pfTextSecondary)
+            ControlActionButton(
+                title: viewModel.isRefreshingSafety ? "Refreshing safety checks…" : "Refresh safety checks",
+                identifier: "printer.controls.refresh-safety",
+                hint: "Reads verified support and timestamped telemetry. Never retries a printer command."
+            ) { Task { await viewModel.refreshSafetyEvidence() } }
+            .disabled(viewModel.isRefreshingSafety || !viewModel.isActive)
+            if let error = viewModel.safetyReadError {
+                Text(error).font(.footnote).foregroundStyle(Color.pfTextSecondary)
+            }
             ForEach(PhysicalFilamentOperation.allCases) { operation in
                 VStack(alignment: .leading, spacing: 4) {
                     ControlActionButton(
@@ -290,7 +315,7 @@ struct PrinterZOffsetCalibrationControls: View {
                 ) { viewModel.cancelCalibration() }
             } else {
                 Text(
-                    "Introduction → Home → Position → Adjust → Save → Done. Negative offsets bring the nozzle closer. Never move to a guessed bed center."
+                    "Introduction → Home → Position → Adjust → Review / Save → Done. Negative offsets bring the nozzle closer. Only verified geometry and clearance can authorize movement."
                 )
                 .font(.footnote)
                 ControlActionButton(title: "Review calibration", identifier: "printer.controls.calibration-start") {
@@ -328,6 +353,8 @@ struct PrinterZOffsetCalibrationControls: View {
             }
             .disabled(viewModel.isExecuting || viewModel.calibrationBlockedReason != nil)
         case .position:
+            Text("If necessary, lift vertically to verified clearance first, then continue to the verified travel center. No guessed bed size or paper-test height is used.")
+                .font(.footnote)
             if let reason = viewModel.calibrationPositionBlockedReason {
                 Text(reason).font(.footnote)
             }
@@ -336,6 +363,9 @@ struct PrinterZOffsetCalibrationControls: View {
             }
             .disabled(viewModel.isExecuting || viewModel.calibrationPositionBlockedReason != nil)
         case .adjust:
+            if let offset = viewModel.calibrationOffset {
+                Text("Draft offset: \(offset.formatted()) mm").font(.headline)
+            }
             Text("Negative brings the nozzle closer; positive moves it farther away. Draft changes require matching Z-position telemetry.")
                 .font(.footnote)
             Picker("Z adjustment increment", selection: $increment) {

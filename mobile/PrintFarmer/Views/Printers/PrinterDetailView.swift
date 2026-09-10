@@ -496,7 +496,8 @@ struct PrinterDetailView: View {
                             usesColumns: PrinterDetailLayout.usesColumns(
                                 width: geometry.size.width, dynamicTypeSize: dynamicTypeSize
                             ),
-                            materialPresentation: filamentPresentation(printer)
+                            materialPresentation: filamentPresentation(printer),
+                            observesSafety: true
                         )
                     } else if controlsComposition == nil
                         || controlsComposition?.identity != services.printerControlsComposition?.identity {

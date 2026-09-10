@@ -79,6 +79,12 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var unloadFilamentToolheadIndex: Int?
     var unloadResultToReturn: FilamentUnloadResult?
     var physicalFilamentCalls: [String] = []
+    var beforeSafetyStatus: (@Sendable () async -> Void)?
+    var beforeSaveZOffset: (@Sendable () async -> Void)?
+    var beforeExtrude: (@Sendable () async -> Void)?
+    var beforeAbsoluteMove: (@Sendable () async -> Void)?
+    var saveZOffsetCallCount = 0
+    var extrudeCallCount = 0
 
     func list(includeDisabled: Bool = false) async throws -> [Printer] {
         listPrintersCalled = true
@@ -104,6 +110,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func getStatus(id: UUID) async throws -> PrinterStatusDetail {
         getStatusCalledWith = id
+        if let beforeSafetyStatus { await beforeSafetyStatus() }
         if let error = errorToThrow { throw error }
         guard let status = statusToReturn else { throw NetworkError.notFound }
         return status
@@ -251,12 +258,15 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func moveTo(printerId: UUID, x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async throws -> CommandResult {
         moveToCalledWith = (printerId, x, y, z, feedrateMmMin)
+        if let beforeAbsoluteMove { await beforeAbsoluteMove() }
         if let error = errorToThrow { throw error }
         return commandResultToReturn
     }
 
     func extrude(printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int) async throws -> CommandResult {
+        extrudeCallCount += 1
         extrudeCalledWith = (printerId, distanceMm, feedrateMmPerMinute)
+        if let beforeExtrude { await beforeExtrude() }
         if let error = errorToThrow { throw error }
         return commandResultToReturn
     }
@@ -268,7 +278,9 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     }
 
     func saveZOffset(printerId: UUID, offsetMm: Double, saveToFirmware: Bool, reviewedRowVersion: String) async throws -> CommandResult {
+        saveZOffsetCallCount += 1
         saveZOffsetCalledWith = (printerId, offsetMm, saveToFirmware, reviewedRowVersion)
+        if let beforeSaveZOffset { await beforeSaveZOffset() }
         if let error = errorToThrow { throw error }
         return commandResultToReturn
     }

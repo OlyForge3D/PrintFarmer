@@ -657,7 +657,11 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         caps.supportsFilamentUnload = supported
         caps.supportsFilamentChange = supported
         caps.supportsZOffset = true
+        caps.supportsZOffsetFirmwareSave = supported
+        caps.supportsAbsoluteMovement = supported
+        if supported { caps.verifiedSafety = VerifiedSafetyFixtures.discovery() }
         let service = makeService(caps: caps)
+        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
         let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
         let content = PrinterSetupControlsContent(
@@ -692,7 +696,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(button.bounds.height, 44, suffix)
             XCTAssertGreaterThanOrEqual(button.bounds.width, 44, suffix)
             XCTAssertFalse(button.accessibilityLabel?.isEmpty ?? true, suffix)
-            XCTAssertEqual(button.isEnabled, suffix == "calibration-start" || (suffix.hasPrefix("filament-") && supported))
+            XCTAssertEqual(button.isEnabled, suffix == "calibration-start" || supported)
         }
         let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
             controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)

@@ -309,10 +309,10 @@ Current implementation evidence is deliberately narrower than legacy flags:
 | SDCP / unknown | Database-only Z-offset; no inferred physical-command support. |
 
 These flags also require the concrete typed backend clients; permission and
-runtime readiness remain separate. Movement is currently unavailable: the
-Moonraker implementation combines mode and move on one G-code line, other
-absolute-move implementations are stubs, and relative routes omit credentials
-required by some backends. Firmware Z-offset persistence is not proven by
+runtime readiness remain separate. Moonraker now discovers absolute-movement
+geometry and uses separate mode/move commands; safe dispatch still requires
+verified clearance and fresh homing/frame telemetry. Other unsupported routes
+remain disabled. Firmware Z-offset persistence is not proven by
 `SET_GCODE_OFFSET` / `SAVE_CONFIG` or generic `M851` / `M500` transport.
 Physical-filament macros are not enabled without installed per-printer macro
 evidence. These prerequisites are recorded in #2597 / #2593; the typed native
@@ -327,22 +327,24 @@ Physical requests are printer-level: no MMU lane or tool is selected. A
 successful response means the request was accepted; follow printer prompts
 and verify completion yourself.
 
-Extrusion offers 10/25/50/100 mm and 1/5/10 mm/s. It remains unavailable on
-current servers because neither a material-safe minimum temperature nor
-measurement freshness is exposed. A hot target, preheat preset, assigned spool
-or catalog heater maximum cannot override this guard. Use the Hotend controls
-to preheat when appropriate, and the printer's own guarded extrusion procedure.
-Load/Unload/Change also remain unavailable until the server verifies the
-individual installed operation, rather than advertising a generic capability.
+Extrusion offers signed 10/25/50/100 mm and 1/5/10 mm/s, converted once to the
+API's mm/min. It becomes available when shared `verifiedSafety` discovery proves
+a material-safe minimum and fresh `safetyTelemetry` proves the measured hotend
+meets it. Load/Unload/Change require the same guard plus verified individual
+operation support. A hot target, preset, assigned spool or catalog maximum cannot
+override it. **Refresh safety checks** reads evidence without retrying a command.
+Current Moonraker discovery proves installed macros but deliberately leaves the
+material-safe minimum Unknown; those hardware exclusions remain visible.
 
-**Review calibration** explains the native Introduction/Home/Position/Adjust/
-Save/Done sequence without claiming unsupported steps work. Current servers
-do not prove firmware persistence or absolute-move support, and catalog build
-dimensions do not prove safe coordinates. Automatic positioning, adjustment
-and firmware saving therefore remain blocked; use your printer's supported
-calibration procedure. No guessed center, default zero offset, or database-only
-save is substituted. A future supported firmware save requires explicit review
-of the current printer revision and will never automatically retry a conflict.
+**Review calibration** opens Introduction/Home/Position/Adjust/Review-Save/Done.
+With verified support, geometry and clearance, the flow waits for fresh homing,
+lifts before lateral positioning, and adjusts by 0.01/0.05/0.1 mm (negative is
+closer) within verified bounds. Firmware save uses the explicitly reviewed
+printer revision; conflicts and uncertain results never auto-retry or become Done.
+No guessed center, zero offset, paper-test height or database-only calibration is
+substituted. Current Moonraker clearance is Unknown and firmware persistence is
+Unsupported, so its calibration remains disabled with explanations even though
+the conditional native path is fully wired. Use the printer's supported procedure.
 
 Cancel calibration stops the workflow, not an already-issued printer command.
 Emergency Stop remains separate and confirmed. After interruption or an

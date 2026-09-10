@@ -13,8 +13,10 @@ This spec defines the visual hierarchy, component anatomy, interaction model, ac
 `Views/PrinterControls/PrinterSetupControlsContent.swift` exports
 `PrinterSetupControlsContent(printer:viewModel:)`. It observes an externally
 owned `PrinterControlsViewModel` and renders thermal/motion, lockout and
-command outcome presentation. It does not create services/models, load capabilities or
-subscribe to updates. `JogSubgroup` likewise no longer loads capabilities;
+command outcome presentation. It does not create services/models or subscribe to
+SignalR. Production hosts explicitly opt into `observesSafety`, which asks the same
+owner to refresh read-only evidence every five seconds while foregrounded; default
+embedded content performs no automatic reads. `JogSubgroup` no longer loads capabilities;
 its initial capability observation normalizes selection for preloaded limited axes.
 
 `PrinterControlsSection(printer:composition:)` remains the standalone owner,
@@ -82,14 +84,24 @@ Narrow and accessibility-text layouts stack. Buttons remain at least 44 points.
 
 The extrusion choices are signed 10/25/50/100 mm and 1/5/10 mm/s. The owner
 converts speed to mm/min once before the typed service boundary. Availability
-and dispatch both fail closed: **the current shared contract provides neither
-a verified material-safe minimum nor hotend sample freshness**. Measured hot,
-cold, missing and cached values therefore cannot authorize extrusion. Targets,
-preheat completion, catalog maxima and assigned-spool metadata are not safety
-evidence. Existing Hotend controls remain the preheat path, not an override.
+and dispatch both require `verifiedSafety` v1 from `backend-capabilities` and
+`safetyTelemetry` from `status` (#2613/#2617). The minimum must be Verified,
+finite and sourced; measured hotend temperature must meet it and pass its own
+`observedAtUtc` / `staleAfterSeconds` policy. Future dates, absent provenance,
+unknown versions and missing/nonfinite samples fail closed. Partial discovery can
+authorize individually verified facts. Targets, preheat completion, catalog maxima
+and assigned-spool metadata are never substitutes.
 
-Load, Unload and Change filament require their own explicit operation flags
-and a native confirmation. The unload path consumes `FilamentUnloadResult`;
+Refresh safety checks performs reads only. A native status read expires after
+15 seconds; receipt of a new response never renews an old fact's timestamp.
+The server independently re-probes and preflights every physical dispatch.
+Backgrounding, reconnect/configuration changes and owner/access changes invalidate
+client evidence. Static discovery timestamps are provenance, not a heater clock;
+configuration revision and the discovered movement frame fence calibration.
+
+Load, Unload and Change filament require their own explicit operation flags,
+Supported per-operation discovery, the same measured-temperature guard, and
+a native confirmation. The unload path consumes `FilamentUnloadResult`;
 its residual weight and spool ID are not physical-loaded state. Successful
 results say **request accepted**, preserve server guidance and ask the operator
 to verify completion. False/failed/uncertain responses never become success.
@@ -97,52 +109,62 @@ No physical action binds or clears a spool, and no action supplies a toolhead
 index. Existing Assign/Change spool, Clear assignment, NFC and combined Eject
 remain unchanged under their original owners.
 
-Calibration exposes Introduction → Home → Position → Adjust → Save → Done.
+Calibration exposes Introduction → Home → Position → Adjust → Review/Save → Done.
 Starting reads the existing stored offset without assuming zero. Fresh
 matching homing telemetry, not HTTP acceptance or a cached homed flag,
-is necessary to advance Home. Catalog build volume does not establish a bed
-origin, travel envelope or safe clearance: **Position currently refuses to
-move and cannot advance to Adjust/Save**. The native adjustment/save code is
-guarded behind this prerequisite; it is not a production-operable calibration
-workflow. Completing those stages requires a separately approved shared safety
-contract and corresponding end-to-end tests; there is no geometry injection,
-default 220×220 bed, manual override or database-only substitute.
+is necessary to advance Home. Position requires verified origin, travel envelope
+and minimum clearance, freshly homed XYZ, fresh matching origin-offset telemetry,
+and finite reported XYZ. It lifts vertically first when needed, then centers within
+the verified envelope after converting through the actual frame. No guessed bed
+size, zero baseline or paper-test height is used. Adjustments preserve XY and send
+all XYZ coordinates, respecting the server's effective-coordinate bounds and
+clearance. A reported matching position after dispatch is required before changing
+the draft; HTTP acceptance or unrelated legacy telemetry cannot advance it.
+Clearance may prevent reaching a useful paper-test height on some hardware; the
+app explains this rather than overriding it.
 
 The guarded downstream semantics use 0.01/0.05/0.1 mm increments (negative is
 closer), -5…5 mm save bounds, a freshly reviewed `PrinterDetails.rowVersion`,
 and `saveToFirmware: true`. A review is consumed on any save attempt, including
 412/428 or an uncertain outcome; refresh/review never automatically retries.
 Done describes firmware-request acceptance, not a measured gap or first-layer
-quality. Current backend firmware-save flags are false, so native physical
-calibration remains unavailable even before the missing geometry prerequisite.
+quality. The full conditional flow is exercised with a synthetic shared-contract
+fixture; it is not a claim that any current production backend proves every fact.
 
 Cancellation/dismissal, loss of access and server-epoch changes invalidate the
 flow's session token. Outstanding physical responses retain the existing
 single-flight lease until settled; late replies cannot advance canceled steps.
+A workflow lease also prevents other controls owners on the same server/printer
+from issuing routine commands between calibration steps. Baseline-offset changes,
+frame/configuration changes and observed stale revisions require a new review;
+there is no physical-save retry, including after 412/428 or uncertain firmware results.
 Unrelated temperature/position changes never acknowledge a filament operation.
 
 **Shared-contract exclusions, verified against source:**
 
 | Operation | Current production availability / missing evidence |
 | --- | --- |
-| Extrude / retract | Moonraker advertises extrusion; native dispatch remains blocked without a material-safe threshold and sample freshness |
-| Load / unload / change | All backend operation flags are false; installed per-printer macro evidence is absent |
+| Extrude / retract | Conditional native path complete; current Moonraker discovery deliberately leaves the material-safe minimum Unknown |
+| Load / unload / change | Conditional native paths complete; Moonraker now probes installed LOAD_FILAMENT / UNLOAD_FILAMENT / M600 macros, but still requires a verified material-safe minimum |
 | Calibration home | Existing ordinary Home controls remain available by their own flags; the calibration flow additionally requires firmware/movement support |
-| Calibration position / adjust | Absolute movement flags are false; shared details expose catalog dimensions, not verified machine coordinate bounds |
-| Firmware save | All firmware-save flags are false; database-only offset support is deliberately not presented as calibration |
+| Calibration position / adjust | Conditional native path complete; Moonraker now supplies verified geometry and separate G90/G0 support, but its clearance remains Unknown |
+| Firmware save | Conditional reviewed native save complete; current Moonraker discovery explicitly reports Unsupported firmware persistence |
 | Assign / clear / NFC / combined Eject | Existing paths unchanged; not replaced by these physical controls |
 
 Sources: `src/infra/Services/Printers/PrinterBackendCapabilitiesService.cs`,
 `src/infra/Models/PrinterBackendCapabilitiesDto.cs`,
 `src/modules/Farm.Modules.Printers/Controllers/PrintersController.cs`
 (`extrude`, `filament-*`, `z-offset`), and native
-`Models/ToolheadModels.swift` / `Models/Models.swift`. No backend routes,
-transport DTOs, schema changes or production safety values are added by #2599.
+`src/infra/Models/PrinterSafetyContracts.cs`, `PrinterSafetyGuard.cs`, and native
+`Models/PrinterBackendCapabilities.swift` / `Models/Models.swift`. Native types
+mirror the shared camelCase/string-enum DTOs; no backend routes, schema changes or
+production safety values are added by #2599.
 
-Focused evidence lives in `mobile/build/guarded-filament-iphone/` and
-`mobile/build/guarded-filament-ipad/`, including native view attachments at
+Integration evidence lives in `mobile/build/guarded-safety-iPhone/` and
+`mobile/build/guarded-safety-iPad/`, including native view attachments at
 390/1024/320-point widths, accessibility text, and separate XCUI evidence.
-These tests prove native guards and typed synthetic-capability behavior,
+Earlier `guarded-filament-*` evidence predates this integration.
+These tests prove native guards and typed synthetic shared-contract behavior,
 **not actual hardware support or a completed physical calibration**.
 
 ### Individual thermal and motion controls (#2598)
