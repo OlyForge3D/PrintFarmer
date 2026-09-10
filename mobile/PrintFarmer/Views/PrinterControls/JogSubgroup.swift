@@ -130,7 +130,7 @@ struct JogSubgroup: View {
                     Text("Absolute position")
                         .font(.headline)
                         .accessibilityAddTraits(.isHeader)
-                    Text("Coordinates are in mm. Blank axes stay unchanged; zero is an explicit destination. Travel limits and origin are not reported. Verify clearance and homing before moving.")
+                    Text("Coordinates are in mm. Blank axes stay unchanged; zero is an explicit destination. The server verifies the coordinate frame, travel limits and homing before dispatch.")
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
                     ForEach(JogSubgroup.visibleAxes(for: viewModel.capabilities), id: \.self) { axis in
@@ -143,6 +143,8 @@ struct JogSubgroup: View {
                             hint: ControlNumberInput.coordinatePrecisionMessage
                         )
                     }
+
+
                     Text("Homed axes: \(viewModel.printer.homedAxes ?? "Unknown")")
                         .font(.footnote)
                     ControlNumberField(
@@ -306,5 +308,141 @@ struct JogSubgroup: View {
     private func stepLabel(_ value: Double) -> String {
         if value == value.rounded() { return String(Int(value)) }
         return String(value)
+    }
+}
+
+/// Essential's single Move & home group. The prototype supplies layout only;
+/// every action still goes through the existing capability-gated command owner.
+struct PrinterMotionControls: View {
+    @ObservedObject var viewModel: PrinterControlsViewModel
+    @State private var step = 1.0
+    @State private var showsAbsolute = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var row: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 8))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Move & home").font(.headline).accessibilityAddTraits(.isHeader)
+            row {
+                position("X", value: viewModel.printer.x)
+                position("Y", value: viewModel.printer.y)
+                position("Z", value: viewModel.printer.z)
+            }
+            Text("Homed axes: \(viewModel.printer.homedAxes ?? "Unknown")")
+                .font(.caption).foregroundStyle(Color.pfTextSecondary)
+            if !JogSubgroup.isHidden(for: viewModel.capabilities) {
+                row {
+                    ForEach(JogSubgroup.stepOptions, id: \.self) { value in
+                        ControlActionButton(
+                            title: "\(value.formatted()) mm",
+                            identifier: "printer.controls.jog.step.\(value.formatted())",
+                            accessibilityTitle: "Jog step \(value.formatted()) millimeters",
+                            selected: step == value, compact: true
+                        ) { step = value }
+                    }
+                }
+                .disabled(!viewModel.canControl || viewModel.isExecuting)
+                if dynamicTypeSize.isAccessibilitySize {
+                    ForEach(JogSubgroup.visibleAxes(for: viewModel.capabilities), id: \.self) { axis in
+                        HStack(spacing: 8) {
+                            jog(axis, sign: -1, title: "\(axis) -")
+                            jog(axis, sign: 1, title: "\(axis) +")
+                        }
+                    }
+                } else {
+                    HStack(spacing: 16) {
+                        Grid(horizontalSpacing: 8, verticalSpacing: 8) {
+                            GridRow {
+                                Color.clear.frame(height: 52).accessibilityHidden(true)
+                                jog("Y", sign: 1, symbol: "arrow.up").frame(maxWidth: .infinity).frame(height: 52)
+                                Color.clear.frame(height: 52).accessibilityHidden(true)
+                            }
+                            GridRow {
+                                jog("X", sign: -1, symbol: "arrow.left").frame(maxWidth: .infinity).frame(height: 52)
+                                homeAll(center: true).frame(maxWidth: .infinity).frame(height: 52)
+                                jog("X", sign: 1, symbol: "arrow.right").frame(maxWidth: .infinity).frame(height: 52)
+                            }
+                            GridRow {
+                                Color.clear.frame(height: 52).accessibilityHidden(true)
+                                jog("Y", sign: -1, symbol: "arrow.down").frame(maxWidth: .infinity).frame(height: 52)
+                                Color.clear.frame(height: 52).accessibilityHidden(true)
+                            }
+                        }
+                        VStack(spacing: 8) {
+                            jog("Z", sign: 1, title: "Z +")
+                            jog("Z", sign: -1, title: "Z -")
+                        }
+                        .frame(width: 72)
+                    }
+                }
+            } else {
+                Text("Relative movement is unavailable without confirmed axis support.")
+                    .font(.footnote).foregroundStyle(Color.pfTextSecondary)
+            }
+            row {
+                homeAll()
+                home("XY", axes: ["X", "Y"]) { await viewModel.homeXY() }
+                home("Z", axes: ["Z"]) { await viewModel.homeZ() }
+            }
+            if JogSubgroup.AbsolutePositionControls.isVisible(viewModel.capabilities) {
+                ControlActionButton(
+                    title: showsAbsolute ? "Hide absolute movement" : "Go to XYZ…",
+                    identifier: "printer.controls.absolute.disclosure",
+                    compact: true, value: showsAbsolute ? "Expanded" : "Collapsed"
+                ) { showsAbsolute.toggle() }
+                if showsAbsolute {
+                    JogSubgroup.AbsolutePositionControls(viewModel: viewModel)
+                }
+            }
+            HomeSubgroup.MotorReleaseControls(viewModel: viewModel)
+            PrinterZOffsetCalibrationControls(viewModel: viewModel)
+        }
+        .foregroundStyle(Color.pfTextPrimary)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("printer.controls.motion-group")
+    }
+
+    private func position(_ axis: String, value: Double?) -> some View {
+        let text = value.flatMap { $0.isFinite ? "\($0.formatted()) mm" : nil } ?? "Unknown"
+        return Text("\(axis): \(text)").font(.caption.monospacedDigit())
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func jog(_ axis: String, sign: Double, title: String = "", symbol: String? = nil) -> some View {
+        let available = viewModel.capabilities?.supportsMovement == true
+            && JogSubgroup.visibleAxes(for: viewModel.capabilities).contains(axis)
+        let direction = sign > 0 ? "positive" : "negative"
+        let pending = viewModel.pendingCommand?.kind == .jog(axis: axis, distanceMm: sign * step)
+        return ControlActionButton(
+            title: title, identifier: "printer.controls.jog.\(axis.lowercased()).\(direction)",
+            accessibilityTitle: "Move \(axis) \(direction)",
+            hint: available ? "Moves \(step.formatted()) millimeters." : "\(axis) movement is unavailable.",
+            compact: true, systemImage: symbol, value: pending ? "Pending" : nil
+        ) { Task { await viewModel.jog(axis: axis, distanceMm: sign * step) } }
+        .disabled(!available || !viewModel.canControl || viewModel.isExecuting)
+    }
+
+    private func homeAll(center: Bool = false) -> some View {
+        home("all", axes: ["X", "Y", "Z"], center: center) { await viewModel.homeAll() }
+    }
+
+    private func home(
+        _ name: String, axes: [String], center: Bool = false, action: @escaping @MainActor () async -> Void
+    ) -> some View {
+        let available = viewModel.capabilities?.supportsHome(axes: axes) == true
+        return ControlActionButton(
+            title: center ? "" : "Home \(name)",
+            identifier: "printer.controls.home.\(name.lowercased())\(center ? ".center" : "")",
+            accessibilityTitle: name == "all" ? "Home all axes" : "Home \(name)",
+            hint: available ? "Homes \(axes.joined(separator: ", "))." : "This homing operation is unavailable.",
+            compact: true, systemImage: center ? "house" : nil,
+            value: viewModel.pendingCommand?.kind == .home(axes: axes) ? "Pending" : nil
+        ) { Task { await action() } }
+        .disabled(!available || !viewModel.canControl || viewModel.isExecuting)
     }
 }

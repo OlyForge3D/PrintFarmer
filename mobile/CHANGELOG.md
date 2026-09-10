@@ -6,10 +6,12 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Added
 
-- **Compact native thermal controls** — Replace tall repeated heater editors
-  with Hotend/Bed rows combining current/target readings, input and Set/Off.
-  Compact presets, adaptive accessibility stacking and 44-point native targets
-  preserve safety validation and pending-command locks.
+- **Essential Controls alignment** — Restore owner-selected concept 1: one
+  Heat group with paired inputs and Set targets, compact presets and Cool down,
+  grouped directional Move & home, and compact Filament tools. Paired readings
+  stay above Heat; iPad separates thermal/material and motion work. Preserve
+  atomic validation, omitted/zero targets, lifecycle locks, native accessibility
+  and genuine safety evidence rather than illustrative prototype readiness.
 
 - **Guarded native material controls** — Separate physical filament requests
   from spool assignment and preserve NFC/Eject. Add signed extrusion choices,

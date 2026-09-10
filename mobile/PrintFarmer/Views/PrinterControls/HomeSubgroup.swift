@@ -54,12 +54,9 @@ struct HomeSubgroup: View {
         var body: some View {
             if viewModel.capabilities?.supportsDisableMotors == true {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Motor maintenance")
-                        .font(.headline)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(Self.warning).font(.footnote).fixedSize(horizontal: false, vertical: true)
                     ControlActionButton(
-                        title: "Disable motors", identifier: "printer.controls.disable-motors", isDestructive: true
+                        title: "Disable motors", identifier: "printer.controls.disable-motors",
+                        hint: Self.warning, isDestructive: true, compact: true
                     ) {
                         confirmsRelease = true
                     }

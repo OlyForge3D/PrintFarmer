@@ -42,6 +42,7 @@ struct ControlCommand: Equatable, Sendable {
         case home(axes: [String])
         case jog(axis: String, distanceMm: Double)
         case heater(Heater, target: Double)
+        case heaterTargets(hotend: Double?, bed: Double?)
         case moveTo(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?)
         case disableMotors
         case extrusion(distanceMm: Double, feedrateMmMin: Int)
@@ -1133,6 +1134,25 @@ final class PrinterControlsViewModel: ObservableObject {
         }
     }
 
+    func setHeaterTargets(hotend: Double?, bed: Double?) async {
+        let command = ControlCommand(kind: .heaterTargets(hotend: hotend, bed: bed), startedAt: clock())
+        guard beginCommand(command) else { return }
+        defer { endCommand(command) }
+        guard hotend != nil || bed != nil else {
+            setError(command: command, message: "Enter at least one target. Blank leaves a heater unchanged.", isRetryable: false)
+            return
+        }
+        guard (hotend == nil || supports(.hotend)), (bed == nil || supports(.bed)) else {
+            setError(command: command, message: "A requested heater is unavailable. Refresh heater support before setting targets.", isRetryable: false)
+            return
+        }
+        guard validateTemperature(hotend, heater: .hotend, command: command),
+              validateTemperature(bed, heater: .bed, command: command) else { return }
+        await perform(command) { [printerService, printer] in
+            try await printerService.setTemperatures(printerId: printer.id, hotend: hotend, bed: bed)
+        }
+    }
+
     func moveTo(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async {
         let automaticFeedrate = z == nil ? Self.xyFeedrateMmMin : Self.zFeedrateMmMin
         let command = ControlCommand(
@@ -1265,6 +1285,9 @@ final class PrinterControlsViewModel: ObservableObject {
                 hotendTarget: heater == .hotend ? target : nil,
                 bedTarget: heater == .bed ? target : nil, in: updated
             )
+        case let .heaterTargets(hotend, bed):
+            return (hotend != nil || bed != nil)
+                && targetsSatisfied(hotendTarget: hotend, bedTarget: bed, in: updated)
         case let .moveTo(x, y, z, _):
             return (x != nil || y != nil || z != nil)
                 && (x.map { updated.x == $0 } ?? true)
@@ -1513,7 +1536,7 @@ final class PrinterControlsViewModel: ObservableObject {
 
     private static func confirmationNotice(for command: ControlCommand) -> String {
         switch command.kind {
-        case .preheat, .heater:
+        case .preheat, .heater, .heaterTargets:
             return "Matching telemetry received. A heater target is a setpoint, not a measured temperature."
         default:
             return "Matching telemetry received. Check the machine before further setup."

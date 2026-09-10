@@ -1269,40 +1269,10 @@ struct PrinterDetailView: View {
         let bed = printer.bedTemp ?? viewModel.statusDetail?.bedTemp
         let bedTgt = printer.bedTarget ?? viewModel.statusDetail?.bedTarget
 
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
-        return layout {
-            temperatureReading(
-                title: "Hotend",
-                reading: .init(measured: hotend, target: hotendTgt, isOnline: printer.isOnline)
-            )
-            temperatureReading(
-                title: "Bed",
-                reading: .init(measured: bed, target: bedTgt, isOnline: printer.isOnline)
-            )
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("printer.detail.temperatures")
-    }
-
-    private func temperatureReading(title: String, reading: PrinterDetailTemperatureReading) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Color.pfTextSecondary)
-            Text(reading.measuredText)
-                .font(.title3.monospacedDigit().weight(.semibold))
-            Text("Target: \(reading.targetText)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(Color.pfTextSecondary)
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(title), measured \(reading.measuredText), target \(reading.targetText)")
+        return PrinterDetailTemperatureStrip(
+            hotend: .init(measured: hotend, target: hotendTgt, isOnline: printer.isOnline),
+            bed: .init(measured: bed, target: bedTgt, isOnline: printer.isOnline)
+        )
     }
 
     // MARK: - Camera Snapshot

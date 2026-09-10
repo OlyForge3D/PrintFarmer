@@ -1,12 +1,63 @@
 # Printer Controls Section — UX Spec
 
-**Status:** v1 locked
-**Issue:** #283
-**Implementers:** #284 (Preheat), #285 (Home), #286 (Jog)
-**Owner:** Newt (UX) → Hudson (iOS)
+**Status:** Essential concept 1 selected by the owner
+**Authority:** [#2593](https://github.com/OlyForge3D/PrintFarmer/issues/2593),
+selected in [#2589](https://github.com/OlyForge3D/PrintFarmer/issues/2589)
+**Implementation owner:** Hudson (iOS)
 **Last updated:** 2026-09-09
 
-This spec defines the visual hierarchy, component anatomy, interaction model, accessibility, and edge cases for the **Printer Controls** section that lives inside `PrinterDetailView`. Three subgroups in fixed order: **Preheat → Home → Jog**.
+The current Controls design is **Essential**, not the original #283
+Preheat/Home/Jog stack and not separate per-heater Set/Off rows. The original
+subgroup specification is retained only as historical context in numbered
+sections 1–7 below; it must not override this contract.
+
+## Approved Essential composition
+
+The recovered `printer-ui/index.html` concept 1, specifically `heatGroup()`,
+`motionGroup()` and `controls(tablet)`, is the layout reference. Its companion
+`concept-1-phone.png` and `concept-1-ipad.png` are local design evidence in
+session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
+
+- Phone: paired measured/target strip, **Heat**, **Move & home**, **Filament
+  tools**, in one reading column. No repeated Controls/Preheat/Home/Jog headers
+  or enclosing diagnostic card.
+- iPad: strip and Heat above Filament tools in the leading column, Move & home
+  in the trailing column. The same three child identities reflow at narrow
+  widths and accessibility sizes without resetting drafts, selected movement
+  distance, disclosures or the command owner.
+- Heat: side-by-side Hotend/Bed target fields, **one Set targets**, compact
+  PLA/PETG/ABS row, then **Cool down**. Actual/target values appear only in the
+  strip above, not repeated around each editor. Accessibility text stacks the
+  fields. Use native typography, ThemeColors, inset groups and 44-point minimum
+  native controls; do not import the browser wrapper's styling.
+- Move & home: reported XYZ/homed context, increment selector, directional XY
+  pad with Home at its center, separate Z +/- controls, compact independent
+  Home All/XY/Z actions, **Go to XYZ...** disclosure and motor/calibration
+  entry points. Accessibility text uses labeled directional pairs instead of
+  shrinking the pad. Motor warnings remain in the confirmation and its hint.
+- Filament tools: existing truthful material summary, Load/Unload/Change row,
+  distance/rate menus, Extrude/Retract row and a relevant blocked explanation.
+  Repeated operation/provenance prose moves under **Availability & safety**;
+  per-operation disabled hints and read-only refresh remain available there.
+  Calibration stays inline after entry so Emergency Stop remains reachable.
+
+Necessary runtime differences from the illustrative prototype:
+
+- Inputs start **Unchanged**, not prefilled from potentially stale targets.
+  Blank omits that heater; zero explicitly switches it off. Set targets validates
+  every entered supported heater before making **one** existing `/temps` request.
+  An invalid pair sends neither heater. Missing/unsupported heaters are omitted
+  by the UI and rejected if explicitly requested from the owner.
+- Real hardware maxima, operation capabilities, measured-temperature freshness,
+  geometry/frame/clearance and reviewed If-Match remain authoritative. No
+  prototype 300/120 limits, 180-degree threshold, assumed loaded state or
+  simulated homing/firmware success is copied.
+- Existing relative movement semantics/rates remain unchanged. Reported homing
+  text is context, not new safety evidence; backend preflight remains authoritative.
+  Calibration separately requires the verified timestamped safety contract.
+- Assignment, Clear, NFC and combined Eject keep their existing Overview flows;
+  the Controls material summary does not gain an inventory mutation owner.
+  Missing support/read errors remain actionable, not hidden behind fake readiness.
 
 ## Embedding contract (#2521)
 
@@ -16,8 +67,8 @@ owned `PrinterControlsViewModel` and renders thermal/motion, lockout and
 command outcome presentation. It does not create services/models or subscribe to
 SignalR. Production hosts explicitly opt into `observesSafety`, which asks the same
 owner to refresh read-only evidence every five seconds while foregrounded; default
-embedded content performs no automatic reads. `JogSubgroup` no longer loads capabilities;
-its initial capability observation normalizes selection for preloaded limited axes.
+embedded content performs no automatic reads. Directional movement reads only
+the existing owner's capabilities and dispatches the explicitly chosen axis.
 
 `PrinterControlsSection(printer:composition:)` remains the standalone owner,
 with lazy construction directly inside `StateObject(wrappedValue:)`. The
@@ -169,20 +220,16 @@ These tests prove native guards and typed synthetic shared-contract behavior,
 
 ### Individual thermal and motion controls (#2598)
 
-- Thermal controls use compact native Hotend/Bed rows: **Current** measurement,
-  reported **Target**, new-target input, **Set** and per-heater **Off**. Standard
-  phone widths keep the input and both actions together; insufficient width or
-  accessibility text stacks the editor without discarding its draft. The same
-  rows fit the iPad thermal column. Native fields and actions retain a 44-point
-  minimum and system Dynamic Type. Range guidance is in the field's VoiceOver
-  hint and specific validation errors, not repeated permanent range paragraphs.
-  Missing limits remain an explicit actionable state.
+- Heat follows the approved Essential composition above, with one combined
+  command owner path. Range guidance is in the field's VoiceOver hint and
+  specific validation errors, not repeated permanent range paragraphs.
 - Presets remain PLA **200/60**, PETG **240/80**, ABS **240/100** and
   Cool Down **0/0** °C. Presets require proven hotend support; unsupported or
   explicitly bed-less hardware omits the bed, including during Cool Down.
-- Separate target editors send only the chosen heater. Zero explicitly turns
-  that heater off; blank is not zero. Actual temperature and reported setpoint
-  are separate labels; missing/nonfinite measurements read **Unknown**.
+- The paired editors send only entered, supported heaters in one request.
+  Zero explicitly turns that heater off; blank is not zero. Both requested
+  targets must match before telemetry acknowledgement; measured-temperature
+  drift cannot acknowledge either setpoint.
 - Targets must be finite, nonnegative **whole degrees Celsius**, and may not exceed a known configured
   `maxHotendTemp`/`maxBedTemp` from the typed details contract. Missing maxima
   remain unknown, not fabricated limits: **positive heating is blocked** when
@@ -328,14 +375,12 @@ of physical completion; Emergency Stop remains independent.
 
 ---
 
-## 1. Visual Hierarchy
+## 1. Historical #283 visual hierarchy (superseded)
 
-The command section is conditionally rendered: offline or preference-disabled
-detail pages show an explanation instead. The following original subgroup
-specification governs controls, not destination discoverability. Overview now
-places identity, paired measured/target temperatures and material/current job
-first. The compact labeled Emergency Stop is above both pages, independent of
-routine actions beside Current Job, and retains confirmation and a 44-point floor.
+Sections 1–7 retain the original #283 exploration and examples for historical
+context only. They do **not** govern current layout, per-group queues or current
+availability. Use the approved Essential composition and embedding/safety
+contracts above. In particular, do not rebuild the old Preheat/Home/Jog stack.
 
 ```
 PrinterDetailView (existing)

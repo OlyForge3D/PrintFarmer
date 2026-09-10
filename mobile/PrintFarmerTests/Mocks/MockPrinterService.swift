@@ -299,8 +299,10 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     }
 
     var beforeSetTemperatures: (@Sendable () async -> Void)?
+    private(set) var setTemperaturesCallCount = 0
 
     func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws {
+        setTemperaturesCallCount += 1
         if let hook = beforeSetTemperatures { await hook() }
         setTemperaturesCalledWith = (printerId, hotend, bed)
         if let error = errorToThrow { throw error }
@@ -360,6 +362,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         unloadFilamentCalledWith = nil
         changeFilamentCalledWith = nil
         setTemperaturesCalledWith = nil
+        setTemperaturesCallCount = 0
         homeCalledWith = nil
         homeXYCalledWith = nil
         homeZCalledWith = nil

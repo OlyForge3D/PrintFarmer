@@ -241,12 +241,15 @@ Controls includes absolute movement, motor release, guarded material controls
 and an inline calibration review. Availability is limited by the safety
 evidence described below. All paths below are relative to `/api/printers/{printerId}`.
 
-Thermal controls use compact Hotend/Bed rows with separate **Current** and
-**Target** readings, a new-target input, and adjacent **Set / Off** actions.
-Presets share a compact row. Large accessibility text and narrow widths stack
-the editors; iPad retains its adaptive thermal column. Off affects only the
-chosen heater, and all existing limits, permissions and pending-command gates
-still apply.
+Controls follows the owner-selected **Essential concept 1** (#2589/#2593):
+paired measured/target readings above one **Heat** group, side-by-side target
+inputs, **Set targets**, a compact PLA/PETG/ABS row and **Cool down**.
+Blank inputs leave that heater unchanged; zero turns it off. One guarded
+request applies entered targets only after every value passes validation.
+**Move & home** combines directional XY, independent Z and compact home actions;
+absolute movement is disclosed. Phone reads Heat / Move / Filament; iPad places
+thermal/material work beside movement. Accessibility sizes stack without
+discarding drafts. Runtime safety is real server evidence, never prototype data.
 
 | Native method | POST route | Request / response |
 | --- | --- | --- |

@@ -5,6 +5,7 @@ struct PrinterFilamentSection: View {
     let presentation: PrinterFilamentPresentation
     let actions: [PrinterFilamentAction]
     let onAction: @MainActor (PrinterFilamentAction) -> Void
+    var embedded = false
     @State var detailsExpanded = false
 
     var primaryAction: PrinterFilamentAction? {
@@ -19,10 +20,12 @@ struct PrinterFilamentSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Filament")
-                .font(.headline)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("printer.filament.heading")
+            if !embedded {
+                Text("Filament")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("printer.filament.heading")
+            }
             ForEach(presentation.integrityNotices, id: \.self) { notice in
                 Label(notice, systemImage: "exclamationmark.triangle")
                     .font(.subheadline)
@@ -51,9 +54,9 @@ struct PrinterFilamentSection: View {
             .accessibilityIdentifier("printer.filament.disclosure")
         }
         .fixedSize(horizontal: false, vertical: true)
-        .padding()
-        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.pfBorder, lineWidth: 1))
+        .padding(embedded ? 0 : 16)
+        .background(embedded ? Color.clear : Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(embedded ? Color.clear : Color.pfBorder, lineWidth: 1))
     }
 
     @MainActor

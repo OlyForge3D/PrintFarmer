@@ -381,6 +381,8 @@ struct PrinterDetailTemperatureReading: Equatable {
         guard isOnline, let measured, measured.isFinite else {
             return String(localized: "Unavailable")
         }
+
+
         return measured.temperatureFormatted
     }
 
@@ -389,5 +391,44 @@ struct PrinterDetailTemperatureReading: Equatable {
             return String(localized: "Unknown")
         }
         return target == 0 ? String(localized: "Off") : target.temperatureFormatted
+    }
+}
+
+struct PrinterDetailTemperatureStrip: View {
+    let hotend: PrinterDetailTemperatureReading
+    let bed: PrinterDetailTemperatureReading
+    var showsBed = true
+    var identifier = "printer.detail.temperatures"
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    var body: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+            : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+        layout {
+            reading(title: "Hotend", value: hotend)
+            if showsBed { reading(title: "Bed", value: bed) }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private func reading(title: String, value: PrinterDetailTemperatureReading) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.pfTextSecondary)
+            Text(value.measuredText)
+                .font(.title3.monospacedDigit().weight(.semibold))
+            Text("Target: \(value.targetText)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(Color.pfTextSecondary)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title), measured \(value.measuredText), target \(value.targetText)")
     }
 }

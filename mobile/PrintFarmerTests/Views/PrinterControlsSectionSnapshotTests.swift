@@ -266,7 +266,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertEqual(model.printer.hotendTarget, 200)
     }
 
-    func test_embeddedLoadedLimitedAxes_selectsSupportedAxisImmediately() async throws {
+    func test_embeddedLoadedLimitedAxes_enablesOnlySupportedDirections() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let caps = PrinterBackendCapabilities(
             supportsMovement: true,
@@ -289,12 +289,14 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         try await settle(controller)
         let controls = nativeControls(in: controller.view)
         let y = try XCTUnwrap(controls.compactMap { $0 as? UIButton }.first {
-            $0.accessibilityIdentifier == "printer.controls.jog.axis.y"
+            $0.accessibilityIdentifier == "printer.controls.jog.y.positive"
         })
-        XCTAssertTrue(y.isSelected, "A loaded YZ-only backend must select Y, not the unsupported X default")
-        XCTAssertEqual(y.accessibilityLabel, "Jog axis Y")
+        XCTAssertTrue(y.isEnabled)
+        XCTAssertEqual(y.accessibilityLabel, "Move Y positive")
         XCTAssertGreaterThanOrEqual(y.bounds.height, 44)
-        XCTAssertFalse(controls.contains { $0.accessibilityIdentifier == "printer.controls.jog.axis.x" })
+        XCTAssertFalse(try XCTUnwrap(controls.first {
+            $0.accessibilityIdentifier == "printer.controls.jog.x.positive"
+        }).isEnabled)
         XCTAssertNil(service.getBackendCapabilitiesCalledWith)
         XCTAssertNil(service.moveCalledWith)
     }
@@ -327,6 +329,112 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         (view as? UIControl).map { [$0] } ?? view.subviews.flatMap { nativeControls(in: $0) }
     }
 
+    private func expandAbsolute<Content: View>(_ controller: UIHostingController<Content>) async throws {
+        let disclosure = try XCTUnwrap(nativeControls(in: controller.view).first {
+            $0.accessibilityIdentifier == "printer.controls.absolute.disclosure"
+        })
+        disclosure.sendActions(for: .touchUpInside)
+        try await settle(controller)
+        if let window = controller.view.window {
+            window.frame.size = controller.sizeThatFits(in: CGSize(width: window.bounds.width, height: 10000))
+            controller.view.frame = window.bounds
+        }
+        try await settle(controller)
+    }
+
+    func test_essentialControls_phoneOrderTabletColumnsAndDisclosedAbsoluteMove() async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        var caps = Self.layoutCaps
+        caps.supportsAbsoluteMovement = true
+        let service = makeService(caps: caps)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        for width: CGFloat in [390, 1024] {
+            let content = PrinterSetupControlsContent(printer: printer, viewModel: model, usesColumns: width >= 760)
+                .environment(\.dynamicTypeSize, .large)
+                .frame(width: width).fixedSize(horizontal: false, vertical: true)
+            let (window, controller) = install(content)
+            defer { window.isHidden = true }
+            window.frame.size = controller.sizeThatFits(in: CGSize(width: width, height: 10000))
+            controller.view.frame = window.bounds
+            try await settle(controller)
+            func control(_ id: String) throws -> UIControl {
+                try XCTUnwrap(nativeControls(in: controller.view).first { $0.accessibilityIdentifier == id }, id)
+            }
+            func frame(_ id: String) throws -> CGRect {
+                let value = try control(id)
+                return value.convert(value.bounds, to: controller.view)
+            }
+            let heat = try frame("printer.controls.heat.set-targets")
+            let motion = try frame("printer.controls.home.all")
+            let material = try frame("printer.controls.filament-load")
+            if width < 760 {
+                XCTAssertLessThan(heat.maxY, motion.minY)
+                XCTAssertLessThan(motion.maxY, material.minY)
+            } else {
+                XCTAssertLessThan(heat.maxX, motion.minX)
+                XCTAssertLessThan(material.maxX, motion.minX)
+                XCTAssertLessThan(heat.maxY, material.minY)
+            }
+            let hotend = try frame("printer.controls.hotend.target")
+            let bed = try frame("printer.controls.bed.target")
+            XCTAssertEqual(hotend.maxY, bed.maxY, accuracy: 1)
+            XCTAssertLessThan(hotend.maxX, bed.minX)
+            XCTAssertLessThan(bed.maxY, heat.minY)
+            XCTAssertFalse(nativeControls(in: controller.view).contains {
+                ["printer.controls.hotend.set", "printer.controls.bed.set",
+                 "printer.controls.hotend.off", "printer.controls.bed.off",
+                 "printer.controls.absolute.x"].contains($0.accessibilityIdentifier ?? "")
+            })
+            let left = try frame("printer.controls.jog.x.negative")
+            let right = try frame("printer.controls.jog.x.positive")
+            let up = try frame("printer.controls.jog.y.positive")
+            let down = try frame("printer.controls.jog.y.negative")
+            XCTAssertLessThan(left.maxX, right.minX)
+            XCTAssertEqual(left.midY, right.midY, accuracy: 1)
+            XCTAssertLessThan(up.maxY, down.minY)
+            XCTAssertEqual(up.midX, down.midX, accuracy: 1)
+            for value in nativeControls(in: controller.view) {
+                XCTAssertGreaterThanOrEqual(value.bounds.width, 44, value.accessibilityIdentifier ?? "")
+                XCTAssertGreaterThanOrEqual(value.bounds.height, 44, value.accessibilityIdentifier ?? "")
+            }
+            try await expandAbsolute(controller)
+            XCTAssertNotNil(try control("printer.controls.absolute.x"))
+        }
+        XCTAssertNil(service.moveCalledWith)
+        XCTAssertNil(service.moveToCalledWith)
+        XCTAssertNil(service.setTemperaturesCalledWith)
+    }
+
+    func test_essentialDirectionalButtons_sendCorrectAxesSignsAndExistingRates() async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        let service = makeService(caps: Self.layoutCaps)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        let (window, controller) = install(PrinterMotionControls(viewModel: model))
+        defer { window.isHidden = true }
+        try await settle(controller)
+        func button(_ id: String) throws -> UIControl {
+            try XCTUnwrap(nativeControls(in: controller.view).first { $0.accessibilityIdentifier == id })
+        }
+        try button("printer.controls.jog.step.10").sendActions(for: .touchUpInside)
+        try await settle(controller)
+        for axis in ["X", "Y", "Z"] {
+            for (direction, sign) in [("negative", -1.0), ("positive", 1.0)] {
+                try button("printer.controls.jog.\(axis.lowercased()).\(direction)").sendActions(for: .touchUpInside)
+                try await settle(controller)
+                XCTAssertEqual(service.moveCalledWith?.axis, axis)
+                XCTAssertEqual(service.moveCalledWith?.distanceMm, sign * 10)
+                XCTAssertEqual(
+                    service.moveCalledWith?.feedrateMmMin,
+                    axis == "Z" ? PrinterControlsViewModel.zFeedrateMmMin : PrinterControlsViewModel.xyFeedrateMmMin
+                )
+                model.cancelPendingCommand()
+                try await settle(controller)
+            }
+        }
+    }
+
     func test_individualControls_phoneFullContentEvidence() async throws {
         try await captureIndividualControls(width: 390, dynamicType: .large, name: "phone")
     }
@@ -353,7 +461,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         heater.text = "200"
         heater.sendActions(for: .editingChanged)
         try await settle(controller)
-        try control("printer.controls.hotend.set").sendActions(for: .touchUpInside)
+        try control("printer.controls.heat.set-targets").sendActions(for: .touchUpInside)
         try await settle(controller)
         XCTAssertNil(service.setTemperaturesCalledWith)
         XCTAssertNil(model.lastError, "The editor rejects before VM dispatch")
@@ -375,7 +483,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         heater.text = "0"
         heater.sendActions(for: .editingChanged)
         try await settle(controller)
-        try control("printer.controls.hotend.set").sendActions(for: .touchUpInside)
+        try control("printer.controls.heat.set-targets").sendActions(for: .touchUpInside)
         try await settle(controller)
         XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
         model.cancelPendingCommand()
@@ -389,11 +497,12 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         heater.text = "261"
         heater.sendActions(for: .editingChanged)
         try await settle(controller)
-        try control("printer.controls.hotend.set").sendActions(for: .touchUpInside)
+        try control("printer.controls.heat.set-targets").sendActions(for: .touchUpInside)
         try await settle(controller)
         XCTAssertNil(service.setTemperaturesCalledWith)
         XCTAssertNil(model.lastError)
 
+        try await expandAbsolute(controller)
         let rate = try XCTUnwrap(try control("printer.controls.absolute.feedrate") as? UITextField)
         XCTAssertFalse(rate.isEnabled)
         rate.text = "\(Int.max)"
@@ -423,14 +532,16 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         window.frame.size = controller.sizeThatFits(in: CGSize(width: 390, height: 10000))
         controller.view.frame = window.bounds
         try await settle(controller)
+        try await expandAbsolute(controller)
         let controls = nativeControls(in: controller.view)
         let heater = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.target" } as? UITextField)
-        let setHeater = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.set" })
+        let setHeater = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.heat.set-targets" })
         let coordinate = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.x" } as? UITextField)
         let move = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.move" })
         XCTAssertEqual(
             heater.accessibilityHint,
             "Maximum \(try XCTUnwrap(model.maximum(for: .hotend))) degrees. " + ControlNumberInput.heaterPrecisionMessage
+                + " Blank leaves this heater unchanged; zero switches it off."
         )
         XCTAssertEqual(coordinate.accessibilityHint, ControlNumberInput.coordinatePrecisionMessage)
 
@@ -496,7 +607,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         controller.view.frame = window.bounds
         try await settle(controller)
         let controls = nativeControls(in: controller.view)
-        let apply = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.set" })
+        let apply = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.heat.set-targets" })
         let input = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.hotend.target" })
         let stop = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.stop-waiting" })
         XCTAssertFalse(apply.isEnabled)
@@ -538,6 +649,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             window.frame.size = controller.sizeThatFits(in: CGSize(width: 390, height: 10000))
             controller.view.frame = window.bounds
             try await settle(controller)
+            if printer.isOnline { try await expandAbsolute(controller) }
             let controls = nativeControls(in: controller.view)
             if !printer.isOnline {
                 XCTAssertTrue(controls.isEmpty, "Offline setup controls remain hidden by the host contract")
@@ -601,12 +713,13 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         defer { window.isHidden = true }
         controller.view.frame = window.bounds
         try await settle(controller)
+        try await expandAbsolute(controller)
         let controls = nativeControls(in: controller.view)
         for label in [
             "Hotend target in degrees Celsius", "Bed target in degrees Celsius",
             "X absolute destination in millimeters", "Y absolute destination in millimeters",
             "Z absolute destination in millimeters",
-            "Set hotend target", "Set bed target", "Move to position", "Disable motors"
+            "Set targets", "Move to position", "Disable motors"
         ] {
             let target = try XCTUnwrap(controls.first { $0.accessibilityLabel == label }, label)
             XCTAssertGreaterThanOrEqual(target.bounds.height, 44, label)
