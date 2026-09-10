@@ -16,6 +16,31 @@ final class HarvestUITests: ShiftTasksUITestBase {
     private let failedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000009"
     private let cancelledJobIdentifier = "job.row.30000000-0003-0000-0000-000000000011"
 
+    func testTasksDestinationSurvivesIdentifierPromotionAndChangedBadgeLabel() throws {
+        let tasks = shellDestinationButton(tabIdentifier: "tab.tasks", timeout: 8)
+        let captured = ShellNode(try tasks.snapshot())
+        let observation = ShellObservation(ShellNode(try app.snapshot()))
+        let destination = try XCTUnwrap(observation.destination(
+            tab: "tab.tasks", sidebar: "sidebar.tasks", title: "Tasks"
+        ))
+        let expectedID = destination.surface == .tabBar ? "tab.tasks" : "sidebar.tasks"
+        let scope = destination.surface == .tabBar
+            ? app.tabBars.descendants(matching: captured.type)
+            : app.descendants(matching: captured.type)
+        let stable = scope.matching(identifier: expectedID).firstMatch
+        XCTAssertTrue(stable.waitForExistence(timeout: 8))
+        // Recreate the earlier identifierless snapshot without changing app state.
+        var earlier = captured
+        earlier.identifier = ""
+        earlier.label = "Tasks, obsolete badge count"
+        let promoted = observedElement(earlier, within: scope, allowingPromotionTo: expectedID)
+        XCTAssertEqual(promoted.identifier, expectedID)
+        XCTAssertTrue(promoted.isHittable)
+        promoted.tap()
+        XCTAssertTrue(app.buttons["shiftTasks.printQueue"].waitForExistence(timeout: 8),
+                      "The promoted identity must navigate to the actual Tasks destination")
+    }
+
     /// Navigates the operator shell to the seeded completed demo job's
     /// detail view, device-adaptively:
     /// Tasks destination → Print queue (`JobListView`) → Recent → the

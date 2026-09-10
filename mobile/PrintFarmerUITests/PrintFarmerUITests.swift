@@ -137,6 +137,15 @@ final class UIWaitBudget {
                 : NSPredicate(format: "elementType == %lu AND identifier == %@",
                               type.rawValue, identifier)
         }
+
+        func liveIdentityPredicate(allowingPromotionTo expectedIdentifier: String?) -> NSPredicate {
+            guard identifier.isEmpty, let expectedIdentifier else { return liveIdentityPredicate }
+            // SwiftUI can attach the stable ID after the initial tab snapshot.
+            return NSPredicate(
+                format: "elementType == %lu AND (identifier == %@ OR (identifier == '' AND label == %@))",
+                type.rawValue, expectedIdentifier, label
+            )
+        }
     }
 
     @MainActor
@@ -152,6 +161,7 @@ final class UIWaitBudget {
             let node: ShellNode
             let surface: RenderedShellRoot.Surface
             var titleFallback = false
+            var promotionIdentifier: String?
         }
 
         let state: State
@@ -200,7 +210,10 @@ final class UIWaitBudget {
                     $0.enabled && $0.type == .button && $0.label == title
                         && ($0.identifier.isEmpty || $0.identifier == title)
                 }) {
-                    return Destination(node: node, surface: .tabBar, titleFallback: true)
+                    return Destination(
+                        node: node, surface: .tabBar, titleFallback: true,
+                        promotionIdentifier: node.identifier.isEmpty ? tab : nil
+                    )
                 }
             case .sidebar(let nodes):
                 if let node = nodes.first(where: { $0.identifier == sidebar && $0.enabled }) {
@@ -393,6 +406,48 @@ final class UIWaitBudgetTests: XCTestCase {
         live["identifier"] = ""
         live["elementType"] = XCUIElement.ElementType.staticText.rawValue
         XCTAssertFalse(captured.liveIdentityPredicate.evaluate(with: live))
+    }
+
+    func testIdentifierlessDestinationPromotesOnlyToItsExpectedIDWithoutBindingOldLabel() throws {
+        let destination = try XCTUnwrap(compact([
+            ShellNode(.button, label: "Tasks")
+        ]).destination(tab: "tab.tasks", sidebar: "sidebar.tasks", title: "Tasks"))
+        XCTAssertEqual(destination.promotionIdentifier, "tab.tasks")
+        let predicate = destination.node.liveIdentityPredicate(
+            allowingPromotionTo: destination.promotionIdentifier
+        )
+        var live: [String: Any] = [
+            "elementType": XCUIElement.ElementType.button.rawValue,
+            "identifier": "", "label": "Tasks"
+        ]
+        XCTAssertTrue(predicate.evaluate(with: live))
+        live["identifier"] = "tab.tasks"
+        live["label"] = "Tasks, 4 pending"
+        XCTAssertTrue(predicate.evaluate(with: live))
+        live["identifier"] = "tab.inventory"
+        live["label"] = "Tasks"
+        XCTAssertFalse(predicate.evaluate(with: live))
+        live["identifier"] = ""
+        live["label"] = "Inventory"
+        XCTAssertFalse(predicate.evaluate(with: live))
+        live["identifier"] = "tab.tasks"
+        live["elementType"] = XCUIElement.ElementType.staticText.rawValue
+        XCTAssertFalse(predicate.evaluate(with: live))
+    }
+
+    func testIdentifiedDestinationNeverFallsBackOrChangesItsStableIdentity() {
+        let node = ShellNode(.button, identifier: "tab.tasks", label: "Tasks")
+        let predicate = node.liveIdentityPredicate(allowingPromotionTo: "tab.inventory")
+        XCTAssertTrue(predicate.evaluate(with: [
+            "elementType": XCUIElement.ElementType.button.rawValue,
+            "identifier": "tab.tasks", "label": "Tasks, changed badge"
+        ]))
+        for identifier in ["", "tab.inventory"] {
+            XCTAssertFalse(predicate.evaluate(with: [
+                "elementType": XCUIElement.ElementType.button.rawValue,
+                "identifier": identifier, "label": "Tasks"
+            ]))
+        }
     }
 
     func testOffscreenDisabledAndUnscopedNodesDoNotAuthorizeNavigation() {
@@ -719,8 +774,11 @@ class PrintFarmerUITestCase: XCTestCase {
         }) == true
     }
 
-    func observedElement(_ node: ShellNode, within scope: XCUIElementQuery) -> XCUIElement {
-        scope.matching(node.liveIdentityPredicate).firstMatch
+    func observedElement(
+        _ node: ShellNode, within scope: XCUIElementQuery,
+        allowingPromotionTo expectedIdentifier: String? = nil
+    ) -> XCUIElement {
+        scope.matching(node.liveIdentityPredicate(allowingPromotionTo: expectedIdentifier)).firstMatch
     }
 
     private func observedToggle(_ node: ShellNode) -> XCUIElement {
@@ -798,7 +856,9 @@ class PrintFarmerUITestCase: XCTestCase {
             let scope = destination.surface == .tabBar
                 ? self.app.tabBars.descendants(matching: destination.node.type)
                 : self.app.descendants(matching: destination.node.type)
-            let element = self.observedElement(destination.node, within: scope)
+            let element = self.observedElement(
+                destination.node, within: scope, allowingPromotionTo: destination.promotionIdentifier
+            )
             guard budget.perform("hittable observed \(destination.node.identifier)", {
                 element.isHittable
             }) == true else { return nil }
