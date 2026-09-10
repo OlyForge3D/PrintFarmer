@@ -30,8 +30,10 @@ struct PrinterSetupControlsContent: View {
                         return
                     }
                     while !Task.isCancelled && viewModel.isActive {
-                        await viewModel.refreshSafetyEvidence()
+                        // Initial owner loading already reads discovery and status.
+                        // Do not race it with a second capability request on mount.
                         do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                        await viewModel.refreshSafetyEvidence()
                     }
                 }
                 .onDisappear {
