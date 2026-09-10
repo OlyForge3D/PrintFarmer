@@ -231,4 +231,97 @@ After the coordinator's step 6 ("Immediately assess: Does anything trigger follo
 
 **While work exists, Ralph does NOT ask "should I continue?" — Ralph KEEPS GOING.** The loop ends when the board is clear, or earlier on explicit "idle"/"stop", or at session end. A clear board → full stop, never a timed recheck. If the human wants monitoring to continue after that, they run `npx @bradygaster/squad-cli watch` themselves.
 
+### Mobile/iOS Job Admission & Evidence Reconciliation
+
+This section governs how Ralph handles mobile QA/test work dispatched through the
+`scripts/ci/ralph-macos-ssh.mjs` / `scripts/ci/ralph-admission.mjs` job ledger, and how
+Ralph reconciles the `<!-- ralph-claim -->` comment convention posted on issues. It exists
+because of a concrete failure: issues #2577/#2578 were stuck "awaiting causal evidence"
+that only ever existed in a session's local `files/` directory, and #2599/#2582 carried
+`Ralph-Fence: pending-admission` claims that never got reconciled against the ledger. Both
+are fail-closed rules, not suggestions.
+
+**Session-local evidence is never durable.** Anything under a session's own working
+directory — for example `session <uuid>/files/before-recovery-2573.log`, an in-memory
+xcresult, or an attachment that only lives in the chat transcript — is **not** recoverable
+evidence and must never be cited as if it were. Evidence only counts once it is:
+- committed to the repository (a file in the diff/PR), or
+- durably published (pushed to a branch, uploaded as a GitHub artifact/attachment on the
+  issue or PR, or attached via `actions/upload-artifact`).
+
+If the only evidence for a claim was session-local and that session is gone, treat the
+evidence as **unavailable**, not merely "hard to find." Never reconstruct, paraphrase, or
+fabricate what the session might have shown — that is fabricating evidence, which is
+never acceptable regardless of how confident the reconstruction feels.
+
+**Evidence-gated issue disposition.** When an issue's fix/verification is blocked purely
+on evidence that is confirmed unavailable per the rule above:
+1. Comment on the issue explaining exactly what evidence is missing and why it cannot be
+   recovered (name the session/path if known).
+2. Apply (or ask a human to apply) a `status:evidence-unavailable` label, or if labels
+   aren't available, state the disposition explicitly in the comment: **"Marking
+   evidence-unavailable; will not be redispatched until fresh reproduction is
+   authorized."**
+3. **Stop redispatching this issue.** Do not spawn another job/session against it on the
+   strength of the old (now-unavailable) evidence.
+4. Only resume work when one of two things happens: (a) a human or agent posts an
+   explicit fresh-reproduction authorization (e.g. "reproduce and gather fresh evidence"),
+   or (b) a new durable artifact (committed log, uploaded xcresult, etc.) appears on the
+   issue/PR. Either one clears the disposition and a brand-new job/claim may be opened.
+
+**Reconciling `<!-- ralph-claim -->` comments.** These HTML-comment blocks
+(`Ralph-Job-ID`, `Ralph-Fence`, `Ralph-Issue`, `Ralph-Owner`, `Ralph-Base-SHA`,
+`Ralph-Status`) are a human-readable surface of the ledger, not the source of truth. A
+claim whose `Ralph-Fence` is the literal string `pending-admission` (dispatch was still
+in flight when the comment was posted) or whose status looks stale **must be reconciled
+against the authoritative ledger before being trusted**:
+- Never take the comment text as proof that work is in progress. Query the ledger
+  (`node scripts/ci/ralph-admission.mjs status-remote` for a remote/mac job, or inspect
+  local state) for the named `Ralph-Job-ID`.
+- If the ledger shows no such job, or the job's worker/session/admission record is
+  **absent or terminal** (no matching ledger entry, or a `completed`/`failed`/`abandoned`
+  state that postdates the claim), the claim is **stale**. Reconcile it explicitly — do
+  not silently delete the comment or the claim; post a follow-up comment stating the
+  reconciled disposition (e.g. "Ledger shows no active job for `Ralph-Job-ID`; treating
+  this claim as abandoned/lost — see below") and act on the *current* ledger state, never
+  the comment's `Ralph-Status` text.
+- If the ledger shows the job is genuinely still active (`reserved`, `delivery-intent`,
+  `accepted`, `running`, `uncertain`), leave it alone — a pending-admission claim with a
+  live ledger entry is not stuck, it is just early. **Pending-admission claims must never
+  be treated as permanently blocking**: if the ledger entry is active, wait and re-check
+  next round; if it is absent/terminal, reconcile immediately per the next paragraph.
+
+**Reconciling a lost local session (accepted/running, no terminal result).** When a local
+job's session dies before ever calling the terminal-result path, use
+`recoverLostLocalSession` (CLI: `node scripts/ci/ralph-admission.mjs recover-local-session`)
+with `{ jobId, sessionAbsent: true }` **only after confirming the session is genuinely
+gone** (e.g. it no longer appears via `list_sessions_and_chats`/`get_sessions_status`).
+This transitions the job to a new terminal `abandoned` state — distinct from `failed` —
+and frees the issue's slot for a fresh `jobId` (an explicit re-admission/fresh
+reproduction). It never deletes the ledger entry, the session's worktree, or any
+artifacts: the abandoned record stays as a permanent audit trail. Reusing the *old*
+`jobId` after abandonment still fails closed with `FENCED`; only a new `jobId` may claim
+the issue again. The equivalent pre-acknowledgment case (a `reserved` job whose session
+was never created at all) uses the existing `recoverLocalReservation` /
+`recover-local` path with the same `sessionAbsent: true` contract.
+
+**Xcode/CoreSimulator concurrency is per-Mac, not per-slot.** The shared 5-slot ledger
+pool bounds total concurrent Ralph jobs, but a single physical Mac can run only one
+`xcodebuild`/`simctl` invocation at a time — DerivedData, the simulator's boot/log state,
+and CoreSimulator services are host-wide, and **a git worktree does not isolate any of
+that**. `reserveJob` therefore rejects a second active remote (mac-dispatched) job
+targeting the same `expectedHost` with `XCODE_HOST_BUSY`, independent of how many of the
+5 slots are free. There is no separate in-process queue: a rejected dispatch is expected
+to be retried on Ralph's normal next round, which is the "queued" behavior. Every mobile
+test invocation must still use a run-unique result bundle path, a run-unique log path, and
+an explicit simulator UDID (never an implicit/default destination) — see
+`mobile/scripts/run-tests.py`'s argument validation and `mobile/AGENTS.md`'s simulator
+resolver — so that even serialized runs never collide on stale artifacts from a prior run.
+
+**Never fabricate, never destructively clean up.** None of the above authorizes closing
+an issue, merging a PR, deleting a worktree/session, or inventing evidence to make a
+claim "resolved." Reconciliation only ever produces an explicit, auditable ledger/issue
+state — `abandoned`, `evidence-unavailable`, or a freshly reconciled active state — never
+a silent deletion or a fabricated pass.
+
 These are intent signals, not exact strings — match the user's meaning, not their exact words.
