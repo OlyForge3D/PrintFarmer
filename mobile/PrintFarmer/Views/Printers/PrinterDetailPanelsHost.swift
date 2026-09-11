@@ -617,10 +617,22 @@ struct PrinterDetailTemperatureStrip: View {
     }
 
     private func essentialReading(title: String, symbol: String, value: PrinterDetailTemperatureReading) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Label(title, systemImage: symbol)
-                .font(.footnote).foregroundStyle(Color.pfTextSecondary)
-                .padding(.bottom, 5)
+        // Match the web UI: colorize the heater glyph itself when the
+        // target is on, rather than a separate "Heater off"/"Target set"
+        // caption string.
+        let isHeating = value.isOnline && (value.target ?? 0) > 0
+        let glyphColor: Color = title == "Bed"
+            ? (isHeating ? .blue : .blue.opacity(0.35))
+            : (isHeating ? .red : .red.opacity(0.35))
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                Image(systemName: symbol)
+                    .foregroundStyle(glyphColor)
+                Text(title)
+                    .foregroundStyle(Color.pfTextSecondary)
+            }
+            .font(.footnote)
+            .padding(.bottom, 5)
             if dynamicTypeSize.isAccessibilitySize {
                 Text(value.measuredText).font(.system(size: essentialReadingSize)).monospacedDigit()
                 Text("Target: \(value.targetText)").font(.footnote).monospacedDigit()
@@ -634,9 +646,6 @@ struct PrinterDetailTemperatureStrip: View {
                 )
                 .monospacedDigit()
             }
-            Text(!value.isOnline || value.measured?.isFinite != true ? "Reading unavailable" :
-                    value.target == 0 ? "Heater off" : value.target?.isFinite == true ? "Target set" : "Target unknown")
-                .font(.caption).foregroundStyle(Color.pfTextSecondary).padding(.top, 3)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 18)

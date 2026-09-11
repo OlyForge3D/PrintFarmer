@@ -49,13 +49,17 @@ struct ControlNumberField: UIViewRepresentable {
     let label: String
     let identifier: String
     var hint: String?
+    /// Defaults to the punctuation-capable keyboard so signed/jog fields that
+    /// need "-" keep full access. Temperature fields pass `.decimalPad` so
+    /// iOS shows the compact numeric keypad instead of the full keyboard.
+    var keyboardType: UIKeyboardType = .numbersAndPunctuation
     @ScaledMetric(relativeTo: .body) private var fontSize: CGFloat = 16
     @Environment(\.isEnabled) private var isEnabled
 
     func makeUIView(context: Context) -> UITextField {
         let field = UITextField()
         field.borderStyle = .roundedRect
-        field.keyboardType = .numbersAndPunctuation
+        field.keyboardType = keyboardType
         field.returnKeyType = .done
         field.autocorrectionType = .no
         field.delegate = context.coordinator
@@ -247,7 +251,6 @@ struct PreheatSubgroup: View {
             IndividualHeaterControls(viewModel: viewModel)
 
             grid.padding(.top, 14).padding(.bottom, 8)
-            button(for: .coolDown)
 
             Text("Hotend max \(viewModel.maximum(for: .hotend).map { $0.formatted() + "°" } ?? "unknown") · Bed max \(viewModel.maximum(for: .bed).map { $0.formatted() + "°" } ?? "unknown").")
                 .font(.footnote).foregroundStyle(Color.pfTextSecondary)
@@ -265,8 +268,10 @@ struct PreheatSubgroup: View {
     @ViewBuilder
     private var grid: some View {
         let columns = gridColumns
+        // Cool down sits in the same row as ABS (spec update): all four
+        // presets share one grid so they render at identical dimensions.
         LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-            ForEach(Self.presets.filter { $0 != .coolDown }, id: \.self) { preset in
+            ForEach(Self.presets, id: \.self) { preset in
                 button(for: preset)
             }
         }
@@ -277,9 +282,9 @@ struct PreheatSubgroup: View {
         if dynamicTypeSize.isAccessibilitySize {
             count = 1
         } else if dynamicTypeSize >= .xxLarge {
-            count = 2
-        } else {
             count = 3
+        } else {
+            count = 4
         }
         return Array(repeating: GridItem(.flexible(), spacing: 8), count: count)
     }
@@ -386,6 +391,20 @@ struct PreheatSubgroup: View {
             return "\(value.formatted(.number.precision(.fractionLength(0...1)))) °C"
         }
 
+        /// Current reported target for this heater, used as the field
+        /// placeholder so the user sees the real value instead of the
+        /// generic word "Unchanged" when the input is blank.
+        private var currentTarget: Double? {
+            heater == .hotend ? viewModel.printer.hotendTarget : viewModel.printer.bedTarget
+        }
+
+        private var placeholder: String {
+            guard viewModel.supports(heater), let currentTarget, currentTarget.isFinite else {
+                return "Unchanged"
+            }
+            return currentTarget == 0 ? "Off" : currentTarget.formatted(.number.precision(.fractionLength(0...1)))
+        }
+
         var body: some View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("\(heater.title) target")
@@ -395,10 +414,11 @@ struct PreheatSubgroup: View {
                     .frame(minHeight: 20, alignment: .leading)
                 HStack(spacing: 6) {
                     ControlNumberField(
-                        placeholder: "Unchanged", text: $target,
+                        placeholder: placeholder, text: $target,
                         label: "\(heater.title) target in degrees Celsius",
                         identifier: "printer.controls.\(heater.rawValue).target",
-                        hint: targetHint
+                        hint: targetHint,
+                        keyboardType: .decimalPad
                     )
                     Text("°C").font(.footnote).foregroundStyle(Color.pfTextSecondary)
                         .accessibilityHidden(true)
@@ -432,15 +452,22 @@ struct PreheatSubgroup: View {
 
     private func buttonLabel(preset: PreheatPreset, isPending: Bool) -> some View {
         VStack(spacing: 3) {
+            if preset == .coolDown {
+                // Matches the web UI's snowflake glyph on the Cooldown control.
+                Image(systemName: "snowflake")
+                    .font(.system(size: presetFontSize))
+                    .accessibilityHidden(true)
+            }
             Text(preset.displayLabel)
-                .font(preset == .coolDown ? .callout : .system(size: presetFontSize))
+                .font(.system(size: presetFontSize))
             if preset != .coolDown {
                 Text(viewModel.supports(.bed) ? preset.temperatureLabel : "\(Int(preset.hotend))°")
                     .font(.caption2.monospacedDigit())
                     .opacity(isPending ? 0 : 1)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: preset == .coolDown ? 45 : 54)
+        // Same footprint as PLA/PETG/ABS so Cool down matches ABS exactly.
+        .frame(maxWidth: .infinity, minHeight: 54)
         .overlay {
             if isPending {
                 ProgressView()
