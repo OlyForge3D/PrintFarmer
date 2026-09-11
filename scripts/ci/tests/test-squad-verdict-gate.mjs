@@ -817,6 +817,30 @@ test('documentation-only classification honours the policy carve-outs', () => {
   assert.equal(classifyChangeScope(['docs/API.md', 'src/api/Program.cs']).docsOnly, false);
 });
 
+test('high-risk classification is order-independent for mixed changes', () => {
+  const standardPath = 'src/Web/ReactApp/src/components/Button.tsx';
+  const highRiskPath = 'src/api/Program.cs';
+  for (const paths of [
+    [standardPath, highRiskPath],
+    [highRiskPath, standardPath],
+  ]) {
+    const scope = classifyChangeScope(paths);
+    assert.equal(scope.highRisk, true, paths.join(', '));
+    assert.equal(scope.docsOnly, false, paths.join(', '));
+  }
+});
+
+test('high-risk classification covers access control, protocol, and release automation', () => {
+  for (const path of [
+    'src/modules/Farm.Modules.Identity/Controllers/AuthController.cs',
+    'src/modules/Farm.Modules.Identity/Controllers/Admin/RolesController.cs',
+    'proto/slicer_jobs.proto',
+    'scripts/publish-to-public.sh',
+  ]) {
+    assert.equal(classifyChangeScope([path]).highRisk, true, path);
+  }
+});
+
 test('the documented full-gate escalation list matches the code exactly', async () => {
   // These drifted apart once: the code force-escalated paths the docs never
   // mentioned, so a reader could not tell which changes take the full gate.

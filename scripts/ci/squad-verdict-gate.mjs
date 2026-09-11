@@ -241,7 +241,7 @@ const sensitiveProse =
   /(^|\/)(security|threat[-_ ]?model|licen[cs]e|notice|copying|code[-_ ]?of[-_ ]?conduct|api[-_ ]?contract)(\.[a-z0-9]+)?$/i;
 
 const highRiskPaths =
-  /(^|\/)(auth(entication|orization)?|contract|dto|identity|permission|role|security|migration|migrations|docker|deploy(ment)?|release|compose|serialization)(\/|[-_.]|$)/i;
+  /(auth(entication|orization)?|contract|dto|identity|permission|role|security|privacy|secret|migration|docker|deploy(ment)?|release|publish|compose|serialization|openapi|swagger|concurren|queue|worker)/i;
 
 /**
  * Reduce a squad identity to its canonical lowercase token.
@@ -576,6 +576,7 @@ export function classifyChangeScope(paths) {
   if (files.length === 0) {
     return { docsOnly: false, highRisk: true, reason: 'no changed files reported' };
   }
+  let docsOnly = true;
   for (const path of files) {
     const basename = path.split('/').pop().toLowerCase();
     if (fullGatePrefixes.some((prefix) => path.startsWith(prefix))) {
@@ -586,6 +587,9 @@ export function classifyChangeScope(paths) {
     }
     if (path.startsWith('src/api/')) {
       return { docsOnly: false, highRisk: true, reason: `${path} is public API code` };
+    }
+    if (path.startsWith('proto/')) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is a public protocol contract` };
     }
     if (!path.includes('/') && fullGateFiles.has(basename)) {
       return { docsOnly: false, highRisk: true, reason: `${path} is a root agent-instruction file` };
@@ -600,10 +604,12 @@ export function classifyChangeScope(paths) {
       return { docsOnly: false, highRisk: true, reason: `${path} is high-risk infrastructure or access-control code` };
     }
     if (!isProse(path)) {
-      return { docsOnly: false, highRisk: false, reason: `${path} is standard code` };
+      docsOnly = false;
     }
   }
-  return { docsOnly: true, highRisk: false, reason: 'every changed path is documentation' };
+  return docsOnly
+    ? { docsOnly: true, highRisk: false, reason: 'every changed path is documentation' }
+    : { docsOnly: false, highRisk: false, reason: 'every changed path is standard code' };
 }
 
 /**
