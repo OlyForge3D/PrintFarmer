@@ -855,6 +855,7 @@ test('high-risk classification covers access control, protocol, and release auto
     '.mcp.json',
     '.gitattributes',
     'src/slicer/Farm.Slicer.Host/appsettings.json',
+    'mobile/PrintFarmer/PrintFarmer.entitlements',
     '.agents/skills/frontend-design/SKILL.md',
     'src/api/Farm.Web.Api.csproj',
     'src/Directory.Build.props',

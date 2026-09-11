@@ -580,7 +580,7 @@ function isProse(path) {
 function isDependencyManifest(path, basename) {
   return manifestBasenames.has(basename) ||
     /^appsettings(?:\.[^.]+)?\.json$/i.test(basename) ||
-    /\.(?:csproj|fsproj|props|targets)$/i.test(path);
+    /\.(?:csproj|fsproj|props|targets|entitlements)$/i.test(path);
 }
 
 function isAutomationPath(path) {
