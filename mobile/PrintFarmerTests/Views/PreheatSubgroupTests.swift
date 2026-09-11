@@ -33,7 +33,7 @@ final class PreheatSubgroupTests: XCTestCase {
             let controls = nativeControls(controller.view)
             XCTAssertEqual(controls.count, 3, "Two inputs and exactly one Set targets; no per-heater Set/Off")
             let set = try thermalButton(controller)
-            XCTAssertEqual(set.accessibilityLabel, "Set targets")
+            XCTAssertEqual(set.accessibilityLabel, "Go, set heater targets")
             let fields = controls.compactMap { $0 as? UITextField }
             XCTAssertEqual(fields.count, 2)
             let firstFrame = fields[0].convert(fields[0].bounds, to: controller.view)
@@ -51,7 +51,14 @@ final class PreheatSubgroupTests: XCTestCase {
                 XCTAssertEqual(field.accessibilityLabel, "\(heater.title) target in degrees Celsius")
                 let fieldFrame = field.convert(field.bounds, to: controller.view)
                 let setFrame = set.convert(set.bounds, to: controller.view)
-                XCTAssertLessThanOrEqual(fieldFrame.maxY, setFrame.minY)
+                XCTAssertEqual(fieldFrame.height, setFrame.height, accuracy: 1)
+                if type.isAccessibilitySize {
+                    XCTAssertLessThanOrEqual(fieldFrame.maxY, setFrame.minY)
+                } else {
+                    XCTAssertEqual(fieldFrame.maxY, setFrame.maxY, accuracy: 1)
+                    XCTAssertLessThanOrEqual(fieldFrame.maxX, setFrame.minX)
+                    XCTAssertLessThanOrEqual(setFrame.width, 52)
+                }
                 for control in [field, set] as [UIControl] {
                     let frame = control.convert(control.bounds, to: controller.view)
                     XCTAssertGreaterThanOrEqual(control.bounds.width, 44)

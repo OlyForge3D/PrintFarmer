@@ -6,6 +6,10 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Fixed
 
+- Use a compact Go action beside the heater targets, stacking for accessibility
+  text. Match extrusion length/rate selector heights to the temperature inputs.
+- Remove Heat's redundant header caption; current/target hotend and bed
+  temperatures remain in the reading strip above it.
 - Keep unsupported Controls actions visible and disabled instead of hiding
   them or rearranging Heat, Move & home, and Filament tools.
 - Keep Z-offset's unsupported-operation explanation behind Details & safety

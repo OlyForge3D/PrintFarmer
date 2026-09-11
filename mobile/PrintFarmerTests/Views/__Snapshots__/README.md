@@ -80,3 +80,7 @@ References were regenerated on task-isolated iPhone 17 (3x) and iPad Pro
 shared approved-runtime resolver and the unchanged `.iPhone13` component
 configuration. Full-page identity/selector captures and homing dispatch tests
 supplement these component goldens.
+
+The follow-up references remove Heat's trailing caption and place a compact
+Go beside the target inputs. Native geometry assertions require matching
+temperature, Go, and extrusion-selector heights, including accessibility sizes.

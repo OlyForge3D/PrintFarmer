@@ -33,7 +33,8 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   in the trailing column. The same three child identities reflow at narrow
   widths and accessibility sizes without resetting drafts, selected movement
   distance, disclosures or the command owner.
-- Heat: side-by-side Hotend/Bed target fields, **one Set targets**, compact
+- Heat: side-by-side Hotend/Bed target fields with **one compact Go button**
+  on the same row (stacked at accessibility text sizes), compact
   PLA/PETG/ABS row, then **Cool down**. Actual/target values appear only in the
   strip above, not repeated around each editor. Accessibility text stacks the
   fields. Use native typography, ThemeColors, inset groups and 44-point minimum
@@ -48,7 +49,8 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   entry points. Accessibility text uses labeled directional pairs instead of
   shrinking the pad. Motor warnings remain in the confirmation and its hint.
 - Filament tools: existing truthful material summary, Load/Unload/Change row,
-  distance/rate menus, Extrude/Retract row and a relevant blocked explanation.
+  extrusion length/rate selectors matching the native temperature input height
+  at each Dynamic Type size, Extrude/Retract row and a relevant blocked explanation.
   Repeated operation/provenance prose moves under **Details & safety**;
   per-operation disabled hints and read-only refresh remain available there.
   Calibration stays inline after entry so Emergency Stop remains reachable.
@@ -65,7 +67,7 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
 ### Native geometry and visual comparison
 
 Preserve the prototype's anatomy: one divided temperature surface with leading
-heater symbols and inline actual/target readings; Heat's trailing caption,
+heater symbols and inline actual/target readings; a plain Heat heading,
 external Celsius suffixes, bordered presets and buttons; a single inset increment
 selector; 48-point directional buttons separated by 6 points, a 68-point Z column,
 and ruled absolute/motor-calibration rows. The two final entry buttons share
@@ -93,7 +95,7 @@ separate approved iPhone/iPad host results and accessibility captures.
 Necessary runtime differences from the illustrative prototype:
 
 - Inputs start **Unchanged**, not prefilled from potentially stale targets.
-  Blank omits that heater; zero explicitly switches it off. Set targets validates
+  Blank omits that heater; zero explicitly switches it off. Go validates
   every entered supported heater before making **one** existing `/temps` request.
   An invalid pair sends neither heater. Missing/unsupported heaters are omitted
   by the UI and rejected if explicitly requested from the owner.

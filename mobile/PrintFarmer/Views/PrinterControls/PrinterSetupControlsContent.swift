@@ -237,7 +237,7 @@ struct PrinterMaterialControls: View {
                     value: "\(Int(distance)) millimeters",
                     menu: UIMenu(children: MaterialControlInput.distances.map { value in
                         UIAction(title: "\(Int(value)) mm", state: distance == value ? .on : .off) { _ in distance = value }
-                    }), textSize: 14
+                    }), textSize: 14, matchesInputHeight: true
                     ) {}
                 }
                 VStack(alignment: .leading, spacing: 5) {
@@ -248,7 +248,7 @@ struct PrinterMaterialControls: View {
                     value: "\(speed) millimeters per second",
                     menu: UIMenu(children: MaterialControlInput.speeds.map { value in
                         UIAction(title: "\(value) mm/s", state: speed == value ? .on : .off) { _ in speed = value }
-                    }), textSize: 14
+                    }), textSize: 14, matchesInputHeight: true
                     ) {}
                 }
             }

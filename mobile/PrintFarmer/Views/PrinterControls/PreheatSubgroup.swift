@@ -5,6 +5,10 @@ enum EssentialControlsStyle {
     static let groupSpacing: CGFloat = 14
     static let groupPadding: CGFloat = 18
     static let columnSpacing: CGFloat = 24
+
+    static func inputHeight(fontSize: CGFloat) -> CGFloat {
+        max(45, ceil(UIFont.systemFont(ofSize: fontSize).lineHeight) + 16)
+    }
 }
 
 struct EssentialControlHeading: View {
@@ -73,7 +77,7 @@ struct ControlNumberField: UIViewRepresentable {
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextField, context: Context) -> CGSize? {
-        CGSize(width: proposal.width ?? 200, height: max(45, ceil(uiView.font?.lineHeight ?? fontSize) + 16))
+        CGSize(width: proposal.width ?? 200, height: EssentialControlsStyle.inputHeight(fontSize: fontSize))
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
@@ -105,6 +109,7 @@ struct ControlActionButton: UIViewRepresentable {
     var segmented = false
     var tinted = false
     var minimumHeight: CGFloat = 45
+    var matchesInputHeight = false
     var textOnly = false
     let action: () -> Void
     @ScaledMetric(relativeTo: .body) private var fontScale: CGFloat = 16
@@ -172,7 +177,10 @@ struct ControlActionButton: UIViewRepresentable {
             width: proposal.width ?? .greatestFiniteMagnitude, height: .greatestFiniteMagnitude
         ))
         // A fractional parent origin can round a nominal 44pt child below 44.
-        return CGSize(width: max(44, proposal.width ?? size.width), height: max(minimumHeight, ceil(size.height)))
+        let height = matchesInputHeight
+            ? EssentialControlsStyle.inputHeight(fontSize: fontScale)
+            : max(minimumHeight, ceil(size.height))
+        return CGSize(width: max(44, proposal.width ?? size.width), height: height)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(action: action) }
@@ -233,7 +241,7 @@ struct PreheatSubgroup: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
-            EssentialControlHeading(title: "Heat", detail: "Actual / target above")
+            EssentialControlHeading(title: "Heat")
                 .padding(.bottom, 14)
 
             IndividualHeaterControls(viewModel: viewModel)
@@ -329,36 +337,42 @@ struct PreheatSubgroup: View {
                 layout {
                     HeaterTargetEditor(viewModel: viewModel, heater: .hotend, target: $hotend)
                     HeaterTargetEditor(viewModel: viewModel, heater: .bed, target: $bed)
+                    setTargetsButton
+                        .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : 52)
                 }
-                ControlActionButton(
-                    title: "Set targets", identifier: "printer.controls.heat.set-targets",
-                    hint: "Sets only entered targets. Blank leaves a heater unchanged; zero switches it off.",
-                    compact: true, prominent: true
-                ) {
-                    do {
-                        let hotendValue = try viewModel.supports(.hotend) ? ControlNumberInput.heaterTarget(hotend) : nil
-                        let bedValue = try viewModel.supports(.bed) ? ControlNumberInput.heaterTarget(bed) : nil
-                        guard hotendValue != nil || bedValue != nil else {
-                            throw PrinterControlError.invalidRequest("Enter at least one target. Blank leaves a heater unchanged.")
-                        }
-                        for (heater, value) in [(Heater.hotend, hotendValue), (.bed, bedValue)] {
-                            if let value, let message = viewModel.heaterTargetError(heater, target: value) {
-                                throw PrinterControlError.invalidRequest(message)
-                            }
-                        }
-                        inputError = nil
-                        Task { await viewModel.setHeaterTargets(hotend: hotendValue, bed: bedValue) }
-                    } catch {
-                        inputError = error.localizedDescription
-                    }
-                }
-                .disabled(!Heater.allCases.contains(where: viewModel.supports))
                 if let inputError {
                     Text(inputError).font(.footnote).foregroundStyle(Color.pfError)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .disabled(!viewModel.canControl || viewModel.isExecuting)
+        }
+
+        private var setTargetsButton: some View {
+            ControlActionButton(
+                title: "Go", identifier: "printer.controls.heat.set-targets",
+                accessibilityTitle: "Go, set heater targets",
+                hint: "Sets only entered targets. Blank leaves a heater unchanged; zero switches it off.",
+                compact: true, prominent: true, matchesInputHeight: true
+            ) {
+                do {
+                    let hotendValue = try viewModel.supports(.hotend) ? ControlNumberInput.heaterTarget(hotend) : nil
+                    let bedValue = try viewModel.supports(.bed) ? ControlNumberInput.heaterTarget(bed) : nil
+                    guard hotendValue != nil || bedValue != nil else {
+                        throw PrinterControlError.invalidRequest("Enter at least one target. Blank leaves a heater unchanged.")
+                    }
+                    for (heater, value) in [(Heater.hotend, hotendValue), (.bed, bedValue)] {
+                        if let value, let message = viewModel.heaterTargetError(heater, target: value) {
+                            throw PrinterControlError.invalidRequest(message)
+                        }
+                    }
+                    inputError = nil
+                    Task { await viewModel.setHeaterTargets(hotend: hotendValue, bed: bedValue) }
+                } catch {
+                    inputError = error.localizedDescription
+                }
+            }
+            .disabled(!Heater.allCases.contains(where: viewModel.supports))
         }
     }
 

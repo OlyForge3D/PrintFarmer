@@ -394,7 +394,8 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             let bed = try frame("printer.controls.bed.target")
             XCTAssertEqual(hotend.maxY, bed.maxY, accuracy: 1)
             XCTAssertLessThan(hotend.maxX, bed.minX)
-            XCTAssertLessThan(bed.maxY, heat.minY)
+            XCTAssertEqual(bed.maxY, heat.maxY, accuracy: 1)
+            XCTAssertLessThan(bed.maxX, heat.minX)
             XCTAssertFalse(nativeControls(in: controller.view).contains {
                 ["printer.controls.hotend.set", "printer.controls.bed.set",
                  "printer.controls.hotend.off", "printer.controls.bed.off",
@@ -448,7 +449,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             coverageState: .unavailable, isStale: false,
             supportedActions: PrinterDetailFilamentActionMapping.supportedActions(hasActiveSpool: true)
         )
-        // Exact scroll-surface sizes from the unmodified Essential HTML at 1320px.
+        // Essential HTML at 1320px, with the owner's compact Go refinement.
         for size in [CGSize(width: 386, height: 612), CGSize(width: 1068, height: 650)] {
             let tablet = size.width > 760
             let content = ScrollView {
@@ -476,16 +477,16 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             let hotend = try frame("printer.controls.hotend.target")
             let set = try frame("printer.controls.heat.set-targets")
             XCTAssertEqual(hotend.minX, tablet ? 42 : 34, accuracy: 1)
-            XCTAssertEqual(set.minX, hotend.minX, accuracy: 1)
-            // Browser positions include 44px controls; native uses 45pt to
-            // guarantee actual >=44pt hit bounds after fractional placement.
+            XCTAssertEqual(set.minX, tablet ? 475.703125 : 300, accuracy: 1)
+            // Both revised prototype and native inputs have 45-point heights.
             XCTAssertEqual(hotend.minY, 217.09375, accuracy: 2)
-            XCTAssertEqual(set.minY, 275.09375, accuracy: 2.5)
-            XCTAssertEqual(set.width, tablet ? 485.703125 : 318, accuracy: 0.5)
+            XCTAssertEqual(set.minY, hotend.minY, accuracy: 1)
+            XCTAssertEqual(set.height, hotend.height, accuracy: 1)
+            XCTAssertEqual(set.width, 52, accuracy: 0.5)
             let up = try frame("printer.controls.jog.y.positive")
             let down = try frame("printer.controls.jog.y.negative")
             XCTAssertEqual(up.height, 48, accuracy: 1)
-            XCTAssertEqual(up.minY, tablet ? 166.09375 : 648.9375, accuracy: 4)
+            XCTAssertEqual(up.minY, tablet ? 166.09375 : 591.9375, accuracy: 4)
             XCTAssertEqual(down.minY - up.minY, 108, accuracy: 1)
             let motors = try frame("printer.controls.disable-motors")
             let calibration = try frame("printer.controls.calibration-start")
@@ -680,6 +681,15 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                     try await settle(controller)
                     let controls = nativeControls(in: controller.view)
                     let visibleIdentifiers = Set(controls.compactMap(\.accessibilityIdentifier))
+                    let hotend = try XCTUnwrap(controls.first {
+                        $0.accessibilityIdentifier == "printer.controls.hotend.target"
+                    })
+                    for suffix in ["bed.target", "heat.set-targets", "extrusion-distance", "extrusion-speed"] {
+                        let control = try XCTUnwrap(controls.first {
+                            $0.accessibilityIdentifier == "printer.controls.\(suffix)"
+                        })
+                        XCTAssertEqual(control.bounds.height, hotend.bounds.height, accuracy: 1, suffix)
+                    }
                     if supported {
                         supportedIdentifiers = visibleIdentifiers
                     } else {
@@ -1149,7 +1159,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             "Hotend target in degrees Celsius", "Bed target in degrees Celsius",
             "X required absolute destination in millimeters", "Y required absolute destination in millimeters",
             "Z required absolute destination in millimeters",
-            "Set targets", "Move to position", "Disable motors"
+            "Go, set heater targets", "Move to position", "Disable motors"
         ] {
             let target = try XCTUnwrap(controls.first { $0.accessibilityLabel == label }, label)
             XCTAssertGreaterThanOrEqual(target.bounds.height, 44, label)
