@@ -246,7 +246,7 @@ const sensitiveProse =
   /(^|\/)(security|threat[-_ ]?model|licen[cs]e|licensing[-_ ]?policy|notice|copying|code[-_ ]?of[-_ ]?conduct|api[-_ ]?contract)(\.[a-z0-9]+)?$/i;
 
 const highRiskPaths =
-  /(access|admin|auth(entication|orization)?|cert|contract|credential|data\/configurations|dbcontext|dto|governance|hub|identity|licens|migration|openapi|password|permission|privacy|protocol|queue|role|secret|security|serialization|signalr|squad|token|worker)/i;
+  /(access|admin|auth(entication|orization)?|cert|compose|contract|credential|data\/configurations|dbcontext|deploy(ment)?|docker|dto|governance|hub|identity|infrastructure|licens|migration|openapi|password|permission|privacy|protocol|queue|role|secret|security|serialization|signalr|squad|token|worker)/i;
 
 /**
  * Reduce a squad identity to its canonical lowercase token.
@@ -607,6 +607,9 @@ export function classifyChangeScope(paths) {
     }
     if (highRiskPaths.test(path)) {
       return { docsOnly: false, highRisk: true, reason: `${path} is high-risk infrastructure or access-control code` };
+    }
+    if (path.startsWith('docs/') && !isProse(path)) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is a non-prose documentation asset` };
     }
     if (!isProse(path)) {
       docsOnly = false;

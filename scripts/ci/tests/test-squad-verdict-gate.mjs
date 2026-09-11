@@ -814,9 +814,7 @@ test('documentation-only classification honours the policy carve-outs', () => {
     );
   }
   assert.equal(classifyChangeScope(['docs/API.md', 'src/api/Program.cs']).docsOnly, false);
-  const binaryDocumentation = classifyChangeScope(['docs/screenshot.png']);
-  assert.equal(binaryDocumentation.docsOnly, false);
-  assert.equal(binaryDocumentation.highRisk, false);
+  assert.equal(classifyChangeScope(['docs/screenshot.png']).highRisk, true);
 });
 
 test('high-risk classification is order-independent for mixed changes', () => {
@@ -841,6 +839,8 @@ test('high-risk classification covers access control, protocol, and release auto
     'src/infra/Services/SignalR/PrinterHub.cs',
     'proto/slicer_jobs.proto',
     'scripts/publish-to-public.sh',
+    'deploy/nginx/nginx.conf',
+    '.devcontainer/Dockerfile',
     'squad.config.ts',
     'agentrc.config.json',
     'skills-lock.json',
