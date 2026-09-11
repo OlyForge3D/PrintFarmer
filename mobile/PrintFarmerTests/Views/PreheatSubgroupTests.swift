@@ -153,7 +153,7 @@ final class PreheatSubgroupTests: XCTestCase {
         XCTAssertTrue(nativeControls(controller.view).allSatisfy { !$0.isEnabled })
     }
 
-    func test_thermalDraft_survivesAccessibilityReflowAndUnconfirmedBedIsOmitted() async throws {
+    func test_thermalDraft_survivesAccessibilityReflowAndUnconfirmedBedStaysDisabled() async throws {
         let (model, _) = try await thermalModel(hotendOnly: true)
         let (window, controller) = try await installThermal(model)
         defer { window.isHidden = true }
@@ -164,9 +164,29 @@ final class PreheatSubgroupTests: XCTestCase {
         controller.rootView = AnyView(thermalContent(model, width: 326, type: .accessibility5))
         try await settle(controller)
         let controls = nativeControls(controller.view)
-        XCTAssertEqual(controls.count, 2)
+        XCTAssertEqual(controls.count, 3)
         XCTAssertEqual((controls.first as? UITextField)?.text, "231")
-        XCTAssertFalse(controls.contains { $0.accessibilityIdentifier?.contains(".bed.") == true })
+        let bed = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.bed.target" })
+        XCTAssertFalse(bed.isEnabled)
+    }
+
+    func test_unsupportedHotendDisablesEveryPresetIncludingCoolDown() async throws {
+        var printer = try TestData.decodePrinter()
+        printer.state = "ready"
+        let service = MockPrinterService()
+        service.capabilitiesToReturn = PrinterBackendCapabilities(
+            supportsMovement: false, supportsTemperatureControl: false,
+            supportsBedTemperature: true, supportsFanControl: false,
+            supportsHoming: false, supportedAxes: []
+        )
+        service.detailsToReturn = .controlsLimitsFixture(for: printer)
+        let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
+        await model.loadCapabilities()
+        for preset in PreheatSubgroup.presets {
+            XCTAssertNotNil(model.preheatBlockedReason(preset))
+            await model.preheat(preset)
+            XCTAssertNil(service.setTemperaturesCalledWith)
+        }
     }
 
     private func thermalModel(

@@ -228,11 +228,7 @@ struct PreheatSubgroup: View {
     }
 
     var body: some View {
-        if Heater.allCases.contains(where: viewModel.supports) {
-            content
-        } else {
-            EmptyView()
-        }
+        content
     }
 
     private var content: some View {
@@ -240,26 +236,14 @@ struct PreheatSubgroup: View {
             EssentialControlHeading(title: "Heat", detail: "Actual / target above")
                 .padding(.bottom, 14)
 
-            if !viewModel.supports(.bed) {
-                Text("Hotend only — bed temperature control is unavailable.")
-                    .font(.caption)
-                    .foregroundStyle(Color.pfTextSecondary)
-            }
-
             IndividualHeaterControls(viewModel: viewModel)
 
-            if Self.isVisible(capabilities: viewModel.capabilities) {
-                grid.padding(.top, 14).padding(.bottom, 8)
-                button(for: .coolDown)
-            }
+            grid.padding(.top, 14).padding(.bottom, 8)
+            button(for: .coolDown)
 
-            if let hotend = viewModel.maximum(for: .hotend) {
-                Text(viewModel.supports(.bed)
-                     ? "Hotend max \(hotend.formatted())° · Bed max \(viewModel.maximum(for: .bed).map { $0.formatted() + "°" } ?? "unknown")."
-                     : "Hotend max \(hotend.formatted())°.")
-                    .font(.footnote).foregroundStyle(Color.pfTextSecondary)
-                    .padding(.top, 10)
-            }
+            Text("Hotend max \(viewModel.maximum(for: .hotend).map { $0.formatted() + "°" } ?? "unknown") · Bed max \(viewModel.maximum(for: .bed).map { $0.formatted() + "°" } ?? "unknown").")
+                .font(.footnote).foregroundStyle(Color.pfTextSecondary)
+                .padding(.top, 10)
             if let message = blockedReasonMessage {
                 Text(message)
                     .font(.footnote)
@@ -343,12 +327,8 @@ struct PreheatSubgroup: View {
                     ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
                     : AnyLayout(HStackLayout(alignment: .bottom, spacing: 12))
                 layout {
-                    if viewModel.supports(.hotend) {
-                        HeaterTargetEditor(viewModel: viewModel, heater: .hotend, target: $hotend)
-                    }
-                    if viewModel.supports(.bed) {
-                        HeaterTargetEditor(viewModel: viewModel, heater: .bed, target: $bed)
-                    }
+                    HeaterTargetEditor(viewModel: viewModel, heater: .hotend, target: $hotend)
+                    HeaterTargetEditor(viewModel: viewModel, heater: .bed, target: $bed)
                 }
                 ControlActionButton(
                     title: "Set targets", identifier: "printer.controls.heat.set-targets",
@@ -372,6 +352,7 @@ struct PreheatSubgroup: View {
                         inputError = error.localizedDescription
                     }
                 }
+                .disabled(!Heater.allCases.contains(where: viewModel.supports))
                 if let inputError {
                     Text(inputError).font(.footnote).foregroundStyle(Color.pfError)
                         .fixedSize(horizontal: false, vertical: true)
@@ -408,10 +389,12 @@ struct PreheatSubgroup: View {
                     Text("°C").font(.footnote).foregroundStyle(Color.pfTextSecondary)
                         .accessibilityHidden(true)
                 }
+                .disabled(!viewModel.supports(heater))
             }
         }
 
         private var targetHint: String {
+            guard viewModel.supports(heater) else { return "\(heater.title) control is unavailable." }
             let limit = viewModel.maximum(for: heater).map { "Maximum \($0) degrees. " }
                 ?? "Heating unavailable until heater limits are known. "
             return limit + ControlNumberInput.heaterPrecisionMessage + " Blank leaves this heater unchanged; zero switches it off."

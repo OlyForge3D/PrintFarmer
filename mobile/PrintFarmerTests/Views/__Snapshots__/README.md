@@ -63,3 +63,20 @@ captures the approved 386x612 phone and 1068x650 tablet scroll viewports,
 including lower content and accessibility layouts, and asserts control geometry.
 The component snapshots retain unsupported states instead of copying the
 prototype's illustrative hardware readiness.
+
+## Web-style homing glyph revision (#2629)
+
+The same six Controls goldens now reflect the owner's web UI reference:
+Home All at the upper-left of the directional pad, Home XY in its center,
+and Home Z between Z+ and Z-. Filled house glyphs replace the text row.
+Unsupported controls remain disabled rather than removing Heat fields/presets,
+the spatial homing layout, motor release, absolute movement or calibration.
+Idle capability explanations live in Details & safety. Backend command,
+offline and print-state gates are unchanged.
+The independent destructive-button dark-mode reference remains unchanged.
+
+References were regenerated on task-isolated iPhone 17 (3x) and iPad Pro
+13-inch M5 (2x) hosts using Xcode 26.6 (17F113), iOS 26.5 (23F77), the
+shared approved-runtime resolver and the unchanged `.iPhone13` component
+configuration. Full-page identity/selector captures and homing dispatch tests
+supplement these component goldens.

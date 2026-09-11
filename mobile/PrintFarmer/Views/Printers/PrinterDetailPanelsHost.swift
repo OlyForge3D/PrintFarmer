@@ -40,8 +40,10 @@ enum PrinterDetailPanel: String, CaseIterable, Hashable, Sendable {
 struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
     @Binding var selection: PrinterDetailPanel
     let controlsAvailable: Bool
+    var printer: Printer? = nil
     @ViewBuilder let overview: () -> Overview
     @ViewBuilder let controls: () -> Controls
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Discoverability is independent of command authorization. The Controls
     /// page explains unavailable access instead of removing the destination.
@@ -62,31 +64,149 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("Printer detail panel", selection: $selection) {
-                ForEach(availablePanels, id: \.self) { panel in
-                    Text(panel.title).tag(panel)
+        GeometryReader { geometry in
+            let inset: CGFloat = PrinterDetailLayout.usesColumns(
+                width: geometry.size.width, dynamicTypeSize: dynamicTypeSize
+            ) ? 24 : 16
+            VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let printer {
+                        PrinterDetailIdentityHeader(printer: printer)
+                    }
+                    PrinterDetailPanelPicker(selection: $selection)
+                    .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 380)
                 }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
-            .accessibilityIdentifier("printer.detail.panel.selector")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, inset)
+                .padding(.top, 12)
+                .padding(.bottom, 16)
+                .background(Color.pfBackground)
 
-            TabView(selection: $selection) {
-                page(overview(), panel: .overview)
-                    .tag(PrinterDetailPanel.overview)
+                TabView(selection: $selection) {
+                    page(overview(), panel: .overview)
+                        .tag(PrinterDetailPanel.overview)
 
-                page(controls(), panel: .controls)
-                    .tag(PrinterDetailPanel.controls)
+                    page(controls(), panel: .controls)
+                        .tag(PrinterDetailPanel.controls)
+                }
+                #if os(iOS)
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                #endif
             }
-            #if os(iOS)
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            #endif
         }
         .onChange(of: controlsAvailable) { _, newValue in
             selection = Self.resolvedSelection(current: selection, controlsAvailable: newValue)
+        }
+    }
+
+    private struct PrinterDetailPanelPicker: UIViewRepresentable {
+        @Binding var selection: PrinterDetailPanel
+        @ScaledMetric(relativeTo: .subheadline) private var fontSize: CGFloat = 15
+
+        func makeUIView(context: Context) -> UISegmentedControl {
+            let control = UISegmentedControl(items: PrinterDetailPanel.allCases.map(\.title))
+            control.addTarget(context.coordinator, action: #selector(Coordinator.selectPanel), for: .valueChanged)
+            control.accessibilityIdentifier = "printer.detail.panel.selector"
+            control.accessibilityLabel = "Printer detail panel"
+            return control
+        }
+
+        func updateUIView(_ control: UISegmentedControl, context: Context) {
+            context.coordinator.selection = $selection
+            control.selectedSegmentIndex = PrinterDetailPanel.allCases.firstIndex(of: selection) ?? 0
+            control.setTitleTextAttributes([.font: UIFont.systemFont(ofSize: fontSize)], for: .normal)
+            control.setTitleTextAttributes([.font: UIFont.systemFont(ofSize: fontSize, weight: .semibold)], for: .selected)
+        }
+
+        func sizeThatFits(_ proposal: ProposedViewSize, uiView: UISegmentedControl, context: Context) -> CGSize? {
+            CGSize(width: proposal.width ?? 380, height: max(48, ceil(fontSize * 1.2) + 20))
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
+
+        final class Coordinator: NSObject {
+            var selection: Binding<PrinterDetailPanel>
+            init(selection: Binding<PrinterDetailPanel>) { self.selection = selection }
+
+            @objc func selectPanel(_ control: UISegmentedControl) {
+                guard PrinterDetailPanel.allCases.indices.contains(control.selectedSegmentIndex) else {
+                    assertionFailure("Printer detail panel selection must name a displayed segment")
+                    return
+                }
+                selection.wrappedValue = PrinterDetailPanel.allCases[control.selectedSegmentIndex]
+            }
+        }
+    }
+
+    struct PrinterDetailIdentityHeader: View {
+        let printer: Printer
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+        private var status: String {
+            guard printer.isOnline else { return "Offline" }
+            guard let state = printer.state, !state.isEmpty else { return "Unknown" }
+            return state.capitalized
+        }
+
+        private var statusColor: Color {
+            guard printer.isOnline else { return .pfTextSecondary }
+            switch printer.state?.lowercased() {
+            case "printing", "idle", "ready": return .pfSuccess
+            case "paused": return .pfWarning
+            case "error": return .pfError
+            default: return .pfTextSecondary
+            }
+        }
+
+        private var subtitle: String {
+            [printer.manufacturerName, printer.modelName, printer.location?.name]
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+                .joined(separator: " · ")
+        }
+
+        var body: some View {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+            layout {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(printer.name)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(Color.pfTextPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityLabel("\(printer.name), printer detail")
+                        .accessibilityIdentifier("printer.detail.destination.\(printer.id.uuidString.lowercased())")
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.subheadline)
+                            .foregroundStyle(Color.pfTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Circle().fill(statusColor).frame(width: 6, height: 6)
+                            .accessibilityHidden(true)
+                        Text(status)
+                            .font(.caption)
+                            .foregroundStyle(statusColor)
+                        if printer.obicoEnabled {
+                            Image(systemName: "shield.checkered")
+                                .accessibilityLabel("Failure detection enabled")
+                        }
+                    }
+                    if printer.inMaintenance {
+                        Text("Maintenance")
+                            .font(.caption)
+                            .foregroundStyle(Color.pfTextPrimary)
+                    }
+                }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("printer.detail.identity")
         }
     }
 

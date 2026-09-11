@@ -128,6 +128,37 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
 
     // MARK: - Default entry / gating
 
+    func testEssentialIdentityRemainsAboveBothPagesAndSelectorStaysCompact() {
+        openFirstPrinterDetail()
+        let identity = app.otherElements["printer.detail.identity"]
+        XCTAssertTrue(identity.waitForExistence(timeout: 8))
+        let names = app.staticTexts.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "printer.detail.destination."
+        ))
+        XCTAssertEqual(names.count, 1)
+        let name = names.firstMatch.label
+        let selector = app.segmentedControls["printer.detail.panel.selector"]
+        XCTAssertTrue(selector.exists)
+        XCTAssertLessThan(identity.frame.maxY, selector.frame.minY)
+        XCTAssertLessThanOrEqual(selector.frame.width, 381)
+        XCTAssertGreaterThanOrEqual(selector.frame.height, 44)
+        XCTAssertEqual(identity.frame.minX, selector.frame.minX, accuracy: 1)
+        for title in ["Overview", "Controls", "Overview"] {
+            selector.buttons[title].tap()
+            let page = app.descendants(matching: .any)["printer.detail.panel.\(title.lowercased())"]
+            XCTAssertTrue(page.waitForExistence(timeout: 5))
+            XCTAssertEqual(names.count, 1, "Printer identity must not be duplicated in a page")
+            XCTAssertEqual(names.firstMatch.label, name)
+            XCTAssertLessThan(identity.frame.maxY, selector.frame.minY)
+            XCTAssertLessThanOrEqual(selector.frame.maxY, page.frame.minY)
+            XCTAssertTrue(app.buttons["printer.detail.control.emergencyStop"].isHittable)
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            screenshot.name = "Essential complete page \(title)"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+        }
+    }
+
     func testOverviewUsesAvailableWidthAcrossRotation() {
         openFirstPrinterDetail()
         defer { XCUIDevice.shared.orientation = .portrait }

@@ -52,15 +52,16 @@ struct HomeSubgroup: View {
         static let warning = "Disabling motors removes holding force. Axes may move or drop under gravity. Support the mechanism and re-home before moving again. This is not Emergency Stop and does not turn heaters off."
 
         var body: some View {
-            if viewModel.capabilities?.supportsDisableMotors == true {
+            Group {
                 VStack(alignment: .leading, spacing: 8) {
                     ControlActionButton(
                         title: "Disable motors", identifier: "printer.controls.disable-motors",
-                        hint: Self.warning, compact: true
+                        hint: viewModel.capabilities?.supportsDisableMotors == true
+                            ? Self.warning : "Motor release is unsupported by this printer.", compact: true
                     ) {
                         confirmsRelease = true
                     }
-                    .disabled(!viewModel.canControl || viewModel.isExecuting)
+                    .disabled(!viewModel.canControl || viewModel.isExecuting || viewModel.capabilities?.supportsDisableMotors != true)
                 }
                 .foregroundStyle(Color.pfTextPrimary)
                 .confirmationDialog("Disable motors?", isPresented: $confirmsRelease, titleVisibility: .visible) {

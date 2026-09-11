@@ -13,6 +13,13 @@ sections 1–7 below; it must not override this contract.
 
 ## Approved Essential composition
 
+Printer identity belongs above the shared Overview/Controls selector, not inside
+Overview's scroll content. Both destinations retain the same name, model/location
+and truthful state. The native selector is leading-aligned, capped at 380 points
+at standard text sizes, and has at least 44-point hit bounds. Compare the complete
+page shell as well as the controls scroll surface; a matching isolated widget
+does not establish that the assembled page matches Essential.
+
 The recovered `printer-ui/index.html` concept 1, including its complete applicable
 CSS, `temperatureStrip()`, `heatGroup()`, `motionGroup()`, `filamentControls()`
 and `controls(tablet)`, is the exact visual target, not inspiration. Its companion
@@ -32,8 +39,12 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   fields. Use native typography, ThemeColors, inset groups and 44-point minimum
   native controls; do not import the browser wrapper's styling.
 - Move & home: reported XYZ/homed context, increment selector, directional XY
-  pad with Home at its center, separate Z +/- controls, compact independent
-  Home All/XY/Z actions, **Go to XYZ...** disclosure and motor/calibration
+  pad with Home XY at its center and Home All at its top-left; Home Z sits
+  between the separate Z +/- controls. These three actions use filled house
+  glyphs with distinct accessible names, not a repeated row of text buttons.
+  This movement-button arrangement follows the owner's web UI reference
+  supplied during #2629 and supersedes the prototype's standalone homing row.
+  Preserve **Go to XYZ...** disclosure and motor/calibration
   entry points. Accessibility text uses labeled directional pairs instead of
   shrinking the pad. Motor warnings remain in the confirmation and its hint.
 - Filament tools: existing truthful material summary, Load/Unload/Change row,
@@ -41,6 +52,15 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   Repeated operation/provenance prose moves under **Details & safety**;
   per-operation disabled hints and read-only refresh remain available there.
   Calibration stays inline after entry so Emergency Stop remains reachable.
+  Before entry, its unsupported-operation explanation belongs behind
+  **Details & safety**, not a permanent paragraph next to Z-offset. During an
+  active calibration workflow, blocked reasons remain immediately visible.
+  Supported design fixtures must include Disable motors. Unsupported operations
+  stay in their original positions but are disabled, including motor release,
+  heater targets/presets, the increment selector, all directional/home actions,
+  absolute-movement entry, calibration, and material controls.
+  Capability changes must not remove groups or rearrange their controls.
+  This does not relax authorization, offline access or physical-command gates.
 
 ### Native geometry and visual comparison
 
@@ -48,7 +68,7 @@ Preserve the prototype's anatomy: one divided temperature surface with leading
 heater symbols and inline actual/target readings; Heat's trailing caption,
 external Celsius suffixes, bordered presets and buttons; a single inset increment
 selector; 48-point directional buttons separated by 6 points, a 68-point Z column,
-and ruled home/absolute/motor-calibration rows. The two final entry buttons share
+and ruled absolute/motor-calibration rows. The two final entry buttons share
 one row, rather than becoming separate full-width cards.
 
 Groups use 18-point insets, 16-point corner radii and 14-point vertical separation.
@@ -84,6 +104,11 @@ Necessary runtime differences from the illustrative prototype:
 - Existing relative movement semantics/rates remain unchanged. Reported homing
   text is context, not new safety evidence; backend preflight remains authoritative.
   Calibration separately requires the verified timestamped safety contract.
+- Unsupported actions remain disabled in both normal and accessibility layouts
+  so independently supported operations retain their spatial positions.
+  Explanations remain in accessible hints and Details & safety, rather than
+  inserting capability-dependent paragraphs between action rows.
+  No macros column or new extrusion/rate controls are added to Move & home.
 - The strip says **Target set**, not an unverified **At target** readiness claim.
   Real maxima replace the prototype's illustrative-limit footnote. Native controls
   have a 45-point minimum to avoid fractional layout rounding below 44 points.
