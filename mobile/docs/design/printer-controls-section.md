@@ -16,8 +16,12 @@ sections 1–7 below; it must not override this contract.
 Printer identity belongs above the shared Overview/Controls selector, not inside
 Overview's scroll content. Both destinations retain the same name, model/location
 and truthful state. The native selector is leading-aligned, capped at 380 points
-at standard text sizes, and has at least 44-point hit bounds. Compare the complete
-page shell as well as the controls scroll surface; a matching isolated widget
+at standard text sizes, and has at least 44-point hit bounds.
+At widths where scaled normal and selected titles cannot fit, use stacked
+full-width choices with the same selection binding rather than truncate titles.
+At accessibility text sizes, identity metadata scrolls within one quarter
+of the available shell height so it cannot displace the selector and page content.
+Compare the complete page shell as well as the controls scroll surface; a matching isolated widget
 does not establish that the assembled page matches Essential.
 
 The recovered `printer-ui/index.html` concept 1, including its complete applicable

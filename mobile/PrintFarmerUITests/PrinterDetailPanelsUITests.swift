@@ -189,9 +189,30 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
         app.launch()
         openFirstPrinterDetail()
         XCTAssertTrue(app.otherElements["printer.detail.readingColumn"].waitForExistence(timeout: 8))
-        let selector = app.segmentedControls["printer.detail.panel.selector"]
+        let identityScroll = app.scrollViews["printer.detail.identity.scroll"]
+        let printerName = identityScroll.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "printer.detail.destination.")
+        ).firstMatch
+        XCTAssertTrue(printerName.exists)
+        XCTAssertGreaterThanOrEqual(identityScroll.frame.height, printerName.frame.height)
+        XCTAssertGreaterThanOrEqual(printerName.frame.minY, identityScroll.frame.minY)
+        XCTAssertLessThanOrEqual(printerName.frame.maxY, identityScroll.frame.maxY)
+        let selector = app.descendants(matching: .any)
+            .matching(identifier: "printer.detail.panel.selector").firstMatch
+        XCTAssertTrue(selector.exists)
         for title in ["Overview", "Controls"] {
+            XCTAssertTrue(selector.buttons[title].isHittable)
             selector.buttons[title].tap()
+            XCTAssertTrue(selector.buttons[title].isSelected)
+            let page = app.descendants(matching: .any)["printer.detail.panel.\(title.lowercased())"]
+            XCTAssertTrue(page.exists)
+            XCTAssertGreaterThanOrEqual(page.frame.height, 100, "The pinned header must leave a usable page viewport")
+            if title == "Overview" {
+                let temperatures = app.otherElements["printer.detail.temperatures"]
+                let beforeScroll = temperatures.frame.minY
+                page.swipeUp()
+                XCTAssertLessThan(temperatures.frame.minY, beforeScroll, "The reading column must actually scroll")
+            }
             let emergency = app.buttons["printer.detail.control.emergencyStop"]
             XCTAssertTrue(emergency.isHittable)
             XCTAssertGreaterThanOrEqual(emergency.frame.height, 44)

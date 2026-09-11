@@ -71,7 +71,15 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
             VStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 16) {
                     if let printer {
-                        PrinterDetailIdentityHeader(printer: printer)
+                        if dynamicTypeSize.isAccessibilitySize {
+                            ScrollView {
+                                PrinterDetailIdentityHeader(printer: printer)
+                            }
+                            .frame(height: geometry.size.height / 4)
+                            .accessibilityIdentifier("printer.detail.identity.scroll")
+                        } else {
+                            PrinterDetailIdentityHeader(printer: printer)
+                        }
                     }
                     PrinterDetailPanelPicker(selection: $selection)
                     .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : 380)
@@ -99,9 +107,53 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
         }
     }
 
-    private struct PrinterDetailPanelPicker: UIViewRepresentable {
+    private struct PrinterDetailPanelPicker: View {
         @Binding var selection: PrinterDetailPanel
         @ScaledMetric(relativeTo: .subheadline) private var fontSize: CGFloat = 15
+
+        private var minimumWidth: CGFloat {
+            let titleWidth = PrinterDetailPanel.allCases.flatMap { panel in
+                [UIFont.Weight.regular, .semibold].map { weight in
+                    (panel.title as NSString).size(withAttributes: [
+                        .font: UIFont.systemFont(ofSize: fontSize, weight: weight)
+                    ]).width
+                }
+            }.max() ?? 0
+            return CGFloat(PrinterDetailPanel.allCases.count) * (ceil(titleWidth) + 32)
+        }
+
+        var body: some View {
+            ViewThatFits(in: .horizontal) {
+                NativePrinterDetailPanelPicker(
+                    selection: $selection, fontSize: fontSize, minimumWidth: minimumWidth
+                )
+                .frame(minWidth: minimumWidth)
+
+                VStack(spacing: 3) {
+                    ForEach(PrinterDetailPanel.allCases, id: \.self) { panel in
+                        ControlActionButton(
+                            title: panel.title,
+                            identifier: "printer.detail.panel.select.\(panel.rawValue)",
+                            selected: selection == panel,
+                            textSize: 15, segmented: true
+                        ) {
+                            selection = panel
+                        }
+                    }
+                }
+                .padding(3)
+                .background(Color.pfBackgroundTertiary, in: RoundedRectangle(cornerRadius: 11))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("printer.detail.panel.selector")
+                .accessibilityLabel("Printer detail panel")
+            }
+        }
+    }
+
+    private struct NativePrinterDetailPanelPicker: UIViewRepresentable {
+        @Binding var selection: PrinterDetailPanel
+        let fontSize: CGFloat
+        let minimumWidth: CGFloat
 
         func makeUIView(context: Context) -> UISegmentedControl {
             let control = UISegmentedControl(items: PrinterDetailPanel.allCases.map(\.title))
@@ -119,7 +171,7 @@ struct PrinterDetailPanelsHost<Overview: View, Controls: View>: View {
         }
 
         func sizeThatFits(_ proposal: ProposedViewSize, uiView: UISegmentedControl, context: Context) -> CGSize? {
-            CGSize(width: proposal.width ?? 380, height: max(48, ceil(fontSize * 1.2) + 20))
+            CGSize(width: max(minimumWidth, proposal.width ?? minimumWidth), height: max(48, ceil(fontSize * 1.2) + 20))
         }
 
         func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }

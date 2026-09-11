@@ -614,6 +614,52 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertNil(service.setTemperaturesCalledWith)
     }
 
+    func test_essentialSelectorRendersBothFullTitlesForEitherSelectionAtAccessibilitySizes() async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        for width: CGFloat in [320, 390, 1068] {
+            for textSize in [DynamicTypeSize.large, .accessibility3, .accessibility5] {
+                for selection in PrinterDetailPanel.allCases {
+                    let content = PrinterDetailPanelsHost(
+                        selection: .constant(selection), controlsAvailable: true, printer: printer,
+                        overview: { Color.clear }, controls: { Color.clear }
+                    )
+                    .environment(\.dynamicTypeSize, textSize)
+                    .frame(width: width, height: 844)
+                    let (window, controller) = install(content)
+                    defer { window.isHidden = true }
+                    window.frame.size = CGSize(width: width, height: 844)
+                    controller.view.frame = window.bounds
+                    try await settle(controller)
+                    func titleLabels(in view: UIView) -> [UILabel] {
+                        guard !view.isHidden, view.alpha > 0 else { return [] }
+                        let own = (view as? UILabel).map { [$0] } ?? []
+                        return own + view.subviews.flatMap { titleLabels(in: $0) }
+                    }
+                    let titles = Set(PrinterDetailPanel.allCases.map(\.title))
+                    let labels = titleLabels(in: controller.view).filter { titles.contains($0.text ?? "") }
+                    XCTAssertEqual(Set(labels.compactMap(\.text)), titles)
+                    for label in labels {
+                        let font = try XCTUnwrap(label.font)
+                        let required = (try XCTUnwrap(label.text) as NSString).size(withAttributes: [.font: font])
+                        XCTAssertGreaterThanOrEqual(label.bounds.width + 1, ceil(required.width), label.text ?? "")
+                        XCTAssertGreaterThanOrEqual(label.bounds.height + 1, ceil(font.lineHeight), label.text ?? "")
+                    }
+                    for control in nativeControls(in: controller.view) {
+                        XCTAssertGreaterThanOrEqual(control.bounds.height, 44)
+                        XCTAssertGreaterThanOrEqual(control.bounds.width, 44)
+                    }
+                    let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+                        XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
+                    }
+                    let attachment = XCTAttachment(image: image)
+                    attachment.name = "selector-\(Int(width))-\(textSize)-\(selection.rawValue)"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                }
+            }
+        }
+    }
+
     func test_calibrationSafetyDetails_areDisclosedAtRestAndImmediateDuringWorkflow() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.layoutCaps)

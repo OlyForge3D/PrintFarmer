@@ -6,6 +6,9 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Fixed
 
+- Keep full Overview/Controls titles readable at accessibility sizes using
+  stacked choices when needed; bound scrolling identity metadata so the page
+  retains usable space beneath the shared header.
 - Use a compact Go action beside the heater targets, stacking for accessibility
   text. Match extrusion length/rate selector heights to the temperature inputs.
 - Remove Heat's redundant header caption; current/target hotend and bed
