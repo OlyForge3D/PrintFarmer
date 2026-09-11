@@ -1,5 +1,7 @@
 import XCTest
 import os
+import UIKit
+import UserNotifications
 @testable import PrintFarmer
 
 /// Issue #818 — graceful no-push degradation when native push is disabled.
@@ -293,6 +295,61 @@ final class PushDegradationTests: XCTestCase {
     }
 }
 
+@MainActor
+final class PendingReadyMonitorPermissionTests: XCTestCase {
+    private static let pushEnabledDefaultsKey = "pf_push_notifications_enabled"
+
+    override func setUp() async throws {
+        try await super.setUp()
+        UserDefaults.standard.removeObject(forKey: Self.pushEnabledDefaultsKey)
+        PushNotificationManager.shared.notificationAuthorizationRequester = LiveNotificationAuthorizationRequester()
+        PushNotificationManager.shared.remoteNotificationRegistrar = {}
+    }
+
+    override func tearDown() async throws {
+        UserDefaults.standard.removeObject(forKey: Self.pushEnabledDefaultsKey)
+        PushNotificationManager.shared.notificationAuthorizationRequester = LiveNotificationAuthorizationRequester()
+        PushNotificationManager.shared.remoteNotificationRegistrar = {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+        try await super.tearDown()
+    }
+
+    func testRequestNotificationPermissionGrantEnablesPushSetting() async throws {
+        let permissionRequested = expectation(description: "notification permission requested twice")
+        permissionRequested.expectedFulfillmentCount = 2
+        let requester = StubNotificationAuthorizationRequester(
+            decisions: [true, true],
+            onRequest: { permissionRequested.fulfill() }
+        )
+        PushNotificationManager.shared.notificationAuthorizationRequester = requester
+        let monitor = PendingReadyMonitor(notificationAuthorizationRequester: requester)
+
+        await monitor.requestNotificationPermission()
+        await fulfillment(of: [permissionRequested], timeout: 1)
+
+        XCTAssertTrue(PushNotificationManager.shared.pushEnabled,
+                      "Granting the monitor permission prompt must sync the app-level push toggle on.")
+    }
+
+    func testRequestNotificationPermissionDenialPreservesExistingPushSetting() async throws {
+        UserDefaults.standard.set(true, forKey: Self.pushEnabledDefaultsKey)
+        let permissionRequested = expectation(description: "notification permission requested once")
+        let requester = StubNotificationAuthorizationRequester(
+            decisions: [false],
+            onRequest: { permissionRequested.fulfill() }
+        )
+        PushNotificationManager.shared.notificationAuthorizationRequester = requester
+        let monitor = PendingReadyMonitor(notificationAuthorizationRequester: requester)
+
+        await monitor.requestNotificationPermission()
+        await fulfillment(of: [permissionRequested], timeout: 1)
+
+        XCTAssertTrue(PushNotificationManager.shared.pushEnabled,
+                      "A denied system prompt must not silently turn off the separate app-level toggle.")
+    }
+}
+
 /// Call-counting `NotificationServiceProtocol` stub with per-outcome error
 /// injection. Lets the degradation tests assert exact register/unregister counts
 /// (zero retries) without any timing dependence.
@@ -340,4 +397,32 @@ private final class CountingNotificationService: NotificationServiceProtocol, @u
     func markRead(id: String) async throws {}
     func markAllRead(ids: [String]) async throws {}
     func delete(id: String) async throws {}
+}
+
+private final class StubNotificationAuthorizationRequester: NotificationAuthorizationRequesting, @unchecked Sendable {
+    private struct State {
+        var decisions: [Bool]
+        var requestCount = 0
+    }
+
+    private let state: OSAllocatedUnfairLock<State>
+    private let onRequest: @Sendable () -> Void
+
+    init(
+        decisions: [Bool],
+        onRequest: @escaping @Sendable () -> Void = {}
+    ) {
+        self.state = OSAllocatedUnfairLock(initialState: State(decisions: decisions))
+        self.onRequest = onRequest
+    }
+
+    func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool {
+        onRequest()
+        return state.withLock { state in
+            let index = min(state.requestCount, max(0, state.decisions.count - 1))
+            let decision = state.decisions[index]
+            state.requestCount += 1
+            return decision
+        }
+    }
 }

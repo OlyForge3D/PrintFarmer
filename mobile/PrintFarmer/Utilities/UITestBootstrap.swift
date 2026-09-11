@@ -54,6 +54,12 @@ enum UITestBootstrap {
     static let attentionActionsLaunchArgument = "--uitesting-attention-actions"
     static let attentionHarvestScanLaunchArgument =
         "--uitesting-attention-harvest-scan"
+    static let preserveStateLaunchArgument = "--uitesting-preserve-state"
+    static let advancedControlsPromptSeenLaunchArgument =
+        "--uitesting-advanced-controls-prompt-seen"
+    static let onboardingSeenLaunchArgument = "--uitesting-onboarding-seen"
+    static let networkPermissionCompletedLaunchArgument =
+        "--uitesting-network-permission-complete"
     static let twoModesNavigationLaunchArgument = "--uitesting-two-modes"
     static let oversightNavigationModeLaunchArgument =
         "--uitesting-oversight-mode"
@@ -241,8 +247,9 @@ enum UITestBootstrap {
     ) -> Environment {
         if defaults == nil {
             clearSystemNotificationState()
+            seedStandardRouteDefaults(arguments: arguments)
         }
-        let resolvedDefaults = defaults ?? makeUserDefaults()
+        let resolvedDefaults = defaults ?? makeUserDefaults(arguments: arguments)
 
         let registry = ServerRegistry(
             userDefaults: resolvedDefaults,
@@ -476,9 +483,11 @@ enum UITestBootstrap {
 
     /// Returns a UserDefaults domain isolated from `.standard`, with any
     /// prior state removed so each launch starts from a clean slate.
-    static func makeUserDefaults() -> UserDefaults {
+    static func makeUserDefaults(arguments: [String] = CommandLine.arguments) -> UserDefaults {
         let defaults = UserDefaults(suiteName: userDefaultsSuiteName) ?? .standard
-        defaults.removePersistentDomain(forName: userDefaultsSuiteName)
+        if !arguments.contains(preserveStateLaunchArgument) {
+            defaults.removePersistentDomain(forName: userDefaultsSuiteName)
+        }
         return defaults
     }
 
@@ -488,6 +497,26 @@ enum UITestBootstrap {
         center.removeAllDeliveredNotifications()
         center.removeAllPendingNotificationRequests()
         #endif
+    }
+
+    private static func seedStandardRouteDefaults(arguments: [String]) {
+        let defaults = UserDefaults.standard
+        guard !arguments.contains(preserveStateLaunchArgument) else {
+            return
+        }
+        defaults.removeObject(forKey: AdvancedPrinterControlsPromptState.hasSeenPromptKey)
+        defaults.removeObject(forKey: "hasSeenOnboarding")
+        defaults.removeObject(forKey: "hasCompletedNetworkPermission")
+
+        if arguments.contains(advancedControlsPromptSeenLaunchArgument) {
+            defaults.set(true, forKey: AdvancedPrinterControlsPromptState.hasSeenPromptKey)
+        }
+        if arguments.contains(onboardingSeenLaunchArgument) {
+            defaults.set(true, forKey: "hasSeenOnboarding")
+        }
+        if arguments.contains(networkPermissionCompletedLaunchArgument) {
+            defaults.set(true, forKey: "hasCompletedNetworkPermission")
+        }
     }
 
     // MARK: - F2-U2 #780 UI-test scenario

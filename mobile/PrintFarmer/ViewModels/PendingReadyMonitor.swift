@@ -2,6 +2,16 @@ import Foundation
 import os
 #if canImport(UserNotifications)
 import UserNotifications
+
+protocol NotificationAuthorizationRequesting: Sendable {
+    func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool
+}
+
+struct LiveNotificationAuthorizationRequester: NotificationAuthorizationRequesting {
+    func requestAuthorization(options: UNAuthorizationOptions) async throws -> Bool {
+        try await UNUserNotificationCenter.current().requestAuthorization(options: options)
+    }
+}
 #endif
 
 @MainActor @Observable
@@ -17,6 +27,13 @@ final class PendingReadyMonitor {
 
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "PendingReadyMonitor")
     private static let notificationCategory = "PENDING_READY"
+    private let notificationAuthorizationRequester: any NotificationAuthorizationRequesting
+
+    init(
+        notificationAuthorizationRequester: any NotificationAuthorizationRequesting = LiveNotificationAuthorizationRequester()
+    ) {
+        self.notificationAuthorizationRequester = notificationAuthorizationRequester
+    }
 
     func configure(
         autoPrintService: any AutoDispatchServiceProtocol,
@@ -59,9 +76,13 @@ final class PendingReadyMonitor {
     /// Request local notification permission. Call once at first launch.
     func requestNotificationPermission() async {
         #if canImport(UserNotifications)
-        let center = UNUserNotificationCenter.current()
         do {
-            let granted = try await center.requestAuthorization(options: [.alert, .badge, .sound])
+            let granted = try await notificationAuthorizationRequester.requestAuthorization(
+                options: [.alert, .badge, .sound]
+            )
+            if granted {
+                PushNotificationManager.shared.pushEnabled = true
+            }
             logger.info("Notification permission \(granted ? "granted" : "denied")")
         } catch {
             logger.error("Failed to request notification permission: \(error.localizedDescription)")
