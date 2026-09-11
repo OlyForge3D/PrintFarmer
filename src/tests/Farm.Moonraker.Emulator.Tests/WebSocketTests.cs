@@ -130,6 +130,41 @@ public sealed class WebSocketTests : IClassFixture<ReadyPrinterFactory>
     }
 
     [Fact]
+    public async Task MmuChangeTool_BroadcastsUpdatedHappyHareStateToSubscribedConnection()
+    {
+        await ResetPrinterAsync();
+        using HttpClient client = _factory.CreateClient();
+        (await client.PostAsync(
+            "/__emulator/printer/mmu",
+            TestRequests.Json("""{"mode":"HappyHare"}"""))).EnsureSuccessStatusCode();
+
+        using WebSocket socket = await ConnectAsync();
+        await SendAsync(socket, """{"jsonrpc":"2.0","method":"printer.objects.subscribe","params":{"objects":{"mmu":null}},"id":101}""");
+        _ = await ReceiveAsync(socket);
+
+        using HttpResponseMessage response = await client.PostAsync(
+            "/printer/gcode/script",
+            TestRequests.Json("""{"script":"MMU_CHANGE_TOOL TOOL=1"}"""));
+        response.EnsureSuccessStatusCode();
+
+        using JsonDocument notification = await ReceiveAsync(socket);
+        notification.RootElement.GetProperty("method").GetString().Should().Be("notify_status_update");
+        JsonElement status = notification.RootElement.GetProperty("params")[0];
+        status.TryGetProperty("mmu", out JsonElement mmu).Should()
+            .BeTrue($"notification payload: {notification.RootElement}");
+        mmu.GetProperty("tool").GetInt32().Should().Be(1);
+        mmu.GetProperty("gate").GetInt32().Should().Be(1);
+
+        using HttpResponseMessage query = await client.GetAsync("/printer/objects/query?mmu");
+        query.EnsureSuccessStatusCode();
+        using JsonDocument snapshot = JsonDocument.Parse(await query.Content.ReadAsStringAsync());
+        snapshot.RootElement.GetProperty("result").GetProperty("status").GetProperty("mmu")
+            .GetProperty("filament").GetString().Should().Be("Loaded");
+
+        await client.PostAsync("/__emulator/printer/reset", content: null);
+    }
+
+    [Fact]
     public async Task TimeReset_DuringActivePrint_BroadcastsZeroTelemetryImmediately()
     {
         await ResetPrinterAsync();

@@ -41,7 +41,8 @@ test.describe('Printer MMU controls — Moonraker', () => {
     await control.reset('ready');
   });
 
-  test('Happy Hare gates render and load/eject through the real backend', async ({ page }) => {
+  test('Happy Hare gates render and load/eject through the real backend', async ({ page, request }) => {
+    const control = createMoonrakerControl(request);
     const sidebar = await openCollapsedPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.ready);
     const controls = await getMmuControls(sidebar);
 
@@ -53,8 +54,30 @@ test.describe('Printer MMU controls — Moonraker', () => {
     await expect(petgGate).toHaveAttribute('aria-pressed', 'true');
     await expect(controls.getByText('#102', { exact: true })).toBeVisible();
 
+    const loadResponseDiagnosticPromise = page.waitForResponse((response) =>
+      response.request().method() === 'POST' &&
+      response.url().includes('/mmu/change-tool'), { timeout: 15_000 })
+      .then(async (loadResponse) => `MMU change-tool response: ${JSON.stringify({
+        method: loadResponse.request().method(),
+        url: loadResponse.url(),
+        status: loadResponse.status(),
+        body: await loadResponse.text(),
+      })}`)
+      .catch((error) =>
+        `MMU change-tool response wait failed: ${error instanceof Error ? error.message : String(error)}`);
     await controls.getByRole('button', { name: 'Load', exact: true }).click();
-    await expect(controls.getByText('T1', { exact: true })).toBeVisible({ timeout: 15_000 });
+    const loadResponseDiagnostic = await loadResponseDiagnosticPromise;
+
+    try {
+      await expect(controls.getByText('T1', { exact: true })).toBeVisible({ timeout: 15_000 });
+    } catch (error) {
+      const emulatorState = await control.getPrinters('ready');
+      throw new Error(
+        `${error}\n` +
+        `${loadResponseDiagnostic}\n` +
+        `Authoritative emulator state: ${JSON.stringify(emulatorState)}`
+      );
+    }
 
     await controls.getByRole('button', { name: 'Eject', exact: true }).click();
     await expect(controls.getByText('T1', { exact: true })).toHaveCount(0, { timeout: 15_000 });
