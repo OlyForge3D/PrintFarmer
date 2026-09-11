@@ -237,8 +237,23 @@ NFC and spool assignment/Eject utilities remain available under their existing g
 The typed networking prerequisite for Essential controls is implemented in
 `PrinterServiceProtocol` and `PrinterService`, together with safety corrections
 to the existing Preheat and Home controls and a visible capability-read retry.
-The new absolute-move, extrusion, motor-release and calibration UI is delivered
-separately. All paths below are relative to `/api/printers/{printerId}`.
+Controls includes absolute movement, motor release, guarded material controls
+and an inline calibration review. Availability is limited by the safety
+evidence described below. All paths below are relative to `/api/printers/{printerId}`.
+
+Controls follows the owner-selected **Essential concept 1** (#2589/#2593):
+paired measured/target readings above one **Heat** group, side-by-side target
+inputs, **Set targets**, a compact PLA/PETG/ABS row and **Cool down**.
+Blank inputs leave that heater unchanged; zero turns it off. One guarded
+request applies entered targets only after every value passes validation.
+**Move & home** combines directional XY, independent Z and compact home actions;
+absolute movement is disclosed. Phone reads Heat / Move / Filament; iPad places
+thermal/material work beside movement. Accessibility sizes stack without
+discarding drafts. Runtime safety is real server evidence, never prototype data.
+The recovered prototype is the visual target, including its divided temperature
+surface, compact bordered controls, ruled motion rows, paired motor/calibration
+entries and 1.1:1 iPad columns. The compact assignment shortcut reuses the existing
+picker; **Details & safety** retains Clear/NFC, inventory details and safety reads.
 
 | Native method | POST route | Request / response |
 | --- | --- | --- |
@@ -308,14 +323,47 @@ Current implementation evidence is deliberately narrower than legacy flags:
 | SDCP / unknown | Database-only Z-offset; no inferred physical-command support. |
 
 These flags also require the concrete typed backend clients; permission and
-runtime readiness remain separate. Movement is currently unavailable: the
-Moonraker implementation combines mode and move on one G-code line, other
-absolute-move implementations are stubs, and relative routes omit credentials
-required by some backends. Firmware Z-offset persistence is not proven by
+runtime readiness remain separate. Moonraker now discovers absolute-movement
+geometry and uses separate mode/move commands; safe dispatch still requires
+verified clearance and fresh homing/frame telemetry. Other unsupported routes
+remain disabled. Firmware Z-offset persistence is not proven by
 `SET_GCODE_OFFSET` / `SAVE_CONFIG` or generic `M851` / `M500` transport.
 Physical-filament macros are not enabled without installed per-printer macro
 evidence. These prerequisites are recorded in #2597 / #2593; the typed native
 methods do not invent support or silently issue substitute commands.
+
+### Physical Material and Calibration Safety
+
+Controls now shows separate **Extrude / Retract** and **Load / Unload / Change
+filament** actions. These are physical printer requests, not Assign/Change
+spool or Clear assignment. Existing NFC and combined Eject remain unchanged.
+Physical requests are printer-level: no MMU lane or tool is selected. A
+successful response means the request was accepted; follow printer prompts
+and verify completion yourself.
+
+Extrusion offers signed 10/25/50/100 mm and 1/5/10 mm/s, converted once to the
+API's mm/min. It becomes available when shared `verifiedSafety` discovery proves
+a material-safe minimum and fresh `safetyTelemetry` proves the measured hotend
+meets it. Load/Unload/Change require the same guard plus verified individual
+operation support. A hot target, preset, assigned spool or catalog maximum cannot
+override it. **Refresh safety checks** reads evidence without retrying a command.
+Current Moonraker discovery proves installed macros but deliberately leaves the
+material-safe minimum Unknown; those hardware exclusions remain visible.
+
+**Review calibration** opens Introduction/Home/Position/Adjust/Review-Save/Done.
+With verified support, geometry and clearance, the flow waits for fresh homing,
+lifts before lateral positioning, and adjusts by 0.01/0.05/0.1 mm (negative is
+closer) within verified bounds. Firmware save uses the explicitly reviewed
+printer revision; conflicts and uncertain results never auto-retry or become Done.
+No guessed center, zero offset, paper-test height or database-only calibration is
+substituted. Current Moonraker clearance is Unknown and firmware persistence is
+Unsupported, so its calibration remains disabled with explanations even though
+the conditional native path is fully wired. Use the printer's supported procedure.
+
+Cancel calibration stops the workflow, not an already-issued printer command.
+Emergency Stop remains separate and confirmed. After interruption or an
+uncertain response, inspect the original printer before another action.
+See the [guarded controls design and availability matrix](docs/design/printer-controls-section.md#guarded-physical-material-and-calibration-2599).
 
 ### Advanced Printer Controls
 

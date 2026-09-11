@@ -9,28 +9,102 @@ final class UIWaitBudget {
     private let deadline: TimeInterval
     private(set) var lastOperation = "none"
 
-    init(timeout: TimeInterval, now: @escaping () -> TimeInterval = {
+    init(timeout: TimeInterval, hardDeadline: TimeInterval? = nil, now: @escaping () -> TimeInterval = {
         ProcessInfo.processInfo.systemUptime
     }) {
         self.now = now
         started = now()
-        deadline = started + max(0, timeout)
+        deadline = min(started + max(0, timeout), hardDeadline ?? .infinity)
     }
 
     var remaining: TimeInterval { max(0, deadline - now()) }
+    func child(timeout: TimeInterval) -> UIWaitBudget {
+        UIWaitBudget(timeout: timeout, hardDeadline: deadline, now: now)
+    }
     var diagnostic: String {
         "elapsed=\(now() - started)s; last operation=\(lastOperation); remaining=\(remaining)s"
     }
 
-    func perform<T>(_ operation: String, _ body: () -> T) -> T? {
+    func perform<T>(_ operation: String, _ body: () throws -> T) rethrows -> T? {
         guard remaining > 0 else { return nil }
         lastOperation = operation
-        let result = body()
+        let result = try body()
         return remaining > 0 ? result : nil
     }
 
     func exists(_ element: XCUIElement, named identifier: String) -> Bool {
         perform("exists: \(identifier)") { element.exists } == true
+    }
+
+    private(set) var lastShellObservation = "not observed"
+
+    func observeShell(
+        observeInterruption: () throws -> ShellNode?,
+        observeApplication: () throws -> ShellObservation
+    ) rethrows -> ShellObservation {
+        // Login's password prompt is a separate accessibility root. Check it
+        // before resolving or revealing navigation behind that interruption.
+        guard let interruption = try perform("navigation interruption", observeInterruption) else {
+            return ShellObservation(ShellNode(.application))
+        }
+        if let interruption {
+            return ShellObservation(ShellNode(
+                .application, frame: interruption.frame, children: [interruption]
+            ))
+        }
+        return try perform("application shell snapshot", observeApplication)
+            ?? ShellObservation(ShellNode(.application))
+    }
+
+    func waitForShell<T>(
+        observe: () throws -> ShellObservation,
+        resolve: (ShellObservation) -> T?,
+        reveal: (ShellNode) -> Bool,
+        leadingEdge: (ShellNode) -> Bool,
+        dismissInterruption: (ShellNode) -> Bool = { _ in false },
+        retryUnchangedInterruption: Bool = false,
+        pause: (() -> Void)? = nil
+    ) rethrows -> T? {
+        var revealedAt: TimeInterval?
+        var usedLeadingEdge = false
+        var dismissedAlert: ShellNode?
+        var retriedInterruptionDismissal = false
+        while remaining > 0 {
+            guard let observation = try perform("shell snapshot", observe) else { return nil }
+            lastShellObservation = observation.diagnostic
+            if let result = perform("resolve observed shell", { resolve(observation) }) ?? nil {
+                return result
+            }
+            if let alert = observation.blockingAlert {
+                if let previous = dismissedAlert {
+                    guard alert.identifier == previous.identifier, alert.label == previous.label,
+                          alert.frame == previous.frame else { return nil }
+                }
+                if dismissedAlert == nil || (retryUnchangedInterruption && !retriedInterruptionDismissal) {
+                    retriedInterruptionDismissal = dismissedAlert != nil
+                    dismissedAlert = alert
+                    guard perform("dismiss observed alert: \(alert.label)", {
+                        dismissInterruption(alert)
+                    }) == true else { return nil }
+                }
+            } else if case .collapsed(let toggle) = observation.state {
+                if revealedAt == nil {
+                    if perform("reveal observed sidebar", { reveal(toggle) }) == true {
+                        revealedAt = now()
+                    }
+                } else if toggle.label == "Show Sidebar",
+                          now() - (revealedAt ?? now()) >= 1, !usedLeadingEdge {
+                    // A second observation must still advertise Show Sidebar.
+                    // Never toggle a now-visible sidebar closed.
+                    usedLeadingEdge = true
+                    _ = perform("reveal observed sidebar from edge", { leadingEdge(toggle) })
+                }
+            }
+            if remaining > 0 {
+                if let pause { pause() } else { self.pause() }
+            }
+        }
+        return nil
     }
 
     func waitFor(
@@ -54,8 +128,813 @@ final class UIWaitBudget {
     }
 }
 
+    /// Values copied from XCTest's public snapshot API. All tree traversal below
+    /// is local: identifier misses never initiate additional accessibility queries.
+    @MainActor
+    struct ShellNode {
+        let type: XCUIElement.ElementType
+        var identifier = ""
+        var label = ""
+        var enabled = true
+        var frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        var children: [ShellNode] = []
+
+        init(
+            _ type: XCUIElement.ElementType,
+            identifier: String = "",
+            label: String = "",
+            enabled: Bool = true,
+            frame: CGRect = CGRect(x: 0, y: 0, width: 100, height: 100),
+            children: [ShellNode] = []
+        ) {
+            self.type = type
+            self.identifier = identifier
+            self.label = label
+            self.enabled = enabled
+            self.frame = frame
+            self.children = children
+        }
+
+        init(_ snapshot: any XCUIElementSnapshot) {
+            type = snapshot.elementType
+            identifier = snapshot.identifier
+            label = snapshot.label
+            enabled = snapshot.isEnabled
+            frame = snapshot.frame
+            children = snapshot.children.map(ShellNode.init)
+        }
+
+        var descendants: [ShellNode] { children.flatMap { [$0] + $0.descendants } }
+
+        func dismissalButton(allowedTitles: [String: String]) -> ShellNode? {
+            guard type == .alert,
+                  let buttonTitle = allowedTitles[label] ?? allowedTitles[identifier] else { return nil }
+            return descendants.first {
+                $0.type == .button && $0.enabled && $0.label == buttonTitle
+                    && !$0.frame.isEmpty && $0.frame.intersects(frame)
+            }
+        }
+
+        var liveIdentityPredicate: NSPredicate {
+            // Badge counts can change after capture; a stable ID owns identity.
+            identifier.isEmpty
+                ? NSPredicate(format: "elementType == %lu AND identifier == '' AND label == %@",
+                              type.rawValue, label)
+                : NSPredicate(format: "elementType == %lu AND identifier == %@",
+                              type.rawValue, identifier)
+        }
+
+        func liveIdentityPredicate(allowingPromotionTo expectedIdentifier: String?) -> NSPredicate {
+            guard identifier.isEmpty, let expectedIdentifier else { return liveIdentityPredicate }
+            // SwiftUI can attach the stable ID after the initial tab snapshot.
+            return NSPredicate(
+                format: "elementType == %lu AND (identifier == %@ OR (identifier == '' AND label == %@))",
+                type.rawValue, expectedIdentifier, label
+            )
+        }
+    }
+
+    @MainActor
+    struct ShellObservation {
+        enum State {
+            case notReady
+            case compact([ShellNode])
+            case sidebar([ShellNode])
+            case collapsed(ShellNode)
+        }
+
+        struct Destination {
+            let node: ShellNode
+            let surface: RenderedShellRoot.Surface
+            var titleFallback = false
+            var promotionIdentifier: String?
+        }
+
+        let state: State
+        let blockingAlert: ShellNode?
+        init(_ root: ShellNode) {
+            let visible = root.descendants.filter {
+                !$0.frame.isEmpty && $0.frame.intersects(root.frame)
+            }
+            blockingAlert = visible.first { $0.type == .alert }
+            if blockingAlert != nil || visible.contains(where: {
+                $0.identifier == "launchSplash" || $0.identifier == "navigation.shellLoading"
+            }) {
+                state = .notReady
+            } else if let tabBar = visible.first(where: { $0.type == .tabBar }) {
+                let nodes = tabBar.descendants.filter {
+                    !$0.frame.isEmpty && $0.frame.intersects(tabBar.frame)
+                        && $0.frame.intersects(root.frame)
+                }
+                state = nodes.isEmpty ? .notReady : .compact(nodes)
+            } else if visible.contains(where: {
+                $0.type == .navigationBar && $0.identifier == "PrintFarmer"
+            }) {
+                let buttons = visible.filter {
+                    $0.type == .button && $0.identifier.hasPrefix("sidebar.")
+                }
+                state = buttons.isEmpty ? .notReady : .sidebar(buttons)
+            } else if let toggle = visible.filter({ $0.type == .navigationBar })
+                .flatMap(\.descendants).first(where: {
+                    $0.type == .button && $0.enabled
+                        && ["Sidebar", "Toggle Sidebar", "Show Sidebar"].contains($0.label)
+                        && !$0.frame.isEmpty && $0.frame.intersects(root.frame)
+                }) {
+                state = .collapsed(toggle)
+            } else {
+                state = .notReady
+            }
+        }
+
+        func destination(tab: String, sidebar: String, title: String) -> Destination? {
+            switch state {
+            case .compact(let nodes):
+                if let node = nodes.first(where: { $0.enabled && $0.type == .button && $0.identifier == tab })
+                    ?? nodes.first(where: { $0.enabled && $0.identifier == tab }) {
+                    return Destination(node: node, surface: .tabBar)
+                }
+                if let node = nodes.first(where: {
+                    $0.enabled && $0.type == .button && $0.label == title
+                        && ($0.identifier.isEmpty || $0.identifier == title)
+                }) {
+                    return Destination(
+                        node: node, surface: .tabBar, titleFallback: true,
+                        promotionIdentifier: node.identifier.isEmpty ? tab : nil
+                    )
+                }
+            case .sidebar(let nodes):
+                if let node = nodes.first(where: { $0.identifier == sidebar && $0.enabled }) {
+                    return Destination(node: node, surface: .sidebar)
+                }
+            case .notReady, .collapsed:
+                break
+            }
+            return nil
+        }
+
+        var isLaunchReady: Bool {
+            switch state {
+            case .compact(let nodes), .sidebar(let nodes):
+                nodes.contains { $0.type == .button && $0.enabled }
+            case .notReady, .collapsed:
+                false
+            }
+        }
+
+        var roots: [RenderedShellRoot] {
+            let nodes: [ShellNode]
+            let surface: RenderedShellRoot.Surface
+            switch state {
+            case .compact(let elements):
+                nodes = elements.filter { $0.type == .button }
+                surface = .tabBar
+            case .sidebar(let elements):
+                nodes = elements
+                surface = .sidebar
+            case .notReady, .collapsed:
+                return []
+            }
+
+            var identifiers = Set<String>()
+            return nodes.map {
+                RenderedShellRoot(title: $0.label, identifier: $0.identifier, surface: surface)
+            }.filter { surface == .tabBar || identifiers.insert($0.key).inserted }
+        }
+
+        var diagnostic: String {
+            if let blockingAlert { return "alert; title=\(blockingAlert.label)" }
+            return switch state {
+            case .notReady: "not ready"
+            case .collapsed(let toggle): "collapsed; toggle=\(toggle.label)"
+            case .compact: "compact; roots=\(roots.map(\.key))"
+            case .sidebar: "sidebar; roots=\(roots.map(\.key))"
+            }
+        }
+    }
+
 @MainActor
 final class UIWaitBudgetTests: XCTestCase {
+    private func passwordAlert(title: String = "Save Password?") -> ShellNode {
+        ShellNode(.alert, label: title, children: [
+            ShellNode(.button, label: "Not Now"),
+            ShellNode(.button, label: "Save")
+        ])
+    }
+
+    func testBlockingAlertPreventsResolvingNavigationBehindIt() {
+        let observation = ShellObservation(ShellNode(.application, children: [
+            ShellNode(.tabBar, children: [ShellNode(.button, identifier: "tab.attention")]),
+            passwordAlert()
+        ]))
+        XCTAssertFalse(observation.isLaunchReady)
+        XCTAssertTrue(observation.roots.isEmpty)
+        XCTAssertNil(observation.destination(tab: "tab.attention", sidebar: "sidebar.attention", title: "Attention"))
+        XCTAssertEqual(observation.blockingAlert?.label, "Save Password?")
+    }
+
+    func testAllowedAlertDismissalNeverChoosesSaveOrAnUnknownAlert() {
+        let allowed = ["Save Password?": "Not Now"]
+        XCTAssertEqual(passwordAlert().dismissalButton(allowedTitles: allowed)?.label, "Not Now")
+        XCTAssertNil(passwordAlert(title: "Allow access?").dismissalButton(allowedTitles: allowed))
+        XCTAssertNil(passwordAlert().dismissalButton(allowedTitles: [:]))
+        XCTAssertNil(ShellNode(.other, label: "Save Password?", children: [
+            ShellNode(.button, label: "Not Now")
+        ]).dismissalButton(allowedTitles: allowed))
+        XCTAssertNil(ShellNode(.alert, label: "Save Password?", children: [
+            ShellNode(.button, label: "Not Now", enabled: false),
+            ShellNode(.button, label: "Save")
+        ]).dismissalButton(allowedTitles: allowed))
+    }
+
+    func testSeparateAlertRootIsDismissedBeforeObservingOrRevealingShell() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        var operations: [String] = []
+        var dismissed = false
+        var observations = [collapsed(), sidebar()]
+        let result = budget.waitForShell(
+            observe: {
+                budget.observeShell(
+                    observeInterruption: {
+                        operations.append("alert")
+                        clock += 0.1
+                        return dismissed ? nil : self.passwordAlert()
+                    },
+                    observeApplication: {
+                        operations.append("shell")
+                        clock += 0.1
+                        return observations.removeFirst()
+                    }
+                )
+            },
+            resolve: { $0.isLaunchReady ? true : nil },
+            reveal: { _ in operations.append("reveal"); clock += 0.5; return true },
+            leadingEdge: { _ in XCTFail("No additional navigation"); return false },
+            dismissInterruption: {
+                XCTAssertEqual($0.dismissalButton(allowedTitles: ["Save Password?": "Not Now"])?.label, "Not Now")
+                operations.append("dismiss")
+                dismissed = true
+                clock += 0.5
+                return true
+            },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(result, true)
+        XCTAssertEqual(operations, ["alert", "dismiss", "alert", "shell", "reveal", "alert", "shell"])
+        XCTAssertEqual(budget.remaining, 3.1, accuracy: 0.001)
+    }
+
+    func testSeparateUnknownAlertFailsBeforeResolvingReadyNavigation() {
+        let budget = UIWaitBudget(timeout: 5)
+        let result: Bool? = budget.waitForShell(
+            observe: {
+                budget.observeShell(
+                    observeInterruption: { self.passwordAlert(title: "Allow access?") },
+                    observeApplication: {
+                        XCTFail("Do not inspect navigation behind an unknown alert")
+                        return self.sidebar()
+                    }
+                )
+            },
+            resolve: { $0.isLaunchReady ? true : nil },
+            reveal: { _ in XCTFail("No navigation"); return false },
+            leadingEdge: { _ in XCTFail("No navigation"); return false },
+            dismissInterruption: { $0.dismissalButton(allowedTitles: ["Save Password?": "Not Now"]) != nil },
+            pause: { XCTFail("Unknown interruptions fail closed") }
+        )
+        XCTAssertNil(result)
+    }
+
+    func testSeparateAlertQueryOverrunNeverStartsShellWorkEvenWhenAlertIsAbsent() {
+        for present in [false, true] {
+            var clock: TimeInterval = 0
+            let budget = UIWaitBudget(timeout: 1, now: { clock })
+            let result: Bool? = budget.waitForShell(
+                observe: {
+                    budget.observeShell(
+                        observeInterruption: { clock = 1.1; return present ? self.passwordAlert() : nil },
+                        observeApplication: { XCTFail("Expired deadline"); return self.sidebar() }
+                    )
+                },
+                resolve: { _ in XCTFail("Expired deadline"); return true },
+                reveal: { _ in XCTFail("Expired deadline"); return false },
+                leadingEdge: { _ in XCTFail("Expired deadline"); return false },
+                dismissInterruption: { _ in XCTFail("Expired deadline"); return false },
+                pause: { XCTFail("Expired deadline") }
+            )
+            XCTAssertNil(result)
+            XCTAssertEqual(budget.lastOperation, "navigation interruption")
+        }
+    }
+
+    func testLatePasswordPromptIsDismissedOnceWithinOriginalNavigationBudget() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        let alert = ShellObservation(ShellNode(.application, children: [passwordAlert()]))
+        var snapshots = [collapsed(), alert, alert, compact([ShellNode(.button, identifier: "tab.attention")])]
+        var reveals = 0
+        var dismissals = 0
+        let destination = budget.waitForShell(
+            observe: { clock += 0.1; return snapshots.removeFirst() },
+            resolve: { $0.destination(tab: "tab.attention", sidebar: "sidebar.attention", title: "Attention") },
+            reveal: { _ in reveals += 1; clock += 0.5; return true },
+            leadingEdge: { _ in XCTFail("No extra navigation"); return false },
+            dismissInterruption: { alert in
+                XCTAssertEqual(alert.dismissalButton(allowedTitles: ["Save Password?": "Not Now"])?.label, "Not Now")
+                dismissals += 1
+                clock += 0.5
+                return true
+            },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(destination?.node.identifier, "tab.attention")
+        XCTAssertEqual(reveals, 1)
+        XCTAssertEqual(dismissals, 1, "An alert still present during dismissal must not receive another tap")
+        XCTAssertEqual(budget.remaining, 3, accuracy: 0.001)
+    }
+
+    func testIdempotentDismissalRetriesOnlyTheSameStillObservedAlertOnce() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        let alert = ShellObservation(ShellNode(.application, children: [passwordAlert()]))
+        var snapshots = [alert, alert, alert, compact([ShellNode(.button, identifier: "tab.attention")])]
+        var dismissals = 0
+        let result = budget.waitForShell(
+            observe: { clock += 0.1; return snapshots.removeFirst() },
+            resolve: { $0.destination(tab: "tab.attention", sidebar: "sidebar.attention", title: "Attention") },
+            reveal: { _ in XCTFail("No extra navigation"); return false },
+            leadingEdge: { _ in XCTFail("No extra navigation"); return false },
+            dismissInterruption: {
+                XCTAssertEqual($0.dismissalButton(allowedTitles: ["Save Password?": "Not Now"])?.label, "Not Now")
+                dismissals += 1
+                clock += 0.5
+                return true
+            },
+            retryUnchangedInterruption: true,
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(result?.node.identifier, "tab.attention")
+        XCTAssertEqual(dismissals, 2, "A third tap must never be requested")
+        XCTAssertEqual(budget.remaining, 3, accuracy: 0.001)
+    }
+
+    func testChangedAlertCannotAuthorizeARepeatedDismissal() {
+        for changedTitle in [false, true] {
+            var clock: TimeInterval = 0
+            var changed = passwordAlert(title: changedTitle ? "Allow access?" : "Save Password?")
+            if !changedTitle { changed.frame.origin.x += 1 }
+            var snapshots = [passwordAlert(), changed]
+            var dismissals = 0
+            let result: Bool? = UIWaitBudget(timeout: 5, now: { clock }).waitForShell(
+                observe: { ShellObservation(ShellNode(.application, children: [snapshots.removeFirst()])) },
+                resolve: { $0.isLaunchReady ? true : nil },
+                reveal: { _ in XCTFail("No extra navigation"); return false },
+                leadingEdge: { _ in XCTFail("No extra navigation"); return false },
+                dismissInterruption: { _ in dismissals += 1; return true },
+                retryUnchangedInterruption: true,
+                pause: { clock += 0.2 }
+            )
+            XCTAssertNil(result)
+            XCTAssertEqual(dismissals, 1)
+        }
+    }
+
+    func testUnknownAlertAndDismissalOverrunFailWithoutMoreRemoteWork() {
+        for known in [false, true] {
+            var clock: TimeInterval = 0
+            let budget = UIWaitBudget(timeout: 1, now: { clock })
+            var snapshots = 0
+            let result: Bool? = budget.waitForShell(
+                observe: {
+                    snapshots += 1
+                    return ShellObservation(ShellNode(.application, children: [
+                        self.passwordAlert(title: known ? "Save Password?" : "Allow access?")
+                    ]))
+                },
+                resolve: { $0.isLaunchReady ? true : nil },
+                reveal: { _ in XCTFail("No navigation behind a modal"); return false },
+                leadingEdge: { _ in XCTFail("No navigation behind a modal"); return false },
+                dismissInterruption: { alert in
+                    guard alert.dismissalButton(allowedTitles: ["Save Password?": "Not Now"]) != nil else {
+                        return false
+                    }
+                    clock = 1.1
+                    return true
+                },
+                pause: { XCTFail("No renewed deadline or retry") }
+            )
+            XCTAssertNil(result)
+            XCTAssertEqual(snapshots, 1)
+        }
+    }
+
+    func testLaunchReadinessAndActionShareAnAbsoluteTestDeadline() {
+        var clock: TimeInterval = 0
+        let testBudget = UIWaitBudget(timeout: 10, now: { clock })
+        clock = 6 // Launch consumed the same overall test allowance.
+        var snapshots = [
+            ShellObservation(ShellNode(.application)),
+            collapsed(),
+            sidebar()
+        ]
+        var reveals = 0
+        let ready = testBudget.waitForShell(
+            observe: { clock += 0.5; return snapshots.removeFirst() },
+            resolve: { $0.isLaunchReady ? true : nil },
+            reveal: { _ in reveals += 1; clock += 0.5; return true },
+            leadingEdge: { _ in XCTFail("No additional chrome action is needed"); return false },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(ready, true)
+        XCTAssertEqual(reveals, 1)
+        let action = testBudget.child(timeout: 5)
+        XCTAssertEqual(action.remaining, 1.6, accuracy: 0.001)
+        XCTAssertNil(action.perform("overrun") { clock = 10.1; return true })
+        XCTAssertEqual(testBudget.child(timeout: 5).remaining, 0,
+                       "Starting another action must never renew the overall allowance")
+    }
+
+    func testNavigationReadinessIncludesSidebarRevealBeforeDestinationBudgetStarts() {
+        var clock: TimeInterval = 0
+        let testBudget = UIWaitBudget(timeout: 60, now: { clock })
+        clock = 46
+        var snapshots = [collapsed(), sidebar()]
+        var operations: [String] = []
+        let ready = testBudget.waitForShell(
+            observe: {
+                operations.append("snapshot")
+                clock += 0.3
+                return snapshots.removeFirst()
+            },
+            resolve: { $0.isLaunchReady ? true : nil },
+            reveal: {
+                XCTAssertEqual($0.label, "Show Sidebar")
+                operations.append("reveal")
+                clock += 5.1
+                return true
+            },
+            leadingEdge: { _ in XCTFail("No additional chrome action is needed"); return false },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(ready, true)
+        XCTAssertEqual(operations, ["snapshot", "reveal", "snapshot"],
+                       "Setup reveals navigation chrome without selecting a destination")
+        XCTAssertEqual(testBudget.child(timeout: 5).remaining, 5)
+        XCTAssertEqual(testBudget.remaining, 8.1, accuracy: 0.001)
+    }
+
+    func testReadyLaunchDoesNotExtendAnActionBudgetOrAcceptUnreadyChrome() {
+        var clock: TimeInterval = 0
+        let testBudget = UIWaitBudget(timeout: 60, now: { clock })
+        clock = 7
+        let action = testBudget.child(timeout: 5)
+        XCTAssertEqual(action.remaining, 5)
+        XCTAssertFalse(compact([]).isLaunchReady)
+        XCTAssertFalse(collapsed().isLaunchReady)
+        XCTAssertFalse(compact([ShellNode(.button, label: "Farm", enabled: false)]).isLaunchReady)
+        XCTAssertFalse(ShellObservation(ShellNode(.application, children: [
+            ShellNode(.other, identifier: "navigation.shellLoading"),
+            ShellNode(.tabBar, children: [ShellNode(.button, identifier: "tab.farm")])
+        ])).isLaunchReady)
+        XCTAssertTrue(compact([ShellNode(.button, identifier: "tab.farm")]).isLaunchReady)
+        clock = 12
+        XCTAssertNil(action.perform("expired action") { XCTFail("No renewed wait"); return true })
+    }
+
+    private func compact(_ nodes: [ShellNode]) -> ShellObservation {
+        ShellObservation(ShellNode(.application, children: [
+            ShellNode(.tabBar, children: nodes)
+        ]))
+    }
+
+    private func sidebar() -> ShellObservation {
+        ShellObservation(ShellNode(.application, children: [
+            ShellNode(.navigationBar, identifier: "PrintFarmer"),
+            ShellNode(.button, identifier: "sidebar.overview", label: "Overview")
+        ]))
+    }
+
+    private func collapsed() -> ShellObservation {
+        ShellObservation(ShellNode(.application, children: [
+            ShellNode(.navigationBar, children: [
+                ShellNode(.button, label: "Show Sidebar")
+            ])
+        ]))
+    }
+
+    func testLoadingThenEmptyCompactRootThenDestinationUsesOnlySnapshots() {
+        var clock: TimeInterval = 0
+        var operations: [String] = []
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        var observations = [
+            ShellObservation(ShellNode(.application, children: [
+                ShellNode(.other, identifier: "navigation.shellLoading")
+            ])),
+            compact([]),
+            compact([ShellNode(.button, identifier: "tab.farm", label: "Farm")])
+        ]
+        let destination = budget.waitForShell(
+            observe: {
+                operations.append("snapshot")
+                clock += 0.5
+                return observations.removeFirst()
+            },
+            resolve: { $0.destination(tab: "tab.farm", sidebar: "sidebar.farm", title: "Farm") },
+            reveal: { _ in
+                operations.append("absent sidebar toggle")
+                clock += 6
+                return false
+            },
+            leadingEdge: { _ in XCTFail("No collapsed sidebar was observed"); return false },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(destination?.node.identifier, "tab.farm")
+        XCTAssertEqual(destination?.surface, .tabBar)
+        XCTAssertEqual(operations, ["snapshot", "snapshot", "snapshot"])
+        XCTAssertEqual(budget.remaining, 3.1, accuracy: 0.001)
+    }
+
+    func testLoadingThenCollapsedThenVisibleSidebarRequiresPositiveToggleEvidence() {
+        var clock: TimeInterval = 0
+        var reveals: [String] = []
+        var observations = [ShellObservation(ShellNode(.application)), collapsed(), sidebar()]
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        let destination = budget.waitForShell(
+            observe: { clock += 0.5; return observations.removeFirst() },
+            resolve: {
+                $0.destination(tab: "tab.oversight", sidebar: "sidebar.overview", title: "Oversight")
+            },
+            reveal: { reveals.append($0.label); return true },
+            leadingEdge: { _ in XCTFail("The sidebar opened after its toggle"); return false },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(destination?.node.identifier, "sidebar.overview")
+        XCTAssertEqual(destination?.surface, .sidebar)
+        XCTAssertEqual(reveals, ["Show Sidebar"])
+    }
+
+    func testSnapshotOverrunDoesNotResolveRevealOrPause() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 2, now: { clock })
+        let result: Bool? = budget.waitForShell(
+            observe: { clock = 3; return self.collapsed() },
+            resolve: { _ in XCTFail("Expired snapshot"); return true },
+            reveal: { _ in XCTFail("Expired snapshot"); return true },
+            leadingEdge: { _ in XCTFail("Expired snapshot"); return true },
+            pause: { XCTFail("Expired deadline") }
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(budget.lastOperation, "shell snapshot")
+        XCTAssertEqual(budget.lastShellObservation, "not observed")
+    }
+
+    func testTitleFallbackAndIdentifierPriorityAreResolvedInTheSameTree() {
+        let observation = compact([
+            ShellNode(.button, label: "Farm"),
+            ShellNode(.button, identifier: "tab.farm", label: "Farm"),
+            ShellNode(.button, label: "Oversight")
+        ])
+        let farm = observation.destination(tab: "tab.farm", sidebar: "sidebar.farm", title: "Farm")
+        XCTAssertEqual(farm?.node.identifier, "tab.farm")
+        XCTAssertEqual(farm?.titleFallback, false)
+        let oversight = observation.destination(
+            tab: "tab.oversight", sidebar: "sidebar.overview", title: "Oversight"
+        )
+        XCTAssertEqual(oversight?.node.label, "Oversight")
+        XCTAssertEqual(oversight?.surface, .tabBar)
+        XCTAssertEqual(oversight?.titleFallback, true)
+    }
+
+    func testAnyTypeIdentifierIsPreservedAndWrongIdentifiedTitleIsNotAFallback() {
+        let observation = compact([
+            ShellNode(.other, identifier: "tab.farm", label: "Farm"),
+            ShellNode(.button, identifier: "tab.jobs", label: "Oversight")
+        ])
+        XCTAssertEqual(observation.destination(
+            tab: "tab.farm", sidebar: "sidebar.farm", title: "Farm"
+        )?.node.type, .other)
+        XCTAssertNil(observation.destination(
+            tab: "tab.oversight", sidebar: "sidebar.overview", title: "Oversight"
+        ))
+    }
+
+    func testLiveIdentitySurvivesBadgeLabelMutationButRejectsWrongIDOrType() {
+        let captured = ShellNode(.button, identifier: "sidebar.farm", label: "Farm, 3 ready")
+        var live: [String: Any] = [
+            "elementType": XCUIElement.ElementType.button.rawValue,
+            "identifier": "sidebar.farm",
+            "label": "Farm, 3 ready"
+        ]
+        XCTAssertTrue(captured.liveIdentityPredicate.evaluate(with: live))
+        live["label"] = "Farm, 4 ready"
+        XCTAssertTrue(captured.liveIdentityPredicate.evaluate(with: live))
+        live["identifier"] = "sidebar.tasks"
+        XCTAssertFalse(captured.liveIdentityPredicate.evaluate(with: live))
+        live["identifier"] = "sidebar.farm"
+        live["elementType"] = XCUIElement.ElementType.staticText.rawValue
+        XCTAssertFalse(captured.liveIdentityPredicate.evaluate(with: live))
+    }
+
+    func testIdentifierlessLiveFallbackStillRequiresItsCapturedTitleAndType() {
+        let captured = ShellNode(.button, label: "Farm")
+        var live: [String: Any] = [
+            "elementType": XCUIElement.ElementType.button.rawValue,
+            "identifier": "",
+            "label": "Farm"
+        ]
+        XCTAssertTrue(captured.liveIdentityPredicate.evaluate(with: live))
+        live["label"] = "Tasks"
+        XCTAssertFalse(captured.liveIdentityPredicate.evaluate(with: live))
+        live["label"] = "Farm"
+        live["identifier"] = "tab.tasks"
+        XCTAssertFalse(captured.liveIdentityPredicate.evaluate(with: live))
+        live["identifier"] = ""
+        live["elementType"] = XCUIElement.ElementType.staticText.rawValue
+        XCTAssertFalse(captured.liveIdentityPredicate.evaluate(with: live))
+    }
+
+    func testIdentifierlessDestinationPromotesOnlyToItsExpectedIDWithoutBindingOldLabel() throws {
+        let destination = try XCTUnwrap(compact([
+            ShellNode(.button, label: "Tasks")
+        ]).destination(tab: "tab.tasks", sidebar: "sidebar.tasks", title: "Tasks"))
+        XCTAssertEqual(destination.promotionIdentifier, "tab.tasks")
+        let predicate = destination.node.liveIdentityPredicate(
+            allowingPromotionTo: destination.promotionIdentifier
+        )
+        var live: [String: Any] = [
+            "elementType": XCUIElement.ElementType.button.rawValue,
+            "identifier": "", "label": "Tasks"
+        ]
+        XCTAssertTrue(predicate.evaluate(with: live))
+        live["identifier"] = "tab.tasks"
+        live["label"] = "Tasks, 4 pending"
+        XCTAssertTrue(predicate.evaluate(with: live))
+        live["identifier"] = "tab.inventory"
+        live["label"] = "Tasks"
+        XCTAssertFalse(predicate.evaluate(with: live))
+        live["identifier"] = ""
+        live["label"] = "Inventory"
+        XCTAssertFalse(predicate.evaluate(with: live))
+        live["identifier"] = "tab.tasks"
+        live["elementType"] = XCUIElement.ElementType.staticText.rawValue
+        XCTAssertFalse(predicate.evaluate(with: live))
+    }
+
+    func testIdentifiedDestinationNeverFallsBackOrChangesItsStableIdentity() {
+        let node = ShellNode(.button, identifier: "tab.tasks", label: "Tasks")
+        let predicate = node.liveIdentityPredicate(allowingPromotionTo: "tab.inventory")
+        XCTAssertTrue(predicate.evaluate(with: [
+            "elementType": XCUIElement.ElementType.button.rawValue,
+            "identifier": "tab.tasks", "label": "Tasks, changed badge"
+        ]))
+        for identifier in ["", "tab.inventory"] {
+            XCTAssertFalse(predicate.evaluate(with: [
+                "elementType": XCUIElement.ElementType.button.rawValue,
+                "identifier": identifier, "label": "Tasks"
+            ]))
+        }
+    }
+
+    func testOffscreenDisabledAndUnscopedNodesDoNotAuthorizeNavigation() {
+        let observation = compact([
+            ShellNode(.button, identifier: "tab.farm", label: "Farm", enabled: false),
+            ShellNode(.button, identifier: "tab.oversight", label: "Oversight",
+                      frame: CGRect(x: 1000, y: 0, width: 44, height: 44))
+        ])
+        XCTAssertNil(observation.destination(tab: "tab.farm", sidebar: "sidebar.farm", title: "Farm"))
+        XCTAssertNil(observation.destination(
+            tab: "tab.oversight", sidebar: "sidebar.overview", title: "Oversight"
+        ))
+        let unscoped = ShellObservation(ShellNode(.application, children: [
+            ShellNode(.button, label: "Show Sidebar"),
+            ShellNode(.button, identifier: "tab.farm", label: "Farm")
+        ]))
+        if case .notReady = unscoped.state {} else { XCTFail("No navigation surface exists") }
+    }
+
+    func testLoadingMarkerOverridesUnreadyNavigationChrome() {
+        let observation = ShellObservation(ShellNode(.application, children: [
+            ShellNode(.other, identifier: "launchSplash"),
+            ShellNode(.tabBar, children: [ShellNode(.button, identifier: "tab.farm", label: "Farm")]),
+            ShellNode(.navigationBar, children: [ShellNode(.button, label: "Show Sidebar")])
+        ]))
+        XCTAssertNil(observation.destination(tab: "tab.farm", sidebar: "sidebar.farm", title: "Farm"))
+        if case .notReady = observation.state {} else { XCTFail("Startup is not a ready shell") }
+    }
+
+    func testRootEnumerationPreservesDisabledAndDuplicateCompactRootsForAssertions() {
+        let farm = ShellNode(.button, identifier: "tab.farm", label: "Farm")
+        let observation = compact([
+            farm, farm,
+            ShellNode(.button, identifier: "tab.tasks", label: "Tasks", enabled: false)
+        ])
+        XCTAssertEqual(observation.roots.map(\.identifier), ["tab.farm", "tab.farm", "tab.tasks"])
+        XCTAssertNil(observation.destination(tab: "tab.tasks", sidebar: "sidebar.tasks", title: "Tasks"))
+    }
+
+    func testNonHittableCompactDestinationWaitsWithoutProbingSidebar() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        var hitTests = 0
+        let result = budget.waitForShell(
+            observe: {
+                clock += 0.5
+                return self.compact([ShellNode(.button, identifier: "tab.farm", label: "Farm")])
+            },
+            resolve: { observation -> ShellObservation.Destination? in
+                guard let destination = observation.destination(
+                    tab: "tab.farm", sidebar: "sidebar.farm", title: "Farm"
+                ) else { return nil }
+                let hittable = budget.perform("live hit test") { hitTests += 1; return hitTests == 2 }
+                return hittable == true ? destination : nil
+            },
+            reveal: { _ in XCTFail("An obstructed compact destination is not a sidebar"); return false },
+            leadingEdge: { _ in XCTFail("No sidebar gesture"); return false },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(hitTests, 2)
+        XCTAssertEqual(result?.node.identifier, "tab.farm")
+        XCTAssertEqual(budget.remaining, 3.8, accuracy: 0.001)
+    }
+
+    func testTitleFallbackDoesNotSpendBudgetOnMissingIdentifierQueries() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        var observations = 0
+        let destination = budget.waitForShell(
+            observe: {
+                observations += 1
+                clock += 4
+                return self.compact([ShellNode(.button, label: "Oversight")])
+            },
+            resolve: { $0.destination(tab: "tab.oversight", sidebar: "sidebar.overview", title: "Oversight") },
+            reveal: { _ in XCTFail("No sidebar query"); return false },
+            leadingEdge: { _ in XCTFail("No gesture"); return false },
+            pause: { XCTFail("Fallback is already in the captured tree") }
+        )
+        XCTAssertEqual(observations, 1)
+        XCTAssertEqual(destination?.titleFallback, true)
+        XCTAssertEqual(budget.remaining, 1)
+    }
+
+    func testPositiveMatchStillMustPassLiveResolutionBeforeDeadline() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 2, now: { clock })
+        var reveals = 0
+        let result: Bool? = budget.waitForShell(
+            observe: { clock += 1; return self.collapsed() },
+            resolve: { _ in clock += 2; return true },
+            reveal: { _ in reveals += 1; return true },
+            leadingEdge: { _ in reveals += 1; return true },
+            pause: { XCTFail("No pause after overrun") }
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(reveals, 0)
+    }
+
+    func testRevealOverrunNeverStartsGestureOrAnotherObservation() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 2, now: { clock })
+        var observations = 0
+        let result: Bool? = budget.waitForShell(
+            observe: { observations += 1; return self.collapsed() },
+            resolve: { _ in nil },
+            reveal: { _ in clock = 3; return true },
+            leadingEdge: { _ in XCTFail("Deadline elapsed"); return true },
+            pause: { XCTFail("Deadline elapsed") }
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(observations, 1)
+    }
+
+    func testPersistentPositiveShowSidebarAllowsOnlyOneTapAndOneEdgeGesture() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        var taps = 0
+        var gestures = 0
+        let result: Bool? = budget.waitForShell(
+            observe: { clock += 0.5; return self.collapsed() },
+            resolve: { _ in nil },
+            reveal: { _ in taps += 1; return true },
+            leadingEdge: { _ in gestures += 1; return true },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(taps, 1)
+        XCTAssertEqual(gestures, 1)
+    }
+
+    func testSnapshotErrorIsPropagatedWithoutFallback() {
+        enum SnapshotFailure: Error { case unavailable }
+        let budget = UIWaitBudget(timeout: 5)
+        XCTAssertThrowsError(try budget.waitForShell(
+            observe: { throw SnapshotFailure.unavailable },
+            resolve: { _ -> Bool? in XCTFail("No snapshot"); return nil },
+            reveal: { _ in XCTFail("No snapshot"); return true },
+            leadingEdge: { _ in XCTFail("No snapshot"); return true }
+        ))
+    }
+
     func testCompositeOperationsShareOneDeadline() {
         var clock: TimeInterval = 10
         let budget = UIWaitBudget(timeout: 5, now: { clock })
@@ -134,24 +1013,37 @@ final class QueryTimeoutDiagnosticUITests: PrintFarmerUITestCase {
 class PrintFarmerUITestCase: XCTestCase {
 
     var app: XCUIApplication!
+    private var testBudget: UIWaitBudget?
 
     /// Extra launch arguments contributed by a subclass, applied before the
     /// app launches. Base tests run in the authenticated operator-shell
     /// bootstrap; override to select a different explicit launch mode.
     var additionalLaunchArguments: [String] { [] }
+    var waitsForNavigationReadiness: Bool { false }
+    var navigationAlertDismissals: [String: String] { [:] }
+    var retryUnchangedNavigationAlertDismissal: Bool { false }
 
     override func setUp() async throws {
         try await super.setUp()
         continueAfterFailure = false
+        testBudget = UIWaitBudget(timeout: executionTimeAllowance)
         app = XCUIApplication()
         app.launchEnvironment["PFARM_UI_TESTING"] = "1"
         app.launchArguments.append("--uitesting")
         app.launchArguments.append(contentsOf: additionalLaunchArguments)
         app.launch()
+        if waitsForNavigationReadiness, let testBudget {
+            let ready = waitForObservedShell(budget: testBudget) {
+                $0.isLaunchReady ? true : nil
+            }
+            XCTAssertEqual(ready, true,
+                           "Authenticated shell did not finish launching within the test allowance; \(testBudget.diagnostic)")
+        }
     }
 
     override func tearDown() async throws {
         app = nil
+        testBudget = nil
         try await super.tearDown()
     }
 
@@ -174,47 +1066,50 @@ class PrintFarmerUITestCase: XCTestCase {
         }
     }
 
+    /// Coverage facts are disclosed separately from the compact assignment summary.
+    func openPrinterFilamentDetails(printerID: String) -> XCUIElement {
+        let root = app.descendants(matching: .any)
+            .matching(identifier: "printer.detail.root.\(printerID)").firstMatch
+        XCTAssertTrue(root.waitForExistence(timeout: 10),
+                      "Navigation must reach the exact printer's detail, not a same-name sibling.")
+        let overview = root.descendants(matching: .any)
+            .matching(identifier: "printer.detail.panel.overview").firstMatch
+        XCTAssertTrue(overview.waitForExistence(timeout: 5))
+        let heading = overview.descendants(matching: .any)
+            .matching(identifier: "printer.filament.heading").firstMatch
+        XCTAssertTrue(heading.waitForExistence(timeout: 10))
+        let disclosure = overview.buttons["printer.filament.disclosure"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 5))
+        for _ in 0..<3 {
+            if disclosure.isHittable { break }
+            overview.swipeUp()
+        }
+        XCTAssertTrue(disclosure.isHittable, "Coverage remains reachable through Filament details.")
+        disclosure.tap()
+        return overview
+    }
+
     // MARK: - Adaptive shell navigation (iPhone tab bar / iPad sidebar)
+
+    // ContentView's split-view sidebar owns this navigation title; destination
+    // buttons are not surface probes because they may not exist on compact UI.
+    private var sidebarNavigationBar: XCUIElement {
+        app.navigationBars["PrintFarmer"]
+    }
 
     /// Reveal the iPad NavigationSplitView sidebar via the system-provided
     /// nav-bar toggle if it appears to be collapsed. No-op on compact width
     /// (iPhone) or when the sidebar is already visible.
     @discardableResult
     func revealSidebarIfCollapsed(timeout: TimeInterval = 3) -> Bool {
-        revealSidebarIfCollapsed(budget: UIWaitBudget(timeout: timeout), toggleWait: timeout)
-    }
-
-    private func revealSidebarIfCollapsed(budget: UIWaitBudget, toggleWait: TimeInterval) -> Bool {
-        let sidebar = app.buttons
-            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
-            .firstMatch
-        if budget.exists(sidebar, named: "sidebar.*") {
-            return true
-        }
-        let labels = ["Sidebar", "Toggle Sidebar", "Show Sidebar"]
-        let toggle = app.buttons
-            .matching(NSPredicate(format: "label IN %@", labels))
-            .firstMatch
-        guard budget.waitFor(toggle, named: "sidebar toggle", upTo: toggleWait) else {
-            return false
-        }
-        guard budget.perform("tap sidebar toggle", {
-            toggle.tap()
-            return true
-        }) == true else {
-            return false
-        }
-        if budget.waitFor(sidebar, named: "sidebar.*", upTo: min(1, budget.remaining)) {
-            return true
-        }
-
-        // On a cold iPad launch the native toggle can consume its first tap
-        // without opening. Only use the alternate gesture if it still says
-        // Show Sidebar; never blindly toggle again and close a visible sidebar.
-        guard budget.exists(app.buttons["Show Sidebar"], named: "Show Sidebar") else {
-            return false
-        }
-        return revealSidebarFromLeadingEdge(budget: budget)
+        let budget = UIWaitBudget(timeout: timeout)
+        return waitForObservedShell(budget: budget) { observation in
+            switch observation.state {
+            case .sidebar: true
+            case .compact: false
+            case .notReady, .collapsed: nil
+            }
+        } ?? false
     }
 
     @discardableResult
@@ -223,17 +1118,93 @@ class PrintFarmerUITestCase: XCTestCase {
     }
 
     private func revealSidebarFromLeadingEdge(budget: UIWaitBudget) -> Bool {
-        guard budget.perform("leading-edge sidebar gesture", {
+        guard performSidebarLeadingEdge(budget: budget) else { return false }
+        return budget.waitFor(sidebarNavigationBar, named: "sidebar navigation bar", upTo: budget.remaining)
+    }
+
+    private func performSidebarLeadingEdge(budget: UIWaitBudget) -> Bool {
+        budget.perform("leading-edge sidebar gesture", {
             let window = app.windows.firstMatch
             let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
             let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.35, dy: 0.5))
             start.press(forDuration: 0.1, thenDragTo: end)
             return true
-        }) == true else { return false }
-        let sidebar = app.buttons
-            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
-            .firstMatch
-        return budget.waitFor(sidebar, named: "sidebar.*", upTo: budget.remaining)
+        }) == true
+    }
+
+    func observedElement(
+        _ node: ShellNode, within scope: XCUIElementQuery,
+        allowingPromotionTo expectedIdentifier: String? = nil
+    ) -> XCUIElement {
+        scope.matching(node.liveIdentityPredicate(allowingPromotionTo: expectedIdentifier)).firstMatch
+    }
+
+    private func observedToggle(_ node: ShellNode) -> XCUIElement {
+        observedElement(node, within: app.navigationBars.descendants(matching: .button))
+    }
+
+    private func waitForObservedShell<T>(
+        budget: UIWaitBudget,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        resolve: (ShellObservation) -> T?
+    ) -> T? {
+        do {
+            let observeInterruption: () throws -> ShellNode? = navigationAlertDismissals.isEmpty ? { nil } : {
+                let alert = self.app.alerts.firstMatch
+                guard budget.exists(alert, named: "navigation interruption") else { return nil }
+                return try budget.perform("observed alert snapshot") {
+                    ShellNode(try alert.snapshot())
+                }
+            }
+            return try budget.waitForShell(
+                observe: {
+                    try budget.observeShell(
+                        observeInterruption: observeInterruption,
+                        observeApplication: { ShellObservation(ShellNode(try self.app.snapshot())) }
+                    )
+                },
+                resolve: resolve,
+                reveal: { node in
+                    let toggle = self.observedToggle(node)
+                    guard budget.perform("hittable observed sidebar toggle", {
+                        toggle.isHittable
+                    }) == true else { return false }
+                    return budget.perform("tap observed sidebar toggle", {
+                        toggle.tap()
+                        return true
+                    }) == true
+                },
+                leadingEdge: { node in
+                    guard budget.perform("hittable observed Show Sidebar", {
+                        self.observedToggle(node).isHittable
+                    }) == true else { return false }
+                    return self.performSidebarLeadingEdge(budget: budget)
+                },
+                dismissInterruption: { alert in
+                    guard let button = alert.dismissalButton(allowedTitles: self.navigationAlertDismissals) else {
+                        return false
+                    }
+                    let container = self.observedElement(alert, within: self.app.alerts)
+                    let dismissal = self.observedElement(button, within: container.buttons)
+                    guard budget.perform("hittable observed alert dismissal", {
+                        dismissal.isHittable
+                    }) == true else { return false }
+                    return budget.perform("tap observed alert dismissal", {
+                        dismissal.tap()
+                        return true
+                    }) == true
+                },
+                retryUnchangedInterruption: retryUnchangedNavigationAlertDismissal
+            )
+        } catch {
+            recordQueryFailure(
+                "Shell snapshot failed: \(error); \(budget.diagnostic); "
+                    + "last snapshot: \(budget.lastShellObservation)",
+                file: file, line: line
+            )
+            return nil
+        }
     }
 
     /// Adaptive locator for a shell destination using its shipped identifier.
@@ -241,8 +1212,9 @@ class PrintFarmerUITestCase: XCTestCase {
     /// otherwise the iPad `NavigationSplitView` sidebar button — revealing a
     /// collapsed sidebar via the system toggle if needed.
     ///
-    /// Gives the compact tab a brief chance to appear, then proactively
-    /// reveals a collapsed iPad sidebar before polling both surfaces.
+    /// Resolve layout and ID/title compatibility from one public snapshot.
+    /// Startup is not evidence of a collapsed sidebar; only a positively
+    /// observed toggle can initiate reveal work.
     ///
     /// - Parameters:
     ///   - tabIdentifier: The compact tab identifier (e.g. `tab.attention`).
@@ -252,52 +1224,41 @@ class PrintFarmerUITestCase: XCTestCase {
     ///   resolving another remote element or hierarchy after the deadline.
     func shellDestinationButton(
         tabIdentifier: String,
+        sidebarIdentifier: String? = nil,
         timeout: TimeInterval = 5,
         file: StaticString = #filePath,
         line: UInt = #line
     ) -> XCUIElement {
-        let budget = UIWaitBudget(timeout: timeout)
-        let tabButton = app.tabBars.buttons[tabIdentifier]
-        let tabElement = app.tabBars.descendants(matching: .any)
-            .matching(identifier: tabIdentifier)
-            .firstMatch
-        let tabLabel = app.tabBars.buttons[tabTitle(for: tabIdentifier)]
-        let sidebarIdentifier = tabIdentifier.replacingOccurrences(
+        let budget = testBudget?.child(timeout: timeout) ?? UIWaitBudget(timeout: timeout)
+        let sidebarIdentifier = sidebarIdentifier ?? tabIdentifier.replacingOccurrences(
             of: "tab.",
             with: "sidebar."
         )
-        let sidebar = app.buttons[sidebarIdentifier]
-        if budget.waitFor(tabButton, named: tabIdentifier, upTo: min(1, timeout)) {
-            return tabButton
-        }
-        if budget.exists(tabElement, named: "\(tabIdentifier) descendant") {
-            return tabElement
-        }
-        if budget.exists(tabLabel, named: "\(tabIdentifier) title fallback") {
-            recordTabIdentifierCompatibilityFallback(tabIdentifier)
-            return tabLabel
-        }
-        if budget.exists(sidebar, named: sidebarIdentifier) {
-            return sidebar
-        }
-
-        _ = revealSidebarIfCollapsed(budget: budget, toggleWait: 1)
-        while budget.remaining > 0 {
-            if budget.exists(tabButton, named: tabIdentifier) { return tabButton }
-            if budget.exists(tabElement, named: "\(tabIdentifier) descendant") { return tabElement }
-            if budget.exists(tabLabel, named: "\(tabIdentifier) title fallback") {
-                recordTabIdentifierCompatibilityFallback(tabIdentifier)
-                return tabLabel
+        if let element = waitForObservedShell(budget: budget, file: file, line: line, resolve: { observation in
+            guard let destination = observation.destination(
+                tab: tabIdentifier, sidebar: sidebarIdentifier, title: self.tabTitle(for: tabIdentifier)
+            ) else { return nil as XCUIElement? }
+            let scope = destination.surface == .tabBar
+                ? self.app.tabBars.descendants(matching: destination.node.type)
+                : self.app.descendants(matching: destination.node.type)
+            let element = self.observedElement(
+                destination.node, within: scope, allowingPromotionTo: destination.promotionIdentifier
+            )
+            guard budget.perform("hittable observed \(destination.node.identifier)", {
+                element.isHittable
+            }) == true else { return nil }
+            if destination.titleFallback {
+                self.recordTabIdentifierCompatibilityFallback(tabIdentifier)
             }
-            if budget.exists(sidebar, named: sidebarIdentifier) { return sidebar }
-            budget.pause()
-        }
+            return element
+        }) { return element }
         recordQueryFailure(
-            "Missing \(tabIdentifier) or \(sidebarIdentifier); \(budget.diagnostic)",
+            "Missing \(tabIdentifier) or \(sidebarIdentifier); \(budget.diagnostic); "
+                + "last snapshot: \(budget.lastShellObservation)",
             file: file,
             line: line
         )
-        return tabButton
+        return app.tabBars.buttons[tabIdentifier]
     }
 
     private func recordQueryFailure(
@@ -355,49 +1316,14 @@ class PrintFarmerUITestCase: XCTestCase {
 
     func renderedShellRoots(timeout: TimeInterval = 8) -> [RenderedShellRoot] {
         let budget = UIWaitBudget(timeout: timeout)
-        while budget.remaining > 0 {
-            let tabButtons = budget.perform("enumerate tab buttons") {
-                app.tabBars.firstMatch.buttons.allElementsBoundByIndex
-            } ?? []
-            if !tabButtons.isEmpty {
-                return shellRoots(tabButtons, surface: .tabBar, budget: budget)
-            }
-
-            // A cold compact shell may still be loading. A missing iPad toggle
-            // must not consume the budget before we inspect the tab bar again.
-            _ = revealSidebarIfCollapsed(budget: budget, toggleWait: 0.5)
-            let sidebarButtons = budget.perform("enumerate sidebar buttons") {
-                app.buttons
-                    .matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebar."))
-                    .allElementsBoundByIndex
-            } ?? []
-            if !sidebarButtons.isEmpty {
-                var identifiers = Set<String>()
-                return shellRoots(sidebarButtons, surface: .sidebar, budget: budget).filter {
-                    identifiers.insert($0.identifier).inserted
-                }
-            }
-            budget.pause()
-        }
-        recordQueryFailure("No rendered shell roots; \(budget.diagnostic)")
+        if let roots = waitForObservedShell(budget: budget, resolve: { observation in
+            let roots = observation.roots
+            return roots.isEmpty ? nil : roots
+        }) { return roots }
+        recordQueryFailure(
+            "No rendered shell roots; \(budget.diagnostic); last snapshot: \(budget.lastShellObservation)"
+        )
         return []
-    }
-
-    private func shellRoots(
-        _ buttons: [XCUIElement],
-        surface: RenderedShellRoot.Surface,
-        budget: UIWaitBudget
-    ) -> [RenderedShellRoot] {
-        var roots: [RenderedShellRoot] = []
-        for button in buttons {
-            guard let title = budget.perform("read root label", { button.label }),
-                  let identifier = budget.perform("read root identifier", { button.identifier }) else {
-                recordQueryFailure("Incomplete rendered shell roots; \(budget.diagnostic)")
-                return []
-            }
-            roots.append(RenderedShellRoot(title: title, identifier: identifier, surface: surface))
-        }
-        return roots
     }
 
     func selectRoot(_ root: RenderedShellRoot) {

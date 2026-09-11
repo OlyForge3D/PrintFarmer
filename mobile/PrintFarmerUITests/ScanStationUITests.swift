@@ -3,6 +3,8 @@ import XCTest
 /// UI coverage for scanner flows after the dedicated Scan tab was retired.
 @MainActor
 final class ScanStationUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
+
     private let printerID = "10000000-0001-0000-0000-000000000001"
 
     private func openDestination(_ tabIdentifier: String) {

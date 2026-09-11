@@ -21,7 +21,16 @@ final class JogSubgroupTests: XCTestCase {
         }
     }
 
-    func test_absoluteInputs_blankIsOmittedZeroIsRealAndUnitsAreUnchanged() throws {
+    func test_absoluteInputs_requireXYZPreserveZeroAndRejectEveryCustomFeedrate() throws {
+        typealias Editor = JogSubgroup.AbsolutePositionControls
+        for (x, y, z) in [("", "1", "10"), ("0", " ", "10"), ("0", "1", "")] {
+            XCTAssertThrowsError(try Editor.destination(x: x, y: y, z: z)) {
+                XCTAssertEqual($0.localizedDescription, ControlNumberInput.absoluteCoordinatesMessage)
+            }
+        }
+        XCTAssertEqual(try Editor.destination(x: "0", y: "-1.234", z: "10"),
+                       SafetyVector3Dto(x: 0, y: -1.234, z: 10))
+        XCTAssertThrowsError(try Editor.destination(x: "1.2345", y: "0", z: "10"))
         XCTAssertNil(try ControlNumberInput.optional("  "))
         XCTAssertEqual(try ControlNumberInput.optional("0"), 0)
         XCTAssertEqual(try ControlNumberInput.optional("-1.25"), -1.25)
@@ -41,6 +50,18 @@ final class JogSubgroupTests: XCTestCase {
         XCTAssertFalse(JogSubgroup.AbsolutePositionControls.isVisible(caps))
         caps.supportsAbsoluteMovement = true
         XCTAssertTrue(JogSubgroup.AbsolutePositionControls.isVisible(caps))
+        var limited = Self.xyOnlyCaps
+        limited.supportsAbsoluteMovement = true
+        XCTAssertFalse(JogSubgroup.AbsolutePositionControls.isVisible(limited))
+    }
+
+    func test_absoluteGuidance_staysNeutralUntilDestinationInputExists() {
+        typealias Editor = JogSubgroup.AbsolutePositionControls
+        XCTAssertFalse(Editor.hasDestinationInput(x: "", y: "", z: ""))
+        XCTAssertFalse(Editor.hasDestinationInput(x: " ", y: "\n", z: "\t"))
+        XCTAssertTrue(Editor.hasDestinationInput(x: "0", y: "", z: ""))
+        XCTAssertTrue(Editor.hasDestinationInput(x: "", y: "-1", z: ""))
+        XCTAssertTrue(Editor.hasDestinationInput(x: "", y: "", z: "invalid"))
     }
 
     private static let fullCaps = PrinterBackendCapabilities(

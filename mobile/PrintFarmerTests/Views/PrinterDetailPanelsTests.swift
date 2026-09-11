@@ -223,7 +223,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         _ = try XCTUnwrap(condition() ? true : nil, message)
     }
 
-    func testControlsReflowRetainsSelectedJogAxisAndDistance() async throws {
+    func testControlsReflowRetainsJogDistanceAndDirectionalZ() async throws {
         var printer = try TestData.decodePrinter(from: TestJSON.printer)
         printer.isOnline = true
         printer.state = "idle"
@@ -265,7 +265,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         func choices() throws -> (axis: UIButton, step: UIButton) {
             let controls = buttons(in: controller.view)
             return (
-                try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.jog.axis.z" }),
+                try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.jog.z.positive" }),
                 try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.jog.step.10" })
             )
         }
@@ -273,7 +273,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let initial = try choices()
         XCTAssertTrue(initial.axis.isEnabled)
         XCTAssertTrue(initial.step.isEnabled)
-        initial.axis.sendActions(for: .touchUpInside)
         initial.step.sendActions(for: .touchUpInside)
         try await settle()
 
@@ -284,7 +283,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
             controller.rootView = AnyView(content(width: width, size: size))
             try await settle()
             let current = try choices()
-            XCTAssertTrue(current.axis.isSelected, "Reflow must preserve selected Z")
+            XCTAssertTrue(current.axis.isEnabled)
+            XCTAssertEqual(current.axis.accessibilityLabel, "Move Z positive")
             XCTAssertTrue(current.step.isSelected, "Reflow must preserve selected 10 mm")
         }
         XCTAssertNil(service.moveCalledWith)

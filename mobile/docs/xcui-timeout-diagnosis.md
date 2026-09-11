@@ -118,6 +118,37 @@ Fake-clock regressions cover aggregate budget consumption, in-flight overrun,
 and zero-budget behavior. The XCTest watchdog, not this polling logic, bounds
 an operation that has already entered a blocking remote accessibility call.
 
+The authenticated Operator Shell, Feature Visibility, Printer List, Parts
+Inventory, Filament Coverage, Harvest, Scan Station, Shift Tasks (including
+Grouped), Task Action Routing and Shift Tasks Failed Refresh suites
+establish navigation readiness in setup before starting an action's existing
+five-, eight- or ten-second budget. Readiness requires a rendered,
+enabled tab/sidebar button and rejects the launch/navigation loading markers.
+A positively observed collapsed-sidebar toggle authorizes the existing bounded
+chrome reveal, but setup completes only after navigation buttons appear. Setup
+never selects a destination. Launch, chrome reveal and readiness consume the
+existing setup-time XCTest allowance; destination
+resolution is capped by that same absolute deadline and cannot renew it. XCTest
+also enforces any tighter allowance assigned in a test body. No XCTest
+allowance or action timeout is increased, and unauthenticated/loading-scenario
+suites do not opt into this precondition.
+
+Login navigation explicitly dismisses an observed "Save Password?" alert using
+"Not Now". The password prompt can arrive after the sidebar opens; snapshot-only
+polling otherwise cannot trigger XCTest's implicit interruption handler. The
+login-only allowlist checks the public alert root before taking a shell snapshot
+or revealing its sidebar. Only an existing alert is then snapshotted;
+the query stays in the target application's public accessibility context.
+An observed interruption takes precedence over navigation behind it, even when
+the application's snapshot omits the alert. Other suites do not perform that extra query.
+The same original action deadline covers dismissal and navigation. Only this
+named alert/button pair is allowed. Login permits one conditional repeat of this
+idempotent dismissal only if a new snapshot still shows the same alert identity
+and frame and its Not Now button remains enabled and hittable. Disappearance,
+changed alerts and expired budgets never authorize another tap. Other suites
+do not opt into that repeat. No credentials are saved, no physical command is
+retried, and no product behavior changes.
+
 ### After-correction evidence
 
 `diagnostic-after-2573.xcresult` again records the deliberately stalled test
@@ -275,6 +306,20 @@ added. The actual workflow shell body was exercised with a stubbed `xcodebuild`
 for ShiftTasks and OperatorShell: suite selection remains intact, only ShiftTasks
 gets the budget selector, logs are retained, and exit codes 0 and 42 propagate
 through `tee` unchanged.
+
+Subsequent CI failures in #2619 exposed the opposite cold-layout problem:
+missing compact-tab child queries spent the iPad budget before opening its
+sidebar. Destination lookup and root enumeration check the compact tab-bar root
+first, then the sidebar's own navigation bar, before querying either surface's
+children under the same monotonic deadline. Fake-clock cases protect this order
+from an absent-sidebar overrun and forbid further probes after a root overrun.
+The matrix also selects the current `OperatorFeatureVisibilityUITests` rather
+than the retired `AttentionDisabledFallbackUITests`; zero executed tests still
+fail with exit 70. Runner regressions check matrix class names against source.
+Filament XCUI assertions find the Overview panel by its identifier regardless of
+accessibility element type, open its details disclosure and retain stable
+printer/slot IDs; the disclosure label's identifier must not overwrite its
+coverage rows, summary, Clear assignment or NFC action identifiers.
 
 ### Retained artifacts
 

@@ -1046,6 +1046,12 @@ final class ServerRegistryTests: XCTestCase {
         let secondCapabilities = try await container.printerService.getBackendCapabilities(printerId: printerID)
 
         XCTAssertTrue(secondCapabilities.supportsMovement)
+        XCTAssertEqual(
+            mockAPIClient.capturedRequests
+                .filter { $0.url?.path.hasSuffix("/backend-capabilities") == true }
+                .compactMap { $0.url?.host },
+            ["one.example.com", "two.example.com"]
+        )
     }
 
     func testOldInFlightAPIResponseIsIgnoredAfterSwitch() async throws {
@@ -1196,8 +1202,8 @@ final class ServerRegistryTests: XCTestCase {
             "printerId": "\(printerID)",
             "printerName": "Test",
             "backend": "Moonraker",
-            "supportsMovement": \(supportsMovement),
-            "supportsTemperatureControl": true
+            "supportsRelativeMovement": \(supportsMovement),
+            "supportsHotendTemperature": true
         }
         """
     }

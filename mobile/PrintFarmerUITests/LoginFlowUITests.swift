@@ -16,6 +16,11 @@ import XCTest
 @MainActor
 final class LoginFlowUITests: PrintFarmerUITestCase {
 
+    override var navigationAlertDismissals: [String: String] {
+        ["Save Password?": "Not Now"]
+    }
+    override var retryUnchangedNavigationAlertDismissal: Bool { true }
+
     override var additionalLaunchArguments: [String] {
         [
             // Literal must match UITestBootstrap.unauthenticatedLaunchArgument

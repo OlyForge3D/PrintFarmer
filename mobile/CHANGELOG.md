@@ -6,6 +6,26 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Added
 
+- **Essential Controls alignment** — Restore owner-selected concept 1: one
+  Heat group with paired inputs and Set targets, compact presets and Cool down,
+  grouped directional Move & home, and compact Filament tools. Paired readings
+  stay above Heat; iPad separates thermal/material and motion work. Preserve
+  atomic validation, omitted/zero targets, lifecycle locks, native accessibility
+  and genuine safety evidence rather than illustrative prototype readiness.
+  Match the original CSS geometry and typography hierarchy: divided temperature
+  strip, bordered controls, ruled motion rows, paired motor/calibration entries,
+  and 1.1:1 iPad columns. Compact assignment delegates to the existing host;
+  native Details & safety retains Clear/NFC and truthful inventory information.
+
+- **Guarded native material controls** — Separate physical filament requests
+  from spool assignment and preserve NFC/Eject. Add signed extrusion choices,
+  explicit unavailable reasons and an interruptible inline calibration review.
+  Integrate shared verified-safety v1 discovery and timestamped telemetry for
+  conditional extrusion, physical filament operations and the full calibration
+  flow. Missing temperature, geometry, macro or firmware-persistence evidence
+  still fails closed. Reviews are one-use, movement respects verified frames and
+  clearance, and interrupted/uncertain work never becomes fake completion.
+
 - **Typed Essential control transport** — Added absolute XYZ movement, signed
   extrusion/retraction, motor release and reviewed-revision Z-offset requests,
   plus detailed filament-unload inventory responses and calibration read data.

@@ -23,6 +23,65 @@ final class PrinterServiceTests: XCTestCase {
         super.tearDown()
     }
 
+    func testSharedSafetyEnvelopesDecodeThroughActualEndpoints() async throws {
+        let date = "2026-09-09T12:00:00.1234567Z"
+        let operation = """
+        {"support":"Supported","source":"test:verified-operation","observedAtUtc":"\(date)"}
+        """
+        let unknown = """
+        {"state":"Unknown","value":null,"source":"test:unknown","observedAtUtc":"\(date)"}
+        """
+        let capabilityJSON = """
+        {
+          "printerId":"\(TestData.testUUID)","supportsExtrusion":true,
+          "verifiedSafety":{
+            "contractVersion":1,
+            "discovery":{"state":"Partial","observedAtUtc":"\(date)","sourceRevision":"0"},
+            "operations":{
+              "absoluteMovement":\(operation),"firmwareZOffsetSave":\(operation),
+              "filamentLoad":\(operation),"filamentUnload":\(operation),"filamentChange":\(operation)
+            },
+            "extrusion":{"minimumSafeMeasuredHotendTemperatureC":{
+              "state":"Verified","value":205,"source":"test:material-policy","observedAtUtc":"\(date)"
+            }},
+            "positioning":{
+              "coordinateOriginMm":\(unknown),"travelEnvelopeMm":\(unknown),"minimumClearanceZMm":\(unknown)
+            }
+          }
+        }
+        """
+        let missingScalar = """
+        {"value":null,"observedAtUtc":null,"staleAfterSeconds":15,"source":null}
+        """
+        mockAPIClient.stubResponses([
+            "backend-capabilities": (statusCode: 200, json: capabilityJSON),
+            "/status": (statusCode: 200, json: """
+            {
+              "id":"\(TestData.testUUID)","isOnline":true,"state":"ready",
+              "safetyTelemetry":{
+                "measuredHotendTemperatureC":{"value":220,"observedAtUtc":"\(date)","staleAfterSeconds":15,"source":"test:hotend"},
+                "targetHotendTemperatureC":\(missingScalar),
+                "homedAxes":{"value":["x","y","z"],"observedAtUtc":"\(date)","staleAfterSeconds":15,"source":"test:homed"},
+                "coordinateOriginOffsetMm":{"value":{"x":10,"y":20,"z":1},"observedAtUtc":"\(date)","staleAfterSeconds":15,"source":"test:frame"}
+              }
+            }
+            """)
+        ])
+        let caps = try await printerService.getBackendCapabilities(printerId: TestData.testUUID)
+        let status = try await printerService.getStatus(id: TestData.testUUID)
+        XCTAssertEqual(caps.verifiedSafety?.contractVersion, 1)
+        XCTAssertEqual(caps.verifiedSafety?.discovery.state, .partial)
+        XCTAssertEqual(caps.verifiedSafety?.operations.filamentUnload.support, .supported)
+        XCTAssertEqual(caps.verifiedSafety?.extrusion.minimumSafeMeasuredHotendTemperatureC.value, 205)
+        XCTAssertEqual(caps.verifiedSafety?.positioning.coordinateOriginMm.state, .unknown)
+        XCTAssertEqual(status.safetyTelemetry?.measuredHotendTemperatureC.value, 220)
+        XCTAssertEqual(status.safetyTelemetry?.homedAxes.value, ["x", "y", "z"])
+        XCTAssertEqual(status.safetyTelemetry?.coordinateOriginOffsetMm.value?.z, 1)
+        XCTAssertNotNil(status.safetyTelemetry?.measuredHotendTemperatureC.observedAtUtc)
+        XCTAssertEqual(mockAPIClient.capturedRequests.map(\.httpMethod), ["GET", "GET"])
+        XCTAssertEqual(mockAPIClient.capturedRequests.last?.url?.path, "/api/printers/\(TestData.testUUID)/status")
+    }
+
     // MARK: - list()
 
     func testListPrintersCallsCorrectEndpoint() async throws {
@@ -526,6 +585,8 @@ final class PrinterServiceTests: XCTestCase {
         XCTAssertFalse(caps.supportsFanControl)
     }
 
+    // Encoding-only coverage: nullable wire fields are preserved, not authorized.
+    // The Controls owner requires verified, complete XYZ before calling this service.
     func testMoveToPreservesOriginOmittedAxesAndFeedrateUnits() async throws {
         mockAPIClient.stubResponse(json: TestJSON.commandSuccess)
         let result = try await printerService.moveTo(

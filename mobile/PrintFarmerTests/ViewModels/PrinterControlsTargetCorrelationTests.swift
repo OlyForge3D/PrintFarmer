@@ -13,6 +13,107 @@ import XCTest
 @MainActor
 final class PrinterControlsTargetCorrelationTests: XCTestCase {
 
+    func test_combinedTargets_oneRequestNeedsBothExactTargetsNeverMeasurements() async throws {
+        let service = MockPrinterService()
+        var printer = try idlePrinter()
+        let model = makeViewModel(printer: printer, capabilities: Self.fullCaps, service: service)
+        await model.loadCapabilities()
+        await model.setHeaterTargets(hotend: 205, bed: 55)
+        XCTAssertEqual(service.setTemperaturesCallCount, 1)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 205)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.bed, 55)
+        let command = try XCTUnwrap(model.pendingCommand)
+        XCTAssertEqual(command.kind, .heaterTargets(hotend: 205, bed: 55))
+        printer.hotendTemp = 205
+        printer.bedTemp = 55
+        model.handlePrinterUpdate(printer)
+        XCTAssertEqual(model.pendingCommand, command)
+        printer.hotendTarget = 205
+        model.handlePrinterUpdate(printer)
+        XCTAssertEqual(model.pendingCommand, command)
+        printer.bedTarget = 55
+        model.handlePrinterUpdate(printer)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertTrue(model.commandNotice?.contains("setpoint") == true)
+    }
+
+    func test_combinedTargets_rejectsInvalidPairAtomically() async throws {
+        for (hotend, bed): (Double?, Double?) in [
+            (nil, nil), (205, 99999), (99999, 55), (.nan, 55),
+            (205, -.infinity), (205.5, 55), (205, -1)
+        ] {
+            let service = MockPrinterService()
+            let model = makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps, service: service)
+            await model.loadCapabilities()
+            await model.setHeaterTargets(hotend: hotend, bed: bed)
+            XCTAssertEqual(service.setTemperaturesCallCount, 0)
+            XCTAssertNotNil(model.lastError)
+            XCTAssertNil(model.pendingCommand)
+        }
+    }
+
+    func test_combinedTargets_unsupportedIsRejectedOmittedIsSafeAndZeroNeedsNoMaximum() async throws {
+        let service = MockPrinterService()
+        let printer = try idlePrinter()
+        let model = makeViewModel(printer: printer, capabilities: Self.noBedCaps, service: service)
+        await model.loadCapabilities()
+        await model.setHeaterTargets(hotend: 205, bed: 0)
+        XCTAssertEqual(service.setTemperaturesCallCount, 0, "Even zero cannot speculate about unsupported heaters")
+        await model.setHeaterTargets(hotend: 205, bed: nil)
+        XCTAssertEqual(service.setTemperaturesCallCount, 1)
+        XCTAssertNil(service.setTemperaturesCalledWith?.bed)
+        model.cancelPendingCommand()
+        service.detailsToReturn = nil
+        await model.loadHardware()
+        await model.setHeaterTargets(hotend: 200, bed: nil)
+        XCTAssertEqual(service.setTemperaturesCallCount, 1)
+        await model.setHeaterTargets(hotend: 0, bed: nil)
+        XCTAssertEqual(service.setTemperaturesCallCount, 2)
+        XCTAssertEqual(service.setTemperaturesCalledWith?.hotend, 0)
+        XCTAssertNil(service.setTemperaturesCalledWith?.bed)
+        model.cancelPendingCommand()
+    }
+
+    func test_combinedTargets_duplicateAndLateServerResponseDoNotReleaseNewOwner() async throws {
+        let service = MockPrinterService()
+        let printer = try idlePrinter()
+        let model = makeViewModel(printer: printer, capabilities: Self.fullCaps, service: service)
+        await model.loadCapabilities()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        service.beforeSetTemperatures = { await barrier.arriveAndWait() }
+        let request = Task { await model.setHeaterTargets(hotend: 205, bed: 55) }
+        await barrier.waitUntilArrived()
+        await model.setHeaterTargets(hotend: 220, bed: 60)
+        XCTAssertEqual(service.setTemperaturesCallCount, 1)
+        model.deactivate()
+        let newService = MockPrinterService()
+        let newModel = makeViewModel(printer: printer, capabilities: Self.fullCaps, service: newService)
+        await newModel.loadCapabilities()
+        await newModel.setHeaterTargets(hotend: 210, bed: 50)
+        let pending = try XCTUnwrap(newModel.pendingCommand)
+        barrier.release()
+        await request.value
+        XCTAssertEqual(newModel.pendingCommand, pending)
+        XCTAssertEqual(newService.setTemperaturesCallCount, 1)
+        XCTAssertFalse(model.commandNotice?.contains("Matching telemetry") == true)
+        newModel.cancelPendingCommand()
+    }
+
+    func test_combinedTargets_cachedMatchAndFailureNeverClaimHeatOrRetry() async throws {
+        let service = MockPrinterService()
+        let printer = try idlePrinter()
+        let model = makeViewModel(printer: printer, capabilities: Self.fullCaps, service: service)
+        await model.loadCapabilities()
+        await model.setHeaterTargets(hotend: printer.hotendTarget, bed: printer.bedTarget)
+        assertAcceptanceOnly(model)
+        service.errorToThrow = NetworkError.timeout
+        await model.setHeaterTargets(hotend: 205, bed: 55)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertTrue(model.lastError?.message.contains("unknown") == true)
+        XCTAssertEqual(service.setTemperaturesCallCount, 2)
+    }
+
     // MARK: - Helpers
 
     /// Builds a view model over a per-test `MockPrinterService`. The service is
@@ -124,20 +225,29 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         }
     }
 
-    func test_absoluteCachedZero_reportsAcceptanceOnlyAndPreservesOmissions() async throws {
+    func test_absoluteCachedZero_reportsAcceptanceOnlyForCompleteXYZ() async throws {
         let service = MockPrinterService()
         var base = try idlePrinter()
         base.x = 0
+        base.y = 0
+        base.z = 0
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
+        caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
+        service.statusToReturn = VerifiedSafetyFixtures.status(
+            id: base.id, position: .init(x: 0, y: 0, z: 0)
+        )
         let vm = makeViewModel(printer: base, capabilities: caps, service: service)
         await vm.loadCapabilities()
-        await vm.moveTo(x: 0, y: nil, z: nil, feedrateMmMin: nil)
+        await vm.moveTo(x: 0, y: 0, z: 0, feedrateMmMin: nil)
         assertAcceptanceOnly(vm)
         XCTAssertEqual(service.moveToCalledWith?.x, 0)
-        XCTAssertNil(service.moveToCalledWith?.y)
-        XCTAssertNil(service.moveToCalledWith?.z)
-        XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 3000)
+        XCTAssertEqual(service.moveToCalledWith?.y, 0)
+        XCTAssertEqual(service.moveToCalledWith?.z, 0)
+        XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 600)
+        XCTAssertEqual(vm.printer.x, base.x)
+        XCTAssertEqual(vm.printer.y, base.y)
+        XCTAssertEqual(vm.printer.z, base.z)
     }
 
     private func assertAcceptanceOnly(
@@ -301,26 +411,56 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         XCTAssertNil(vm.pendingCommand)
     }
 
-    func test_absolute_requiresAllRequestedAxes_notUnrelatedNoise() async throws {
+    func test_absolute_requiresMatchingXYZ_notMissingAxesOrUnrelatedNoise() async throws {
         let service = MockPrinterService()
-        let base = try idlePrinter()
+        var base = try idlePrinter()
+        base.x = 5
+        base.y = 6
+        base.z = 7
         var caps = Self.fullCaps
         caps.supportsAbsoluteMovement = true
+        caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
+        service.statusToReturn = VerifiedSafetyFixtures.status(
+            id: base.id, position: .init(x: 5, y: 6, z: 7)
+        )
         let vm = makeViewModel(printer: base, capabilities: caps, service: service)
         await vm.loadCapabilities()
-        await vm.moveTo(x: 0, y: nil, z: 2, feedrateMmMin: nil)
+        await vm.moveTo(x: 0, y: -2.5, z: 2, feedrateMmMin: nil)
+        let pending = try XCTUnwrap(vm.pendingCommand)
+        XCTAssertNil(vm.lastError)
+        XCTAssertEqual(pending.kind, .moveTo(x: 0, y: -2.5, z: 2, feedrateMmMin: 600))
+        XCTAssertEqual(service.moveToCalledWith?.x, 0)
+        XCTAssertEqual(service.moveToCalledWith?.y, -2.5)
+        XCTAssertEqual(service.moveToCalledWith?.z, 2)
+        XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 600)
+        service.moveToCalledWith = nil
+
         var update = base
-        update.y = 50
         update.hotendTarget = 0
+        update.hotendTemp = 0
+        update.bedTarget = 0
         vm.handlePrinterUpdate(update)
-        XCTAssertNotNil(vm.pendingCommand)
+        XCTAssertEqual(vm.pendingCommand, pending)
+
+        for axis in ["X", "Y", "Z"] {
+            for reported: Double? in [nil, 99] {
+                update.x = axis == "X" ? reported : 0
+                update.y = axis == "Y" ? reported : -2.5
+                update.z = axis == "Z" ? reported : 2
+                vm.handlePrinterUpdate(update)
+                XCTAssertEqual(vm.pendingCommand, pending,
+                               "Both missing and nonmatching \(axis) must leave the command pending")
+                XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true)
+            }
+        }
         update.x = 0
-        update.z = 1
-        vm.handlePrinterUpdate(update)
-        XCTAssertNotNil(vm.pendingCommand)
+        update.y = -2.5
         update.z = 2
         vm.handlePrinterUpdate(update)
         XCTAssertNil(vm.pendingCommand)
+        XCTAssertNil(vm.lastError)
+        XCTAssertEqual(vm.commandNotice, "Matching telemetry received. Check the machine before further setup.")
+        XCTAssertNil(service.moveToCalledWith, "Correlation must not retry the physical command")
     }
 
     func test_homeZ_doesNotResolveOnUnrelatedHomingOrMissingTelemetry() throws {
