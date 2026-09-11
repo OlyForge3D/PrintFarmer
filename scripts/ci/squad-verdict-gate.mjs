@@ -189,16 +189,14 @@ const apiWireModelPaths = new Set([
   'src/web/reactapp/src/types/api.ts',
 ]);
 
-// Non-prose changes are high-risk unless they are in a known presentation-only
-// area. This positive allowlist prevents a new code or asset location from
-// silently taking standard review.
-const knownLowRiskPathPrefixes = [
-  'mobile/printfarmer/views/',
-  'src/web/reactapp/src/common/components/',
-  'src/web/reactapp/src/components/',
-  'src/web/reactapp/src/features/',
-  'src/web/reactapp/src/pages/',
-];
+// Non-prose changes are high-risk unless they are explicitly vetted
+// presentation-only code or an isolated UI test. Do not allowlist a shared
+// component directory: layout and shared components can enforce access control.
+const knownLowRiskPaths = new Set([
+  'mobile/printfarmer/views/printerview.swift',
+  'src/web/reactapp/e2e/emulator/cameras.spec.ts',
+  'src/web/reactapp/src/components/printercard.tsx',
+]);
 
 // Trees that always take the full gate even when they look like prose. These
 // hold agent instructions, review policy, and CI definitions: whether a given
@@ -610,7 +608,7 @@ function isAutomationPath(path) {
 }
 
 function isKnownLowRiskPath(path) {
-  return knownLowRiskPathPrefixes.some((prefix) => path.startsWith(prefix));
+  return knownLowRiskPaths.has(path);
 }
 
 /**

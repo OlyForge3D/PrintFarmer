@@ -54,7 +54,7 @@ function comment(reviewer, verdict, sha = headSha, overrides = {}) {
 function gate(overrides = {}) {
   return evaluateGate({
     headSha,
-    changedPaths: ['src/Web/ReactApp/src/components/Button.tsx'],
+    changedPaths: ['src/Web/ReactApp/e2e/emulator/cameras.spec.ts'],
     comments: [],
     reviews: [],
     roster,
@@ -868,23 +868,25 @@ test('high-risk classification covers access control, protocol, and release auto
   }
 });
 
-test('known API wire models escalate while allowlisted presentation paths stay standard', () => {
+test('known API wire models and shared Layout escalate while vetted presentation paths stay standard', () => {
   for (const path of [
     'mobile/PrintFarmer/Models/FarmShape.swift',
     'src/Web/ReactApp/src/types/api.ts',
+    'src/Web/ReactApp/src/common/components/Layout.tsx',
   ]) {
     assert.equal(classifyChangeScope([path]).highRisk, true, path);
   }
   for (const path of [
     'mobile/PrintFarmer/Views/PrinterView.swift',
+    'src/Web/ReactApp/e2e/emulator/cameras.spec.ts',
     'src/Web/ReactApp/src/components/PrinterCard.tsx',
   ]) {
     assert.equal(classifyChangeScope([path]).highRisk, false, path);
   }
 });
 
-test('a renamed high-risk path remains high-risk when the workflow includes both paths', () => {
-  const newPath = 'src/Web/ReactApp/src/components/RenamedWidget.tsx';
+test('a standard UI path remains high-risk when the workflow includes a high-risk path', () => {
+  const newPath = 'src/Web/ReactApp/src/components/PrinterCard.tsx';
   const previousPath = 'src/api/PublicContract.cs';
   assert.equal(classifyChangeScope([newPath]).highRisk, false);
   assert.equal(classifyChangeScope([previousPath]).highRisk, true);
