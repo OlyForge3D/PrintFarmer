@@ -182,6 +182,9 @@ jobs:
       - name: Test daily development image-set policy
         run: node --test scripts/ci/tests/test-daily-development-images.mjs
 
+      - name: Test run-owned daily UI validation
+        run: node --test scripts/ci/tests/test-daily-validation.mjs
+
       - name: Test acceptance provenance preflight
         run: >-
           node --test

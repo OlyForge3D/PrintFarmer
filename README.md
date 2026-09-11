@@ -206,6 +206,10 @@ DB_PROVIDER=mysql DB_CONNECTION_STRING="Server=localhost;Database=printfarmer;Ui
 
 ## 🧪 Testing
 
+Daily immutable-image browser validation on Windows uses the
+[run-owned native WSL runner](./docs/DAILY_UI_VALIDATION_RUNNER.md), with separate
+Moonraker and extended-coverage results, durable evidence and verified teardown.
+
 All tests pass and are automated:
 
 ```bash

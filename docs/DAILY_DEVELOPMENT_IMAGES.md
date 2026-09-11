@@ -73,6 +73,13 @@ allows newly created packages to link to this repository.
 
 ## Select the Latest Successful Set
 
+For the saved Windows daily UI automation, use the
+[run-owned WSL validation runner](DAILY_UI_VALIDATION_RUNNER.md) instead of
+repeating the manual commands below. It selects this same atomic manifest once,
+persists provenance/secrets, isolates concurrent deployments, runs both browser
+phases and verifies cleanup. The manual examples are for a dedicated environment,
+not concurrent daily/exploratory automation.
+
 Run these commands from the repository root. They deliberately select a successful
 run on `development`, then download the artifact from that exact run:
 

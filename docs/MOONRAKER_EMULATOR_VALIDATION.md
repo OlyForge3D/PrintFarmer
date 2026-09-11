@@ -273,6 +273,11 @@ curl -X POST http://127.0.0.1:17125/__emulator/rules \
 
 ## Running printer-facing E2E coverage
 
+The [daily UI runner](DAILY_UI_VALIDATION_RUNNER.md) automates this setup with
+run-specific admin credentials, ports and external-target Playwright configuration.
+It gates both browser phases on healthy, authenticated emulator fixtures and
+preserves immutable-image provenance without starting a local Vite server.
+
 After the daily validation stack is healthy, run the strict Moonraker printer suite
 from `src/Web/ReactApp`:
 
