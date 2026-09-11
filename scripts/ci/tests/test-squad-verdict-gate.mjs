@@ -837,6 +837,11 @@ test('high-risk classification covers access control, protocol, and release auto
     'src/infra/Data/AppDbContext.cs',
     'src/infra/Data/Configurations/RefreshTokenConfiguration.cs',
     'src/infra/Services/SignalR/PrinterHub.cs',
+    'src/modules/Farm.Modules.Printers/Controllers/PrintersController.cs',
+    'mobile/scripts/release-beta.sh',
+    '.devcontainer/post-create.sh',
+    '.githooks/setup.sh',
+    'src/Web/ReactApp/.env.example',
     'proto/slicer_jobs.proto',
     'scripts/publish-to-public.sh',
     'deploy/nginx/nginx.conf',
@@ -846,6 +851,11 @@ test('high-risk classification covers access control, protocol, and release auto
     'skills-lock.json',
     'VERSION',
     'cliff.toml',
+    '.agents/skills/frontend-design/SKILL.md',
+    'src/api/Farm.Web.Api.csproj',
+    'src/Directory.Build.props',
+    'global.json',
+    'dotnet-tools.json',
   ]) {
     assert.equal(classifyChangeScope([path]).highRisk, true, path);
   }

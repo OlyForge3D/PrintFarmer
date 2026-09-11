@@ -198,6 +198,7 @@ export const fullGatePrefixes = [
   '.copilot/',
   '.claude/',
   '.cursor/',
+  '.agents/',
 ];
 
 // Root-level agent-instruction files, which are agent behaviour by content even
@@ -238,6 +239,8 @@ const manifestBasenames = new Set([
   'cargo.toml',
   'cargo.lock',
   'nuget.config',
+  'global.json',
+  'dotnet-tools.json',
 ]);
 
 // Prose whose contents carry real consequences: security policy, threat models,
@@ -246,7 +249,7 @@ const sensitiveProse =
   /(^|\/)(security|threat[-_ ]?model|licen[cs]e|licensing[-_ ]?policy|notice|copying|code[-_ ]?of[-_ ]?conduct|api[-_ ]?contract)(\.[a-z0-9]+)?$/i;
 
 const highRiskPaths =
-  /(access|admin|auth(entication|orization)?|cert|compose|contract|credential|data\/configurations|dbcontext|deploy(ment)?|docker|dto|governance|hub|identity|infrastructure|licens|migration|openapi|password|permission|privacy|protocol|queue|role|secret|security|serialization|signalr|squad|token|worker)/i;
+  /(access|actions|admin|auth(entication|orization)?|bump|cert|compose|contract|controller|credential|data\/configurations|dbcontext|deploy(ment)?|docker|dto|env|governance|hub|identity|infrastructure|licens|migration|openapi|password|permission|privacy|protocol|publish|queue|release|role|secret|security|serialization|signalr|squad|token|version|worker)/i;
 
 /**
  * Reduce a squad identity to its canonical lowercase token.
@@ -572,6 +575,18 @@ function isProse(path) {
   return proseExtensions.some((extension) => lower.endsWith(extension));
 }
 
+function isDependencyManifest(path, basename) {
+  return manifestBasenames.has(basename) ||
+    /\.(?:csproj|fsproj|props|targets)$/i.test(path);
+}
+
+function isAutomationPath(path) {
+  return path.startsWith('scripts/') ||
+    path.startsWith('.githooks/') ||
+    path.startsWith('.devcontainer/') ||
+    /(?:^|\/)scripts\/|\.sh$|\.ps1$|\.mjs$|\.cjs$|\.py$/i.test(path);
+}
+
 /**
  * Classify the change for reviewer-count enforcement. Standard changes and
  * documentation require one reviewer; high-risk changes require the panel.
@@ -587,7 +602,7 @@ export function classifyChangeScope(paths) {
     if (fullGatePrefixes.some((prefix) => path.startsWith(prefix))) {
       return { docsOnly: false, highRisk: true, reason: `${path} governs agent or CI behaviour` };
     }
-    if (path.startsWith('scripts/')) {
+    if (isAutomationPath(path)) {
       return { docsOnly: false, highRisk: true, reason: `${path} is automation code` };
     }
     if (path.startsWith('src/api/')) {
@@ -599,7 +614,7 @@ export function classifyChangeScope(paths) {
     if (!path.includes('/') && fullGateFiles.has(basename)) {
       return { docsOnly: false, highRisk: true, reason: `${path} is a root agent-instruction file` };
     }
-    if (manifestBasenames.has(basename)) {
+    if (isDependencyManifest(path, basename)) {
       return { docsOnly: false, highRisk: true, reason: `${path} is a dependency manifest` };
     }
     if (sensitiveProse.test(path)) {

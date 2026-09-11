@@ -367,15 +367,11 @@ dispatch requirement, not GitHub-verdict evidence: canonical records do not cont
 trustworthy model attestation. This changes reviewer **count**, not review **rigour** — a single
 reviewer still performs a real review and can still REJECT.
 
-**Definition (allowlist).** A change is documentation-only when **every** changed path is prose
-or agent-instruction content:
+**Definition (allowlist).** A change is documentation-only when **every** changed path is prose,
+unless a high-risk condition below applies:
 
 - `**/*.md`
 - `docs/**`
-- `.squad/**`
-- `.github/agents/**`
-- `.github/instructions/**`
-- `.copilot/skills/**` and `.github/skills/**`
 - `LICENSE` and similar top-level prose files
 
 **Standard scope.** Source files, tests, and mixed code/documentation changes are standard
@@ -400,6 +396,7 @@ following **always** take the full gate, even when the only change is markdown:
 - `.copilot/**`
 - `.claude/**`
 - `.cursor/**`
+- `.agents/**`
 - root-level agent-instruction, governance, or release files: `AGENTS.md`, `CLAUDE.md`,
   `GEMINI.md`, `COPILOT.md`, `.cursorrules`, `squad.config.ts`, `agentrc.config.json`,
   `skills-lock.json`, `VERSION`, and `cliff.toml`
