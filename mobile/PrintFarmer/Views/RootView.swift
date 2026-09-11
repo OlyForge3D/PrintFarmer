@@ -1,8 +1,8 @@
 import SwiftUI
 
 enum UnauthenticatedRootRoute: Equatable {
-    case advancedPrinterControls
     case onboarding
+    case advancedPrinterControls
     case localNetworkPermission
     case login
 
@@ -11,11 +11,11 @@ enum UnauthenticatedRootRoute: Equatable {
         hasSeenOnboarding: Bool,
         hasCompletedNetworkPermission: Bool
     ) -> Self {
-        if !hasSeenAdvancedPrinterControlsPrompt {
-            return .advancedPrinterControls
-        }
         if !hasSeenOnboarding {
             return .onboarding
+        }
+        if !hasSeenAdvancedPrinterControlsPrompt {
+            return .advancedPrinterControls
         }
         if !hasCompletedNetworkPermission {
             return .localNetworkPermission
@@ -97,6 +97,8 @@ struct RootView: View {
                         hasSeenOnboarding: hasSeenOnboarding,
                         hasCompletedNetworkPermission: hasCompletedNetworkPermission
                     ) {
+                    case .onboarding:
+                        OnboardingView(hasSeenOnboarding: $hasSeenOnboarding)
                     case .advancedPrinterControls:
                         AdvancedPrinterControlsPermissionView(
                             serverRegistry: serverRegistry,
@@ -104,8 +106,6 @@ struct RootView: View {
                                 hasSeenAdvancedPrinterControlsPrompt = true
                             }
                         )
-                    case .onboarding:
-                        OnboardingView(hasSeenOnboarding: $hasSeenOnboarding)
                     case .localNetworkPermission:
                         LocalNetworkPermissionView(
                             hasCompletedNetworkPermission: $hasCompletedNetworkPermission

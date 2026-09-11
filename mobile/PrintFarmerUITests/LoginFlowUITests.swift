@@ -30,7 +30,7 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
             "--uitesting-unauthenticated",
             // Argument-domain overrides for the two @AppStorage gates in
             // RootView so the unauthenticated app lands on LoginView instead
-            // of AdvancedPrinterControls / Onboarding / LocalNetworkPermission.
+            // of Onboarding / AdvancedPrinterControls / LocalNetworkPermission.
             // These are ephemeral and do not persist to UserDefaults.standard.
             "-hasSeenAdvancedPrinterControlsPrompt", "YES",
             "-hasSeenOnboarding", "YES",
@@ -154,16 +154,22 @@ final class AdvancedPrinterControlsNotNowUITests: PrintFarmerUITestCase {
         ]
     }
 
-    func testNotNowAdvancesFromPromptToOnboarding() {
-        XCTAssertTrue(app.otherElements["advancedPrinterControlsPermissionView"].waitForExistence(timeout: 8))
+    func testNotNowAdvancesFromOnboardingToLogin() {
+        completeOnboarding()
+
+        XCTAssertTrue(
+            app.otherElements["advancedPrinterControlsPermissionView"].waitForExistence(timeout: 8),
+            "Completing onboarding should advance to the advanced printer controls prompt"
+        )
 
         let notNow = app.buttons["advancedPrinterControls.notNow"]
         XCTAssertTrue(notNow.waitForExistence(timeout: 5))
         notNow.tap()
 
+        let usernameField = app.textFields["usernameField"]
         XCTAssertTrue(
-            app.buttons["Skip"].waitForExistence(timeout: 8),
-            "Tapping Not Now should mark the prompt seen and continue to onboarding"
+            usernameField.waitForExistence(timeout: 8),
+            "Tapping Not Now should mark the prompt seen and continue to login when network permission is already complete"
         )
 
         relaunchAuthenticatedPreservingState()
@@ -175,6 +181,12 @@ final class AdvancedPrinterControlsNotNowUITests: PrintFarmerUITestCase {
         }
         XCTAssertTrue(advancedControlsToggle.waitForExistence(timeout: 3))
         XCTAssertEqual(advancedControlsToggle.value as? String, "0")
+    }
+
+    private func completeOnboarding() {
+        let skip = app.buttons["Skip"]
+        XCTAssertTrue(skip.waitForExistence(timeout: 8))
+        skip.tap()
     }
 
     private func relaunchAuthenticatedPreservingState() {

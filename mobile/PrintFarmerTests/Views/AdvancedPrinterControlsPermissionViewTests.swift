@@ -73,11 +73,22 @@ final class AdvancedPrinterControlsPermissionViewTests: XCTestCase {
         )
     }
 
-    func testUnauthenticatedRouteShowsPromptBeforeOnboarding() {
+    func testUnauthenticatedRouteShowsOnboardingBeforePrompt() {
         XCTAssertEqual(
             UnauthenticatedRootRoute.resolve(
                 hasSeenAdvancedPrinterControlsPrompt: false,
                 hasSeenOnboarding: false,
+                hasCompletedNetworkPermission: false
+            ),
+            .onboarding
+        )
+    }
+
+    func testUnauthenticatedRouteShowsPromptAfterOnboarding() {
+        XCTAssertEqual(
+            UnauthenticatedRootRoute.resolve(
+                hasSeenAdvancedPrinterControlsPrompt: false,
+                hasSeenOnboarding: true,
                 hasCompletedNetworkPermission: false
             ),
             .advancedPrinterControls
