@@ -67,13 +67,14 @@ export function TemperatureControlRow({
       {hasRowPresetSelector ? (
         <div className="h-9 w-6">
           <Select
-            value=""
+            defaultValue=""
             aria-label={`Apply ${label} preset`}
             disabled={disabled}
             onChange={(e) => {
               const preset = e.target.value;
               if (preset) {
                 onPresetSelect?.(preset);
+                e.currentTarget.value = '';
               }
             }}
             className="h-9 !p-0 !pr-0 !border-transparent !bg-transparent text-transparent focus:ring-0 focus:border-transparent"

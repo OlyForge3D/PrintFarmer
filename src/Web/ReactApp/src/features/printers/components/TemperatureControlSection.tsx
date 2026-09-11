@@ -46,6 +46,9 @@ export function TemperatureControlSection({
   onApplyPreset,
   onApplySingleHeaterPreset,
 }: TemperatureControlSectionProps) {
+  const temperatureControlsDisabled = temperatureActionPending || !canSetTemperatures;
+  const cooldownDisabled = temperatureActionPending || !canCooldown;
+
   return (
     <div className="mb-2">
       <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1 -ml-1">
@@ -57,7 +60,7 @@ export function TemperatureControlSection({
             type="button"
             variant="ghost"
             size="sm"
-            disabled={temperatureActionPending || !canCooldown}
+            disabled={cooldownDisabled}
             onClick={() => onApplyPreset('cooldown')}
             title="Cooldown"
             aria-label="Cooldown"
@@ -74,12 +77,14 @@ export function TemperatureControlSection({
           />
           <div className="relative w-24">
             <Select
-              value=""
-              disabled={temperatureActionPending || !canSetTemperatures}
+              defaultValue=""
+              aria-label="Apply temperature preset"
+              disabled={temperatureControlsDisabled}
               onChange={(e) => {
                 const value = e.target.value;
                 if (value) {
                   onApplyPreset(value);
+                  e.currentTarget.value = '';
                 }
               }}
               className="h-8 text-[10px] uppercase tracking-wide font-semibold pr-6! border-transparent! bg-transparent! enabled:hover:[background:rgba(255,255,255,0.10)] focus:border-transparent focus:ring-0"
@@ -115,7 +120,7 @@ export function TemperatureControlSection({
           value={hotendTemp}
           onChange={(e) => onHotendTempChange(e.target.value === '' ? '' : Number(e.target.value))}
           onKeyDown={onHotendTempKeyDown}
-          disabled={temperatureActionPending || !canSetTemperatures}
+          disabled={temperatureControlsDisabled}
           presetOptions={hotendPresetOptions}
           onPresetSelect={(preset) => onApplySingleHeaterPreset('hotend', preset)}
         />
@@ -133,7 +138,7 @@ export function TemperatureControlSection({
           value={bedTemp}
           onChange={(e) => onBedTempChange(e.target.value === '' ? '' : Number(e.target.value))}
           onKeyDown={onBedTempKeyDown}
-          disabled={temperatureActionPending || !canSetTemperatures}
+          disabled={temperatureControlsDisabled}
           presetOptions={bedPresetOptions}
           onPresetSelect={(preset) => onApplySingleHeaterPreset('bed', preset)}
         />
