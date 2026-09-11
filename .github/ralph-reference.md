@@ -284,7 +284,10 @@ against the authoritative ledger before being trusted**:
   not silently delete the comment or the claim; post a follow-up comment stating the
   reconciled disposition (e.g. "Ledger shows no active job for `Ralph-Job-ID`; treating
   this claim as abandoned/lost — see below") and act on the *current* ledger state, never
-  the comment's `Ralph-Status` text.
+  the comment's `Ralph-Status` text. The one exception is a `failed` entry whose
+  `failureReason` is `kickoff-unverified` and which carries a `strandedSessionId`: that
+  claim is **not** stale while that session still exists — see the stranded-kickoff
+  paragraph below, which forbids re-admitting the issue.
 - If the ledger shows the job is genuinely still active (`reserved`, `delivery-intent`,
   `accepted`, `running`, `uncertain`), leave it alone — a pending-admission claim with a
   live ledger entry is not stuck, it is just early. **Pending-admission claims must never
@@ -304,6 +307,32 @@ artifacts: the abandoned record stays as a permanent audit trail. Reusing the *o
 the issue again. The equivalent pre-acknowledgment case (a `reserved` job whose session
 was never created at all) uses the existing `recoverLocalReservation` /
 `recover-local` path with the same `sessionAbsent: true` contract.
+
+**Releasing a stranded kickoff (reserved, session created but never started).** A created session
+is not a started session: issue #2621's session was created with its worktree and branch and then
+sat idle with zero turns for hours while holding a slot and the issue's claim. Acknowledgement is
+therefore gated — `acknowledgeLocalJob` / `acknowledge-local` requires `kickoffVerified: true`
+(plus `kickoffRetried` when the kickoff had to be resent) and fails closed without it. When a
+session's processing is still unconfirmed after one `send_session_message` resend, use
+`failLocalKickoff` (CLI: `node scripts/ci/ralph-admission.mjs fail-local-kickoff`) with
+`{ jobId, sessionId, controllerPid, kickoffUnverified: true }`; `sessionId` is required. Release is
+authorized either by the reservation's own owner (matching the recorded `reservationOwnerPid`) or,
+when that controller died first, by a later controller under the same dead-owner-plus-expired-lease
+proof `recoverLocalReservation` uses — otherwise a crashed round would wedge the reservation in
+`reserved` forever. The PID match correlates a caller to its own reservation inside this
+machine-local trusted ledger; it is not an authentication boundary. Neither existing recovery path
+fits this case: `recoverLocalReservation` also requires authoritative session absence, and
+`recoverLostLocalSession` requires state `accepted`/`running`. The job becomes terminal `failed`
+with `failureReason: 'kickoff-unverified'` and records the stranded session as
+`strandedSessionId` (not `sessionId`, which stays reserved for acknowledged sessions). It never
+archives, deletes, or cleans up the stranded session. Freeing the ledger slot is **not** permission
+to re-dispatch: the issue's claim stays in place and the issue must not be re-admitted while the
+stranded session still exists, or a late-waking session and a fresh one would both work the same
+issue. That is enforced, not merely documented — `reserveJob` rejects the issue with
+`STRANDED_SESSION` until `clearStrandedKickoff` (CLI: `clear-stranded-kickoff`) is called with
+`{ jobId, sessionAbsent: true }`, the same authoritative-absence assertion `recoverLostLocalSession`
+requires. Clearing keeps the audit record and the jobId's fence. The round report names the issue
+and its `strandedSessionId`.
 
 **Xcode/CoreSimulator concurrency is per-Mac, not per-slot.** The shared 5-slot ledger
 pool bounds total concurrent Ralph jobs, but a single physical Mac can run only one

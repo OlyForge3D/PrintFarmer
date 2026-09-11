@@ -505,6 +505,11 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
     'fresh eligibility', 'apply claim label and comment', 'verify that exact claim landed',
     'Authoritative Label Vocabulary', 'squad:lambert', 'type:feature', 'priority:p0',
     'Emoji-prefixed duplicate owner labels', 'plain form',
+    'A created session is not a started session', 'get_sessions_status', 'send_session_message',
+    'a session whose processing was not observed', 'kickoffVerified', 'kickoffRetried',
+    'fail-local-kickoff', 'kickoffUnverified', 'strandedSessionId',
+    'never re-dispatch that issue while', 'never makes that claim stale',
+    'recorded owner PID is dead and its lease has expired', 'clear-stranded-kickoff',
   ]) assert.match(operations, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   for (const reference of [
     'one Ralph automation', 'delete_item', 'earlier-round children', 'post-merge',
