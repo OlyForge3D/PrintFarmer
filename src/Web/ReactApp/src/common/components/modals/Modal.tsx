@@ -2,6 +2,7 @@ import React, { useEffect, useCallback, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { CloseIcon } from '@/common/components/icons/MdiIcons';
 import { Button, type ButtonVariant } from '@/common/components/ui/Button';
+import { useModalOpenBodyClass } from '@/common/components/modals/modalBodyClass';
 import clsx from 'clsx';
 
 export type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
@@ -405,6 +406,8 @@ export function Modal({
       }
     };
   }, [isOpen]);
+
+  useModalOpenBodyClass(isOpen);
 
   if (!isOpen) return null;
 

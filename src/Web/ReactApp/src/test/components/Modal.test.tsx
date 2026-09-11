@@ -167,6 +167,68 @@ describe('Modal', () => {
     });
   });
 
+  describe('Modal/tour body class', () => {
+    it('adds and removes the modal body class with open state changes', async () => {
+      const { rerender } = render(
+        <Modal isOpen={true} onClose={vi.fn()} title="Test Modal">
+          <p>Content</p>
+        </Modal>
+      );
+
+      await waitFor(() => expect(document.body).toHaveClass('pf-modal-open'));
+
+      rerender(
+        <Modal isOpen={false} onClose={vi.fn()} title="Test Modal">
+          <p>Content</p>
+        </Modal>
+      );
+
+      await waitFor(() => expect(document.body).not.toHaveClass('pf-modal-open'));
+    });
+
+    it('keeps the modal body class until the last open modal closes', async () => {
+      const onClose = vi.fn();
+      const { rerender } = render(
+        <>
+          <Modal isOpen={true} onClose={onClose} title="First Modal">
+            <p>First content</p>
+          </Modal>
+          <Modal isOpen={true} onClose={onClose} title="Second Modal">
+            <p>Second content</p>
+          </Modal>
+        </>
+      );
+
+      await waitFor(() => expect(document.body).toHaveClass('pf-modal-open'));
+
+      rerender(
+        <>
+          <Modal isOpen={false} onClose={onClose} title="First Modal">
+            <p>First content</p>
+          </Modal>
+          <Modal isOpen={true} onClose={onClose} title="Second Modal">
+            <p>Second content</p>
+          </Modal>
+        </>
+      );
+
+      expect(document.body).toHaveClass('pf-modal-open');
+
+      rerender(
+        <>
+          <Modal isOpen={false} onClose={onClose} title="First Modal">
+            <p>First content</p>
+          </Modal>
+          <Modal isOpen={false} onClose={onClose} title="Second Modal">
+            <p>Second content</p>
+          </Modal>
+        </>
+      );
+
+      await waitFor(() => expect(document.body).not.toHaveClass('pf-modal-open'));
+    });
+  });
+
   describe('Footer', () => {
     it('should render footer when provided', () => {
       render(

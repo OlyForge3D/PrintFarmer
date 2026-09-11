@@ -7,6 +7,7 @@ import React, {
   type ErrorInfo,
   type ReactNode,
 } from 'react';
+import { useModalOpenBodyClass } from '@/common/components/modals/modalBodyClass';
 import { Button } from '@/common/components/ui';
 
 interface LazyModalSurfaceProps {
@@ -19,6 +20,8 @@ function LazyModalSurface({ label, onCancel, children }: LazyModalSurfaceProps) 
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCancelRef = useRef(onCancel);
   const titleId = useId();
+
+  useModalOpenBodyClass(true);
 
   useEffect(() => {
     onCancelRef.current = onCancel;

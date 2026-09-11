@@ -42,12 +42,14 @@ describe('LazyModalBoundary', () => {
     const cancelButton = screen.getByRole('button', { name: 'Cancel' });
     expect(loadingDialog).toContainElement(cancelButton);
     expect(cancelButton).toHaveFocus();
+    expect(document.body).toHaveClass('pf-modal-open');
 
     await user.tab();
     expect(cancelButton).toHaveFocus();
 
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog', { name: 'Loading test modal' })).not.toBeInTheDocument();
+    await waitFor(() => expect(document.body).not.toHaveClass('pf-modal-open'));
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 

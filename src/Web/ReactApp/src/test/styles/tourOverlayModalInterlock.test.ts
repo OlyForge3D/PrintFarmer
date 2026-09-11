@@ -27,11 +27,10 @@ afterEach(() => {
 });
 
 describe('tour overlay/modal interlock (#2621)', () => {
-  it('does not suspend tour hit testing for an inert mobile drawer shell', () => {
+  it('does not suspend tour hit testing when no modal body class is present', () => {
     const { overlay, popover } = mountTourThemeFixture(`
       <div class="driver-overlay"></div>
       <div class="driver-popover pf-tour-popover"></div>
-      <div role="dialog" aria-modal="true" inert></div>
     `);
 
     expect(overlay).not.toBeNull();
@@ -40,12 +39,12 @@ describe('tour overlay/modal interlock (#2621)', () => {
     expect(getComputedStyle(popover!).pointerEvents).toBe('auto');
   });
 
-  it('suspends tour hit testing while a real modal dialog is open', () => {
+  it('suspends tour hit testing while the modal body class is present', () => {
     const { overlay, popover } = mountTourThemeFixture(`
       <div class="driver-overlay"></div>
       <div class="driver-popover pf-tour-popover"></div>
-      <div role="dialog" aria-modal="true"></div>
     `);
+    document.body.classList.add('pf-modal-open');
 
     expect(overlay).not.toBeNull();
     expect(popover).not.toBeNull();
@@ -53,16 +52,10 @@ describe('tour overlay/modal interlock (#2621)', () => {
     expect(getComputedStyle(popover!).pointerEvents).toBe('none');
   });
 
-  it('requires non-inert dialogs in the selector contract', () => {
-    expect(tourThemeCss).toContain(
-      'body:has([role="dialog"][aria-modal="true"]:not([inert])) .driver-overlay,',
-    );
-    expect(tourThemeCss).toContain(
-      'body:has([role="dialog"][aria-modal="true"]:not([inert])) .driver-popover {',
-    );
-    expect(tourThemeCss).not.toContain(
-      'body:has([role="dialog"][aria-modal="true"]) .driver-overlay,',
-    );
+  it('uses the modal body-class contract instead of dialog-shape heuristics', () => {
+    expect(tourThemeCss).toContain('body.pf-modal-open .driver-overlay,');
+    expect(tourThemeCss).toContain('body.pf-modal-open .driver-popover {');
+    expect(tourThemeCss).not.toContain('body:has([role="dialog"]');
     expect(tourThemeCss).toContain('pointer-events: none !important;');
   });
 });
