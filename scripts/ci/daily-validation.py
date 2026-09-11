@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -114,6 +115,27 @@ def validate_manifest(manifest, run_id):
         require(image.get("reference") == f'{name}@{image["digest"]}',
                 f"Image reference is not digest-pinned: {service}")
     return manifest
+
+
+def select_candidate(inventory, cutoff):
+    eligible = []
+    for item in inventory:
+        require(item["headBranch"] == "development" and item["status"] == "completed"
+                and item["conclusion"] == "success", "Wrong workflow inventory filters")
+        require(re.fullmatch(r"[0-9a-f]{40}", item["headSha"]), "Invalid workflow commit")
+        if timestamp(item["createdAt"]) <= timestamp(cutoff) and timestamp(item["updatedAt"]) <= timestamp(cutoff):
+            eligible.append(item)
+    require(eligible, "No successful image run observed at the selection cutoff")
+    return max(eligible, key=lambda item: (timestamp(item["createdAt"]), int(item["databaseId"])))
+
+
+def verify_selection(primary, verification, cutoff):
+    candidate = select_candidate(primary, cutoff)
+    observed = select_candidate(verification, cutoff)
+    require((candidate["databaseId"], candidate["headSha"]) ==
+            (observed["databaseId"], observed["headSha"]),
+            "Image selection observations disagree at cutoff; blocked without reselection")
+    return candidate
 
 
 def redact(text, env):
@@ -342,19 +364,38 @@ class Run:
     def prepare(self):
         self.state["environment"] = probe()
         self.save()
+        cutoff = now()
+        self.state["selection"] = {"cutoff": cutoff, "startedAt": now(),
+                                   "ordering": "createdAt descending, databaseId descending"}
+        self.save()
         run = self.command(["gh", "run", "list", "--repo", REPO, "--workflow",
                             "daily-development-images.yml", "--branch", "development",
-                            "--status", "success", "--limit", "1", "--json", "databaseId"],
+                            "--status", "success", "--limit", "100", "--json",
+                            "databaseId,headSha,headBranch,createdAt,updatedAt,status,conclusion"],
                            "select-image")[1]
-        selected = json.loads(run)
-        require(len(selected) == 1, "No successful daily image run available")
-        self.state["imageRun"] = str(selected[0]["databaseId"])
+        primary = json.loads(run)
+        self.state["selection"]["primaryFinishedAt"] = now()
+        query = urllib.parse.urlencode({"branch": "development", "status": "success", "per_page": 100})
+        endpoint = f"repos/{REPO}/actions/workflows/daily-development-images.yml/runs?{query}"
+        response = json.loads(self.command(["gh", "api", "-H", "Cache-Control: no-cache", endpoint],
+                                           "verify-selection")[1])
+        verification = [{
+            "databaseId": item["id"], "headSha": item["head_sha"], "headBranch": item["head_branch"],
+            "createdAt": item["created_at"], "updatedAt": item["updated_at"],
+            "status": item["status"], "conclusion": item["conclusion"]
+        } for item in response["workflow_runs"]]
+        selected = verify_selection(primary, verification, cutoff)
+        self.state["selection"].update(verifiedAt=now(), selected=selected,
+                                      primaryHash=digest(self.directory / "select-image.log"),
+                                      verificationHash=digest(self.directory / "verify-selection.log"))
+        self.state["imageRun"] = str(selected["databaseId"])
         self.save()
         self.command(["gh", "run", "download", self.state["imageRun"], "--repo", REPO,
                       "--name", "daily-development-image-set", "--dir", str(self.directory / "release")],
                      "download-manifest", 180)
         manifest_path = self.directory / "release/image-set.json"
         manifest = validate_manifest(read_json(manifest_path), self.state["imageRun"])
+        require(manifest["commit"] == selected["headSha"], "Manifest and selected workflow commit disagree")
         shutil.copyfile(manifest_path, self.directory / "image-set.json")
         self.state.update(manifest=manifest, manifestHash=digest(manifest_path), commit=manifest["commit"])
         self.save()
@@ -750,7 +791,7 @@ class Run:
         result = {key: self.state.get(key) for key in (
             "validationId", "startedAt", "imageRun", "commit", "manifestHash", "harnessRevision",
             "harnessHash", "harnessDirty", "workspace", "composeFiles", "project", "ports",
-            "environment", "health", "fixtures", "steps", "cleanup", "privateEvidence", "blocker")}
+            "environment", "health", "fixtures", "steps", "cleanup", "privateEvidence", "blocker", "selection")}
         result["evidenceDirectory"] = str(self.directory)
         result["phases"] = {}
         for name in PHASES:

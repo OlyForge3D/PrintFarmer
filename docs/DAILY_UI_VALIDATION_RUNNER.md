@@ -54,6 +54,15 @@ All published ports must be loopback-only and leased to this run. An external
 process winning the final port-bind race fails deployment; it never triggers a
 silent port/source/image substitution.
 
+Selection records a UTC cutoff, the full CLI inventory observation, a separate
+REST observation with equivalent workflow/branch/success filters, timestamps and
+response hashes. Both must agree on the newest eligible creation time (then run
+ID); runs completed/updated after the cutoff are excluded from both observations.
+Disagreement blocks without selecting another image. A second request or a
+no-cache header is not a guarantee of upstream freshness; these are retained
+observations that make stale/disagreeing responses diagnosable. The manifest
+commit must also match the selected workflow commit.
+
 The harness verifies the exact topology, pinned application images, healthy
 containers, frontend/API build provenance, real admin login/reset, Moonraker and
 offline fixtures, deterministic discovery, and the single worker's writable temp.

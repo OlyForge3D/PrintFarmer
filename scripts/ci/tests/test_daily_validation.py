@@ -52,6 +52,36 @@ class ManifestTests(unittest.TestCase):
                     daily.validate_manifest(value, "123")
 
 
+class SelectionTests(unittest.TestCase):
+    def setUp(self):
+        self.cutoff = "2026-09-11T14:00:00+00:00"
+        self.old = dict(databaseId=123, headSha="a" * 40, headBranch="development",
+                        status="completed", conclusion="success",
+                        createdAt="2026-09-08T13:00:00Z", updatedAt="2026-09-08T14:00:00Z")
+        self.latest = dict(self.old, databaseId=456, headSha="b" * 40,
+                           createdAt="2026-09-10T13:00:00Z", updatedAt="2026-09-10T14:00:00Z")
+
+    def test_ordered_latest_selection(self):
+        self.assertEqual(daily.verify_selection([self.old, self.latest], [self.latest, self.old],
+                                                self.cutoff)["databaseId"], 456)
+
+    def test_completion_after_cutoff_does_not_invalidate_selection(self):
+        concurrent = dict(self.latest, databaseId=789, createdAt="2026-09-11T13:30:00Z",
+                          updatedAt="2026-09-11T14:00:01Z")
+        self.assertEqual(daily.verify_selection([self.latest], [concurrent, self.latest],
+                                                self.cutoff)["databaseId"], 456)
+
+    def test_stale_or_mismatched_observations_block_without_reselection(self):
+        for verification in ([self.latest, self.old], [dict(self.old, headSha="c" * 40)]):
+            with self.assertRaisesRegex(daily.Blocked, "disagree"):
+                daily.verify_selection([self.old], verification, self.cutoff)
+
+    def test_wrong_branch_or_status_rejected(self):
+        for item in (dict(self.latest, headBranch="main"), dict(self.latest, conclusion="failure")):
+            with self.assertRaises(daily.Blocked):
+                daily.select_candidate([item], self.cutoff)
+
+
 class PhaseTests(unittest.TestCase):
     def setUp(self):
         self.state = dict(validationId="unique", commit="a" * 40, manifestHash="manifest", harnessHash="harness")
