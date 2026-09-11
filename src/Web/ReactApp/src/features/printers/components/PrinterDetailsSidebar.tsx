@@ -14,6 +14,7 @@ import { formatPrinterModelSubtitle } from '@/common/utils/printerModelDisplay';
 import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectDto, type PrintJobObjectListDto, type TempTargets } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
+import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import {
   canCancel,
   canCooldown,
@@ -32,10 +33,7 @@ import {
   getPrinterSupport,
 } from '@/features/printers/utils/printerSupport';
 import {
-  bedPresetOptions,
   getPresetTargets,
-  hotendPresetOptions,
-  materialPresets,
   getExtrudeMinTemp,
   EXTRUDE_DISTANCE_OPTIONS,
   DEFAULT_EXTRUDE_DISTANCE_MM,
@@ -49,11 +47,9 @@ import { getStatusHeaderClassName, getStatusIndicatorColor, isPrinterStateShutdo
 // Move, Temperature, Materials/MMU, Spool. DetailedPrinterCard mirrors this
 // order for its shared sections (#1698).
 import { renderUnknown } from '@/common/utils/renderUnknown';
-import { Button, TemperatureControlRow, MovementInput, MoveDistanceSlider, Select, CollapsibleSection, LoadedFilamentCard } from '@/common/components/ui';
+import { Button, MovementInput, MoveDistanceSlider, CollapsibleSection, LoadedFilamentCard } from '@/common/components/ui';
 import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
 import {
-  NozzleIcon,
-  BedIcon,
   DisableMotorsIcon,
   HomeIcon,
   PlayIcon,
@@ -67,7 +63,6 @@ import {
   RefreshIcon,
   HistoryIcon,
   CloseIcon,
-  SnowflakeIcon,
   XCircleIcon,
   FilamentLoadIcon,
   FilamentUnloadIcon,
@@ -469,11 +464,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     if (!Number.isFinite(grams)) return '—';
     if (grams >= 1000) return `${(grams / 1000).toFixed(2)}kg`;
     return `${Math.round(grams)}g`;
-  };
-
-  const formatCurrentTemp = (current?: number, lastKnown?: number | null): string => {
-    const displayCurrent = current ?? lastKnown ?? 0;
-    return `${displayCurrent.toFixed(1)}°C`;
   };
 
   // Check if axes are homed based on homedAxes string from Moonraker
@@ -1285,80 +1275,25 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           expanded={isTempsExpanded}
           onToggle={setIsTempsExpanded}
         >
-          <div className="flex justify-end gap-1 items-stretch h-8 pb-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={temperatureActionPending || !canCooldownNow}
-              onClick={() => handleApplyPreset('cooldown')}
-              title="Cooldown"
-              className="shrink-0 px-2!"
-              iconCenter={<SnowflakeIcon className={`h-4 w-4 ${((displayPrinter?.hotendTarget ?? 0) > 0 || (displayPrinter?.bedTarget ?? 0) > 0) ? 'text-pf-accent' : 'text-pf-text-secondary'}`} />}
-            ></Button>
-            <div className="relative w-24">
-              <Select
-                value=""
-                onChange={(e) => {
-                  const value = e.target.value;
-                  if (value) {
-                    handleApplyPreset(value);
-                  }
-                }}
-                disabled={temperatureActionPending || !canSetTemperaturesNow}
-                className="h-8 text-[10px] uppercase tracking-wide font-semibold pr-6! border-transparent! bg-transparent! enabled:hover:[background:rgba(255,255,255,0.10)] focus:border-transparent focus:ring-0"
-              >
-                <option value="">PRESETS</option>
-                {materialPresets.map((preset) => (
-                  <option key={preset.value} value={preset.value}>{preset.label}</option>
-                ))}
-              </Select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-[minmax(0,1fr)_3rem_4.75rem_5rem_1.5rem] gap-2 pb-1 text-[10px] uppercase tracking-wide text-pf-text-secondary">
-            <span>Name</span>
-            <span className="text-right">State</span>
-            <span className="text-right">Current</span>
-            <span className="text-right">Target</span>
-            <span></span>
-          </div>
-
-          {/* Hotend Temperature Row */}
-          <TemperatureControlRow
-            icon={<NozzleIcon className="w-4 h-4 text-pf-error" isOn={(displayPrinter?.hotendTarget ?? 0) > 0} />}
-            label="Hotend"
-            stateLabel={(displayPrinter?.hotendTarget ?? 0) > 0 ? 'on' : 'off'}
-            liveReading={formatCurrentTemp(
-              displayPrinter?.hotendTemp,
-              lastKnownHotendTemp
-            )}
-            value={hotendTemp}
-            onChange={(e) => setHotendTemp(e.target.value === '' ? '' : Number(e.target.value))}
-            onKeyDown={handleHotendTempKeyDown}
-            disabled={temperatureActionPending || !canSetTemperaturesNow}
-            presetOptions={hotendPresetOptions}
-            onPresetSelect={(preset) => {
-              void handleApplySingleHeaterPreset('hotend', preset);
+          <TemperatureControlSection
+            hotendTemp={hotendTemp}
+            bedTemp={bedTemp}
+            hotendTarget={displayPrinter?.hotendTarget}
+            bedTarget={displayPrinter?.bedTarget}
+            hotendCurrent={displayPrinter?.hotendTemp ?? lastKnownHotendTemp ?? undefined}
+            bedCurrent={displayPrinter?.bedTemp ?? lastKnownBedTemp ?? undefined}
+            temperatureActionPending={temperatureActionPending}
+            canSetTemperatures={canSetTemperaturesNow}
+            canCooldown={canCooldownNow}
+            onHotendTempChange={setHotendTemp}
+            onBedTempChange={setBedTemp}
+            onHotendTempKeyDown={handleHotendTempKeyDown}
+            onBedTempKeyDown={handleBedTempKeyDown}
+            onApplyPreset={(preset) => {
+              void handleApplyPreset(preset);
             }}
-          />
-
-          {/* Bed Temperature Row */}
-          <TemperatureControlRow
-            icon={<BedIcon className="w-4 h-4 text-pf-accent" isOn={(displayPrinter?.bedTarget ?? 0) > 0} />}
-            label="Bed"
-            stateLabel={(displayPrinter?.bedTarget ?? 0) > 0 ? 'on' : 'off'}
-            liveReading={formatCurrentTemp(
-              displayPrinter?.bedTemp,
-              lastKnownBedTemp
-            )}
-            value={bedTemp}
-            onChange={(e) => setBedTemp(e.target.value === '' ? '' : Number(e.target.value))}
-            onKeyDown={handleBedTempKeyDown}
-            disabled={temperatureActionPending || !canSetTemperaturesNow}
-            presetOptions={bedPresetOptions}
-            onPresetSelect={(preset) => {
-              void handleApplySingleHeaterPreset('bed', preset);
+            onApplySingleHeaterPreset={(heater, preset) => {
+              void handleApplySingleHeaterPreset(heater, preset);
             }}
           />
         </CollapsibleSection>
