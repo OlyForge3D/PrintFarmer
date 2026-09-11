@@ -275,8 +275,8 @@ struct PreheatSubgroup: View {
 
             grid.padding(.top, 14).padding(.bottom, 8)
 
-            Text("Hotend max \(viewModel.maximum(for: .hotend).map { $0.formatted() + "°" } ?? "unknown") · Bed max \(viewModel.maximum(for: .bed).map { $0.formatted() + "°" } ?? "unknown").")
-                .font(.footnote).foregroundStyle(Color.pfTextSecondary)
+            Text("Hotend max \(viewModel.maximum(for: .hotend).map { $0.formatted() + "°C" } ?? "unknown") · Bed max \(viewModel.maximum(for: .bed).map { $0.formatted() + "°C" } ?? "unknown").")
+                .font(.footnote.monospacedDigit()).foregroundStyle(Color.pfTextSecondary)
                 .padding(.top, 10)
             if let message = blockedReasonMessage {
                 Text(message)

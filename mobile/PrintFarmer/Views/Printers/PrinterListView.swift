@@ -382,7 +382,7 @@ struct PrinterLookupView: View {
                                 if let notes = printer.notes, !notes.isEmpty {
                                     Text(notes)
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(Color.pfTextSecondary)
                                 }
                             }
                         }
@@ -486,7 +486,7 @@ private struct FilterChip: View {
                 .frame(minHeight: 44)
                 .foregroundStyle(Color.pfTextPrimary)
                 .background(
-                    isSelected ? Color.pfAccent.opacity(0.16) : Color.pfBorder.opacity(0.5),
+                    isSelected ? Color.pfAccent.opacity(0.18) : Color.pfCard,
                     in: Capsule()
                 )
                 .overlay {

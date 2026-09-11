@@ -479,14 +479,14 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             XCTAssertEqual(hotend.minX, tablet ? 42 : 34, accuracy: 1)
             XCTAssertEqual(set.minX, tablet ? 475.703125 : 300, accuracy: 1)
             // Both revised prototype and native inputs have 45-point heights.
-            XCTAssertEqual(hotend.minY, 217.09375, accuracy: 2)
+            XCTAssertEqual(hotend.minY, 254.0, accuracy: 2)
             XCTAssertEqual(set.minY, hotend.minY, accuracy: 1)
             XCTAssertEqual(set.height, hotend.height, accuracy: 1)
             XCTAssertEqual(set.width, 52, accuracy: 0.5)
             let up = try frame("printer.controls.jog.y.positive")
             let down = try frame("printer.controls.jog.y.negative")
             XCTAssertEqual(up.height, 48, accuracy: 1)
-            XCTAssertEqual(up.minY, tablet ? 166.09375 : 591.9375, accuracy: 4)
+            XCTAssertEqual(up.minY, tablet ? 166.09375 : 579.6666666666666, accuracy: 4)
             XCTAssertEqual(down.minY - up.minY, 108, accuracy: 1)
             let motors = try frame("printer.controls.disable-motors")
             let calibration = try frame("printer.controls.calibration-start")
@@ -660,37 +660,35 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         }
     }
 
-    func test_calibrationSafetyDetails_areDisclosedAtRestAndImmediateDuringWorkflow() async throws {
+    func test_obsoleteDetailsAndSafetyEntryPointsAreNotReachable() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.layoutCaps)
         let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
-        let (window, controller) = install(PrinterZOffsetCalibrationControls(viewModel: model))
+        let (window, controller) = install(PrinterSetupControlsContent(
+            printer: printer,
+            viewModel: model
+        ))
         defer { window.isHidden = true }
         try await settle(controller)
-        func details() throws -> UIControl {
-            try XCTUnwrap(nativeControls(in: controller.view).first {
-                $0.accessibilityIdentifier == "printer.controls.calibration.details"
-            })
-        }
-        XCTAssertNotNil(model.calibrationBlockedReason)
-        XCTAssertEqual(try details().accessibilityValue, "Collapsed")
-        try details().sendActions(for: .touchUpInside)
-        try await settle(controller)
-        XCTAssertEqual(try details().accessibilityValue, "Expanded")
-        XCTAssertNil(service.homeCalledWith)
-        XCTAssertNil(service.saveZOffsetCalledWith)
-        try details().sendActions(for: .touchUpInside)
-        try await settle(controller)
-        await model.startCalibration()
-        try await settle(controller)
-        XCTAssertNotNil(model.calibrationStep)
         XCTAssertFalse(nativeControls(in: controller.view).contains {
-            $0.accessibilityIdentifier == "printer.controls.calibration.details"
-        }, "An active workflow must expose the blocked reason without a disclosure")
-        XCTAssertNotNil(model.calibrationBlockedReason)
-        XCTAssertNil(service.homeCalledWith)
-        XCTAssertNil(service.saveZOffsetCalledWith)
+            [
+                "printer.controls.calibration.details",
+                "printer.controls.refresh-safety"
+            ].contains($0.accessibilityIdentifier)
+        }, "Obsolete Details and Safety controls must not be reachable")
+        XCTAssertNotNil(
+            nativeControls(in: controller.view).first {
+                $0.accessibilityIdentifier == "printer.controls.calibration-start"
+            },
+            "Removing obsolete surfaces must preserve calibration"
+        )
+        XCTAssertNotNil(
+            nativeControls(in: controller.view).first {
+                $0.accessibilityIdentifier == "printer.controls.extrude"
+            },
+            "Removing obsolete surfaces must preserve material controls"
+        )
     }
 
     func test_unsupportedControlsStayDisabledInTheSamePositions() async throws {
