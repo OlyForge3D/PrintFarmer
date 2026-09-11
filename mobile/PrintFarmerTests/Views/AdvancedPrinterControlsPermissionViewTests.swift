@@ -94,29 +94,4 @@ final class AdvancedPrinterControlsPermissionViewTests: XCTestCase {
             .onboarding
         )
     }
-
-    func testNotNowLeavesControlsOffAndAllowsNavigationForward() throws {
-        let registry = ServerRegistry(
-            userDefaults: userDefaults,
-            migrateLegacyServerURL: false
-        )
-        _ = try registry.add(
-            displayName: "Farm",
-            baseURL: URL(string: "https://farm.example.com")!
-        )
-
-        AdvancedPrinterControlsPromptState.deferOptIn(defaults: userDefaults)
-
-        XCTAssertFalse(registry.advancedPrinterControlsEnabled)
-        XCTAssertEqual(
-            UnauthenticatedRootRoute.resolve(
-                hasSeenAdvancedPrinterControlsPrompt: userDefaults.bool(
-                    forKey: AdvancedPrinterControlsPromptState.hasSeenPromptKey
-                ),
-                hasSeenOnboarding: false,
-                hasCompletedNetworkPermission: false
-            ),
-            .onboarding
-        )
-    }
 }

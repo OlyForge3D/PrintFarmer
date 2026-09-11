@@ -99,7 +99,10 @@ struct RootView: View {
                     ) {
                     case .advancedPrinterControls:
                         AdvancedPrinterControlsPermissionView(
-                            serverRegistry: serverRegistry
+                            serverRegistry: serverRegistry,
+                            onComplete: {
+                                hasSeenAdvancedPrinterControlsPrompt = true
+                            }
                         )
                     case .onboarding:
                         OnboardingView(hasSeenOnboarding: $hasSeenOnboarding)

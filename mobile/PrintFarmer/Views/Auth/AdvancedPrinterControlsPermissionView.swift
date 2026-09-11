@@ -23,6 +23,7 @@ enum AdvancedPrinterControlsPromptState {
 /// default until the user explicitly enables them.
 struct AdvancedPrinterControlsPermissionView: View {
     let serverRegistry: ServerRegistry
+    var onComplete: (() -> Void)? = nil
     @AppStorage(AdvancedPrinterControlsPromptState.hasSeenPromptKey)
     private var hasSeenPrompt: Bool = false
 
@@ -51,6 +52,7 @@ struct AdvancedPrinterControlsPermissionView: View {
                 Button {
                     AdvancedPrinterControlsPromptState.deferOptIn()
                     hasSeenPrompt = true
+                    onComplete?()
                 } label: {
                     Text("Not Now")
                         .font(.headline)
@@ -66,6 +68,7 @@ struct AdvancedPrinterControlsPermissionView: View {
                         serverRegistry: serverRegistry
                     )
                     hasSeenPrompt = true
+                    onComplete?()
                 } label: {
                     Text("Enable")
                         .font(.headline)
@@ -82,6 +85,7 @@ struct AdvancedPrinterControlsPermissionView: View {
                 .frame(height: 40)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("advancedPrinterControlsPermissionView")
     }
 }

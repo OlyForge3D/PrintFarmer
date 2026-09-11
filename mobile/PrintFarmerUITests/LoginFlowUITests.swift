@@ -143,3 +143,88 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
         return XCTWaiter.wait(for: [focused], timeout: timeout)
     }
 }
+
+@MainActor
+final class AdvancedPrinterControlsNotNowUITests: PrintFarmerUITestCase {
+    override var additionalLaunchArguments: [String] {
+        [
+            "--uitesting-unauthenticated",
+            "--uitesting-network-permission-complete",
+            "-isDemoModeActive", "NO"
+        ]
+    }
+
+    func testNotNowAdvancesFromPromptToOnboarding() {
+        XCTAssertTrue(app.otherElements["advancedPrinterControlsPermissionView"].waitForExistence(timeout: 8))
+
+        let notNow = app.buttons["advancedPrinterControls.notNow"]
+        XCTAssertTrue(notNow.waitForExistence(timeout: 5))
+        notNow.tap()
+
+        XCTAssertTrue(
+            app.buttons["Skip"].waitForExistence(timeout: 8),
+            "Tapping Not Now should mark the prompt seen and continue to onboarding"
+        )
+    }
+}
+
+@MainActor
+final class AdvancedPrinterControlsEnableUITests: PrintFarmerUITestCase {
+    override var additionalLaunchArguments: [String] {
+        [
+            "--uitesting-unauthenticated",
+            "--uitesting-onboarding-seen",
+            "--uitesting-network-permission-complete",
+            "-isDemoModeActive", "NO"
+        ]
+    }
+
+    func testEnableTurnsOnControlsForActiveServer() {
+        XCTAssertTrue(app.otherElements["advancedPrinterControlsPermissionView"].waitForExistence(timeout: 8))
+
+        let enable = app.buttons["advancedPrinterControls.enable"]
+        XCTAssertTrue(enable.waitForExistence(timeout: 5))
+        enable.tap()
+
+        let usernameField = app.textFields["usernameField"]
+        XCTAssertTrue(usernameField.waitForExistence(timeout: 8))
+        relaunchAuthenticatedPreservingState()
+        openSettingsFromAccount()
+
+        let advancedControlsToggle = app.switches["settings.advancedPrinterControls"]
+        if !advancedControlsToggle.waitForExistence(timeout: 3) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(advancedControlsToggle.waitForExistence(timeout: 3))
+        XCTAssertEqual(advancedControlsToggle.value as? String, "1")
+    }
+
+    private func relaunchAuthenticatedPreservingState() {
+        app.terminate()
+        app = XCUIApplication()
+        app.launchEnvironment["PFARM_UI_TESTING"] = "1"
+        app.launchArguments = [
+            "--uitesting",
+            "--uitesting-preserve-state",
+            "-isDemoModeActive", "NO"
+        ]
+        app.launch()
+    }
+
+    private func openSettingsFromAccount() {
+        let attention = shellDestinationButton(tabIdentifier: "tab.attention", timeout: 20)
+        XCTAssertTrue(attention.exists)
+        attention.tap()
+
+        let account = app.buttons["navigation.account"]
+        XCTAssertTrue(account.waitForExistence(timeout: 5))
+        account.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["account.root"].waitForExistence(timeout: 5))
+
+        let settings = app.buttons["account.destination.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.tap()
+
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5))
+    }
+}
