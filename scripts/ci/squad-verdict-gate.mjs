@@ -181,6 +181,25 @@ const headShaLine = /^[ \t]*Squad-Head-SHA:[ \t]*([0-9a-fA-F]{40})[ \t]*$/gim;
 // binary or image assets, which the policy denylist excludes.
 const proseExtensions = ['.md', '.markdown', '.rst', '.adoc', '.txt'];
 
+// These client-side shapes define the public API wire contract. Keep this
+// explicit: broad language- or directory-based matching would incorrectly
+// elevate unrelated Swift or TypeScript implementation files.
+const apiWireModelPaths = new Set([
+  'mobile/printfarmer/models/farmshape.swift',
+  'src/web/reactapp/src/types/api.ts',
+]);
+
+// Non-prose changes are high-risk unless they are in a known presentation-only
+// area. This positive allowlist prevents a new code or asset location from
+// silently taking standard review.
+const knownLowRiskPathPrefixes = [
+  'mobile/printfarmer/views/',
+  'src/web/reactapp/src/common/components/',
+  'src/web/reactapp/src/components/',
+  'src/web/reactapp/src/features/',
+  'src/web/reactapp/src/pages/',
+];
+
 // Trees that always take the full gate even when they look like prose. These
 // hold agent instructions, review policy, and CI definitions: whether a given
 // edit moves an agent's safety boundary cannot be judged from the path, so the
@@ -251,7 +270,7 @@ const sensitiveProse =
   /(^|\/)(security|threat[-_ ]?model|licen[cs]e|licensing[-_ ]?policy|notice|copying|code[-_ ]?of[-_ ]?conduct|api[-_ ]?contract)(\.[a-z0-9]+)?$/i;
 
 const highRiskPaths =
-  /(access|actions|admin|auth(entication|orization)?|bump|cert|compose|contract|controller|credential|data\/configurations|dbcontext|deploy(ment)?|docker|dto|env|governance|hub|identity|infrastructure|licens|migration|openapi|password|permission|privacy|protocol|publish|queue|release|role|secret|security|serialization|signalr|squad|token|version|worker)/i;
+  /(access|actions|admin|api[-_ ]?keys?|auth(entication|orization)?|bump|cert|compose|contract|controller|credential|data\/configurations|dbcontext|deploy(ment)?|docker|dto|env|governance|hub|identity|infrastructure|licens|migration|openapi|password|permission|privacy|protocol|publish|queue|release|role|secret|security|serialization|signalr|squad|token|version|worker)/i;
 
 /**
  * Reduce a squad identity to its canonical lowercase token.
@@ -590,6 +609,10 @@ function isAutomationPath(path) {
     /(?:^|\/)scripts\/|\.sh$|\.ps1$|\.mjs$|\.cjs$|\.py$/i.test(path);
 }
 
+function isKnownLowRiskPath(path) {
+  return knownLowRiskPathPrefixes.some((prefix) => path.startsWith(prefix));
+}
+
 /**
  * Classify the change for reviewer-count enforcement. Standard changes and
  * documentation require one reviewer; high-risk changes require the panel.
@@ -601,38 +624,45 @@ export function classifyChangeScope(paths) {
   }
   let docsOnly = true;
   for (const path of files) {
-    const basename = path.split('/').pop().toLowerCase();
-    if (fullGatePrefixes.some((prefix) => path.startsWith(prefix))) {
+    const normalizedPath = path.toLowerCase();
+    const basename = normalizedPath.split('/').pop();
+    if (apiWireModelPaths.has(normalizedPath)) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is a public API wire model` };
+    }
+    if (fullGatePrefixes.some((prefix) => normalizedPath.startsWith(prefix))) {
       return { docsOnly: false, highRisk: true, reason: `${path} governs agent or CI behaviour` };
     }
-    if (isAutomationPath(path)) {
+    if (isAutomationPath(normalizedPath)) {
       return { docsOnly: false, highRisk: true, reason: `${path} is automation code` };
     }
-    if (path.startsWith('src/api/')) {
+    if (normalizedPath.startsWith('src/api/')) {
       return { docsOnly: false, highRisk: true, reason: `${path} is public API code` };
     }
-    if (path.startsWith('src/infra/')) {
+    if (normalizedPath.startsWith('src/infra/')) {
       return { docsOnly: false, highRisk: true, reason: `${path} is infrastructure or persistent data code` };
     }
-    if (path.startsWith('proto/')) {
+    if (normalizedPath.startsWith('proto/')) {
       return { docsOnly: false, highRisk: true, reason: `${path} is a public protocol contract` };
     }
-    if (!path.includes('/') && fullGateFiles.has(basename)) {
+    if (!normalizedPath.includes('/') && fullGateFiles.has(basename)) {
       return { docsOnly: false, highRisk: true, reason: `${path} is a root agent-instruction file` };
     }
     if (isDependencyManifest(path, basename)) {
       return { docsOnly: false, highRisk: true, reason: `${path} is a dependency manifest` };
     }
-    if (sensitiveProse.test(path)) {
+    if (sensitiveProse.test(normalizedPath)) {
       return { docsOnly: false, highRisk: true, reason: `${path} is security/licensing/contract prose` };
     }
-    if (highRiskPaths.test(path)) {
+    if (highRiskPaths.test(normalizedPath)) {
       return { docsOnly: false, highRisk: true, reason: `${path} is high-risk infrastructure or access-control code` };
     }
-    if (path.startsWith('docs/') && !isProse(path)) {
+    if (normalizedPath.startsWith('docs/') && !isProse(normalizedPath)) {
       return { docsOnly: false, highRisk: true, reason: `${path} is a non-prose documentation asset` };
     }
-    if (!isProse(path)) {
+    if (!isProse(normalizedPath)) {
+      if (!isKnownLowRiskPath(normalizedPath)) {
+        return { docsOnly: false, highRisk: true, reason: `${path} is not a known low-risk path` };
+      }
       docsOnly = false;
     }
   }
@@ -892,6 +922,26 @@ export function evaluateGate({
   // 3. Reviewer eligibility. Excluding the author agent is a quality heuristic
   //    (fresh context catches more than self-re-reading), not an independence
   //    guarantee — the author agent and the reviewer agent share one principal.
+  const authoringPanelMembers = scope.highRisk
+    ? reviewPanel.filter((member) => authorMembers.has(member))
+    : [];
+  if (authoringPanelMembers.length > 0) {
+    const members = authoringPanelMembers.join('+');
+    return {
+      state: 'failure',
+      passed: false,
+      description: truncate(
+        `BLOCKED @ ${shortSha(head)}: required panel member ${members} is the PR author`,
+      ),
+      reason:
+        `required high-risk panel member ${members} is the squad member who authored ` +
+        `this PR (source: ${authorSource}); no substitute is permitted`,
+      notes,
+      requiredMembers: reviewPanel,
+      approvals: [],
+      stale,
+    };
+  }
   const eligible = new Map();
   for (const [member, record] of current) {
     if (!roster.has(member)) {
@@ -946,14 +996,8 @@ export function evaluateGate({
   // 5. Reviewer count and panel membership.
   const requiredCount = scope.highRisk ? 3 : 1;
   const requiredMembers = scope.highRisk
-    ? reviewPanel.filter((member) => !authorMembers.has(member))
+    ? reviewPanel
     : [];
-  if (scope.highRisk && requiredMembers.length < reviewPanel.length) {
-    notes.push(
-      `Panel members ${reviewPanel.filter((m) => authorMembers.has(m)).join(', ')} ` +
-      'authored this PR; substitutes from the roster may stand in.',
-    );
-  }
 
   const missingPanel = requiredMembers.filter((member) => !approvals.includes(member));
   if (missingPanel.length > 0 || approvals.length < requiredCount) {

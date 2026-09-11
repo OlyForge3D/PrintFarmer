@@ -80,5 +80,7 @@ canonical risk-based scope in `.github/copilot-instructions.md` § `Risk-Based R
 standard review uses one qualified non-author reviewer from a different model family; high-risk
 review requires Bishop `claude-opus-5`, Hicks `gpt-5.6-sol`, and Vasquez
 `gemini-3.8-flash`, each medium. An unavailable required model is a blocker.
+If a required panel member authored a high-risk PR, block it; never substitute another roster
+member.
 Reviewers read only and never build, install, or test. End with the compact accounting report
 and exit.

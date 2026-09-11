@@ -843,6 +843,8 @@ test('high-risk classification covers access control, protocol, and release auto
     '.devcontainer/post-create.sh',
     '.githooks/setup.sh',
     'src/Web/ReactApp/.env.example',
+    'src/Web/ReactApp/src/types/api.ts',
+    'mobile/PrintFarmer/Models/FarmShape.swift',
     'proto/slicer_jobs.proto',
     'scripts/publish-to-public.sh',
     'deploy/nginx/nginx.conf',
@@ -866,12 +868,46 @@ test('high-risk classification covers access control, protocol, and release auto
   }
 });
 
-test('renamed high-risk paths remain high-risk', () => {
-  const scope = classifyChangeScope([
-    'src/Web/ReactApp/src/components/RequestHandler.tsx',
-    'src/api/PublicContract.cs',
-  ]);
+test('known API wire models escalate while allowlisted presentation paths stay standard', () => {
+  for (const path of [
+    'mobile/PrintFarmer/Models/FarmShape.swift',
+    'src/Web/ReactApp/src/types/api.ts',
+  ]) {
+    assert.equal(classifyChangeScope([path]).highRisk, true, path);
+  }
+  for (const path of [
+    'mobile/PrintFarmer/Views/PrinterView.swift',
+    'src/Web/ReactApp/src/components/PrinterCard.tsx',
+  ]) {
+    assert.equal(classifyChangeScope([path]).highRisk, false, path);
+  }
+});
+
+test('a renamed high-risk path remains high-risk when the workflow includes both paths', () => {
+  const newPath = 'src/Web/ReactApp/src/components/RenamedWidget.tsx';
+  const previousPath = 'src/api/PublicContract.cs';
+  assert.equal(classifyChangeScope([newPath]).highRisk, false);
+  assert.equal(classifyChangeScope([previousPath]).highRisk, true);
+  const scope = classifyChangeScope([newPath, previousPath]);
   assert.equal(scope.highRisk, true);
+});
+
+test('missed sensitive and unrecognized non-prose paths fail closed', () => {
+  for (const path of [
+    'src/Web/ReactApp/src/features/integrations/ApiKeyForm.tsx',
+    'src/Web/ReactApp/src/features/security/SessionSecurity.tsx',
+    'mobile/PrintFarmer/Services/SigningService.swift',
+    'mobile/PrintFarmer/Infrastructure/KeychainStore.swift',
+    'deploy/grafana/dashboards/farm-overview.json',
+    'assets/firmware/unknown-format.bin',
+  ]) {
+    const scope = classifyChangeScope([path]);
+    assert.equal(scope.highRisk, true, path);
+  }
+  assert.match(
+    classifyChangeScope(['assets/firmware/unknown-format.bin']).reason,
+    /not a known low-risk path/,
+  );
 });
 
 test('the documented full-gate escalation list matches the code exactly', async () => {
@@ -948,7 +984,7 @@ test('PR authorship falls back to the linked issue label, then the branch name',
   assert.equal(unresolved.source, 'unresolved');
 });
 
-test('a panel member who authored the PR is substitutable, not a deadlock', () => {
+test('a required panel member who authored a high-risk PR blocks without substitution', () => {
   const result = evaluateGate({
     headSha,
     changedPaths: ['src/api/Program.cs'],
@@ -963,19 +999,11 @@ test('a panel member who authored the PR is substitutable, not a deadlock', () =
     authorSource: 'PR body Squad-Author',
     squadLabeled: true,
   });
-  // Assert the substitution actually happened rather than only that the gate
-  // went green: without squadLabeled this returns success as out-of-scope, so a
-  // bare state check would pass while exercising none of this logic.
   assert.equal(result.scope, undefined);
-  assert.equal(result.passed, true);
-  assert.ok(
-    result.description.startsWith('REVIEWED'),
-    `expected a REVIEWED record, got: ${result.description}`,
-  );
-  assert.ok(
-    result.description.includes('dallas'),
-    `expected dallas to substitute for the authoring reviewer: ${result.description}`,
-  );
+  assert.equal(result.passed, false);
+  assert.equal(result.requiredMembers.join(), 'bishop,hicks,vasquez');
+  assert.match(result.description, /required panel member bishop is the PR author/);
+  assert.match(result.reason, /no substitute is permitted/);
 });
 
 test('auto-scoping refuses forks and unrostered self-declared authors', () => {

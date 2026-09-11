@@ -86,9 +86,9 @@ name: Record squad review (self-attested)
 #     current head is still honoured on that path, evaluated by the same code —
 #     it reads only API-supplied logins and the live head SHA.
 #
-# REVIEWER COUNT follows .github/copilot-instructions.md § "Documentation-Only
-# Changes: One Reviewer": documentation-only PRs need one record, everything
-# else needs the bishop/hicks/vasquez panel.
+# REVIEWER COUNT follows .github/copilot-instructions.md § "Risk-Based Review
+# Scope": standard and documentation-only PRs need one record; high-risk PRs
+# need the bishop/hicks/vasquez panel. Do not duplicate the scope definition here.
 #
 # OWNER OVERRIDE: on an in-scope PR a repository administrator satisfies the gate
 # unconditionally, either by approving through GitHub's native review UI at the

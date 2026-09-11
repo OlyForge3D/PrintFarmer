@@ -492,11 +492,13 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
     'one round and exits', 'five implementation/analysis slots maximum',
     'verified macOS SSH adapter', 'never fall back to native `--connect` or local Windows execution',
     'Before every dispatch, claim, message, review decision, or merge, fetch',
-    'Vasquez `gemini-3.8-flash`', 'unavailable exact model is a blocker',
+    'unavailable required model is a blocker',
     'assessCleanupCandidate', 'operations.md', 'cleanup.md',
     'authoritative five-slot ledger', 'No named non-workflow test entrypoint',
     'test-ralph-round-cache.mjs',
   ]) assert.match(skill, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+  assert.match(skill,
+    /Bishop\s+`claude-opus-5`,\s+Hicks\s+`gpt-5\.6-sol`,\s+and\s+Vasquez\s+`gemini-3\.8-flash`,\s+each\s+medium/i);
   assert.doesNotMatch(skill, /\.squad\/templates\/ralph-reference\.md/i);
   assert.match(operations, /mobile work is READY only when the verified\s+SSH adapter is explicitly enabled/i);
   assert.doesNotMatch(operations, /not needs-analysis,\s+non-mobile on Windows/i);
@@ -515,11 +517,14 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
     'one Ralph automation', 'delete_item', 'earlier-round children', 'post-merge',
     'confirmed-action handoff', 'explicitly confirms each exact',
   ]) assert.match(cleanup, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
-  for (const reference of [
-    '.github/copilot-instructions.md', 'Documentation-Only Changes: One Reviewer',
-    'number of genuine canonical verdict comments', 'documentation-only change and three',
-    'full-gate change',
-  ]) assert.match(prePr, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+  assert.match(prePr, /\.github\/copilot-instructions\.md.*Risk-Based Review Scope/is);
+  assert.match(prePr,
+    /standard\s+and\s+documentation-only\s+changes,\s+dispatch\s+one\s+qualified\s+non-author\s+reviewer/i);
+  assert.match(prePr, /high-risk\s+changes,\s+dispatch\s+Bishop,\s+Hicks,\s+and\s+Vasquez/i);
+  assert.match(prePr,
+    /number\s+of\s+genuine\s+canonical\s+verdict\s+comments.*one\s+for\s+a\s+standard\s+or\s+documentation-only\s+change\s+and\s+three\s+for\s+a\s+high-risk\s+change/is);
+  assert.match(prePr,
+    /required\s+high-risk\s+panel\s+member\s+authored\s+the\s+PR,\s+block\s+the\s+PR;\s+never\s+substitute\s+Dallas\s+or\s+another\s+roster\s+member/i);
   assert.doesNotMatch(prePr, /Workflow\/configuration|agent-safety-boundary/i);
   for (const reference of [
     'verify-squad-verdict.mjs', 'CodeQL', 'match-head-commit', 'hand-authored conflict',

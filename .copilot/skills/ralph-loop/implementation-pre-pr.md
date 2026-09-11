@@ -28,6 +28,8 @@ as parallel read-only task agents—not sessions—and explicitly prohibit build
 tests. An unavailable required model blocks the PR; never substitute or self-review. Post exactly
 the number of genuine canonical verdict comments the canonical rule requires: one for a standard
 or documentation-only change and three for a high-risk change.
+If a required high-risk panel member authored the PR, block the PR; never substitute Dallas or
+another roster member.
 
 Fix every blocker and repeat review at the new head. If conflict resolution authored hunks,
 request narrowly targeted review that agrees across all resolved files. Then create the PR with
