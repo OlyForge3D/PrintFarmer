@@ -7,7 +7,7 @@ confidence: high
 # PrintFarmer iOS TestFlight Beta Skill
 
 Use this skill whenever the user asks to kick off a new mobile beta build,
-TestFlight build, or iOS beta release.
+TestFlight build, TestFlight beta, or iOS beta release.
 
 ## The Actual Mechanism (verified 2026-09-10/11)
 
