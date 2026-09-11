@@ -1,5 +1,29 @@
 import SwiftUI
 
+enum UnauthenticatedRootRoute: Equatable {
+    case advancedPrinterControls
+    case onboarding
+    case localNetworkPermission
+    case login
+
+    static func resolve(
+        hasSeenAdvancedPrinterControlsPrompt: Bool,
+        hasSeenOnboarding: Bool,
+        hasCompletedNetworkPermission: Bool
+    ) -> Self {
+        if !hasSeenAdvancedPrinterControlsPrompt {
+            return .advancedPrinterControls
+        }
+        if !hasSeenOnboarding {
+            return .onboarding
+        }
+        if !hasCompletedNetworkPermission {
+            return .localNetworkPermission
+        }
+        return .login
+    }
+}
+
 /// Root view that gates between loading, login, and main content.
 ///
 /// Extracted from `PFarmApp` so that `@Observable` property tracking
@@ -14,6 +38,8 @@ struct RootView: View {
     @State private var pendingReadyMonitor = PendingReadyMonitor()
     @State private var connectionMonitor = ConnectionMonitor()
     @State private var connectionGate = BackendConnectionGate()
+    @AppStorage(AdvancedPrinterControlsPromptState.hasSeenPromptKey)
+    private var hasSeenAdvancedPrinterControlsPrompt = false
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
     @AppStorage("hasCompletedNetworkPermission") private var hasCompletedNetworkPermission = false
     @State private var minimumSplashElapsed = false
@@ -65,12 +91,25 @@ struct RootView: View {
                     } else {
                         connectionCheck
                     }
-                } else if !hasSeenOnboarding {
-                    OnboardingView(hasSeenOnboarding: $hasSeenOnboarding)
-                } else if !hasCompletedNetworkPermission {
-                    LocalNetworkPermissionView(hasCompletedNetworkPermission: $hasCompletedNetworkPermission)
                 } else {
-                    LoginView()
+                    switch UnauthenticatedRootRoute.resolve(
+                        hasSeenAdvancedPrinterControlsPrompt: hasSeenAdvancedPrinterControlsPrompt,
+                        hasSeenOnboarding: hasSeenOnboarding,
+                        hasCompletedNetworkPermission: hasCompletedNetworkPermission
+                    ) {
+                    case .advancedPrinterControls:
+                        AdvancedPrinterControlsPermissionView(
+                            serverRegistry: serverRegistry
+                        )
+                    case .onboarding:
+                        OnboardingView(hasSeenOnboarding: $hasSeenOnboarding)
+                    case .localNetworkPermission:
+                        LocalNetworkPermissionView(
+                            hasCompletedNetworkPermission: $hasCompletedNetworkPermission
+                        )
+                    case .login:
+                        LoginView()
+                    }
                 }
             }
         }

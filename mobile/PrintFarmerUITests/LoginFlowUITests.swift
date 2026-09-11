@@ -8,11 +8,12 @@ import XCTest
 /// ## Launch mode
 /// Unlike the operator-shell UI tests, these run in the **unauthenticated**
 /// bootstrap (`--uitesting-unauthenticated`) so `RootView` renders
-/// `LoginView` deterministically. The onboarding / local-network-permission
-/// gates are cleared via the volatile `NSArgumentDomain` overrides below —
-/// they apply only to this launched process and are never written to the
-/// persistent `UserDefaults.standard` plist. The demo `ServiceContainer`
-/// keeps the sign-in path off the real network.
+/// `LoginView` deterministically. The onboarding / advanced-controls /
+/// local-network-permission gates are cleared via the volatile
+/// `NSArgumentDomain` overrides below — they apply only to this launched
+/// process and are never written to the persistent `UserDefaults.standard`
+/// plist. The demo `ServiceContainer` keeps the sign-in path off the real
+/// network.
 @MainActor
 final class LoginFlowUITests: PrintFarmerUITestCase {
 
@@ -29,8 +30,9 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
             "--uitesting-unauthenticated",
             // Argument-domain overrides for the two @AppStorage gates in
             // RootView so the unauthenticated app lands on LoginView instead
-            // of Onboarding / LocalNetworkPermission. These are ephemeral and
-            // do not persist to UserDefaults.standard.
+            // of AdvancedPrinterControls / Onboarding / LocalNetworkPermission.
+            // These are ephemeral and do not persist to UserDefaults.standard.
+            "-hasSeenAdvancedPrinterControlsPrompt", "YES",
             "-hasSeenOnboarding", "YES",
             "-hasCompletedNetworkPermission", "YES",
             // Force demo mode off deterministically: DemoMode.shared reads
