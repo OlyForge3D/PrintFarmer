@@ -78,11 +78,30 @@ delivery:
    session inventory and run `acknowledge-local`, never create a duplicate. If authoritative
    inventory proves no matching session exists, the reservation lease has expired, and its
    controller PID is dead, run `recover-local` with `{"jobId":...,"sessionAbsent":true}`.
-3. Once the app returns the real session ID, run `acknowledge-local` with
-   `{"jobId":...,"sessionId":...}`. On terminal completion, run `terminal-local` with the
-   matching session ID and verified head, exit, validation, clean-worktree, and pushed-commit
-   evidence.
-4. For an eligible mobile issue only, run `dispatch-remote` with
+3. A created session is not a started session. After creation returns a session ID, wait a brief
+   grace window, then confirm from `get_sessions_status` that the session is busy, awaiting input,
+   or awaiting plan approval, or that the session store records at least one turn for that session
+   ID. Idle with no recorded turn means the kickoff was never received: resend the exact kickoff
+   once with `send_session_message`, wait the same grace window, and re-confirm. Never acknowledge
+   a session whose processing was not observed.
+4. Once the app returns the real session ID and that session's kickoff processing is confirmed, run
+   `acknowledge-local` with
+   `{"jobId":...,"sessionId":...,"kickoffVerified":true,"kickoffRetried":...}`, where
+   `kickoffRetried` is true only when the kickoff had to be resent. If processing is still
+   unconfirmed after the single resend, run `fail-local-kickoff` with
+   `{"jobId":...,"sessionId":...,"controllerPid":...,"kickoffUnverified":true}` instead of
+   acknowledging, passing the calling controller's own process ID — the reserving controller
+   releases its own reservation, while a later controller may release one only after confirming the
+   recorded owner PID is dead and its lease has expired. That releases the reservation to terminal
+   `kickoff-unverified` failure and records the stranded session as `strandedSessionId`. The
+   stranded session is never archived, deleted, or cleaned up, and its issue claim stays in place:
+   leave the claim, report the issue and stranded session, and never re-dispatch that issue while
+   the stranded session exists. The ledger enforces this — reserving that issue again fails with
+   `STRANDED_SESSION` until `clear-stranded-kickoff` with `{"jobId":...,"sessionAbsent":true}`
+   proves the stranded session is gone. A `kickoff-unverified` failure never makes that claim stale,
+   so the claim-reconciliation rule for terminal ledger states does not apply to it. On terminal completion, run `terminal-local` with the matching
+   session ID and verified head, exit, validation, clean-worktree, and pushed-commit evidence.
+5. For an eligible mobile issue only, run `dispatch-remote` with
    `{"job":...,"eligibility":...,"controllerPid":...}` using the app Ralph controller's own
    process ID instead of local session creation. It reserves, records a PID-and-lease-fenced
    intent, and sends SSH in one durable operation; lost acknowledgement/timeouts remain reserved
@@ -107,4 +126,6 @@ legacy Mac Ralph admission so Windows is the single coordinator.
 
 Report triage, every accounting bucket, epic/analysis status, dispatch order and blockers,
 cross-platform deferrals, PR gates, active slots, and the cleanup section from `cleanup.md`.
+Name every resent kickoff and every `kickoff-unverified` release with its issue and
+`strandedSessionId` under dispatch order and blockers.
 Finish the report and exit; do not poll or begin another round.

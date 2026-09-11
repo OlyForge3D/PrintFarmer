@@ -6,7 +6,8 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import {
-  RalphMacSshError, acknowledgeJob, acknowledgeLocalJob, createRemoteRequest, createSshInvocation, dispatchMacJob,
+  RalphMacSshError, acknowledgeJob, acknowledgeLocalJob, clearStrandedKickoff, createRemoteRequest,
+  createSshInvocation, dispatchMacJob, failLocalKickoff,
   loadMacSshConfiguration, markUncertain, parseRemoteAcknowledgement, parseRemoteWorkerResponse, reconcileMacJob,
   recordDeliveryIntent, recordLocalTerminalResult, recoverLocalReservation, recoverLostLocalSession,
   recoverRemoteDelivery, reserveJob, reserveLocalJob, runSsh,
@@ -315,7 +316,7 @@ test('keeps local reservations out of the remote terminal lifecycle', async () =
   await reset();
   const configuration = options();
   await reserveLocalJob({ job: job(), eligibility }, configuration);
-  await acknowledgeLocalJob('job-2605', 'local-session-1', configuration);
+  await acknowledgeLocalJob('job-2605', 'local-session-1', { ...configuration, kickoffVerified: true });
 
   await assert.rejects(() => reconcileMacJob({ job: job() }, configuration),
     (error) => error.code === 'INVALID_TRANSITION');
@@ -348,7 +349,7 @@ test('does not reuse a terminal job identifier as an active reservation', async 
   await reset();
   const configuration = options();
   await reserveLocalJob({ job: job(), eligibility }, configuration);
-  await acknowledgeLocalJob('job-2605', 'local-session-1', configuration);
+  await acknowledgeLocalJob('job-2605', 'local-session-1', { ...configuration, kickoffVerified: true });
   await recordLocalTerminalResult({
     jobId: 'job-2605', sessionId: 'local-session-1', headSha: 'b'.repeat(40), exitCode: 0,
     validationEvidence: 'targeted tests passed', workingTreeClean: true, allCommitsPushed: true,
@@ -367,11 +368,13 @@ test('executes the local create-session admission lifecycle through the CLI', as
   assert.equal(JSON.parse(reserve.stdout).result.state, 'reserved');
 
   const acknowledgement = await runAdmission('acknowledge-local', {
-    jobId: 'job-2605', sessionId: 'app-session-2605',
+    jobId: 'job-2605', sessionId: 'app-session-2605', kickoffVerified: true, kickoffRetried: true,
   });
 
   assert.equal(acknowledgement.code, 0, acknowledgement.stderr);
   assert.equal(JSON.parse(acknowledgement.stdout).result.sessionId, 'app-session-2605');
+  assert.equal(JSON.parse(acknowledgement.stdout).result.kickoffVerified, true);
+  assert.equal(JSON.parse(acknowledgement.stdout).result.kickoffRetried, true);
 
   const terminal = await runAdmission('terminal-local', {
     result: {
@@ -466,7 +469,7 @@ test('lost session: an accepted/running local job with a confirmed-absent sessio
   await reset();
   const configuration = options();
   await reserveLocalJob({ job: job(), eligibility }, configuration);
-  await acknowledgeLocalJob('job-2605', 'session-370ca864', configuration);
+  await acknowledgeLocalJob('job-2605', 'session-370ca864', { ...configuration, kickoffVerified: true });
 
   // Fails closed: caller must authoritatively assert absence, never inferred.
   await assert.rejects(() => recoverLostLocalSession('job-2605', { ...configuration }),
@@ -497,7 +500,7 @@ test('stale pending admission: reconciliation is rejected for jobs that never re
   await assert.rejects(() => recoverLostLocalSession('job-2605', { sessionAbsent: true, ...configuration }),
     (error) => error.code === 'INVALID_TRANSITION');
 
-  await acknowledgeLocalJob('job-2605', 'session-1', configuration);
+  await acknowledgeLocalJob('job-2605', 'session-1', { ...configuration, kickoffVerified: true });
   await recordLocalTerminalResult({
     jobId: 'job-2605', sessionId: 'session-1', headSha: 'b'.repeat(40), exitCode: 0,
     validationEvidence: 'targeted tests passed', workingTreeClean: true, allCommitsPushed: true,
@@ -506,6 +509,137 @@ test('stale pending admission: reconciliation is rejected for jobs that never re
   // A genuinely completed job is not eligible for lost-session reconciliation either.
   await assert.rejects(() => recoverLostLocalSession('job-2605', { sessionAbsent: true, ...configuration }),
     (error) => error.code === 'INVALID_TRANSITION');
+});
+
+// --- Stranded kickoff: created-but-never-started local session (issue #2621) ---
+
+test('unverified kickoff: acknowledgement fails closed unless the dispatcher observed the session start', async () => {
+  await reset();
+  const configuration = options();
+  await reserveLocalJob({ job: job(), eligibility }, configuration);
+
+  // A session id alone proves creation, never that the kickoff was processed.
+  await assert.rejects(() => acknowledgeLocalJob('job-2605', 'session-1', configuration),
+    (error) => error.code === 'INVALID_REQUEST');
+  await assert.rejects(() => acknowledgeLocalJob('job-2605', 'session-1', { ...configuration, kickoffVerified: 'yes' }),
+    (error) => error.code === 'INVALID_REQUEST');
+  await assert.rejects(() => acknowledgeLocalJob('job-2605', 'session-1', { ...configuration, kickoffVerified: true, kickoffRetried: 'once' }),
+    (error) => error.code === 'INVALID_REQUEST');
+
+  const accepted = await acknowledgeLocalJob('job-2605', 'session-1', { ...configuration, kickoffVerified: true });
+  assert.equal(accepted.state, 'accepted');
+  assert.equal(accepted.kickoffVerified, true);
+  assert.equal(accepted.kickoffRetried, false);
+});
+
+test('stranded kickoff: only an owning or demonstrably dead reservation releases a never-started session', async () => {
+  await reset();
+  const configuration = options();
+  await reserveLocalJob({ job: job(), eligibility, controllerPid: process.pid }, configuration);
+
+  // Fails closed without the explicit assertion, without a valid controller PID, without the
+  // stranded session identifier, and for any controller that does not own this reservation.
+  await assert.rejects(() => failLocalKickoff('job-2605', { controllerPid: process.pid, sessionId: 'session-stranded', ...configuration }),
+    (error) => error.code === 'INVALID_REQUEST');
+  await assert.rejects(() => failLocalKickoff('job-2605', { kickoffUnverified: true, sessionId: 'session-stranded', ...configuration }),
+    (error) => error.code === 'INVALID_REQUEST');
+  await assert.rejects(() => failLocalKickoff('job-2605', {
+    controllerPid: process.pid, kickoffUnverified: true, ...configuration,
+  }), (error) => error.code === 'INVALID_REQUEST');
+  await assert.rejects(() => failLocalKickoff('job-2605', {
+    controllerPid: process.pid + 300_000, kickoffUnverified: true, sessionId: 'session-stranded',
+    isOwnerAlive: () => true, ...configuration,
+  }), (error) => error.code === 'RESERVATION_ACTIVE');
+
+  const failed = await failLocalKickoff('job-2605', {
+    controllerPid: process.pid, kickoffUnverified: true, sessionId: 'session-stranded', ...configuration,
+  });
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.failureReason, 'kickoff-unverified');
+  assert.equal(failed.kickoffVerified, false);
+  // The stranded session is recorded for the round report, never archived or deleted here.
+  assert.equal(failed.strandedSessionId, 'session-stranded');
+
+  // The ledger slot is freed for other issues, but this issue stays blocked until the stranded
+  // session is proven gone, and the released jobId stays fenced forever.
+  await assert.rejects(() => reserveLocalJob({ job: job('job-2605-rekickoff'), eligibility }, configuration),
+    (error) => error.code === 'STRANDED_SESSION');
+  const other = await reserveLocalJob({
+    job: { ...job('job-2606'), issue: 2606 }, eligibility: { ...eligibility, issue: 2606 },
+  }, configuration);
+  assert.equal(other.state, 'reserved');
+
+  await assert.rejects(() => clearStrandedKickoff('job-2605', configuration),
+    (error) => error.code === 'INVALID_REQUEST');
+  const cleared = await clearStrandedKickoff('job-2605', { sessionAbsent: true, ...configuration });
+  assert.equal(cleared.strandedSessionCleared, true);
+  assert.equal(cleared.strandedSessionId, 'session-stranded');
+
+  const fresh = await reserveLocalJob({ job: job('job-2605-rekickoff'), eligibility }, configuration);
+  assert.equal(fresh.state, 'reserved');
+  await assert.rejects(() => reserveLocalJob({ job: job(), eligibility }, configuration),
+    (error) => error.code === 'FENCED');
+});
+
+test('stranded kickoff: a crashed controller does not wedge its reservation in reserved forever', async () => {
+  await reset();
+  const configuration = options();
+  await reserveLocalJob({ job: job(), eligibility, controllerPid: process.pid + 400_000 }, configuration);
+
+  // The dead-owner branch demands the same proof recoverLocalReservation requires: an expired
+  // lease and a demonstrably dead owner. Either one unmet still fails closed.
+  await assert.rejects(() => failLocalKickoff('job-2605', {
+    controllerPid: process.pid, kickoffUnverified: true, sessionId: 'session-stranded',
+    isOwnerAlive: () => false, ...configuration,
+  }), (error) => error.code === 'RESERVATION_ACTIVE');
+  await assert.rejects(() => failLocalKickoff('job-2605', {
+    controllerPid: process.pid, kickoffUnverified: true, sessionId: 'session-stranded',
+    isOwnerAlive: () => true, now: Date.parse('2999-01-01T00:00:00Z'), ...configuration,
+  }), (error) => error.code === 'RESERVATION_ACTIVE');
+
+  const failed = await failLocalKickoff('job-2605', {
+    controllerPid: process.pid, kickoffUnverified: true, sessionId: 'session-stranded',
+    isOwnerAlive: () => false, now: Date.parse('2999-01-01T00:00:00Z'), ...configuration,
+  });
+  assert.equal(failed.state, 'failed');
+  assert.equal(failed.failureReason, 'kickoff-unverified');
+  assert.equal(failed.strandedSessionId, 'session-stranded');
+});
+
+test('stranded kickoff: an acknowledged or terminal local job is never released as an unverified kickoff', async () => {
+  await reset();
+  const configuration = options();
+  await reserveLocalJob({ job: job(), eligibility }, configuration);
+  await acknowledgeLocalJob('job-2605', 'session-1', { ...configuration, kickoffVerified: true });
+
+  await assert.rejects(() => failLocalKickoff('job-2605', {
+    controllerPid: process.pid, kickoffUnverified: true, sessionId: 'session-1', ...configuration,
+  }), (error) => error.code === 'INVALID_TRANSITION');
+});
+
+test('executes the stranded-kickoff release through the CLI and keeps the acknowledgement gate', async () => {
+  await reset();
+  const reserve = await runAdmission('reserve-local', { job: job(), eligibility, controllerPid: process.pid });
+  assert.equal(reserve.code, 0, reserve.stderr);
+
+  // The CLI acknowledgement is gated by the same assertion the library enforces.
+  const unverified = await runAdmission('acknowledge-local', { jobId: 'job-2605', sessionId: 'app-session-2605' });
+  assert.equal(unverified.code, 1);
+  assert.equal(JSON.parse(unverified.stderr).code, 'INVALID_REQUEST');
+
+  // reserve-local ran in its own one-shot process, so the recorded owner is that PID, not ours.
+  const reservationOwnerPid = JSON.parse(reserve.stdout).result.reservationOwnerPid;
+  const unrecorded = await runAdmission('fail-local-kickoff', {
+    jobId: 'job-2605', controllerPid: reservationOwnerPid, kickoffUnverified: true,
+  });
+  assert.equal(unrecorded.code, 1);
+  assert.equal(JSON.parse(unrecorded.stderr).code, 'INVALID_REQUEST');
+
+  const released = await runAdmission('fail-local-kickoff', {
+    jobId: 'job-2605', sessionId: 'app-session-2605', controllerPid: reservationOwnerPid, kickoffUnverified: true,
+  });
+  assert.equal(released.code, 0, released.stderr);
+  assert.equal(JSON.parse(released.stdout).result.failureReason, 'kickoff-unverified');
 });
 
 test('rejects Xcode/CoreSimulator host over-subscription independent of the shared slot pool', async () => {

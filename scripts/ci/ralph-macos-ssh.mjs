@@ -385,6 +385,15 @@ export async function reserveJob({ job, eligibility, mode = 'remote', now = new 
     }
     const active = Object.values(ledger.jobs).filter((entry) => activeJobStates.has(entry.state));
     if (active.some((entry) => entry.issue === job.issue)) throw new RalphMacSshError('Issue already has an active Ralph job.', 'ISSUE_OWNED');
+    // A released stranded kickoff (issue #2621) frees the slot but not the issue: the created
+    // session was never observed processing anything, so it may still wake up and work the issue.
+    // Re-admitting the issue before that session is proven gone would put two sessions on the same
+    // work — the ledger enforces that here rather than trusting the caller to remember the policy.
+    if (Object.values(ledger.jobs).some((entry) => entry.issue === job.issue &&
+      entry.failureReason === 'kickoff-unverified' && validIdentifier(entry.strandedSessionId) &&
+      entry.strandedSessionCleared !== true)) {
+      throw new RalphMacSshError('Issue has a stranded local session that is not yet reconciled.', 'STRANDED_SESSION');
+    }
     if (active.length >= 5) throw new RalphMacSshError('All five PrintFarmer Ralph slots are reserved.', 'SLOT_EXHAUSTED');
     // Xcode/CoreSimulator concurrency is a per-Mac constraint, independent of the shared 5-slot
     // pool: a physical Mac can only run one xcodebuild/simctl invocation at a time no matter how
@@ -416,14 +425,23 @@ export async function reserveLocalJob({ job, eligibility, now = new Date().toISO
   return reserveJob({ job: localJob, eligibility, mode: 'local', now, reservationOwnerPid: controllerPid }, options);
 }
 
-export async function acknowledgeLocalJob(jobId, sessionId, options = {}) {
+// A created session is not a started session: a local session can be created with its worktree and
+// branch and still never process its kickoff, sitting idle with zero turns while it holds a slot
+// and the issue's claim (issue #2621). Acknowledgement therefore requires the dispatcher to assert
+// that it observed the session actually processing the kickoff, and records that assertion — plus
+// whether the kickoff had to be resent — as a durable audit field.
+export async function acknowledgeLocalJob(jobId, sessionId, { kickoffVerified, kickoffRetried = false, ...options } = {}) {
   if (!validIdentifier(sessionId)) throw new RalphMacSshError('Local session identifier is invalid.', 'INVALID_REQUEST');
+  if (kickoffVerified !== true) throw new RalphMacSshError('Verified kickoff processing is required to acknowledge a local session.', 'INVALID_REQUEST');
+  if (typeof kickoffRetried !== 'boolean') throw new RalphMacSshError('Kickoff retry evidence must be boolean.', 'INVALID_REQUEST');
   return mutateLedger((ledger) => {
     const entry = ledger.jobs[jobId];
     if (!entry || entry.mode !== 'local' || entry.state !== 'reserved') throw new RalphMacSshError('Only a reserved local job may be acknowledged.', 'INVALID_TRANSITION');
     entry.state = 'accepted';
     entry.sessionId = sessionId;
     entry.local = true;
+    entry.kickoffVerified = true;
+    entry.kickoffRetried = kickoffRetried;
     delete entry.reservationOwnerPid;
     delete entry.reservationExpiresAt;
     entry.updatedAt = new Date().toISOString();
@@ -431,8 +449,68 @@ export async function acknowledgeLocalJob(jobId, sessionId, options = {}) {
   }, options);
 }
 
-export async function recoverLocalReservation(jobId, { isOwnerAlive = ownerIsAlive, now = Date.now(), sessionAbsent, ...options } = {}) {
+// The stranded-kickoff counterpart of acknowledgeLocalJob: the session exists but never started,
+// so neither existing recovery path applies (recoverLocalReservation needs an expired lease and a
+// dead controller — the dispatching controller is alive; recoverLostLocalSession needs the session
+// to be genuinely absent — it is present, just idle). Release is authorized either by the
+// reservation's own live owner (matching the recorded reservation PID) or, when that controller
+// died before it could verify the kickoff, by a later controller under exactly the same
+// dead-owner-plus-expired-lease proof recoverLocalReservation already requires — without that
+// second branch a crashed round would wedge the reservation in 'reserved' forever, with no legal
+// transition out and the issue's slot held permanently. The PID match correlates a caller to its
+// own reservation inside this machine-local trusted ledger; it is not an authentication boundary,
+// and nothing here is weaker than direct write access to the ledger file itself. The disposition is
+// terminal: the stranded sessionId is required and retained as an audit record, the issue's slot is
+// freed for a fresh jobId, the old jobId stays fenced, and nothing about the stranded session is
+// archived, deleted, or otherwise cleaned up. Freeing the slot is not permission to re-dispatch the
+// issue: reserveJob keeps that issue blocked (STRANDED_SESSION) until clearStrandedKickoff proves
+// the stranded session is gone.
+export async function failLocalKickoff(jobId, { controllerPid, kickoffUnverified, sessionId, isOwnerAlive = ownerIsAlive, now = Date.now(), ...options } = {}) {
+  if (kickoffUnverified !== true) throw new RalphMacSshError('An explicit unverified-kickoff assertion is required.', 'INVALID_REQUEST');
+  if (!Number.isInteger(controllerPid) || controllerPid <= 0) throw new RalphMacSshError('Local controller process identifier is invalid.', 'INVALID_REQUEST');
+  if (!validIdentifier(sessionId)) throw new RalphMacSshError('The stranded local session identifier is required.', 'INVALID_REQUEST');
+  return mutateLedger((ledger) => {
+    const entry = ledger.jobs[jobId];
+    if (!entry || entry.mode !== 'local' || entry.state !== 'reserved') {
+      throw new RalphMacSshError('Only a reserved local job may fail for an unverified kickoff.', 'INVALID_TRANSITION');
+    }
+    const ownsReservation = entry.reservationOwnerPid === controllerPid;
+    const ownerIsDead = Number.isInteger(entry.reservationOwnerPid) &&
+      Number.isFinite(Date.parse(entry.reservationExpiresAt)) &&
+      Date.parse(entry.reservationExpiresAt) <= now &&
+      isOwnerAlive(entry.reservationOwnerPid) === false;
+    if (!ownsReservation && !ownerIsDead) {
+      throw new RalphMacSshError('Local reservation is still owned by another live controller.', 'RESERVATION_ACTIVE');
+    }
+    entry.state = 'failed';
+    entry.failureReason = 'kickoff-unverified';
+    entry.kickoffVerified = false;
+    entry.strandedSessionId = sessionId;
+    delete entry.reservationOwnerPid;
+    delete entry.reservationExpiresAt;
+    entry.updatedAt = new Date(now).toISOString();
+    return entry;
+  }, options);
+}
+
+// The only way a stranded issue becomes dispatchable again. It requires the same authoritative
+// session-absence assertion recoverLostLocalSession uses — the ledger cannot observe an app-managed
+// session itself — and it clears the issue-level block without resurrecting the fenced jobId or
+// deleting the audit record.
+export async function clearStrandedKickoff(jobId, { sessionAbsent, now = Date.now(), ...options } = {}) {
   if (sessionAbsent !== true) throw new RalphMacSshError('Authoritative session absence is required.', 'INVALID_REQUEST');
+  return mutateLedger((ledger) => {
+    const entry = ledger.jobs[jobId];
+    if (!entry || entry.mode !== 'local' || entry.failureReason !== 'kickoff-unverified' || !validIdentifier(entry.strandedSessionId)) {
+      throw new RalphMacSshError('Only a released stranded kickoff may be reconciled.', 'INVALID_TRANSITION');
+    }
+    entry.strandedSessionCleared = true;
+    entry.updatedAt = new Date(now).toISOString();
+    return entry;
+  }, options);
+}
+
+export async function recoverLocalReservation(jobId, { isOwnerAlive = ownerIsAlive, now = Date.now(), sessionAbsent, ...options } = {}) {  if (sessionAbsent !== true) throw new RalphMacSshError('Authoritative session absence is required.', 'INVALID_REQUEST');
   return mutateLedger((ledger) => {
     const entry = ledger.jobs[jobId];
     if (!entry || entry.mode !== 'local' || entry.state !== 'reserved' ||
