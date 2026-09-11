@@ -54,7 +54,7 @@ function comment(reviewer, verdict, sha = headSha, overrides = {}) {
 function gate(overrides = {}) {
   return evaluateGate({
     headSha,
-    changedPaths: ['src/api/Program.cs'],
+    changedPaths: ['src/Web/ReactApp/src/components/Button.tsx'],
     comments: [],
     reviews: [],
     roster,
@@ -270,23 +270,28 @@ test('a stale verdict cannot erase a live rejection from the same reviewer', () 
   assert.match(result.description, /^REQUEST_CHANGES @ .* by bishop$/);
 });
 
-test('accepts a full panel approval at the current head', () => {
+test('accepts a single eligible approval for a standard code change', () => {
   const result = gate({
-    comments: [
-      comment('bishop', 'APPROVE'),
-      comment('hicks', 'APPROVE'),
-      comment('vasquez', 'APPROVE'),
-    ],
+    comments: [comment('bishop', 'APPROVE')],
   });
   assert.equal(result.state, 'success');
   assert.equal(
     result.description,
-    `REVIEWED (self-attested) @ ${headSha.slice(0, 12)} by bishop+hicks+vasquez`,
+    `REVIEWED (self-attested) @ ${headSha.slice(0, 12)} by bishop`,
   );
   assert.ok(
     result.notes.some((note) => note.includes('not independent review')),
     'the record must state that it is not independent review',
   );
+});
+
+test('requires the full panel for a high-risk change', () => {
+  const result = gate({
+    changedPaths: ['src/migrations/Farm.Migrations.PostgreSQL/Migrations/AddRole.cs'],
+    comments: [comment('bishop', 'APPROVE')],
+  });
+  assert.equal(result.state, 'failure');
+  assert.match(result.description, /have 1\/3, missing hicks\+vasquez/);
 });
 
 test('rejects verdicts pinned to a stale SHA', () => {
@@ -571,8 +576,11 @@ test('carriedShas is keyed on the reviewed SHA, not the current head', () => {
   assert.equal(stale[0].reviewer, 'hicks');
 });
 
-test('a single approval never satisfies a code change', () => {
-  const result = gate({ comments: [comment('bishop', 'APPROVE')] });
+test('a single approval does not satisfy a high-risk code change', () => {
+  const result = gate({
+    changedPaths: ['src/migrations/Farm.Migrations.PostgreSQL/Migrations/AddRole.cs'],
+    comments: [comment('bishop', 'APPROVE')],
+  });
   assert.equal(result.state, 'failure');
   assert.match(result.description, /have 1\/3, missing hicks\+vasquez/);
 });
@@ -611,7 +619,10 @@ test('only a reviewer decision emits REQUEST_CHANGES; absent evidence is BLOCKED
   // verify-squad-verdict.mjs distinguishes these: REQUEST_CHANGES routes back
   // to the author, BLOCKED means no usable evidence exists yet.
   const noVerdict = gate();
-  const insufficient = gate({ comments: [comment('bishop', 'APPROVE')] });
+  const insufficient = gate({
+    changedPaths: ['src/migrations/Farm.Migrations.PostgreSQL/Migrations/AddRole.cs'],
+    comments: [comment('bishop', 'APPROVE')],
+  });
   const authorReview = gate({
     changedPaths: ['docs/ARCHITECTURE.md'],
     comments: [comment('parker', 'APPROVE')],

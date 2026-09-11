@@ -27,7 +27,7 @@
 export const verdictContext = 'squad/pre-pr-verdict';
 
 /**
- * Squad members that form the standard review panel. Three agents reviewing
+ * Squad members that form the elevated review panel. Three agents reviewing
  * instead of one is a quality measure, not three independent parties.
  */
 export const reviewPanel = ['bishop', 'hicks', 'vasquez'];
@@ -239,6 +239,9 @@ const manifestBasenames = new Set([
 // licensing terms, published API contracts.
 const sensitiveProse =
   /(^|\/)(security|threat[-_ ]?model|licen[cs]e|notice|copying|code[-_ ]?of[-_ ]?conduct|api[-_ ]?contract)(\.[a-z0-9]+)?$/i;
+
+const highRiskPaths =
+  /(^|\/)(auth(entication|orization)?|contract|dto|identity|permission|role|security|migration|migrations|docker|deploy(ment)?|release|compose|serialization)(\/|[-_.]|$)/i;
 
 /**
  * Reduce a squad identity to its canonical lowercase token.
@@ -565,34 +568,42 @@ function isProse(path) {
 }
 
 /**
- * Decide whether the changed paths qualify for the one-reviewer
- * documentation-only exemption defined in .github/copilot-instructions.md.
- * Fails toward the full gate whenever classification is not obvious.
+ * Classify the change for reviewer-count enforcement. Standard changes and
+ * documentation require one reviewer; high-risk changes require the panel.
  */
 export function classifyChangeScope(paths) {
   const files = (paths ?? []).filter((path) => typeof path === 'string' && path);
   if (files.length === 0) {
-    return { docsOnly: false, reason: 'no changed files reported' };
+    return { docsOnly: false, highRisk: true, reason: 'no changed files reported' };
   }
   for (const path of files) {
     const basename = path.split('/').pop().toLowerCase();
     if (fullGatePrefixes.some((prefix) => path.startsWith(prefix))) {
-      return { docsOnly: false, reason: `${path} governs agent or CI behaviour` };
+      return { docsOnly: false, highRisk: true, reason: `${path} governs agent or CI behaviour` };
+    }
+    if (path.startsWith('scripts/ci/')) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is CI code` };
+    }
+    if (path.startsWith('src/api/')) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is public API code` };
     }
     if (!path.includes('/') && fullGateFiles.has(basename)) {
-      return { docsOnly: false, reason: `${path} is a root agent-instruction file` };
+      return { docsOnly: false, highRisk: true, reason: `${path} is a root agent-instruction file` };
     }
     if (manifestBasenames.has(basename)) {
-      return { docsOnly: false, reason: `${path} is a dependency manifest` };
+      return { docsOnly: false, highRisk: true, reason: `${path} is a dependency manifest` };
     }
     if (sensitiveProse.test(path)) {
-      return { docsOnly: false, reason: `${path} is security/licensing/contract prose` };
+      return { docsOnly: false, highRisk: true, reason: `${path} is security/licensing/contract prose` };
+    }
+    if (highRiskPaths.test(path)) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is high-risk infrastructure or access-control code` };
     }
     if (!isProse(path)) {
-      return { docsOnly: false, reason: `${path} is not documentation` };
+      return { docsOnly: false, highRisk: false, reason: `${path} is standard code` };
     }
   }
-  return { docsOnly: true, reason: 'every changed path is documentation' };
+  return { docsOnly: true, highRisk: false, reason: 'every changed path is documentation' };
 }
 
 /**
@@ -824,9 +835,9 @@ export function evaluateGate({
 
   const scope = classifyChangeScope(changedPaths);
   notes.push(
-    scope.docsOnly
-      ? `Documentation-only change (${scope.reason}): one reviewer required.`
-      : `Full gate (${scope.reason}): the ${reviewPanel.join('/')} panel is required.`,
+    scope.highRisk
+      ? `High-risk gate (${scope.reason}): the ${reviewPanel.join('/')} panel is required.`
+      : `${scope.docsOnly ? 'Documentation-only change' : 'Standard change'} (${scope.reason}): one reviewer required.`,
   );
   if (authorMembers.size > 0) {
     notes.push(
@@ -898,11 +909,11 @@ export function evaluateGate({
     .sort();
 
   // 5. Reviewer count and panel membership.
-  const requiredCount = scope.docsOnly ? 1 : 3;
-  const requiredMembers = scope.docsOnly
-    ? []
-    : reviewPanel.filter((member) => !authorMembers.has(member));
-  if (!scope.docsOnly && requiredMembers.length < reviewPanel.length) {
+  const requiredCount = scope.highRisk ? 3 : 1;
+  const requiredMembers = scope.highRisk
+    ? reviewPanel.filter((member) => !authorMembers.has(member))
+    : [];
+  if (scope.highRisk && requiredMembers.length < reviewPanel.length) {
     notes.push(
       `Panel members ${reviewPanel.filter((m) => authorMembers.has(m)).join(', ')} ` +
       'authored this PR; substitutes from the roster may stand in.',

@@ -20,13 +20,14 @@ test assembly.
 ## Pre-PR Gate
 
 Before opening a PR, fetch then merge `origin/development` into the branch, resolve only actual
-conflicts, and rerun targeted validation. Do not rebase. Reviewer count and documentation-only
-classification are governed solely by
-`.github/copilot-instructions.md` § `Documentation-Only Changes: One Reviewer`. Dispatch the
-required reviewers as parallel read-only task agents—not sessions—and explicitly prohibit builds,
-installs, and tests. An unavailable model blocks the PR; never substitute or self-review.
-Post exactly the number of genuine canonical verdict comments the canonical rule requires: one
-for a documentation-only change and three for a full-gate change.
+conflicts, and rerun targeted validation. Do not rebase. Reviewer count and risk classification are governed solely by
+`.github/copilot-instructions.md` § `Risk-Based Review Scope`. For standard and
+documentation-only changes, dispatch one qualified non-author reviewer using a different model
+family than the implementation agent. For high-risk changes, dispatch Bishop, Hicks, and Vasquez
+as parallel read-only task agents—not sessions—and explicitly prohibit builds, installs, and
+tests. An unavailable required model blocks the PR; never substitute or self-review. Post exactly
+the number of genuine canonical verdict comments the canonical rule requires: one for a standard
+or documentation-only change and three for a high-risk change.
 
 Fix every blocker and repeat review at the new head. If conflict resolution authored hunks,
 request narrowly targeted review that agrees across all resolved files. Then create the PR with

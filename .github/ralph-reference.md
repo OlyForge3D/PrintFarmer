@@ -132,7 +132,7 @@ or rejection from a PR that never had squad evidence.
   - `have <n>/<required>[, missing <agents>][ (stale at <agent>@<sha>, ...)]` —
     too few accepted records for this change's scope. Match this as a **pattern,
     not a fixed string**: the `missing` and `stale at` clauses each appear only
-    when they apply, so real forms include `have 1/3, missing hicks+vasquez`,
+    when they apply, so real forms include `have 1/1`, `have 1/3, missing hicks+vasquez`,
     `have 0/1 (stale at dallas@<sha>)`, and
     `have 0/3, missing bishop+hicks+vasquez (stale at bishop@<sha>, ...)`.
     A `stale at` clause means those reviewers reviewed a superseded head.
