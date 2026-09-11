@@ -403,7 +403,7 @@ following **always** take the full gate, even when the only change is markdown:
 - `.agents/**`
 - root-level agent-instruction, governance, or release files: `AGENTS.md`, `CLAUDE.md`,
   `GEMINI.md`, `COPILOT.md`, `.cursorrules`, `squad.config.ts`, `agentrc.config.json`,
-  `skills-lock.json`, `VERSION`, and `cliff.toml`
+  `skills-lock.json`, `VERSION`, `cliff.toml`, `.mcp.json`, and `.gitattributes`
 
 Whether a given edit moves an agent's safety boundary cannot be judged from the path, so a
 single review record must never be able to rewrite these. Prose is matched by extension

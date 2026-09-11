@@ -214,6 +214,8 @@ export const fullGateFiles = new Set([
   'skills-lock.json',
   'version',
   'cliff.toml',
+  '.mcp.json',
+  '.gitattributes',
 ]);
 
 // Dependency manifests and lockfiles, matched by basename anywhere in the tree.
@@ -577,6 +579,7 @@ function isProse(path) {
 
 function isDependencyManifest(path, basename) {
   return manifestBasenames.has(basename) ||
+    /^appsettings(?:\.[^.]+)?\.json$/i.test(basename) ||
     /\.(?:csproj|fsproj|props|targets)$/i.test(path);
 }
 
