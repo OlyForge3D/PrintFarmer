@@ -313,7 +313,7 @@ jobs:
         suite:
           - LoginFlowUITests
           - OperatorShellUITests
-          - AttentionDisabledFallbackUITests
+          - OperatorFeatureVisibilityUITests
           - ScanStationUITests
           - HarvestUITests
           - PartsInventoryUITests
@@ -374,7 +374,6 @@ jobs:
           suite_tests=("-only-testing:PrintFarmerUITests/${{ matrix.suite }}")
           if [[ "${{ matrix.suite }}" == "OperatorShellUITests" ]]; then
             suite_tests+=(
-              "-only-testing:PrintFarmerUITests/OperatorFeatureVisibilityUITests/testDisabledDestinationsAreAbsentAndFarmIsSelected"
               "-only-testing:PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations"
             )
           fi

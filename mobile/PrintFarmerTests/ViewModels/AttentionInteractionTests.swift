@@ -1,4 +1,5 @@
 import XCTest
+import Observation
 @testable import PrintFarmer
 
 @MainActor
@@ -1974,6 +1975,58 @@ final class AttentionInteractionTests: XCTestCase {
         XCTAssertEqual(vm.actionState(for: itemB.id), .idle)
         let actionCount = await service.actionCallCount
         XCTAssertEqual(actionCount, 2)
+    }
+
+    func testDemoActionFixtureAcknowledgementReleasesResumeAndRefreshesIndependently() async throws {
+        let feed = UITestBootstrap.attentionActionsScenarioFeed()
+        let failure = try XCTUnwrap(feed.items.first { $0.actions.contains { $0.kind == .resume } })
+        let maintenance = try XCTUnwrap(feed.items.first { $0.actions.contains { $0.kind == .acknowledge } })
+        let resume = try XCTUnwrap(failure.actions.first { $0.kind == .resume })
+        let acknowledge = try XCTUnwrap(maintenance.actions.first { $0.kind == .acknowledge })
+        let service = DemoAttentionService(
+            feed: feed, gatedFailureAction: .resume, gateReleaseAction: .acknowledge,
+            feedFailureAfterSuccessfulAction: .resume
+        )
+        let signalR = MockSignalRService()
+        let vm = AttentionFeedViewModel()
+        let bootstrapped = await vm.bootstrap(
+            attentionService: service, signalRService: signalR, attentionEnabled: true
+        )
+        XCTAssertTrue(bootstrapped)
+        XCTAssertEqual(signalR.attentionSubscriberCount, 1)
+        XCTAssertEqual(signalR.connectionStateSubscriberCount, 1)
+
+        let pending = expectation(description: "Resume published as pending")
+        withObservationTracking {
+            _ = vm.actionState(for: failure.id)
+        } onChange: {
+            pending.fulfill()
+        }
+        let resumeTask = Task { await vm.performAction(resume, for: failure.id) }
+        await fulfillment(of: [pending], timeout: 2)
+        XCTAssertEqual(vm.actionState(for: failure.id), .inProgress(.resume))
+        XCTAssertTrue(vm.snapshot?.items.contains { $0.id == maintenance.id } == true)
+
+        let acknowledged = await vm.performAction(acknowledge, for: maintenance.id)
+        XCTAssertTrue(acknowledged)
+        XCTAssertFalse(vm.snapshot?.items.contains { $0.id == maintenance.id } == true)
+        let resumed = await resumeTask.value
+        XCTAssertFalse(resumed)
+        guard case .failed(let firstFailure) = vm.actionState(for: failure.id) else {
+            return XCTFail("Acknowledgement must release the event-gated Resume failure")
+        }
+        XCTAssertEqual(firstFailure.message, "The printer refused the first resume request.")
+
+        let retried = await vm.retryAction(failureID: firstFailure.id)
+        XCTAssertTrue(retried)
+        guard case .refreshPending(let refresh) = vm.actionState(for: failure.id) else {
+            return XCTFail("Successful retry must retain the failed canonical-refresh requirement")
+        }
+        XCTAssertEqual(refresh.message, "Canonical attention refresh failed.")
+        let refreshed = await vm.retryActionRefresh(pendingID: refresh.id)
+        XCTAssertTrue(refreshed)
+        XCTAssertFalse(vm.snapshot?.items.contains { $0.id == failure.id } == true)
+        vm.deactivate()
     }
 
     func testSnapshotLoadsAreOnePerLiveItemAndIndependent() async {

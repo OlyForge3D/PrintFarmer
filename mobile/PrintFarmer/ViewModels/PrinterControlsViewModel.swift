@@ -42,8 +42,50 @@ struct ControlCommand: Equatable, Sendable {
         case home(axes: [String])
         case jog(axis: String, distanceMm: Double)
         case heater(Heater, target: Double)
+        case heaterTargets(hotend: Double?, bed: Double?)
         case moveTo(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?)
         case disableMotors
+        case extrusion(distanceMm: Double, feedrateMmMin: Int)
+        case filament(PhysicalFilamentOperation)
+        case calibrationHome
+        case calibrationPosition(target: SafetyVector3Dto, centered: Bool)
+        case calibrationAdjust(delta: Double, expectedZ: Double)
+        case calibrationSave(offsetMm: Double)
+    }
+}
+
+enum PhysicalFilamentOperation: String, CaseIterable, Identifiable, Sendable {
+    case load, unload, change
+    var id: String { rawValue }
+    var title: String { "\(rawValue.capitalized) filament" }
+}
+
+enum ZOffsetCalibrationStep: String, CaseIterable, Sendable {
+    case introduction, home, position, adjust, save, done
+}
+
+/// Native choices and validation only; never a source of hardware safety evidence.
+enum MaterialControlInput {
+    static let distances = [10.0, 25, 50, 100]
+    static let speeds = [1, 5, 10]
+    static let increments = [0.01, 0.05, 0.1]
+
+    static func feedrate(distance: Double, speed: Int) throws -> Int {
+        guard distance.isFinite, distances.contains(abs(distance)), speeds.contains(speed) else {
+            throw PrinterControlError.invalidRequest("Choose 10, 25, 50 or 100 mm and 1, 5 or 10 mm/s.")
+        }
+        return speed * 60
+    }
+
+    static func adjustedOffset(_ offset: Double, delta: Double) throws -> Double {
+        guard ControlNumberInput.hasCoordinatePrecision(offset), increments.contains(abs(delta)) else {
+            throw PrinterControlError.invalidRequest("Choose a 0.01, 0.05 or 0.1 mm adjustment.")
+        }
+        let value = (offset * 1000 + delta * 1000).rounded() / 1000
+        guard (-5...5).contains(value) else {
+            throw PrinterControlError.invalidRequest("Z-offset must stay within -5…5 mm.")
+        }
+        return value
     }
 }
 
@@ -54,6 +96,7 @@ enum Heater: String, CaseIterable, Sendable {
 }
 
 enum ControlNumberInput {
+    static let absoluteCoordinatesMessage = "Enter finite X, Y and Z destinations. All three coordinates are required; no current position is filled in."
     static let heaterPrecisionMessage = "Use whole degrees Celsius. Fractional targets are not supported; no rounding is applied."
     static let coordinatePrecisionMessage = "Use at most 3 decimal places in millimetres. No rounding is applied."
     static let customFeedrateMessage = "Custom feedrates are unavailable without a verified maximum. Leave this field blank to use the established axis-specific rate."
@@ -88,6 +131,16 @@ enum ControlNumberInput {
             throw PrinterControlError.invalidRequest(coordinatePrecisionMessage)
         }
         return value
+    }
+
+    static func absolutePosition(x: Double?, y: Double?, z: Double?) throws -> SafetyVector3Dto {
+        guard let x, let y, let z, x.isFinite, y.isFinite, z.isFinite else {
+            throw PrinterControlError.invalidRequest(absoluteCoordinatesMessage)
+        }
+        guard [x, y, z].allSatisfy(hasCoordinatePrecision) else {
+            throw PrinterControlError.invalidRequest(coordinatePrecisionMessage)
+        }
+        return SafetyVector3Dto(x: x, y: y, z: z)
     }
 
     static func isWholeDegree(_ value: Double) -> Bool {
@@ -136,26 +189,42 @@ struct PrinterControlsComposition: Sendable {
     let printerService: any PrinterServiceProtocol
 }
 
-private struct PrinterControlsIdentity: Hashable {
+private struct PrinterControlsIdentity: Hashable, Sendable {
     let serverID: UUID
     let printerID: UUID
 }
 
-/// Process-wide physical-request ownership, independent of view/service lifetime.
+/// Process-wide request/telemetry-wait ownership, independent of service lifetime.
 /// Only tokens are retained; neither command tasks nor view models live here.
 @MainActor
 private final class PrinterControlsLeases: ObservableObject {
     static let shared = PrinterControlsLeases()
     @Published private var owners: [PrinterControlsIdentity: UUID] = [:]
+    @Published private var workflows: [PrinterControlsIdentity: UUID] = [:]
 
-    func contains(_ identity: PrinterControlsIdentity) -> Bool {
-        owners[identity] != nil
+    func contains(_ identity: PrinterControlsIdentity, excludingWorkflow: UUID? = nil) -> Bool {
+        owners[identity] != nil || (workflows[identity] != nil && workflows[identity] != excludingWorkflow)
     }
 
-    func acquire(_ identity: PrinterControlsIdentity, token: UUID) -> Bool {
-        guard owners[identity] == nil else { return false }
+    func acquire(_ identity: PrinterControlsIdentity, token: UUID, workflow: UUID? = nil) -> AnyCancellable? {
+        guard !contains(identity, excludingWorkflow: workflow) else { return nil }
         owners[identity] = token
-        return true
+        return AnyCancellable {
+            Task { @MainActor in self.release(identity, token: token) }
+        }
+    }
+
+    func acquireWorkflow(_ identity: PrinterControlsIdentity, token: UUID) -> AnyCancellable? {
+        guard !contains(identity) else { return nil }
+        workflows[identity] = token
+        return AnyCancellable {
+            Task { @MainActor in self.releaseWorkflow(identity, token: token) }
+        }
+    }
+
+    func releaseWorkflow(_ identity: PrinterControlsIdentity, token: UUID) {
+        guard workflows[identity] == token else { return }
+        workflows.removeValue(forKey: identity)
     }
 
     func release(_ identity: PrinterControlsIdentity, token: UUID) {
@@ -179,7 +248,15 @@ final class PrinterControlsViewModel: ObservableObject {
 
     @Published private(set) var capabilities: PrinterBackendCapabilities?
     @Published private(set) var lastError: ControlsError?
-    @Published private(set) var pendingCommand: ControlCommand?
+    @Published private(set) var pendingCommand: ControlCommand? {
+        didSet {
+            // Live confirmation and explicit observation cleanup share the
+            // same token release, but neither may unlock an outstanding HTTP call.
+            if let previous = oldValue, pendingCommand != previous, commandTask == nil {
+                releaseLease(for: previous)
+            }
+        }
+    }
     @Published private(set) var isLoadingCapabilities: Bool = false
     @Published private(set) var capabilityLoadError: String?
     @Published private(set) var hardware: PrinterHardwareCapabilities?
@@ -187,6 +264,24 @@ final class PrinterControlsViewModel: ObservableObject {
     @Published private(set) var hardwareLoadError: String?
     @Published private(set) var commandNotice: String?
     @Published private(set) var isActive = true
+    @Published private(set) var calibrationStep: ZOffsetCalibrationStep?
+    @Published private(set) var calibrationOffset: Double?
+    @Published private(set) var calibrationReview: PrinterDetails?
+    @Published private(set) var calibrationMessage: String?
+    @Published private(set) var isReviewingCalibration = false
+    @Published private(set) var safetyStatus: PrinterStatusDetail?
+    @Published private(set) var isRefreshingSafety = false
+    @Published private(set) var safetyReadError: String?
+    @Published private(set) var safetyCheckedAt: Date?
+    private var safetyReadID = UUID()
+    private var calibrationFrame: SafetyVector3Dto?
+    private var calibrationPosition: SafetyVector3Dto?
+    private var calibrationBaseline: Double?
+    private var calibrationInterrupted = false
+    private var calibrationSession = UUID()
+    private var calibrationLease: UUID?
+    private var calibrationLeaseLifetime: AnyCancellable?
+    private var calibrationCommandID: UUID?
     var registeredServerID: UUID? { composition?.identity.serverID }
     var compositionIdentity: PrinterControlsComposition.Identity? { composition?.identity }
 
@@ -194,6 +289,7 @@ final class PrinterControlsViewModel: ObservableObject {
     private var accessCheck: @MainActor () -> String? = { nil }
     private var hasConfiguredAccess = false
     private let commandLeases = PrinterControlsLeases.shared
+    private var commandLease: (id: UUID, lifetime: AnyCancellable)?
     private var leaseObservation: AnyCancellable?
     private var commandTask: Task<Void, Error>?
     private var commandWasDispatched = false
@@ -256,6 +352,7 @@ final class PrinterControlsViewModel: ObservableObject {
                 capabilities = loaded
             }
             if hardware == nil || hardwareLoadError != nil { await loadHardware() }
+            if safetyStatus == nil { await refreshSafetyEvidence(refreshDiscovery: false) }
         } catch {
             guard !Task.isCancelled, canPublishRead(generation) else { return }
             // Failed reads are not cached as proof of unsupported hardware.
@@ -289,6 +386,135 @@ final class PrinterControlsViewModel: ObservableObject {
         generation == lifecycleGeneration && isActive && accessCheck() == nil
     }
 
+    /// Read-only refresh; never retries a physical command or refreshes If-Match.
+    func refreshSafetyEvidence(refreshDiscovery: Bool = true) async {
+        guard isActive, accessCheck() == nil, !isRefreshingSafety else { return }
+        let generation = lifecycleGeneration
+        let readID = UUID()
+        safetyReadID = readID
+        isRefreshingSafety = true
+        let startedAt = clock()
+        defer {
+            if safetyReadID == readID { isRefreshingSafety = false }
+        }
+        do {
+            let loaded = refreshDiscovery
+                ? try await printerService.getBackendCapabilities(printerId: printer.id) : capabilities
+            try Task.checkCancellation()
+            guard canPublishRead(generation), safetyReadID == readID else { return }
+            if refreshDiscovery {
+                if let old = capabilities?.verifiedSafety, calibrationStep != nil {
+                    if let new = loaded?.verifiedSafety {
+                        if !Self.sameSafetyConfiguration(old, new) {
+                            interruptCalibration("Safety discovery changed. Cancel and review calibration again.")
+                        }
+                    } else {
+                        interruptCalibration("Safety discovery is no longer available. Cancel and review again.")
+                    }
+                }
+                capabilities = loaded
+            }
+            let status = try await printerService.getStatus(id: printer.id)
+            try Task.checkCancellation()
+            guard canPublishRead(generation), safetyReadID == readID else { return }
+            guard status.id == printer.id else { throw NetworkError.invalidResponse }
+            let previous = safetyStatus
+            safetyStatus = status
+            safetyCheckedAt = clock()
+            safetyReadError = nil
+            if !status.isOnline || ["printing", "paused", "starting"].contains(status.state?.lowercased() ?? "") {
+                interruptCalibration("Printer readiness changed. Cancel and check the machine.")
+            }
+            if let frame = calibrationFrame, status.safetyTelemetry?.coordinateOriginOffsetMm.value != frame {
+                interruptCalibration("Movement frame changed. Cancel, re-home and review again.")
+            }
+            confirmCalibrationObservation(previous: previous, status: status, readStartedAt: startedAt)
+        } catch {
+            guard canPublishRead(generation), safetyReadID == readID else { return }
+            safetyStatus = nil
+            safetyCheckedAt = nil
+            safetyReadError = "Safety evidence could not be read. Refresh safety checks. \(error.localizedDescription)"
+            interruptCalibration("Safety evidence could not be read. Check the machine, then cancel and review again.")
+        }
+    }
+
+    private static func sameSafetyConfiguration(_ a: PrinterVerifiedSafetyDto, _ b: PrinterVerifiedSafetyDto) -> Bool {
+        a.contractVersion == b.contractVersion &&
+        a.discovery.sourceRevision == b.discovery.sourceRevision &&
+        a.discovery.state == b.discovery.state &&
+        a.positioning.coordinateOriginMm.state == b.positioning.coordinateOriginMm.state &&
+        a.positioning.travelEnvelopeMm.state == b.positioning.travelEnvelopeMm.state &&
+        a.positioning.minimumClearanceZMm.state == b.positioning.minimumClearanceZMm.state &&
+        a.positioning.coordinateOriginMm.value == b.positioning.coordinateOriginMm.value &&
+        a.positioning.travelEnvelopeMm.value == b.positioning.travelEnvelopeMm.value &&
+        a.positioning.minimumClearanceZMm.value == b.positioning.minimumClearanceZMm.value &&
+        a.operations.absoluteMovement.support == b.operations.absoluteMovement.support &&
+        a.operations.firmwareZOffsetSave.support == b.operations.firmwareZOffsetSave.support
+    }
+
+    private func invalidateSafety() {
+        safetyReadID = UUID()
+        isRefreshingSafety = false
+        safetyStatus = nil
+        safetyCheckedAt = nil
+        capabilities?.verifiedSafety = nil
+    }
+
+    func suspendSafetyObservation() {
+        invalidateSafety()
+        cancelCalibration()
+    }
+
+    private var safetyEvidenceBlockedReason: String? {
+        guard let safety = capabilities?.verifiedSafety, safety.contractVersion == 1,
+              safety.discovery.state != .unavailable,
+              let revision = safety.discovery.sourceRevision, revision == String(printer.configurationRevision),
+              let observed = safety.discovery.observedAtUtc, observed <= clock() else {
+            return "Verified safety discovery is unavailable. Refresh safety checks or use the printer's supported procedure."
+        }
+        guard let checked = safetyCheckedAt, clock().timeIntervalSince(checked) >= 0,
+              clock().timeIntervalSince(checked) <= 15, let status = safetyStatus else {
+            return safetyReadError ?? "Refresh safety checks: current printer safety telemetry is unavailable."
+        }
+        guard status.isOnline,
+              !["printing", "paused", "starting"].contains(status.state?.lowercased() ?? "") else {
+            return "Safety status reports the printer offline or a print active."
+        }
+        return nil
+    }
+
+    private func hasProvenance(_ source: String?, _ observed: Date?) -> Bool {
+        guard let source, !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let observed, let discovery = capabilities?.verifiedSafety?.discovery.observedAtUtc else { return false }
+        return observed <= clock() && observed <= discovery
+    }
+
+    private func supportReason(_ operation: VerifiedSafetyOperationCapabilityDto?, title: String) -> String? {
+        guard let operation else { return "\(title): verified support is unknown. Refresh safety checks." }
+        if operation.support == .unsupported {
+            return "\(title) is unsupported by the authoritative printer probe. Use the printer's supported procedure."
+        }
+        guard operation.support == .supported, hasProvenance(operation.source, operation.observedAtUtc) else {
+            return "\(title): verified support or its provenance is unknown. Refresh safety checks."
+        }
+        return nil
+    }
+
+    private var materialTemperatureBlockedReason: String? {
+        if let reason = safetyEvidenceBlockedReason { return reason }
+        guard let minimum = capabilities?.verifiedSafety?.extrusion.minimumSafeMeasuredHotendTemperatureC,
+              minimum.state == .verified, let value = minimum.value, value.isFinite,
+              hasProvenance(minimum.source, minimum.observedAtUtc) else {
+            return "A verified material-safe minimum is unavailable. Firmware cold-extrusion limits and assigned spools are not safety evidence."
+        }
+        guard let measured = safetyStatus?.safetyTelemetry?.measuredHotendTemperatureC,
+              measured.isFresh(at: clock()), let temperature = measured.value, temperature.isFinite else {
+            return "Fresh measured hotend temperature is unavailable. Refresh safety checks; a hot target cannot authorize extrusion."
+        }
+        return temperature >= value ? nil :
+            "Measured hotend is below the verified minimum of \(value.formatted()) °C. Use Hotend preheat, then refresh safety checks."
+    }
+
     func configureAccess(serverID: UUID?, _ check: @escaping @MainActor () -> String?) {
         guard let serverID, composition != nil, registeredServerID == serverID else {
             deactivate()
@@ -310,6 +536,8 @@ final class PrinterControlsViewModel: ObservableObject {
     func refreshAccess() {
         if accessCheck() != nil {
             lifecycleGeneration += 1
+            invalidateSafety()
+            cancelCalibration()
             cancelPendingCommand()
         }
     }
@@ -317,11 +545,18 @@ final class PrinterControlsViewModel: ObservableObject {
     func deactivate() {
         isActive = false
         lifecycleGeneration += 1
+        invalidateSafety()
+        cancelCalibration()
         cancelPendingCommand()
     }
 
     func cancelPendingCommand() {
         guard let command = pendingCommand else { return }
+        if calibrationCommandID == command.id {
+            calibrationCommandID = nil
+            calibrationInterrupted = true
+            calibrationMessage = "Calibration interrupted. Check the machine; no step was confirmed. Cancel and start again."
+        }
         telemetryConfirmed = false
         commandStateInvalidated = true
         if commandTask != nil, commandWasDispatched {
@@ -333,13 +568,512 @@ final class PrinterControlsViewModel: ObservableObject {
         commandTask?.cancel()
         commandTask = nil
         pendingCommand = nil
-        releaseLease(for: command)
         commandNotice = commandWasDispatched
             ? "Stopped waiting. The printer may still execute the request. Check the machine before another action."
             : "Request canceled before dispatch. No printer command was sent."
     }
 
     // MARK: - Commands
+
+    var extrusionBlockedReason: String? {
+        if let reason = blockedReason { return reason }
+        guard capabilities?.supportsExtrusion == true else {
+            return "Extrusion is unavailable without explicit backend support."
+        }
+        return materialTemperatureBlockedReason
+    }
+
+    func extrude(distanceMm: Double, speedMmPerSecond: Int) async {
+        let feedrate: Int
+        do {
+            feedrate = try MaterialControlInput.feedrate(distance: distanceMm, speed: speedMmPerSecond)
+        } catch {
+            commandNotice = error.localizedDescription
+            return
+        }
+        let command = ControlCommand(kind: .extrusion(distanceMm: distanceMm, feedrateMmMin: feedrate), startedAt: clock())
+        guard beginCommand(command) else { return }
+        defer { endCommand(command) }
+        if let reason = extrusionBlockedReason {
+            setError(command: command, message: reason, isRetryable: false)
+            return
+        }
+        await perform(command) { [self] in
+            if let reason = extrusionBlockedReason { throw PrinterControlError.invalidRequest(reason) }
+            let result = try await printerService.extrude(
+                printerId: printer.id, distanceMm: distanceMm, feedrateMmPerMinute: feedrate
+            )
+            guard result.success else { throw PrinterControlError.rejected(result.message) }
+        }
+        finishAcceptedRequest(command, notice: "Extrusion request accepted. Travel and physical filament state are not reported; verify at the printer.")
+    }
+
+    func filamentBlockedReason(_ operation: PhysicalFilamentOperation) -> String? {
+        if let reason = blockedReason { return reason }
+        let supported: Bool
+        let evidence: VerifiedSafetyOperationCapabilityDto?
+        switch operation {
+        case .load:
+            supported = capabilities?.supportsFilamentLoad == true
+            evidence = capabilities?.verifiedSafety?.operations.filamentLoad
+        case .unload:
+            supported = capabilities?.supportsFilamentUnload == true
+            evidence = capabilities?.verifiedSafety?.operations.filamentUnload
+        case .change:
+            supported = capabilities?.supportsFilamentChange == true
+            evidence = capabilities?.verifiedSafety?.operations.filamentChange
+        }
+        guard supported else { return "\(operation.title) is unavailable: no verified per-operation backend/macro support." }
+        return supportReason(evidence, title: operation.title) ?? materialTemperatureBlockedReason
+    }
+
+    func performFilament(_ operation: PhysicalFilamentOperation) async {
+        let command = ControlCommand(kind: .filament(operation), startedAt: clock())
+        guard beginCommand(command) else { return }
+        defer { endCommand(command) }
+        if let reason = filamentBlockedReason(operation) {
+            setError(command: command, message: reason, isRetryable: false)
+            return
+        }
+        var responseMessage: String?
+        await perform(command) { [self] in
+            if let reason = filamentBlockedReason(operation) { throw PrinterControlError.invalidRequest(reason) }
+            switch operation {
+            case .load:
+                let result = try await printerService.loadFilament(printerId: printer.id)
+                guard result.success else { throw PrinterControlError.rejected(result.message) }
+                responseMessage = result.message
+            case .unload:
+                // Residual weight/spool ID describe inventory, not physical
+                // completion. No binding, clearing or slot targeting occurs.
+                let result = try await printerService.unloadFilament(printerId: printer.id, toolheadIndex: nil)
+                guard result.success else { throw PrinterControlError.rejected(result.message) }
+                responseMessage = result.message
+            case .change:
+                let result = try await printerService.changeFilament(printerId: printer.id)
+                guard result.success else { throw PrinterControlError.rejected(result.message) }
+                responseMessage = result.message
+            }
+        }
+        let detail = responseMessage.map { " Server response: \($0)" } ?? ""
+        finishAcceptedRequest(command, notice: "\(operation.title) request accepted. Follow the printer's prompts and verify physical completion. Spool assignment was not changed.\(detail)")
+    }
+
+    private func finishAcceptedRequest(_ command: ControlCommand, notice: String) {
+        guard pendingCommand == command, lastError == nil, !commandStateInvalidated,
+              !Task.isCancelled, canControl else { return }
+        pendingCommand = nil
+        commandNotice = notice
+    }
+
+    // MARK: - Interruptible calibration
+
+    var calibrationBlockedReason: String? {
+        if let reason = blockedReason { return reason }
+        if calibrationInterrupted { return calibrationMessage ?? "Calibration interrupted. Cancel and start again." }
+        guard capabilities?.supportsZOffset == true,
+              capabilities?.supportsZOffsetFirmwareSave == true else {
+            return "Firmware Z-offset calibration is not verified for this printer. Database-only storage is not physical calibration. Use the printer's supported calibration procedure."
+        }
+        guard capabilities?.supportsHoming == true else { return "Verified All-axes homing is required." }
+        guard capabilities?.supportsAbsoluteMovement == true else { return "Verified absolute positioning is required." }
+        return safetyEvidenceBlockedReason ??
+            supportReason(capabilities?.verifiedSafety?.operations.firmwareZOffsetSave, title: "Firmware save") ??
+            supportReason(capabilities?.verifiedSafety?.operations.absoluteMovement, title: "Absolute positioning")
+    }
+
+    var calibrationPositionBlockedReason: String? {
+        if let reason = calibrationBlockedReason { return reason }
+        return positioningEvidenceBlockedReason
+    }
+
+    private var positioningEvidenceBlockedReason: String? {
+        if let reason = safetyEvidenceBlockedReason { return reason }
+        guard let geometry = capabilities?.verifiedSafety?.positioning,
+              geometry.coordinateOriginMm.state == .verified,
+              let origin = geometry.coordinateOriginMm.value, origin.isFinite,
+              hasProvenance(geometry.coordinateOriginMm.source, geometry.coordinateOriginMm.observedAtUtc),
+              geometry.travelEnvelopeMm.state == .verified,
+              let envelope = geometry.travelEnvelopeMm.value, envelope.isValid,
+              hasProvenance(geometry.travelEnvelopeMm.source, geometry.travelEnvelopeMm.observedAtUtc),
+              geometry.minimumClearanceZMm.state == .verified,
+              let clearance = geometry.minimumClearanceZMm.value, clearance.isFinite,
+              hasProvenance(geometry.minimumClearanceZMm.source, geometry.minimumClearanceZMm.observedAtUtc),
+              (envelope.minimum.z...envelope.maximum.z).contains(clearance) else {
+            return "Verified bed origin, travel bounds and safe clearance are required. Catalog build-volume dimensions cannot establish a safe move."
+        }
+        guard let telemetry = safetyStatus?.safetyTelemetry,
+              telemetry.homedAxes.isFresh(at: clock()),
+              Set(telemetry.homedAxes.value?.map { $0.uppercased() } ?? []).isSuperset(of: ["X", "Y", "Z"]) else {
+            return "All axes must be freshly reported homed. Refresh safety checks or re-home."
+        }
+        guard telemetry.coordinateOriginOffsetMm.isFresh(at: clock()),
+              let frame = telemetry.coordinateOriginOffsetMm.value, frame.isFinite else {
+            return "Fresh coordinate-frame telemetry is required. Refresh safety checks."
+        }
+        guard frame == origin, calibrationFrame == nil || calibrationFrame == frame else {
+            return "Movement frame differs from verified discovery. Cancel and refresh/re-home before moving."
+        }
+        return nil
+    }
+
+    private var reportedSafetyPosition: SafetyVector3Dto? {
+        guard let status = safetyStatus, let x = status.x, let y = status.y, let z = status.z else { return nil }
+        let position = SafetyVector3Dto(x: x, y: y, z: z)
+        return position.isFinite ? position : nil
+    }
+
+    /// Quantize only internally derived positions, never entered or reported
+    /// coordinates. Check the effective frame after rounding; a clearance lift
+    /// must round upward and a center must stay inside the verified envelope.
+    private static func derivedCalibrationCoordinate(
+        _ desired: Double, frameOffset: Double, minimum: Double, maximum: Double
+    ) -> Double? {
+        guard desired.isFinite, frameOffset.isFinite, minimum.isFinite, maximum.isFinite,
+              minimum <= maximum else { return nil }
+        func quantized(_ value: Double) -> Double? {
+            guard value.isFinite else { return nil }
+            return Double(String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), value))
+        }
+        guard var value = quantized(desired) else { return nil }
+        // Comparing in the effective frame avoids treating .2 - .05's binary
+        // tail as a real extra micron, while never rounding below clearance.
+        if value + frameOffset < minimum {
+            guard let next = quantized(value + 0.001) else { return nil }
+            value = next
+        } else if value + frameOffset > maximum {
+            guard let next = quantized(value - 0.001) else { return nil }
+            value = next
+        }
+        guard ControlNumberInput.hasCoordinatePrecision(value),
+              (minimum...maximum).contains(value + frameOffset) else { return nil }
+        return value
+    }
+
+    private func safeMoveReason(_ point: SafetyVector3Dto) -> String? {
+        if let reason = positioningEvidenceBlockedReason { return reason }
+        guard let frame = safetyStatus?.safetyTelemetry?.coordinateOriginOffsetMm.value,
+              let envelope = capabilities?.verifiedSafety?.positioning.travelEnvelopeMm.value,
+              let clearance = capabilities?.verifiedSafety?.positioning.minimumClearanceZMm.value else {
+            return "Verified movement geometry is unavailable."
+        }
+        let effective = SafetyVector3Dto(x: point.x + frame.x, y: point.y + frame.y, z: point.z + frame.z)
+        guard [point.x, point.y, point.z].allSatisfy(ControlNumberInput.hasCoordinatePrecision),
+              envelope.contains(effective), effective.z >= clearance else {
+            return "Move exceeds verified travel bounds, minimum clearance or supported coordinate precision. Use the printer's supported procedure."
+        }
+        return nil
+    }
+
+    private func interruptCalibration(_ message: String) {
+        guard calibrationStep != nil, calibrationStep != .done else { return }
+        if calibrationCommandID != nil { cancelPendingCommand() }
+        calibrationInterrupted = true
+        calibrationReview = nil
+        calibrationMessage = message
+    }
+
+    func startCalibration() async {
+        guard !isExecuting, canControl, !isReviewingCalibration, calibrationStep == nil else { return }
+        calibrationSession = UUID()
+        guard let identity = commandIdentity,
+              let lifetime = commandLeases.acquireWorkflow(identity, token: calibrationSession) else { return }
+        calibrationLease = calibrationSession
+        calibrationLeaseLifetime = lifetime
+        let session = calibrationSession
+        let generation = lifecycleGeneration
+        calibrationStep = .introduction
+        calibrationOffset = nil
+        calibrationReview = nil
+        calibrationMessage = nil
+        calibrationInterrupted = false
+        calibrationFrame = nil
+        calibrationPosition = nil
+        calibrationBaseline = nil
+        isReviewingCalibration = true
+        defer { isReviewingCalibration = false }
+        do {
+            let details = try await printerService.getDetails(id: printer.id)
+            try Task.checkCancellation()
+            guard session == calibrationSession, canPublishRead(generation), details.id == printer.id else { return }
+            guard let offset = details.zOffsetMm, offset.isFinite, (-5...5).contains(offset) else {
+                calibrationMessage = "Existing Z-offset is unknown or out of range. No zero baseline is assumed. Use the printer's calibration procedure."
+                return
+            }
+            calibrationOffset = offset
+            calibrationBaseline = offset
+        } catch {
+            guard session == calibrationSession, canPublishRead(generation) else { return }
+            calibrationMessage = "Calibration details could not be read. \(error.localizedDescription)"
+        }
+    }
+
+    func cancelCalibration() {
+        releaseCalibrationLease()
+        calibrationSession = UUID()
+        if calibrationCommandID != nil { cancelPendingCommand() }
+        calibrationCommandID = nil
+        calibrationStep = nil
+        calibrationOffset = nil
+        calibrationReview = nil
+        calibrationMessage = nil
+        calibrationInterrupted = false
+        calibrationFrame = nil
+        calibrationPosition = nil
+        calibrationBaseline = nil
+    }
+
+    private func releaseCalibrationLease() {
+        if let token = calibrationLease, let identity = commandIdentity {
+            commandLeases.releaseWorkflow(identity, token: token)
+        }
+        calibrationLease = nil
+        calibrationLeaseLifetime = nil
+    }
+
+    func beginCalibrationHome() {
+        guard calibrationStep == .introduction, !isExecuting, !isReviewingCalibration,
+              calibrationOffset != nil else { return }
+        if let reason = calibrationBlockedReason {
+            calibrationMessage = reason
+            return
+        }
+        calibrationStep = .home
+    }
+
+    func homeForCalibration() async {
+        guard calibrationStep == .home, !isExecuting else { return }
+        if let reason = calibrationBlockedReason { calibrationMessage = reason; return }
+        let command = ControlCommand(kind: .calibrationHome, startedAt: clock())
+        guard beginCommand(command) else { return }
+        calibrationCommandID = command.id
+        defer { endCommand(command) }
+        await perform(command) { [self] in
+            if let reason = calibrationBlockedReason { throw PrinterControlError.invalidRequest(reason) }
+            try await printerService.home(printerId: printer.id, axes: ["X", "Y", "Z"])
+        }
+    }
+
+    func positionForCalibration() async {
+        guard calibrationStep == .position, !isExecuting else { return }
+        if let reason = calibrationPositionBlockedReason { calibrationMessage = reason; return }
+        guard let current = reportedSafetyPosition,
+              let geometry = capabilities?.verifiedSafety?.positioning,
+              let envelope = geometry.travelEnvelopeMm.value,
+              let frame = safetyStatus?.safetyTelemetry?.coordinateOriginOffsetMm.value,
+              let clearance = geometry.minimumClearanceZMm.value else {
+            calibrationMessage = "Reported X, Y and Z are required; no starting position is assumed."
+            return
+        }
+        // Lift vertically before lateral motion. Never lower to an invented
+        // paper-test height, or cross the verified minimum clearance.
+        let needsLift = current.z + frame.z < clearance
+        let target: SafetyVector3Dto
+        if needsLift {
+            guard let z = Self.derivedCalibrationCoordinate(
+                clearance - frame.z, frameOffset: frame.z,
+                minimum: clearance, maximum: envelope.maximum.z
+            ) else {
+                calibrationMessage = "Verified clearance cannot be reached within travel bounds at 0.001 mm transport precision. Use the printer's supported calibration procedure."
+                return
+            }
+            target = .init(x: current.x, y: current.y, z: z)
+        } else {
+            guard let x = Self.derivedCalibrationCoordinate(
+                envelope.minimum.x + (envelope.maximum.x - envelope.minimum.x) / 2 - frame.x,
+                frameOffset: frame.x, minimum: envelope.minimum.x, maximum: envelope.maximum.x
+            ), let y = Self.derivedCalibrationCoordinate(
+                envelope.minimum.y + (envelope.maximum.y - envelope.minimum.y) / 2 - frame.y,
+                frameOffset: frame.y, minimum: envelope.minimum.y, maximum: envelope.maximum.y
+            ) else {
+                calibrationMessage = "Verified travel bounds contain no center at 0.001 mm transport precision. Use the printer's supported calibration procedure."
+                return
+            }
+            target = .init(x: x, y: y, z: current.z)
+        }
+        if let reason = safeMoveReason(target) { calibrationMessage = reason; return }
+        if target == current {
+            calibrationPosition = current
+            calibrationStep = .adjust
+            calibrationMessage = "Latest status already reports the verified center. No positioning command was needed."
+            return
+        }
+        let command = ControlCommand(kind: .calibrationPosition(target: target, centered: !needsLift), startedAt: clock())
+        guard beginCommand(command) else { return }
+        calibrationCommandID = command.id
+        defer { endCommand(command) }
+        await perform(command) { [self] in
+            if let reason = calibrationPositionBlockedReason ?? safeMoveReason(target) {
+                throw PrinterControlError.invalidRequest(reason)
+            }
+            let result = try await printerService.moveTo(
+                printerId: printer.id, x: target.x, y: target.y, z: target.z, feedrateMmMin: Self.zFeedrateMmMin
+            )
+            guard result.success else { throw PrinterControlError.rejected(result.message) }
+        }
+    }
+
+    func calibrationAdjustmentBlockedReason(delta: Double) -> String? {
+        if let reason = calibrationPositionBlockedReason { return reason }
+        guard let offset = calibrationOffset, let current = reportedSafetyPosition, current == calibrationPosition else {
+            return "Position changed or is unavailable. Cancel and re-position before adjusting."
+        }
+        do { _ = try MaterialControlInput.adjustedOffset(offset, delta: delta) }
+        catch { return error.localizedDescription }
+        let z = (current.z * 1000 + delta * 1000).rounded() / 1000
+        return safeMoveReason(.init(x: current.x, y: current.y, z: z))
+    }
+
+    func adjustCalibration(delta: Double) async {
+        guard calibrationStep == .adjust, !isExecuting, let offset = calibrationOffset else { return }
+        if let reason = calibrationAdjustmentBlockedReason(delta: delta) { calibrationMessage = reason; return }
+        guard let current = reportedSafetyPosition, current == calibrationPosition else {
+            calibrationMessage = "Position changed or is unavailable. Cancel and re-position before adjusting."
+            return
+        }
+        do {
+            _ = try MaterialControlInput.adjustedOffset(offset, delta: delta)
+            let expectedZ = (current.z * 1000 + delta * 1000).rounded() / 1000
+            let target = SafetyVector3Dto(x: current.x, y: current.y, z: expectedZ)
+            if let reason = safeMoveReason(target) { calibrationMessage = reason; return }
+            let command = ControlCommand(kind: .calibrationAdjust(delta: delta, expectedZ: expectedZ), startedAt: clock())
+            guard beginCommand(command) else { return }
+            calibrationCommandID = command.id
+            defer { endCommand(command) }
+            await perform(command) { [self] in
+                if let reason = calibrationPositionBlockedReason ?? safeMoveReason(target) {
+                    throw PrinterControlError.invalidRequest(reason)
+                }
+                let result = try await printerService.moveTo(
+                    printerId: printer.id, x: target.x, y: target.y, z: target.z, feedrateMmMin: Self.zFeedrateMmMin
+                )
+                guard result.success else { throw PrinterControlError.rejected(result.message) }
+            }
+        } catch { calibrationMessage = error.localizedDescription }
+    }
+
+    func reviewCalibration() async {
+        guard calibrationStep == .adjust, !isExecuting, !isReviewingCalibration else { return }
+        if let reason = calibrationPositionBlockedReason { calibrationMessage = reason; return }
+        guard reportedSafetyPosition == calibrationPosition else {
+            interruptCalibration("Position changed. Cancel and calibrate again before reviewing.")
+            return
+        }
+        let session = calibrationSession
+        let generation = lifecycleGeneration
+        isReviewingCalibration = true
+        defer { isReviewingCalibration = false }
+        do {
+            let details = try await printerService.getDetails(id: printer.id)
+            try Task.checkCancellation()
+            guard session == calibrationSession, canPublishRead(generation), details.id == printer.id else { return }
+            guard let revision = details.rowVersion, !revision.isEmpty else {
+                calibrationMessage = "Printer revision unavailable. Refresh and review again."
+                return
+            }
+            guard details.zOffsetMm == calibrationBaseline else {
+                interruptCalibration("Stored Z-offset changed during calibration. Cancel and review the new baseline.")
+                return
+            }
+            calibrationReview = details
+            calibrationStep = .save
+        } catch {
+            guard session == calibrationSession, canPublishRead(generation) else { return }
+            calibrationMessage = "Could not refresh the calibration review. \(error.localizedDescription)"
+        }
+    }
+
+    func saveCalibration() async {
+        guard calibrationStep == .save, !isExecuting, let review = calibrationReview,
+              let revision = review.rowVersion, let offset = calibrationOffset else { return }
+        if let reason = calibrationPositionBlockedReason { calibrationMessage = reason; return }
+        guard reportedSafetyPosition == calibrationPosition else {
+            interruptCalibration("Position changed after review. Cancel and calibrate again.")
+            return
+        }
+        guard offset.isFinite, (-5...5).contains(offset) else {
+            calibrationMessage = "Z-offset must stay within -5…5 mm."
+            return
+        }
+        let command = ControlCommand(kind: .calibrationSave(offsetMm: offset), startedAt: clock())
+        guard beginCommand(command) else { return }
+        calibrationCommandID = command.id
+        let session = calibrationSession
+        defer { endCommand(command) }
+        await perform(command) { [self] in
+            if let reason = calibrationPositionBlockedReason { throw PrinterControlError.invalidRequest(reason) }
+            let result = try await printerService.saveZOffset(
+                printerId: printer.id, offsetMm: offset, saveToFirmware: true, reviewedRowVersion: revision
+            )
+            guard result.success else { throw PrinterControlError.rejected(result.message) }
+        }
+        guard session == calibrationSession else { return }
+        // A review is one-use, even for 412/428 or uncertain transport results.
+        calibrationReview = nil
+        guard pendingCommand == command, lastError == nil, !commandStateInvalidated, canControl, !Task.isCancelled else {
+            calibrationInterrupted = true
+            calibrationMessage = "Save was not confirmed. Check the printer, then cancel and refresh/review. No automatic retry was sent."
+            return
+        }
+        finishAcceptedRequest(command, notice: "Firmware save request accepted. The printer may restart or disconnect. Verify the offset at the machine before printing.")
+        calibrationStep = .done
+        calibrationCommandID = nil
+        releaseCalibrationLease()
+    }
+
+    private func confirmCalibration(_ command: ControlCommand) {
+        guard calibrationCommandID == command.id, !commandStateInvalidated, canControl else { return }
+        guard calibrationPositionBlockedReason == nil else {
+            interruptCalibration("Safety evidence expired before command confirmation. Cancel and check the machine.")
+            return
+        }
+        switch command.kind {
+        case .calibrationHome:
+            calibrationStep = .position
+            calibrationFrame = safetyStatus?.safetyTelemetry?.coordinateOriginOffsetMm.value
+        case .calibrationPosition(let target, let centered):
+            calibrationPosition = target
+            if centered { calibrationStep = .adjust }
+            calibrationMessage = centered
+                ? "Position reported at the verified center. Adjust only within the verified clearance."
+                : "Clearance lift confirmed. Continue positioning to the verified center."
+        case .calibrationAdjust(let delta, _):
+            if let offset = calibrationOffset {
+                calibrationOffset = try? MaterialControlInput.adjustedOffset(offset, delta: delta)
+            }
+            calibrationPosition = reportedSafetyPosition
+        default: break
+        }
+        calibrationCommandID = nil
+    }
+
+    private func confirmCalibrationObservation(
+        previous: PrinterStatusDetail?, status: PrinterStatusDetail, readStartedAt: Date
+    ) {
+        guard let command = pendingCommand, calibrationCommandID == command.id,
+              commandWasDispatched, !commandStateInvalidated, !calibrationInterrupted,
+              readStartedAt >= command.startedAt, calibrationPositionBlockedReason == nil else { return }
+        let matches: Bool
+        switch command.kind {
+        case .calibrationHome:
+            matches = (status.safetyTelemetry?.homedAxes.observedAtUtc ?? .distantPast) > command.startedAt
+        case .calibrationPosition(let target, _):
+            matches = reportedSafetyPosition == target &&
+                (previous?.x != status.x || previous?.y != status.y || previous?.z != status.z)
+        case .calibrationAdjust(_, let expectedZ):
+            matches = status.z == expectedZ && previous?.z != status.z &&
+                status.x == calibrationPosition?.x && status.y == calibrationPosition?.y
+        default: return
+        }
+        if matches {
+            telemetryConfirmed = true
+            if commandTask == nil {
+                confirmCalibration(command)
+                pendingCommand = nil
+                commandNotice = Self.confirmationNotice(for: command)
+            }
+        }
+    }
 
     func preheat(_ preset: PreheatPreset) async {
         let caps = capabilities ?? PrinterBackendCapabilities.fallback(for: printer.backend)
@@ -469,28 +1203,55 @@ final class PrinterControlsViewModel: ObservableObject {
         }
     }
 
+    func setHeaterTargets(hotend: Double?, bed: Double?) async {
+        let command = ControlCommand(kind: .heaterTargets(hotend: hotend, bed: bed), startedAt: clock())
+        guard beginCommand(command) else { return }
+        defer { endCommand(command) }
+        guard hotend != nil || bed != nil else {
+            setError(command: command, message: "Enter at least one target. Blank leaves a heater unchanged.", isRetryable: false)
+            return
+        }
+        guard (hotend == nil || supports(.hotend)), (bed == nil || supports(.bed)) else {
+            setError(command: command, message: "A requested heater is unavailable. Refresh heater support before setting targets.", isRetryable: false)
+            return
+        }
+        guard validateTemperature(hotend, heater: .hotend, command: command),
+              validateTemperature(bed, heater: .bed, command: command) else { return }
+        await perform(command) { [printerService, printer] in
+            try await printerService.setTemperatures(printerId: printer.id, hotend: hotend, bed: bed)
+        }
+    }
+
+    func absoluteMoveBlockedReason(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int? = nil) -> String? {
+        if let reason = blockedReason { return reason }
+        guard feedrateMmMin == nil else { return ControlNumberInput.customFeedrateMessage }
+        let point: SafetyVector3Dto
+        do {
+            point = try ControlNumberInput.absolutePosition(x: x, y: y, z: z)
+        } catch { return error.localizedDescription }
+        guard capabilities?.supportsAbsoluteMovement == true,
+              Set(capabilities?.supportedAxes ?? []).isSuperset(of: ["X", "Y", "Z"]) else {
+            return "Absolute movement requires confirmed support for all X, Y and Z axes."
+        }
+        return supportReason(capabilities?.verifiedSafety?.operations.absoluteMovement, title: "Absolute positioning")
+            ?? safeMoveReason(point)
+    }
+
     func moveTo(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async {
-        let automaticFeedrate = z == nil ? Self.xyFeedrateMmMin : Self.zFeedrateMmMin
+        let automaticFeedrate = Self.zFeedrateMmMin
         let command = ControlCommand(
             kind: .moveTo(x: x, y: y, z: z, feedrateMmMin: automaticFeedrate), startedAt: clock()
         )
         guard beginCommand(command) else { return }
         defer { endCommand(command) }
-        guard feedrateMmMin == nil else {
-            setError(command: command, message: ControlNumberInput.customFeedrateMessage, isRetryable: false)
+        if let reason = absoluteMoveBlockedReason(x: x, y: y, z: z, feedrateMmMin: feedrateMmMin) {
+            setError(command: command, message: reason, isRetryable: false)
             return
         }
-        let coordinates = [("X", x), ("Y", y), ("Z", z)].filter { $0.1 != nil }
-        guard capabilities?.supportsAbsoluteMovement == true, !coordinates.isEmpty,
-              coordinates.allSatisfy({ capabilities?.supportedAxes.contains($0.0) == true && $0.1!.isFinite }) else {
-            setError(command: command, message: "Provide finite coordinates on supported axes.", isRetryable: false)
-            return
-        }
-        guard coordinates.allSatisfy({ ControlNumberInput.hasCoordinatePrecision($0.1!) }) else {
-            setError(command: command, message: ControlNumberInput.coordinatePrecisionMessage, isRetryable: false)
-            return
-        }
-        await perform(command) { [printerService, printer] in
+        await perform(command) { [self] in
+            if let reason = absoluteMoveBlockedReason(x: x, y: y, z: z, feedrateMmMin: feedrateMmMin) {
+                throw PrinterControlError.invalidRequest(reason)
+            }
             let result = try await printerService.moveTo(
                 printerId: printer.id, x: x, y: y, z: z, feedrateMmMin: automaticFeedrate
             )
@@ -543,7 +1304,17 @@ final class PrinterControlsViewModel: ObservableObject {
         guard updated.id == printer.id else { return }
         let previous = printer
         printer = updated
+        if previous.configurationRevision != updated.configurationRevision || previous.backend != updated.backend {
+            lifecycleGeneration += 1
+            invalidateSafety()
+            interruptCalibration("Printer configuration changed. Cancel and refresh safety checks.")
+        }
+        if previous.isOnline && !updated.isOnline { invalidateSafety() }
+        if let review = calibrationReview, updated.rowVersion != review.rowVersion {
+            interruptCalibration("Printer revision changed after review. Cancel and refresh; no save was sent.")
+        }
         if !canControl {
+            cancelCalibration()
             commandStateInvalidated = true
             if commandTask == nil {
                 cancelPendingCommand()
@@ -558,6 +1329,7 @@ final class PrinterControlsViewModel: ObservableObject {
         if Self.transition(from: previous, to: updated, resolves: pending) {
             telemetryConfirmed = true
             if commandTask == nil {
+                confirmCalibration(pending)
                 pendingCommand = nil
                 commandNotice = Self.confirmationNotice(for: pending)
             }
@@ -590,12 +1362,19 @@ final class PrinterControlsViewModel: ObservableObject {
                 hotendTarget: heater == .hotend ? target : nil,
                 bedTarget: heater == .bed ? target : nil, in: updated
             )
+        case let .heaterTargets(hotend, bed):
+            return (hotend != nil || bed != nil)
+                && targetsSatisfied(hotendTarget: hotend, bedTarget: bed, in: updated)
         case let .moveTo(x, y, z, _):
             return (x != nil || y != nil || z != nil)
                 && (x.map { updated.x == $0 } ?? true)
                 && (y.map { updated.y == $0 } ?? true)
                 && (z.map { updated.z == $0 } ?? true)
-        case .disableMotors:
+        case .disableMotors, .extrusion, .filament, .calibrationSave:
+            return false
+        case .calibrationHome, .calibrationPosition, .calibrationAdjust:
+            // Legacy merged fields lack fact timestamps and frame provenance.
+            // Calibration confirms only through the versioned status reader.
             return false
         case .home(let axes):
             // `homedAxes` is the authoritative homing confirmation; position
@@ -641,7 +1420,9 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     var isExecuting: Bool {
-        pendingCommand != nil || commandIdentity.map(commandLeases.contains) == true
+        pendingCommand != nil || commandIdentity.map {
+            commandLeases.contains($0, excludingWorkflow: calibrationLease)
+        } == true
     }
 
     var canControl: Bool {
@@ -689,10 +1470,19 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     /// One pipeline acquires the registered-server/printer lease before any
-    /// dispatch. Local pending state additionally preserves telemetry observation.
+    /// dispatch and retains it while this owner awaits matching telemetry.
     private func beginCommand(_ command: ControlCommand) -> Bool {
         guard !Task.isCancelled else { return false }
         guard pendingCommand == nil else { return false }
+        if let step = calibrationStep, step != .introduction, step != .done {
+            switch command.kind {
+            case .calibrationHome, .calibrationPosition, .calibrationAdjust, .calibrationSave:
+                break
+            default:
+                commandNotice = "Cancel calibration before another setup command. Emergency Stop remains independent."
+                return false
+            }
+        }
         guard canControl else {
             commandNotice = nil
             lastError = ControlsError(
@@ -703,7 +1493,8 @@ final class PrinterControlsViewModel: ObservableObject {
             return false
         }
         guard let identity = commandIdentity,
-              commandLeases.acquire(identity, token: command.id) else { return false }
+              let lifetime = commandLeases.acquire(identity, token: command.id, workflow: calibrationLease) else { return false }
+        commandLease = (command.id, lifetime)
         lastError = nil
         commandNotice = nil
         telemetryConfirmed = false
@@ -791,16 +1582,25 @@ final class PrinterControlsViewModel: ObservableObject {
     ///     further delta would hang forever, so we clear now. Only a fresh
     ///     post-dispatch snapshot permits telemetry wording; cached matches
     ///     report request acceptance without physical confirmation.
-    /// Every exit releases only this invocation's shared lease. Post-response
-    /// telemetry observation does not retain a transport lease.
+    /// HTTP settlement alone cannot unlock another owner while this command
+    /// still awaits telemetry. Pending-state cleanup releases the matching token.
     private func endCommand(_ command: ControlCommand) {
-        defer { releaseLease(for: command) }
+        defer {
+            if pendingCommand != command { releaseLease(for: command) }
+        }
         guard pendingCommand == command else { return }
         if lastError?.command == command {
+            if calibrationCommandID == command.id {
+                calibrationInterrupted = true
+                calibrationReview = nil
+                calibrationCommandID = nil
+                calibrationMessage = "Calibration command failed or its outcome is uncertain. Check the printer, then cancel and start again. No automatic retry."
+            }
             pendingCommand = nil
             return
         }
         if telemetryConfirmed {
+            confirmCalibration(command)
             pendingCommand = nil
             commandNotice = Self.confirmationNotice(for: command)
         } else if Self.transition(from: printer, to: printer, resolves: command) {
@@ -812,11 +1612,12 @@ final class PrinterControlsViewModel: ObservableObject {
     private func releaseLease(for command: ControlCommand) {
         guard let identity = commandIdentity else { return }
         commandLeases.release(identity, token: command.id)
+        if commandLease?.id == command.id { commandLease = nil }
     }
 
     private static func confirmationNotice(for command: ControlCommand) -> String {
         switch command.kind {
-        case .preheat, .heater:
+        case .preheat, .heater, .heaterTargets:
             return "Matching telemetry received. A heater target is a setpoint, not a measured temperature."
         default:
             return "Matching telemetry received. Check the machine before further setup."

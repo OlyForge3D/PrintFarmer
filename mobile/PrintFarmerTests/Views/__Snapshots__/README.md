@@ -25,11 +25,16 @@ workflow steps and preference variables used by
 `.github/workflows/ios-pr-ci.yml`, then run only
 `PrinterControlsSectionSnapshotTests`.
 
-1. Temporarily pass `record: .all` to each `assertSnapshot` call.
-2. Run the suite against the resolver-selected simulator.
-3. Inspect all seven regenerated PNGs for that device family in the directory above.
-4. Remove `record: .all`.
-5. Run the suite again; all seven tests must pass with zero skips before
+1. Run the full affected snapshot class and inspect reference/actual/difference
+   attachments. Identify which baselines reflect an intentional approved change,
+   rather than an unexpected rendering or runtime difference.
+2. Temporarily pass `record: true` only to those `assertSnapshot` calls and run
+   their selectors against the resolver-selected simulator.
+3. Inspect the regenerated PNGs for that device family in the directory above.
+   Recording deliberately fails with a reminder to turn recording off.
+4. Remove `record: true`.
+5. Run the full affected class again; all seven golden tests and the class's
+   layout/lifecycle assertions must pass with zero skips before
    committing the PNGs.
 
 Do not accept baselines generated with a different Xcode, runtime, device
@@ -37,3 +42,24 @@ resolver preference, display scale, or locale.
 
 Validate both an iPhone and an iPad host when changing these tests. Do not
 overwrite the other family's references while recording.
+
+## Essential Controls baseline revision (#2599)
+
+The six Controls goldens were intentionally updated for the owner-selected
+Essential concept 1 in [the Controls design contract](../../../docs/design/printer-controls-section.md),
+using Xcode 26.6 (17F113), iOS 26.5 (23F77), iPhone 15 at 3x and
+iPad Pro 13-inch (M5) at 2x, with the existing locale and `.iPhone13` component
+configuration unchanged. The shared destructive-button dark-mode golden was
+not changed.
+
+| Cases | Intentional change from the legacy references |
+| --- | --- |
+| Moonraker | Paired readings, one Heat group with side-by-side targets and Set targets, compact presets/Cool down, grouped Move & home, guarded calibration entry. |
+| Starting / printing | The same Essential composition with the retained lockout banner and disabled physical controls, not the old vertical Preheat/Home/Jog cards. |
+| FlashForge / SDCP / capabilities loading | Replace the old empty panel with persistent measured/target readings and guarded Move & home / Filament tools, with truthful unavailable-support guidance. |
+
+These are not full-screen iPad layout references. The same class separately
+captures the approved 386x612 phone and 1068x650 tablet scroll viewports,
+including lower content and accessibility layouts, and asserts control geometry.
+The component snapshots retain unsupported states instead of copying the
+prototype's illustrative hardware readiness.

@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -53,6 +54,19 @@ class EventTests(unittest.TestCase):
         self.assertEqual(events.idle_since, 61)
         events.read(io.StringIO(event("testStarted", "Next/test()")), 101)
         self.assertIsNone(events.idle_since)
+
+    def test_ci_matrix_selectors_name_existing_xcui_classes(self):
+        mobile = SCRIPT.parents[1]
+        workflow = (mobile.parent / ".github/workflows/ios-pr-ci.yml").read_text()
+        matrix = workflow.split("        suite:\n", 1)[1].split("        include:", 1)[0]
+        suites = re.findall(r"^          - (\w+)$", matrix, re.MULTILINE)
+        declarations = set()
+        for source in (mobile / "PrintFarmerUITests").glob("*.swift"):
+            declarations.update(re.findall(r"\bclass\s+(\w+)\s*:", source.read_text()))
+        self.assertTrue(suites, "The XCUI matrix must select real test classes")
+        for suite in suites:
+            with self.subTest(suite=suite):
+                self.assertIn(suite, declarations, "A stale class selector executes zero XCTest cases")
 
 
 class RunnerTests(unittest.TestCase):
@@ -220,6 +234,9 @@ class RunnerTests(unittest.TestCase):
             ("Run ${{ matrix.suite }} XCUI", "OperatorShellUITests",
              "build-iphone-OperatorShellUITests/OperatorShellUITests",
              "PrintFarmerUITests/OperatorShellUITests", "failed", 65),
+            ("Run ${{ matrix.suite }} XCUI", "OperatorFeatureVisibilityUITests",
+             "build-iphone-OperatorFeatureVisibilityUITests/OperatorFeatureVisibilityUITests",
+             "PrintFarmerUITests/OperatorFeatureVisibilityUITests", "success", 0),
         )
         for step, suite, stem, selector, mode, expected in cases:
             with self.subTest(step=step, suite=suite):

@@ -1,21 +1,109 @@
 # Printer Controls Section — UX Spec
 
-**Status:** v1 locked
-**Issue:** #283
-**Implementers:** #284 (Preheat), #285 (Home), #286 (Jog)
-**Owner:** Newt (UX) → Hudson (iOS)
+**Status:** Essential concept 1 selected by the owner
+**Authority:** [#2593](https://github.com/OlyForge3D/PrintFarmer/issues/2593),
+selected in [#2589](https://github.com/OlyForge3D/PrintFarmer/issues/2589)
+**Implementation owner:** Hudson (iOS)
 **Last updated:** 2026-09-09
 
-This spec defines the visual hierarchy, component anatomy, interaction model, accessibility, and edge cases for the **Printer Controls** section that lives inside `PrinterDetailView`. Three subgroups in fixed order: **Preheat → Home → Jog**.
+The current Controls design is **Essential**, not the original #283
+Preheat/Home/Jog stack and not separate per-heater Set/Off rows. The original
+subgroup specification is retained only as historical context in numbered
+sections 1–7 below; it must not override this contract.
+
+## Approved Essential composition
+
+The recovered `printer-ui/index.html` concept 1, including its complete applicable
+CSS, `temperatureStrip()`, `heatGroup()`, `motionGroup()`, `filamentControls()`
+and `controls(tablet)`, is the exact visual target, not inspiration. Its companion
+`concept-1-phone.png` and `concept-1-ipad.png` are local design evidence in
+session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
+
+- Phone: paired measured/target strip, **Heat**, **Move & home**, **Filament
+  tools**, in one reading column. No repeated Controls/Preheat/Home/Jog headers
+  or enclosing diagnostic card.
+- iPad: strip and Heat above Filament tools in the leading column, Move & home
+  in the trailing column. The same three child identities reflow at narrow
+  widths and accessibility sizes without resetting drafts, selected movement
+  distance, disclosures or the command owner.
+- Heat: side-by-side Hotend/Bed target fields, **one Set targets**, compact
+  PLA/PETG/ABS row, then **Cool down**. Actual/target values appear only in the
+  strip above, not repeated around each editor. Accessibility text stacks the
+  fields. Use native typography, ThemeColors, inset groups and 44-point minimum
+  native controls; do not import the browser wrapper's styling.
+- Move & home: reported XYZ/homed context, increment selector, directional XY
+  pad with Home at its center, separate Z +/- controls, compact independent
+  Home All/XY/Z actions, **Go to XYZ...** disclosure and motor/calibration
+  entry points. Accessibility text uses labeled directional pairs instead of
+  shrinking the pad. Motor warnings remain in the confirmation and its hint.
+- Filament tools: existing truthful material summary, Load/Unload/Change row,
+  distance/rate menus, Extrude/Retract row and a relevant blocked explanation.
+  Repeated operation/provenance prose moves under **Details & safety**;
+  per-operation disabled hints and read-only refresh remain available there.
+  Calibration stays inline after entry so Emergency Stop remains reachable.
+
+### Native geometry and visual comparison
+
+Preserve the prototype's anatomy: one divided temperature surface with leading
+heater symbols and inline actual/target readings; Heat's trailing caption,
+external Celsius suffixes, bordered presets and buttons; a single inset increment
+selector; 48-point directional buttons separated by 6 points, a 68-point Z column,
+and ruled home/absolute/motor-calibration rows. The two final entry buttons share
+one row, rather than becoming separate full-width cards.
+
+Groups use 18-point insets, 16-point corner radii and 14-point vertical separation.
+The iPad columns have a 24-point gap and a 1.1:1 thermal-to-motion width ratio,
+not equal columns. The scroll surface has 16-point phone / 24-point tablet side
+insets. Native system typography follows the reference hierarchy: 24-point
+readings, 17-point headings, 16-point actions, 13-point labels and 12-point
+secondary status, all scaling with Dynamic Type. ThemeColors supply surfaces,
+borders and semantic tint; SF Symbols replace the illustrative SVG strokes.
+At accessibility sizes, actual and explicitly labeled target readings stack
+instead of wrapping the compact slash notation. Motor release keeps the quiet
+entry-button treatment, with its destructive action and warning in confirmation.
+
+`test_essentialPrototype_matchedScrollViewportsAndNativeControlMetrics` retains
+native 386x612 phone and 1068x650 tablet scroll viewports, matching the unmodified
+browser artifact at a 1320-pixel review viewport. It asserts field alignment,
+48-point pad geometry, paired motor/calibration placement, native font sizes and
+minimum hit bounds, and emits placement metrics. Compare top, motion and material
+captures, not just the first viewport or a stretched phone screenshot. Retain
+separate approved iPhone/iPad host results and accessibility captures.
+
+Necessary runtime differences from the illustrative prototype:
+
+- Inputs start **Unchanged**, not prefilled from potentially stale targets.
+  Blank omits that heater; zero explicitly switches it off. Set targets validates
+  every entered supported heater before making **one** existing `/temps` request.
+  An invalid pair sends neither heater. Missing/unsupported heaters are omitted
+  by the UI and rejected if explicitly requested from the owner.
+- Real hardware maxima, operation capabilities, measured-temperature freshness,
+  geometry/frame/clearance and reviewed If-Match remain authoritative. No
+  prototype 300/120 limits, 180-degree threshold, assumed loaded state or
+  simulated homing/firmware success is copied.
+- Existing relative movement semantics/rates remain unchanged. Reported homing
+  text is context, not new safety evidence; backend preflight remains authoritative.
+  Calibration separately requires the verified timestamped safety contract.
+- The strip says **Target set**, not an unverified **At target** readiness claim.
+  Real maxima replace the prototype's illustrative-limit footnote. Native controls
+  have a 45-point minimum to avoid fractional layout rounding below 44 points.
+- The compact Controls assignment shortcut delegates to the existing detail
+  host's picker, not a second inventory owner. Clear/NFC and richer inventory
+  information remain under Details & safety; combined Eject keeps its existing
+  Overview flow. Assigned material is labeled as assigned, never physically loaded.
+  The extra native details disclosure preserves these non-illustrative actions.
+  Missing support/read errors remain actionable, not hidden behind fake readiness.
 
 ## Embedding contract (#2521)
 
 `Views/PrinterControls/PrinterSetupControlsContent.swift` exports
 `PrinterSetupControlsContent(printer:viewModel:)`. It observes an externally
 owned `PrinterControlsViewModel` and renders thermal/motion, lockout and
-command outcome presentation. It does not create services/models, load capabilities or
-subscribe to updates. `JogSubgroup` likewise no longer loads capabilities;
-its initial capability observation normalizes selection for preloaded limited axes.
+command outcome presentation. It does not create services/models or subscribe to
+SignalR. Production hosts explicitly opt into `observesSafety`, which asks the same
+owner to refresh read-only evidence every five seconds while foregrounded; default
+embedded content performs no automatic reads. Directional movement reads only
+the existing owner's capabilities and dispatches the explicitly chosen axis.
 
 `PrinterControlsSection(printer:composition:)` remains the standalone owner,
 with lazy construction directly inside `StateObject(wrappedValue:)`. The
@@ -46,16 +134,16 @@ read feature flags. Replace the owner when the real server/printer target change
 | Home All/XY/Z | `home`, `homeXY`, `homeZ` | Independent capability; fresh requested-axis acknowledgement, or acceptance-only when already homed |
 | Jog | `move` | Movement + supported axes; matching-axis position update; existing distances/feedrates |
 | Individual hotend/bed | `setTemperatures` | Specific heater support; other heater omitted; exact setpoint acknowledgement |
-| Absolute XYZ | `moveTo` | Absolute support + supported axes; every requested coordinate must match |
+| Absolute XYZ | `moveTo` | All XYZ required; verified operation, frame, bounds, homing and clearance; every coordinate must match |
 | Disable motors | `disableMotors` | Specific motor-release support + explicit confirmation; acceptance only, no motor telemetry |
 
-All operations retain shared transport single-flight and online/idle gating. Printing
+All operations retain shared command single-flight and online/idle gating. Printing
 and paused printers keep the explanatory lockout. Unrelated telemetry and
 other-printer updates do not acknowledge pending commands. Becoming offline or
 entering an unsafe state invalidates physical confirmation, not an outstanding
 HTTP response. Network/server failures can have uncertain physical outcomes;
 inspect the printer before another request. Z-offset, physical filament and
-console are not part of this child.
+console were not part of #2598; material/calibration extensions are described below.
 Earlier design proposals below are not evidence of additional command support
 or per-subgroup concurrency.
 
@@ -69,14 +157,119 @@ The controls snapshot suite includes hosted observer-remount, wrapper-offline,
 retained-owner, preloaded-axis and large-text regressions; model/correlation
 suites continue to exercise native dispatch through mock services.
 
+### Guarded physical material and calibration (#2599)
+
+`PrinterMaterialControls` occupies the thermal/material column;
+`PrinterZOffsetCalibrationControls` occupies the motion column. Both observe
+the existing owner. The detail host passes its existing
+`PrinterFilamentPresentation` to the thermal/material column, which reuses
+`PrinterFilamentSection` passively, without assignment callbacks. Assign/Clear,
+NFC and Eject remain on Overview. Calibration is inline, not a second modal control owner,
+so the detail host's independently confirmed Emergency Stop remains reachable.
+Narrow and accessibility-text layouts stack. Buttons remain at least 44 points.
+
+The extrusion choices are signed 10/25/50/100 mm and 1/5/10 mm/s. The owner
+converts speed to mm/min once before the typed service boundary. Availability
+and dispatch both require `verifiedSafety` v1 from `backend-capabilities` and
+`safetyTelemetry` from `status` (#2613/#2617). The minimum must be Verified,
+finite and sourced; measured hotend temperature must meet it and pass its own
+`observedAtUtc` / `staleAfterSeconds` policy. Future dates, absent provenance,
+unknown versions and missing/nonfinite samples fail closed. Partial discovery can
+authorize individually verified facts. Targets, preheat completion, catalog maxima
+and assigned-spool metadata are never substitutes.
+
+Refresh safety checks performs reads only. A native status read expires after
+15 seconds; receipt of a new response never renews an old fact's timestamp.
+The server independently re-probes and preflights every physical dispatch.
+Backgrounding, reconnect/configuration changes and owner/access changes invalidate
+client evidence. Static discovery timestamps are provenance, not a heater clock;
+configuration revision and the discovered movement frame fence calibration.
+
+Load, Unload and Change filament require their own explicit operation flags,
+Supported per-operation discovery, the same measured-temperature guard, and
+a native confirmation. The unload path consumes `FilamentUnloadResult`;
+its residual weight and spool ID are not physical-loaded state. Successful
+results say **request accepted**, preserve server guidance and ask the operator
+to verify completion. False/failed/uncertain responses never become success.
+No physical action binds or clears a spool, and no action supplies a toolhead
+index. Existing Assign/Change spool, Clear assignment, NFC and combined Eject
+remain unchanged under their original owners.
+
+Calibration exposes Introduction → Home → Position → Adjust → Review/Save → Done.
+Starting reads the existing stored offset without assuming zero. Fresh
+matching homing telemetry, not HTTP acceptance or a cached homed flag,
+is necessary to advance Home. Position requires verified origin, travel envelope
+and minimum clearance, freshly homed XYZ, fresh matching origin-offset telemetry,
+and finite reported XYZ. It lifts vertically first when needed, then centers within
+the verified envelope after converting through the actual frame. No guessed bed
+size, zero baseline or paper-test height is used. Derived lift/center coordinates
+use the transport's 0.001 mm grid: lifts round upward to preserve effective
+clearance, and centers stay inside the verified envelope. If no representable
+position fits, positioning is blocked with an explanation. Entered coordinates
+and reported axes that must remain stationary are never silently rounded.
+Adjustments preserve XY and send
+all XYZ coordinates, respecting the server's effective-coordinate bounds and
+clearance. A reported matching position after dispatch is required before changing
+the draft; HTTP acceptance or unrelated legacy telemetry cannot advance it.
+Clearance may prevent reaching a useful paper-test height on some hardware; the
+app explains this rather than overriding it.
+
+The guarded downstream semantics use 0.01/0.05/0.1 mm increments (negative is
+closer), -5…5 mm save bounds, a freshly reviewed `PrinterDetails.rowVersion`,
+and `saveToFirmware: true`. A review is consumed on any save attempt, including
+412/428 or an uncertain outcome; refresh/review never automatically retries.
+Done describes firmware-request acceptance, not a measured gap or first-layer
+quality. The full conditional flow is exercised with a synthetic shared-contract
+fixture; it is not a claim that any current production backend proves every fact.
+
+Cancellation/dismissal, loss of access and server-epoch changes invalidate the
+flow's session token. Outstanding physical responses retain the existing
+single-flight lease until settled; late replies cannot advance canceled steps.
+A workflow lease also prevents other controls owners on the same server/printer
+from issuing routine commands between calibration steps. Baseline-offset changes,
+frame/configuration changes and observed stale revisions require a new review;
+there is no physical-save retry, including after 412/428 or uncertain firmware results.
+Unrelated temperature/position changes never acknowledge a filament operation.
+
+**Shared-contract exclusions, verified against source:**
+
+| Operation | Current production availability / missing evidence |
+| --- | --- |
+| Extrude / retract | Conditional native path complete; current Moonraker discovery deliberately leaves the material-safe minimum Unknown |
+| Load / unload / change | Conditional native paths complete; Moonraker now probes installed LOAD_FILAMENT / UNLOAD_FILAMENT / M600 macros, but still requires a verified material-safe minimum |
+| Calibration home | Existing ordinary Home controls remain available by their own flags; the calibration flow additionally requires firmware/movement support |
+| Calibration position / adjust | Conditional native path complete; Moonraker now supplies verified geometry and separate G90/G0 support, but its clearance remains Unknown |
+| Firmware save | Conditional reviewed native save complete; current Moonraker discovery explicitly reports Unsupported firmware persistence |
+| Assign / clear / NFC / combined Eject | Existing paths unchanged; not replaced by these physical controls |
+
+Sources: `src/infra/Services/Printers/PrinterBackendCapabilitiesService.cs`,
+`src/infra/Models/PrinterBackendCapabilitiesDto.cs`,
+`src/modules/Farm.Modules.Printers/Controllers/PrintersController.cs`
+(`extrude`, `filament-*`, `z-offset`), and native
+`src/infra/Models/PrinterSafetyContracts.cs`, `PrinterSafetyGuard.cs`, and native
+`Models/PrinterBackendCapabilities.swift` / `Models/Models.swift`. Native types
+mirror the shared camelCase/string-enum DTOs; no backend routes, schema changes or
+production safety values are added by #2599.
+
+Integration evidence lives in `mobile/build/guarded-safety-iPhone/` and
+`mobile/build/guarded-safety-iPad/`, including native view attachments at
+390/1024/320-point widths, accessibility text, and separate XCUI evidence.
+Earlier `guarded-filament-*` evidence predates this integration.
+These tests prove native guards and typed synthetic shared-contract behavior,
+**not actual hardware support or a completed physical calibration**.
+
 ### Individual thermal and motion controls (#2598)
 
+- Heat follows the approved Essential composition above, with one combined
+  command owner path. Range guidance is in the field's VoiceOver hint and
+  specific validation errors, not repeated permanent range paragraphs.
 - Presets remain PLA **200/60**, PETG **240/80**, ABS **240/100** and
   Cool Down **0/0** °C. Presets require proven hotend support; unsupported or
   explicitly bed-less hardware omits the bed, including during Cool Down.
-- Separate target editors send only the chosen heater. Zero explicitly turns
-  that heater off; blank is not zero. Actual temperature and reported setpoint
-  are separate labels; missing/nonfinite measurements read **Unknown**.
+- The paired editors send only entered, supported heaters in one request.
+  Zero explicitly turns that heater off; blank is not zero. Both requested
+  targets must match before telemetry acknowledgement; measured-temperature
+  drift cannot acknowledge either setpoint.
 - Targets must be finite, nonnegative **whole degrees Celsius**, and may not exceed a known configured
   `maxHotendTemp`/`maxBedTemp` from the typed details contract. Missing maxima
   remain unknown, not fabricated limits: **positive heating is blocked** when
@@ -90,17 +283,22 @@ suites continue to exercise native dispatch through mock services.
   late reads. Missing/failed limits are explained in the shared group with a
   **Retry heater limits** read-only action. Missing fields can also be retried;
   retry never replays a target. Reopening can retry missing hardware with cached capabilities.
-- Absolute coordinates are signed millimetres, with blank axes omitted and
-  zero preserved, and accept **at most three decimal places**. **Custom feedrate
+- Absolute coordinates require **explicit X, Y and Z**, in signed millimetres,
+  with zero preserved and **at most three decimal places**. Blank coordinates
+  block both the form and owner; cached position never fills them. **Custom feedrate
   input is disabled** because the shared contract provides no authoritative
   feedrate maximum. Both the editor and VM reject any custom value, including
   otherwise reasonable rates and extreme integers. An omitted custom rate
-  selects and explicitly sends the existing relative-jog rate: **3000 mm/min**
-  for XY-only moves, **600 mm/min** for any move including Z (even Z=0).
+  selects and explicitly sends **600 mm/min**, the existing rate for a move
+  including Z (even Z=0). Partial XY-only absolute requests are not supported.
   These are the established native axis-specific rates, not a newly invented
   custom range or an unbounded server default. No mm/s conversion or relative-move fallback
   occurs. Build-volume dimensions are not firmware travel limits or proof of
   a zero origin. Position and homing labels preserve unknown telemetry.
+  The owner requires shared verified absolute-operation support, origin, travel
+  envelope and clearance, plus fresh homing and matching coordinate-frame telemetry.
+  It checks the effective destination against those bounds and clearance again
+  immediately before transport; backend preflight remains authoritative.
 - Precision is checked in both the editor and command owner before dispatch:
   shared Moonraker/FlashForge temperature formatting emits whole degrees, and
   Moonraker movement formatting emits at most three decimal millimetres.
@@ -206,30 +404,39 @@ fixtures.
 
 All thermal/motion owners acquire the same lease in the existing command
 pipeline. It survives detail dismissal, replacement view models, and service
-reconstruction until the original response settles. Different servers/printers
+reconstruction until the original response settles, and remains held while an
+active owner subsequently awaits matching telemetry. HTTP acceptance alone
+cannot let another owner bypass that pending state. Different servers/printers
 remain independent. Every terminal path, including failed validation and proven
 pre-dispatch cancellation, releases only its matching invocation token. Old
 telemetry cancellation cannot release a replacement's lease. An outstanding call
 retains its cleanup owner, but the registry stores only UUIDs and observes views
-weakly, so settled owners are not leaked.
+weakly, so settled owners are not leaked. Owner-held cancellation handles also
+release matching command/workflow tokens when a settled observer is destroyed;
+an abandoned view cannot strand the process-wide registry. An in-flight call
+still retains its cleanup owner until the response returns.
 
 A replacement explains the shared lock and disables preset, home, jog and other routine inputs; it does
 not offer Stop waiting for another owner's request. Shared-state observation
-updates the replacement UI when the lease is released. Local post-response
-telemetry waiting remains separate from transport ownership. This is a
+updates the replacement UI when matching telemetry clears the original pending
+command. Stop waiting/deactivation after HTTP settlement explicitly ends
+observation and releases that token with an uncertainty warning; it does not
+cancel, reverse or prove completion of the physical action. Before settlement,
+neither cancellation nor matching telemetry releases the outstanding request.
+Two-owner tests cover all observable thermal/motion command domains, unrelated
+and wrong-printer updates, pre-response telemetry/rejection, cancellation and
+stale-token cleanup. This is a
 **process-local** guarantee, not cross-device/server-side serialization or proof
 of physical completion; Emergency Stop remains independent.
 
 ---
 
-## 1. Visual Hierarchy
+## 1. Historical #283 visual hierarchy (superseded)
 
-The command section is conditionally rendered: offline or preference-disabled
-detail pages show an explanation instead. The following original subgroup
-specification governs controls, not destination discoverability. Overview now
-places identity, paired measured/target temperatures and material/current job
-first. The compact labeled Emergency Stop is above both pages, independent of
-routine actions beside Current Job, and retains confirmation and a 44-point floor.
+Sections 1–7 retain the original #283 exploration and examples for historical
+context only. They do **not** govern current layout, per-group queues or current
+availability. Use the approved Essential composition and embedding/safety
+contracts above. In particular, do not rebuild the old Preheat/Home/Jog stack.
 
 ```
 PrinterDetailView (existing)
@@ -287,8 +494,7 @@ PrinterDetailView (existing)
 
 | Action | SF Symbol |
 | --- | --- |
-| Preheat (PLA / PETG / ABS) | `thermometer.high` |
-| Cool Down | `thermometer.snowflake` |
+| Preheat / Cool Down | Text labels and temperature pairs (compact thermal row) |
 | Home All | `house.fill` |
 | Home XY | `move.3d` (fallback `arrow.up.left.and.arrow.down.right`) |
 | Home Z | `arrow.up.and.down` |
@@ -311,14 +517,11 @@ PrinterDetailView (existing)
 │ ⓘ Controls disabled while printing. │ ← lockout banner (only when state==printing|paused)
 ├─────────────────────────────────────┤
 │ Preheat                             │
-│ ┌──────────────┐  ┌──────────────┐ │
-│ │ 🌡 PLA       │  │ 🌡 PETG      │ │  ← 2-column grid, equal width
-│ │ 200° / 60°   │  │ 240° / 80°   │ │
-│ └──────────────┘  └──────────────┘ │
-│ ┌──────────────┐  ┌──────────────┐ │
-│ │ 🌡 ABS       │  │ ❄ Cool Down  │ │
-│ │ 240° / 100°  │  │ 0° / 0°      │ │
-│ └──────────────┘  └──────────────┘ │
+│ [PLA] [PETG] [ABS] [Cool]            │  ← temperature pair under each label
+│ Hotend        Target: 215 °C         │
+│ Current:192° [New °C] [Set] [Off]    │
+│ Bed           Target: 60 °C          │
+│ Current:37°  [New °C] [Set] [Off]    │
 ├─────────────────────────────────────┤
 │ Home                                │
 │ ┌─────────────────────────────────┐ │
@@ -369,7 +572,10 @@ Use `ViewThatFits` or `horizontalSizeClass` to switch layouts. No new breakpoint
 - Each button shows: icon, material label (`.subheadline.weight(.medium)`), temperatures `H°/B°` (`.caption.monospacedDigit()`).
 - Cool Down uses `pfSecondaryAccent` tint for icon + label to differentiate from heat actions.
 - Tap → calls `PrinterService.setTemperatures(printerId:hotend:bed:)` with the locked preset values.
-- Buttons are `.standard` (44pt) height. Phone: 2×2 grid. iPad: 1×4 row.
+- Presets use a compact four-button row on standard phone and iPad text sizes,
+  two columns at XX Large/XXX Large, and one column at accessibility sizes.
+  Labels and temperature pairs remain visible; the compact **Cool** label keeps
+  the full **Cool down** VoiceOver name. Hit targets remain at least 44pt.
 - **No custom temp input. No long-press. No swipe.**
 
 #### Home
@@ -507,7 +713,7 @@ If all three subgroups are empty, the whole Controls section hides (same as offl
 All controls must satisfy:
 
 - **Touch target ≥ 44×44pt.** Already enforced by `ActionButtonStyle.standard` / `.prominent`. Jog `±` use 60pt.
-- **Dynamic Type.** All labels use system text styles (`.subheadline`, `.caption`, etc.). At `.accessibility5`, the 2×2 Preheat grid collapses to a single column (1×4) via `ViewThatFits`.
+- **Dynamic Type.** All labels use system text styles (`.subheadline`, `.caption`, etc.). Accessibility sizes collapse Preheat to one column and stack each heater's reading, target editor and Set/Off row. `ViewThatFits` also stacks heater editors when the inline row cannot fit.
 - **VoiceOver labels and hints** on every control.
 - **Color contrast ≥ 4.5:1** for text, ≥ 3:1 for icon-only. The dark theme `pfButtonPrimary` (#047857) on `pfButtonPrimaryText` (#fff) measures 4.6:1 — passes.
 - **Reduce Motion** honored: pending crossfade and banner slide become instant when `accessibilityReduceMotion == true`.

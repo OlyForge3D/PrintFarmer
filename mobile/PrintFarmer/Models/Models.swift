@@ -406,6 +406,7 @@ struct PrinterSpoolInfo: Codable, Sendable {
 // MARK: - Printer Status Detail (matches PrinterStatusDto)
 
 struct PrinterStatusDetail: Codable, Sendable {
+    var safetyTelemetry: PrinterSafetyTelemetryDto?
     let id: UUID
     let isOnline: Bool
     let state: String?

@@ -209,6 +209,33 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
 
     // MARK: - Selector reachability once Controls is available
 
+    func testUnsettledControlsContextCannotExposeMaterialActuationAndKeepsEmergencyIndependent() {
+        enableAdvancedPrinterControls()
+        openFirstPrinterDetail()
+        app.segmentedControls["printer.detail.panel.selector"].buttons["Controls"].tap()
+        XCTAssertTrue(app.staticTexts[
+            "Controls require a settled registered server connection. Reopen this printer after reconnecting."
+        ].waitForExistence(timeout: 8))
+        XCTAssertFalse(app.buttons["printer.controls.extrude"].exists,
+                       "Demo targets and spool assignment cannot establish physical-control access")
+        for operation in ["load", "unload", "change"] {
+            let action = app.buttons["printer.controls.filament-\(operation)"]
+            XCTAssertFalse(action.exists, "An unsettled control composition must not expose physical actuation")
+        }
+        XCTAssertFalse(app.buttons["printer.controls.calibration-start"].exists)
+        let emergency = app.buttons["printer.detail.control.emergencyStop"]
+        XCTAssertTrue(emergency.isHittable)
+        XCTAssertTrue(emergency.isEnabled)
+        XCTAssertGreaterThanOrEqual(emergency.frame.height, 44)
+        emergency.tap()
+        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 3))
+        app.alerts.firstMatch.buttons["Cancel"].tap()
+        let evidence = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        evidence.name = "Unsettled material context blocked; independent confirmed emergency"
+        evidence.lifetime = .keepAlways
+        add(evidence)
+    }
+
     func testSelectorTapSwitchesToControlsPageAndBackToOverview() {
         enableAdvancedPrinterControls()
         openFirstPrinterDetail()

@@ -69,7 +69,7 @@ struct PrinterControlsSection: View {
         // re-fire `.onChange` — no update loop.
         ZStack {
             if enforcesAccess {
-                PrinterSetupControlsContent(printer: printer, viewModel: viewModel)
+                PrinterSetupControlsContent(printer: printer, viewModel: viewModel, observesSafety: true)
                     .modifier(PrinterControlsAccessLifecycle(viewModel: viewModel))
             } else {
                 PrinterSetupControlsContent(printer: printer, viewModel: viewModel)
@@ -106,6 +106,9 @@ struct PrinterControlsSection: View {
 /// when it is meaningful for the controls surface.
 struct PrinterControlsUpdateSignal: Hashable {
     let id: UUID
+    let configurationRevision: Int64
+    let rowVersion: String?
+    let backend: PrinterBackend
     let isOnline: Bool
     let state: String?
     let x: Double?
@@ -119,6 +122,9 @@ struct PrinterControlsUpdateSignal: Hashable {
 
     init(printer: Printer) {
         self.id = printer.id
+        self.configurationRevision = printer.configurationRevision
+        self.rowVersion = printer.rowVersion
+        self.backend = printer.backend
         self.isOnline = printer.isOnline
         self.state = printer.state
         self.x = printer.x
