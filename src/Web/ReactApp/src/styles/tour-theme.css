@@ -115,8 +115,8 @@ body:has(.driver-overlay) [data-main-content] {
    overlay's dimming is harmless, but its full-viewport hit target must not
    swallow clicks meant for the modal. Disable the popover too so the modal is
    the only interactive surface during the interruption. */
-body:has([role="dialog"][aria-modal="true"]) .driver-overlay,
-body:has([role="dialog"][aria-modal="true"]) .driver-popover {
+body:has([role="dialog"][aria-modal="true"]:not([inert])) .driver-overlay,
+body:has([role="dialog"][aria-modal="true"]:not([inert])) .driver-popover {
   pointer-events: none !important;
 }
 
