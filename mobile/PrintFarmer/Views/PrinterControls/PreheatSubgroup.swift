@@ -64,8 +64,27 @@ struct ControlNumberField: UIViewRepresentable {
         field.autocorrectionType = .no
         field.delegate = context.coordinator
         field.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .editingChanged)
+        // Numeric-pad keyboards (.decimalPad, .numberPad, etc.) have no
+        // Return key, so textFieldShouldReturn never fires. Add a "Done"
+        // toolbar so the keyboard can still be dismissed.
+        if Self.padKeyboardTypesWithoutReturnKey.contains(keyboardType) {
+            let toolbar = UIToolbar(frame: CGRect(x: 0, y: 0, width: 320, height: 44))
+            let done = UIBarButtonItem(
+                barButtonSystemItem: .done,
+                target: context.coordinator,
+                action: #selector(Coordinator.doneTapped)
+            )
+            toolbar.items = [UIBarButtonItem(systemItem: .flexibleSpace), done]
+            toolbar.sizeToFit()
+            field.inputAccessoryView = toolbar
+            context.coordinator.field = field
+        }
         return field
     }
+
+    private static let padKeyboardTypesWithoutReturnKey: Set<UIKeyboardType> = [
+        .numberPad, .decimalPad, .phonePad, .asciiCapableNumberPad
+    ]
 
     func updateUIView(_ field: UITextField, context: Context) {
         context.coordinator.text = $text
@@ -88,11 +107,15 @@ struct ControlNumberField: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextFieldDelegate {
         var text: Binding<String>
+        weak var field: UITextField?
         init(text: Binding<String>) { self.text = text }
         @objc func changed(_ field: UITextField) { text.wrappedValue = field.text ?? "" }
         func textFieldShouldReturn(_ textField: UITextField) -> Bool {
             textField.resignFirstResponder()
             return true
+        }
+        @objc func doneTapped() {
+            field?.resignFirstResponder()
         }
     }
 }

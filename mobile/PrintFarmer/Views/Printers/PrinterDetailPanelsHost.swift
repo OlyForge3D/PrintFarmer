@@ -620,7 +620,7 @@ struct PrinterDetailTemperatureStrip: View {
         // Match the web UI: colorize the heater glyph itself when the
         // target is on, rather than a separate "Heater off"/"Target set"
         // caption string.
-        let isHeating = value.isOnline && (value.target ?? 0) > 0
+        let isHeating = value.isOnline && (value.target?.isFinite ?? false) && (value.target ?? 0) > 0
         let glyphColor: Color = title == "Bed"
             ? (isHeating ? .blue : .blue.opacity(0.35))
             : (isHeating ? .red : .red.opacity(0.35))
