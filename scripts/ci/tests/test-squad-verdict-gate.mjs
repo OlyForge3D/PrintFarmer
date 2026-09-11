@@ -54,7 +54,7 @@ function comment(reviewer, verdict, sha = headSha, overrides = {}) {
 function gate(overrides = {}) {
   return evaluateGate({
     headSha,
-    changedPaths: ['src/api/Program.cs'],
+    changedPaths: ['src/Web/ReactApp/e2e/emulator/cameras.spec.ts'],
     comments: [],
     reviews: [],
     roster,
@@ -270,23 +270,28 @@ test('a stale verdict cannot erase a live rejection from the same reviewer', () 
   assert.match(result.description, /^REQUEST_CHANGES @ .* by bishop$/);
 });
 
-test('accepts a full panel approval at the current head', () => {
+test('accepts a single eligible approval for a standard code change', () => {
   const result = gate({
-    comments: [
-      comment('bishop', 'APPROVE'),
-      comment('hicks', 'APPROVE'),
-      comment('vasquez', 'APPROVE'),
-    ],
+    comments: [comment('bishop', 'APPROVE')],
   });
   assert.equal(result.state, 'success');
   assert.equal(
     result.description,
-    `REVIEWED (self-attested) @ ${headSha.slice(0, 12)} by bishop+hicks+vasquez`,
+    `REVIEWED (self-attested) @ ${headSha.slice(0, 12)} by bishop`,
   );
   assert.ok(
     result.notes.some((note) => note.includes('not independent review')),
     'the record must state that it is not independent review',
   );
+});
+
+test('requires the full panel for a high-risk change', () => {
+  const result = gate({
+    changedPaths: ['src/migrations/Farm.Migrations.PostgreSQL/Migrations/AddRole.cs'],
+    comments: [comment('bishop', 'APPROVE')],
+  });
+  assert.equal(result.state, 'failure');
+  assert.match(result.description, /have 1\/3, missing hicks\+vasquez/);
 });
 
 test('rejects verdicts pinned to a stale SHA', () => {
@@ -571,8 +576,11 @@ test('carriedShas is keyed on the reviewed SHA, not the current head', () => {
   assert.equal(stale[0].reviewer, 'hicks');
 });
 
-test('a single approval never satisfies a code change', () => {
-  const result = gate({ comments: [comment('bishop', 'APPROVE')] });
+test('a single approval does not satisfy a high-risk code change', () => {
+  const result = gate({
+    changedPaths: ['src/migrations/Farm.Migrations.PostgreSQL/Migrations/AddRole.cs'],
+    comments: [comment('bishop', 'APPROVE')],
+  });
   assert.equal(result.state, 'failure');
   assert.match(result.description, /have 1\/3, missing hicks\+vasquez/);
 });
@@ -584,6 +592,22 @@ test('a single approval satisfies a documentation-only change', () => {
   });
   assert.equal(result.state, 'success');
   assert.equal(result.approvals.join(), 'dallas');
+});
+
+test('only the documented vetted paths receive standard review and licensing prose is high-risk', () => {
+  for (const path of [
+    'mobile/PrintFarmer/Views/PrinterView.swift',
+    'src/Web/ReactApp/e2e/emulator/cameras.spec.ts',
+    'src/Web/ReactApp/src/components/PrinterCard.tsx',
+  ]) {
+    const scope = classifyChangeScope([path]);
+    assert.equal(scope.docsOnly, false, path);
+    assert.equal(scope.highRisk, false, path);
+  }
+
+  for (const path of ['LICENSE', 'docs/licensing-policy.md', 'NOTICE.txt']) {
+    assert.equal(classifyChangeScope([path]).highRisk, true, path);
+  }
 });
 
 test('reviewer may not be the squad member who authored the PR', () => {
@@ -611,7 +635,10 @@ test('only a reviewer decision emits REQUEST_CHANGES; absent evidence is BLOCKED
   // verify-squad-verdict.mjs distinguishes these: REQUEST_CHANGES routes back
   // to the author, BLOCKED means no usable evidence exists yet.
   const noVerdict = gate();
-  const insufficient = gate({ comments: [comment('bishop', 'APPROVE')] });
+  const insufficient = gate({
+    changedPaths: ['src/migrations/Farm.Migrations.PostgreSQL/Migrations/AddRole.cs'],
+    comments: [comment('bishop', 'APPROVE')],
+  });
   const authorReview = gate({
     changedPaths: ['docs/ARCHITECTURE.md'],
     comments: [comment('parker', 'APPROVE')],
@@ -796,14 +823,109 @@ test('documentation-only classification honours the policy carve-outs', () => {
     'docs/api-contract.md',
     'src/Web/ReactApp/package.json',
     'src/api/Program.cs',
-    'docs/screenshot.png',
   ]) {
     assert.equal(
-      classifyChangeScope([carveOut]).docsOnly, false,
+      classifyChangeScope([carveOut]).highRisk, true,
       `${carveOut} must take the full gate`,
     );
   }
   assert.equal(classifyChangeScope(['docs/API.md', 'src/api/Program.cs']).docsOnly, false);
+  assert.equal(classifyChangeScope(['docs/screenshot.png']).highRisk, true);
+});
+
+test('high-risk classification is order-independent for mixed changes', () => {
+  const standardPath = 'src/Web/ReactApp/src/components/Button.tsx';
+  const highRiskPath = 'src/api/Program.cs';
+  for (const paths of [
+    [standardPath, highRiskPath],
+    [highRiskPath, standardPath],
+  ]) {
+    const scope = classifyChangeScope(paths);
+    assert.equal(scope.highRisk, true, paths.join(', '));
+    assert.equal(scope.docsOnly, false, paths.join(', '));
+  }
+});
+
+test('high-risk classification covers access control, protocol, and release automation', () => {
+  for (const path of [
+    'src/modules/Farm.Modules.Identity/Controllers/AuthController.cs',
+    'src/modules/Farm.Modules.Identity/Controllers/Admin/RolesController.cs',
+    'src/infra/Data/AppDbContext.cs',
+    'src/infra/Data/Configurations/RefreshTokenConfiguration.cs',
+    'src/infra/Domain/Printer.cs',
+    'src/infra/Services/SignalR/PrinterHub.cs',
+    'src/modules/Farm.Modules.Printers/Controllers/PrintersController.cs',
+    'mobile/scripts/release-beta.sh',
+    '.devcontainer/post-create.sh',
+    '.githooks/setup.sh',
+    'src/Web/ReactApp/.env.example',
+    'src/Web/ReactApp/src/types/api.ts',
+    'mobile/PrintFarmer/Models/FarmShape.swift',
+    'proto/slicer_jobs.proto',
+    'scripts/publish-to-public.sh',
+    'deploy/nginx/nginx.conf',
+    '.devcontainer/Dockerfile',
+    'squad.config.ts',
+    'agentrc.config.json',
+    'skills-lock.json',
+    'VERSION',
+    'cliff.toml',
+    '.mcp.json',
+    '.gitattributes',
+    'src/slicer/Farm.Slicer.Host/appsettings.json',
+    'mobile/PrintFarmer/PrintFarmer.entitlements',
+    '.agents/skills/frontend-design/SKILL.md',
+    'src/api/Farm.Web.Api.csproj',
+    'src/Directory.Build.props',
+    'global.json',
+    'dotnet-tools.json',
+  ]) {
+    assert.equal(classifyChangeScope([path]).highRisk, true, path);
+  }
+});
+
+test('known API wire models and shared Layout escalate while vetted presentation paths stay standard', () => {
+  for (const path of [
+    'mobile/PrintFarmer/Models/FarmShape.swift',
+    'src/Web/ReactApp/src/types/api.ts',
+    'src/Web/ReactApp/src/common/components/Layout.tsx',
+  ]) {
+    assert.equal(classifyChangeScope([path]).highRisk, true, path);
+  }
+  for (const path of [
+    'mobile/PrintFarmer/Views/PrinterView.swift',
+    'src/Web/ReactApp/e2e/emulator/cameras.spec.ts',
+    'src/Web/ReactApp/src/components/PrinterCard.tsx',
+  ]) {
+    assert.equal(classifyChangeScope([path]).highRisk, false, path);
+  }
+});
+
+test('a standard UI path remains high-risk when the workflow includes a high-risk path', () => {
+  const newPath = 'src/Web/ReactApp/src/components/PrinterCard.tsx';
+  const previousPath = 'src/api/PublicContract.cs';
+  assert.equal(classifyChangeScope([newPath]).highRisk, false);
+  assert.equal(classifyChangeScope([previousPath]).highRisk, true);
+  const scope = classifyChangeScope([newPath, previousPath]);
+  assert.equal(scope.highRisk, true);
+});
+
+test('missed sensitive and unrecognized non-prose paths fail closed', () => {
+  for (const path of [
+    'src/Web/ReactApp/src/features/integrations/ApiKeyForm.tsx',
+    'src/Web/ReactApp/src/features/security/SessionSecurity.tsx',
+    'mobile/PrintFarmer/Services/SigningService.swift',
+    'mobile/PrintFarmer/Infrastructure/KeychainStore.swift',
+    'deploy/grafana/dashboards/farm-overview.json',
+    'assets/firmware/unknown-format.bin',
+  ]) {
+    const scope = classifyChangeScope([path]);
+    assert.equal(scope.highRisk, true, path);
+  }
+  assert.match(
+    classifyChangeScope(['assets/firmware/unknown-format.bin']).reason,
+    /not a known low-risk path/,
+  );
 });
 
 test('the documented full-gate escalation list matches the code exactly', async () => {
@@ -842,11 +964,11 @@ test('the documented full-gate escalation list matches the code exactly', async 
 
 test('every exported full-gate path is actually escalated', () => {
   for (const prefix of fullGatePrefixes) {
-    assert.equal(classifyChangeScope([`${prefix}notes.md`]).docsOnly, false, prefix);
+    assert.equal(classifyChangeScope([`${prefix}notes.md`]).highRisk, true, prefix);
   }
   for (const file of fullGateFiles) {
-    assert.equal(classifyChangeScope([file]).docsOnly, false, file);
-    assert.equal(classifyChangeScope([file.toUpperCase()]).docsOnly, false, file);
+    assert.equal(classifyChangeScope([file]).highRisk, true, file);
+    assert.equal(classifyChangeScope([file.toUpperCase()]).highRisk, true, file);
   }
 });
 
@@ -880,7 +1002,7 @@ test('PR authorship falls back to the linked issue label, then the branch name',
   assert.equal(unresolved.source, 'unresolved');
 });
 
-test('a panel member who authored the PR is substitutable, not a deadlock', () => {
+test('a required panel member who authored a high-risk PR blocks without substitution', () => {
   const result = evaluateGate({
     headSha,
     changedPaths: ['src/api/Program.cs'],
@@ -895,19 +1017,11 @@ test('a panel member who authored the PR is substitutable, not a deadlock', () =
     authorSource: 'PR body Squad-Author',
     squadLabeled: true,
   });
-  // Assert the substitution actually happened rather than only that the gate
-  // went green: without squadLabeled this returns success as out-of-scope, so a
-  // bare state check would pass while exercising none of this logic.
   assert.equal(result.scope, undefined);
-  assert.equal(result.passed, true);
-  assert.ok(
-    result.description.startsWith('REVIEWED'),
-    `expected a REVIEWED record, got: ${result.description}`,
-  );
-  assert.ok(
-    result.description.includes('dallas'),
-    `expected dallas to substitute for the authoring reviewer: ${result.description}`,
-  );
+  assert.equal(result.passed, false);
+  assert.equal(result.requiredMembers.join(), 'bishop,hicks,vasquez');
+  assert.match(result.description, /required panel member bishop is the PR author/);
+  assert.match(result.reason, /no substitute is permitted/);
 });
 
 test('auto-scoping refuses forks and unrostered self-declared authors', () => {
@@ -967,6 +1081,7 @@ test('workflow keeps its default-branch, SHA-binding and least-privilege control
   assert.match(workflow, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/);
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /squad-verdict-gate\.mjs/);
+  assert.match(workflow, /file\.previous_filename/);
   assert.match(workflow, /getCollaboratorPermissionLevel/);
   assert.match(workflow, /gate\.hasWriteAccess\(await permissionOf\(login\)\)/);
   assert.match(workflow, /gate\.hasAdminAccess\(await permissionOf\(login\)\)/);

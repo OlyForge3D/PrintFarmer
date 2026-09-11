@@ -27,7 +27,7 @@
 export const verdictContext = 'squad/pre-pr-verdict';
 
 /**
- * Squad members that form the standard review panel. Three agents reviewing
+ * Squad members that form the elevated review panel. Three agents reviewing
  * instead of one is a quality measure, not three independent parties.
  */
 export const reviewPanel = ['bishop', 'hicks', 'vasquez'];
@@ -181,6 +181,23 @@ const headShaLine = /^[ \t]*Squad-Head-SHA:[ \t]*([0-9a-fA-F]{40})[ \t]*$/gim;
 // binary or image assets, which the policy denylist excludes.
 const proseExtensions = ['.md', '.markdown', '.rst', '.adoc', '.txt'];
 
+// These client-side shapes define the public API wire contract. Keep this
+// explicit: broad language- or directory-based matching would incorrectly
+// elevate unrelated Swift or TypeScript implementation files.
+const apiWireModelPaths = new Set([
+  'mobile/printfarmer/models/farmshape.swift',
+  'src/web/reactapp/src/types/api.ts',
+]);
+
+// Non-prose changes are high-risk unless they are explicitly vetted
+// presentation-only code or an isolated UI test. Do not allowlist a shared
+// component directory: layout and shared components can enforce access control.
+const knownLowRiskPaths = new Set([
+  'mobile/printfarmer/views/printerview.swift',
+  'src/web/reactapp/e2e/emulator/cameras.spec.ts',
+  'src/web/reactapp/src/components/printercard.tsx',
+]);
+
 // Trees that always take the full gate even when they look like prose. These
 // hold agent instructions, review policy, and CI definitions: whether a given
 // edit moves an agent's safety boundary cannot be judged from the path, so the
@@ -198,6 +215,7 @@ export const fullGatePrefixes = [
   '.copilot/',
   '.claude/',
   '.cursor/',
+  '.agents/',
 ];
 
 // Root-level agent-instruction files, which are agent behaviour by content even
@@ -208,6 +226,13 @@ export const fullGateFiles = new Set([
   'gemini.md',
   'copilot.md',
   '.cursorrules',
+  'squad.config.ts',
+  'agentrc.config.json',
+  'skills-lock.json',
+  'version',
+  'cliff.toml',
+  '.mcp.json',
+  '.gitattributes',
 ]);
 
 // Dependency manifests and lockfiles, matched by basename anywhere in the tree.
@@ -233,12 +258,17 @@ const manifestBasenames = new Set([
   'cargo.toml',
   'cargo.lock',
   'nuget.config',
+  'global.json',
+  'dotnet-tools.json',
 ]);
 
 // Prose whose contents carry real consequences: security policy, threat models,
 // licensing terms, published API contracts.
 const sensitiveProse =
-  /(^|\/)(security|threat[-_ ]?model|licen[cs]e|notice|copying|code[-_ ]?of[-_ ]?conduct|api[-_ ]?contract)(\.[a-z0-9]+)?$/i;
+  /(^|\/)(security|threat[-_ ]?model|licen[cs]e|licensing[-_ ]?policy|notice|copying|code[-_ ]?of[-_ ]?conduct|api[-_ ]?contract)(\.[a-z0-9]+)?$/i;
+
+const highRiskPaths =
+  /(access|actions|admin|api[-_ ]?keys?|auth(entication|orization)?|bump|cert|compose|contract|controller|credential|data\/configurations|dbcontext|deploy(ment)?|docker|dto|env|governance|hub|identity|infrastructure|licens|migration|openapi|password|permission|privacy|protocol|publish|queue|release|role|secret|security|serialization|signalr|squad|token|version|worker)/i;
 
 /**
  * Reduce a squad identity to its canonical lowercase token.
@@ -564,35 +594,79 @@ function isProse(path) {
   return proseExtensions.some((extension) => lower.endsWith(extension));
 }
 
+function isDependencyManifest(path, basename) {
+  return manifestBasenames.has(basename) ||
+    /^appsettings(?:\.[^.]+)?\.json$/i.test(basename) ||
+    /\.(?:csproj|fsproj|props|targets|entitlements)$/i.test(path);
+}
+
+function isAutomationPath(path) {
+  return path.startsWith('scripts/') ||
+    path.startsWith('.githooks/') ||
+    path.startsWith('.devcontainer/') ||
+    /(?:^|\/)scripts\/|\.sh$|\.ps1$|\.mjs$|\.cjs$|\.py$/i.test(path);
+}
+
+function isKnownLowRiskPath(path) {
+  return knownLowRiskPaths.has(path);
+}
+
 /**
- * Decide whether the changed paths qualify for the one-reviewer
- * documentation-only exemption defined in .github/copilot-instructions.md.
- * Fails toward the full gate whenever classification is not obvious.
+ * Classify the change for reviewer-count enforcement. Standard changes and
+ * documentation require one reviewer; high-risk changes require the panel.
  */
 export function classifyChangeScope(paths) {
   const files = (paths ?? []).filter((path) => typeof path === 'string' && path);
   if (files.length === 0) {
-    return { docsOnly: false, reason: 'no changed files reported' };
+    return { docsOnly: false, highRisk: true, reason: 'no changed files reported' };
   }
+  let docsOnly = true;
   for (const path of files) {
-    const basename = path.split('/').pop().toLowerCase();
-    if (fullGatePrefixes.some((prefix) => path.startsWith(prefix))) {
-      return { docsOnly: false, reason: `${path} governs agent or CI behaviour` };
+    const normalizedPath = path.toLowerCase();
+    const basename = normalizedPath.split('/').pop();
+    if (apiWireModelPaths.has(normalizedPath)) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is a public API wire model` };
     }
-    if (!path.includes('/') && fullGateFiles.has(basename)) {
-      return { docsOnly: false, reason: `${path} is a root agent-instruction file` };
+    if (fullGatePrefixes.some((prefix) => normalizedPath.startsWith(prefix))) {
+      return { docsOnly: false, highRisk: true, reason: `${path} governs agent or CI behaviour` };
     }
-    if (manifestBasenames.has(basename)) {
-      return { docsOnly: false, reason: `${path} is a dependency manifest` };
+    if (isAutomationPath(normalizedPath)) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is automation code` };
     }
-    if (sensitiveProse.test(path)) {
-      return { docsOnly: false, reason: `${path} is security/licensing/contract prose` };
+    if (normalizedPath.startsWith('src/api/')) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is public API code` };
     }
-    if (!isProse(path)) {
-      return { docsOnly: false, reason: `${path} is not documentation` };
+    if (normalizedPath.startsWith('src/infra/')) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is infrastructure or persistent data code` };
+    }
+    if (normalizedPath.startsWith('proto/')) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is a public protocol contract` };
+    }
+    if (!normalizedPath.includes('/') && fullGateFiles.has(basename)) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is a root agent-instruction file` };
+    }
+    if (isDependencyManifest(path, basename)) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is a dependency manifest` };
+    }
+    if (sensitiveProse.test(normalizedPath)) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is security/licensing/contract prose` };
+    }
+    if (highRiskPaths.test(normalizedPath)) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is high-risk infrastructure or access-control code` };
+    }
+    if (normalizedPath.startsWith('docs/') && !isProse(normalizedPath)) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is a non-prose documentation asset` };
+    }
+    if (!isProse(normalizedPath)) {
+      if (!isKnownLowRiskPath(normalizedPath)) {
+        return { docsOnly: false, highRisk: true, reason: `${path} is not a known low-risk path` };
+      }
+      docsOnly = false;
     }
   }
-  return { docsOnly: true, reason: 'every changed path is documentation' };
+  return docsOnly
+    ? { docsOnly: true, highRisk: false, reason: 'every changed path is documentation' }
+    : { docsOnly: false, highRisk: false, reason: 'every changed path is standard code' };
 }
 
 /**
@@ -824,9 +898,9 @@ export function evaluateGate({
 
   const scope = classifyChangeScope(changedPaths);
   notes.push(
-    scope.docsOnly
-      ? `Documentation-only change (${scope.reason}): one reviewer required.`
-      : `Full gate (${scope.reason}): the ${reviewPanel.join('/')} panel is required.`,
+    scope.highRisk
+      ? `High-risk gate (${scope.reason}): the ${reviewPanel.join('/')} panel is required.`
+      : `${scope.docsOnly ? 'Documentation-only change' : 'Standard change'} (${scope.reason}): one reviewer required.`,
   );
   if (authorMembers.size > 0) {
     notes.push(
@@ -846,6 +920,26 @@ export function evaluateGate({
   // 3. Reviewer eligibility. Excluding the author agent is a quality heuristic
   //    (fresh context catches more than self-re-reading), not an independence
   //    guarantee — the author agent and the reviewer agent share one principal.
+  const authoringPanelMembers = scope.highRisk
+    ? reviewPanel.filter((member) => authorMembers.has(member))
+    : [];
+  if (authoringPanelMembers.length > 0) {
+    const members = authoringPanelMembers.join('+');
+    return {
+      state: 'failure',
+      passed: false,
+      description: truncate(
+        `BLOCKED @ ${shortSha(head)}: required panel member ${members} is the PR author`,
+      ),
+      reason:
+        `required high-risk panel member ${members} is the squad member who authored ` +
+        `this PR (source: ${authorSource}); no substitute is permitted`,
+      notes,
+      requiredMembers: reviewPanel,
+      approvals: [],
+      stale,
+    };
+  }
   const eligible = new Map();
   for (const [member, record] of current) {
     if (!roster.has(member)) {
@@ -898,16 +992,10 @@ export function evaluateGate({
     .sort();
 
   // 5. Reviewer count and panel membership.
-  const requiredCount = scope.docsOnly ? 1 : 3;
-  const requiredMembers = scope.docsOnly
-    ? []
-    : reviewPanel.filter((member) => !authorMembers.has(member));
-  if (!scope.docsOnly && requiredMembers.length < reviewPanel.length) {
-    notes.push(
-      `Panel members ${reviewPanel.filter((m) => authorMembers.has(m)).join(', ')} ` +
-      'authored this PR; substitutes from the roster may stand in.',
-    );
-  }
+  const requiredCount = scope.highRisk ? 3 : 1;
+  const requiredMembers = scope.highRisk
+    ? reviewPanel
+    : [];
 
   const missingPanel = requiredMembers.filter((member) => !approvals.includes(member));
   if (missingPanel.length > 0 || approvals.length < requiredCount) {

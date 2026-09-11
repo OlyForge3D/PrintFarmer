@@ -206,7 +206,11 @@ The verifier supplies issue-level feedback, not a PR merge gate.
 
 ## Pre-PR Review Gate
 
-**All code MUST pass 3-way adversarial review before any PR is opened.** Bishop, Hicks, and Vasquez review the branch together, debate thoroughly, and deliver a single consensus verdict. Do not open a PR until they APPROVE.
+**Every change MUST receive the risk-based review defined below before any PR is opened.**
+Standard and documentation-only changes require one qualified non-author reviewer using a
+different model family from the implementation agent. High-risk changes require Bishop, Hicks,
+and Vasquez to review the branch together and deliver a consensus verdict. Do not open a PR
+until the required review approves.
 
 ### Scope: the gate applies to `squad`-labelled PRs only
 
@@ -269,19 +273,24 @@ Flow:
 
 1. Commit code to a feature branch, then push the branch for recovery. **Do not open
    the PR yet**; the review gate below must still pass before PR creation.
-2. Request review from Bishop, Hicks, Vasquez (mention all three).
-3. Reviewers converge adversarially on the branch — no serial review or independence.
+2. Classify the change using the risk-based review scope below. For a standard change,
+   dispatch one qualified, non-author reviewer using a different model family from the
+   implementation agent. For a high-risk change, request review from Bishop, Hicks, and
+   Vasquez (mention all three).
+3. The required reviewer or panel examines the branch. Agent review is self-attested,
+   not independent approval.
 4. If consensus is APPROVE, proceed to step 5. If REJECT or BLOCK, fix the code on the
    branch and re-request — subject to § "Post-Rejection Revision Ownership" below, which
    governs whether the original author may make that fix themselves.
 5. Once APPROVED, open the PR — see § "PR creation: tool preference" immediately below
    for exactly how, and apply the `squad` label as part of that step (required — see
    § "Scope" above).
-6. After the PR exists, each reviewer records their review as a PR comment in the
+6. After the PR exists, each required reviewer records their review as a PR comment in the
    canonical format below. The `squad-review-verdict.yml` workflow re-evaluates
    automatically on every comment, review, and push.
 
-This is a hard gate enforced by team policy. The trio's consensus verdict gates the PR creation step itself.
+This is a hard gate enforced by team policy. The required risk-based review record gates the
+PR creation step itself.
 
 ### PR creation: tool preference
 
@@ -302,8 +311,7 @@ cannot be retroactively linked once created outside the app's own creation flow.
 - Either path still requires `Closes #N` in the PR body per § "Pull Request Issue
   Linkage" below — the tool choice doesn't change the issue-linkage rules.
 
-The single exception is a documentation-only change — see the next section. Nothing else
-reduces the trio to fewer than three reviewers.
+Reviewer count is determined by the risk-based review scope below.
 
 ### Post-Rejection Revision Ownership
 
@@ -351,48 +359,47 @@ Once invoked, the following apply to that artifact:
 See `.github/skills/reviewer-protocol/SKILL.md` for the Coordinator-facing mechanics,
 examples, and anti-patterns that operationalize these rules once lockout is invoked.
 
-### Documentation-Only Changes: One Reviewer
+### Risk-Based Review Scope
 
-**This section is the canonical definition of the documentation-only review exemption. Every
-other mention of it in this repository must link here rather than restate it, so the definition
-cannot drift.**
+**This section is the canonical definition of reviewer count. Every other mention of reviewer
+count in this repository must link here rather than restate it, so the definition cannot drift.**
 
-**A documentation-only change requires ONE reviewer, not three.** Three specialist reviewers
-have essentially nothing to assess in prose that changes no runtime behaviour, so the full gate
-burns three dispatches for no signal. This reduces reviewer **count**, not review **rigour** —
-the single reviewer still performs a real review and can still REJECT.
+**Standard and documentation-only changes require ONE reviewer. High-risk changes require the
+three-reviewer panel.** Standard review must be performed by a qualified non-author reviewer
+using a model from a different family than the implementation agent. Model diversity is a
+dispatch requirement, not GitHub-verdict evidence: canonical records do not contain a
+trustworthy model attestation. This changes reviewer **count**, not review **rigour** — a single
+reviewer still performs a real review and can still REJECT.
 
-**Definition (allowlist).** A change is documentation-only when **every** changed path is prose
-or agent-instruction content:
+**Definition (allowlist).** A change is documentation-only when **every** changed path is prose,
+unless a high-risk condition below applies:
 
 - `**/*.md`
 - `docs/**`
-- `.squad/**`
-- `.github/agents/**`
-- `.github/instructions/**`
-- `.copilot/skills/**` and `.github/skills/**`
 - `LICENSE` and similar top-level prose files
 
-**Denylist — if ANY changed file falls outside the allowlist, the change is NOT
-documentation-only and the full three-reviewer gate applies in full.** This includes, but is not
-limited to: source files, tests, `package.json` or any dependency manifest, lockfiles, workflow
-YAML, scripts, EF Core migrations, and binary or image assets. Match manifests and lockfiles by
-basename, wherever they live in the tree. A PR that touches both a markdown file and a source
-file is **not** documentation-only.
+**Standard scope.** Non-prose changes are standard only for these vetted, known-low-risk
+paths: `mobile/PrintFarmer/Views/PrinterView.swift`,
+`src/Web/ReactApp/e2e/emulator/cameras.spec.ts`, and
+`src/Web/ReactApp/src/components/PrinterCard.tsx`, unless they meet a high-risk condition
+below. The enforced list lives in `scripts/ci/squad-verdict-gate.mjs`; do not infer
+directory-wide allowlists from these examples. Mixed code/documentation changes use standard
+review only when every non-prose path is one of those exact paths. Any unrecognized non-prose
+path is high-risk.
 
-**Carve-outs that always keep the full gate**, even when only markdown changes:
+**High-risk scope — always requires the full panel.** This includes authentication,
+authorization, identity, permissions or roles; security/privacy; EF migrations and persistent
+data schema; deployment, Docker, Compose and infrastructure; CI/workflows and release scripts;
+public API or serialization contracts; and all Squad/Ralph/governance or agent-instruction
+changes. This includes the API wire models
+`mobile/PrintFarmer/Models/FarmShape.swift` and
+`src/Web/ReactApp/src/types/api.ts`; and security, threat-model, licensing, notice, copying,
+code-of-conduct, or published API-contract prose. Dependency manifests and lockfiles are also
+high-risk. If a
+required panel member authored a high-risk PR, block it rather than substituting another roster
+member.
 
-- Anything under `.github/workflows/**`. Workflow YAML is not documentation.
-- Any change to a SECURITY policy, threat model, licensing terms, or a published API contract
-  document. These are prose whose contents carry real consequences.
-- Any change that alters an agent's **safety boundary**, merge-safety rules, or
-  destructive-operation permissions. A markdown file that governs whether an autopilot agent
-  may merge, delete, or force-push is not low-risk prose. This carve-out matters specifically
-  because the agent-instruction files under `.squad/` and `.copilot/skills/` are documentation
-  by path but govern real behaviour.
-
-**Be conservative — when in doubt, use the full gate.** Fail toward the stricter path whenever
-the classification is not obvious.
+**Be conservative — when in doubt, use the high-risk panel.**
 
 **How the gate automates this.** `scripts/ci/squad-verdict-gate.mjs` implements the allowlist
 and the denylist, and takes the conservative reading of the safety-boundary carve-out. The
@@ -404,8 +411,10 @@ following **always** take the full gate, even when the only change is markdown:
 - `.copilot/**`
 - `.claude/**`
 - `.cursor/**`
-- root-level agent-instruction files: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `COPILOT.md`,
-  `.cursorrules`
+- `.agents/**`
+- root-level agent-instruction, governance, or release files: `AGENTS.md`, `CLAUDE.md`,
+  `GEMINI.md`, `COPILOT.md`, `.cursorrules`, `squad.config.ts`, `agentrc.config.json`,
+  `skills-lock.json`, `VERSION`, `cliff.toml`, `.mcp.json`, and `.gitattributes`
 
 Whether a given edit moves an agent's safety boundary cannot be judged from the path, so a
 single review record must never be able to rewrite these. Prose is matched by extension

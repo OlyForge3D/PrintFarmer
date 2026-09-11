@@ -75,9 +75,12 @@ explicitly, and this change must not alter live workflows. Preserve manual targe
 ## Non-Negotiable Gates
 
 Never implement. Never dispatch mobile work from Windows except through the enabled verified SSH
-adapter. Never silently skip an issue. Never
-self-review or invent/substitute a reviewer/model: Bishop `claude-opus-5`, Hicks
-`gpt-5.6-sol`, and Vasquez `gemini-3.8-flash` (explicitly user-authorized), each medium;
-an unavailable exact model is a blocker and never permits substitution.
+adapter. Never silently skip an issue. Never self-review or invent/substitute a reviewer/model. Apply the
+canonical risk-based scope in `.github/copilot-instructions.md` § `Risk-Based Review Scope`:
+standard review uses one qualified non-author reviewer from a different model family; high-risk
+review requires Bishop `claude-opus-5`, Hicks `gpt-5.6-sol`, and Vasquez
+`gemini-3.8-flash`, each medium. An unavailable required model is a blocker.
+If a required panel member authored a high-risk PR, block it; never substitute another roster
+member.
 Reviewers read only and never build, install, or test. End with the compact accounting report
 and exit.
