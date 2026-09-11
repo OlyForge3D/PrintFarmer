@@ -384,6 +384,7 @@ struct PrinterDetailView: View {
         PrinterDetailPanelsHost(
             selection: $selectedPanel,
             controlsAvailable: controlsAvailable(for: printer),
+            printer: printer,
             overview: { overviewPage(printer) },
             controls: { controlsPage(printer) }
         )
@@ -454,10 +455,12 @@ struct PrinterDetailView: View {
 
     private func overviewPrimary(_ printer: Printer) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            headerSection(printer)
             temperatureSection(printer)
             filamentSectionView(printer)
             currentJobBlock(printer)
+            if let homedAxes = printer.homedAxes ?? viewModel.statusDetail?.homedAxes {
+                homedAxesBadges(homedAxes)
+            }
             ejectFilamentUtility(printer)
         }
     }
@@ -1125,119 +1128,6 @@ struct PrinterDetailView: View {
             candidate.eliminated
                 ? "\(name), not eligible. \(candidate.eliminationReasons.first ?? "")"
                 : "\(name), eligible, score \(Int(candidate.score.rounded()))"
-        )
-    }
-
-    // MARK: - Header
-
-    private func detailHeaderBaseColor(_ printer: Printer) -> Color {
-        if !printer.isOnline { return .pfTextSecondary }
-        switch printer.state?.lowercased() {
-        case "printing": return .pfSuccess
-        case "paused": return .pfWarning
-        case "error": return .pfError
-        default: return .pfAccent
-        }
-    }
-
-    private func detailStatusLabel(_ printer: Printer) -> String {
-        guard printer.isOnline else { return "Offline" }
-        guard let state = printer.state else { return "Unknown" }
-        switch state.lowercased() {
-        case "printing": return "Printing"
-        case "paused": return "Paused"
-        case "error": return "Error"
-        case "idle", "ready": return "Ready"
-        default: return state.capitalized
-        }
-    }
-
-    private func headerSection(_ printer: Printer) -> some View {
-        let baseColor = detailHeaderBaseColor(printer)
-
-        return VStack(alignment: .leading, spacing: 0) {
-            let layout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
-                : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
-            layout {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(printer.name)
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(Color.pfTextPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityLabel("\(printer.name), printer detail")
-                        .accessibilityIdentifier(
-                            "printer.detail.destination.\(printer.id.uuidString.lowercased())"
-                        )
-
-                    if let manufacturer = printer.manufacturerName,
-                       let model = printer.modelName {
-                        Text("\(manufacturer) · \(model)")
-                            .font(.subheadline)
-                            .foregroundStyle(Color.pfTextSecondary)
-                    } else if let manufacturer = printer.manufacturerName {
-                        Text(manufacturer)
-                            .font(.subheadline)
-                            .foregroundStyle(Color.pfTextSecondary)
-                    } else if let model = printer.modelName {
-                        Text(model)
-                            .font(.subheadline)
-                            .foregroundStyle(Color.pfTextSecondary)
-                    }
-                }
-
-                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-
-                VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 6) {
-                    HStack(spacing: 6) {
-                        if printer.obicoEnabled {
-                            Image(systemName: "shield.checkered")
-                                .font(.caption)
-                                .foregroundStyle(baseColor)
-                        }
-                        Text(detailStatusLabel(printer))
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(baseColor.opacity(0.12), in: Capsule())
-                            .foregroundStyle(baseColor)
-                    }
-
-                    if printer.inMaintenance {
-                        Text("Maintenance")
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(Color.pfWarning.opacity(0.12), in: Capsule())
-                            .foregroundStyle(Color.pfTextPrimary)
-                    }
-
-                    if let homedAxes = printer.homedAxes ?? viewModel.statusDetail?.homedAxes {
-                        homedAxesBadges(homedAxes)
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(Color.pfCard)
-
-            // Location row below the gradient
-            if let location = printer.location {
-                HStack {
-                    Label(location.name, systemImage: "building.2")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(Color.pfCard)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Color.pfBorder, lineWidth: 1)
         )
     }
 

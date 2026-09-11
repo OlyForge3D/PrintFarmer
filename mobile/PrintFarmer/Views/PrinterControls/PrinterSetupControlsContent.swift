@@ -100,12 +100,10 @@ struct PrinterSetupControlsContent: View {
                         PrinterDetailTemperatureStrip(
                             hotend: .init(measured: printer.hotendTemp, target: printer.hotendTarget, isOnline: printer.isOnline),
                             bed: .init(measured: printer.bedTemp, target: printer.bedTarget, isOnline: printer.isOnline),
-                            showsBed: viewModel.hardware?.hasHeatedBed != false,
+                            showsBed: true,
                             identifier: "printer.controls.temperatures", essentialControls: true
                         )
-                        if Heater.allCases.contains(where: viewModel.supports) {
-                            insetGroup { PreheatSubgroup(viewModel: viewModel) }
-                        }
+                        insetGroup { PreheatSubgroup(viewModel: viewModel) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     insetGroup { PrinterMotionControls(viewModel: viewModel) }
@@ -239,7 +237,7 @@ struct PrinterMaterialControls: View {
                     value: "\(Int(distance)) millimeters",
                     menu: UIMenu(children: MaterialControlInput.distances.map { value in
                         UIAction(title: "\(Int(value)) mm", state: distance == value ? .on : .off) { _ in distance = value }
-                    }), textSize: 14
+                    }), textSize: 14, matchesInputHeight: true
                     ) {}
                 }
                 VStack(alignment: .leading, spacing: 5) {
@@ -250,30 +248,24 @@ struct PrinterMaterialControls: View {
                     value: "\(speed) millimeters per second",
                     menu: UIMenu(children: MaterialControlInput.speeds.map { value in
                         UIAction(title: "\(value) mm/s", state: speed == value ? .on : .off) { _ in speed = value }
-                    }), textSize: 14
+                    }), textSize: 14, matchesInputHeight: true
                     ) {}
                 }
             }
             .padding(.vertical, 12)
-            .disabled(!viewModel.canControl || viewModel.isExecuting)
-            if let reason = viewModel.extrusionBlockedReason {
-                Text(reason)
-                    .font(.footnote)
-                    .padding(11).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.pfWarning.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
-                    .padding(.bottom, 12)
-                    .accessibilityIdentifier("printer.controls.extrusion-unavailable")
-            }
+            .disabled(!viewModel.canControl || viewModel.isExecuting || viewModel.capabilities?.supportsExtrusion != true)
             row {
                 ControlActionButton(
                     title: "Extrude", identifier: "printer.controls.extrude",
-                    accessibilityTitle: "Extrude \(Int(distance)) millimeters", compact: true
+                    accessibilityTitle: "Extrude \(Int(distance)) millimeters",
+                    hint: viewModel.extrusionBlockedReason, compact: true
                 ) {
                     Task { await viewModel.extrude(distanceMm: distance, speedMmPerSecond: speed) }
                 }
                 ControlActionButton(
                     title: "Retract", identifier: "printer.controls.retract",
-                    accessibilityTitle: "Retract \(Int(distance)) millimeters", compact: true
+                    accessibilityTitle: "Retract \(Int(distance)) millimeters",
+                    hint: viewModel.extrusionBlockedReason, compact: true
                 ) {
                     Task { await viewModel.extrude(distanceMm: -distance, speedMmPerSecond: speed) }
                 }
@@ -291,6 +283,10 @@ struct PrinterMaterialControls: View {
                     }
                     Text("Printer-level commands only; no tool or MMU slot is selected. Assignment and NFC do not physically load filament. A hot target is not a measured safe temperature.")
                         .font(.footnote)
+                    if let reason = viewModel.extrusionBlockedReason {
+                        Text(reason).font(.footnote)
+                            .accessibilityIdentifier("printer.controls.extrusion-unavailable")
+                    }
                     ForEach(PhysicalFilamentOperation.allCases) { operation in
                         if let reason = viewModel.filamentBlockedReason(operation) {
                             Text("\(operation.title): \(reason)").font(.footnote)
@@ -340,6 +336,7 @@ struct PrinterZOffsetCalibrationControls: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
     var showsEntry = true
     @State private var increment = 0.05
+    @State private var showsSafetyDetails = false
     @AccessibilityFocusState private var stepFocused: Bool
 
     var body: some View {
@@ -364,11 +361,24 @@ struct PrinterZOffsetCalibrationControls: View {
                 ControlActionButton(title: "Z-offset…", identifier: "printer.controls.calibration-start", compact: true) {
                     Task { await viewModel.startCalibration() }
                 }
-                .disabled(!viewModel.canControl || viewModel.isExecuting || viewModel.isReviewingCalibration)
+                .disabled(!viewModel.canControl || viewModel.isExecuting || viewModel.isReviewingCalibration
+                          || viewModel.calibrationBlockedReason != nil)
             }
-            if let reason = viewModel.calibrationBlockedReason {
-                Text(reason).font(.footnote)
-                    .accessibilityIdentifier("printer.controls.calibration-unavailable")
+            if viewModel.calibrationStep == nil {
+                ControlActionButton(
+                    title: "Details & safety", identifier: "printer.controls.calibration.details",
+                    accessibilityTitle: "Z-offset details and safety",
+                    compact: true, value: showsSafetyDetails ? "Expanded" : "Collapsed", textOnly: true
+                ) { showsSafetyDetails.toggle() }
+            }
+            if viewModel.calibrationStep != nil || showsSafetyDetails {
+                if let reason = viewModel.calibrationBlockedReason {
+                    Text(reason).font(.footnote)
+                        .accessibilityIdentifier("printer.controls.calibration-unavailable")
+                } else if showsSafetyDetails && viewModel.calibrationStep == nil {
+                    Text("Calibration requires verified firmware support, homing and safe positioning. Checks are repeated before each physical action.")
+                        .font(.footnote)
+                }
             }
         }
         .foregroundStyle(Color.pfTextPrimary)

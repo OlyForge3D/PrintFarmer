@@ -4,6 +4,27 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep full Overview/Controls titles readable at accessibility sizes using
+  stacked choices when needed; bound scrolling identity metadata so the page
+  retains usable space beneath the shared header.
+- Use a compact Go action beside the heater targets, stacking for accessibility
+  text. Match extrusion length/rate selector heights to the temperature inputs.
+- Remove Heat's redundant header caption; current/target hotend and bed
+  temperatures remain in the reading strip above it.
+- Keep unsupported Controls actions visible and disabled instead of hiding
+  them or rearranging Heat, Move & home, and Filament tools.
+- Keep Z-offset's unsupported-operation explanation behind Details & safety
+  until calibration starts; active workflow warnings remain immediately visible.
+- Replace the Controls page's Home All/XY/Z text row with accessible house
+  glyphs in the web UI movement arrangement, including centered XY homing and
+  Z homing between Z+ and Z-. Preserve independent capability gating.
+- Keep printer identity above both Overview and Controls instead of hiding it
+  when Controls is selected. Restore Essential's compact leading-aligned iPad
+  selector and native minimum hit height; retain maintenance, failure-detection
+  and homing information without the old bordered identity card.
+
 ### Added
 
 - **Essential Controls alignment** — Restore owner-selected concept 1: one

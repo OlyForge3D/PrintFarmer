@@ -1181,6 +1181,7 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     func preheatBlockedReason(_ preset: PreheatPreset) -> String? {
+        guard supports(.hotend) else { return "Hotend temperature control is unavailable." }
         if let reason = heaterTargetError(.hotend, target: preset.hotend) { return reason }
         if supports(.bed) { return heaterTargetError(.bed, target: preset.bed) }
         return nil
