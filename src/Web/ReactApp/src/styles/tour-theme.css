@@ -111,6 +111,15 @@ body:has(.driver-overlay) [data-main-content] {
   overflow: visible !important;
 }
 
+/* Suspend tour interaction while a real app modal surface is open above it.
+   The overlay's dimming is harmless, but its full-viewport hit target must
+   not swallow clicks meant for the modal. Disable the popover too so the
+   modal is the only interactive surface during the interruption. */
+body.pf-modal-open .driver-overlay,
+body.pf-modal-open .driver-popover {
+  pointer-events: none !important;
+}
+
 /* Highlight ring on the spotlighted element.
    Uses outline instead of box-shadow so the glow is never clipped
    by ancestor overflow: hidden/auto/scroll containers. */
