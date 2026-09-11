@@ -378,12 +378,14 @@ unless a high-risk condition below applies:
 - `docs/**`
 - `LICENSE` and similar top-level prose files
 
-**Standard scope.** Non-prose changes are standard only in the known low-risk presentation paths:
-`mobile/PrintFarmer/Views/`, `src/Web/ReactApp/src/common/components/`,
-`src/Web/ReactApp/src/components/`, `src/Web/ReactApp/src/features/`, and
-`src/Web/ReactApp/src/pages/`, unless they meet a high-risk condition below. Mixed
-code/documentation changes use standard review only when every non-prose path is on that
-allowlist. Any unrecognized non-prose path is high-risk.
+**Standard scope.** Non-prose changes are standard only for these vetted, known-low-risk
+paths: `mobile/PrintFarmer/Views/PrinterView.swift`,
+`src/Web/ReactApp/e2e/emulator/cameras.spec.ts`, and
+`src/Web/ReactApp/src/components/PrinterCard.tsx`, unless they meet a high-risk condition
+below. The enforced list lives in `scripts/ci/squad-verdict-gate.mjs`; do not infer
+directory-wide allowlists from these examples. Mixed code/documentation changes use standard
+review only when every non-prose path is one of those exact paths. Any unrecognized non-prose
+path is high-risk.
 
 **High-risk scope — always requires the full panel.** This includes authentication,
 authorization, identity, permissions or roles; security/privacy; EF migrations and persistent
@@ -391,7 +393,9 @@ data schema; deployment, Docker, Compose and infrastructure; CI/workflows and re
 public API or serialization contracts; and all Squad/Ralph/governance or agent-instruction
 changes. This includes the API wire models
 `mobile/PrintFarmer/Models/FarmShape.swift` and
-`src/Web/ReactApp/src/types/api.ts`. Dependency manifests and lockfiles are also high-risk. If a
+`src/Web/ReactApp/src/types/api.ts`; and security, threat-model, licensing, notice, copying,
+code-of-conduct, or published API-contract prose. Dependency manifests and lockfiles are also
+high-risk. If a
 required panel member authored a high-risk PR, block it rather than substituting another roster
 member.
 

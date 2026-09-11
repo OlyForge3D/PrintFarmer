@@ -594,6 +594,22 @@ test('a single approval satisfies a documentation-only change', () => {
   assert.equal(result.approvals.join(), 'dallas');
 });
 
+test('only the documented vetted paths receive standard review and licensing prose is high-risk', () => {
+  for (const path of [
+    'mobile/PrintFarmer/Views/PrinterView.swift',
+    'src/Web/ReactApp/e2e/emulator/cameras.spec.ts',
+    'src/Web/ReactApp/src/components/PrinterCard.tsx',
+  ]) {
+    const scope = classifyChangeScope([path]);
+    assert.equal(scope.docsOnly, false, path);
+    assert.equal(scope.highRisk, false, path);
+  }
+
+  for (const path of ['LICENSE', 'docs/licensing-policy.md', 'NOTICE.txt']) {
+    assert.equal(classifyChangeScope([path]).highRisk, true, path);
+  }
+});
+
 test('reviewer may not be the squad member who authored the PR', () => {
   const result = gate({
     changedPaths: ['docs/ARCHITECTURE.md'],
