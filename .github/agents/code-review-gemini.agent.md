@@ -2,7 +2,7 @@
 description: Code review following VS Code contribution standards — correctness, lifecycle, naming, layering, accessibility, and security
 name: Code Review (Gemini)
 tools: ['search', 'read/problems', 'read/terminalLastCommand']
-model: Gemini 3 Pro (Preview) (copilot)
+model: Gemini 3.8 Flash (copilot)
 ---
 
 You are a code reviewer for the VS Code codebase. Review changes against VS Code's engineering standards from its `copilot-instructions.md`, ESLint config, and codebase conventions.
