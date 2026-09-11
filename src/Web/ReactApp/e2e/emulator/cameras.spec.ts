@@ -50,10 +50,10 @@ test.describe('Cameras — Emulator', () => {
     // The canonical URL-driven settings shell renders one top-level H1 naming
     // the scope ("Farm & Admin Settings" for `/admin/settings`), not a per-section
     // "Cameras" heading — see docs/SETTINGS_ARCHITECTURE.md. `CamerasPage` is
-    // mounted `embedded`, which suppresses its own heading, so the Cameras
-    // section is surfaced instead as the selected sub-page tab.
+    // mounted `embedded`, which suppresses its own heading. The shell
+    // canonicalizes the direct sub-page URL into the system settings scope.
     await expect(page.getByRole('heading', { name: 'Farm & Admin Settings', exact: true })).toBeVisible();
-    await expect(page.getByRole('tab', { name: 'Cameras', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await expect(page).toHaveURL('/admin/settings?tab=hardware&sub=cameras&scope=system');
 
     expect(criticalErrors()).toHaveLength(0);
   });
