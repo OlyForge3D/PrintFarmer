@@ -836,6 +836,7 @@ test('high-risk classification covers access control, protocol, and release auto
     'src/modules/Farm.Modules.Identity/Controllers/Admin/RolesController.cs',
     'src/infra/Data/AppDbContext.cs',
     'src/infra/Data/Configurations/RefreshTokenConfiguration.cs',
+    'src/infra/Domain/Printer.cs',
     'src/infra/Services/SignalR/PrinterHub.cs',
     'src/modules/Farm.Modules.Printers/Controllers/PrintersController.cs',
     'mobile/scripts/release-beta.sh',

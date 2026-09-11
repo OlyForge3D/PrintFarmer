@@ -608,6 +608,9 @@ export function classifyChangeScope(paths) {
     if (path.startsWith('src/api/')) {
       return { docsOnly: false, highRisk: true, reason: `${path} is public API code` };
     }
+    if (path.startsWith('src/infra/')) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is infrastructure or persistent data code` };
+    }
     if (path.startsWith('proto/')) {
       return { docsOnly: false, highRisk: true, reason: `${path} is a public protocol contract` };
     }
