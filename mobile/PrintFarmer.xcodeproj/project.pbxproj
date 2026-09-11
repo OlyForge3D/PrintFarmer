@@ -10,6 +10,8 @@
 		F25220000000000000000101 /* PrinterDetailPanelsHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = F25220000000000000000001 /* PrinterDetailPanelsHost.swift */; };
 		F25220000000000000000102 /* PrinterDetailPanelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F25220000000000000000002 /* PrinterDetailPanelsTests.swift */; };
 		F25220000000000000000103 /* PrinterDetailPanelsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F25220000000000000000003 /* PrinterDetailPanelsUITests.swift */; };
+		2630A0010000000000000101 /* AdvancedPrinterControlsPermissionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2630A0010000000000000001 /* AdvancedPrinterControlsPermissionView.swift */; };
+		2630A0020000000000000101 /* AdvancedPrinterControlsPermissionViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2630A0020000000000000001 /* AdvancedPrinterControlsPermissionViewTests.swift */; };
 		25200000000000000000001B /* PrinterRunActionPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25200000000000000000001A /* PrinterRunActionPresentation.swift */; };
 		25200000000000000000002B /* PrinterRunActionBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25200000000000000000002A /* PrinterRunActionBar.swift */; };
 		25200000000000000000003B /* PrinterRunActionPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25200000000000000000003A /* PrinterRunActionPresentationTests.swift */; };
@@ -590,6 +592,8 @@
 		25200000000000000000002A /* PrinterRunActionBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterRunActionBar.swift; sourceTree = "<group>"; };
 		25200000000000000000003A /* PrinterRunActionPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterRunActionPresentationTests.swift; sourceTree = "<group>"; };
 		25200000000000000000004A /* PrinterRunActionBarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterRunActionBarTests.swift; sourceTree = "<group>"; };
+		2630A0010000000000000001 /* AdvancedPrinterControlsPermissionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedPrinterControlsPermissionView.swift; sourceTree = "<group>"; };
+		2630A0020000000000000001 /* AdvancedPrinterControlsPermissionViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdvancedPrinterControlsPermissionViewTests.swift; sourceTree = "<group>"; };
 		F25190000000000000000001 /* PrinterFilamentPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterFilamentPresentation.swift; sourceTree = "<group>"; };
 		F25190000000000000000002 /* PrinterFilamentSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterFilamentSection.swift; sourceTree = "<group>"; };
 		F25190000000000000000003 /* PrinterFilamentPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterFilamentPresentationTests.swift; sourceTree = "<group>"; };
@@ -1344,6 +1348,7 @@ B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; incl
 		707B7EA94C57005EC3C622EC /* Auth */ = {
 			isa = PBXGroup;
 			children = (
+				2630A0010000000000000001 /* AdvancedPrinterControlsPermissionView.swift */,
 				1667A0000000000000000004 /* CertificateTrustView.swift */,
 				574F629AF29665D4872351E8 /* LoginView.swift */,
 				C8C70E99B5CA4E578AF3AAA6 /* OnboardingView.swift */,
@@ -1462,6 +1467,7 @@ B67CDDC8FEB03EE83C0232BD /* ScanWidgets.swift */ = {isa = PBXFileReference; incl
 		A2B6286100000000000000D1 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				2630A0020000000000000001 /* AdvancedPrinterControlsPermissionViewTests.swift */,
 				A2B6286100000000000000B1 /* JogSubgroupTests.swift */,
 				D1A6C200000000000000F003 /* PrinterControlsSectionSnapshotTests.swift */,
 				F25190000000000000000004 /* PrinterFilamentSectionTests.swift */,
@@ -1937,6 +1943,7 @@ FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2630A0020000000000000101 /* AdvancedPrinterControlsPermissionViewTests.swift in Sources */,
 				F25220000000000000000102 /* PrinterDetailPanelsTests.swift in Sources */,
 				25200000000000000000003B /* PrinterRunActionPresentationTests.swift in Sources */,
 				25200000000000000000004B /* PrinterRunActionBarTests.swift in Sources */,
@@ -2204,6 +2211,7 @@ FA9835EC3313360D4BC13824 /* PrintFarmerScanWidgets */ = {
 				F24170040000000000000004 /* OversightHubView.swift in Sources */,
 				F24170100000000000000010 /* OversightUpgradeOfferCard.swift in Sources */,
 				F24170060000000000000006 /* FilamentCoverageView.swift in Sources */,
+				2630A0010000000000000101 /* AdvancedPrinterControlsPermissionView.swift in Sources */,
 				1DC1666AD87080FDC1140528 /* LoginView.swift in Sources */,
 				BCEF91EF40EA431F928DB79F /* OnboardingView.swift in Sources */,
 				FF2EE1DD0CC9BB8AA7F6E5D4 /* LocalNetworkAuthorization.swift in Sources */,
