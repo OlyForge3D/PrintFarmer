@@ -148,10 +148,105 @@ def redact(text, env):
     return text
 
 
-def execute(arguments, cwd, env, timeout=120, log=None, check=True):
+def owned_processes(record):
+    marker = f'PF_DAILY_PROCESS_TOKEN={record["token"]}'.encode()
+    found = []
+    session_owned = "pid" in record
+    if session_owned:
+        try:
+            leader = (Path("/proc") / str(record["pid"]) / "stat").read_text().rsplit(")", 1)[1].split()
+            session_owned = leader[19] == record["startTicks"]
+        except (FileNotFoundError, ProcessLookupError):
+            pass
+    for path in Path("/proc").glob("[0-9]*"):
+        member = False
+        try:
+            details = (path / "stat").read_text().rsplit(")", 1)[1].split()
+            member = session_owned and int(details[3]) == record["pid"] and details[0] != "Z"
+            require(not member or path.stat().st_uid == os.getuid(), "Run session changed process owner")
+            if path.stat().st_uid != os.getuid():
+                continue
+            marked = marker in (path / "environ").read_bytes().split(b"\0")
+            require(not member or marked, "Run session lost its ownership token; cleanup cannot be proven")
+            if marked:
+                found.append(int(path.name))
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        except PermissionError:
+            require(not member, "Cannot inspect run-owned process; cleanup cannot be proven")
+    return found
+
+
+def finish_process_record(path, allow_pending=False):
+    record = read_json(path)
+    require(record["validationId"] == path.parent.parent.name, "Foreign process ownership record")
+    if record["status"] in ("complete", "previous-boot"):
+        return
+    if record["bootId"] != Path("/proc/sys/kernel/random/boot_id").read_text().strip():
+        record["status"] = "previous-boot"
+        write_json(path, record)
+        return
+    if record["status"] == "starting" and not allow_pending:
+        for _ in range(50):
+            if owned_processes(record) or read_json(path)["status"] != "starting":
+                break
+            time.sleep(0.1)
+        record = read_json(path)
+        require(record["status"] != "starting" or owned_processes(record),
+                "Unresolved process spawn intent; refusing to claim cleanup complete")
+    for attempt in range(30):
+        pids = owned_processes(record)
+        if not pids:
+            record.update(status="complete", finishedAt=now())
+            write_json(path, record)
+            return
+        for pid in pids:
+            try:
+                descriptor = os.pidfd_open(pid)
+                try:
+                    # Recheck after opening the pidfd; PID reuse cannot redirect the signal.
+                    if pid in owned_processes(record):
+                        signal.pidfd_send_signal(descriptor, signal.SIGTERM if attempt < 20 else signal.SIGKILL)
+                finally:
+                    os.close(descriptor)
+            except ProcessLookupError:
+                pass
+        time.sleep(0.1)
+    raise Blocked("Run-owned child processes remain; runtime must not be deleted")
+
+
+def owned_child():
+    path = Path(sys.argv[2])
+    record = read_json(path)
+    require(os.environ.get("PF_DAILY_PROCESS_TOKEN") == record["token"], "Child ownership token mismatch")
+    fields = Path("/proc/self/stat").read_text().rsplit(")", 1)[1].split()
+    record.update(status="running", pid=os.getpid(), startTicks=fields[19], startedAt=now())
+    write_json(path, record)
+    os.execvpe(sys.argv[3], sys.argv[3:], os.environ)
+
+
+def execute(arguments, cwd, env, timeout=120, log=None, check=True, owner=None):
     """Capture once; preserve real child status without a tee pipeline."""
-    process = subprocess.Popen(arguments, cwd=cwd, env=env, stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, start_new_session=True)
+    record_path = None
+    launch = arguments
+    if owner is not None:
+        processes = Path(owner) / "processes"
+        private_directory(processes)
+        token = uuid.uuid4().hex
+        record_path = processes / f"{token}.json"
+        write_json(record_path, {"validationId": Path(owner).name, "token": token, "status": "starting",
+                                 "bootId": Path("/proc/sys/kernel/random/boot_id").read_text().strip()})
+        env = dict(env, PF_DAILY_PROCESS_TOKEN=token)
+        launch = [sys.executable, str(Path(__file__).resolve()), "--owned-child", str(record_path), *arguments]
+    try:
+        process = subprocess.Popen(launch, cwd=cwd, env=env, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, start_new_session=True)
+    except OSError:
+        if record_path is not None:
+            record = read_json(record_path)
+            record.update(status="not-started", finishedAt=now())
+            write_json(record_path, record)
+        raise
     try:
         output, errors = process.communicate(timeout=timeout)
         code = process.returncode
@@ -168,6 +263,8 @@ def execute(arguments, cwd, env, timeout=120, log=None, check=True):
     if log:
         Path(log).write_text(redact(diagnostic, env), encoding="utf-8")
         os.chmod(log, 0o600)
+    if record_path is not None:
+        finish_process_record(record_path, allow_pending=True)
     if check and code:
         detail = redact(diagnostic, env)[-2500:]
         raise Blocked(f"{Path(arguments[0]).name} exited {code}: {detail}")
@@ -183,7 +280,9 @@ def base_environment():
     return env
 
 
-def probe():
+def probe(owner=None):
+    require(hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal"),
+            "Native Python/Linux pidfd support is required for safe process cleanup")
     env = base_environment()
     cwd = str(Path.home())
     versions = {}
@@ -199,7 +298,7 @@ def probe():
         "filesystem": ["findmnt", "-T", str(ROOT), "-n", "-o", "FSTYPE"],
     }
     for name, command in commands.items():
-        versions[name] = execute(command, cwd, env)[1].strip()
+        versions[name] = execute(command, cwd, env, owner=owner)[1].strip()
     require(versions["dockerPath"] == "/usr/bin/docker", "Reject non-native Docker CLI")
     require(re.match(r"docker(?:\.io|-ce(?:-cli)?):", versions["dockerPackage"]),
             "Docker CLI is not owned by an approved native package")
@@ -212,7 +311,7 @@ def probe():
     require(version.get("Client") and version.get("Server"), "Native client and server required")
     require("desktop" not in json.dumps(version).lower(), "Docker Desktop daemon is prohibited")
     execute(["bash", "-lc", "command -v git jq openssl envsubst >/dev/null; "
-             "python3 -c 'import ruamel.yaml'"], cwd, env)
+             "python3 -c 'import ruamel.yaml'"], cwd, env, owner=owner)
     return versions
 
 
@@ -288,7 +387,7 @@ def validate_phase(report, state, invocation, code):
 
 
 class Run:
-    def __init__(self, run_id):
+    def __init__(self, run_id, cleanup_only=False):
         require(re.fullmatch(r"dv-[0-9]{8}t[0-9]{6}-[0-9a-f]{32}", run_id), "Invalid validation ID")
         self.directory = ROOT / "runs" / run_id
         require(self.directory.is_dir(), "Unknown run; never load historical global state")
@@ -297,11 +396,18 @@ class Run:
         self.validate_identity(run_id)
         self.env = base_environment()
         env_path = self.directory / "runtime" / "secrets.json"
-        if env_path.exists():
+        if env_path.exists() and not cleanup_only:
             require(not env_path.is_symlink() and env_path.stat().st_mode & 0o077 == 0,
                     "Secret env permissions are not restrictive")
-            require(digest(env_path) == self.state["secretHash"], "Secret env changed")
+            require(digest(env_path) == self.state.get("secretHash"), "Secret env changed or incomplete")
             self.env.update(read_json(env_path))
+        elif env_path.exists() and self.state.get("secretHash"):
+            require(not env_path.is_symlink() and env_path.stat().st_mode & 0o077 == 0
+                    and digest(env_path) == self.state["secretHash"],
+                    "Secret env changed; cannot safely reconstruct cleanup")
+            self.env.update(read_json(env_path))
+        require(not cleanup_only or self.state.get("secretHash") or not self.state.get("resources"),
+                "Resource cleanup requires its registered secret environment")
 
     def validate_identity(self, run_id):
         state = self.state
@@ -323,7 +429,7 @@ class Run:
 
     def command(self, args, name, timeout=120, check=True, cwd=None):
         return execute(args, cwd or self.state["workspace"], self.env, timeout,
-                       self.directory / f"{name}.log", check)
+                       self.directory / f"{name}.log", check, owner=self.directory)
 
     def compose(self, args, name="compose", timeout=120, check=True):
         files = self.state["composeFiles"]
@@ -362,7 +468,7 @@ class Run:
             self.save()
 
     def prepare(self):
-        self.state["environment"] = probe()
+        self.state["environment"] = probe(self.directory)
         self.save()
         cutoff = now()
         self.state["selection"] = {"cutoff": cutoff, "startedAt": now(),
@@ -698,7 +804,8 @@ class Run:
                    PLAYWRIGHT_HTML_OUTPUT_DIR=str(directory / "html"), PLAYWRIGHT_HTML_OPEN="never")
         args = PHASES[name] + ["--config", self.state["playwrightConfig"]]
         invocation["command"] = args
-        code, _ = execute(args, self.state["frontend"], env, 3600, self.directory / f"{name}.log", False)
+        code, _ = execute(args, self.state["frontend"], env, 3600, self.directory / f"{name}.log", False,
+                          owner=self.directory)
         invocation.update(status="finished", exitCode=code, finishedAt=now())
         self.save()
         if code in (124, 130, -signal.SIGINT, -signal.SIGTERM):
@@ -741,6 +848,14 @@ class Run:
                                  "attempts": previous.get("attempts", 0) + 1}
         self.save()
         try:
+            processes = self.directory / "processes"
+            if processes.exists():
+                private_directory(processes)
+                for path in processes.glob("*.json"):
+                    require(not path.is_symlink(), "Process ownership symlink rejected")
+                    finish_process_record(path)
+            self.state["cleanup"]["processesVerifiedAt"] = now()
+            self.save()
             containers = self.owned_resources()
             if self.state.get("resources"):
                 for path, expected in self.state["fileHashes"].items():
@@ -783,7 +898,7 @@ class Run:
                                  "cleanup-permissions", 120)
                 shutil.rmtree(runtime)
             self.state["cleanup"].update(status="complete", finishedAt=now())
-        except (Blocked, OSError, ValueError) as error:
+        except (Blocked, OSError, ValueError, KeyError) as error:
             self.state["cleanup"].update(status="failed", finishedAt=now(), error=redact(str(error), self.env))
             raise
         finally:
@@ -852,9 +967,18 @@ def main():
         return 0
     require(args.run_id or args.command in ("init", "run"), "This command requires --run-id")
     require(not args.run_id or args.command != "init", "init always creates a new identity")
-    run = Run(args.run_id) if args.run_id else create_run()
+    if args.run_id:
+        require(re.fullmatch(r"dv-[0-9]{8}t[0-9]{6}-[0-9a-f]{32}", args.run_id), "Invalid validation ID")
+        directory = ROOT / "runs" / args.run_id
+        require(directory.is_dir(), "Unknown run")
+        private_directory(directory)
+    else:
+        created = create_run()
+        args.run_id = created.state["validationId"]
+        directory = created.directory
     code = 0
-    with lock(run.directory / "command.lock"):
+    with lock(directory / "command.lock"):
+        run = Run(args.run_id, cleanup_only=args.command == "cleanup")
         try:
             if args.command in ("init", "run") and not run.state["steps"].get("prepare"):
                 run.step("prepare", run.prepare)
@@ -874,7 +998,14 @@ def main():
             if args.command == "cleanup":
                 run.cleanup()
             if args.command == "status" and run.state["cleanup"]["status"] != "complete":
-                run.health()
+                if run.state["steps"].get("deploy", {}).get("status") == "complete":
+                    run.health()
+                else:
+                    require(run.state["steps"].get("prepare", {}).get("status") == "complete",
+                            "Interrupted preparation; cleanup required")
+                    require("deploy" not in run.state["steps"], "Interrupted deployment; cleanup required")
+                    run.verify_files()
+                    require(not run.owned_resources(), "Unfinished deployment has resources; cleanup required")
             if args.command == "read":
                 require(args.evidence and re.fullmatch(r"[a-zA-Z0-9_.-]+\.(json|log|md)", args.evidence),
                         "Read accepts a single run-evidence filename, never arbitrary Linux paths")
@@ -902,6 +1033,9 @@ def main():
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--owned-child":
+        owned_child()
+        sys.exit(127)
     def interrupt(_signal, _frame):
         raise KeyboardInterrupt()
     signal.signal(signal.SIGTERM, interrupt)

@@ -2,7 +2,7 @@
 
 `scripts/ci/daily-validation.ps1` is the Windows orchestration entrypoint for
 native Ubuntu-24.04 WSL validation. Use PowerShell 7. The runner requires native
-Docker Engine and its Compose plugin, Python 3 with `ruamel.yaml`, Node/npm,
+Docker Engine and its Compose plugin, Python 3 with `ruamel.yaml` and Linux pidfd support, Node/npm,
 GitHub CLI authentication, git, jq, openssl and envsubst inside WSL.
 It reports installed versions rather than assuming a permanently supported
 version. It does not install system packages, start services or use Docker Desktop.
@@ -44,6 +44,10 @@ Secrets are random per run, saved separately in `runtime/secrets.json` and
 reloads them; every Compose command uses the same explicit env file, project
 and ordered file list. Ambient Compose/image/port variables cannot change them.
 No secrets or resolved Compose environment are printed.
+Mutable state and secrets are loaded under the command lock, so a concurrent
+status request cannot overwrite a newly completed phase. If preparation dies
+between writing secrets and checkpointing their hash, cleanup may discard that
+incomplete pre-resource runtime without adopting or regenerating the secrets.
 
 The existing tested-commit Compose generator, daily registry/validation overlays,
 certificate helper, worker-temp helper and acceptance provenance verifier are
@@ -101,6 +105,13 @@ It never uses a mutable helper image or cleans shared/global resources.
 Teardown errors remain visible, retain runtime for investigation, and allow only
 one further cleanup attempt. A hard process/host kill cannot execute a finally
 handler: use the recorded ID and original harness to run cleanup after recovery.
+Every run command registers a private spawn intent before launch. Its child
+registers itself before executing work, and descendants inherit a unique process
+token. Recovery terminates only matching run-owned processes using pidfds, then
+verifies their absence before runtime deletion. An unresolved spawn intent blocks
+cleanup rather than claiming that an unaccounted child is gone. Process records
+remain in the run's `processes` directory. Interrupted/timed-out partial test
+evidence is retained but never authorizes the next phase.
 
 Sanitized results/logs and copied tested-commit deployment documents remain after
 runtime deletion. Raw browser traces/screenshots are kept separately in private

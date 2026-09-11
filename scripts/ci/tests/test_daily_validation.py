@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -204,6 +205,84 @@ class LifecycleTests(unittest.TestCase):
                 with daily.lock(self.run.directory / "command.lock"):
                     self.fail("Lock incorrectly acquired")
 
+    def test_main_loads_mutable_state_only_after_lock(self):
+        self.run.state["cleanup"]["status"] = "complete"
+        self.run.save()
+        constructor = daily.Run
+        def checked(*args, **kwargs):
+            with self.assertRaisesRegex(daily.Blocked, "Another command"):
+                with daily.lock(self.run.directory / "command.lock"):
+                    self.fail("State loaded outside lock")
+            return constructor(*args, **kwargs)
+        with patch.object(daily, "Run", side_effect=checked), \
+                patch.object(sys, "argv", ["daily", "status", "--run-id", self.run.state["validationId"]]):
+            self.assertEqual(daily.main(), 0)
+
+    def test_cleanup_recovers_secret_file_before_hash_checkpoint(self):
+        daily.write_json(Path(self.run.state["workspace"]) / "secrets.json", {"POSTGRES_PASSWORD": "test"})
+        with self.assertRaisesRegex(daily.Blocked, "incomplete"):
+            daily.Run(self.run.state["validationId"])
+        recovered = daily.Run(self.run.state["validationId"], cleanup_only=True)
+        with patch.object(recovered, "owned_resources", return_value=[]):
+            recovered.cleanup()
+        self.assertEqual(recovered.state["cleanup"]["status"], "complete")
+        self.assertFalse(Path(recovered.state["workspace"]).exists())
+
+    def test_failed_spawn_does_not_leave_ambiguous_intent(self):
+        with self.assertRaises(FileNotFoundError):
+            daily.execute(["true"], str(Path(self.temp.name) / "absent"), {}, owner=self.run.directory)
+        with patch.object(self.run, "owned_resources", return_value=[]):
+            self.run.cleanup()
+        self.assertEqual(self.run.state["cleanup"]["status"], "complete")
+
+    def test_prepared_status_can_resume_before_deployment_without_claiming_health(self):
+        self.run.state["steps"]["prepare"] = {"status": "complete"}
+        with patch.object(daily, "Run", return_value=self.run), \
+                patch.object(sys, "argv", ["daily", "status", "--run-id", self.run.state["validationId"]]), \
+                patch.object(self.run, "verify_files") as verify, \
+                patch.object(self.run, "owned_resources", return_value=[]), \
+                patch.object(self.run, "health") as health:
+            self.assertEqual(daily.main(), 0)
+        verify.assert_called_once()
+        health.assert_not_called()
+        self.assertNotIn("health", self.run.state)
+
+    def test_hard_killed_parent_children_cleaned_foreign_process_untouched(self):
+        ready = Path(self.run.state["workspace"]) / "child-ready"
+        child = ("import pathlib,subprocess,sys,time;"
+                 "subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);"
+                 f"pathlib.Path({str(ready)!r}).touch();time.sleep(60)")
+        parent = ("import importlib.util,os;"
+                  f"s=importlib.util.spec_from_file_location('daily',{daily.__file__!r});"
+                  "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
+                  f"m.execute([{sys.executable!r},'-c',{child!r}],{self.temp.name!r},os.environ,"
+                  f"owner={str(self.run.directory)!r})")
+        foreign = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(60)"])
+        process = subprocess.Popen([sys.executable, "-c", parent])
+        try:
+            deadline = time.monotonic() + 10
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertTrue(ready.exists(), "Child did not register/start")
+            process.kill()
+            process.wait(timeout=5)
+            records = list((self.run.directory / "processes").glob("*.json"))
+            self.assertEqual(len(records), 1)
+            self.assertTrue(daily.owned_processes(daily.read_json(records[0])))
+            with patch.object(self.run, "owned_resources", return_value=[]):
+                self.run.cleanup()
+            self.assertFalse(daily.owned_processes(daily.read_json(records[0])))
+            self.assertIsNone(foreign.poll())
+            self.assertEqual(self.run.state["cleanup"]["status"], "complete")
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+            for path in (self.run.directory / "processes").glob("*.json"):
+                daily.finish_process_record(path, allow_pending=True)
+            foreign.terminate()
+            foreign.wait(timeout=5)
+
     def test_resume_exhausted_or_interrupted_step_does_not_run(self):
         calls = []
         self.run.step("prepare", lambda: calls.append(1))
@@ -228,7 +307,7 @@ class LifecycleTests(unittest.TestCase):
                 run = daily.create_run()
                 run.state.update(commit="a" * 40, manifestHash="manifest", frontend=self.temp.name,
                                  playwrightConfig="config", steps={"deploy": {"status": "complete"}})
-                def interrupted(args, cwd, env, *unused):
+                def interrupted(args, cwd, env, *unused, **kwargs):
                     daily.write_json(env["PF_DAILY_RESULT"], dict(
                         validationId=env["PF_DAILY_ID"], invocationId=env["PF_DAILY_INVOCATION"],
                         phase=env["PF_DAILY_PHASE"], commit=env["PF_DAILY_COMMIT"],
