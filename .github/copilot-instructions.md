@@ -206,7 +206,11 @@ The verifier supplies issue-level feedback, not a PR merge gate.
 
 ## Pre-PR Review Gate
 
-**All code MUST pass 3-way adversarial review before any PR is opened.** Bishop, Hicks, and Vasquez review the branch together, debate thoroughly, and deliver a single consensus verdict. Do not open a PR until they APPROVE.
+**Every change MUST receive the risk-based review defined below before any PR is opened.**
+Standard and documentation-only changes require one qualified non-author reviewer using a
+different model family from the implementation agent. High-risk changes require Bishop, Hicks,
+and Vasquez to review the branch together and deliver a consensus verdict. Do not open a PR
+until the required review approves.
 
 ### Scope: the gate applies to `squad`-labelled PRs only
 
