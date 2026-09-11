@@ -292,6 +292,76 @@ final class PreheatSubgroupTests: XCTestCase {
         XCTAssertEqual(value, "")
     }
 
+    func test_numericPadKeyboards_getDoneToolbarWiredToCoordinatorDoneTapped() async throws {
+        // .decimalPad/.numberPad/etc. have no Return key, so
+        // textFieldShouldReturn never fires; a "Done" toolbar is the only
+        // way to dismiss the keyboard for these fields. First-responder
+        // transitions aren't reliable in a headless test host, so this
+        // asserts the toolbar wiring itself rather than an actual keyboard
+        // dismissal; test_doneTapped_resignsFirstResponderOnTheWiredField
+        // covers the dismissal behavior directly against the Coordinator.
+        for keyboardType: UIKeyboardType in [.decimalPad, .numberPad, .phonePad, .asciiCapableNumberPad] {
+            var value = "200"
+            let field = ControlNumberField(
+                placeholder: "", text: Binding(get: { value }, set: { value = $0 }),
+                label: "target", identifier: "test.numeric-pad", keyboardType: keyboardType
+            )
+            let (_, controller) = try await install(field)
+            let textField = try XCTUnwrap(nativeControls(controller.view).first as? UITextField, "\(keyboardType)")
+            let toolbar = try XCTUnwrap(textField.inputAccessoryView as? UIToolbar, "\(keyboardType)")
+            let done = try XCTUnwrap(toolbar.items?.last, "\(keyboardType)")
+
+            XCTAssertTrue(done.target is ControlNumberField.Coordinator, "\(keyboardType)")
+            XCTAssertEqual(done.action, #selector(ControlNumberField.Coordinator.doneTapped), "\(keyboardType)")
+        }
+    }
+
+    func test_doneTapped_resignsFirstResponderOnTheWiredField() {
+        // Directly exercises the Done-toolbar action against the
+        // Coordinator, independent of UIKit's first-responder chain (which
+        // isn't reliably available in a headless test host).
+        let coordinator = ControlNumberField.Coordinator(text: Binding(get: { "" }, set: { _ in }))
+        let field = ResignTrackingTextField()
+        coordinator.field = field
+
+        coordinator.doneTapped()
+
+        XCTAssertEqual(field.resignFirstResponderCallCount, 1)
+    }
+
+    private final class ResignTrackingTextField: UITextField {
+        private(set) var resignFirstResponderCallCount = 0
+        override func resignFirstResponder() -> Bool {
+            resignFirstResponderCallCount += 1
+            return super.resignFirstResponder()
+        }
+    }
+
+    func test_punctuationKeyboard_hasNoAccessoryToolbar() async throws {
+        // The default keyboard (used for signed/jog fields) has a native
+        // Return key, so it must not grow an extra toolbar.
+        var value = ""
+        let field = ControlNumberField(
+            placeholder: "", text: Binding(get: { value }, set: { value = $0 }),
+            label: "jog", identifier: "test.punctuation-pad", keyboardType: .numbersAndPunctuation
+        )
+        let (_, controller) = try await install(field)
+        let textField = try XCTUnwrap(nativeControls(controller.view).first as? UITextField)
+        XCTAssertNil(textField.inputAccessoryView)
+    }
+
+    private func install<Content: View>(_ content: Content) async throws -> (UIWindow, UIHostingController<Content>) {
+        let controller = UIHostingController(rootView: content)
+        let size = controller.sizeThatFits(in: CGSize(width: 200, height: 200))
+        let window = UIWindow()
+        window.windowScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        window.frame = CGRect(origin: .zero, size: size.width > 0 ? size : CGSize(width: 200, height: 60))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        try await settle(controller)
+        return (window, controller)
+    }
+
     // MARK: - presets
 
     func test_presets_containsAllFourInFixedOrder() {

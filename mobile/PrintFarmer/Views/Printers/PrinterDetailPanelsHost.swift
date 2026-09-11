@@ -616,11 +616,19 @@ struct PrinterDetailTemperatureStrip: View {
         .accessibilityIdentifier(identifier)
     }
 
+    /// Whether the heater glyph should render in its "on" color. A non-finite
+    /// (NaN/Infinity) target is treated as unknown/off, matching
+    /// `compactTemperature`'s "—" rendering for the same values, rather than
+    /// incorrectly appearing to be heating.
+    static func isHeatingGlyph(value: PrinterDetailTemperatureReading) -> Bool {
+        value.isOnline && (value.target?.isFinite ?? false) && (value.target ?? 0) > 0
+    }
+
     private func essentialReading(title: String, symbol: String, value: PrinterDetailTemperatureReading) -> some View {
         // Match the web UI: colorize the heater glyph itself when the
         // target is on, rather than a separate "Heater off"/"Target set"
         // caption string.
-        let isHeating = value.isOnline && (value.target?.isFinite ?? false) && (value.target ?? 0) > 0
+        let isHeating = Self.isHeatingGlyph(value: value)
         let glyphColor: Color = title == "Bed"
             ? (isHeating ? .blue : .blue.opacity(0.35))
             : (isHeating ? .red : .red.opacity(0.35))
