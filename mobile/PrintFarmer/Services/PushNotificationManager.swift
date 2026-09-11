@@ -24,6 +24,10 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     private(set) var permissionStatus: PermissionStatus = .notDetermined
     private(set) var deviceToken: String?
     private(set) var registrationError: String?
+    var notificationAuthorizationRequester: any NotificationAuthorizationRequesting = LiveNotificationAuthorizationRequester()
+    var remoteNotificationRegistrar: @Sendable @MainActor () -> Void = {
+        UIApplication.shared.registerForRemoteNotifications()
+    }
 
     /// Issue #818: `true` when the currently selected server reported native push
     /// as disabled (`code == "featureDisabled"`) on the last device-token
@@ -280,15 +284,15 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     // MARK: - Permission & Registration
 
     func requestPermissionAndRegister() async {
-        let center = UNUserNotificationCenter.current()
-
         do {
-            let granted = try await center.requestAuthorization(options: [.alert, .badge, .sound])
+            let granted = try await notificationAuthorizationRequester.requestAuthorization(
+                options: [.alert, .badge, .sound]
+            )
             if granted {
                 permissionStatus = .authorized
                 registrationError = nil
                 logger.info("Notification permission granted")
-                UIApplication.shared.registerForRemoteNotifications()
+                remoteNotificationRegistrar()
             } else {
                 permissionStatus = .denied
                 logger.info("Notification permission denied by user")
