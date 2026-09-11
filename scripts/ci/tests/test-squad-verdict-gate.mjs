@@ -807,14 +807,16 @@ test('documentation-only classification honours the policy carve-outs', () => {
     'docs/api-contract.md',
     'src/Web/ReactApp/package.json',
     'src/api/Program.cs',
-    'docs/screenshot.png',
   ]) {
     assert.equal(
-      classifyChangeScope([carveOut]).docsOnly, false,
+      classifyChangeScope([carveOut]).highRisk, true,
       `${carveOut} must take the full gate`,
     );
   }
   assert.equal(classifyChangeScope(['docs/API.md', 'src/api/Program.cs']).docsOnly, false);
+  const binaryDocumentation = classifyChangeScope(['docs/screenshot.png']);
+  assert.equal(binaryDocumentation.docsOnly, false);
+  assert.equal(binaryDocumentation.highRisk, false);
 });
 
 test('high-risk classification is order-independent for mixed changes', () => {
@@ -834,11 +836,27 @@ test('high-risk classification covers access control, protocol, and release auto
   for (const path of [
     'src/modules/Farm.Modules.Identity/Controllers/AuthController.cs',
     'src/modules/Farm.Modules.Identity/Controllers/Admin/RolesController.cs',
+    'src/infra/Data/AppDbContext.cs',
+    'src/infra/Data/Configurations/RefreshTokenConfiguration.cs',
+    'src/infra/Services/SignalR/PrinterHub.cs',
     'proto/slicer_jobs.proto',
     'scripts/publish-to-public.sh',
+    'squad.config.ts',
+    'agentrc.config.json',
+    'skills-lock.json',
+    'VERSION',
+    'cliff.toml',
   ]) {
     assert.equal(classifyChangeScope([path]).highRisk, true, path);
   }
+});
+
+test('renamed high-risk paths remain high-risk', () => {
+  const scope = classifyChangeScope([
+    'src/Web/ReactApp/src/components/RequestHandler.tsx',
+    'src/api/PublicContract.cs',
+  ]);
+  assert.equal(scope.highRisk, true);
 });
 
 test('the documented full-gate escalation list matches the code exactly', async () => {
@@ -877,11 +895,11 @@ test('the documented full-gate escalation list matches the code exactly', async 
 
 test('every exported full-gate path is actually escalated', () => {
   for (const prefix of fullGatePrefixes) {
-    assert.equal(classifyChangeScope([`${prefix}notes.md`]).docsOnly, false, prefix);
+    assert.equal(classifyChangeScope([`${prefix}notes.md`]).highRisk, true, prefix);
   }
   for (const file of fullGateFiles) {
-    assert.equal(classifyChangeScope([file]).docsOnly, false, file);
-    assert.equal(classifyChangeScope([file.toUpperCase()]).docsOnly, false, file);
+    assert.equal(classifyChangeScope([file]).highRisk, true, file);
+    assert.equal(classifyChangeScope([file.toUpperCase()]).highRisk, true, file);
   }
 });
 
@@ -1002,6 +1020,7 @@ test('workflow keeps its default-branch, SHA-binding and least-privilege control
   assert.match(workflow, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/);
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /squad-verdict-gate\.mjs/);
+  assert.match(workflow, /file\.previous_filename/);
   assert.match(workflow, /getCollaboratorPermissionLevel/);
   assert.match(workflow, /gate\.hasWriteAccess\(await permissionOf\(login\)\)/);
   assert.match(workflow, /gate\.hasAdminAccess\(await permissionOf\(login\)\)/);

@@ -397,7 +397,9 @@ jobs:
                 { owner, repo, pull_number: prNumber, per_page: 100 }),
             ]);
 
-            const changedPaths = fileData.map((file) => file.filename);
+            const changedPaths = fileData.flatMap((file) =>
+              [file.filename, file.previous_filename].filter(Boolean),
+            );
 
             // Resolve real repository permission for every account that posted
             // something shaped like a verdict, and flag the owner override.

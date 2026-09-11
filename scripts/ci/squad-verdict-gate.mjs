@@ -208,6 +208,11 @@ export const fullGateFiles = new Set([
   'gemini.md',
   'copilot.md',
   '.cursorrules',
+  'squad.config.ts',
+  'agentrc.config.json',
+  'skills-lock.json',
+  'version',
+  'cliff.toml',
 ]);
 
 // Dependency manifests and lockfiles, matched by basename anywhere in the tree.
@@ -238,10 +243,10 @@ const manifestBasenames = new Set([
 // Prose whose contents carry real consequences: security policy, threat models,
 // licensing terms, published API contracts.
 const sensitiveProse =
-  /(^|\/)(security|threat[-_ ]?model|licen[cs]e|notice|copying|code[-_ ]?of[-_ ]?conduct|api[-_ ]?contract)(\.[a-z0-9]+)?$/i;
+  /(^|\/)(security|threat[-_ ]?model|licen[cs]e|licensing[-_ ]?policy|notice|copying|code[-_ ]?of[-_ ]?conduct|api[-_ ]?contract)(\.[a-z0-9]+)?$/i;
 
 const highRiskPaths =
-  /(auth(entication|orization)?|contract|dto|identity|permission|role|security|privacy|secret|migration|docker|deploy(ment)?|release|publish|compose|serialization|openapi|swagger|concurren|queue|worker)/i;
+  /(access|admin|auth(entication|orization)?|cert|contract|credential|data\/configurations|dbcontext|dto|governance|hub|identity|licens|migration|openapi|password|permission|privacy|protocol|queue|role|secret|security|serialization|signalr|squad|token|worker)/i;
 
 /**
  * Reduce a squad identity to its canonical lowercase token.
@@ -582,8 +587,8 @@ export function classifyChangeScope(paths) {
     if (fullGatePrefixes.some((prefix) => path.startsWith(prefix))) {
       return { docsOnly: false, highRisk: true, reason: `${path} governs agent or CI behaviour` };
     }
-    if (path.startsWith('scripts/ci/')) {
-      return { docsOnly: false, highRisk: true, reason: `${path} is CI code` };
+    if (path.startsWith('scripts/')) {
+      return { docsOnly: false, highRisk: true, reason: `${path} is automation code` };
     }
     if (path.startsWith('src/api/')) {
       return { docsOnly: false, highRisk: true, reason: `${path} is public API code` };
