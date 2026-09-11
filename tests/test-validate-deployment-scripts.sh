@@ -112,18 +112,23 @@ chmod +x "$mock_repo/scripts/docker/compose-generator.sh"
 cat > "$mock_repo/bin/docker" <<'EOF'
 #!/bin/bash
 # Minimal "docker compose ... config" stub used by the regression suite. It
-# does not perform real variable interpolation (that would require a full
-# compose implementation), but it does parse the target file as YAML so a
+# checks the required connection-string fixture without implementing general
+# Compose interpolation, and parses the target file as YAML so a
 # deliberately corrupted compose file still fails, matching real docker's
 # behavior closely enough to exercise validate-deployment-scripts.sh's
 # negative-control assertion.
 if [[ "${1:-}" == "compose" ]]; then
     shift
     compose_file="docker-compose.yml"
+    env_file=".env"
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -f)
                 compose_file="$2"
+                shift 2
+                ;;
+            --env-file)
+                env_file="$2"
                 shift 2
                 ;;
             *)
@@ -131,13 +136,28 @@ if [[ "${1:-}" == "compose" ]]; then
                 ;;
         esac
     done
-    exec python3 -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$compose_file"
+    if ! grep -Eq '^ConnectionStrings__Default=.+$' "$env_file"; then
+        echo "ConnectionStrings__Default must be set" >&2
+        exit 1
+    fi
+    # Windows Git Bash may expose a nonfunctional python3 Store alias.
+    for python_cmd in python3 python py; do
+        if "$python_cmd" -c "import yaml" >/dev/null 2>&1; then
+            exec "$python_cmd" -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$compose_file"
+        fi
+    done
+    echo "A working Python interpreter with PyYAML is required" >&2
+    exit 1
 fi
 exit 0
 EOF
 chmod +x "$mock_repo/bin/docker"
 
 : > "$mock_repo/scripts/docker/compose-templates/base.yml"
+for template_name in docker-compose.yml docker-compose.slicer-host.yml; do
+    printf '%s\n' '      - ConnectionStrings__Default=${ConnectionStrings__Default:?ConnectionStrings__Default must be set}' \
+        > "$mock_repo/scripts/docker/compose-templates/$template_name"
+done
 
 run_validator() {
     local output_file="$1"

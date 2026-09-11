@@ -695,7 +695,8 @@ test_provider_only_env_sqlserver() {
 
     # Must contain SQL Server password variable
     assert_contains "$compose_content" "MSSQL_SA_PASSWORD" "Should include MSSQL_SA_PASSWORD for SQL Server"
-    assert_bare_placeholders_equal "$compose_content" '${ConnectionStrings__Default} ${MSSQL_SA_PASSWORD}' "SQL Server compose should leave only the expected runtime placeholders"
+    assert_contains "$compose_content" 'ConnectionStrings__Default=${ConnectionStrings__Default:?' "SQL Server connection string should remain a required runtime placeholder"
+    assert_bare_placeholders_equal "$compose_content" '${MSSQL_SA_PASSWORD}' "SQL Server compose should leave only the expected bare runtime placeholders"
 
     # Must not contain other providers' secret variables
     assert_not_contains "$compose_content" "POSTGRES_PASSWORD" "Should not include Postgres password when sqlserver is selected"
@@ -724,13 +725,13 @@ test_postgres_runtime_secrets_not_baked() {
     compose_content=$(cat "$temp_dir/docker-compose.yml")
 
     assert_contains "$compose_content" 'POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}' "Database password should remain a runtime placeholder"
-    assert_contains "$compose_content" 'ConnectionStrings__Default=${ConnectionStrings__Default}' "API/slicer connection string should remain a runtime placeholder"
-    assert_bare_placeholders_equal "$compose_content" '${ConnectionStrings__Default} ${POSTGRES_PASSWORD}' "PostgreSQL compose should leave only expected runtime placeholders"
+    assert_contains "$compose_content" 'ConnectionStrings__Default=${ConnectionStrings__Default:?' "API/slicer connection string should remain a required runtime placeholder"
+    assert_bare_placeholders_equal "$compose_content" '${POSTGRES_PASSWORD}' "PostgreSQL compose should leave only expected bare runtime placeholders"
     assert_not_contains "$compose_content" "$pg_pw" "Generated compose should not contain the concrete database password"
     assert_not_contains "$compose_content" "$(postgres_connection_string "$pg_pw")" "Generated compose should not contain the concrete connection string"
 
     local connection_placeholder_count
-    connection_placeholder_count="$(printf '%s\n' "$compose_content" | grep -F 'ConnectionStrings__Default=${ConnectionStrings__Default}' | wc -l | tr -d '[:space:]')"
+    connection_placeholder_count="$(printf '%s\n' "$compose_content" | grep -F 'ConnectionStrings__Default=${ConnectionStrings__Default:?' | wc -l | tr -d '[:space:]')"
     assert_equals "2" "$connection_placeholder_count" "API and slicer-host should both defer connection-string interpolation to Docker Compose"
 
     local expected_orcaslicer_sha
