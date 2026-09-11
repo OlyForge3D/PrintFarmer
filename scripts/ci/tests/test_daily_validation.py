@@ -166,6 +166,17 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(reloaded.env["POSTGRES_PASSWORD"], self.run.env["POSTGRES_PASSWORD"])
         self.assertEqual(reloaded.env["BASE_URL"], self.run.env["BASE_URL"])
         self.assertEqual((self.run.directory / "runtime/secrets.json").stat().st_mode & 0o777, 0o600)
+        child = (
+            "import importlib.util,pathlib,sys,hashlib;"
+            "s=importlib.util.spec_from_file_location('daily',sys.argv[1]);"
+            "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
+            "m.ROOT=pathlib.Path(sys.argv[2]);r=m.Run(sys.argv[3]);"
+            "print(hashlib.sha256(r.env['POSTGRES_PASSWORD'].encode()).hexdigest())"
+        )
+        result = subprocess.run([sys.executable, "-c", child, daily.__file__, str(daily.ROOT),
+                                 self.run.state["validationId"]], capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.strip(),
+                         daily.hashlib.sha256(self.run.env["POSTGRES_PASSWORD"].encode()).hexdigest())
 
     def test_cleanup_failure_visible_and_bounded(self):
         with patch.object(self.run, "owned_resources", side_effect=daily.Blocked("foreign resource")):
@@ -211,6 +222,31 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.run.state["phases"], {})
         self.assertIsNone(self.run.summary()["phases"]["phase-a"]["counts"])
 
+    def test_interrupted_partial_evidence_cannot_authorize_phase_b(self):
+        for code, status in ((124, "interrupted"), (130, "failed"), (1, "timedout")):
+            with self.subTest(code=code, status=status):
+                run = daily.create_run()
+                run.state.update(commit="a" * 40, manifestHash="manifest", frontend=self.temp.name,
+                                 playwrightConfig="config", steps={"deploy": {"status": "complete"}})
+                def interrupted(args, cwd, env, *unused):
+                    daily.write_json(env["PF_DAILY_RESULT"], dict(
+                        validationId=env["PF_DAILY_ID"], invocationId=env["PF_DAILY_INVOCATION"],
+                        phase=env["PF_DAILY_PHASE"], commit=env["PF_DAILY_COMMIT"],
+                        manifestHash=env["PF_DAILY_MANIFEST_HASH"], harnessHash=env["PF_DAILY_HARNESS_HASH"],
+                        startedAt=daily.now(), finishedAt=daily.now(), status=status, errors=[],
+                        tests=[{"category": "passed", "attempts": [{"status": "passed"}]},
+                               {"category": "did-not-run", "attempts": []}]))
+                    return code, ""
+                with patch.object(run, "health"), patch.object(run, "fixtures"), \
+                        patch.object(daily, "execute", side_effect=interrupted):
+                    with self.assertRaisesRegex(daily.Blocked, "partial evidence retained"):
+                        run.phase("phase-a")
+                    self.assertTrue((run.directory / "phase-a.json").exists())
+                    with self.assertRaisesRegex(daily.Blocked, "partial evidence cannot authorize"):
+                        run.phase("phase-b")
+                self.assertNotIn("phase-b", run.state["phases"])
+                self.assertIsNone(run.summary()["phases"]["phase-a"]["counts"])
+
     def test_exit_status_logging_and_bounded_timeout(self):
         log = self.run.directory / "child.log"
         code, output = daily.execute(["bash", "-lc", "printf 'literal $dollar\\n'; exit 19"],
@@ -220,6 +256,32 @@ class LifecycleTests(unittest.TestCase):
         code, _ = daily.execute(["bash", "-lc", "sleep 30"], self.temp.name,
                                 os.environ, timeout=0.05, log=log, check=False)
         self.assertEqual(code, 124)
+
+    def test_interrupt_status_is_not_timeout(self):
+        with patch.object(daily.subprocess, "Popen") as popen, patch.object(daily.os, "killpg"):
+            popen.return_value.communicate.side_effect = [KeyboardInterrupt(), (b"partial", b"interrupted")]
+            code, output = daily.execute(["fake"], self.temp.name, {}, check=False)
+        self.assertEqual((code, output), (130, "partial"))
+
+    def test_run_interrupt_cleans_up_without_starting_next_phase(self):
+        self.run.state["steps"] = {"prepare": {"status": "complete"}, "deploy": {"status": "complete"}}
+        with patch.object(daily, "Run", return_value=self.run), \
+                patch.object(sys, "argv", ["daily", "run", "--run-id", self.run.state["validationId"]]), \
+                patch.object(self.run, "health"), patch.object(self.run, "cleanup") as cleanup, \
+                patch.object(self.run, "phase", side_effect=daily.Blocked("interrupted")) as phase:
+            self.assertEqual(daily.main(), 1)
+        phase.assert_called_once_with("phase-a")
+        cleanup.assert_called_once()
+
+    def test_executed_unclassified_failure_retains_counts_without_inventing_defect(self):
+        counts = {"passed": 50, "failed": 1, "skipped": 0, "did-not-run": 3, "flaky": 0}
+        self.run.state["phases"]["phase-a"] = {"status": "finished"}
+        with patch.object(self.run, "phase_summary", return_value=counts):
+            summary = self.run.summary()
+        self.assertEqual(summary["phases"]["phase-a"]["counts"], counts)
+        self.assertTrue(summary["requiresAgentClassification"])
+        self.assertNotIn("outcome", summary)
+        self.assertIsNone(summary["blocker"])
 
     def test_foreign_container_blocks_cleanup_before_down(self):
         container = {"Config": {"Labels": {daily.LABEL: "another-run"}}}
@@ -235,6 +297,10 @@ class LifecycleTests(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
+    def test_token_environment_values_redacted(self):
+        self.assertEqual(daily.redact("opaque-access-value", {"GH_TOKEN": "opaque-access-value"}),
+                         "[REDACTED]")
+
     def test_overlay_isolates_network_and_volumes_without_changing_aliases(self):
         config = {
             "services": {service: {"networks": {"farm": {"aliases": ["discovery-voron"]}}}

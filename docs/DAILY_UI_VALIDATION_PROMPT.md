@@ -90,10 +90,13 @@ prerequisites remain healthy. A harness/fixture/health blocker ends testing.
 ## Classify and track
 
 For each failure, examine assertion, source/fixture at the tested commit,
-trace/screenshot and browser console/network or API evidence. Assign exactly one:
+trace/screenshot and browser console/network or API evidence. When established, assign one:
 `confirmed product defect`, `test defect`,
 `missing deterministic fixture/unsupported coverage`, `infrastructure failure`.
 Do not infer a product defect from a failed harness command.
+If the evidence cannot distinguish these classes, retain **unresolved classification**,
+link an investigation issue, and report INCOMPLETE classification. An executed
+assertion failure is not automatically a product defect or an infrastructure blocker.
 
 Search existing open issues before filing; update duplicates. Product bugs need
 reproduction, failing test/phase/assertion, tested commit/digest, browser/viewport
@@ -132,8 +135,10 @@ Use exactly one first-line outcome (substitute the tested commit):
   to this outcome by unclassified B failures.
 - `🚫 VALIDATION BLOCKED: <reason>` if deployment or infrastructure prevents A
   or meaningful B, or cleanup fails.
-- `⛔ VALIDATION INCOMPLETE: <what was reached>` only if the session runs out
-  of room; name remaining work.
+- `⛔ VALIDATION INCOMPLETE: <what was reached>` if the session runs out of
+  room or an executed failure still has unresolved classification; name the
+  remaining investigation, linked issue, and verified counts rather than inventing
+  a product/infrastructure label. Do not turn an unexplained assertion into a pass.
 
 Then report environment versions; validation ID/evidence directory; image run,
 manifest hash, commit and six digests; harness revision/hash; topology/health;

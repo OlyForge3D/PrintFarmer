@@ -140,7 +140,7 @@ def verify_selection(primary, verification, cutoff):
 
 def redact(text, env):
     for key, value in sorted(env.items(), key=lambda pair: -len(pair[1])):
-        if any(word in key.lower() for word in ("password", "key", "connectionstrings")):
+        if any(word in key.lower() for word in ("password", "key", "token", "secret", "connectionstrings")):
             if value:
                 text = text.replace(value, "[REDACTED]")
     text = re.sub(r"(?i)(bearer\s+)[\w.+/=-]+", r"\1[REDACTED]", text)
@@ -155,14 +155,14 @@ def execute(arguments, cwd, env, timeout=120, log=None, check=True):
     try:
         output, errors = process.communicate(timeout=timeout)
         code = process.returncode
-    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+    except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
         os.killpg(process.pid, signal.SIGTERM)
         try:
             output, errors = process.communicate(timeout=15)
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
             output, errors = process.communicate()
-        code = 124
+        code = 130 if isinstance(error, KeyboardInterrupt) else 124
     text = output.decode("utf-8", errors="replace")
     diagnostic = text + errors.decode("utf-8", errors="replace")
     if log:
@@ -701,12 +701,23 @@ class Run:
         code, _ = execute(args, self.state["frontend"], env, 3600, self.directory / f"{name}.log", False)
         invocation.update(status="finished", exitCode=code, finishedAt=now())
         self.save()
-        report = read_json(directory / "result.json")
+        if code in (124, 130, -signal.SIGINT, -signal.SIGTERM):
+            invocation["termination"] = "timeout" if code == 124 else "interrupted"
+            self.save()
+        result_path = directory / "result.json"
+        require(result_path.exists(),
+                f"{name} exited {code} ({invocation.get('termination', 'no result')}); "
+                "no fresh structured result, cleanup required")
+        report = read_json(result_path)
+        if report.get("status") in ("interrupted", "timedout"):
+            invocation["termination"] = report["status"]
         counts = validate_phase(report, self.state, invocation, code)
         target = self.directory / f"{name}.json"
         target.write_text(redact(json.dumps(report, indent=2), env))
         invocation.update(counts=counts, evidence=str(target), evidenceHash=digest(target))
         self.save()
+        require(not invocation.get("termination"),
+                f"{name} {invocation.get('termination')}; partial evidence retained, no next phase")
         # Evidence is only accepted while the same healthy deployment still exists.
         self.health()
         invocation["postHealthVerified"] = True
@@ -715,6 +726,8 @@ class Run:
 
     def phase_summary(self, name):
         invocation = self.state["phases"].get(name)
+        require(not (invocation and invocation.get("termination")),
+                f"{name} was interrupted/timed out; partial evidence cannot authorize a next phase")
         require(invocation and invocation.get("postHealthVerified"), f"No verified execution for {name}")
         require(digest(invocation["evidence"]) == invocation["evidenceHash"], "Phase evidence changed")
         return validate_phase(read_json(invocation["evidence"]), self.state, invocation, invocation["exitCode"])

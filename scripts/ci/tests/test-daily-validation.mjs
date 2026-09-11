@@ -20,6 +20,14 @@ test('Python runner regressions', () => {
   assert.equal(result.status, 0, result.stdout + result.stderr);
 });
 
+test('prompt preserves unresolved assertion classification without inventing a verdict', () => {
+  const prompt = readFileSync('docs/DAILY_UI_VALIDATION_PROMPT.md', 'utf8');
+  assert.match(prompt, /unresolved classification/);
+  assert.match(prompt, /link an investigation issue, and report INCOMPLETE classification/);
+  assert.match(prompt, /An executed\s+assertion failure is not automatically a product defect or an infrastructure blocker/);
+  assert.match(prompt, /VALIDATION INCOMPLETE:[\s\S]*executed failure still has unresolved classification/);
+});
+
 test('external hosting preserves tested Playwright config and exact selectors', () => {
   const runner = readFileSync('scripts/ci/daily-validation.py', 'utf8');
   assert.match(runner, /import original from/);
