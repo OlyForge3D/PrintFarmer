@@ -327,6 +327,27 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(invalid.targetText, "Unknown")
     }
 
+    func testHeaterGlyphIsHeatingOnlyWhenOnlineWithFinitePositiveTarget() {
+        XCTAssertTrue(PrinterDetailTemperatureStrip.isHeatingGlyph(
+            value: .init(measured: 200, target: 200, isOnline: true)
+        ))
+        XCTAssertFalse(PrinterDetailTemperatureStrip.isHeatingGlyph(
+            value: .init(measured: 20, target: 0, isOnline: true)
+        ), "A zero target means the heater is off")
+        XCTAssertFalse(PrinterDetailTemperatureStrip.isHeatingGlyph(
+            value: .init(measured: 200, target: 200, isOnline: false)
+        ), "Offline readings must never render as heating")
+        XCTAssertFalse(PrinterDetailTemperatureStrip.isHeatingGlyph(
+            value: .init(measured: nil, target: nil, isOnline: true)
+        ), "A missing target must never render as heating")
+        XCTAssertFalse(PrinterDetailTemperatureStrip.isHeatingGlyph(
+            value: .init(measured: .nan, target: .infinity, isOnline: true)
+        ), "A non-finite target must render as off, not heating")
+        XCTAssertFalse(PrinterDetailTemperatureStrip.isHeatingGlyph(
+            value: .init(measured: .nan, target: .nan, isOnline: true)
+        ), "A NaN target must render as off, not heating")
+    }
+
     func testEmergencyAndRoutinePresentationsPartitionWithoutChangingGates() {
         let presentation = PrinterDetailRunActionMapping.presentation(
             isOnline: true, isPrinting: true, isPaused: false,
