@@ -74,6 +74,7 @@ class EventTests(unittest.TestCase):
             Counter(family for _, family, _ in shards),
             {"iPhone": 4, "iPad": 4},
         )
+        self.assertEqual(len({key for key, _, _ in shards}), 8)
 
         selectors_by_family = {"iPhone": [], "iPad": []}
         for key, family, selectors in shards:
@@ -299,7 +300,7 @@ class RunnerTests(unittest.TestCase):
                 block = block.split("\n      - name:", 1)[0]
                 shell = textwrap.dedent(block.split("        run: |\n", 1)[1])
                 shell = shell.replace("${{ matrix.key }}", key)
-                shell = shell.replace("${{ matrix.selectors }}", selectors)
+                shell = shell.replace("$SELECTORS", selectors)
                 stem = f"build-{key}/XCUIShard"
                 (self.directory / stem).parent.mkdir(parents=True, exist_ok=True)
                 environment = {

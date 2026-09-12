@@ -355,9 +355,11 @@ jobs:
 
       - name: Run XCUI shard
         timeout-minutes: 25
+        env:
+          SELECTORS: ${{ matrix.selectors }}
         run: |
           set -o pipefail
-          read -r -a selectors <<< "${{ matrix.selectors }}"
+          read -r -a selectors <<< "$SELECTORS"
           python3 scripts/run-tests.py -- test-without-building \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
