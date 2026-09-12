@@ -213,9 +213,9 @@ jobs:
     name: XCUI (${{ matrix.family }}, shard ${{ matrix.shard }})
     runs-on: macos-latest
     needs: [select, test]
-    # Avoid allocating eight macOS runners until selection and unit coverage
-    # both pass; run only when the selector marks the change relevant.
-    if: ${{ !cancelled() && needs.select.result == 'success' && needs.test.result == 'success' && needs.select.outputs.should_run != 'false' }}
+    # Avoid allocating eight macOS runners until unit coverage passes; retain
+    # the selector's fail-safe behavior by skipping only explicit false.
+    if: ${{ !cancelled() && needs.test.result == 'success' && needs.select.outputs.should_run != 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -248,6 +248,7 @@ jobs:
               -only-testing:PrintFarmerUITests/PartsInventoryUITests/testReorderNeededPartExposesWarningInAccessibilityLabel
               -only-testing:PrintFarmerUITests/PartsInventoryUITests/testTappingPartRowOpensAdjustmentSheet
               -only-testing:PrintFarmerUITests/PartsInventoryUITests/testInventoryTabDefaultsToSpoolsSegment
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testReorderOnlyToggleFiltersList
               -only-testing:PrintFarmerUITests/PrinterListUITests
               -only-testing:PrintFarmerUITests/FilamentCoverageUITests
           - key: iphone-4
@@ -290,6 +291,7 @@ jobs:
               -only-testing:PrintFarmerUITests/PartsInventoryUITests/testReorderNeededPartExposesWarningInAccessibilityLabel
               -only-testing:PrintFarmerUITests/PartsInventoryUITests/testTappingPartRowOpensAdjustmentSheet
               -only-testing:PrintFarmerUITests/PartsInventoryUITests/testInventoryTabDefaultsToSpoolsSegment
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testReorderOnlyToggleFiltersList
               -only-testing:PrintFarmerUITests/PrinterListUITests
               -only-testing:PrintFarmerUITests/FilamentCoverageUITests
           - key: ipad-4

@@ -62,11 +62,11 @@ class EventTests(unittest.TestCase):
         matrix = workflow.split("  xcui-shards:\n", 1)[1].split("    defaults:", 1)[0]
         self.assertIn("needs: [select, test]", matrix)
         self.assertIn(
-            "if: ${{ !cancelled() && needs.select.result == 'success' && "
-            "needs.test.result == 'success' && "
+            "if: ${{ !cancelled() && needs.test.result == 'success' && "
             "needs.select.outputs.should_run != 'false' }}",
             matrix,
         )
+        self.assertNotIn("needs.select.result == 'success'", matrix)
         shards = re.findall(
             r"^          - key: (?P<key>\S+)\n"
             r"            family: (?P<family>iPhone|iPad)\n"
@@ -105,6 +105,7 @@ class EventTests(unittest.TestCase):
             "PrintFarmerUITests/PartsInventoryUITests/testReorderNeededPartExposesWarningInAccessibilityLabel",
             "PrintFarmerUITests/PartsInventoryUITests/testTappingPartRowOpensAdjustmentSheet",
             "PrintFarmerUITests/PartsInventoryUITests/testInventoryTabDefaultsToSpoolsSegment",
+            "PrintFarmerUITests/PartsInventoryUITests/testReorderOnlyToggleFiltersList",
             "PrintFarmerUITests/PrinterListUITests",
             "PrintFarmerUITests/FilamentCoverageUITests",
             "PrintFarmerUITests/ColdOfflineShellUITests",
@@ -158,9 +159,17 @@ class EventTests(unittest.TestCase):
         sources_by_suite = {}
         for source in (mobile / "PrintFarmerUITests").glob("*.swift"):
             contents = source.read_text()
-            for suite in re.findall(r"\bclass\s+(\w+)\s*:", contents):
+            suite_declarations = list(re.finditer(r"\bclass\s+(\w+)\s*:", contents))
+            for index, declaration in enumerate(suite_declarations):
+                suite = declaration.group(1)
                 declarations.add(suite)
-                sources_by_suite[suite] = contents
+                next_declaration = (
+                    suite_declarations[index + 1].start()
+                    if index + 1 < len(suite_declarations)
+                    else len(contents)
+                )
+                sources_by_suite[suite] = contents[declaration.start():next_declaration]
+        selected_methods_by_suite = {}
         for selectors in selectors_by_family.values():
             for selector in selectors:
                 selector_parts = selector.split("/")
@@ -168,12 +177,31 @@ class EventTests(unittest.TestCase):
                 with self.subTest(suite=suite):
                     self.assertIn(suite, declarations, "A stale class selector executes zero XCTest cases")
                 if len(selector_parts) == 3:
+                    selected_methods_by_suite.setdefault(suite, set()).add(selector_parts[2])
                     with self.subTest(selector=selector):
                         self.assertRegex(
                             sources_by_suite[suite],
                             rf"\bfunc\s+{selector_parts[2]}\s*\(",
                             "A stale method selector executes zero XCTest cases",
                         )
+        for suite, selected_methods in selected_methods_by_suite.items():
+            suite_selectors = [
+                selector
+                for selectors in selectors_by_family.values()
+                for selector in selectors
+                if selector.split("/")[1] == suite
+            ]
+            if all(len(selector.split("/")) == 3 for selector in suite_selectors):
+                source_methods = set(re.findall(
+                    r"\bfunc\s+(test\w+)\s*\(",
+                    sources_by_suite[suite],
+                ))
+                with self.subTest(suite=suite):
+                    self.assertEqual(
+                        selected_methods,
+                        source_methods,
+                        "Method-selected XCUI suites must select every source test method",
+                    )
         self.assertIn(
             "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
             (mobile / "PrintFarmerUITests/AttentionActionsUITests.swift").read_text(),

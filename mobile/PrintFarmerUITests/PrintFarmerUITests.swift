@@ -36,6 +36,17 @@ final class UIWaitBudget {
         perform("exists: \(identifier)") { element.exists } == true
     }
 
+    func firstTerminalInterruption(
+        _ observe: @escaping () throws -> ShellNode?
+    ) -> () throws -> ShellNode? {
+        var hasObserved = false
+        return {
+            guard !hasObserved else { return nil }
+            hasObserved = true
+            return try observe()
+        }
+    }
+
     private(set) var lastShellObservation = "not observed"
 
     func observeShell(
@@ -469,6 +480,36 @@ final class UIWaitBudgetTests: XCTestCase {
             pause: { clock += 0.2 }
         )
         XCTAssertNil(result)
+        XCTAssertEqual(terminalProbes, 1)
+    }
+
+    func testTerminalAlertProbeRunsOnlyOnceForNavigableShellWait() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        var observations = [sidebar(), sidebar()]
+        var terminalProbes = 0
+        var resolutions = 0
+        let observeTerminalInterruption = budget.firstTerminalInterruption {
+            terminalProbes += 1
+            return nil
+        }
+        let result: Bool? = budget.waitForShell(
+            observe: {
+                budget.observeShell(
+                    observeInterruption: { nil },
+                    observeTerminalInterruption: observeTerminalInterruption,
+                    observeApplication: { observations.removeFirst() }
+                )
+            },
+            resolve: { _ in
+                resolutions += 1
+                return resolutions == 2 ? true : nil
+            },
+            reveal: { _ in XCTFail("No navigation"); return false },
+            leadingEdge: { _ in XCTFail("No navigation"); return false },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(result, true)
         XCTAssertEqual(terminalProbes, 1)
     }
 
@@ -1249,7 +1290,7 @@ class PrintFarmerUITestCase: XCTestCase {
                 }
                 return nil
             }
-            let observeTerminalInterruption: () throws -> ShellNode? = navigationAlertDismissals.isEmpty ? { nil } : {
+            let observeTerminalInterruption: () throws -> ShellNode? = navigationAlertDismissals.isEmpty ? { nil } : budget.firstTerminalInterruption {
                 let alert = self.app.alerts.firstMatch
                 guard budget.exists(alert, named: "terminal navigation interruption") else { return nil }
                 return try budget.perform("observed terminal alert snapshot") {

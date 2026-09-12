@@ -2,9 +2,9 @@ import XCTest
 
 /// UI tests for the F9 printed-parts inventory list (issue #714).
 ///
-/// Verifies the accessibility cue and critical adjustment-sheet interaction
-/// against the deterministic printed-parts catalog. Repository loading and
-/// list filtering are covered by `PartsInventoryViewModelTests`.
+/// Verifies rendered segment, accessibility, and critical adjustment/filter
+/// interactions against the deterministic printed-parts catalog. Repository
+/// loading behavior is covered by `PartsInventoryViewModelTests`.
 @MainActor
 final class PartsInventoryUITests: PrintFarmerUITestCase {
     override var waitsForNavigationReadiness: Bool { true }
@@ -69,6 +69,40 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
 
         let applyButton = app.buttons["partScan.applyAdjustment"]
         XCTAssertTrue(applyButton.waitForExistence(timeout: 3))
+    }
+
+    func testReorderOnlyToggleFiltersList() {
+        openPrintedPartsSegment()
+
+        let clipRow = app.buttons["partsInventory.row.CLIP-02"]
+        XCTAssertTrue(clipRow.waitForExistence(timeout: 5))
+
+        let toggle = app.switches["partsInventory.reorderToggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 3),
+                      "Needs Reorder Only must remain an accessible switch")
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+
+        let toggleActivated = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '1'"),
+            object: toggle
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [toggleActivated], timeout: 3),
+            .completed,
+            "Needs Reorder Only must expose its active accessibility value"
+        )
+
+        let clipRemoved = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: clipRow
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [clipRemoved], timeout: 3),
+            .completed,
+            "Filtering must hide non-reorder rows from the accessibility hierarchy"
+        )
+        XCTAssertTrue(app.buttons["partsInventory.row.BRKT-01"].exists,
+                      "BRKT-01 must remain visible because it needs reorder")
     }
 
 }
