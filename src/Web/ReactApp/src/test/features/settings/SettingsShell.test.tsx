@@ -370,11 +370,11 @@ describe('SettingsShell', () => {
     }
   });
 
-  it('renders the accessible Cameras sub-tab on its canonical admin settings URL (#2644)', () => {
+  it('renders the accessible Cameras destination on its canonical admin settings URL (#2644)', () => {
     setAuthRoles(['farm_admin']);
     renderSettings('/admin/settings?tab=hardware&sub=cameras');
 
-    expect(screen.getByRole('tab', { name: 'Cameras', selected: true })).toBeInTheDocument();
+    expect(getCategoryButton('Cameras')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByTestId('cameras-page')).toHaveAttribute('data-embedded', 'true');
     expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/settings');
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=hardware');
