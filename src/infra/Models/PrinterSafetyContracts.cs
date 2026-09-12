@@ -62,7 +62,10 @@ public sealed record VerifiedSafetyOperationsDto(
     VerifiedSafetyOperationCapabilityDto FirmwareZOffsetSave,
     VerifiedSafetyOperationCapabilityDto FilamentLoad,
     VerifiedSafetyOperationCapabilityDto FilamentUnload,
-    VerifiedSafetyOperationCapabilityDto FilamentChange);
+    VerifiedSafetyOperationCapabilityDto FilamentChange,
+    VerifiedSafetyOperationCapabilityDto MmuChangeTool,
+    VerifiedSafetyOperationCapabilityDto MmuLoad,
+    VerifiedSafetyOperationCapabilityDto MmuEject);
 
 /// <summary>A verified scalar safety fact.</summary>
 public sealed record VerifiedSafetyScalarFactDto(
@@ -124,6 +127,9 @@ public sealed record PrinterVerifiedSafetyDto(
             1,
             new VerifiedSafetyDiscoveryDto(discoveryState, observedAtUtc, sourceRevision),
             new VerifiedSafetyOperationsDto(
+                operation,
+                operation,
+                operation,
                 operation,
                 operation,
                 operation,

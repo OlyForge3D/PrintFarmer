@@ -58,6 +58,70 @@ public sealed class PrinterSafetyGuardTests
     }
 
     [Theory]
+    [InlineData(PrinterSafetyOperation.MmuChangeTool)]
+    [InlineData(PrinterSafetyOperation.MmuLoad)]
+    [InlineData(PrinterSafetyOperation.MmuEject)]
+    public async Task ValidateAsync_SupportedMmuOperationWithUnknownThreshold_Allows(
+        PrinterSafetyOperation operation)
+    {
+        Guid printerId = Guid.NewGuid();
+        PrinterVerifiedSafetyDto safety = CreateSafety() with
+        {
+            Extrusion = new VerifiedSafetyExtrusionDto(
+                new VerifiedSafetyScalarFactDto(
+                    VerifiedSafetyFactState.Unknown,
+                    null,
+                    "moonraker",
+                    Now)),
+        };
+        PrinterSafetyGuard guard = CreateGuard(
+            printerId,
+            safety,
+            CreateStatus(printerId, 0, 0, Now));
+
+        PrinterSafetyValidationResult result = await guard.ValidateAsync(
+            printerId,
+            operation,
+            null,
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+    }
+
+    [Theory]
+    [InlineData(PrinterSafetyOperation.FilamentLoad)]
+    [InlineData(PrinterSafetyOperation.FilamentUnload)]
+    [InlineData(PrinterSafetyOperation.FilamentChange)]
+    public async Task ValidateAsync_GenericFilamentOperationWithUnknownThreshold_FailsClosed(
+        PrinterSafetyOperation operation)
+    {
+        Guid printerId = Guid.NewGuid();
+        PrinterVerifiedSafetyDto safety = CreateSafety() with
+        {
+            Extrusion = new VerifiedSafetyExtrusionDto(
+                new VerifiedSafetyScalarFactDto(
+                    VerifiedSafetyFactState.Unknown,
+                    null,
+                    "moonraker",
+                    Now)),
+        };
+        PrinterSafetyGuard guard = CreateGuard(
+            printerId,
+            safety,
+            CreateStatus(printerId, 220, 0, Now));
+
+        PrinterSafetyValidationResult result = await guard.ValidateAsync(
+            printerId,
+            operation,
+            null,
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal(503, result.StatusCode);
+        Assert.Equal("printer_safety_evidence_unknown", result.Code);
+    }
+
+    [Theory]
     [InlineData(VerifiedSafetySupport.Unsupported, 422, "printer_operation_unsupported")]
     [InlineData(VerifiedSafetySupport.Unknown, 503, "printer_safety_evidence_unknown")]
     public async Task ValidateAsync_UnavailableOperation_FailsClosed(
@@ -259,6 +323,9 @@ public sealed class PrinterSafetyGuardTests
                 Now,
                 "1"),
             new VerifiedSafetyOperationsDto(
+                supported,
+                supported,
+                supported,
                 supported,
                 supported,
                 supported,

@@ -3694,7 +3694,7 @@ public class PrintersController(
             "mmu_change_tool",
             token => _printersService.SendGcodeAsync(id, $"MMU_CHANGE_TOOL TOOL={tool}", token),
             ct,
-            safetyOperation: PrinterSafetyOperation.FilamentChange);
+            safetyOperation: PrinterSafetyOperation.MmuChangeTool);
     }
 
     /// <summary>
@@ -3716,7 +3716,7 @@ public class PrintersController(
             "mmu_eject",
             token => _printersService.SendGcodeAsync(id, "MMU_EJECT", token),
             ct,
-            safetyOperation: PrinterSafetyOperation.FilamentUnload);
+            safetyOperation: PrinterSafetyOperation.MmuEject);
     }
 
     /// <summary>
@@ -3738,7 +3738,7 @@ public class PrintersController(
             "mmu_load",
             token => _printersService.SendGcodeAsync(id, "MMU_LOAD", token),
             ct,
-            safetyOperation: PrinterSafetyOperation.FilamentLoad);
+            safetyOperation: PrinterSafetyOperation.MmuLoad);
     }
 
     /// <summary>

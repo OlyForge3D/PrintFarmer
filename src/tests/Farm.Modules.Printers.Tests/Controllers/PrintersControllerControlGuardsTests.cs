@@ -159,9 +159,9 @@ public class PrintersControllerControlGuardsTests
     }
 
     [Theory]
-    [InlineData("change", PrinterSafetyOperation.FilamentChange)]
-    [InlineData("load", PrinterSafetyOperation.FilamentLoad)]
-    [InlineData("eject", PrinterSafetyOperation.FilamentUnload)]
+    [InlineData("change", PrinterSafetyOperation.MmuChangeTool)]
+    [InlineData("load", PrinterSafetyOperation.MmuLoad)]
+    [InlineData("eject", PrinterSafetyOperation.MmuEject)]
     [InlineData("qidibox-unload", PrinterSafetyOperation.FilamentUnload)]
     [InlineData("qidibox-eject", PrinterSafetyOperation.FilamentUnload)]
     [InlineData("afc-load", PrinterSafetyOperation.FilamentChange)]
@@ -188,11 +188,13 @@ public class PrintersControllerControlGuardsTests
                 503,
                 "printer_safety_evidence_unknown",
                 "Unknown."));
+        var capabilities = new Mock<IPrinterBackendCapabilitiesService>();
         PrintersController controller = CreateController(
             printersService,
             statusCache,
             out _,
-            guard);
+            guard,
+            capabilitiesService: capabilities);
 
         ActionResult<CommandResult> result = route switch
         {
@@ -242,6 +244,9 @@ public class PrintersControllerControlGuardsTests
             expectedOperation,
             null,
             It.IsAny<CancellationToken>()), Times.Once);
+        capabilities.Verify(
+            service => service.InvalidateVerifiedSafety(id),
+            Times.Never());
         printersService.Verify(service => service.SendGcodeAsync(
             It.IsAny<Guid>(),
             It.IsAny<string>(),

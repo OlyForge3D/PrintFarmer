@@ -18,6 +18,15 @@ public enum PrinterSafetyOperation
     /// <summary>Physical filament change.</summary>
     FilamentChange,
 
+    /// <summary>Happy Hare MMU tool change.</summary>
+    MmuChangeTool,
+
+    /// <summary>Happy Hare MMU filament load.</summary>
+    MmuLoad,
+
+    /// <summary>Happy Hare MMU filament eject.</summary>
+    MmuEject,
+
     /// <summary>Direct extrusion or retraction.</summary>
     Extrusion,
 }
@@ -123,6 +132,10 @@ public sealed class PrinterSafetyGuard(
                     _statusCache.GetStatus(printerId),
                     move,
                     _timeProvider.GetUtcNow().UtcDateTime),
+            PrinterSafetyOperation.MmuChangeTool or
+            PrinterSafetyOperation.MmuLoad or
+            PrinterSafetyOperation.MmuEject =>
+                PrinterSafetyValidationResult.Allowed,
             PrinterSafetyOperation.FilamentLoad or
             PrinterSafetyOperation.FilamentUnload or
             PrinterSafetyOperation.FilamentChange or
@@ -150,6 +163,12 @@ public sealed class PrinterSafetyGuard(
                 safety.Operations.FilamentUnload,
             PrinterSafetyOperation.FilamentChange =>
                 safety.Operations.FilamentChange,
+            PrinterSafetyOperation.MmuChangeTool =>
+                safety.Operations.MmuChangeTool,
+            PrinterSafetyOperation.MmuLoad =>
+                safety.Operations.MmuLoad,
+            PrinterSafetyOperation.MmuEject =>
+                safety.Operations.MmuEject,
             _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, null),
         };
 
