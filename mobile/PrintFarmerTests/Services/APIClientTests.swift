@@ -578,6 +578,66 @@ final class APIClientTests: XCTestCase {
             } else {
                 XCTFail("Expected .conflict, got \(error)")
             }
+
+            func testConflictPreservesServerTextAndFallsBackOnlyWithoutText() async {
+                let cases: [(String, String?)] = [
+                    (#"{"detail":"Another physical operation owns the printer barrier.","message":"message","title":"title","code":"FenceConflict"}"#,
+                     "Another physical operation owns the printer barrier."),
+                    (#"{"message":"Job state prevents this command.","title":"title"}"#, "Job state prevents this command."),
+                    (#"{"title":"Revision conflict"}"#, "Revision conflict"),
+                    (#"{"detail":"","message":"message","title":"title"}"#, "message"),
+                    (#"{"detail":" \n","message":"\t","title":"title"}"#, "title"),
+                    (#"{"detail":" ","message":"","title":"\n"}"#, nil),
+                    ("{}", nil),
+                    ("", nil),
+                    ("not JSON", nil)
+                ]
+                for (json, expected) in cases {
+                    mockAPIClient.stubResponse(json: json, statusCode: 409)
+                    do {
+                        let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
+                        XCTFail("Expected conflict for \(json)")
+                    } catch let error as NetworkError {
+                        guard case .conflict(let api) = error else {
+                            XCTFail("Expected generic conflict, got \(error)")
+                            continue
+                        }
+                        XCTAssertEqual(api?.displayMessage, expected, json)
+                        XCTAssertEqual(error.errorDescription, expected ?? "Conflict — resource was modified", json)
+                        let mapped = await PrinterControlsViewModel.mapError(error)
+                        XCTAssertEqual(mapped.message, expected ?? "Printer is busy.", json)
+                        XCTAssertFalse(mapped.isRetryable, json)
+                    } catch {
+                        XCTFail("Unexpected error: \(error)")
+                    }
+                }
+            }
+
+            func testConflictRetainsTypedHarvestPayloads() async {
+                for code in ["wrongBin", "partMappingRequired"] {
+                    mockAPIClient.stubResponse(
+                        json: """
+                        {"code":"\(code)","detail":"Harvest needs attention.",
+                         "mismatches":[{"partSku":"SKU-A","expectedBinCode":"BIN-1","scannedBinCode":"BIN-2"}]}
+                        """,
+                        statusCode: 409
+                    )
+                    do {
+                        let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
+                        XCTFail("Expected typed conflict")
+                    } catch let error as NetworkError {
+                        guard case .partsInventoryConflict(let conflict) = error else {
+                            XCTFail("Expected typed harvest conflict, got \(error)")
+                            continue
+                        }
+                        XCTAssertEqual(conflict.code, code)
+                        XCTAssertEqual(conflict.detail, "Harvest needs attention.")
+                        XCTAssertEqual(conflict.mismatches?.first?.partSku, "SKU-A")
+                    } catch {
+                        XCTFail("Unexpected error: \(error)")
+                    }
+                }
+            }
         } catch {
             XCTFail("Unexpected error type: \(error)")
         }

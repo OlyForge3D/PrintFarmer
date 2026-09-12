@@ -77,11 +77,11 @@ enum OfflineWriteReplayClassifier {
                 message: conflict.detail ?? conflict.title ?? "Printed-parts conflict"
             ))
 
-        // Bare 409 — a genuine business conflict (job-state, etc.).
-        case .conflict:
+        case .conflict(let apiError):
             return .conflict(OfflineWriteConflict(
                 reason: .businessConflict,
-                message: "The server rejected this action as conflicting with the current state."
+                message: apiError?.displayMessage
+                    ?? "The server rejected this action as conflicting with the current state."
             ))
 
         case .preconditionFailed(let apiError), .preconditionRequired(let apiError):
