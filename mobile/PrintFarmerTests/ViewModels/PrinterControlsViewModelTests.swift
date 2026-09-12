@@ -2141,6 +2141,30 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertFalse(missing.isRetryable)
     }
 
+    func test_conflictRejectionShowsServerTextWithoutUnknownOutcomeWarning() async throws {
+        let cases: [(APIError?, String)] = [
+            (APIError(
+                title: "Conflict", status: 409, detail: "Another physical operation owns the printer barrier.",
+                errors: nil, message: nil, code: "FenceConflict"
+            ), "Another physical operation owns the printer barrier."),
+            (nil, "Printer is busy.")
+        ]
+        for (api, expected) in cases {
+            mockService.errorToThrow = nil
+            let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
+            await vm.loadCapabilities()
+            mockService.errorToThrow = NetworkError.conflict(api)
+
+            await vm.preheat(.pla)
+
+            XCTAssertNotNil(mockService.setTemperaturesCalledWith)
+            XCTAssertEqual(vm.lastError?.message, expected)
+            XCTAssertEqual(vm.lastError?.isRetryable, false)
+            XCTAssertNil(vm.pendingCommand)
+            XCTAssertFalse(vm.isExecuting)
+        }
+    }
+
     func test_errorMapping_network_isRetryable() async throws {
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
         await vm.loadCapabilities()

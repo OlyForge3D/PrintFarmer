@@ -1401,18 +1401,15 @@ actor APIClient {
             // `"partMappingRequired"` and extension fields the harvest UI
             // must read structurally (see PartsInventoryProblemDetails.cs).
             // Decode it when the `code` extension is recognised so callers
-            // get typed detail; every other 409 (e.g. plain `{message}`
-            // conflicts from job-state checks) keeps mapping to the
-            // existing bare `.conflict` case so current callers
-            // (PrinterControlsViewModel) are unaffected.
-            if !data.isEmpty,
-               let apiError = try? decoder.decode(APIError.self, from: data),
+            // get typed detail; other conflicts retain their API error text.
+            let apiError = try? decoder.decode(APIError.self, from: data)
+            if let apiError,
                apiError.code == PartsInventoryConflict.wrongBinCode
                 || apiError.code == PartsInventoryConflict.partMappingRequiredCode,
                let conflict = try? decoder.decode(PartsInventoryConflict.self, from: data) {
                 throw NetworkError.partsInventoryConflict(conflict)
             }
-            throw NetworkError.conflict
+            throw NetworkError.conflict(apiError)
         case 412:
             let apiError = try? decoder.decode(APIError.self, from: data)
             throw NetworkError.preconditionFailed(apiError)
@@ -1502,7 +1499,7 @@ enum NetworkError: LocalizedError, Sendable {
     /// treating the resource as genuinely missing. Introduced by #728.
     case featureDisabled(APIError)
     case methodNotAllowed
-    case conflict
+    case conflict(APIError?)
     /// A typed printed-parts harvest conflict (#714/#741): either a
     /// `wrongBin` mismatch (scanned destination bin does not match the
     /// expected bin for one or more SKUs) or `partMappingRequired`
@@ -1537,7 +1534,8 @@ enum NetworkError: LocalizedError, Sendable {
             return apiError.detail ?? apiError.title ?? "This feature is disabled on the server."
         case .methodNotAllowed:
             return "This action isn't supported by your PrintFarmer server (405). Update the server to the latest version."
-        case .conflict: return "Conflict — resource was modified"
+        case .conflict(let apiError):
+            return apiError?.displayMessage ?? "Conflict — resource was modified"
         case .partsInventoryConflict(let conflict): return conflict.detail ?? conflict.title ?? "Printed-parts conflict"
         case .preconditionFailed(let apiError):
             return apiError?.detail
