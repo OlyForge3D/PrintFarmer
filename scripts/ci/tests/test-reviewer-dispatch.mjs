@@ -25,19 +25,19 @@ test('reviewer agent definitions: tool grants, model diversity, and read-only bo
   const agentSpecs = [
     {
       file: '.github/agents/code-review-opus.agent.md',
-      expectedName: 'Code Review (Opus)',
+      expectedName: 'Bishop',
       expectedModelFamily: 'opus',
       expectedReviewer: 'bishop',
     },
     {
       file: '.github/agents/code-review-gemini.agent.md',
-      expectedName: 'Code Review (Gemini)',
+      expectedName: 'Vasquez',
       expectedModelFamily: 'gemini',
       expectedReviewer: 'vasquez',
     },
     {
       file: '.github/agents/code-review-codex.agent.md',
-      expectedName: 'Code Review (Codex)',
+      expectedName: 'Hicks',
       expectedModelFamily: 'gpt-5.6',
       expectedReviewer: 'hicks',
     },
@@ -121,6 +121,8 @@ test('review prompt template (.github/prompts/review.prompt.md)', async () => {
   assert.ok(body.includes('Bishop') && body.includes('Hicks') && body.includes('Vasquez'));
   assert.ok(body.includes('read-only'));
   assert.ok(body.includes('<!-- squad-verdict -->'));
+  assert.ok(body.includes('agent_type: "code-review"'));
+  assert.ok(!/agent_type:\s*"Code Review \(/i.test(body), 'Prompt must not reference legacy Code Review (...) agent types');
 });
 
 
