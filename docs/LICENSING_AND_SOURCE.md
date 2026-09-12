@@ -67,7 +67,7 @@ All first-party Docker build paths accept these build arguments:
 
 | Argument | Meaning |
 |---|---|
-| `BUILD_VERSION` | v-prefixed release version |
+| `BUILD_VERSION` | Canonical release version without a leading `v` |
 | `VCS_REF` | Full 40-character Git commit |
 | `SOURCE_REPOSITORY` | Public HTTPS source repository |
 | `SOURCE_ARCHIVE_URL` | Public exact-version source archive |
@@ -95,8 +95,9 @@ leave unpublished artifact URLs blank.
 
 ## Release source and SBOM procedure
 
-The release workflows generate all legal and source artifacts from the exact
-release tag. For a local dry run from the repository root:
+The consolidated release authority generates legal and source artifacts from
+the authorized exact source SHA and verifies its immutable source tag. For a
+local dry run from the repository root:
 
 ```bash
 node scripts/compliance/create-source-bundle.mjs \
@@ -148,17 +149,19 @@ and monolith images ship that file with the web assets; the frontend image also
 installs it under `/usr/share/licenses/printfarmer/`.
 
 Images are initially pushed only by immutable digest. The workflow validates
-and uploads all five digest/SBOM pairs, attaches the enriched SPDX document as
+and uploads all six digest/SBOM pairs (including slicer-host), attaches the enriched SPDX document as
 a signed Cosign attestation, verifies signatures and attestations, and smoke
 tests ARM64 digests. For an exact version tag, the same gate then creates or
 verifies the GitHub release, publishes the exact source archive, source
 manifest, notices, canonical and image-specific SBOMs, and digest records, and
 confirms every asset is anonymously reachable. An existing asset must be
 byte-for-byte identical; the workflow never silently replaces it. Only after
-that source-first publication succeeds does the gate assign semantic version or
-channel tags. Semantic version tags are emitted only by the matching exact-tag
-workflow run. The release orchestrators subsequently finalize release notes but
-do not republish compliance assets. BuildKit SBOM and provenance attestations
+that source-first publication succeeds does the gate assign immutable semantic
+version tags. They are emitted only by the signed-record-consuming reusable
+Docker workflow, not direct tag events. The shared identity accompanies source
+and digest records. Mutable channel aliases remain unchanged pending #2660's
+signed complete-manifest publication; a source-only release is not a managed
+update candidate. BuildKit SBOM and provenance attestations
 are retained in addition to the enriched SPDX attestation.
 
 Each GitHub release must contain:
@@ -329,10 +332,11 @@ node scripts/compliance/create-license-inventory.mjs \
 
 Image publication then runs `scripts/compliance/enrich-sbom.mjs` against the
 Syft SPDX document and this exact inventory before any public tag is assigned.
-Release workflows verify `VERSION`, .NET `VersionPrefix`, and mobile marketing
-version before creating a tag, wait for the single exact-tag image run, and
-refuse to create a GitHub release unless all five image digest/SBOM pairs are
-present and signed.
+The consolidated workflow verifies the sole authored `VERSION`, reserves a
+canonical identity and exact source tag, and calls the Docker workflow with a
+signed authorization record. All six image digest/SBOM pairs must be present
+and signed before public source publication. Mobile marketing versions and
+`ios/*` tags remain an independent release namespace.
 
 CI runs these checks as blocking gates. The test suite includes negative
 fixtures for mutable revisions, unmanifested or changed calibration files,

@@ -1,0 +1,5 @@
+<Project>
+  <!-- Generated only by the authorized release consumer. Local builds keep their existing metadata. -->
+  <Import Project="$(MSBuildThisFileDirectory)ReleaseIdentity.props"
+          Condition="Exists('$(MSBuildThisFileDirectory)ReleaseIdentity.props')" />
+</Project>

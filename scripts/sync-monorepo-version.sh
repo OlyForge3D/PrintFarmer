@@ -31,13 +31,15 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-RAW_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
-SEMVER="${RAW_VERSION#v}"
-
-if [[ ! "$SEMVER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "VERSION must be semantic (vX.Y.Z or X.Y.Z). Found: $RAW_VERSION" >&2
-  exit 1
-fi
+SEMVER="$(node --input-type=module - "$ROOT" <<'JS'
+import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+const root = process.argv[2];
+const { parseVersionFile } = await import(pathToFileURL(join(root, 'scripts/ci/release-policy.mjs')));
+console.log(parseVersionFile(readFileSync(join(root, 'VERSION'), 'utf8')));
+JS
+)"
 
 CURRENT_WEB_VERSION="$(python3 - <<'PY' "$WEB_PACKAGE_JSON"
 import json

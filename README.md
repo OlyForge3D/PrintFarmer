@@ -406,4 +406,10 @@ PrintFarmer builds on amazing open-source projects:
 
 **Last Updated:** January 11, 2026  
 **Current Version:** See [GitHub Releases](https://github.com/OlyForge3D/PrintFarmer/releases)  
+
+Server releases use one [branch-bound release workflow](docs/RELEASE_GUIDE.md):
+stable from `main`, explicitly opted-in insider from `development`. Release
+activation requires owner-approved protections and allocator continuity.
+Source-only releases are not managed-update candidates without the complete
+signed manifest; historical image aliases remain unchanged during cutover.
 **Current Phase:** Phase 4 - COMPLETE (Phase 4.5 Load Balancing planned next)

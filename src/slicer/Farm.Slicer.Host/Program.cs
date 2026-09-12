@@ -222,7 +222,7 @@ app.MapGet("/", () => Results.Ok(new { service = "Farm.Slicer.Host", status = "r
 
 app.MapGet("/api/system/version", () =>
 {
-    var assembly = System.Reflection.Assembly.GetEntryAssembly();
+    var assembly = typeof(Program).Assembly;
     string? informationalVersion = (assembly is not null
         ? Attribute.GetCustomAttribute(assembly, typeof(System.Reflection.AssemblyInformationalVersionAttribute))
             as System.Reflection.AssemblyInformationalVersionAttribute
@@ -234,6 +234,10 @@ app.MapGet("/api/system/version", () =>
         string[] parts = informationalVersion.Split('+', 2);
         version = parts[0];
         commit = parts.Length > 1 ? parts[1] : null;
+        if (commit?.StartsWith("sha.", StringComparison.Ordinal) == true)
+        {
+            commit = commit[4..];
+        }
     }
 
     return Results.Ok(new

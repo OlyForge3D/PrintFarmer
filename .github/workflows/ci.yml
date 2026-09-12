@@ -43,6 +43,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate optional stabilization lifecycle
+        env:
+          CANDIDATE_BRANCH: ${{ github.head_ref || github.ref_name }}
+          RELEASE_CANDIDATE_MAX_DAYS: ${{ vars.RELEASE_CANDIDATE_MAX_DAYS }}
+        run: node scripts/ci/validate-release-candidate.mjs
+
       - name: Compute change set
         id: diff
         env:

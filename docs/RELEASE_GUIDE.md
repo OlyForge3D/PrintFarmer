@@ -1,121 +1,204 @@
-# Release Guide
+---
+post_title: "Release channels and authorization"
+author1: "Parker"
+post_slug: "release-guide"
+microsoft_alias: ""
+featured_image: ""
+categories: []
+tags: ["release", "deployment"]
+ai_note: "Implementation guidance; not owner approval or deployed-policy evidence."
+summary: "One branch-bound release authority, durable allocation, immutable identity and activation requirements."
+post_date: "2026-09-12"
+---
 
 ## Release channels and branches
 
-PrintFarmer publishes two end-user channels:
+`consolidated-release.yml` is the sole server release entry point. Dispatch
+stable on `main`, insider on `development`; the schedule explicitly dispatches
+the same workflow on development (independent of the default branch), selecting ordinary
+insider on the repository's `development` default branch. It fails closed if
+the default changes. Branch pushes and direct tag pushes do not publish.
+The reusable Docker workflow requires the signed record from this exact
+workflow/run/attempt; arbitrary reusable callers cannot authorize a release.
 
-| Channel | Source branch | Version format | Container pointer | Audience |
-| --- | --- | --- | --- | --- |
-| Stable | `main` | `vX.Y.Z` | `stable` and `latest` | Default for all installations |
-| Insider | `development` | `vX.Y.Z-insider.N` | `insider` | Explicit opt-in for faster, potentially less stable builds |
+| Channel | Base authority | Canonical version | Source tag |
+| --- | --- | --- | --- |
+| Stable | `main:VERSION` | `X.Y.Z` | `vX.Y.Z` |
+| Insider | `development:VERSION` | `X.Y.Z-insider.N`, `X.Y.Z-beta.N`, `X.Y.Z-rc.N` | canonical version prefixed with `v` |
 
-Container prereleases use only `vX.Y.Z-insider.N`; they never move `stable`,
-`latest`, or stable major/minor tags. Mobile TestFlight releases use the separate
-`ios/vX.Y-beta.N`, `ios/vX.Y-alpha.N`, or `ios/vX.Y-rc.N` namespace and never
-trigger container publication. The repository `VERSION` file stores the server
-base version (`vX.Y.Z`); the insider suffix is supplied when dispatching the
-container release workflow.
+`VERSION` contains exactly `vX.Y.Z` and an optional final newline. Numeric
+components have no leading zeros. Prerelease N is positive, never caller-assigned.
+The optional dispatch `version` is an assertion against the allocated result,
+not a version authority. Omit it for normal allocation. The `stage` field must
+be empty for stable; insider defaults to `insider`.
 
-Historical `v1.0-beta.*` mobile tags remain immutable for compatibility. Matching
-`ios/v1.0-beta.*` aliases point to the same commits; only the namespaced tags are
-used for future TestFlight releases.
+Stable is the installation default. Insider requires separate administrator
+opt-in and a reduced-stability warning; running a release workflow does not
+enroll or update any host. Versions and channels do not prove compatibility.
 
-Dispatch `.github/workflows/consolidated-release.yml` from the branch matching
-the selected channel. The workflow rejects branch/channel/version mismatches.
-The legacy `.github/workflows/release.yml` is stable-only and rejects dispatches
-outside `main`.
+TestFlight remains independent under `ios/vX.Y-{alpha,beta,rc}.N`. Historical
+`v1.0-beta.*` identities and their `ios/*` aliases retain their original objects.
+No migration rewrites existing source tags, registry tags, or historical evidence.
 
-Do not maintain permanent parallel release branches. `main` is the stable line
-and `development` is the insider line. When stabilization needs isolation, use
-a short-lived `release/vX.Y.Z` branch. Creating or pushing that branch triggers
-the full-safe CI matrix, but does not publish containers. After validation,
-merge it to `main` and publish the stable tag from the resulting `main` commit.
-Merge release-only fixes back to `development`. A release branch must never move
-stable or `latest` image pointers by itself.
+## Durable allocation and exact source
 
-## Release authentication
+The proposed storage is the protected `release-ledger` Git branch, containing
+`state.json`. `RELEASE_LEDGER_ANCHOR` pins its owner-approved ancestry checkpoint.
+Each transaction creates a single-parent commit from the observed ledger head
+and updates the ref with `force: false`. Competing sibling commits cannot both
+fast-forward: the loser rereads and retries. Workflow concurrency is an additional
+serialization measure, not the allocator.
 
-This document explains how to create and configure the repository Personal Access Token (PAT) used by the release workflow (`.github/workflows/release.yml`) to push tags so downstream workflows (for example container builds) are triggered.
+One global decimal counter covers beta, insider and RC, across bases and
+approved workflow migrations. Allocation keys include repository, workflow ref,
+run ID, attempt, full source SHA and base. Same-key retries reuse the entire
+record; new attempts reserve a larger N. Failed reservations remain consumed.
+Re-run all jobs for a new insider attempt: build, authorization, SBOM and digest
+artifact names are attempt-scoped, and consumers never reuse another attempt's
+outputs. A failed-job-only rerun cannot inherit an older authorization.
+Stable has no N: a new run/attempt cannot rebuild an already reserved stable
+identity. Resume byte-identical transfer within its original attempt, or qualify
+a reviewed new base; never replace a stable identity with new build bytes.
+Big integers are compared numerically, not lexically or through floating point.
+No timestamp, run-number concatenation or local tag scan allocates identities.
 
-Every release must also publish exact-commit source archives, source metadata,
-license and notice files, and validated SPDX JSON SBOMs. Follow
-[Licensing, Corresponding Source, and Provenance](LICENSING_AND_SOURCE.md)
-for required assets, retention, correction, and rollback procedures. A release
-must not proceed if compliance or SBOM validation fails.
+SemVer orders stages **beta < insider < rc** for a fixed base. Stage changes
+must follow that order; after RC, bump the reviewed base before returning to
+ordinary insider. All stages share the durable counter, so switching stages
+never recycles N. Failed RC reservations also establish the stage high water.
 
-The exact-tag container workflow is the source-publication authority. After all
-five image digests and SPDX records are validated, signed, and smoke tested, it
-creates or verifies the GitHub release and publishes the exact source archive,
-source manifest, license, notices, SBOMs, and digest records. It verifies those
-assets are public before assigning any semantic image tag. The dispatching
-release workflow then finalizes release notes without replacing compliance
-assets. A direct tag push therefore cannot publish versioned images without a
-matching public corresponding-source release.
+Admission verifies trusted repository/event/workflow, exact canonical branch
+HEAD, VERSION and required exact-SHA checks. HEAD drift before authorization
+fails; afterward all builds use the authorized SHA, not moving HEAD. An
+annotated tag object is stored durably before its public ref is created.
+Consumers check both object ID and peeled commit. Missing, moved or recreated
+tags fail. No tag force-update/delete API is used. Continuous tag protection
+prevents a delete/recreate of the identical object between observations.
 
-Why a PAT is required
+The authorization record is signed with the existing Cosign GitHub OIDC flow,
+and the Docker admission job verifies the exact workflow certificate identity
+and record bytes. This is an authorization prerequisite, not the #2660 signed
+complete-manifest format or its offline trust policy.
 
-- GitHub Actions workflows that run using the automatically-provided `GITHUB_TOKEN` cannot create events that trigger other workflows in some scenarios (for example, creating a tag will not trigger workflows that listen for tag pushes). To ensure a tag push triggers the containers/image-publish workflow, the release job must push the tag using a repository Personal Access Token (PAT).
+## Shared build identity and complete-set boundary
 
-Create a repository PAT (recommended minimal scopes)
+Every job consumes the same record. `release-control.mjs consume` emits:
 
-1. In GitHub (user account) go to Settings → Developer settings → Personal access tokens → Tokens (classic) (or the new fine-grained token flow if preferred).
-2. Create a new token with a descriptive name like `printfarmer-release-pat`.
+- `src/ReleaseIdentity.props`, imported by `src/Directory.Build.targets` in
+  both native and canonical Docker builds. Informational version is
+  `canonicalVersion+sha.<fullCommit>`; assembly/file versions project
+  `baseVersion.0` (components must fit .NET's numeric limits).
+- Frontend `public/release-identity.json`, embedded in build-time `version.json`.
+  Package version and runtime API responses cannot replace the frontend identity.
+- OCI version/revision/source/created and release/channel/run/attempt/workflow/
+  record-hash labels, identical across API, frontend, slicer-host, discovery,
+  OrcaSlicer worker and monolith, and every declared platform.
 
-Minimum required scopes (classic PAT):
+Native/optimized images and the canonical multistage monolith consume identical
+projections. Local builds without the generated file retain their existing
+development metadata.
 
-- repo (Full control of private repositories)
-  - This is required to push commits/tags to the repository.
+The complete platform set, labels, source tag, signatures and SPDX attestations
+are checked before immutable version-tag publication. Corresponding source,
+notices, SBOMs, identity and digest records are publicly verified first; uploads
+never clobber differing bytes. Existing version tags must resolve to the exact
+candidate digest or publication fails before any version-tag write.
 
-Optional scopes if you plan to extend the PAT to publish packages or images directly from workflows:
+The final ledger transaction compares the expected channel pointer and stores
+the entire validated set atomically. It rejects stale source even if an old
+attempt somehow has a higher N, version regression, and same identity/different
+bytes. A failed build/qualification/set check leaves the previous pointer intact.
+The ledger's candidate pointer is **not** authenticated update discovery.
 
-- packages: write (if workflows need to push to GitHub Packages / GHCR directly)
+**#2660 owns signed managed eligibility and publication aliases.** These outputs
+say `managedEligible: false`; a source-only public release is not an install
+candidate. This workflow does not move `stable`, `latest`, `insider`, or major/
+minor aliases. Historical aliases remain untouched until #2660 implements
+complete-manifest publication and alias isolation. Installer application defaults
+remain legacy inputs, not a competing authority for managed releases; generating
+digest-pinned installer references belongs to that signed-manifest consumer.
 
-If you create a fine-grained token, grant it the following permissions on the specific repository:
+## Stable qualification and candidate lifecycle
 
-- Repository access: select the PrintFarmer repository
-- Permissions:
-  - Contents: Read & write
-  - Packages: Read & write (optional)
+Stable requires an owner-reviewed ledger qualification at the exact main SHA:
+tests, compatibility, migrations and recovery must pass. Promotion references
+an existing immutable insider set/hash/source, plus reviewed main source-tree
+changes. Stable rebuilds every image with stable identity; retagging insider
+bytes fails complete-set identity checks. A direct stable hotfix instead records
+an explicit non-promotion reason and equivalent qualification.
 
-Security recommendations
+No permanent extra channel branch exists. Optional `release/vX.Y.Z` branches
+carry an owner, qualified source, target, creation time and owner-bounded expiry.
+They receive full-safe CI and never publish. Merge reviewed stabilization into
+main, requalify the resulting SHA, then reconcile fixes into development and
+active candidates without regressing development VERSION. Delete only after
+publication or documented abandonment and merge-back evidence; retain tags,
+source and recovery artifacts. `validateCandidate` provides the executable
+policy fixture. CI invokes `validate-release-candidate.mjs` for candidate refs;
+their `.github/release-candidate.json` must match the branch, reference an
+ancestor qualified source, and stay within `RELEASE_CANDIDATE_MAX_DAYS`.
+Protected branch policy and owner review govern lifecycle deletion actions.
 
-- Use the smallest scope that meets your needs. If you only need to push tags, `repo` (or repository Contents write in fine-grained) is sufficient.
-- Create the PAT from a machine / account that is long-lived and managed (avoid ephemeral accounts).
-- Store the PAT in the repository Secrets (see below) and do not commit it anywhere in plaintext.
-- Rotate the PAT periodically (for example every 90 days) and document the rotation steps in your team runbook.
+## Owner activation and continuity recovery — currently blocked
 
-Add `REPO_PAT` to repository secrets
+Read-only live API evidence on 2026-09-12:
 
-1. In the repository, go to Settings → Secrets and variables → Actions → New repository secret.
-2. Name: `REPO_PAT`
-3. Value: paste the PAT from the previous step.
-4. Save.
+- Ruleset **12465886 `Main`** is **disabled**, has an empty include scope, and
+  only deletion/non-fast-forward rules. It does not enforce release policy.
+- Only the unprotected `copilot` environment exists.
+  `release-stable`, `release-insider` and `refs/heads/release-ledger` return 404.
+- No `RELEASE_*` variables are configured. Repository access reports admin,
+  but #2668 retains explicit owner approval of storage/continuity/publisher policy.
+  No live ruleset/environment was changed and no publisher app was provisioned.
 
-How the release workflow uses `REPO_PAT`
+Owner acceptance must name policy/VERSION reviewers, publisher and bypass owners,
+approve this Git-CAS storage and recovery design, and choose candidate expiry.
+CODEOWNERS currently names `jpapiez`; that is existing ownership, not approval
+of this new policy.
+The ledger is a data-only coordination ref, never an additional release source
+branch. Required non-self environment approval also needs an eligible reviewer;
+admin API access alone does not supply that reviewer or approve the new policy.
 
-- The release workflow uses `actions/checkout` with `token: ${{ secrets.REPO_PAT }}` to perform a checkout that is authenticated with the PAT. It then creates a tag and pushes it using the authenticated origin. This push will trigger downstream workflows that listen for tag pushes (for example your container image build & publish workflow).
+Before enabling:
 
-Troubleshooting
+1. Inventory historical tags/releases and preserve original identities. Record
+   the last historical stable base and a trusted sequence floor at cutover.
+2. Create a reviewed ledger seed after the approved ancestry checkpoint with
+   `schema: 1`, `anchor`, decimal `counter`, `lastHistoricalStable`,
+   `reservations`, `identities`, `pointers`, and `qualifications`. Set
+   `RELEASE_LEDGER_ANCHOR` to that checkpoint. The workflow never auto-initializes.
+3. Enforce main/development code-owner review, non-force/non-delete rules and
+   exact-SHA status checks. Protect `release-stable`/`release-insider` with
+   non-self reviewer approval and only their respective branch allowed.
+4. Activate `release-canonical-tags` (`v*`, no update/delete, **no bypass**) and
+   `release-ledger-continuity` (ledger branch, no force/delete, **no bypass**).
+   Separate `release-tag-creators` and `release-ledger-writer` rules restrict
+   creation/update to one explicitly approved publisher App.
+5. Provision its scoped `RELEASE_PUBLISHER_APP_ID` and environment-only
+   `RELEASE_PUBLISHER_PRIVATE_KEY`. It needs contents write plus check,
+   administration and Actions read permissions for verification.
+   Do not reuse an unrestricted repository PAT.
+6. Read the effective policies back and rehearse denied publication before
+   first authorized publication. Package write access also requires owner setup.
 
-- Linter/validator warnings about `Context access might be invalid: REPO_PAT`:
-  - You may see static lint warnings in certain editors or CI checks that attempt to statically validate the workflow YAML where secret usage is flagged. These are warnings about static analysis, not runtime failures. If the secret is present in GitHub Secrets and the workflow is permitted to use it, the runtime will accept the expression `${{ secrets.REPO_PAT }}`.
+Missing state, invalid ancestry, counter rollback or lost reservations block
+publication. Recovery is owner-only: stop publishers, compare retained ledger
+history, signed authorization records and release evidence, restore a proven
+high water without changing old reservations, and review a continuity checkpoint
+migration. Never reset N after a base/workflow change. An unprovable floor means
+publication remains disabled. No normal workflow has a reset/bypass operation.
 
-- Tag push fails with authentication errors:
-  - Ensure the PAT has `repo` (or repository contents write) permission and the token was created by a user with push access to the repository.
-  - Verify that `REPO_PAT` was added as an Actions secret under the correct repository (not the organization or user settings).
+## Validation
 
-- Downstream workflows do not trigger on tag push:
-  - Ensure the downstream workflow triggers include `on: push` with tags or the branches/tags you use (for example `on: push: tags: - 'v*'`).
-  - Confirm the tag was pushed by the PAT, not by a run that used `GITHUB_TOKEN` (pushing with GITHUB_TOKEN will sometimes not trigger other workflows).
+Run from the repository root:
 
-- Avoid accidental overwrites of existing tags:
-  - The `scripts/bump-version.sh` used by release jobs has safety checks: it fetches tags, refuses to run with an unclean working tree, and will abort if the computed new tag already exists locally or remotely.
+```text
+node --test scripts/ci/tests/test-release-tag-triggers.mjs scripts/ci/tests/test-daily-development-images.mjs
+```
 
-Maintenance notes
-
-- If you rotate the PAT, update the `REPO_PAT` secret to the new token value.
-- If you narrow permissions (for example switch to a fine-grained token), ensure the token has Contents: Read & Write on the repository and any additional package write permissions if you rely on GHCR publishing with the same token.
-
-Contact
-
-- If you need help creating or rotating the PAT or want me to perform a test-run of the release workflow after you add the secret, tell me and I will kick off a test dispatch and verify the tag push and downstream workflow trigger.
+Fixtures execute admission denials without writes, positive stable/insider/
+beta/RC paths, numeric ordering, atomic contention, retry/attempt/migration
+semantics, tag peeling/movement, same-identity byte conflicts, complete-set/
+platform checks, stale-source races, promotion and candidate lifecycle policy.
+YAML/compliance checks and the focused Vite metadata test remain required.
+No PR may open before fresh exact-head high-risk panel approval.

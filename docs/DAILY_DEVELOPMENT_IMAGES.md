@@ -1,6 +1,19 @@
 ## Daily Development Images
 
-The **Daily development microservice images** workflow builds the complete
+**#2668 cutover:** `daily-development-images.yml` now performs validation only,
+without package/signing credentials or registry writes. Server insider
+publication runs through `consolidated-release.yml` and the shared release
+authorization/allocator. The legacy daily registry publisher was removed.
+New validation runs do **not** contain `daily-development-image-set`; do not
+select them as release artifacts. Use explicit retained pre-cutover run IDs
+for historical validation or build locally until the #2660 signed-manifest
+consumer replaces the old registry selection. Historical tags/digests remain
+unchanged and do not automatically gain managed eligibility.
+
+The remainder of this guide describes **historical pre-cutover artifacts**
+and manual validation of an explicitly retained run, not current publication.
+
+The former **Daily development microservice images** workflow built the complete
 repository-owned microservice image set from the exact `development` branch HEAD.
 It runs every day at `09:17 UTC` and can also be started manually.
 
@@ -71,7 +84,7 @@ remain distinct. The validated images also must carry
 `org.opencontainers.image.source=https://github.com/OlyForge3D/PrintFarmer`, which
 allows newly created packages to link to this repository.
 
-## Select the Latest Successful Set
+## Select an Explicit Historical Set
 
 For the saved Windows daily UI automation, use the
 [run-owned WSL validation runner](DAILY_UI_VALIDATION_RUNNER.md) instead of
@@ -88,16 +101,8 @@ STACK_DIR=".daily-validation"
 rm -rf "$STACK_DIR"
 mkdir -p "$STACK_DIR"
 
-RUN_ID="$(
-  gh run list \
-    --workflow daily-development-images.yml \
-    --branch development \
-    --status success \
-    --limit 1 \
-    --json databaseId \
-    --jq '.[0].databaseId'
-)"
-test -n "$RUN_ID"
+# Select a retained pre-cutover run whose complete artifact was verified.
+: "${RUN_ID:?Set an explicit historical run ID; new runs are validation-only}"
 
 gh run download "$RUN_ID" \
   --name daily-development-image-set \

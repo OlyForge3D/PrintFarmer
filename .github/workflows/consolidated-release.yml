@@ -1,318 +1,140 @@
 name: Consolidated Release
 
-# Release workflow for the PrintFarmer server and Docker containers.
-# Mobile/TestFlight releases use the separate ios/* tag namespace and workflow.
-#
-# Release channels and source branches:
-#   stable  → main only, version vX.Y.Z
-#   insider → development only, version vX.Y.Z-insider.N
-#
-# Short-lived release/vX.Y.Z branches may validate a stable candidate, but stable
-# publication happens only after the candidate is merged to main. This keeps main
-# as the single stable source of truth and development as the insider source.
-#
-# Container and mobile releases intentionally have independent cadences.
-
 on:
   workflow_dispatch:
     inputs:
       channel:
-        description: 'Release channel (stable defaults for end users; insider is opt-in)'
-        required: true
-        default: stable
+        description: Release channel (not installation enrollment)
         type: choice
-        options:
-          - stable
-          - insider
-      version:
-        description: 'Stable: vX.Y.Z; insider: vX.Y.Z-insider.N'
+        options: [stable, insider]
+        default: stable
         required: true
+      stage:
+        description: Insider stage; choose none for stable
+        type: choice
+        options: [none, insider, beta, rc]
+        default: none
+      version:
+        description: Optional exact tag assertion; N is allocated, never caller-selected
+        type: string
+  schedule:
+    - cron: '27 9 * * *'
 
 permissions:
-  actions: read
-  contents: write
-  packages: write
-  id-token: write
+  contents: read
+
+env:
+  RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+
+concurrency:
+  group: release-${{ inputs.channel || 'insider' }}
+  cancel-in-progress: false
 
 jobs:
-  # ====================
-  # JOB 1: Validate and Tag
-  # ====================
-  validate-and-tag:
-    name: Validate & Tag
+  schedule-insider:
+    if: github.event_name == 'schedule' && github.repository == 'OlyForge3D/PrintFarmer'
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch the same authority on development
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run consolidated-release.yml --repo "$GITHUB_REPOSITORY" \
+            --ref development -f channel=insider -f stage=insider
+
+  admit:
+    if: github.event_name != 'schedule'
+    name: Read-only release admission
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      checks: read
     outputs:
-      version: ${{ steps.parse.outputs.version }}
-      channel: ${{ steps.parse.outputs.channel }}
-      is_prerelease: ${{ steps.parse.outputs.is_prerelease }}
-      base_version: ${{ steps.parse.outputs.base_version }}
-      source_sha: ${{ steps.parse.outputs.source_sha }}
+      source_sha: ${{ steps.admit.outputs.source_sha }}
+      channel: ${{ steps.admit.outputs.channel }}
     steps:
-      - name: Validate release channel, branch, and version
-        id: parse
-        env:
-          CHANNEL: ${{ github.event.inputs.channel }}
-          VERSION: ${{ github.event.inputs.version }}
-          SOURCE_REF: ${{ github.ref }}
-          SOURCE_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-
-          case "$CHANNEL" in
-            stable)
-              if [[ "$SOURCE_REF" != "refs/heads/main" ]]; then
-                echo "Stable releases must be dispatched from main; got $SOURCE_REF"
-                exit 1
-              fi
-              if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo "Stable versions must match vX.Y.Z; got $VERSION"
-                exit 1
-              fi
-              ;;
-            insider)
-              if [[ "$SOURCE_REF" != "refs/heads/development" ]]; then
-                echo "Insider releases must be dispatched from development; got $SOURCE_REF"
-                exit 1
-              fi
-              if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-insider\.[0-9]+$ ]]; then
-                echo "Insider versions must match vX.Y.Z-insider.N; got $VERSION"
-                exit 1
-              fi
-              ;;
-            *)
-              echo "Unsupported release channel: $CHANNEL"
-              exit 1
-              ;;
-          esac
-
-          BASE_VERSION="$(echo "$VERSION" | sed -E 's/^(v[0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
-          IS_PRERELEASE="false"
-          if [[ "$CHANNEL" == "insider" ]]; then
-            IS_PRERELEASE="true"
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
-          echo "is_prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
-          echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
-          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
-
-          echo "📦 Version: $VERSION"
-          echo "   Channel: $CHANNEL"
-          echo "   Source: $SOURCE_REF"
-          echo "   Commit: $SOURCE_SHA"
-          echo "   Base: $BASE_VERSION"
-
-      - name: Checkout selected source
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
-          ref: ${{ steps.parse.outputs.source_sha }}
-          fetch-depth: 0
-          token: ${{ secrets.REPO_PAT }}
-
-      - name: Verify repository version metadata
-        run: |
-          VERSION="${{ steps.parse.outputs.version }}"
-          BASE="${{ steps.parse.outputs.base_version }}"
-          FILE_VERSION="$(tr -d '[:space:]' < VERSION)"
-          if [[ "${FILE_VERSION#v}" != "${BASE#v}" ]]; then
-            echo "Requested release $VERSION does not match VERSION ($FILE_VERSION)"
-            exit 1
-          fi
-          bash scripts/sync-monorepo-version.sh --check
-
-      - name: Create and push tag
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Admit exact canonical branch HEAD
+        id: admit
         env:
-          TAG: ${{ steps.parse.outputs.version }}
-          SOURCE_SHA: ${{ steps.parse.outputs.source_sha }}
-        run: |
-          set -e
-          git config user.name 'github-actions'
-          git config user.email 'github-actions@github.com'
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_STAGE: ${{ inputs.stage }}
+          RELEASE_TAG: ${{ inputs.version }}
+          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+        run: node scripts/ci/release-control.mjs admit
 
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists; aborting to avoid overwrite."
-            exit 1
-          fi
-          git tag -a "$TAG" "$SOURCE_SHA" -m "Release $TAG"
-          git push origin "$TAG"
-          echo "✅ Tag $TAG created and pushed"
-
-  # ====================
-  # JOB 2: Create GitHub Release
-  # ====================
-  create-release:
-    name: Create GitHub Release
+  authorize:
+    name: Reserve and authorize immutable source
+    needs: admit
     runs-on: ubuntu-latest
-    needs: validate-and-tag
+    environment: release-${{ needs.admit.outputs.channel }}
+    permissions:
+      contents: write
+      id-token: write
+    outputs:
+      identity: ${{ steps.authorize.outputs.identity }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.admit.outputs.source_sha }}
           fetch-depth: 0
-          ref: ${{ needs.validate-and-tag.outputs.version }}
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
+          persist-credentials: false
+      - uses: actions/setup-node@v7
         with:
-          node-version: 24.x
-
-      - name: Wait for exact-tag Docker workflow
-        id: docker
+          node-version: 24
+      - name: Check sole authored version base
+        run: bash scripts/sync-monorepo-version.sh --check
+      - name: Obtain protected publisher app token
+        id: publisher
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
+          permission-contents: write
+          permission-checks: read
+          permission-administration: read
+          permission-actions: read
+      - name: Reserve sequence before source tag
+        id: authorize
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.validate-and-tag.outputs.version }}
-        run: |
-          set -euo pipefail
-          COMMIT="$(git rev-parse "${VERSION}^{commit}")"
-          RUN_ID=""
-          for attempt in $(seq 1 30); do
-            RUN_ID="$(gh run list \
-              --workflow docker-publish.yml \
-              --branch "$VERSION" \
-              --commit "$COMMIT" \
-              --event push \
-              --limit 1 \
-              --json databaseId \
-              --jq '.[0].databaseId // empty')"
-            [[ -n "$RUN_ID" ]] && break
-            sleep 10
-          done
-          if [[ -z "$RUN_ID" ]]; then
-            echo "Could not find the Docker workflow for $VERSION ($COMMIT)"
-            exit 1
-          fi
-          gh run watch "$RUN_ID" --exit-status
-          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
-
-      - name: Download Docker release artifacts
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh run download "${{ steps.docker.outputs.run_id }}" \
-            --pattern 'sbom-*' \
-            --dir artifacts
-          gh run download "${{ steps.docker.outputs.run_id }}" \
-            --pattern 'digest-*' \
-            --dir artifacts
-
-      - name: Require and revalidate all image artifacts
-        run: |
-          set -euo pipefail
-          IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)
-          for image in "${IMAGES[@]}"; do
-            digest_file="artifacts/digest-${image}/digest-${image}.txt"
-            if [[ ! -s "$digest_file" ]]; then
-              echo "Missing digest artifact for $image"
-              exit 1
-            fi
-            digest="$(tr -d '[:space:]' < "$digest_file")"
-            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "Invalid digest artifact for $image: $digest"
-              exit 1
-            fi
-            mapfile -d '' sboms < <(
-              find "artifacts/sbom-${image}" -maxdepth 1 -type f -name '*.spdx.json' -print0
-            )
-            if [[ "${#sboms[@]}" -ne 1 ]]; then
-              echo "Expected exactly one SPDX SBOM artifact for $image, found ${#sboms[@]}"
-              exit 1
-            fi
-            node scripts/compliance/validate-compliance.mjs \
-              --skip-dependencies \
-              --sbom "${sboms[0]}"
-          done
-
+          GH_TOKEN: ${{ steps.publisher.outputs.token }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_STAGE: ${{ inputs.stage }}
+          RELEASE_TAG: ${{ inputs.version }}
+          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+        run: node scripts/ci/release-control.mjs authorize
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2
-
-      - name: Verify all image signatures and SPDX attestations
-        env:
-          VERSION: ${{ needs.validate-and-tag.outputs.version }}
-          OWNER: ${{ github.repository_owner }}
-          REPOSITORY: ${{ github.repository }}
+      - name: Sign immutable branch-at-authorization evidence
         run: |
-          set -euo pipefail
-          OWNER_LC="$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')"
-          CERTIFICATE_IDENTITY="https://github.com/${REPOSITORY}/.github/workflows/docker-publish.yml@refs/tags/${VERSION}"
-          IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)
-          for image in "${IMAGES[@]}"; do
-            digest="$(tr -d '[:space:]' < "artifacts/digest-${image}/digest-${image}.txt")"
-            reference="ghcr.io/${OWNER_LC}/printfarmer-${image}@${digest}"
-            cosign verify "$reference" \
-              --certificate-identity "$CERTIFICATE_IDENTITY" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com
-            cosign verify-attestation "$reference" \
-              --type spdxjson \
-              --certificate-identity "$CERTIFICATE_IDENTITY" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com
-          done
-
-      - name: Generate changelog
-        id: cliff
-        uses: orhun/git-cliff-action@v4
+          cosign sign-blob --yes --bundle release-identity.bundle.json release-identity.json
+      - uses: actions/upload-artifact@v7
         with:
-          config: cliff.toml
-          args: --current-tag ${{ needs.validate-and-tag.outputs.version }}
-        continue-on-error: true
+          name: release-authorization-${{ github.run_attempt }}
+          path: |
+            release-identity.json
+            release-identity.bundle.json
+          if-no-files-found: error
 
-      - name: Build release notes
-        env:
-          VERSION: ${{ needs.validate-and-tag.outputs.version }}
-          CHANNEL: ${{ needs.validate-and-tag.outputs.channel }}
-          CHANGELOG: ${{ steps.cliff.outputs.changelog }}
-        run: |
-          {
-            echo "## Release $VERSION"
-            echo ""
-            echo "- **Channel:** $CHANNEL"
-            echo "- **Source branch:** ${{ github.ref_name }}"
-            echo ""
-            echo "### Release Components"
-            echo ""
-
-            echo "- ✅ **Server (Docker images)** — Validated, attested, signed, and published to GHCR"
-
-            echo "- ℹ️ **iOS App** — Released independently through the TestFlight workflow"
-
-            echo ""
-            echo "### Changes"
-            echo ""
-
-            if [[ -n "${CHANGELOG:-}" ]]; then
-              echo "$CHANGELOG"
-            else
-              PREV=$(git describe --tags --abbrev=0 --match 'v*' --exclude "$VERSION" 2>/dev/null || true)
-              if [[ -n "$PREV" ]]; then
-                git log --pretty=format:'- %s (%h)' "$PREV"..HEAD
-              else
-                echo "Initial release."
-              fi
-            fi
-
-            echo ""
-            echo "### Docker Images"
-            echo ""
-            echo '```bash'
-            echo "docker pull ghcr.io/olyforge3d/printfarmer-api:${VERSION#v}"
-            echo "docker pull ghcr.io/olyforge3d/printfarmer-frontend:${VERSION#v}"
-            echo "docker pull ghcr.io/olyforge3d/printfarmer-printer-discovery:${VERSION#v}"
-            echo "docker pull ghcr.io/olyforge3d/printfarmer-orcaslicer-worker:${VERSION#v}"
-            echo "docker pull ghcr.io/olyforge3d/printfarmer-monolith:${VERSION#v}"
-            echo '```'
-            echo ""
-            echo "### License and Corresponding Source"
-            echo ""
-            echo "- License: GNU AGPL v3.0 only (AGPL-3.0-only)"
-            echo "- Exact source archive: PrintFarmer-${VERSION}-source.tar.gz"
-            echo "- Source manifest: PrintFarmer-${VERSION}-source.json"
-            echo "- Third-party notices: THIRD-PARTY-NOTICES.md"
-          } > RELEASE_NOTES.md
-
-      - name: Finalize GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          name: ${{ needs.validate-and-tag.outputs.version }}
-          tag_name: ${{ needs.validate-and-tag.outputs.version }}
-          body_path: RELEASE_NOTES.md
-          draft: false
-          prerelease: ${{ needs.validate-and-tag.outputs.is_prerelease == 'true' }}
+  publish:
+    needs: authorize
+    uses: ./.github/workflows/docker-publish.yml
+    permissions:
+      actions: write
+      contents: write
+      packages: write
+      id-token: write
+    with:
+      identity: ${{ needs.authorize.outputs.identity }}
+    secrets: inherit

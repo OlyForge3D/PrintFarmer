@@ -173,3 +173,10 @@ __pycache__/
 
 # Wire-contract corpus cross-process manifest lock (issue #2238) - runtime artifact, never committed
 fixtures/wire-contracts/manifest.json.lock
+# Release build outputs are generated from the authorized ledger record.
+/release-identity.json
+/release-identity.bundle.json
+/release-set.json
+/release-labels.txt
+/src/ReleaseIdentity.props
+/src/Web/ReactApp/public/release-identity.json

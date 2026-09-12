@@ -77,11 +77,11 @@
       "path": ".github/workflows/docker-publish.yml",
       "contains": [
         "org.opencontainers.image.licenses=AGPL-3.0-only",
-        "org.opencontainers.image.revision=${{ github.sha }}",
+        "org.opencontainers.image.revision=${{ fromJSON(inputs.identity).sourceCommit }}",
         "outputs: type=image,name=",
         "cosign attest --yes --type spdxjson",
         "--include-npm",
-        "IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)",
+        "IMAGES=(api frontend slicer-host printer-discovery orcaslicer-worker monolith)",
         "Smoke test ARM64 image digests",
         "printfarmer-monolith@${monolith_digest}",
         "Publish and verify public corresponding-source assets",
@@ -105,33 +105,16 @@
       ]
     },
     {
-      "path": ".github/workflows/release.yml",
-      "contains": [
-        "bash scripts/sync-monorepo-version.sh --check",
-        "--branch \"$VERSION\"",
-        "IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)",
-        "cosign verify-attestation",
-        "Finalize GitHub Release"
-      ],
-      "notContains": [
-        "Verify image signatures (best-effort)",
-        "Verify failed for",
-        "Create corresponding-source assets",
-        "release-artifacts/*",
-        "artifacts/**/*.spdx.json"
-      ]
-    },
-    {
       "path": ".github/workflows/consolidated-release.yml",
       "contains": [
         "bash scripts/sync-monorepo-version.sh --check",
-        "--branch \"$VERSION\"",
-        "IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)",
-        "cosign verify-attestation",
-        "Finalize GitHub Release"
+        "node scripts/ci/release-control.mjs admit",
+        "node scripts/ci/release-control.mjs authorize",
+        "cosign sign-blob",
+        "uses: ./.github/workflows/docker-publish.yml"
       ],
       "notContains": [
-        "uses: ./.github/workflows/docker-publish.yml",
+        "REPO_PAT",
         "Create corresponding-source assets",
         "release-artifacts/*",
         "artifacts/**/*.spdx.json"

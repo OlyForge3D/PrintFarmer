@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const fullCommitShaPattern = /^[0-9a-f]{40}$/i;
 
@@ -42,6 +42,17 @@ export function resolveGitHash(command: 'build' | 'serve') {
 
 // Emit dist/version.json at build time so the deployed frontend commit is queryable
 // (served by nginx at /version.json), mirroring the backend /api/system/version endpoints.
+export function frontendVersionMetadata(
+  gitHash: string,
+  buildTime: string,
+  releaseIdentity?: Record<string, unknown>,
+) {
+  if (releaseIdentity && releaseIdentity.sourceCommit !== gitHash) {
+    throw new Error('Frontend release identity does not match the build source SHA.');
+  }
+  return { service: 'frontend', commit: gitHash, buildTime, ...releaseIdentity };
+}
+
 function emitVersionJson(gitHash: string, buildTime: string) {
   let outDir = 'dist';
   return {
@@ -51,10 +62,14 @@ function emitVersionJson(gitHash: string, buildTime: string) {
       outDir = config.build.outDir;
     },
     closeBundle() {
+      const identityPath = resolve('public', 'release-identity.json');
+      const releaseIdentity: Record<string, unknown> | undefined = existsSync(identityPath)
+        ? JSON.parse(readFileSync(identityPath, 'utf8')) as Record<string, unknown>
+        : undefined;
       mkdirSync(outDir, { recursive: true });
       writeFileSync(
         resolve(outDir, 'version.json'),
-        JSON.stringify({ service: 'frontend', commit: gitHash, buildTime }, null, 2),
+        JSON.stringify(frontendVersionMetadata(gitHash, buildTime, releaseIdentity), null, 2),
       );
       const serviceWorkerPath = resolve(outDir, 'sw.js');
       const serviceWorker = readFileSync(serviceWorkerPath, 'utf8')

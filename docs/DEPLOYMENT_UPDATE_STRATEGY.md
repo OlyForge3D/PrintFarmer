@@ -71,6 +71,18 @@ do not.
 
 ### Implemented branch/channel publication baseline
 
+**Revision status (2026-09-12, #2668):** the original audit descriptions below
+are historical baseline evidence, not the current branch implementation.
+The [release guide](RELEASE_GUIDE.md) now documents one consolidated authority,
+strict stable/insider/beta/RC grammar, protected Git-CAS reservations, signed
+exact-SHA authorization, shared assembly/frontend/OCI identity and complete-set
+candidate CAS. Direct tag publication, legacy release helpers and the daily
+registry publisher have been removed. Existing historical aliases are unchanged.
+The branch remains **activation-blocked** on explicit owner approval and missing
+live rulesets/environments/ledger/publisher setup. #2660 still owns signed
+managed eligibility, image aliases and generated installer references; no
+source-only release or unsigned candidate pointer is an update candidate.
+
 The local #2668 implementation establishes the following publication policy,
 as documented in the [release guide](RELEASE_GUIDE.md#release-channels-and-branches):
 
@@ -106,9 +118,9 @@ and blocks #2660. Graph PASS verifies relationships, not implementation closure.
 
 ### Canonical release identity and single version authority
 
-The baseline above is implemented locally. The following stronger coordinated
-identity contract remains future work feeding #2660 and its consumers, with
-remaining #2668 ownership/authorization criteria requiring implementation.
+The following coordinated identity contract is normative. Its #2668 identity
+and authorization prerequisite is implemented on this revision branch, but
+owner acceptance, live activation and #2660 distribution remain blocked.
 It must preserve the disjoint server/mobile namespaces and channel-pointer isolation.
 Maintainer acceptance of counter/ownership choices gates this future work,
 not the already implemented stable/main or insider/development dispatch policy.
@@ -124,7 +136,10 @@ not the already implemented stable/main or insider/development dispatch policy.
    tag `vX.Y.Z`, and only publishes from a protected `main` commit. The
    requested tag must exactly match that commit's `VERSION`; mismatch fails
    before write credentials or publication. Insider is
-   `X.Y.Z-insider.N`, tag `vX.Y.Z-insider.N`, only from `development`. Mobile
+   `X.Y.Z-insider.N`, tag `vX.Y.Z-insider.N`, only from `development`.
+   Server `beta.N` and `rc.N` are also insider identities; all stages share N
+   and progress in SemVer order `beta < insider < rc`, without same-base stage
+   regression. Mobile
    alpha/beta/RC identities remain independent under `ios/` and are excluded
    from server release discovery. `N` is one positive decimal integer, without
    leading zeros, reserved by a
@@ -211,8 +226,8 @@ unknown; do not relabel it from the selected channel.
 
 For the remaining coordinated-identity work, the maintainer names the authoritative workflow,
 release-policy owners and allocator storage/transaction/continuity mechanism.
-The one-integer grammar and allocation semantics above are fixed; storage is
-not implemented or implicitly approved. Missing or rolled-back allocation
+The one-integer grammar and allocation semantics above are fixed; the proposed
+protected Git-CAS implementation is not implicitly owner-approved. Missing or rolled-back allocation
 state blocks publication until trusted continuity is restored, even after a
 base bump. Do not approximate N with concatenated counters, timestamps or a
 local tag scan. New attempts of older source commits cannot advance insider
@@ -222,7 +237,7 @@ and channel advancement, with durable compare-and-set high-water checks;
 workflow concurrency alone does not guarantee ordering.
 #2660 separately gates signing/trust and offline verification choices.
 
-### Branch topology decision and repository evidence
+### Branch topology decision and historical baseline evidence
 
 **Decision: no permanent per-track release branches.** `development` is the
 insider integration line; `main` is the stable line. The following follow-up
@@ -249,13 +264,14 @@ full-safe validation, never a third channel; all release branch refs are
 non-publishing. A future multi-version maintenance
 commitment requires a separate explicit support-policy decision.
 
-### Remaining tag validation and event authorization
+### Original tag-validation gaps (superseded by #2668 revision)
 
 Stable tags use `vX.Y.Z`; insider tags use `vX.Y.Z-insider.N`. TestFlight tags
 use `ios/vX.Y-beta.N`, `ios/vX.Y-alpha.N`, or `ios/vX.Y-rc.N`. Current server
-dispatch regexes accept decimal numeric components, including zero and leading
-zeros; they do not implement stricter SemVer numeric validation or a positive
-monotonic allocator. Future validation must preserve namespace isolation.
+baseline dispatch regexes accepted decimal numeric components, including zero
+and leading zeros. The revision's executable `release-policy.mjs` rejects these,
+and all supported server stages use protected durable allocation. Namespace
+isolation remains mandatory.
 Existing tags and daily artifacts retain their original identity; publication
 channel classification alone never proves managed eligibility or enrollment.
 

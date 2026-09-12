@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { resolveGitHash } from './vite.config';
+import { frontendVersionMetadata, resolveGitHash } from './vite.config';
 
 const originalViteGitSha = process.env.VITE_GIT_SHA;
 const originalGitSha = process.env.GIT_SHA;
@@ -18,6 +18,21 @@ function restoreEnvironment() {
 }
 
 afterEach(restoreEnvironment);
+
+describe('canonical frontend release identity', () => {
+  it('embeds the shared record without package-version or API derivation', () => {
+    const identity = { sourceCommit: 'a'.repeat(40), canonicalVersion: '1.2.3-rc.10',
+      releaseId: 'insider:1.2.3-rc.10', channel: 'insider', buildId: '45',
+      buildAttempt: '2', buildTime: '2026-09-12T20:00:00Z' };
+    expect(frontendVersionMetadata(identity.sourceCommit, 'local-clock', identity))
+      .toEqual({ service: 'frontend', commit: identity.sourceCommit, ...identity });
+  });
+  it('rejects metadata for a different source and preserves local build behavior', () => {
+    expect(() => frontendVersionMetadata('a'.repeat(40), 'now', { sourceCommit: 'b'.repeat(40) }))
+      .toThrow(/does not match/);
+    expect(frontendVersionMetadata('dev', 'now')).toEqual({ service: 'frontend', commit: 'dev', buildTime: 'now' });
+  });
+});
 
 describe('production commit provenance', () => {
   it.each(['unknown', 'dev', 'abc1234'])(
