@@ -123,7 +123,7 @@ class EventTests(unittest.TestCase):
         shard_step = workflow.split("      - name: Run XCUI shard\n", 1)[1]
         shard_step = shard_step.split("\n      - name:", 1)[0]
         self.assertIn(
-            "if: ${{ success() || steps.login-xcui.conclusion == 'failure' }}",
+            "if: ${{ !cancelled() && (success() || steps.login-xcui.conclusion == 'failure') }}",
             shard_step,
         )
         self.assertIn(
