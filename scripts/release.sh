@@ -17,13 +17,14 @@ set -euo pipefail
 # will never surface internal team files.
 #
 # Usage:
-#   ./scripts/release.sh [major|minor|patch|alpha|beta|vX.Y.Z[-alpha.N|-beta.N]] [--clean-history]
+#   ./scripts/release.sh [major|minor|patch|vX.Y.Z] [--clean-history]
 #
 #   patch (default) — v0.1.0 → v0.1.1
 #   minor           — v0.1.0 → v0.2.0
 #   major           — v0.1.0 → v1.0.0
-#   alpha           — v1.2.3 → v1.2.3-alpha.1 (auto-increments from existing tags)
-#   beta            — v1.2.3 → v1.2.3-beta.1 (auto-increments from existing tags)
+#
+# Mobile prereleases use the separate ios/* TestFlight workflow. Server insider
+# releases use consolidated-release.yml and never pass through this script.
 #
 # Options:
 #   --clean-history   One-time: force-push a fresh orphan main to the release
@@ -51,22 +52,6 @@ bump_version() {
 base_version() {
   local version="$1"
   echo "${version%%-*}"
-}
-
-next_prerelease_tag() {
-  local base="$1"
-  local channel="$2"
-  local max=0
-  local tag number
-
-  while IFS= read -r tag; do
-    number="${tag##"${base}"-"${channel}".}"
-    if [[ "$number" =~ ^[0-9]+$ ]] && (( number > max )); then
-      max=$number
-    fi
-  done < <(git tag -l "${base}-${channel}.*")
-
-  echo "${base}-${channel}.$((max + 1))"
 }
 
 # Remove forbidden paths from the git index and working tree.
@@ -129,14 +114,18 @@ git fetch --tags "$RELEASE_REMOTE" 2>/dev/null || true
 CURRENT_BASE="$(base_version "$CURRENT")"
 case "$ARG" in
   major|minor|patch) TAG="$(bump_version "$CURRENT_BASE" "$ARG")" ;;
-  alpha|beta) TAG="$(next_prerelease_tag "$CURRENT_BASE" "$ARG")" ;;
-  v*) TAG="$ARG" ;;
+  v[0-9]*.[0-9]*.[0-9]*) TAG="$ARG" ;;
   *)
-    echo "❌ Usage: $0 [major|minor|patch|alpha|beta|vX.Y.Z[-alpha.N|-beta.N]] [--clean-history]"
+    echo "❌ Usage: $0 [major|minor|patch|vX.Y.Z] [--clean-history]"
     echo "   Default: patch"
     exit 1
     ;;
 esac
+
+if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "❌ Stable release tag must match vX.Y.Z: $TAG"
+  exit 1
+fi
 
 echo "🚀 Releasing ${TAG} (was ${CURRENT})"
 if $CLEAN_HISTORY; then

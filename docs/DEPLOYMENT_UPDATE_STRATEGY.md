@@ -233,9 +233,9 @@ not changed, and are not evidence of deployed enforcement.
 | Exact source | Observed behavior and implication |
 | --- | --- |
 | `.github\workflows\ci.yml` (`on.push.branches`); `scripts\ci\select-dotnet-tests.sh`; `scripts\ci\tests\test-select-dotnet-tests.sh` | Local changes add `release/**` pushes and full-safe selection, including a `release/v1.2.3` fixture. This is candidate validation, not a reason for permanent release channels. |
-| `.github\workflows\consolidated-release.yml` (`validate-and-tag`) | Implemented channel input/guards bind stable dispatch to main and insider dispatch to development. Mobile/TestFlight publication is separate. Checkout still uses a moving branch ref; exact-SHA authorization remains future work. |
+| `.github\workflows\consolidated-release.yml` (`validate-and-tag`) | Implemented channel input/guards bind stable dispatch to main and insider dispatch to development. Mobile/TestFlight publication is separate. Dispatch captures `github.sha`, checks out that commit and creates the tag explicitly at it; stronger protected-branch authorization evidence remains future work. |
 | `.github\workflows\release.yml` (`tag-and-build`, exact-tag Docker wait) | Local stable dispatch checks main and VERSION; the downstream wait matches tag and commit. Preserve that matching but bind tag creation and every checkout to the selected main SHA. |
-| `.github\workflows\docker-publish.yml` (`on.push`, `Resolve source metadata`, `Resolve promotion tags`) | Still accepts bare `release` pushes, creates `release`/`release-sha-*` and manual tags, and derives channel from suffix. Tag publication lacks equivalent branch-origin validation. Remove these publication bypasses; they do not justify another permanent branch. |
+| `.github\workflows\docker-publish.yml` (`on.push`, `Resolve source metadata`, `Resolve promotion tags`) | Publication accepts only exact stable or insider tag pushes; release-branch and manual-dispatch publication paths are removed. Direct tag publication still needs stronger publisher and protected-branch authorization evidence. |
 | `.github\workflows\docker-publish.yml` (both metadata-action blocks and `promote-images`) | Both blocks add `org.printfarmer.release-channel`. Final promotion isolates stable/latest/major/minor from insider and intentionally moves `insider`. The `ios/` namespace cannot enter this workflow. Metadata-action patterns still need executable generated-tag coverage. |
 | `.github\workflows\daily-development-images.yml` (`source`, publication jobs) | Resolves/checks exact development HEAD; uses `development-<sha12>` build metadata and `sha-<sha>-run-<id>-attempt-<n>` tags with six-image `image-set.json`. Reuse exact-SHA handling, but migrate identities to canonical insider SemVer before managed discovery. |
 | `scripts\bump-version.sh`; `scripts\sync-monorepo-version.sh`; `VERSION` | Bump tool supports only the server `insider` prerelease suffix and a local tag-scan sequence, then commits/pushes the current branch; sync checks only numeric base and web package version. Neither proves channel origin nor implements a durable insider allocator. VERSION currently contains `v0.2.3`. |
@@ -245,8 +245,8 @@ No inspected workflow requires simultaneous supported stable maintenance lines.
 Permanent branches would duplicate VERSION ownership, protection, backports
 and publication authorization without solving artifact identity. Narrow
 `release/**` to reviewed, optional `release/vX.Y.Z` candidate lifecycle and
-full-safe validation, never a third channel; reject all release refs for
-publication, including bare `release`. A future multi-version maintenance
+full-safe validation, never a third channel; all release branch refs are
+non-publishing. A future multi-version maintenance
 commitment requires a separate explicit support-policy decision.
 
 ### Remaining tag validation and event authorization

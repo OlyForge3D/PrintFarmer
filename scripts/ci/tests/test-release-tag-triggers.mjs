@@ -161,6 +161,12 @@ test('docker-publish tag globs cover stable and insider release validators', asy
     'stable releases must remain bound to main');
   assert.match(policy.source, /SOURCE_REF" != "refs\/heads\/development"/,
     'insider releases must remain bound to development');
+  assert.match(policy.source, /SOURCE_SHA: \$\{\{ github\.sha \}\}/,
+    'release admission must capture the exact dispatch commit');
+  assert.match(policy.source, /ref: \$\{\{ steps\.parse\.outputs\.source_sha \}\}/,
+    'release checkout must use the captured commit, not a moving branch');
+  assert.match(policy.source, /git tag -a "\$TAG" "\$SOURCE_SHA"/,
+    'release tags must be created at the captured commit');
 });
 
 test('TestFlight and container tag namespaces are disjoint', async () => {
@@ -195,6 +201,18 @@ test('TestFlight and container tag namespaces are disjoint', async () => {
   const testflight = await readFile(testflightPath, 'utf8');
   assert.match(testflight, /TAG_NAME="ios\/v\$\{VERSION\}-beta\./,
     'automatic TestFlight tags must use the ios/ namespace');
+
+  const skill = await readFile(path.join(
+    repositoryRoot, '.squad', 'skills', 'testflight-beta', 'SKILL.md',
+  ), 'utf8');
+  assert.doesNotMatch(skill, /git tag v[0-9]|git push origin v[0-9]|'v\*-beta/,
+    'TestFlight guidance must not instruct unscoped tag creation');
+
+  const legacyRelease = await readFile(path.join(
+    repositoryRoot, 'scripts', 'release.sh',
+  ), 'utf8');
+  assert.doesNotMatch(legacyRelease, /alpha\|beta|next_prerelease_tag/,
+    'the legacy stable release script must not create mobile prerelease tags');
 });
 
 test('Docker promotion isolates stable and insider channel pointers', async () => {
@@ -209,6 +227,14 @@ test('Docker promotion isolates stable and insider channel pointers', async () =
     'only server insider prereleases may move the insider pointer');
   assert.match(source, /TAGS\+=\(insider\)/,
     'insider releases must promote the insider pointer');
+  assert.doesNotMatch(source, /^\s+branches:\s*\n\s+- release$/m,
+    'the legacy release branch must not publish containers');
+  assert.doesNotMatch(source, /^\s{2}workflow_dispatch:/m,
+    'manual dispatch must not bypass exact release tags');
+  assert.match(source, /group: docker-publish-\$\{\{ contains\(github\.ref_name, '-insider\.'\)/,
+    'channel publication must be serialized');
+  assert.match(source, /Refusing to move the channel pointer backward/,
+    'promotion must reject stale releases that would regress a channel pointer');
   assert.equal(
     (source.match(/org\.printfarmer\.release-channel=\$\{\{ steps\.source\.outputs\.channel \}\}/g) ?? []).length,
     2,

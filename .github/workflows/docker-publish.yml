@@ -12,8 +12,6 @@ name: Build and Publish Docker Images
 
 on:
   push:
-    branches:
-      - release
     # Tag globs use GitHub Actions filter-pattern syntax (not regex): `+` means
     # one-or-more of the preceding character, `.` is literal, `*` is zero-or-more
     # of any non-`/` character. The three patterns below must match — and only
@@ -24,12 +22,10 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-insider.[0-9]+'
-  workflow_dispatch:
-    inputs:
-      tag_suffix:
-        description: 'Optional tag suffix (e.g., "-beta")'
-        required: false
-        default: ''
+
+concurrency:
+  group: docker-publish-${{ contains(github.ref_name, '-insider.') && 'insider' || 'stable' }}
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -884,34 +880,27 @@ jobs:
 
       - name: Resolve promotion tags
         id: tags
-        env:
-          TAG_SUFFIX: ${{ github.event.inputs.tag_suffix }}
         run: |
           set -euo pipefail
           TAGS=()
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-            TAGS+=("$VERSION")
-            if [[ "$VERSION" != *-* ]]; then
-              IFS='.' read -r major minor patch <<< "$VERSION"
-              TAGS+=("${major}.${minor}" "$major" stable latest)
-            elif [[ "$VERSION" =~ -insider\.[0-9]+$ ]]; then
-              # Every prerelease belongs to the opt-in insider channel. Never
-              # move stable/latest/major/minor pointers from a prerelease tag.
-              TAGS+=(insider)
-            fi
-            SMOKE_TAG="$VERSION"
-          elif [[ "$GITHUB_REF" == "refs/heads/release" ]]; then
-            SMOKE_TAG="release-sha-${GITHUB_SHA::7}"
-            TAGS+=(release "$SMOKE_TAG")
-          else
-            if [[ ! "${TAG_SUFFIX:-}" =~ ^[-._A-Za-z0-9]*$ ]]; then
-              echo "Invalid manual tag suffix: $TAG_SUFFIX"
-              exit 1
-            fi
-            SMOKE_TAG="manual-${GITHUB_SHA::7}${TAG_SUFFIX:-}"
-            TAGS+=("$SMOKE_TAG")
+          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "Docker publication requires an authorized release tag."
+            exit 1
           fi
+
+          VERSION="${GITHUB_REF_NAME#v}"
+          TAGS+=("$VERSION")
+          if [[ "$VERSION" != *-* ]]; then
+            IFS='.' read -r major minor patch <<< "$VERSION"
+            TAGS+=("${major}.${minor}" "$major" stable latest)
+          elif [[ "$VERSION" =~ -insider\.[0-9]+$ ]]; then
+            # Insider releases never move stable/latest/major/minor pointers.
+            TAGS+=(insider)
+          else
+            echo "Unsupported release tag: $GITHUB_REF_NAME"
+            exit 1
+          fi
+          SMOKE_TAG="$VERSION"
           printf '%s\n' "${TAGS[@]}" > "$RUNNER_TEMP/promotion-tags.txt"
           echo "smoke_tag=$SMOKE_TAG" >> "$GITHUB_OUTPUT"
 
@@ -1093,6 +1082,30 @@ jobs:
               --retry 6 --retry-delay 5 --retry-all-errors \
               "$asset_url" >/dev/null
           done
+
+      - name: Reject channel pointer regression
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          candidate="${GITHUB_REF_NAME#v}"
+          if [[ "$candidate" == *-insider.* ]]; then
+            pattern='^[0-9]+\.[0-9]+\.[0-9]+-insider\.[0-9]+$'
+          else
+            pattern='^[0-9]+\.[0-9]+\.[0-9]+$'
+          fi
+
+          all_tags="$(
+            gh api --paginate \
+              "/orgs/${IMAGE_OWNER}/packages/container/printfarmer-api/versions?per_page=100" \
+              --jq '.[].metadata.container.tags[]?'
+          )"
+          existing_tags="$(grep -E "$pattern" <<< "$all_tags" || true)"
+          newest="$(printf '%s\n%s\n' "$existing_tags" "$candidate" | sed '/^$/d' | sort -V | tail -n 1)"
+          if [[ "$newest" != "$candidate" ]]; then
+            echo "Refusing to move the channel pointer backward from $newest to $candidate."
+            exit 1
+          fi
 
       - name: Promote validated digests
         run: |

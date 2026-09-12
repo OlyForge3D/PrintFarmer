@@ -46,6 +46,7 @@ jobs:
       channel: ${{ steps.parse.outputs.channel }}
       is_prerelease: ${{ steps.parse.outputs.is_prerelease }}
       base_version: ${{ steps.parse.outputs.base_version }}
+      source_sha: ${{ steps.parse.outputs.source_sha }}
     steps:
       - name: Validate release channel, branch, and version
         id: parse
@@ -53,6 +54,7 @@ jobs:
           CHANNEL: ${{ github.event.inputs.channel }}
           VERSION: ${{ github.event.inputs.version }}
           SOURCE_REF: ${{ github.ref }}
+          SOURCE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
@@ -92,16 +94,18 @@ jobs:
           echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
           echo "is_prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
           echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
 
           echo "📦 Version: $VERSION"
           echo "   Channel: $CHANNEL"
           echo "   Source: $SOURCE_REF"
+          echo "   Commit: $SOURCE_SHA"
           echo "   Base: $BASE_VERSION"
 
       - name: Checkout selected source
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ steps.parse.outputs.source_sha }}
           fetch-depth: 0
           token: ${{ secrets.REPO_PAT }}
 
@@ -117,17 +121,19 @@ jobs:
           bash scripts/sync-monorepo-version.sh --check
 
       - name: Create and push tag
+        env:
+          TAG: ${{ steps.parse.outputs.version }}
+          SOURCE_SHA: ${{ steps.parse.outputs.source_sha }}
         run: |
           set -e
           git config user.name 'github-actions'
           git config user.email 'github-actions@github.com'
-          TAG="${{ steps.parse.outputs.version }}"
 
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists; aborting to avoid overwrite."
             exit 1
           fi
-          git tag -a "$TAG" -m "Release $TAG"
+          git tag -a "$TAG" "$SOURCE_SHA" -m "Release $TAG"
           git push origin "$TAG"
           echo "✅ Tag $TAG created and pushed"
 
