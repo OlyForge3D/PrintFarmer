@@ -798,4 +798,25 @@ final class PrinterDetailPanelsTests: XCTestCase {
             scenePhase: .background, selectedPanel: .overview
         ))
     }
+
+    // MARK: - Homed-axes badge source resolution
+
+    func test_resolveHomedAxes_prefersPopulatedSourceOverStaleEmptyString() {
+        // The list DTO can carry "" while /status carries the real string. `??`
+        // only falls through on nil, so the empty value used to win and badge a
+        // homed printer as unhomed.
+        XCTAssertEqual(PrinterDetailView.resolveHomedAxes(["", "xyz"]), "xyz")
+        XCTAssertEqual(PrinterDetailView.resolveHomedAxes([nil, "xyz"]), "xyz")
+        XCTAssertEqual(PrinterDetailView.resolveHomedAxes(["xy", "xyz"]), "xy")
+    }
+
+    func test_resolveHomedAxes_keepsEmptyWhenThatIsAllTheBackendReports() {
+        // An empty string is a real "nothing is homed" signal; only a total
+        // absence of the field should hide the badges.
+        XCTAssertEqual(PrinterDetailView.resolveHomedAxes(["", nil]), "")
+        XCTAssertEqual(PrinterDetailView.resolveHomedAxes([nil, ""]), "")
+        XCTAssertNil(PrinterDetailView.resolveHomedAxes([nil, nil]))
+        XCTAssertNil(PrinterDetailView.resolveHomedAxes([]))
+    }
+
 }
