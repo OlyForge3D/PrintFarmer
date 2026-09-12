@@ -507,7 +507,9 @@ public class MoonrakerClient(
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(_timeouts.StatusPollTimeout);
             Uri baseUri = new(baseUrl);
-            Uri posUri = new(baseUri, "printer/objects/query?toolhead=position");
+            Uri posUri = new(
+                baseUri,
+                "printer/objects/query?toolhead=position&gcode_move=gcode_position");
             using HttpResponseMessage resp = await _http.GetAsync(posUri, cts.Token);
             if (resp.IsSuccessStatusCode)
             {
@@ -515,32 +517,32 @@ public class MoonrakerClient(
                 using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
                 JsonElement root = doc.RootElement;
                 if (root.TryGetProperty("result", out JsonElement result) &&
-                    result.TryGetProperty("status", out JsonElement statusNode) &&
-                    statusNode.TryGetProperty("toolhead", out JsonElement th) &&
-                    th.TryGetProperty("position", out JsonElement pos) && pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
+                    result.TryGetProperty("status", out JsonElement statusNode))
                 {
-                    try
+                    if (TryGetFinitePosition(
+                            statusNode,
+                            "toolhead",
+                            "position",
+                            out double toolheadX,
+                            out double toolheadY,
+                            out double toolheadZ))
                     {
-                        x = pos[0].GetDouble();
-                    }
-                    catch
-                    {
-                    }
-
-                    try
-                    {
-                        y = pos[1].GetDouble();
-                    }
-                    catch
-                    {
+                        x = toolheadX;
+                        y = toolheadY;
+                        z = toolheadZ;
                     }
 
-                    try
+                    if (TryGetFinitePosition(
+                            statusNode,
+                            "gcode_move",
+                            "gcode_position",
+                            out double gcodeX,
+                            out double gcodeY,
+                            out double gcodeZ))
                     {
-                        z = pos[2].GetDouble();
-                    }
-                    catch
-                    {
+                        x = gcodeX;
+                        y = gcodeY;
+                        z = gcodeZ;
                     }
                 }
             }
@@ -656,6 +658,29 @@ public class MoonrakerClient(
         }
 
         return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT, PrintTimeLeftSeconds: printTimeLeftSeconds);
+    }
+
+    private static bool TryGetFinitePosition(
+        JsonElement status,
+        string objectName,
+        string propertyName,
+        out double x,
+        out double y,
+        out double z)
+    {
+        x = 0;
+        y = 0;
+        z = 0;
+        return status.TryGetProperty(objectName, out JsonElement obj) &&
+            obj.TryGetProperty(propertyName, out JsonElement position) &&
+            position.ValueKind == JsonValueKind.Array &&
+            position.GetArrayLength() >= 3 &&
+            position[0].TryGetDouble(out x) &&
+            position[1].TryGetDouble(out y) &&
+            position[2].TryGetDouble(out z) &&
+            double.IsFinite(x) &&
+            double.IsFinite(y) &&
+            double.IsFinite(z);
     }
 
     public Task<PrinterDto> CreatePrinterDtoAsync(

@@ -13,6 +13,49 @@ namespace Farm.Backend.Plugins.Tests.Backends;
 public sealed class MoonrakerVerifiedSafetyTests
 {
     [Fact]
+    public async Task GetCompositeStatusAsync_GcodePositionPresent_PrefersGcodeCoordinates()
+    {
+        using var handler = new InlineHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/printer/info" => JsonResponse("""{"result":{"state":"ready"}}"""),
+            "/printer/objects/query" when request.RequestUri.Query.Contains(
+                "print_stats",
+                StringComparison.Ordinal) =>
+                JsonResponse("""{"result":{"status":{"print_stats":{"state":"standby"}}}}"""),
+            "/printer/objects/query" when request.RequestUri.Query.Contains(
+                "gcode_move",
+                StringComparison.Ordinal) =>
+                JsonResponse(
+                    """
+                    {
+                      "result":{
+                        "status":{
+                          "toolhead":{"position":[100,200,300,0]},
+                          "gcode_move":{"gcode_position":[10,20,30,0]}
+                        }
+                      }
+                    }
+                    """),
+            "/printer/objects/query" => JsonResponse("""{"result":{"status":{}}}"""),
+            "/server/webcams/list" => JsonResponse("""{"result":{"webcams":[]}}"""),
+            _ => JsonResponse("""{"result":{}}"""),
+        });
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+
+        PrinterCompositeStatus status = await client.GetCompositeStatusAsync(
+            "http://printer.local/",
+            CancellationToken.None);
+
+        Assert.Equal(10, status.X);
+        Assert.Equal(20, status.Y);
+        Assert.Equal(30, status.Z);
+    }
+
+    [Fact]
     public void HandleGcodeMoveUpdate_GcodePositionPresent_OverridesToolheadPositionWithoutChangingSafetyOffset()
     {
         var state = new PrinterState
