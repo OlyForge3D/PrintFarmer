@@ -14,7 +14,7 @@ import { runContext, runReleaseControl } from '../release-control.mjs';
 import { inspectCompleteSet, publishImmutableTags } from '../release-set.mjs';
 import {
   authorizationPath, authorizationBundle, privateSetPath, publicAuthorization, verifyAuthorization,
-  writeAuthorization, writeAuthorizationSet, emitPublicReleaseAssets,
+  writeAuthorization, writeAuthorizationSet, writePublicSet, emitPublicReleaseAssets,
 } from '../release-authorization.mjs';
 import { publicIdentity, publicIdentityFields } from '../../../src/Web/ReactApp/public-release-identity.mjs';
 
@@ -875,6 +875,158 @@ test('every transaction rejects private qualification seed fields before any Git
   assert.deepEqual(publicLedger(qualified).qualifications[sha], promotion);
 });
 
+function publicSetPoisons(identity) {
+  const invalidValues = [undefined, JSON.parse('null'), [], { private: 'private-value' }, 'private-value'];
+  const mutations = [
+    ...invalidValues.map(value => set => { set.images = value; }),
+    set => { set.images.private = { private: 'private-value' }; },
+    set => {
+      set.images['api,frontend'] = set.images.api;
+      delete set.images.api;
+      delete set.images.frontend;
+    },
+    set => { set.schema = 2; },
+    set => { set.managedEligible = true; },
+    set => { set.identity.sourceCommit = newerSha; },
+    set => { set.identity.identitySha256 = 'f'.repeat(64); },
+    set => { set.identity.futurePrivate = { private: 'private-value' }; },
+  ];
+  const invalidDigests = [...invalidValues, 'sha256:bad', `sha256:${'A'.repeat(64)}`,
+    `sha256:${'a'.repeat(63)}`, `sha256:${'a'.repeat(65)}`, `sha256:${'a'.repeat(64)}\n`];
+  for (const [name, platforms] of Object.entries(components)) {
+    mutations.push(set => { delete set.images[name]; });
+    mutations.push(...invalidValues.map(value => set => { set.images[name] = value; }));
+    mutations.push(...invalidDigests.map(value => set => { set.images[name].digest = value; }));
+    mutations.push(...invalidValues.map(value => set => { set.images[name].platforms = value; }));
+    mutations.push(set => { set.images[name].platforms['private/platform'] = { private: 'private-value' }; });
+    for (const platform of platforms) {
+      const target = set => set.images[name].platforms[platform];
+      mutations.push(set => { delete set.images[name].platforms[platform]; });
+      mutations.push(...invalidValues.map(value => set => { set.images[name].platforms[platform] = value; }));
+      mutations.push(...invalidDigests.map(value => set => { target(set).digest = value; }));
+      mutations.push(...invalidValues.map(value => set => { target(set).labels = value; }));
+      for (const label of Object.keys(identityLabels(identity))) {
+        mutations.push(set => { delete target(set).labels[label]; });
+        mutations.push(...invalidValues.map(value => set => { target(set).labels[label] = value; }));
+      }
+    }
+  }
+  return mutations;
+}
+
+function addUnknownSetFields(set) {
+  set.futurePrivate = { nested: 'private-value' };
+  for (const image of Object.values(set.images)) {
+    image.futurePrivate = { nested: 'private-value' };
+    for (const platform of Object.values(image.platforms)) {
+      platform.futurePrivate = { nested: 'private-value' };
+      platform.labels.futurePrivate = { nested: 'private-value' };
+    }
+  }
+}
+
+test('public complete-set projection is closed, canonical and idempotent for private and ledger sets', () => {
+  const seed = state();
+  const identity = record(seed);
+  const set = completeSet(identity);
+  const projected = writePublicSet(identity, set);
+  assert.deepEqual(projected.identity, publicAuthorization(identity));
+  assert.deepEqual(projected.images, set.images);
+  addUnknownSetFields(set);
+  const before = JSON.stringify(set);
+  assert.deepEqual(writePublicSet(identity, set), projected);
+  assert.equal(JSON.stringify(set), before, 'Projection must not mutate hashed input');
+  assert.deepEqual(writePublicSet(identity, projected), projected);
+  assert.deepEqual(writePublicSet(projected.identity, projected), projected);
+  advance(seed, identity, set, sha, '');
+  const ledger = publicLedger(seed);
+  const entry = ledger.reservations[identity.allocationKey];
+  assert.deepEqual(writePublicSet(entry.record, entry.set), projected);
+  assert.deepEqual(publicLedger(ledger), ledger);
+  assert.equal(entry.identitySha256, hash(identity));
+  assert.equal(entry.setHash, hash(set));
+  assert.equal(ledger.pointers.insider.setHash, hash(set));
+  for (const poison of publicSetPoisons(identity)) {
+    for (const original of [completeSet(identity), projected]) {
+      const changed = structuredClone(original);
+      poison(changed);
+      assert.throws(() => writePublicSet(identity, changed), /public set/i);
+    }
+  }
+  for (const invalid of ['', 'f'.repeat(63), `${'f'.repeat(64)}\n`, {}, []]) {
+    assert.throws(() => writePublicSet(identity, projected, invalid), /identity hash/);
+  }
+});
+
+test('every ledger write path rejects poisoned stored public sets before Git blob creation', async t => {
+  const seed = state();
+  const identity = record(seed);
+  const set = completeSet(identity);
+  advance(seed, identity, set, sha, '');
+  const nextIdentity = record(seed, { buildAttempt: '2' });
+  const clean = publicLedger(seed);
+  const operations = [
+    current => reserve(current, admission({ buildAttempt: '3' }), created),
+    current => reserve(current, admission(), created),
+    current => { current.reservations[identity.allocationKey].tagObject = newerSha; },
+    current => { current.reservations[identity.allocationKey].tagPublished = true; },
+    current => advance(current, nextIdentity, completeSet(nextIdentity), sha, hash(set)),
+    current => advance(current, identity, set, sha, hash(set)),
+  ];
+  let rejected = 0;
+  for (const poison of publicSetPoisons(identity)) {
+    for (const operation of operations) {
+      const contaminated = structuredClone(clean);
+      poison(contaminated.reservations[identity.allocationKey].set);
+      let calls = 0;
+      const adapter = gitLedger(async () => { calls++; throw new Error('Unexpected Git call'); }, anchor);
+      const store = {
+        read: async () => ({ revision: sha, state: structuredClone(contaminated) }),
+        compareAndSet: adapter.compareAndSet,
+      };
+      await assert.rejects(transact(store, operation), /public set/i);
+      assert.equal(calls, 0, 'Reject before even an unreachable Git blob or parent lookup');
+      rejected++;
+    }
+  }
+  for (const invalid of [false, JSON.parse('null'), [], 'private-value']) {
+    const changed = structuredClone(clean);
+    changed.reservations[identity.allocationKey].set = invalid;
+    let calls = 0;
+    await assert.rejects(gitLedger(async () => { calls++; }, anchor).compareAndSet(sha, changed), /public set/i);
+    assert.equal(calls, 0);
+  }
+  for (const operation of operations) {
+    const contaminated = structuredClone(clean);
+    addUnknownSetFields(contaminated.reservations[identity.allocationKey].set);
+    let persisted;
+    const adapter = gitLedger(async (endpoint, method, body) => {
+      if (endpoint === `git/commits/${sha}`) return { tree: { sha: anchor } };
+      if (endpoint === 'git/blobs') {
+        persisted = JSON.parse(body.content);
+        return { sha: anchor };
+      }
+      if (endpoint === 'git/trees') return { sha: anchor };
+      if (endpoint === 'git/commits') {
+        assert.deepEqual(body.parents, [sha]);
+        return { sha: newerSha };
+      }
+      assert.equal(endpoint, 'git/refs/heads/release-ledger');
+      assert.deepEqual(body, { sha: newerSha, force: false });
+      return {};
+    }, anchor);
+    await transact({
+      read: async () => ({ revision: sha, state: contaminated }), compareAndSet: adapter.compareAndSet,
+    }, operation);
+    assert.doesNotMatch(JSON.stringify(persisted), /futurePrivate|private-value/);
+    assert.deepEqual(persisted.reservations[identity.allocationKey].set, clean.reservations[identity.allocationKey].set);
+    assert.equal(persisted.reservations[identity.allocationKey].identitySha256, hash(identity));
+    assert.equal(persisted.reservations[identity.allocationKey].setHash, hash(set));
+    assert.deepEqual(publicLedger(persisted), persisted);
+  }
+  t.diagnostic(`${rejected} poisoned-set/transaction combinations rejected before any Git call`);
+});
+
 test('public ledger schema rejects malformed maps and typed references; stable owner approval remains mandatory', () => {
   for (const field of ['reservations', 'identities', 'pointers', 'stages', 'qualifications']) {
     const malformed = state();
@@ -1130,7 +1282,7 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
   assert.deepEqual(publicLedger(sanitized), sanitized, 'Public ledger serialization must be idempotent');
   const root = resolve('.artifacts', `public-assets-${process.pid}`);
   try {
-    emitPublicReleaseAssets(identity, set, identityLabels(identity), root);
+    emitPublicReleaseAssets(identity, set, root);
     for (const file of ['release-identity.json', 'release-set.json']) {
       const content = readFileSync(resolve(root, 'release-assets', file), 'utf8');
       assert.doesNotMatch(content, /protection|rulesets|environment|reviewer|publisher|futurePrivate|private-/);
@@ -1190,7 +1342,7 @@ test('executed signing and asset-copy commands keep normalized authorization sep
     const identity = await authorizedRecord();
     writeAuthorization(identity);
     writeAuthorizationSet(identity, completeSet(identity));
-    emitPublicReleaseAssets(identity, completeSet(identity), identityLabels(identity));
+    emitPublicReleaseAssets(identity, completeSet(identity));
     // Echo the signing input into the mock bundle to detect any wrong-file publication.
     const mock = `cosign() {
       local bundle="" source="" previous=""

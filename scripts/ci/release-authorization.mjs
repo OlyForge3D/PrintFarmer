@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { hash, identityLabels, requireThat, validateCompleteSet, verifyProtectionEvidence } from './release-policy.mjs';
+import { components, hash, identityLabels, repository, requireThat, validateCompleteSet, verifyProtectionEvidence } from './release-policy.mjs';
 import { publicIdentity, publicIdentityFields } from '../../src/Web/ReactApp/public-release-identity.mjs';
 
 export const authorizationDirectory = '.artifacts/release-authorization';
@@ -87,27 +87,73 @@ export function readPrivateJson(path) {
   catch { throw new Error('Private authorization unavailable or malformed'); }
 }
 
-export function writePublicSet(record, set, labels) {
-  const images = Object.fromEntries(Object.entries(set.images).map(([name, image]) => [name, {
-    digest: image.digest,
-    platforms: Object.fromEntries(Object.entries(image.platforms).map(([platform, value]) => [platform, {
-      digest: value.digest,
-      labels: Object.fromEntries(Object.keys(labels).map(key => [key, value.labels[key]])),
-    }])),
-  }]));
-  return { schema: 1, identity: publicAuthorization(record), managedEligible: false, images };
+function requirePublicObject(value) {
+  requireThat(value && typeof value === 'object' && !Array.isArray(value), 'Invalid public set object');
+}
+
+function requirePublicKeys(value, keys) {
+  requirePublicObject(value);
+  requireThat(Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key)),
+    'Invalid public set component/platform keys');
+}
+
+function publicDigest(value) {
+  requireThat(typeof value === 'string' && value.length === 71 && /^sha256:[a-f0-9]{64}$/.test(value),
+    'Invalid public set digest');
+  return value;
+}
+
+export function writePublicSet(record, set, identitySha256 = record.identitySha256 ?? hash(record)) {
+  requireThat(typeof identitySha256 === 'string' && identitySha256.length === 64 && /^[a-f0-9]{64}$/.test(identitySha256),
+    'Invalid public set identity hash');
+  const identity = {
+    ...publicAuthorization({ ...record, created: record.created ?? record.buildTime }), identitySha256,
+  };
+  requireThat(publicIdentityFields.every(field => typeof identity[field] === 'string'),
+    'Incomplete public set identity');
+  requirePublicObject(set);
+  requireThat(set.schema === 1 && set.managedEligible === false, 'Invalid public set schema/eligibility');
+  requirePublicObject(set.identity);
+  requireThat(hash(set.identity) === hash(identity) ||
+    (hash(set.identity) === identitySha256 && hash(publicAuthorization(set.identity)) === hash(identity)),
+  'Public set identity mismatch');
+  const labels = {
+    ...identityLabels({ ...identity, repository, created: identity.buildTime }),
+    'org.printfarmer.identity-sha256': identitySha256,
+  };
+  requirePublicKeys(set.images, Object.keys(components));
+  const images = {};
+  for (const [name, expectedPlatforms] of Object.entries(components)) {
+    const image = set.images[name];
+    requirePublicObject(image);
+    const digest = publicDigest(image.digest);
+    requirePublicKeys(image.platforms, expectedPlatforms);
+    const platforms = {};
+    for (const platform of expectedPlatforms) {
+      const value = image.platforms[platform];
+      requirePublicObject(value);
+      requirePublicObject(value.labels);
+      for (const [key, expected] of Object.entries(labels)) {
+        requireThat(Object.hasOwn(value.labels, key) && value.labels[key] === expected, 'Invalid public set identity label');
+      }
+      platforms[platform] = { digest: publicDigest(value.digest), labels: { ...labels } };
+    }
+    images[name] = { digest, platforms };
+  }
+  return { schema: 1, identity, managedEligible: false, images };
 }
 
 export function writeAuthorizationSet(record, set) {
   validateAuthorizationRecord(record);
   validateCompleteSet(record, set);
-  const normalized = { ...writePublicSet(record, set, identityLabels(record)), identity: record };
+  const normalized = { ...writePublicSet(record, set), identity: record };
   writeFileSync(privateSetPath, JSON.stringify(normalized), { mode: 0o600 });
 }
 
-export function emitPublicReleaseAssets(record, set, labels, root = '.') {
+export function emitPublicReleaseAssets(record, set, root = '.') {
+  const projected = writePublicSet(record, set);
   const directory = join(root, 'release-assets');
   mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, 'release-identity.json'), JSON.stringify(publicAuthorization(record)));
-  writeFileSync(join(directory, 'release-set.json'), JSON.stringify(writePublicSet(record, set, labels)));
+  writeFileSync(join(directory, 'release-identity.json'), JSON.stringify(projected.identity));
+  writeFileSync(join(directory, 'release-set.json'), JSON.stringify(projected));
 }

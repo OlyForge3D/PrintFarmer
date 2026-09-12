@@ -128,6 +128,16 @@ optional `lastHistoricalStable`, and the `reservations`, `identities`, `pointers
 `stages`, and `qualifications` maps. Every Git transaction projects this schema
 before creating a blob, including allocation/tag/set retries. Unknown top-level
 fields are omitted; map keys, references and scalar claims are validated.
+Complete sets use the same idempotent projection for original authorization
+records and already-projected ledger records. Only declared components and their
+expected platforms are traversed; missing or extra component/platform keys,
+malformed digests, mismatched identities and noncanonical identity-label values
+are rejected before any Git blob is created, including writes that only allocate
+or retry another release. Labels are emitted from the canonical public identity
+and retained authorization hash, never from caller-selected values or keys.
+Unknown fields within sets, images, platforms and label maps are omitted, not
+copied. Projection leaves the original `setHash`, `identitySha256`, pointer and
+CAS semantics unchanged.
 
 Owner-entered qualifications are strict public schema-1 records keyed by the
 exact source commit. They contain `schema: 1`, matching `sourceCommit`, boolean

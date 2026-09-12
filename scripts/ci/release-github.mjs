@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   repository, ledgerBranch, requireThat, validateLedger, verifyTag, compareVersions, normalizeProtectionEvidence,
-  hash, identityLabels, parseTag, publicLedgerQualification,
+  hash, parseTag, publicLedgerQualification,
 } from './release-policy.mjs';
 import { publicAuthorization, writePublicSet } from './release-authorization.mjs';
 
@@ -50,9 +50,8 @@ function publicReservation(entry, key) {
     requireThat(typeof entry.tagPublished === 'boolean', 'Invalid public ledger tag claim');
     result.tagPublished = entry.tagPublished;
   }
-  if (entry.set) {
-    result.set = writePublicSet(record, entry.set, identityLabels(record));
-    result.set.identity = { ...publicAuthorization(record), identitySha256 };
+  if (entry.set !== undefined) {
+    result.set = writePublicSet(record, entry.set, identitySha256);
   }
   return result;
 }
