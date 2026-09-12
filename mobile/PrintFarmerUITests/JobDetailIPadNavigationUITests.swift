@@ -32,7 +32,7 @@ final class JobDetailIPadNavigationUITests: ShiftTasksUITestBase {
     /// the compact tab-bar surface; sidebar navigation itself is exercised
     /// by `openTasksDestination()`, which handles a collapsed iPad sidebar.
     private func requireRegularWidthShell() throws {
-        if app.tabBars.firstMatch.waitForExistence(timeout: 8) {
+        if UIDevice.current.userInterfaceIdiom == .phone || app.tabBars.firstMatch.waitForExistence(timeout: 8) {
             throw XCTSkip("iPad-only navigation coverage; compact (iPhone) shell is covered by HarvestUITests")
         }
     }
