@@ -15,6 +15,29 @@ struct JogSubgroup: View {
         return homedAxes.lowercased().contains(axis.lowercased())
     }
 
+    /// Firmware keeps reporting the last kinematic position after homing is
+    /// invalidated (M84, firmware restart), so an unhomed coordinate is a stale
+    /// number rather than a machine position. Withhold it instead of presenting
+    /// it as fact; `nil` homing means the backend never reports the field, in
+    /// which case the reported coordinate is all we have.
+    static func positionDisplay(
+        axis: String,
+        value: Double?,
+        homedAxes: String?,
+        unit: String = ""
+    ) -> (text: String, accessibilityLabel: String) {
+        if isAxisHomed(axis, homedAxes: homedAxes) == false {
+            return ("—", "\(axis) position unavailable, axis not homed")
+        }
+        guard let value, value.isFinite else {
+            let unknown = unit.isEmpty ? "---" : "Unknown"
+            return (unknown, "\(axis) \(unknown)")
+        }
+        let formatted = value.formatted(.number.precision(.fractionLength(1)))
+        let text = unit.isEmpty ? formatted : "\(formatted) \(unit)"
+        return (text, "\(axis) \(text)")
+    }
+
     @ObservedObject var viewModel: PrinterControlsViewModel
 
     @State private var selectedAxis: String = "X"
@@ -243,12 +266,12 @@ struct JogSubgroup: View {
         }
 
         private func positionText(_ axis: String) -> String {
-            // An unhomed axis reports a stale firmware coordinate, not a
-            // position. Never badge it as the current location.
-            if JogSubgroup.isAxisHomed(axis, homedAxes: viewModel.printer.homedAxes) == false { return "—" }
             let value = axis == "X" ? viewModel.printer.x : axis == "Y" ? viewModel.printer.y : viewModel.printer.z
-            guard let value, value.isFinite else { return "---" }
-            return "\(value.formatted(.number.precision(.fractionLength(1))))"
+            return JogSubgroup.positionDisplay(
+                axis: axis,
+                value: value,
+                homedAxes: viewModel.printer.homedAxes
+            ).text
         }
     }
 
@@ -476,20 +499,17 @@ struct PrinterMotionControls: View {
     }
 
     private func position(_ axis: String, value: Double?) -> some View {
-        // Firmware keeps reporting the last kinematic position after homing is
-        // invalidated (M84, firmware restart), so an unhomed coordinate is a
-        // stale number rather than a machine position. Withhold it instead of
-        // presenting it as fact; `nil` homing means the backend never reports
-        // the field, in which case the reported coordinate is all we have.
-        let unhomed = JogSubgroup.isAxisHomed(axis, homedAxes: viewModel.printer.homedAxes) == false
-        let text = unhomed ? "—" : value.flatMap {
-            $0.isFinite ? "\($0.formatted(.number.precision(.fractionLength(1)))) mm" : nil
-        } ?? "Unknown"
-        return Text("\(axis) \(text)").font(.caption.monospacedDigit())
+        let display = JogSubgroup.positionDisplay(
+            axis: axis,
+            value: value,
+            homedAxes: viewModel.printer.homedAxes,
+            unit: "mm"
+        )
+        return Text("\(axis) \(display.text)").font(.caption.monospacedDigit())
             .foregroundStyle(Color.pfTextSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(minHeight: 18)
-            .accessibilityLabel(unhomed ? "\(axis) position unavailable, axis not homed" : "\(axis) \(text)")
+            .accessibilityLabel(display.accessibilityLabel)
     }
 
     private var homingDescription: String {
