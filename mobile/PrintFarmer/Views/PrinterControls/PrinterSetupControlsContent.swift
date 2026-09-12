@@ -274,8 +274,6 @@ struct PrinterMaterialControls: View {
                 }
             }
             .disabled(viewModel.isExecuting || viewModel.extrusionBlockedReason != nil)
-            Text("Assignment tracks a spool. It does not physically load filament.")
-                .font(.footnote).foregroundStyle(Color.pfTextSecondary).padding(.top, 10)
         }
         .foregroundStyle(Color.pfTextPrimary)
         .accessibilityElement(children: .contain)

@@ -23,13 +23,19 @@ final class JogSubgroupTests: XCTestCase {
 
     func test_absoluteInputs_requireXYZPreserveZeroAndRejectEveryCustomFeedrate() throws {
         typealias Editor = JogSubgroup.AbsolutePositionControls
-        for (x, y, z) in [("", "1", "10"), ("0", " ", "10"), ("0", "1", "")] {
-            XCTAssertThrowsError(try Editor.destination(x: x, y: y, z: z)) {
-                XCTAssertEqual($0.localizedDescription, ControlNumberInput.absoluteCoordinatesMessage)
-            }
+        XCTAssertThrowsError(try Editor.destination(x: "", y: "", z: "")) {
+            XCTAssertEqual($0.localizedDescription, ControlNumberInput.absoluteCoordinatesMessage)
         }
-        XCTAssertEqual(try Editor.destination(x: "0", y: "-1.234", z: "10"),
-                       SafetyVector3Dto(x: 0, y: -1.234, z: 10))
+        let partial = try Editor.destination(x: "", y: "1", z: "10")
+        XCTAssertNil(partial.x)
+        XCTAssertEqual(partial.y, 1.0)
+        XCTAssertEqual(partial.z, 10.0)
+
+        let full = try Editor.destination(x: "0", y: "-1.234", z: "10")
+        XCTAssertEqual(full.x, 0.0)
+        XCTAssertEqual(full.y, -1.234)
+        XCTAssertEqual(full.z, 10.0)
+
         XCTAssertThrowsError(try Editor.destination(x: "1.2345", y: "0", z: "10"))
         XCTAssertNil(try ControlNumberInput.optional("  "))
         XCTAssertEqual(try ControlNumberInput.optional("0"), 0)

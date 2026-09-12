@@ -126,7 +126,7 @@ struct JogSubgroup: View {
                 && Set(capabilities?.supportedAxes ?? []).isSuperset(of: ["X", "Y", "Z"])
         }
 
-        static func destination(x: String, y: String, z: String) throws -> SafetyVector3Dto {
+        static func destination(x: String, y: String, z: String) throws -> (x: Double?, y: Double?, z: Double?) {
             try ControlNumberInput.absolutePosition(
                 x: ControlNumberInput.coordinate(x),
                 y: ControlNumberInput.coordinate(y),
@@ -139,6 +139,7 @@ struct JogSubgroup: View {
         }
 
         private var validationMessage: String? {
+            guard Self.hasDestinationInput(x: x, y: y, z: z) else { return nil }
             do {
                 let point = try Self.destination(x: x, y: y, z: z)
                 return viewModel.absoluteMoveBlockedReason(
@@ -158,22 +159,22 @@ struct JogSubgroup: View {
             VStack(alignment: .leading, spacing: 8) {
                 rowLayout {
                     ForEach(["X", "Y", "Z"], id: \.self) { axis in
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 3) {
-                                Text(axis)
-                                    .font(.caption.bold())
-                                    .foregroundStyle(Color.pfTextPrimary)
-                                Text("[ \(positionText(axis)) ]")
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundStyle(Color.pfTextSecondary)
-                            }
+                        ZStack(alignment: .topTrailing) {
                             ControlNumberField(
                                 placeholder: "\(axis) (mm)",
                                 text: binding(axis),
-                                label: "\(axis) required absolute destination in millimeters",
+                                label: "\(axis) destination in millimeters",
                                 identifier: "printer.controls.absolute.\(axis.lowercased())",
                                 hint: ControlNumberInput.coordinatePrecisionMessage
                             )
+                            .padding(.top, 6)
+
+                            Text("[ \(positionText(axis)) ]")
+                                .font(.caption2.monospacedDigit().bold())
+                                .foregroundStyle(Color.pfTextSecondary)
+                                .padding(.horizontal, 4)
+                                .background(Color.pfBackground)
+                                .offset(x: -8, y: 0)
                         }
                     }
 
@@ -201,7 +202,7 @@ struct JogSubgroup: View {
                             inputError = error.localizedDescription
                         }
                     }
-                    .disabled(validationMessage != nil)
+                    .disabled(validationMessage != nil || !Self.hasDestinationInput(x: x, y: y, z: z))
                 }
 
                 ControlNumberField(
@@ -215,13 +216,10 @@ struct JogSubgroup: View {
                 .frame(height: 0)
                 .hidden()
 
-                if let message = validationMessage ?? inputError {
+                if let message = inputError ?? validationMessage {
                     Text(message)
                         .font(.footnote)
-                        .foregroundStyle(
-                            Self.hasDestinationInput(x: x, y: y, z: z) || inputError != nil
-                                ? Color.pfError : Color.pfTextSecondary
-                        )
+                        .foregroundStyle(Color.pfError)
                         .accessibilityAddTraits(.isStaticText)
                 }
             }
