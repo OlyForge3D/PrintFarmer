@@ -109,12 +109,18 @@ class EventTests(unittest.TestCase):
             Counter(selectors_by_family["iPad"]),
             Counter(shared + ["PrintFarmerUITests/JobDetailIPadNavigationUITests"]),
         )
-        for family, selectors in selectors_by_family.items():
-            self.assertLess(
-                selectors.index("PrintFarmerUITests/LoginFlowUITests"),
-                selectors.index("PrintFarmerUITests/AttentionActionsUITests"),
-                f"{family} login coverage must run before state-mutating Attention actions",
-            )
+        login_step = workflow.split("      - name: Run login XCUI\n", 1)[1]
+        login_step = login_step.split("\n      - name:", 1)[0]
+        self.assertIn("if: matrix.shard == 1", login_step)
+        self.assertIn(
+            "-only-testing:PrintFarmerUITests/LoginFlowUITests",
+            login_step,
+        )
+        self.assertIn("test-without-building", login_step)
+        self.assertIn(
+            'selectors=("${selectors[@]:1}")',
+            workflow.split("      - name: Run XCUI shard\n", 1)[1],
+        )
 
         declarations = set()
         for source in (mobile / "PrintFarmerUITests").glob("*.swift"):
@@ -292,6 +298,14 @@ class RunnerTests(unittest.TestCase):
                 "-only-testing:PrintFarmerTests",
                 "other-failure",
                 42,
+            ),
+            (
+                "Run login XCUI",
+                "iphone-1",
+                "build-iphone-1/Login",
+                "-only-testing:PrintFarmerUITests/LoginFlowUITests",
+                "success",
+                0,
             ),
             (
                 "Run XCUI shard",

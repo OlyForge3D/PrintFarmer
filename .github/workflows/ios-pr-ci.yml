@@ -353,6 +353,27 @@ jobs:
             SWIFT_STRICT_CONCURRENCY=minimal \
             build-for-testing
 
+      - name: Run login XCUI
+        if: matrix.shard == 1
+        timeout-minutes: 25
+        run: |
+          set -o pipefail
+          python3 scripts/run-tests.py -- test-without-building \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -destination-timeout 90 \
+            -derivedDataPath "build-${{ matrix.key }}" \
+            -clonedSourcePackagesDirPath "build-${{ matrix.key }}/SourcePackages" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            -only-testing:PrintFarmerUITests/LoginFlowUITests \
+            -parallel-testing-enabled NO \
+            -disable-concurrent-destination-testing \
+            -resultBundlePath "build-${{ matrix.key }}/Login.xcresult" \
+            2>&1 | tee "build-${{ matrix.key }}/Login.log"
+
       - name: Run XCUI shard
         timeout-minutes: 25
         env:
@@ -360,6 +381,9 @@ jobs:
         run: |
           set -o pipefail
           read -r -a selectors <<< "$SELECTORS"
+          if [[ "${{ matrix.shard }}" == "1" ]]; then
+            selectors=("${selectors[@]:1}")
+          fi
           python3 scripts/run-tests.py -- test-without-building \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
@@ -382,6 +406,10 @@ jobs:
         with:
           name: ios-xcui-${{ matrix.key }}
           path: |
+            mobile/build-${{ matrix.key }}/Login.xcresult
+            mobile/build-${{ matrix.key }}/Login.log
+            mobile/build-${{ matrix.key }}/Login.events.jsonl
+            mobile/build-${{ matrix.key }}/Login.timing.json
             mobile/build-${{ matrix.key }}/XCUIShard.xcresult
             mobile/build-${{ matrix.key }}/XCUIShard.log
             mobile/build-${{ matrix.key }}/XCUIShard.events.jsonl
