@@ -841,9 +841,9 @@ main() {
       emit_full_safe "full-safe: workflow_dispatch"
       ;;
     push)
-      # Trusted branches always run the full safe matrix so nothing merges
-      # to main/development untested.
-      if [[ "$base" == "main" || "$base" == "development" ]]; then
+      # Trusted branches and short-lived release candidates always run the
+      # full safe matrix so nothing reaches main/development untested.
+      if [[ "$base" == "main" || "$base" == "development" || "$base" == release/* ]]; then
         emit_full_safe "full-safe: trusted push to $base"
       fi
       ;;

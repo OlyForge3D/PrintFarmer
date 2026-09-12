@@ -6,10 +6,6 @@ on:
       version:
         description: 'Version (vX.Y.Z)'
         required: true
-      prerelease:
-        description: 'Is prerelease? (true/false)'
-        required: false
-        default: 'false'
 
 permissions:
   actions: read
@@ -30,12 +26,18 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.REPO_PAT }}
 
-      - name: Verify release version metadata
+      - name: Verify stable branch and version metadata
         env:
           VERSION: ${{ github.event.inputs.version }}
+          SOURCE_REF: ${{ github.ref }}
         run: |
+          set -euo pipefail
+          if [[ "$SOURCE_REF" != "refs/heads/main" ]]; then
+            echo "Stable releases must be dispatched from main; got $SOURCE_REF"
+            exit 1
+          fi
           if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Version must be vX.Y.Z"
+            echo "Stable version must be vX.Y.Z"
             exit 1
           fi
           bash scripts/sync-monorepo-version.sh --check
@@ -226,7 +228,7 @@ jobs:
           tag_name: ${{ github.event.inputs.version }}
           body_path: RELEASE_NOTES.md
           draft: false
-          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          prerelease: false
 
       - name: Upload RELEASE_NOTES.md as release asset
         if: always()

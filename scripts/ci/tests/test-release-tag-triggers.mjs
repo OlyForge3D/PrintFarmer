@@ -1,15 +1,13 @@
 // Regression guard for Defect: docker-publish tag triggers must cover the
 // exact release-tag set that consolidated-release.yml accepts. The release
 // workflow polls docker-publish.yml for the exact tag; if docker-publish
-// doesn't trigger for a `-beta.N` / `-rc.N` tag, the release step times out.
+// doesn't trigger for an accepted insider-channel tag, the release step times out.
 //
 // This test asserts:
-//   1. The GH Actions tag globs in docker-publish.yml accept `v1.2.3`,
-//      `v1.2.3-beta.1`, and `v1.2.3-rc.1`.
-//   2. The tag globs REJECT arbitrary suffixes such as `v1.2.3-alpha.1`
-//      and `v1.2.3-anything`, matching the release validator's accepted set.
-//   3. The globs and the release validator regex agree on the entire
-//      sample set — no drift between the two.
+//   1. The GH Actions tag globs accept stable and supported insider-channel tags.
+//   2. The globs reject arbitrary suffixes, matching the release validators.
+//   3. Stable and insider branch guards remain explicit.
+//   4. Promotion keeps stable/latest and insider channel pointers isolated.
 
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -101,61 +99,97 @@ async function loadDockerPublishTagGlobs() {
   return globs;
 }
 
-// Extract the validation regex from consolidated-release.yml. It lives in
-// the "Parse version" step as a Bash `=~` operand: ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+|-rc\.[0-9]+)?$
-async function loadReleaseValidatorRegex() {
+async function loadReleasePolicy() {
   const workflowPath = path.join(
     repositoryRoot, '.github', 'workflows', 'consolidated-release.yml',
   );
   const source = await readFile(workflowPath, 'utf8');
-  const match = source.match(/if\s+\[\[\s+!\s+"\$VERSION"\s+=~\s+(\^v[^\s]+)\s+\]\]/);
-  assert.ok(match, 'consolidated-release.yml: version validator regex not found');
-  // Translate Bash regex escapes (\.) to JS regex form — same syntax here.
-  return new RegExp(match[1]);
+  const matches = [...source.matchAll(/if\s+\[\[\s+!\s+"\$VERSION"\s+=~\s+(\^v[^\s]+)\s+\]\]/g)];
+  assert.equal(matches.length, 2,
+    'consolidated-release.yml: expected stable and insider version validators');
+  return {
+    source,
+    stable: new RegExp(matches[0][1]),
+    insider: new RegExp(matches[1][1]),
+  };
 }
 
-test('docker-publish tag globs cover the release validator\'s accepted set', async () => {
+test('docker-publish tag globs cover stable and insider release validators', async () => {
   const globs = await loadDockerPublishTagGlobs();
   const globRegexes = globs.map(globToRegex);
-  const validator = await loadReleaseValidatorRegex();
-
+  const policy = await loadReleasePolicy();
   const matchesAnyGlob = (tag) => globRegexes.some((rx) => rx.test(tag));
 
-  // Positive vectors — tags the release workflow can produce.
   const accepted = [
-    'v1.2.3',
-    'v0.0.0',
-    'v10.20.30',
-    'v1.2.3-beta.1',
-    'v1.2.3-beta.42',
-    'v1.2.3-rc.1',
-    'v1.2.3-rc.99',
+    ['stable', 'v1.2.3'],
+    ['stable', 'v0.0.0'],
+    ['stable', 'v10.20.30'],
+    ['insider', 'v1.2.3-insider.1'],
+    ['insider', 'v1.2.3-insider.42'],
+    ['insider', 'v1.2.3-beta.1'],
+    ['insider', 'v1.2.3-rc.99'],
   ];
-  for (const tag of accepted) {
-    assert.ok(validator.test(tag),
-      `release validator should accept ${tag} (test-vector self-check)`);
+  for (const [channel, tag] of accepted) {
+    assert.ok(policy[channel].test(tag),
+      `${channel} release validator should accept ${tag}`);
     assert.ok(matchesAnyGlob(tag),
       `docker-publish.yml tag globs must match accepted release tag ${tag}`);
   }
 
-  // Negative vectors — the globs and the validator must both reject these.
-  // This proves the globs did not over-broaden (e.g. via a bare `v*` pattern)
-  // and stay in sync with consolidated-release.yml's accepted set.
   const rejected = [
     'v1.2.3-alpha.1',
     'v1.2.3-preview',
-    'v1.2.3-beta',        // missing .N
-    'v1.2.3-rc',          // missing .N
-    'v1.2.3-beta.1.2',    // extra segment
-    'v1.2',               // truncated
-    'v1.2.3.4',           // extra segment
-    'release-1.2.3',      // wrong prefix
-    'v1.2.3-BETA.1',      // wrong case
+    'v1.2.3-insider',
+    'v1.2.3-beta',
+    'v1.2.3-rc',
+    'v1.2.3-insider.1.2',
+    'v1.2',
+    'v1.2.3.4',
+    'release-1.2.3',
+    'v1.2.3-INSIDER.1',
   ];
   for (const tag of rejected) {
-    assert.ok(!validator.test(tag),
-      `release validator should reject ${tag} (test-vector self-check)`);
+    assert.ok(!policy.stable.test(tag) && !policy.insider.test(tag),
+      `release validators should reject ${tag}`);
     assert.ok(!matchesAnyGlob(tag),
       `docker-publish.yml tag globs must NOT match rejected tag ${tag}`);
   }
+
+  assert.match(policy.source, /SOURCE_REF" != "refs\/heads\/main"/,
+    'stable releases must remain bound to main');
+  assert.match(policy.source, /SOURCE_REF" != "refs\/heads\/development"/,
+    'insider releases must remain bound to development');
+});
+
+test('Docker promotion isolates stable and insider channel pointers', async () => {
+  const workflowPath = path.join(
+    repositoryRoot, '.github', 'workflows', 'docker-publish.yml',
+  );
+  const source = await readFile(workflowPath, 'utf8');
+
+  assert.match(source, /TAGS\+=\("\$\{major\}\.\$\{minor\}" "\$major" stable latest\)/,
+    'stable releases must promote stable, latest, major, and minor pointers');
+  assert.match(source, /VERSION" =~ -\(insider\|beta\|rc\)\\\.\[0-9\]\+\$/,
+    'supported prereleases must be recognized as insider-channel builds');
+  assert.match(source, /TAGS\+=\(insider\)/,
+    'insider releases must promote the insider pointer');
+  assert.equal(
+    (source.match(/org\.printfarmer\.release-channel=\$\{\{ steps\.source\.outputs\.channel \}\}/g) ?? []).length,
+    2,
+    'both split-service and monolith images must carry the release-channel label',
+  );
+});
+
+test('legacy stable release path is main-only and cannot mark stable tags prerelease', async () => {
+  const workflowPath = path.join(
+    repositoryRoot, '.github', 'workflows', 'release.yml',
+  );
+  const source = await readFile(workflowPath, 'utf8');
+
+  assert.match(source, /SOURCE_REF" != "refs\/heads\/main"/,
+    'legacy stable releases must remain bound to main');
+  assert.match(source, /prerelease: false/,
+    'legacy stable releases must always publish as stable');
+  assert.doesNotMatch(source, /^\s+prerelease:\s*\n\s+description:/m,
+    'legacy stable workflow must not expose a prerelease toggle');
 });

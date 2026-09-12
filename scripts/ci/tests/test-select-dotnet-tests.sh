@@ -1839,6 +1839,15 @@ case_push_to_main_full_safe() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
 }
 
+case_push_to_release_candidate_full_safe() {
+  local out="$1"
+  CHANGED_FILES="README.md"
+  EVENT_NAME="push" BASE_REF="release/v1.2.3" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+}
+
 # Regression guard (#1397): the merge-base fix must be scoped to `pull_request`
 # events only. The `push` event path's `before`/`after` are already a real
 # ancestry pair on the trusted branch's own history (or, on a force-push, two
@@ -1933,7 +1942,7 @@ case_workflow_trusted_pushes_unfiltered() {
   local push_block pull_block
   push_block="$(extract_event_block push)"
   pull_block="$(extract_event_block pull_request)"
-  assert_contains "push branches" "$push_block" "branches: [main, development]" || return 1
+  assert_contains "push branches" "$push_block" "branches: [main, development, 'release/**']" || return 1
   if printf '%s\n%s\n' "$push_block" "$pull_block" \
       | grep -Eq '^[[:space:]]+(paths|paths-ignore):'; then
     printf '  push/pull_request workflow events must not define path filters\n' >&2
@@ -3963,6 +3972,7 @@ TESTS=(
   case_merge_base_diverged_pr_base_sha_mobile_only
   case_push_to_development_full_safe
   case_push_to_main_full_safe
+  case_push_to_release_candidate_full_safe
   case_compute_change_set_push_force_push_diffs_before_after_directly
   case_workflow_trusted_pushes_unfiltered
   case_workflow_dispatch_full_safe

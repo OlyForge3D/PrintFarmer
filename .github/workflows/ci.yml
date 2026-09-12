@@ -3,9 +3,10 @@ name: CI
 on:
   workflow_dispatch:
   push:
-    branches: [main, development]
-    # No path filter: every trusted-branch push must dispatch, then the selector
-    # forces the full-safe matrix before considering the changed-path set.
+    branches: [main, development, 'release/**']
+    # No path filter: every trusted-branch or release-candidate push must
+    # dispatch, then the selector forces the full-safe matrix before considering
+    # the changed-path set. Release branches validate candidates but cannot publish.
   pull_request:
     types: [opened, synchronize, reopened]
     # No `paths:` filter here — every PR must produce the required CI check.
@@ -219,8 +220,8 @@ jobs:
   # bucket that feeds `want_dotnet_build` changed, so a mobile-only or
   # docs-only PR provably has nothing new to validate. Coverage does not
   # regress — `want_dotnet_build` is forced `true` (full-safe) on every
-  # trusted push to `main`/`development` (see select-dotnet-tests.sh
-  # `emit_full_safe "full-safe: trusted push to $base"`), on
+  # trusted push to `main`/`development` or `release/**` (see
+  # select-dotnet-tests.sh `emit_full_safe "full-safe: trusted push to $base"`), on
   # `workflow_dispatch`, and on any change to `Directory.Packages.props`,
   # `NuGet.Config`, or any `*.sln` (the `shared_config` bucket). Any edit to
   # an EXISTING `.csproj` that `farm-web.sln` actually references also lives

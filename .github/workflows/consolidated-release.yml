@@ -3,18 +3,29 @@ name: Consolidated Release
 # Unified release workflow for main PrintFarmer app (Docker containers)
 # AND iOS mobile app (TestFlight). Uses a single VERSION file and tag.
 #
-# Tag conventions:
-#   v1.2.3           → Production release (Docker images + App Store submission)
-#   v1.2.3-beta.N   → Beta release (Docker pre-release images + TestFlight beta)
-#   v1.2.3-rc.N     → Release candidate (Docker pre-release + TestFlight external)
+# Release channels and source branches:
+#   stable  → main only, version vX.Y.Z
+#   insider → development only, version vX.Y.Z-insider.N (beta/rc remain supported)
+#
+# Short-lived release/vX.Y.Z branches may validate a stable candidate, but stable
+# publication happens only after the candidate is merged to main. This keeps main
+# as the single stable source of truth and development as the insider source.
 #
 # This workflow orchestrates both release paths from a single trigger.
 
 on:
   workflow_dispatch:
     inputs:
+      channel:
+        description: 'Release channel (stable defaults for end users; insider is opt-in)'
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - insider
       version:
-        description: 'Version tag (vX.Y.Z or vX.Y.Z-beta.N or vX.Y.Z-rc.N)'
+        description: 'Stable: vX.Y.Z; insider: vX.Y.Z-insider.N (beta.N/rc.N also supported)'
         required: true
       skip_mobile:
         description: 'Skip iOS/TestFlight release'
@@ -40,47 +51,72 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.parse.outputs.version }}
+      channel: ${{ steps.parse.outputs.channel }}
       is_prerelease: ${{ steps.parse.outputs.is_prerelease }}
       is_beta: ${{ steps.parse.outputs.is_beta }}
       base_version: ${{ steps.parse.outputs.base_version }}
     steps:
-      - name: Parse version
+      - name: Validate release channel, branch, and version
         id: parse
+        env:
+          CHANNEL: ${{ github.event.inputs.channel }}
+          VERSION: ${{ github.event.inputs.version }}
+          SOURCE_REF: ${{ github.ref }}
         run: |
-          VERSION="${{ github.event.inputs.version }}"
+          set -euo pipefail
 
-          # Validate format: vX.Y.Z or vX.Y.Z-beta.N or vX.Y.Z-rc.N
-          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+|-rc\.[0-9]+)?$ ]]; then
-            echo "❌ Version must match vX.Y.Z, vX.Y.Z-beta.N, or vX.Y.Z-rc.N"
-            echo "   Got: $VERSION"
-            exit 1
-          fi
+          case "$CHANNEL" in
+            stable)
+              if [[ "$SOURCE_REF" != "refs/heads/main" ]]; then
+                echo "Stable releases must be dispatched from main; got $SOURCE_REF"
+                exit 1
+              fi
+              if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "Stable versions must match vX.Y.Z; got $VERSION"
+                exit 1
+              fi
+              ;;
+            insider)
+              if [[ "$SOURCE_REF" != "refs/heads/development" ]]; then
+                echo "Insider releases must be dispatched from development; got $SOURCE_REF"
+                exit 1
+              fi
+              if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(insider|beta|rc)\.[0-9]+$ ]]; then
+                echo "Insider versions must match vX.Y.Z-insider.N, vX.Y.Z-beta.N, or vX.Y.Z-rc.N; got $VERSION"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Unsupported release channel: $CHANNEL"
+              exit 1
+              ;;
+          esac
 
-          # Extract base version (without prerelease suffix)
-          BASE_VERSION=$(echo "$VERSION" | sed -E 's/^(v[0-9]+\.[0-9]+\.[0-9]+).*/\1/')
-
+          BASE_VERSION="$(echo "$VERSION" | sed -E 's/^(v[0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
           IS_PRERELEASE="false"
           IS_BETA="false"
-          if [[ "$VERSION" == *"-beta"* ]] || [[ "$VERSION" == *"-rc"* ]]; then
+          if [[ "$CHANNEL" == "insider" ]]; then
             IS_PRERELEASE="true"
           fi
-          if [[ "$VERSION" == *"-beta"* ]]; then
+          if [[ "$VERSION" == *"-beta."* ]]; then
             IS_BETA="true"
           fi
 
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
-          echo "is_beta=$IS_BETA" >> $GITHUB_OUTPUT
-          echo "base_version=$BASE_VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "is_beta=$IS_BETA" >> "$GITHUB_OUTPUT"
+          echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
 
           echo "📦 Version: $VERSION"
+          echo "   Channel: $CHANNEL"
+          echo "   Source: $SOURCE_REF"
           echo "   Base: $BASE_VERSION"
-          echo "   Prerelease: $IS_PRERELEASE"
-          echo "   Beta: $IS_BETA"
 
-      - name: Checkout
+      - name: Checkout selected source
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.ref }}
           fetch-depth: 0
           token: ${{ secrets.REPO_PAT }}
 
@@ -400,12 +436,16 @@ jobs:
       - name: Build release notes
         env:
           VERSION: ${{ needs.validate-and-tag.outputs.version }}
+          CHANNEL: ${{ needs.validate-and-tag.outputs.channel }}
           IS_PRERELEASE: ${{ needs.validate-and-tag.outputs.is_prerelease }}
           MOBILE_RESULT: ${{ needs.mobile-release.result }}
           CHANGELOG: ${{ steps.cliff.outputs.changelog }}
         run: |
           {
             echo "## Release $VERSION"
+            echo ""
+            echo "- **Channel:** $CHANNEL"
+            echo "- **Source branch:** ${{ github.ref_name }}"
             echo ""
             echo "### Release Components"
             echo ""

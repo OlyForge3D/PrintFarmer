@@ -18,13 +18,12 @@ on:
     # one-or-more of the preceding character, `.` is literal, `*` is zero-or-more
     # of any non-`/` character. The three patterns below must match — and only
     # match — the release-tag set accepted by consolidated-release.yml's
-    # validator (^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+|-rc\.[0-9]+)?$).
-    # consolidated-release.yml polls this workflow for the exact tag; missing
-    # prerelease coverage causes its "Wait for exact-tag Docker workflow" step
-    # to time out for `-beta.N` / `-rc.N` releases. See regression guard at
+    # channel validator. Stable tags are vX.Y.Z; insider-channel tags use
+    # -insider.N, -beta.N, or -rc.N. See the regression guard at
     # scripts/ci/tests/test-release-tag-triggers.mjs.
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-insider.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
   workflow_dispatch:
@@ -80,7 +79,10 @@ jobs:
             echo "Invalid release version: $VERSION"
             exit 1
           fi
+          CHANNEL="stable"
+          [[ "$VERSION" == *-* ]] && CHANNEL="insider"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
 
       - name: Verify repository version metadata
         env:
@@ -351,8 +353,11 @@ jobs:
             SOURCE_ARCHIVE_URL="${RELEASE_BASE_URL}/PrintFarmer-${VERSION}-source.tar.gz"
             SBOM_URL="${RELEASE_BASE_URL}/printfarmer-${{ matrix.image }}-${VERSION}.spdx.json"
           fi
+          CHANNEL="stable"
+          [[ "$VERSION" == *-* ]] && CHANNEL="insider"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "container_version=${VERSION#v}" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
           echo "source_archive_url=$SOURCE_ARCHIVE_URL" >> "$GITHUB_OUTPUT"
           echo "sbom_url=$SBOM_URL" >> "$GITHUB_OUTPUT"
 
@@ -546,6 +551,7 @@ jobs:
             org.opencontainers.image.licenses=AGPL-3.0-only
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ steps.source.outputs.version }}
+            org.printfarmer.release-channel=${{ steps.source.outputs.channel }}
             org.printfarmer.source-archive=${{ steps.source.outputs.source_archive_url }}
             org.printfarmer.sbom=${{ steps.source.outputs.sbom_url }}
 
@@ -667,8 +673,11 @@ jobs:
             SOURCE_ARCHIVE_URL="${RELEASE_BASE_URL}/PrintFarmer-${VERSION}-source.tar.gz"
             SBOM_URL="${RELEASE_BASE_URL}/printfarmer-${VERSION}.spdx.json"
           fi
+          CHANNEL="stable"
+          [[ "$VERSION" == *-* ]] && CHANNEL="insider"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "container_version=${VERSION#v}" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
           echo "source_archive_url=$SOURCE_ARCHIVE_URL" >> "$GITHUB_OUTPUT"
           echo "sbom_url=$SBOM_URL" >> "$GITHUB_OUTPUT"
 
@@ -712,6 +721,7 @@ jobs:
             org.opencontainers.image.licenses=AGPL-3.0-only
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ steps.source.outputs.version }}
+            org.printfarmer.release-channel=${{ steps.source.outputs.channel }}
             org.printfarmer.source-archive=${{ steps.source.outputs.source_archive_url }}
             org.printfarmer.sbom=${{ steps.source.outputs.sbom_url }}
 
@@ -886,7 +896,11 @@ jobs:
             TAGS+=("$VERSION")
             if [[ "$VERSION" != *-* ]]; then
               IFS='.' read -r major minor patch <<< "$VERSION"
-              TAGS+=("${major}.${minor}" "$major" latest)
+              TAGS+=("${major}.${minor}" "$major" stable latest)
+            elif [[ "$VERSION" =~ -(insider|beta|rc)\.[0-9]+$ ]]; then
+              # Every prerelease belongs to the opt-in insider channel. Never
+              # move stable/latest/major/minor pointers from a prerelease tag.
+              TAGS+=(insider)
             fi
             SMOKE_TAG="$VERSION"
           elif [[ "$GITHUB_REF" == "refs/heads/release" ]]; then

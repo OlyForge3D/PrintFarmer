@@ -1,5 +1,35 @@
 # Release Guide
 
+## Release channels and branches
+
+PrintFarmer publishes two end-user channels:
+
+| Channel | Source branch | Version format | Container pointer | Audience |
+| --- | --- | --- | --- | --- |
+| Stable | `main` | `vX.Y.Z` | `stable` and `latest` | Default for all installations |
+| Insider | `development` | `vX.Y.Z-insider.N` | `insider` | Explicit opt-in for faster, potentially less stable builds |
+
+`-beta.N` and `-rc.N` tags remain supported prerelease stages and also move only
+the `insider` container pointer. Prereleases never move `stable`, `latest`, or
+stable major/minor tags. The repository `VERSION` file stores the base version
+(`vX.Y.Z`); an insider, beta, or RC suffix is supplied when dispatching the
+release workflow.
+
+Dispatch `.github/workflows/consolidated-release.yml` from the branch matching
+the selected channel. The workflow rejects branch/channel/version mismatches.
+The legacy `.github/workflows/release.yml` is stable-only and rejects dispatches
+outside `main`.
+
+Do not maintain permanent parallel release branches. `main` is the stable line
+and `development` is the insider line. When stabilization needs isolation, use
+a short-lived `release/vX.Y.Z` branch. Creating or pushing that branch triggers
+the full-safe CI matrix, but does not publish containers. After validation,
+merge it to `main` and publish the stable tag from the resulting `main` commit.
+Merge release-only fixes back to `development`. A release branch must never move
+stable or `latest` image pointers by itself.
+
+## Release authentication
+
 This document explains how to create and configure the repository Personal Access Token (PAT) used by the release workflow (`.github/workflows/release.yml`) to push tags so downstream workflows (for example container builds) are triggered.
 
 Every release must also publish exact-commit source archives, source metadata,
