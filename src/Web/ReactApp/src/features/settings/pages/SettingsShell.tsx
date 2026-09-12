@@ -1697,7 +1697,9 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     </div>
   );
 
-  const showSubTabs = !isAdminRoute && effectiveScope !== 'system' && !hasNoMatches && visibleSubPages.length > 0;
+  const showSubTabs = !hasNoMatches
+    && visibleSubPages.length > 0
+    && (!isAdminRoute || currentCategory.id === 'hardware');
   const subTabs = showSubTabs ? (
       <div className="border-b border-pf-border px-4 pt-4 md:px-6">
         <SettingsSubTabs
