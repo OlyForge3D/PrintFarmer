@@ -280,28 +280,39 @@ class RunnerTests(unittest.TestCase):
         )
         cases = (
             (
+                "Run unit tests",
+                None,
+                "build/TestResults",
+                "-only-testing:PrintFarmerTests",
+                "other-failure",
+                42,
+            ),
+            (
+                "Run XCUI shard",
                 "iphone-4",
+                "build-iphone-4/XCUIShard",
                 "-only-testing:PrintFarmerUITests/ShiftTasksUITests "
                 "-only-testing:PrintFarmerUITests/UIWaitBudgetTests",
                 "success",
                 0,
             ),
             (
+                "Run XCUI shard",
                 "ipad-4",
+                "build-ipad-4/XCUIShard",
                 "-only-testing:PrintFarmerUITests/JobDetailIPadNavigationUITests",
                 "failed",
                 65,
             ),
         )
-        for key, selectors, mode, expected in cases:
-            with self.subTest(key=key):
-                step = "Run XCUI shard"
+        for step, key, stem, selectors, mode, expected in cases:
+            with self.subTest(step=step, key=key):
                 block = workflow.split(f"      - name: {step}\n", 1)[1]
                 block = block.split("\n      - name:", 1)[0]
                 shell = textwrap.dedent(block.split("        run: |\n", 1)[1])
-                shell = shell.replace("${{ matrix.key }}", key)
-                shell = shell.replace("$SELECTORS", selectors)
-                stem = f"build-{key}/XCUIShard"
+                if key is not None:
+                    shell = shell.replace("${{ matrix.key }}", key)
+                    shell = shell.replace("$SELECTORS", selectors)
                 (self.directory / stem).parent.mkdir(parents=True, exist_ok=True)
                 environment = {
                     **os.environ,
@@ -328,7 +339,8 @@ class RunnerTests(unittest.TestCase):
                 upload = workflow.split(f"      - name: {step}\n", 1)[1]
                 upload = upload.split("uses: actions/upload-artifact@v7", 1)[1]
                 upload = upload.split("retention-days:", 1)[0]
-                upload = upload.replace("${{ matrix.key }}", key)
+                if key is not None:
+                    upload = upload.replace("${{ matrix.key }}", key)
                 for suffix in (".xcresult", ".log", ".events.jsonl", ".timing.json"):
                     self.assertIn(f"mobile/{stem}{suffix}", upload)
 
