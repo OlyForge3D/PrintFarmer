@@ -77,12 +77,15 @@ class EventTests(unittest.TestCase):
         self.assertEqual(len({key for key, _, _ in shards}), 8)
 
         selectors_by_family = {"iPhone": [], "iPad": []}
+        selectors_by_shard = {}
         for key, family, selectors in shards:
             self.assertRegex(key, rf"^{family.lower()}-[1-4]$")
-            selectors_by_family[family].extend(
+            shard_selectors = [
                 line.strip().removeprefix("-only-testing:")
                 for line in selectors.splitlines()
-            )
+            ]
+            selectors_by_shard[key] = shard_selectors
+            selectors_by_family[family].extend(shard_selectors)
 
         shared = [
             "PrintFarmerUITests/AttentionActionsUITests",
@@ -121,6 +124,20 @@ class EventTests(unittest.TestCase):
             'selectors=("${selectors[@]:1}")',
             workflow.split("      - name: Run XCUI shard\n", 1)[1],
         )
+        for key in ("iphone-1", "ipad-1"):
+            with self.subTest(key=key):
+                self.assertEqual(
+                    selectors_by_shard[key][0],
+                    "PrintFarmerUITests/LoginFlowUITests",
+                )
+                self.assertEqual(
+                    selectors_by_shard[key][1:],
+                    [
+                        "PrintFarmerUITests/AttentionActionsUITests",
+                        "PrintFarmerUITests/OperatorShellUITests",
+                        "PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations",
+                    ],
+                )
 
         declarations = set()
         for source in (mobile / "PrintFarmerUITests").glob("*.swift"):
@@ -309,6 +326,17 @@ class RunnerTests(unittest.TestCase):
             ),
             (
                 "Run XCUI shard",
+                "iphone-1",
+                "build-iphone-1/XCUIShard",
+                "-only-testing:PrintFarmerUITests/LoginFlowUITests "
+                "-only-testing:PrintFarmerUITests/AttentionActionsUITests "
+                "-only-testing:PrintFarmerUITests/OperatorShellUITests "
+                "-only-testing:PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations",
+                "success",
+                0,
+            ),
+            (
+                "Run XCUI shard",
                 "iphone-4",
                 "build-iphone-4/XCUIShard",
                 "-only-testing:PrintFarmerUITests/ShiftTasksUITests "
@@ -332,6 +360,7 @@ class RunnerTests(unittest.TestCase):
                 shell = textwrap.dedent(block.split("        run: |\n", 1)[1])
                 if key is not None:
                     shell = shell.replace("${{ matrix.key }}", key)
+                    shell = shell.replace("${{ matrix.shard }}", key.rsplit("-", 1)[1])
                     shell = shell.replace("$SELECTORS", selectors)
                 (self.directory / stem).parent.mkdir(parents=True, exist_ok=True)
                 environment = {
@@ -352,7 +381,14 @@ class RunnerTests(unittest.TestCase):
                 bundle = self.directory / f"{stem}.xcresult"
                 args = json.loads((bundle / "arguments.json").read_text())
                 self.assertIn("test-without-building", args)
-                for selector in selectors.split():
+                expected_selectors = selectors.split()
+                if key is not None and key.endswith("-1") and step == "Run XCUI shard":
+                    self.assertNotIn(
+                        "-only-testing:PrintFarmerUITests/LoginFlowUITests",
+                        args,
+                    )
+                    expected_selectors = expected_selectors[1:]
+                for selector in expected_selectors:
                     self.assertIn(selector, args)
                 for suffix in (".log", ".events.jsonl", ".timing.json"):
                     self.assertTrue((self.directory / f"{stem}{suffix}").exists())
