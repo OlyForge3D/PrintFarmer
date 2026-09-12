@@ -8,7 +8,7 @@ import {
   parseTag, parseVersionFile, reserve, transact, validateCandidate, validateCompleteSet,
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence,
 } from '../release-policy.mjs';
-import { ensureSourceTag, gitLedger, publicLedger, readTag, verifyProtection } from '../release-github.mjs';
+import { ensureSourceTag, githubClient, gitLedger, publicLedger, publicLedgerFields, readTag, verifyProtection } from '../release-github.mjs';
 import { buildMetadata, emitBuildIdentity } from '../release-metadata.mjs';
 import { runContext, runReleaseControl } from '../release-control.mjs';
 import { inspectCompleteSet, publishImmutableTags } from '../release-set.mjs';
@@ -30,6 +30,10 @@ const context = (overrides = {}) => ({
   channel: 'insider', ...overrides,
 });
 const state = () => ({ schema: 1, anchor, counter: '0', reservations: {}, identities: {}, pointers: {}, qualifications: {} });
+const hotfixQualification = () => ({
+  schema: 1, sourceCommit: sha, reviewed: true, tests: true, compatibility: true,
+  migrations: true, recovery: true, mode: 'hotfix', nonPromotionApproved: true,
+});
 const admission = (overrides = {}) => admit(context(overrides), overrides.eventSha || sha, 'v1.2.3\n', '1.2.2');
 const record = (ledger = state(), overrides = {}) => reserve(ledger, admission(overrides), created).record;
 const completeSet = identity => ({
@@ -336,11 +340,22 @@ test('stable promotion requires exact-main qualification and never reuses inside
   const stable = admit(context({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
     workflowIdentity: context().workflowIdentity.replace('/development', '/main') }), sha, 'v1.2.3');
   assert.throws(() => reserve(ledger, stable, created), /qualification/);
-  ledger.qualifications[sha] = { sourceCommit: sha, reviewed: true, tests: 'passed',
-    compatibility: 'passed', migrations: 'passed', recovery: 'passed', sourceTreeReviewed: true,
-    reviewers: [{ id: 7, login: 'private-value' }],
+  ledger.qualifications[sha] = { schema: 1, sourceCommit: sha, reviewed: true, tests: true,
+    compatibility: true, migrations: true, recovery: true, sourceTreeReviewed: true, mode: 'promotion',
     promotionOrigin: { allocationKey: insider.allocationKey, releaseId: insider.releaseId,
       sourceCommit: sha, setHash: hash(set) } };
+  for (const [field, value] of Object.entries({
+    allocationKey: 'd'.repeat(64), releaseId: 'insider:1.2.3-insider.99',
+    sourceCommit: newerSha, setHash: 'd'.repeat(64),
+  })) {
+    const changed = structuredClone(ledger);
+    changed.qualifications[sha].promotionOrigin[field] = value;
+    assert.throws(() => reserve(publicLedger(changed), stable, created), /qualified immutable insider set/);
+  }
+  const unreviewed = structuredClone(ledger);
+  unreviewed.qualifications[sha].sourceTreeReviewed = false;
+  assert.throws(() => reserve(unreviewed, stable, created), /promotion qualification/);
+  Object.assign(ledger, publicLedger(ledger));
   const stableRecord = reserve(ledger, stable, created).record;
   assert.deepEqual(stableRecord.qualification, {
     sourceCommit: sha, reviewed: true, tests: 'passed', compatibility: 'passed',
@@ -636,11 +651,7 @@ test('stable artifact qualification retains pass claims but never owner free tex
   const stable = admit(context({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
     workflowIdentity: context().workflowIdentity.replace('/development', '/main') }), sha, 'v1.2.3');
   const ledger = state();
-  ledger.qualifications[sha] = {
-    sourceCommit: sha, reviewed: true, tests: 'passed', compatibility: 'passed',
-    migrations: 'passed', recovery: 'passed', hotfixReason: 'private-value owner explanation',
-    reviewers: [{ login: 'raw-reviewer-sentinel', id: 7 }],
-  };
+  ledger.qualifications[sha] = hotfixQualification();
   const identity = reserve(ledger, stable, protection.verifiedAt, stableProtection).record;
   assert.equal(identity.qualification.mode, 'hotfix');
   const cwd = process.cwd();
@@ -699,6 +710,7 @@ function authorizationFixture(initial = state()) {
   let head = put({ tree: { sha: tree }, parents: [{ sha: anchor }] });
   let tag;
   const calls = [];
+  const ledgerWrites = [];
   const env = {
     GH_TOKEN: 'github-fixture', RELEASE_PUBLISHER_TOKEN: 'publisher-fixture',
     RELEASE_PUBLISHER_APP_ID: '123', RELEASE_LEDGER_ANCHOR: anchor,
@@ -708,7 +720,7 @@ function authorizationFixture(initial = state()) {
     GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '1', RELEASE_CHANNEL: 'insider',
   };
   return {
-    env, calls,
+    env, calls, ledgerWrites,
     deleteTag() { tag = undefined; },
     async fetch(url, options) {
       const endpoint = url.split('/repos/OlyForge3D/PrintFarmer/')[1];
@@ -740,6 +752,7 @@ function authorizationFixture(initial = state()) {
       }
       const body = JSON.parse(options.body);
       if (endpoint === 'git/blobs') {
+        ledgerWrites.push(JSON.parse(body.content));
         return response({ sha: put({ encoding: 'base64', content: Buffer.from(body.content).toString('base64') }) });
       }
       if (endpoint === 'git/trees') return response({ sha: put({ truncated: false, tree: body.tree }) });
@@ -758,6 +771,139 @@ function authorizationFixture(initial = state()) {
     },
   };
 }
+
+test('every ledger write path removes unknown top-level seed fields without changing immutable references', async () => {
+  const seed = state();
+  seed.lastHistoricalStable = '1.2.2';
+  seed.qualifications[sha] = hotfixQualification();
+  const privateSeed = {
+    reviewers: [{ id: 7, login: 'private-value' }], publisherAppId: 'private-value',
+    protection: { rulesets: [{ id: 7 }] }, ownerNotes: 'private-value',
+    futurePrivate: { nested: 'private-value' },
+  };
+  Object.assign(seed, privateSeed);
+  const fixture = authorizationFixture(seed);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = fixture.fetch;
+  try {
+    const store = gitLedger(githubClient(fixture.env.RELEASE_PUBLISHER_TOKEN), anchor);
+    // Reintroduce contamination at each transaction, including unchanged retries.
+    const write = mutate => transact(store, current => {
+      Object.assign(current, privateSeed);
+      return mutate(current);
+    });
+    const identity = await write(current => reserve(current, admission(), created).record);
+    const retry = await write(current => reserve(current, admission(), created).record);
+    assert.equal(retry.identitySha256, hash(identity));
+    await ensureSourceTag(githubClient(fixture.env.RELEASE_PUBLISHER_TOKEN), store, identity,
+      (_store, mutate) => write(mutate));
+    const set = completeSet(identity);
+    await write(current => advance(current, identity, set, sha, ''));
+    await write(current => advance(current, identity, set, sha, hash(set)));
+    assert.equal(fixture.ledgerWrites.length, 6, 'Allocation, retry, tag object, tag publication, set and set retry');
+    for (const persisted of fixture.ledgerWrites) {
+      assert.deepEqual(Object.keys(persisted).sort(), [...publicLedgerFields].sort());
+      assert.doesNotMatch(JSON.stringify(persisted), /private-value|reviewers|publisherAppId|protection|ownerNotes|futurePrivate/);
+      assert.deepEqual(persisted.qualifications[sha], hotfixQualification());
+      assert.equal(persisted.lastHistoricalStable, '1.2.2');
+      assert.equal(persisted.counter, '1');
+      assert.equal(persisted.identities[identity.canonicalVersion], identity.allocationKey);
+      assert.equal(persisted.reservations[identity.allocationKey].identitySha256, hash(identity));
+      assert.deepEqual(publicLedger(persisted), persisted);
+      validateLedger(persisted, anchor);
+    }
+    const persisted = (await store.read()).state; // Also verifies adjacent-commit CAS continuity.
+    const entry = persisted.reservations[identity.allocationKey];
+    assert.equal(entry.setHash, hash(set));
+    assert.equal(entry.set.identity.identitySha256, hash(identity));
+    assert.deepEqual(entry.set.images, set.images);
+    assert.equal(entry.tagPublished, true);
+    assert.equal(persisted.pointers.insider.setHash, hash(set));
+    assert.deepEqual(fixture.ledgerWrites[4], fixture.ledgerWrites[5]);
+    verifyConsumer(identity, entry.record, context(), entry.identitySha256);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('every transaction rejects private qualification seed fields before any Git write', async () => {
+  const seed = state();
+  const identity = record(seed);
+  const set = completeSet(identity);
+  advance(seed, identity, set, sha, '');
+  const nextIdentity = record(seed, { buildAttempt: '2' });
+  const clean = publicLedger(seed);
+  const operations = [
+    current => reserve(current, admission({ buildAttempt: '3' }), created),
+    current => reserve(current, admission(), created),
+    current => { current.reservations[identity.allocationKey].tagObject = newerSha; },
+    current => { current.reservations[identity.allocationKey].tagPublished = true; },
+    current => advance(current, nextIdentity, completeSet(nextIdentity), sha, hash(set)),
+    current => advance(current, identity, set, sha, hash(set)),
+  ];
+  const promotion = {
+    schema: 1, sourceCommit: sha, reviewed: true, tests: true, compatibility: true,
+    migrations: true, recovery: true, mode: 'promotion', sourceTreeReviewed: true,
+    promotionOrigin: {
+      allocationKey: identity.allocationKey, releaseId: identity.releaseId, sourceCommit: sha, setHash: hash(set),
+    },
+  };
+  const poisonedQualifications = [
+    ...['reviewers', 'reviewerLogin', 'reviewerId', 'publisherAppId', 'rawPolicy', 'hotfixReason', 'ownerNotes', 'futurePrivate']
+      .map(field => ({ ...hotfixQualification(), [field]: { secret: 'private-value' } })),
+    ...['reviewerLogin', 'publisherAppId', 'rawPolicy', 'futurePrivate']
+      .map(field => ({ ...promotion, promotionOrigin: { ...promotion.promotionOrigin, [field]: 'private-value' } })),
+    { ...hotfixQualification(), reviewed: { login: 'private-value' } },
+    { ...hotfixQualification(), sourceCommit: { id: 'private-value' } },
+  ];
+  for (const qualification of poisonedQualifications) {
+    for (const operation of operations) {
+      const contaminated = structuredClone(clean);
+      contaminated.qualifications[sha] = qualification;
+      let writes = 0;
+      const adapter = gitLedger(async () => { writes++; throw new Error('Unexpected Git write'); }, anchor);
+      const store = {
+        read: async () => ({ revision: newerSha, state: structuredClone(contaminated) }),
+        compareAndSet: adapter.compareAndSet,
+      };
+      await assert.rejects(transact(store, operation), /public ledger .*qualification/);
+      assert.equal(writes, 0, 'Reject before creating even an unreachable public Git blob');
+    }
+  }
+  const qualified = structuredClone(clean);
+  qualified.qualifications[sha] = promotion;
+  assert.deepEqual(publicLedger(qualified).qualifications[sha], promotion);
+});
+
+test('public ledger schema rejects malformed maps and typed references; stable owner approval remains mandatory', () => {
+  for (const field of ['reservations', 'identities', 'pointers', 'stages', 'qualifications']) {
+    const malformed = state();
+    malformed[field] = [{ ownerNotes: 'private-value' }];
+    assert.throws(() => publicLedger(malformed));
+  }
+  const stable = admit(context({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
+    workflowIdentity: context().workflowIdentity.replace('/development', '/main') }), sha, 'v1.2.3');
+  for (const field of ['reviewed', 'tests', 'compatibility', 'migrations', 'recovery', 'nonPromotionApproved']) {
+    for (const invalid of [false, 'true', { private: 'private-value' }, undefined]) {
+      const ledger = state();
+      ledger.qualifications[sha] = { ...hotfixQualification(), [field]: invalid };
+      assert.throws(() => publicLedger(ledger));
+      assert.throws(() => reserve(ledger, stable, created));
+      assert.deepEqual(ledger.reservations, {});
+    }
+  }
+  const ledger = state();
+  const identity = record(ledger);
+  for (const field of ['tagObject', 'tagPublished', 'setHash']) {
+    const changed = structuredClone(ledger);
+    changed.reservations[identity.allocationKey][field] = { private: 'private-value' };
+    assert.throws(() => publicLedger(changed), /public ledger/);
+  }
+  ledger.qualifications[sha] = hotfixQualification();
+  const normalized = publicLedger(ledger);
+  assert.equal(reserve(normalized, stable, created).record.qualification.mode, 'hotfix');
+  assert.throws(() => publicLedger({ ...ledger, lastHistoricalStable: '1.2.3-insider.1' }), /stable floor/);
+});
 
 test('actual control flow keeps github.token read-only and requires App verification before any writes', async () => {
   const fixture = authorizationFixture();

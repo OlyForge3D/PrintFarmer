@@ -1,38 +1,103 @@
 import { execFileSync } from 'node:child_process';
 import {
   repository, ledgerBranch, requireThat, validateLedger, verifyTag, compareVersions, normalizeProtectionEvidence,
-  hash, identityLabels,
+  hash, identityLabels, parseTag, publicLedgerQualification,
 } from './release-policy.mjs';
 import { publicAuthorization, writePublicSet } from './release-authorization.mjs';
 
+// Schema 1 contains only these public maps, immutable references and scalar claims.
+export const publicLedgerFields = [
+  'schema', 'anchor', 'counter', 'lastHistoricalStable', 'reservations', 'identities', 'pointers', 'stages', 'qualifications',
+];
+
+function publicMap(value, project) {
+  requireThat(value && typeof value === 'object' && !Array.isArray(value), 'Invalid public ledger map');
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, project(entry, key)]));
+}
+
+function publicReference(value, pattern) {
+  requireThat(typeof value === 'string' && pattern.test(value), 'Invalid public ledger reference');
+  return value;
+}
+
+const shaPattern = /^[a-f0-9]{40}$/;
+const hashPattern = /^[a-f0-9]{64}$/;
+const sequencePattern = /^[1-9][0-9]*$/;
+
+function publicReservation(entry, key) {
+  publicReference(key, hashPattern);
+  const record = entry.record;
+  const identitySha256 = publicReference(entry.identitySha256 || hash(record), hashPattern);
+  const projected = { ...publicAuthorization(record), identitySha256 };
+  for (const field of ['repository', 'workflowCommit', 'allocationKey', 'created', 'stage', 'sequence']) {
+    requireThat(record[field] === undefined || typeof record[field] === 'string', 'Invalid ledger identity field');
+    if (record[field] !== undefined) projected[field] = record[field];
+  }
+  requireThat(record.schema === 1, 'Invalid ledger identity schema');
+  projected.schema = 1;
+  const admission = {};
+  for (const field of ['repository', 'channel', 'baseVersion', 'sourceBranch', 'stage',
+    'sourceCommit', 'authorizedBranchHead', 'buildId', 'buildAttempt', 'workflowIdentity', 'workflowCommit']) {
+    requireThat(entry.admission[field] === undefined || typeof entry.admission[field] === 'string',
+      'Invalid ledger admission field');
+    if (entry.admission[field] !== undefined) admission[field] = entry.admission[field];
+  }
+  const result = { admission, record: projected, identitySha256 };
+  if (entry.sequence !== undefined) result.sequence = publicReference(entry.sequence, sequencePattern);
+  if (entry.tagObject !== undefined) result.tagObject = publicReference(entry.tagObject, shaPattern);
+  if (entry.setHash !== undefined) result.setHash = publicReference(entry.setHash, hashPattern);
+  if (entry.tagPublished !== undefined) {
+    requireThat(typeof entry.tagPublished === 'boolean', 'Invalid public ledger tag claim');
+    result.tagPublished = entry.tagPublished;
+  }
+  if (entry.set) {
+    result.set = writePublicSet(record, entry.set, identityLabels(record));
+    result.set.identity = { ...publicAuthorization(record), identitySha256 };
+  }
+  return result;
+}
+
 export function publicLedger(state) {
-  return { ...state, reservations: Object.fromEntries(Object.entries(state.reservations).map(([key, entry]) => {
-    const record = entry.record;
-    const identitySha256 = entry.identitySha256 || hash(record);
-    const projected = { ...publicAuthorization(record), identitySha256 };
-    for (const field of ['repository', 'workflowCommit', 'allocationKey', 'created', 'stage', 'sequence']) {
-      requireThat(record[field] === undefined || typeof record[field] === 'string', 'Invalid ledger identity field');
-      if (record[field] !== undefined) projected[field] = record[field];
-    }
-    requireThat(record.schema === 1, 'Invalid ledger identity schema');
-    projected.schema = 1;
-    const admission = {};
-    for (const field of ['repository', 'channel', 'baseVersion', 'sourceBranch', 'stage',
-      'sourceCommit', 'authorizedBranchHead', 'buildId', 'buildAttempt', 'workflowIdentity', 'workflowCommit']) {
-      requireThat(entry.admission[field] === undefined || typeof entry.admission[field] === 'string',
-        'Invalid ledger admission field');
-      if (entry.admission[field] !== undefined) admission[field] = entry.admission[field];
-    }
-    const result = { admission, record: projected, sequence: entry.sequence, identitySha256 };
-    for (const field of ['tagObject', 'tagPublished', 'setHash']) {
-      if (entry[field] !== undefined) result[field] = entry[field];
-    }
-    if (entry.set) {
-      result.set = writePublicSet(record, entry.set, identityLabels(record));
-      result.set.identity = { ...publicAuthorization(record), identitySha256 };
-    }
-    return [key, result];
-  })) };
+  validateLedger(state, state.anchor);
+  const projectedState = {
+    schema: 1,
+    anchor: publicReference(state.anchor, shaPattern),
+    counter: publicReference(state.counter, /^(0|[1-9][0-9]*)$/),
+    reservations: publicMap(state.reservations, publicReservation),
+    identities: publicMap(state.identities, (key, version) => {
+      parseTag(`v${version}`);
+      return publicReference(key, hashPattern);
+    }),
+    pointers: publicMap(state.pointers, (pointer, channel) => {
+      requireThat(['stable', 'insider'].includes(channel), 'Invalid public ledger channel');
+      const tag = parseTag(`v${pointer.canonicalVersion}`);
+      requireThat(tag.channel === channel && pointer.releaseId === `${channel}:${tag.canonicalVersion}`,
+        'Invalid public ledger pointer');
+      requireThat(Object.keys(pointer).sort().join() ===
+        ['releaseId', 'canonicalVersion', 'sourceCommit', 'setHash', 'allocationKey'].sort().join(),
+      'Unknown public ledger pointer field');
+      return {
+        releaseId: pointer.releaseId, canonicalVersion: tag.canonicalVersion,
+        sourceCommit: publicReference(pointer.sourceCommit, shaPattern),
+        setHash: publicReference(pointer.setHash, hashPattern),
+        allocationKey: publicReference(pointer.allocationKey, hashPattern),
+      };
+    }),
+    stages: publicMap(state.stages ?? {}, (version, base) => {
+      const tag = parseTag(`v${version}`);
+      requireThat(tag.baseVersion === base && tag.channel === 'insider', 'Invalid public ledger stage');
+      return tag.canonicalVersion;
+    }),
+    qualifications: publicMap(state.qualifications ?? {}, publicLedgerQualification),
+  };
+  if (state.lastHistoricalStable !== undefined) {
+    requireThat(typeof state.lastHistoricalStable === 'string', 'Invalid public ledger stable floor');
+    const stable = parseTag(`v${state.lastHistoricalStable}`);
+    requireThat(stable.channel === 'stable', 'Invalid public ledger stable floor');
+    projectedState.lastHistoricalStable = stable.canonicalVersion;
+  }
+  validateLedger(projectedState, projectedState.anchor);
+  return projectedState;
 }
 
 export function githubClient(token = process.env.GH_TOKEN) {
@@ -130,8 +195,9 @@ export function gitLedger(api, anchor) {
       return { revision, state };
     },
     async compareAndSet(revision, state) {
+      const content = JSON.stringify(publicLedger(state));
       const parent = await api(`git/commits/${revision}`);
-      const blob = await api('git/blobs', 'POST', { content: JSON.stringify(publicLedger(state)), encoding: 'utf-8' });
+      const blob = await api('git/blobs', 'POST', { content, encoding: 'utf-8' });
       const tree = await api('git/trees', 'POST', {
         base_tree: parent.tree.sha, tree: [{ path: 'state.json', mode: '100644', type: 'blob', sha: blob.sha }],
       });

@@ -215,6 +215,41 @@ export function validateLedger(state, anchor) {
   }
 }
 
+export function publicLedgerQualification(qualification, sourceCommit) {
+  const claims = ['reviewed', 'tests', 'compatibility', 'migrations', 'recovery'];
+  const fields = ['schema', 'sourceCommit', ...claims, 'mode',
+    ...(qualification?.mode === 'promotion' ? ['promotionOrigin', 'sourceTreeReviewed'] : ['nonPromotionApproved'])];
+  requireThat(qualification && !Array.isArray(qualification) &&
+    Object.keys(qualification).sort().join() === fields.sort().join() &&
+    qualification.schema === 1 && typeof sourceCommit === 'string' && shaPattern.test(sourceCommit) &&
+    qualification.sourceCommit === sourceCommit && claims.every(field => qualification[field] === true) &&
+    ['promotion', 'hotfix'].includes(qualification.mode), 'Invalid public ledger qualification');
+  const result = {
+    schema: 1, sourceCommit, ...Object.fromEntries(claims.map(field => [field, true])), mode: qualification.mode,
+  };
+  if (qualification.mode === 'promotion') {
+    const origin = qualification.promotionOrigin;
+    requireThat(qualification.sourceTreeReviewed === true && origin && !Array.isArray(origin) &&
+      Object.keys(origin).sort().join() === ['allocationKey', 'releaseId', 'sourceCommit', 'setHash'].sort().join() &&
+      typeof origin.allocationKey === 'string' && /^[a-f0-9]{64}$/.test(origin.allocationKey) &&
+      typeof origin.setHash === 'string' && /^[a-f0-9]{64}$/.test(origin.setHash) &&
+      typeof origin.sourceCommit === 'string' && shaPattern.test(origin.sourceCommit) &&
+      typeof origin.releaseId === 'string' && origin.releaseId.startsWith('insider:') &&
+      parseTag(`v${origin.releaseId.slice('insider:'.length)}`).channel === 'insider',
+    'Invalid public ledger promotion qualification');
+    result.promotionOrigin = {
+      allocationKey: origin.allocationKey, releaseId: origin.releaseId,
+      sourceCommit: origin.sourceCommit, setHash: origin.setHash,
+    };
+    result.sourceTreeReviewed = true;
+  } else {
+    requireThat(qualification.nonPromotionApproved === true,
+      'Direct stable release requires explicit owner non-promotion approval');
+    result.nonPromotionApproved = true;
+  }
+  return result;
+}
+
 export function reserve(state, admission, created, protection) {
   const key = allocationKey(admission);
   const existing = state.reservations[key];
@@ -236,12 +271,8 @@ export function reserve(state, admission, created, protection) {
     ...(protection ? { protection } : {}),
   };
   if (admission.channel === 'stable') {
-    const qualification = state.qualifications?.[admission.sourceCommit];
-    requireThat(qualification?.sourceCommit === admission.sourceCommit &&
-      qualification.reviewed === true && qualification.tests === 'passed' &&
-      qualification.compatibility === 'passed' && qualification.migrations === 'passed' &&
-      qualification.recovery === 'passed', 'Stable requires owner-recorded exact-SHA qualification');
-    if (qualification.promotionOrigin) {
+    const qualification = publicLedgerQualification(state.qualifications?.[admission.sourceCommit], admission.sourceCommit);
+    if (qualification.mode === 'promotion') {
       const origin = qualification.promotionOrigin;
       const candidate = state.reservations[origin.allocationKey];
       requireThat(candidate?.setHash === origin.setHash && candidate.record.channel === 'insider' &&
@@ -249,14 +280,11 @@ export function reserve(state, admission, created, protection) {
         candidate.record.releaseId === origin.releaseId &&
         qualification.sourceTreeReviewed === true,
       'Promotion requires a qualified immutable insider set and reviewed main source-tree changes');
-    } else {
-      requireThat(typeof qualification.hotfixReason === 'string' && qualification.hotfixReason.trim().length >= 10,
-        'Direct stable release requires an explicit non-promotion qualification reason');
     }
     record.qualification = {
       sourceCommit: qualification.sourceCommit, reviewed: true, tests: 'passed',
       compatibility: 'passed', migrations: 'passed', recovery: 'passed',
-      mode: qualification.promotionOrigin ? 'promotion' : 'hotfix',
+      mode: qualification.mode,
     };
   }
   const reservation = { admission, record, sequence };

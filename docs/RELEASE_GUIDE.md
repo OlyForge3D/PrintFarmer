@@ -122,8 +122,28 @@ projected JSON, not the full authorization record. The public complete-set asset
 reservations contain only projected identities and approved image labels, while
 retaining full-record/full-set hashes. Unknown future authorization fields are
 not copied. The normalized complete set and original authorization bundle remain
-available to downstream consumers without relying on artifact confidentiality. Existing owner-entered
-ledger qualifications remain public policy inputs; do not place secrets in them.
+available to downstream consumers without relying on artifact confidentiality.
+Ledger schema 1 explicitly permits only `schema`, `anchor`, decimal `counter`,
+optional `lastHistoricalStable`, and the `reservations`, `identities`, `pointers`,
+`stages`, and `qualifications` maps. Every Git transaction projects this schema
+before creating a blob, including allocation/tag/set retries. Unknown top-level
+fields are omitted; map keys, references and scalar claims are validated.
+
+Owner-entered qualifications are strict public schema-1 records keyed by the
+exact source commit. They contain `schema: 1`, matching `sourceCommit`, boolean
+`reviewed`, `tests`, `compatibility`, `migrations`, and `recovery` claims (all
+`true`), and `mode`. `mode: promotion` additionally requires
+`sourceTreeReviewed: true` and `promotionOrigin` containing only `allocationKey`,
+`releaseId`, `sourceCommit`, and `setHash` of the qualified immutable insider set.
+`mode: hotfix` instead requires the owner's explicit
+`nonPromotionApproved: true` assertion. The owner retains the non-promotion
+rationale outside public ledger/artifact payloads; no free-form reason is copied.
+Unknown fields, raw policy objects, reviewer/publisher identities and legacy
+`hotfixReason` or string-valued pass claims are rejected, not auto-approved or
+migrated. Owners must review and replace legacy qualification inputs before
+enabling publication. Both source-tree and immutable-set promotion checks remain
+mandatory at reservation. Signed authorization retains its existing normalized
+pass-claim schema.
 Same-attempt retries require the retained original authorization file; if it is lost,
 fail closed and rerun all jobs with a new attempt rather than recreating evidence.
 Artifact retention therefore bounds attestation recovery.
@@ -190,8 +210,9 @@ Stable requires an owner-reviewed ledger qualification at the exact main SHA:
 tests, compatibility, migrations and recovery must pass. Promotion references
 an existing immutable insider set/hash/source, plus reviewed main source-tree
 changes. Stable rebuilds every image with stable identity; retagging insider
-bytes fails complete-set identity checks. A direct stable hotfix instead records
-an explicit non-promotion reason and equivalent qualification.
+bytes fails complete-set identity checks. A direct stable hotfix instead requires
+`nonPromotionApproved: true` and equivalent qualification; its owner-reviewed
+non-promotion rationale stays outside public ledger/artifact payloads.
 
 No permanent extra channel branch exists. Optional `release/vX.Y.Z` branches
 carry an owner, qualified source, target, creation time and owner-bounded expiry.
@@ -234,7 +255,8 @@ Before enabling:
    the last historical stable base and a trusted sequence floor at cutover.
 2. Create a reviewed ledger seed after the approved ancestry checkpoint with
    `schema: 1`, `anchor`, decimal `counter`, `lastHistoricalStable`,
-   `reservations`, `identities`, `pointers`, and `qualifications`. Set
+   `reservations`, `identities`, `pointers`, `stages`, and `qualifications`
+   using the strict public schemas above. Set
    `RELEASE_LEDGER_ANCHOR` to that checkpoint. The workflow never auto-initializes.
 3. Enforce main/development code-owner review, non-force/non-delete rules and
    exact-SHA status checks. Protect `release-stable`/`release-insider` with
