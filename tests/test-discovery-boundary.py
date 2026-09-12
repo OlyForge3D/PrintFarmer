@@ -39,6 +39,13 @@ def assert_current_guidance(text, path):
         raise AssertionError(f"{path}:{line}: obsolete topology guidance: {match.group()}")
 
 
+def normalize_powershell_error(text):
+    text = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+    # PowerShell's ConciseView prefixes wrapped diagnostic lines with a gutter.
+    text = re.sub(r"(?m)^[ \t]*\|[ \t]*", "", text)
+    return " ".join(text.split())
+
+
 def supported_guidance_paths():
     paths = set((ROOT / "docs").rglob("*.md"))
     paths.update(path for path in (ROOT / "scripts" / "docker").rglob("*")
@@ -543,6 +550,17 @@ generate_deployment_config() { echo "GENERATE:$5"; exit 0; }
                         self.assertIn("Only bridge networking is supported", result.stderr)
 
     def test_powershell_entry_point_fails_fast(self):
+        for message in ("does not support it", "Only bridge networking is supported"):
+            words = message.split()
+            for split in range(1, len(words)):
+                with self.subTest(message=message, wrap_after=split):
+                    wrapped = (
+                        f"\x1b[36;1m     | \x1b[31;1m{' '.join(words[:split])}\x1b[0m\r\n"
+                        f"\x1b[36;1m     | \x1b[31;1m{' '.join(words[split:])}\x1b[0m\n"
+                    )
+                    self.assertEqual(message, normalize_powershell_error(wrapped))
+            self.assertNotIn(message, normalize_powershell_error(" ".join(words[:-1])))
+
         pwsh = shutil.which("pwsh")
         if not pwsh:
             raise RuntimeError("PowerShell is required for deployment entry-point regression tests")
@@ -556,7 +574,7 @@ generate_deployment_config() { echo "GENERATE:$5"; exit 0; }
                     capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
                 )
                 self.assertNotEqual(0, result.returncode)
-                self.assertIn(message, result.stderr)
+                self.assertIn(message, normalize_powershell_error(result.stderr), result.stderr)
 
         # Execute the actual config loader without running deployment/image operations.
         text = script.read_text(encoding="utf-8")
@@ -583,7 +601,8 @@ generate_deployment_config() { echo "GENERATE:$5"; exit 0; }
                     self.assertEqual("bridge", result.stdout.strip())
                 else:
                     self.assertNotEqual(0, result.returncode)
-                    self.assertIn("Only bridge networking is supported", result.stderr)
+                    self.assertIn("Only bridge networking is supported",
+                                  normalize_powershell_error(result.stderr), result.stderr)
 
 
 if __name__ == "__main__":
