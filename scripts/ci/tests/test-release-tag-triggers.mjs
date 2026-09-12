@@ -9,7 +9,7 @@ import {
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence,
 } from '../release-policy.mjs';
 import { ensureSourceTag, gitLedger, readTag, verifyProtection } from '../release-github.mjs';
-import { buildMetadata } from '../release-metadata.mjs';
+import { buildMetadata, emitBuildIdentity } from '../release-metadata.mjs';
 import { runContext, runReleaseControl } from '../release-control.mjs';
 import { inspectCompleteSet, publishImmutableTags } from '../release-set.mjs';
 
@@ -243,6 +243,36 @@ test('two concurrent complete sets cannot both win the same expected pointer', a
     state => advance(state, identity, completeSet(identity), sha, ''))));
   assert.equal(outcomes.filter(result => result.status === 'fulfilled').length, 1);
   assert.equal(store.writes, 1);
+});
+
+test('emitted public identity excludes private and future fields without altering the authorization record', () => {
+  const identity = { ...record(), protection: {
+    rulesets: [{ id: 'private-ruleset-id' }],
+    environment: { id: 'private-environment-id', reviewers: [{ id: 'private-reviewer-id' }] },
+  }, futureAuthorization: { policy: 'private-future-value' },
+  rulesetId: 'private-ruleset-id', environmentId: 'private-environment-id',
+  reviewerId: 'private-reviewer-id', service: 'private-service', commit: 'private-commit',
+  buildTime: 'private-time' };
+  const original = JSON.stringify(identity);
+  const root = resolve('.artifacts', `public-identity-${process.pid}`);
+  try {
+    emitBuildIdentity(identity, root);
+    const emitted = readFileSync(resolve(root, 'src/Web/ReactApp/public/release-identity.json'), 'utf8');
+    assert.deepEqual(JSON.parse(emitted), {
+      service: 'frontend', commit: sha, buildTime: created,
+      releaseId: identity.releaseId, channel: identity.channel,
+      canonicalVersion: identity.canonicalVersion, baseVersion: identity.baseVersion,
+      sourceBranch: identity.sourceBranch, sourceTag: identity.sourceTag,
+      sourceCommit: identity.sourceCommit, authorizedBranchHead: identity.authorizedBranchHead,
+      buildId: identity.buildId, buildAttempt: identity.buildAttempt,
+      workflowIdentity: identity.workflowIdentity, identitySha256: hash(identity),
+    });
+    assert.doesNotMatch(emitted, /protection|ruleset|environment|reviewer|futureAuthorization|private-/);
+    assert.equal(readFileSync(resolve(root, 'release-identity.json'), 'utf8'), original);
+    assert.equal(JSON.stringify(identity), original);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('every platform uses one identity in assemblies/frontend/OCI, including large N', () => {
@@ -600,6 +630,11 @@ test('actual control flow keeps github.token read-only and requires App verifica
     await runReleaseControl('consume', consumer);
     assert.ok(fixture.calls.every(call => !call.admin && !call.publisher && call.method === 'GET'));
     assert.match(readFileSync('src/ReleaseIdentity.props', 'utf8'), /1\.2\.3-insider\.1/);
+    assert.equal(readFileSync('release-identity.json', 'utf8'), signedBytes,
+      'Public projection must preserve the signed private record bytes');
+    const publicIdentity = readFileSync('src/Web/ReactApp/public/release-identity.json', 'utf8');
+    assert.doesNotMatch(publicIdentity, /protection|rulesets|environment|reviewers|publisherAppId/);
+    assert.equal(JSON.parse(publicIdentity).identitySha256, hash(identity));
     fixture.calls.length = 0;
     writeFileSync('release-set.json', JSON.stringify(completeSet(identity)));
     await runReleaseControl('advance', { ...fixture.env, RELEASE_IDENTITY: signedBytes });

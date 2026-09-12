@@ -30,7 +30,9 @@ ${fields.map(field => `    <AssemblyMetadata Include="${field}" Value="${escape(
 </Project>
 `,
     frontend: JSON.stringify({ service: 'frontend', commit: record.sourceCommit,
-      buildTime: record.created, ...record, identitySha256: hash(record) }),
+      buildTime: record.created,
+      ...Object.fromEntries(fields.map(field => [field, record[field]])),
+      identitySha256: hash(record) }),
     labels: Object.entries(identityLabels(record)).map(([key, value]) => `${key}=${value}`).join('\n'),
   };
 }

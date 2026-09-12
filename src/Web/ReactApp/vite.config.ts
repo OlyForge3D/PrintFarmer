@@ -50,7 +50,15 @@ export function frontendVersionMetadata(
   if (releaseIdentity && releaseIdentity.sourceCommit !== gitHash) {
     throw new Error('Frontend release identity does not match the build source SHA.');
   }
-  return { service: 'frontend', commit: gitHash, buildTime, ...releaseIdentity };
+  const fields = ['releaseId', 'channel', 'canonicalVersion', 'baseVersion', 'sourceBranch',
+    'sourceTag', 'sourceCommit', 'authorizedBranchHead', 'buildId', 'buildAttempt',
+    'workflowIdentity', 'identitySha256'];
+  const publicIdentity = Object.fromEntries(fields
+    .filter(field => typeof releaseIdentity?.[field] === 'string')
+    .map(field => [field, releaseIdentity![field]]));
+  return { service: 'frontend', commit: gitHash,
+    buildTime: typeof releaseIdentity?.buildTime === 'string' ? releaseIdentity.buildTime : buildTime,
+    ...publicIdentity };
 }
 
 function emitVersionJson(gitHash: string, buildTime: string) {
@@ -67,10 +75,12 @@ function emitVersionJson(gitHash: string, buildTime: string) {
         ? JSON.parse(readFileSync(identityPath, 'utf8')) as Record<string, unknown>
         : undefined;
       mkdirSync(outDir, { recursive: true });
-      writeFileSync(
-        resolve(outDir, 'version.json'),
-        JSON.stringify(frontendVersionMetadata(gitHash, buildTime, releaseIdentity), null, 2),
-      );
+      const metadata = JSON.stringify(frontendVersionMetadata(gitHash, buildTime, releaseIdentity), null, 2);
+      writeFileSync(resolve(outDir, 'version.json'), metadata);
+      if (releaseIdentity) {
+        // Vite copies public assets verbatim; sanitize that copy as well.
+        writeFileSync(resolve(outDir, 'release-identity.json'), metadata);
+      }
       const serviceWorkerPath = resolve(outDir, 'sw.js');
       const serviceWorker = readFileSync(serviceWorkerPath, 'utf8')
         .replaceAll('__PRINTFARMER_BUILD_TIME__', buildTime)

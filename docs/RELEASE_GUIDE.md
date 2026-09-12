@@ -110,6 +110,15 @@ Every job consumes the same record. `release-control.mjs consume` emits:
   `baseVersion.0` (components must fit .NET's numeric limits).
 - Frontend `public/release-identity.json`, embedded in build-time `version.json`.
   Package version and runtime API responses cannot replace the frontend identity.
+  Both generation and Vite consumption explicitly allow only `releaseId`,
+  `channel`, `canonicalVersion`, `baseVersion`, `sourceBranch`, `sourceTag`,
+  `sourceCommit`, `authorizedBranchHead`, `buildId`, `buildAttempt`,
+  `workflowIdentity` and `identitySha256`, plus frontend `service`, `commit`
+  and `buildTime`. Vite also sanitizes the copied `dist/release-identity.json`.
+  Protection evidence, ruleset/environment/reviewer IDs and any future private
+  fields are not frontend assets. The root authorization record remains complete
+  and unchanged for signing and downstream verification; `identitySha256`
+  continues to hash that full record, not the public projection.
 - OCI version/revision/source/created and release/channel/run/attempt/workflow/
   record-hash labels, identical across API, frontend, slicer-host, discovery,
   OrcaSlicer worker and monolith, and every declared platform.
