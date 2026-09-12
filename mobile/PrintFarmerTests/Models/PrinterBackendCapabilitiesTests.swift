@@ -2,6 +2,88 @@ import XCTest
 @testable import PrintFarmer
 
 final class PrinterBackendCapabilitiesTests: XCTestCase {
+    func testMotionProjectionMissingIsDistinctFromExplicitUnlocked() throws {
+        let missing = try JSONDecoder().decode(Printer.self, from: Data(TestJSON.printer.utf8))
+        XCTAssertNil(missing.physicalControl)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(TestJSON.printer.utf8)) as? [String: Any])
+        json["physicalControl"] = try JSONSerialization.jsonObject(with: Data(ControlOperationTestJSON.unlockedProjection.utf8))
+        let explicit = try JSONDecoder().decode(Printer.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(explicit.physicalControl?.supportedOperations.count, 5)
+        XCTAssertEqual(explicit.physicalControl?.isExplicitlyUnlocked, true)
+        XCTAssertThrowsError(try JSONDecoder().decode(PrinterCurrentControlOperation.self, from: Data("""
+        {"physicalControl":\(ControlOperationTestJSON.unlockedProjection)}
+        """.utf8)))
+    }
+
+    func testMalformedMotionProjectionFailsClosedWithoutDefaultUnlockedValues() throws {
+        for projection in [
+            "{}",
+            #"{"supportedOperations":["FutureMotion"],"barrierHeld":false,"requiresRecovery":false}"#,
+            #"{"supportedOperations":[],"barrierHeld":false,"requiresRecovery":false,"state":"FutureState"}"#,
+            #"{"supportedOperations":[],"barrierHeld":0,"requiresRecovery":false}"#,
+            #"{"supportedOperations":[],"barrierHeld":false,"requiresRecovery":false,"operationId":"bad"}"#
+        ] {
+            XCTAssertThrowsError(try JSONDecoder().decode(PrinterPhysicalControl.self, from: Data(projection.utf8)))
+        }
+        for state in [PrinterControlOperationState.queued, .running, .unknown, .recovering] {
+            let projection = PrinterPhysicalControl(
+                supportedOperations: [.homeAll], barrierHeld: false,
+                operationId: UUID(), state: state, requiresRecovery: false
+            )
+            XCTAssertFalse(projection.isExplicitlyUnlocked)
+        }
+    }
+
+    func testMotionEnumRawStringsAndUnknownValuesAreStrict() throws {
+        for kind in PrinterControlOperationKind.allCases {
+            let request = PrinterControlOperationRequest(kind: kind, x: 0, y: nil, z: -1, f: 1200)
+            XCTAssertEqual(try JSONDecoder().decode(
+                PrinterControlOperationRequest.self, from: JSONEncoder().encode(request)
+            ), request)
+        }
+        for json in [#""FutureKind""#, "123", "null"] {
+            XCTAssertThrowsError(try JSONDecoder().decode(PrinterControlOperationKind.self, from: Data(json.utf8)))
+        }
+        for state in [PrinterControlOperationState.queued, .running, .succeeded, .failed, .unknown, .recovering, .recovered] {
+            XCTAssertEqual(try JSONDecoder().decode(
+                PrinterControlOperationState.self, from: JSONEncoder().encode(state)
+            ), state)
+        }
+        XCTAssertThrowsError(try JSONDecoder().decode(PrinterControlCompletionEvidence.self, from: Data(#""FutureEvidence""#.utf8)))
+        XCTAssertThrowsError(try JSONDecoder().decode(PrinterControlSenderIsolation.self, from: Data(#""FutureIsolation""#.utf8)))
+    }
+
+    func testDemoMotionRecordsAreInstanceScopedAndIdempotent() async throws {
+        let demo = DemoPrinterService()
+        let fleet = try await demo.list(includeDisabled: false)
+        let printer = try XCTUnwrap(fleet.first(where: { $0.backend == .moonraker }))
+        let operationId = UUID()
+        let request = PrinterControlOperationRequest(kind: .homeAll)
+        let queued = try await demo.submitControlOperation(printerId: printer.id, operationId: operationId, request: request)
+        let replay = try await demo.submitControlOperation(printerId: printer.id, operationId: operationId, request: request)
+        XCTAssertEqual(queued, replay)
+        XCTAssertEqual(queued.state, .queued)
+        XCTAssertFalse(queued.isSafelyComplete)
+        do {
+            _ = try await demo.submitControlOperation(printerId: printer.id, operationId: operationId, request: .init(kind: .homeZ))
+            XCTFail("Conflicting nonce must not create a new operation")
+        } catch { }
+        let running = try await demo.getControlOperation(printerId: printer.id, operationId: operationId)
+        XCTAssertEqual(running.state, .running)
+        XCTAssertTrue(running.barrierHeld)
+        let terminal = try await demo.getControlOperation(printerId: printer.id, operationId: operationId)
+        XCTAssertTrue(terminal.isSafelyComplete)
+        let completedCurrent = try await demo.getCurrentControlOperation(printerId: printer.id)
+        XCTAssertNil(completedCurrent.operation)
+        XCTAssertNil(completedCurrent.physicalControl.operationId)
+        XCTAssertNil(completedCurrent.physicalControl.state)
+        XCTAssertTrue(completedCurrent.physicalControl.isExplicitlyUnlocked)
+        let retainedTerminal = try await demo.getControlOperation(printerId: printer.id, operationId: operationId)
+        XCTAssertEqual(retainedTerminal, terminal)
+        let independent = try await DemoPrinterService().getCurrentControlOperation(printerId: printer.id)
+        XCTAssertNil(independent.operation)
+        XCTAssertTrue(independent.physicalControl.isExplicitlyUnlocked)
+    }
 
     func testFallbackNeverProvesPhysicalControlForAnyBackend() {
         for backend in [PrinterBackend.moonraker, .prusaLink, .octoPrint, .flashForge, .sdcp, .unknown] {

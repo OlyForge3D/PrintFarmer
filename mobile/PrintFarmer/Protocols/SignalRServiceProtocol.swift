@@ -47,6 +47,13 @@ protocol SignalRServiceProtocol: AnyObject, Sendable {
     @discardableResult
     func onPrinterUpdated(_ handler: @escaping @Sendable (PrinterStatusUpdate) -> Void) -> SignalRSubscription
 
+    /// Lowercase printercontroloperationupdated is invalidation only. Refetch
+    /// the authoritative operation; rowVersion is opaque, never ordered here.
+    @discardableResult
+    func onPrinterControlOperationUpdated(
+        _ handler: @escaping @Sendable (PrinterControlOperationInvalidation) -> Void
+    ) -> SignalRSubscription
+
     @discardableResult
     func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) -> SignalRSubscription
 
@@ -87,6 +94,12 @@ protocol SignalRServiceProtocol: AnyObject, Sendable {
 }
 
 extension SignalRServiceProtocol {
+    func onPrinterControlOperationUpdated(
+        _ handler: @escaping @Sendable (PrinterControlOperationInvalidation) -> Void
+    ) -> SignalRSubscription {
+        SignalRSubscription {}
+    }
+
     func connectForReadiness() async throws {
         try await connect()
     }

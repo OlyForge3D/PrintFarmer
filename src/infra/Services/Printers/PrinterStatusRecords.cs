@@ -36,5 +36,7 @@ public record PrinterCompositeStatus(
     double? BedTarget = null,
     IReadOnlyDictionary<int, ExtruderTemperature>? ExtruderTemperatures = null,
     int? DetectedExtruderCount = null,
-    double? PrintTimeLeftSeconds = null);
+    double? PrintTimeLeftSeconds = null,
+    string? HomedAxes = null,
+    DateTime? HomedAxesObservedAtUtc = null);
 #pragma warning restore CA1056 // URI-like properties should not be strings

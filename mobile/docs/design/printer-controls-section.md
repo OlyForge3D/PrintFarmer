@@ -74,6 +74,9 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   as do acceptance, telemetry confirmation and interrupted-observation notices.
   Request acceptance never implies physical completion, and stopping observation
   never claims to stop the printer.
+  Unresolved durable Moonraker motion does not offer **Stop waiting**. Its
+  status, explicit admission confirmation and web-recovery guidance remain
+  outside disabled/offline controls, while command feedback stays in its card.
 
 ### Native geometry and visual comparison
 

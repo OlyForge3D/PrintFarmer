@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -133,6 +134,21 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
         IDbContextTransaction? ownedTransaction = await BeginOwnedTransactionAsync(ct);
         try
         {
+            // Serialize deletion against admission's barrier revision CAS. Deletion must
+            // never erase an unresolved command's fence while its sender may still act.
+            await _db.PrinterDispatchStates.Where(state => state.PrinterId == trackedPrinter.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(state => state.Revision, state => state.Revision + 1), ct);
+            if (await _db.PrinterDispatchStates.AsNoTracking().AnyAsync(
+                    state => state.PrinterId == trackedPrinter.Id && state.PhysicalControlCommandId != null, ct) ||
+                await _db.PrinterControlOperations.AsNoTracking().AnyAsync(
+                    operation =>
+                    operation.PrinterId == trackedPrinter.Id &&
+                    operation.State != PrinterControlState.Succeeded && operation.State != PrinterControlState.Failed &&
+                    operation.State != PrinterControlState.Recovered, ct))
+            {
+                throw new PrinterControlException(409, "physical_control_barrier", "Resolve the physical control operation before deleting this printer.");
+            }
+
             // F2 + Dallas Fix 4 — Clear direct PartOutputMappings whose GcodeFileId points to
             // any GcodeFile SourcePrinter'd by this printer, BEFORE bulk-deleting those
             // GcodeFiles. The direct PartOutputMappings.GcodeFileId FK is Restrict (not

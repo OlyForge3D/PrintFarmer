@@ -29,6 +29,8 @@ import { resolveMaterialLoadout } from '@/features/printers/utils/materialLoadou
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
+import { usePrinterControlOperation } from '@/features/printers/hooks/use-printer-control-operation';
+import { PrinterControlOperationPanel } from '@/features/printers/components/PrinterControlOperationPanel';
 import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
 import type { ZOffsetCalibrationWizardProps } from '@/features/printers/components/ZOffsetCalibrationWizard';
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
@@ -144,6 +146,7 @@ function formatFilament(grams: number): string {
 // re-renders when its own printer's data actually changed.
 export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ printer, backendCapabilities, onEdit }: DetailedPrinterCardProps) {
   const queryClient = useQueryClient();
+  const motion = usePrinterControlOperation(printer);
   const { ready: spoolmanReady } = useSpoolmanConfigured();
   const mmuStatus = (printer as PrinterDisplay).mmuStatus;
   // Snapmaker U1's AMS-equivalent is surfaced through its own UI elsewhere, so the
@@ -166,7 +169,8 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const [showZOffsetWizard, setShowZOffsetWizard] = useState(false);
   const [controlActionPending, setControlActionPending] = useState(false);
   const [temperatureActionPending, setTemperatureActionPending] = useState(false);
-  const [movementActionPending, setMovementActionPending] = useState(false);
+  const [localMovementActionPending, setMovementActionPending] = useState(false);
+  const movementActionPending = localMovementActionPending || motion.blocked;
   const [filamentActionPending, setFilamentActionPending] = useState(false);
   const [spoolActionPending, setSpoolActionPending] = useState(false);
   const [hotendTemp, setHotendTemp] = useState<number | string>('');
@@ -291,7 +295,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
-  const canDisableMotorsNow = canDisableMotors({ isOnline, isEnabled, isPrinting, support });
+  const canDisableMotorsNow = !motion.blocked && canDisableMotors({ isOnline, isEnabled, isPrinting, support });
   const canMoveNow = canMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
   const canSetStepNow = canSetStep({ isOnline, isShutdown, support });
   const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
@@ -570,7 +574,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       const move: MoveRequest = {};
       move[axis.toLowerCase() as keyof MoveRequest] = distance;
       
-      const result = await apiClient.movePrinter(printer.id, move);
+      const result = await motion.execute({ kind: 'Jog', ...move });
       
       if (!result.success) {
         console.error(`Failed to move ${axis} by ${distance}:`, result.error);
@@ -594,11 +598,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
       let result;
       
       if (!axes || axes === 'all') {
-        result = await apiClient.homePrinter(printer.id);
+        result = await motion.execute({ kind: 'HomeAll' });
       } else if (axes === 'xy') {
-        result = await apiClient.homeXY(printer.id);
+        result = await motion.execute({ kind: 'HomeXY' });
       } else if (axes === 'z') {
-        result = await apiClient.homeZ(printer.id);
+        result = await motion.execute({ kind: 'HomeZ' });
       } else {
         console.warn(`Unknown home axes: ${axes}`);
         return;
@@ -611,6 +615,19 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     } catch (error) {
       console.error(`Error homing ${axes || 'all'}:`, error);
       toast.error(mutationErrorMessage(error, 'Failed to home printer'));
+    } finally {
+      setMovementActionPending(false);
+    }
+  };
+
+  const handleMoveTo = async (position: MoveRequest) => {
+    if (movementActionPending) return;
+    setMovementActionPending(true);
+    try {
+      const result = await motion.execute({ kind: 'MoveTo', ...position });
+      if (!result.success) toast.error(result.error || 'Movement did not succeed');
+    } catch (error) {
+      toast.error(mutationErrorMessage(error, 'Movement status uncertain'));
     } finally {
       setMovementActionPending(false);
     }
@@ -1033,6 +1050,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
 
       {/* Move and Control Section */}
       <div className="mb-2">
+          <PrinterControlOperationPanel control={motion} />
           <MovementControlSection
             moveX={moveX}
             moveY={moveY}
@@ -1060,6 +1078,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             onExtrudeSpeedChange={setExtrudeSpeed}
             onMove={handleMove}
             onHome={handleHome}
+            onMoveTo={motion.isMoonraker ? handleMoveTo : undefined}
             onDisableMotors={() => handleControlAction('disable-motors')}
             onExtrude={handleExtrude}
             rightContent={

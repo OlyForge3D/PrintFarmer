@@ -133,6 +133,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
     /// Online + idle (state="ready") printer; base targets are 215/60.
     private func idlePrinter() throws -> Printer {
         let json = TestJSON.printer
+            .replacingOccurrences(of: "\"backend\": \"Moonraker\"", with: "\"backend\": \"OctoPrint\"")
             .replacingOccurrences(of: "\"state\": \"printing\"", with: "\"state\": \"ready\"")
         return try TestData.decoder.decode(Printer.self, from: json.data(using: .utf8)!)
     }

@@ -1,4 +1,5 @@
 import { ControlPadButton, MovementInput, MoveDistanceSlider } from '@/common/components/ui';
+import type { MoveRequest } from '@/types/api';
 import {
   HomeIcon,
   DisableMotorsIcon,
@@ -42,6 +43,7 @@ interface MovementControlSectionProps {
   onExtrudeStepChange: (step: number) => void;
   onExtrudeSpeedChange: (speed: number) => void;
   onMove: (axis: 'X' | 'Y' | 'Z', distance: number) => void;
+  onMoveTo?: (position: MoveRequest) => void;
   onHome: (axes?: string) => void;
   onDisableMotors: () => void;
   onExtrude: (direction: 'extrude' | 'retract') => void;
@@ -75,6 +77,7 @@ export function MovementControlSection({
   onExtrudeStepChange,
   onExtrudeSpeedChange,
   onMove,
+  onMoveTo,
   onHome,
   onDisableMotors,
   onExtrude,
@@ -88,6 +91,7 @@ export function MovementControlSection({
   const isZHomed = isHomedStateKnown && homedAxesLower.includes('z');
   const isXYHomed = isXHomed && isYHomed;
   const isAllHomed = isXYHomed && isZHomed;
+  const completePosition = [moveX, moveY, moveZ].every(value => value !== '' && Number.isFinite(value));
 
   return (
     <div className="mb-2">
@@ -114,6 +118,7 @@ export function MovementControlSection({
               <ControlPadButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onMove('Y', step)}
+                aria-label="Jog Y positive"
                 padSize="small"
               >
                 ▲
@@ -131,6 +136,7 @@ export function MovementControlSection({
               <ControlPadButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onMove('X', -step)}
+                aria-label="Jog X negative"
                 padSize="small"
               >
                 ◀
@@ -148,6 +154,7 @@ export function MovementControlSection({
               <ControlPadButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onMove('X', step)}
+                aria-label="Jog X positive"
                 padSize="small"
               >
                 ▶
@@ -158,6 +165,7 @@ export function MovementControlSection({
               <ControlPadButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onMove('Y', -step)}
+                aria-label="Jog Y negative"
                 padSize="small"
               >
                 ▼
@@ -170,6 +178,7 @@ export function MovementControlSection({
               <ControlPadButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onMove('Z', step)}
+                aria-label="Jog Z positive"
                 padSize="small"
               >
                 Z+
@@ -187,6 +196,7 @@ export function MovementControlSection({
               <ControlPadButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onMove('Z', -step)}
+                aria-label="Jog Z negative"
                 padSize="small"
               >
                 Z-
@@ -306,9 +316,16 @@ export function MovementControlSection({
             disabled={
               movementActionPending ||
               !canManualMove ||
-              (moveX === '' && moveY === '' && moveZ === '')
+              (onMoveTo ? !completePosition : (moveX === '' && moveY === '' && moveZ === ''))
             }
             onClick={async () => {
+              if (onMoveTo) {
+                if (!completePosition) return;
+                onMoveTo({
+                  x: Number(moveX), y: Number(moveY), z: Number(moveZ),
+                });
+                return;
+              }
               if (moveX !== '') await onMove('X', Number(moveX));
               if (moveY !== '') await onMove('Y', Number(moveY));
               if (moveZ !== '') await onMove('Z', Number(moveZ));
@@ -320,6 +337,7 @@ export function MovementControlSection({
             GO
           </ControlPadButton>
         </div>
+        {onMoveTo && !completePosition && <p className="col-span-4 text-xs text-pf-text-secondary">Enter valid X, Y, and Z coordinates for absolute movement.</p>}
       </div>
     </div>
   );

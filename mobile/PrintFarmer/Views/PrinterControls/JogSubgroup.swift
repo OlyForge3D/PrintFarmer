@@ -187,6 +187,12 @@ struct JogSubgroup: View {
 
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
+                if viewModel.usesDurableMotion {
+                    Text(ControlNumberInput.durableAbsoluteCoordinatesMessage)
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("printer.controls.absolute.complete-target")
+                }
                 rowLayout {
                     ForEach(["X", "Y", "Z"], id: \.self) { axis in
                         ZStack(alignment: .topTrailing) {
@@ -309,7 +315,8 @@ struct JogSubgroup: View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
-        .disabled(!isInteractive && !shouldRevealDisabledTooltipOnTap)
+        .disabled((!isInteractive && !shouldRevealDisabledTooltipOnTap)
+                  || (viewModel.usesDurableMotion && viewModel.isExecuting))
         .disabledControlStyle(isDisabled: !isInteractive && !isPending)
         .errorBorderHighlight(isActive: hasError)
         .accessibilityLabel(jogAccessibilityLabel(direction: direction))

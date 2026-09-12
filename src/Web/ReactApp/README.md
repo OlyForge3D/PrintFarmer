@@ -141,6 +141,65 @@ Tests use Vitest and React Testing Library. See `src/test/` for examples.
 
 ## API Integration
 
+### Durable Moonraker motion
+
+Home All/XY/Z, relative jogs, absolute positioning, and calibration use durable
+`/api/printers/{id}/control-operations` records. HTTP 202 means admission, not
+completion, and must contain an unresolved operation. HTTP 200 admission replay
+must contain a valid terminal receipt for that same operation ID; mismatched
+status/state combinations, malformed receipts, and other successful HTTP statuses
+are rejected without confirming admission. Even valid terminal POST receipts
+still require canonical GET/current checks before success or release.
+Receipts associated with a locally saved UUID must also match its original kind,
+X/Y/Z, and feed rate on admission, canonical reads, and recovery. Omitted request
+coordinates match null receipt values; the saved request is never rewritten.
+An intent mismatch preserves the journal and keeps motion uncertain and locked.
+The UI keeps motion locked until REST confirms the outcome and
+rechecks the current operation for a successor. Position telemetry, homed axes,
+and elapsed time never establish completion.
+The current endpoint identifies only a barrier owner; when unlocked its operation,
+operation ID, and state are null. Settled receipts are read by their exact UUID.
+
+Before submission, the client saves the operation UUID and intent in local
+storage scoped to the authenticated account, API server, and printer. Closing
+a panel or navigating away does not cancel backend work. Reopening, returning
+to the foreground, or reconnecting rechecks REST. SignalR's lowercase
+`printercontroloperationupdated` event is an invalidation hint, not an outcome.
+While an operation or saved admission remains unresolved, a shared two-second
+read-only REST polling cadence also runs even when SignalR is connected; missed
+notifications cannot leave it waiting forever. Overlapping polls reuse the
+in-flight read, and timers never release barriers or replay physical commands.
+Unavailable status keeps motion locked. A lost admission response never triggers
+a new UUID or a legacy fallback; an explicitly offered admission retry reuses
+the saved UUID and intent. Older servers must be updated for Moonraker motion.
+That deliberate retry can admit and start physical motion if the server never
+admitted the original request; operation recovery cannot resolve a client-only
+receipt. The review shows the exact saved intent and requires confirmation;
+declining leaves motion blocked. Before re-submission, REST status, session
+authority, and the unchanged saved receipt are rechecked. Confirmed admission is
+persisted, so later 404 responses cannot offer a known Unknown/Recovering execution
+for re-submission. A missing operation response never discards the saved UUID.
+Other printer backends retain their existing motion endpoints.
+Moonraker absolute GO/Enter requires finite X, Y, and Z coordinates together;
+non-Moonraker partial-axis controls retain their existing behavior. Calibration
+Z adjustments retain the explicitly selected bed-center X/Y target.
+
+Unknown outcomes require operator recovery. The motion panel explains required
+farm-administrator role, `queue:reconcile` permission, and printer Submit access
+(administrator permission bypass applies). Nonadmin queue reconcilers can view
+status but are not offered recovery actions. It also explains prior-sender
+isolation, controller-queue clearance, and physical
+stationarity. Recovery completion requires separate, initially unchecked
+attestations and written evidence, using the exact reviewed GET ETag. No stop,
+reset, or hardware command is sent by the recovery form. `Recovered` is not
+successful execution; calibration advances only after confirmed success and
+fresh printer safety checks. It reads enabled/maintenance configuration from
+the printer list and fact-specific `safetyTelemetry.homedAxes` from
+`/api/printers/{id}/status`, not absent fields on basic printer GET or the legacy
+homed-axes string. The observation must contain all three axes, be no older than
+the completed operation, and satisfy its positive freshness window without a
+future timestamp. The current-operation barrier is checked again before advancing.
+
 The React app communicates with the ASP.NET Core API backend using a centralized **apiClient** singleton:
 
 - **API Base URL**: `http://localhost:5245`

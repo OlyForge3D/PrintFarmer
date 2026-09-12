@@ -23,6 +23,7 @@ struct PrinterSetupControlsContent: View {
     }
 
     var body: some View {
+        PrinterMotionStatusBanner(viewModel: viewModel)
         if !PrinterControlsSection.isHidden(for: printer) {
             content
                 .task(id: scenePhase) {
@@ -121,6 +122,73 @@ struct PrinterSetupControlsContent: View {
         }
     }
 
+    /// Kept outside disabled controls and offline branches so uncertainty is actionable.
+    struct PrinterMotionStatusBanner: View {
+        @ObservedObject var viewModel: PrinterControlsViewModel
+        @State private var showsAdmissionConfirmation = false
+        @State private var admissionOperationID: UUID?
+        @State private var admissionSummary = ""
+
+        var body: some View {
+            if let message = viewModel.motionStatusMessage {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Motion status", systemImage: viewModel.hasUnresolvedMotion ? "lock.fill" : "info.circle")
+                        .font(.headline)
+                    Text(message).font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let operationID = viewModel.motionOperationID {
+                        Text("Operation \(operationID.uuidString)")
+                            .font(.caption)
+                            .textSelection(.enabled)
+                    }
+                    if let error = viewModel.operationReadError {
+                        Text(error).font(.footnote)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ControlActionButton(
+                        title: "Refresh motion status", identifier: "printer.controls.motion.refresh",
+                        hint: "Reads the saved operation. Never sends or retries motion."
+                    ) { Task { await viewModel.refreshControlOperation() } }
+                    .disabled(viewModel.isRefreshingControlOperation || !viewModel.isActive)
+                    if let operationID = viewModel.motionAdmissionResubmissionID {
+                        ControlActionButton(
+                            title: "Review saved admission", identifier: "printer.controls.motion.review-admission",
+                            hint: "Requires confirmation. Resubmitting the same operation may start the original motion."
+                        ) {
+                            admissionOperationID = operationID
+                            admissionSummary = viewModel.savedMotionAdmissionSummary ?? ""
+                            showsAdmissionConfirmation = true
+                        }
+                    }
+                    if viewModel.isResubmittingMotionAdmission {
+                        Text("Checking and resubmitting only the confirmed saved admission…")
+                            .font(.footnote)
+                    }
+                    if let recoveryURL = viewModel.motionRecoveryURL {
+                        Link("Open printer recovery on web", destination: recoveryURL)
+                            .frame(minHeight: 44)
+                            .accessibilityHint("An administrator must verify isolation and inspect the physical machine before releasing recovery.")
+                            .accessibilityIdentifier("printer.controls.motion.recovery")
+                    }
+                }
+                .foregroundStyle(Color.pfTextPrimary)
+                .padding(12)
+                .background(Color.pfWarning.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("printer.controls.motion.status")
+                .alert("Resubmit saved motion?", isPresented: $showsAdmissionConfirmation) {
+                    Button("Resubmit same operation", role: .destructive) {
+                        guard let operationID = admissionOperationID else { return }
+                        Task { await viewModel.resubmitUnconfirmedMotionAdmission(operationID: operationID) }
+                    }
+                    Button("Keep blocked", role: .cancel) {}
+                } message: {
+                    Text("\(admissionSummary)\n\n\(PrinterControlsViewModel.motionAdmissionResubmissionWarning)")
+                }
+            }
+        }
+    }
+
     private func insetGroup<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -175,7 +243,7 @@ struct PrinterControlCommandFeedback: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                if viewModel.pendingCommand != nil {
+                if viewModel.pendingCommand != nil && !viewModel.hasUnresolvedMotion {
                     ControlActionButton(
                         title: "Stop waiting for command", identifier: "printer.controls.stop-waiting",
                         hint: "Does not stop the printer. Physical execution may continue."

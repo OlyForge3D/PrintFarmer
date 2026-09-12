@@ -163,6 +163,8 @@ struct Printer: Codable, Identifiable, Sendable {
     let isEnabled: Bool
     let rowVersion: String?
     let configurationRevision: Int64
+    /// Nil means the server supplied no durable-control evidence, not unlocked.
+    var physicalControl: PrinterPhysicalControl?
 
     // Live status (from SignalR cache)
     var isOnline: Bool
@@ -202,6 +204,7 @@ struct Printer: Codable, Identifiable, Sendable {
         case manufacturerId, manufacturerName, modelId, modelName, motionType
         case backend, apiKey, originalServerUrl, backendPort, frontendPort
         case inMaintenance, isEnabled, rowVersion, configurationRevision
+        case physicalControl
         case isOnline, state, progress, jobName, fileName, thumbnailUrl
         case cameraStreamUrl, cameraSnapshotUrl
         case cameraAccessMode, cameraStreamFormat, cameraSnapshotStrategy
@@ -230,6 +233,7 @@ struct Printer: Codable, Identifiable, Sendable {
         inMaintenance = try c.decodeIfPresent(Bool.self, forKey: .inMaintenance) ?? false
         isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
         rowVersion = try c.decodeIfPresent(String.self, forKey: .rowVersion)
+        physicalControl = try c.decodeIfPresent(PrinterPhysicalControl.self, forKey: .physicalControl)
         configurationRevision = try c.decodeIfPresent(
             Int64.self,
             forKey: .configurationRevision

@@ -60,6 +60,12 @@ type GcodeLibraryUpdatedCallback = () => void;
 const AUTO_DISPATCH_STATE_CHANGED_EVENT = "autodispatchstatechanged";
 
 export class PrinterSignalRService {
+  private controlOperationCallbacks = new Set<(event: { printerId: string; operationId: string; rowVersion: string }) => void>();
+
+  onControlOperationUpdated(callback: (event: { printerId: string; operationId: string; rowVersion: string }) => void): () => void {
+    this.controlOperationCallbacks.add(callback);
+    return () => { this.controlOperationCallbacks.delete(callback); };
+  }
   // Keep a local cache of last statuses for debugging
   private lastStatuses: Map<string, PrinterStatusUpdate> = new Map();
   /** Pending offline timers keyed by printer ID — suppresses transient offline flicker */
@@ -199,6 +205,10 @@ export class PrinterSignalRService {
   }
 
   private setupEventHandlers(connection: HubConnection): void {
+    connection.on("printercontroloperationupdated", (event: { printerId: string; operationId: string; rowVersion: string }) => {
+      if (!event || typeof event.printerId !== "string" || typeof event.operationId !== "string" || typeof event.rowVersion !== "string") return;
+      this.controlOperationCallbacks.forEach(callback => callback(event));
+    });
     // Register single lowercase event name
     connection.on("printerupdated", (status: PrinterStatusUpdate) => {
       this.handlePrinterStatusPayload(status);
@@ -1537,6 +1547,7 @@ export class PrinterSignalRService {
       this.authListener = null;
     }
     this.printerStatusCallbacks = [];
+    this.controlOperationCallbacks.clear();
     this.jobQueueUpdateCallbacks = [];
     this.connectionStateCallbacks = [];
     this.discoveryProgressCallbacks = [];

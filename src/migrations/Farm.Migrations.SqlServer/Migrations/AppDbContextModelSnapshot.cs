@@ -6230,6 +6230,128 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("Printers");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterControlOperation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ActorSubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CompletionEvidence")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<Guid?>("CorrelationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("EmergencyStopInFlight")
+                        .HasColumnType("bit");
+
+                    b.Property<double?>("F")
+                        .HasColumnType("float");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("FailureMessage")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("NormalizedIntent")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTime?>("OwnerHeartbeatAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("OwnerToken")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PrinterConfigurationIdentity")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RecoveryActorSubject")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("RecoveryEvidenceJson")
+                        .HasMaxLength(8192)
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<long?>("RecoveryFromRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("RecoveryRequestedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
+
+                    b.Property<DateTime?>("SendCommittedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("SenderIsolatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SenderIsolation")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTime?>("StartedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<double?>("X")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("Y")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("Z")
+                        .HasColumnType("float");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId", "CreatedAtUtc");
+
+                    b.HasIndex("State", "OwnerHeartbeatAtUtc");
+
+                    b.ToTable("PrinterControlOperations");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterDispatchState", b =>
                 {
                     b.Property<Guid>("PrinterId")
@@ -6304,6 +6426,49 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasKey("PrinterId");
 
                     b.ToTable("PrinterDispatchStates");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterEmergencyStopAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ActorSubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ConfigurationIdentity")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Delivery")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<Guid>("OperationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("SendCommittedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OperationId", "Delivery");
+
+                    b.ToTable("PrinterEmergencyStopAttempts");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroup", b =>
@@ -9383,6 +9548,15 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired();
 
                     b.Navigation("Printer");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterEmergencyStopAttempt", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.PrinterControlOperation", null)
+                        .WithMany()
+                        .HasForeignKey("OperationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrinterGroupAccess", b =>

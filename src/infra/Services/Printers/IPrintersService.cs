@@ -518,6 +518,9 @@ public interface IPrintersService
     /// <returns>True if stop succeeded, false if backend unavailable or unsupported</returns>
     Task<bool> EmergencyStopAsync(Guid id, CancellationToken ct);
 
+    /// <summary>Stops only the exact printer configuration fenced by the emergency attempt.</summary>
+    Task<bool> EmergencyStopAsync(Guid id, string expectedConfigurationIdentity, CancellationToken ct);
+
     /// <summary>
     /// Reboots the printer's microcontroller (MCU).
     /// </summary>

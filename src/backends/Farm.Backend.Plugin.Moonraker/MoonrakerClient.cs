@@ -42,6 +42,7 @@ public class MoonrakerClient(
     ISupportsCompositeStatus,
     ISupportsControlRestart,
     ISupportsGcodeExecution,
+    ISupportsEmergencyStop,
     ISupportsObjectExclusion,
     ISupportsFilamentUsageQuery,
     ISupportsPerExtruderFilamentUsage,
@@ -502,6 +503,8 @@ public class MoonrakerClient(
 
         // Try to read current position
         double? x = null, y = null, z = null;
+        string? homedAxes = null;
+        DateTime? homedAxesObservedAtUtc = null;
         try
         {
             using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -509,7 +512,7 @@ public class MoonrakerClient(
             Uri baseUri = new(baseUrl);
             Uri posUri = new(
                 baseUri,
-                "printer/objects/query?toolhead=position&gcode_move=gcode_position");
+                "printer/objects/query?toolhead=position,homed_axes&gcode_move=gcode_position");
             using HttpResponseMessage resp = await _http.GetAsync(posUri, cts.Token);
             if (resp.IsSuccessStatusCode)
             {
@@ -519,6 +522,13 @@ public class MoonrakerClient(
                 if (root.TryGetProperty("result", out JsonElement result) &&
                     result.TryGetProperty("status", out JsonElement statusNode))
                 {
+                    if (statusNode.TryGetProperty("toolhead", out JsonElement th) && th.ValueKind == JsonValueKind.Object &&
+                        th.TryGetProperty("homed_axes", out JsonElement axes) && axes.ValueKind == JsonValueKind.String)
+                    {
+                        homedAxes = axes.GetString();
+                        homedAxesObservedAtUtc = DateTime.UtcNow;
+                    }
+
                     if (TryGetFinitePosition(
                             statusNode,
                             "toolhead",
@@ -657,7 +667,8 @@ public class MoonrakerClient(
             printTimeLeftSeconds = job.PrintDurationSeconds.Value * (1.0 - progressFraction) / progressFraction;
         }
 
-        return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT, PrintTimeLeftSeconds: printTimeLeftSeconds);
+        return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT,
+            PrintTimeLeftSeconds: printTimeLeftSeconds, HomedAxes: homedAxes, HomedAxesObservedAtUtc: homedAxesObservedAtUtc);
     }
 
     private static bool TryGetFinitePosition(
@@ -1180,8 +1191,24 @@ public class MoonrakerClient(
         }
     }
 
-    public async Task<bool> EmergencyStopAsync(string baseUrl, CancellationToken ct = default)
-        => await SendGcodePrivateAsync(baseUrl, "M112", ct);
+    public Task<bool> EmergencyStopAsync(string baseUrl, CancellationToken ct = default) =>
+        EmergencyStopAsync(baseUrl, null, ct);
+
+    public async Task<bool> EmergencyStopAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(_timeouts.CommandTimeout);
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            new Uri(new Uri(baseUrl.TrimEnd('/') + "/"), "printer/emergency_stop"));
+        if (credential?.HasApiKey == true)
+        {
+            request.Headers.Add("X-Api-Key", credential.ApiKey);
+        }
+
+        using HttpResponseMessage response = await _http.SendAsync(request, timeout.Token);
+        return response.IsSuccessStatusCode;
+    }
 
     public async Task<bool> FirmwareRestartAsync(string baseUrl, CancellationToken ct = default)
         => await SendGcodePrivateAsync(baseUrl, "FIRMWARE_RESTART", ct);

@@ -1,9 +1,438 @@
 import XCTest
 @testable import PrintFarmer
 
+enum ControlOperationTestJSON {
+    static let operationId = UUID(uuidString: "10000000-0000-0000-0000-000000000001")!
+
+    static func operation(
+        printerId: UUID = TestData.testUUID,
+        kind: String = "HomeAll",
+        state: String = "Queued",
+        barrierHeld: Bool = true,
+        evidence: String = "None",
+        x: Double? = nil,
+        y: Double? = 0,
+        z: Double? = nil,
+        f: Double? = 1200,
+        requiresRecovery: Bool = false
+    ) -> String {
+        """
+        {
+          "operationId":"\(operationId)","printerId":"\(printerId)","kind":"\(kind)",
+          "x":\(x.map { String($0) } ?? "null"),"y":\(y.map { String($0) } ?? "null"),
+          "z":\(z.map { String($0) } ?? "null"),"f":\(f.map { String($0) } ?? "null"),
+          "state":"\(state)","rowVersion":"opaque-r1",
+          "createdAtUtc":"2026-09-12T17:00:00.1234567Z",
+          "updatedAtUtc":"2026-09-12T17:00:01Z","startedAtUtc":null,"completedAtUtc":null,
+          "barrierHeld":\(barrierHeld),"requiresRecovery":\(requiresRecovery),
+          "completionEvidence":"\(evidence)","failure":null,"senderIsolation":"NotRequested"
+        }
+        """
+    }
+
+    static let unlockedProjection = """
+    {"supportedOperations":["HomeAll","HomeXY","HomeZ","Jog","MoveTo"],
+     "barrierHeld":false,"requiresRecovery":false,"operationId":null,"state":null}
+    """
+}
+
 /// Tests for PrinterService: verifies correct endpoints, HTTP methods,
 /// and error propagation. Now includes individual command endpoints.
 final class PrinterServiceTests: XCTestCase {
+
+    func testControlOperationAllKindsUse202AndCallerNonceWithoutLegacyFallback() async throws {
+        for kind in PrinterControlOperationKind.allCases {
+            mockAPIClient.reset()
+            let intent: PrinterControlOperationRequest
+            switch kind {
+            case .homeAll, .homeXY, .homeZ:
+                intent = .init(kind: kind)
+            case .jog:
+                intent = .init(kind: kind, x: 1, f: 1200)
+            case .moveTo:
+                intent = .init(kind: kind, x: 10, y: 0, z: 5, f: 1200)
+            }
+            mockAPIClient.stubResponse(json: ControlOperationTestJSON.operation(
+                kind: kind.rawValue, x: intent.x, y: intent.y, z: intent.z, f: intent.f
+            ), statusCode: 202)
+            let operation = try await printerService.submitControlOperation(
+                printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+                request: intent
+            )
+            XCTAssertEqual(operation.state, .queued)
+            XCTAssertFalse(operation.isSafelyComplete)
+            XCTAssertEqual(operation.y, intent.y)
+            XCTAssertNil(operation.startedAtUtc)
+            XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+            let sent = try XCTUnwrap(mockAPIClient.capturedRequests.first)
+            XCTAssertEqual(sent.httpMethod, "POST")
+            XCTAssertEqual(sent.url?.path, "/api/printers/\(TestData.testUUID)/control-operations")
+            XCTAssertEqual(sent.value(forHTTPHeaderField: "Idempotency-Key"), ControlOperationTestJSON.operationId.uuidString)
+            let body = try XCTUnwrap(sent.capturedHTTPBody())
+            let request = try JSONDecoder().decode(PrinterControlOperationRequest.self, from: body)
+            XCTAssertEqual(request, intent)
+        }
+    }
+
+    func testControlOperationReadsAreUncachedAuthoritativeEvidence() async throws {
+        mockAPIClient.stubResponse(json: ControlOperationTestJSON.operation(
+            state: "Succeeded", barrierHeld: false, evidence: "MotionQueueDrained"
+        ))
+        let result = try await printerService.getControlOperation(
+            printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId
+        )
+        XCTAssertTrue(result.isSafelyComplete)
+        let sent = try XCTUnwrap(mockAPIClient.capturedRequests.first)
+        XCTAssertEqual(sent.httpMethod, "GET")
+        XCTAssertEqual(sent.url?.path, "/api/printers/\(TestData.testUUID)/control-operations/\(ControlOperationTestJSON.operationId)")
+        XCTAssertEqual(sent.cachePolicy, .reloadIgnoringLocalAndRemoteCacheData)
+        XCTAssertEqual(sent.value(forHTTPHeaderField: "Cache-Control"), "no-store")
+        XCTAssertNil(sent.value(forHTTPHeaderField: "Idempotency-Key"))
+    }
+
+    func testHTTP200TerminalReplayRequiresCanonicalReadWithoutIssuingAnotherCommand() async throws {
+        mockAPIClient.stubResponse(json: ControlOperationTestJSON.operation(
+            state: "Succeeded", barrierHeld: false, evidence: "MotionQueueDrained"
+        ), statusCode: 200)
+        let record = try await printerService.submitControlOperation(
+            printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+            request: .init(kind: .homeAll)
+        )
+        // A durable replay may already be terminal. The service preserves the
+        // record, not a CommandResult; the view model must confirm via GET.
+        XCTAssertEqual(record.operationId, ControlOperationTestJSON.operationId)
+        XCTAssertEqual(record.state, .succeeded)
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+        let confirmed = try await printerService.getControlOperation(
+            printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId
+        )
+        XCTAssertEqual(confirmed, record)
+        XCTAssertEqual(mockAPIClient.capturedRequests.map(\.httpMethod), ["POST", "GET"])
+        XCTAssertEqual(mockAPIClient.capturedRequests.first?.value(forHTTPHeaderField: "Idempotency-Key"),
+                       ControlOperationTestJSON.operationId.uuidString)
+    }
+
+    func testLostSubmissionCanBeResolvedByReadUsingSameOperationID() async throws {
+        mockAPIClient.stubError(.timedOut)
+        do {
+            _ = try await printerService.submitControlOperation(
+                printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+                request: .init(kind: .homeAll)
+            )
+            XCTFail("Expected transport timeout")
+        } catch NetworkError.timeout { }
+        mockAPIClient.stubResponse(json: ControlOperationTestJSON.operation(state: "Running"))
+        let record = try await printerService.getControlOperation(
+            printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId
+        )
+        XCTAssertEqual(record.state, .running)
+        XCTAssertTrue(record.barrierHeld)
+        XCTAssertEqual(mockAPIClient.capturedRequests.map(\.httpMethod), ["POST", "GET"])
+    }
+
+    func testDeliberateResumePreservesUUIDAndOriginalIntentAfterAmbiguousAdmission() async throws {
+        let intent = PrinterControlOperationRequest(kind: .moveTo, x: 10, y: 0, z: 5, f: 1200)
+        for alreadyAdmitted in [false, true] {
+            mockAPIClient.reset()
+            mockAPIClient.stubError(alreadyAdmitted ? .networkConnectionLost : .cannotConnectToHost)
+            do {
+                _ = try await printerService.submitControlOperation(
+                    printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+                    request: intent
+                )
+                XCTFail("Expected ambiguous submission failure")
+            } catch { }
+            XCTAssertEqual(mockAPIClient.capturedRequests.count, 1, "No automatic admission retry")
+
+            // This second call represents explicit operator confirmation, not
+            // transport replay. The server owns the exactly-once physical send.
+            let receipt = ControlOperationTestJSON.operation(
+                kind: "MoveTo", state: alreadyAdmitted ? "Succeeded" : "Queued",
+                barrierHeld: !alreadyAdmitted,
+                evidence: alreadyAdmitted ? "MotionQueueDrained" : "None",
+                x: intent.x, y: intent.y, z: intent.z, f: intent.f
+            )
+            mockAPIClient.stubResponse(json: receipt, statusCode: alreadyAdmitted ? 200 : 202)
+            let resumed = try await printerService.submitControlOperation(
+                printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+                request: intent
+            )
+            XCTAssertEqual(resumed.operationId, ControlOperationTestJSON.operationId)
+            let submissions = mockAPIClient.capturedRequests
+            XCTAssertEqual(submissions.count, 2)
+            for sent in submissions {
+                XCTAssertEqual(sent.httpMethod, "POST")
+                XCTAssertEqual(sent.url?.path, "/api/printers/\(TestData.testUUID)/control-operations")
+                XCTAssertEqual(sent.value(forHTTPHeaderField: "Idempotency-Key"), ControlOperationTestJSON.operationId.uuidString)
+                let body = try XCTUnwrap(sent.capturedHTTPBody())
+                XCTAssertEqual(try JSONDecoder().decode(PrinterControlOperationRequest.self, from: body), intent)
+            }
+
+            mockAPIClient.stubResponse(json: receipt)
+            let confirmed = try await printerService.getControlOperation(
+                printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId
+            )
+            XCTAssertEqual(confirmed, resumed)
+            XCTAssertEqual(mockAPIClient.capturedRequests.map(\.httpMethod), ["POST", "POST", "GET"])
+        }
+    }
+
+    func testCurrentControlOperationRequiresExplicitConsistentProjection() async throws {
+        mockAPIClient.stubResponse(json: """
+        {"physicalControl":\(ControlOperationTestJSON.unlockedProjection),"operation":null}
+        """)
+        let result = try await printerService.getCurrentControlOperation(printerId: TestData.testUUID)
+        XCTAssertTrue(result.physicalControl.isExplicitlyUnlocked)
+        XCTAssertNil(result.operation)
+        XCTAssertEqual(mockAPIClient.capturedRequests.first?.url?.path,
+                       "/api/printers/\(TestData.testUUID)/control-operations/current")
+        mockAPIClient.stubResponse(json: """
+        {"physicalControl":\(ControlOperationTestJSON.unlockedProjection),"operation":\(ControlOperationTestJSON.operation())}
+        """)
+        do {
+            _ = try await printerService.getCurrentControlOperation(printerId: TestData.testUUID)
+            XCTFail("Contradictory current evidence must not unlock")
+        } catch PrinterControlOperationError.invalidResponse { }
+    }
+
+    func testCurrentDoesNotExposeCompletedRecordAsBarrierOwner() async {
+        mockAPIClient.stubResponse(json: """
+        {
+          "physicalControl": {
+            "supportedOperations":["HomeAll"],"barrierHeld":false,"requiresRecovery":false,
+            "operationId":"\(ControlOperationTestJSON.operationId)","state":"Succeeded"
+          },
+          "operation":\(ControlOperationTestJSON.operation(state: "Succeeded", barrierHeld: false, evidence: "MotionQueueDrained"))
+        }
+        """)
+        do {
+            _ = try await printerService.getCurrentControlOperation(printerId: TestData.testUUID)
+            XCTFail("Current contains only barrier ownership, not terminal history")
+        } catch { }
+    }
+
+    func testCurrentPreservesUnrelatedPhysicalBarrierWithoutOperationOwner() async throws {
+        for supported in [#"["HomeAll","HomeXY","HomeZ","Jog","MoveTo"]"#, "[]"] {
+            mockAPIClient.stubResponse(json: """
+            {
+              "physicalControl":{
+                "supportedOperations":\(supported),"barrierHeld":true,"requiresRecovery":true,
+                "operationId":null,"state":null
+              },
+              "operation":null
+            }
+            """)
+            let current = try await printerService.getCurrentControlOperation(printerId: TestData.testUUID)
+            XCTAssertNil(current.operation)
+            XCTAssertTrue(current.physicalControl.barrierHeld)
+            XCTAssertTrue(current.physicalControl.requiresRecovery)
+            XCTAssertFalse(current.physicalControl.isExplicitlyUnlocked)
+        }
+    }
+
+    func testMissingCurrentIsAmbiguousNotDefinitiveUpgradeEvidence() async {
+        mockAPIClient.stubResponse(json: "{}", statusCode: 404)
+        do {
+            _ = try await printerService.getCurrentControlOperation(printerId: TestData.testUUID)
+            XCTFail("Missing current must not synthesize an unlocked record")
+        } catch PrinterControlOperationError.problem(let status, _, let message) {
+            XCTAssertEqual(status, 404)
+            XCTAssertTrue(message?.contains("unavailable, inaccessible, or unsupported") == true)
+        } catch {
+            XCTFail("404 must not definitively classify server incompatibility: \(error)")
+        }
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+    }
+
+    func testControlOperationRejectsWrongIdentityMalformedEnumsAndFalseCompletion() async throws {
+        let good = ControlOperationTestJSON.operation()
+        for json in [
+            ControlOperationTestJSON.operation(printerId: UUID()),
+            good.replacingOccurrences(of: ControlOperationTestJSON.operationId.uuidString, with: UUID().uuidString),
+            ControlOperationTestJSON.operation(state: "FutureState"),
+            ControlOperationTestJSON.operation(kind: "FutureKind"),
+            ControlOperationTestJSON.operation(state: "Running", barrierHeld: false),
+            ControlOperationTestJSON.operation(state: "Succeeded", barrierHeld: false),
+            good.replacingOccurrences(of: "\"opaque-r1\"", with: "\"\""),
+            good.replacingOccurrences(of: "\"requiresRecovery\":false,", with: ""),
+            good.replacingOccurrences(of: "\"senderIsolation\":\"NotRequested\"", with: "\"senderIsolation\":7"),
+            good.replacingOccurrences(of: "2026-09-12T17:00:00.1234567Z", with: "invalid-date")
+        ] {
+            mockAPIClient.reset()
+            mockAPIClient.stubResponse(json: json)
+            do {
+                _ = try await printerService.getControlOperation(
+                    printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId
+                )
+                XCTFail("Expected fail-closed response rejection")
+            } catch { }
+            XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+        }
+    }
+
+    func testControlOperationSubmissionRejectsUnrelatedSuccessStatusesEvenWithTerminalBody() async {
+        for status in [201, 204, 206] {
+            mockAPIClient.reset()
+            mockAPIClient.stubResponse(json: ControlOperationTestJSON.operation(
+                state: "Succeeded", barrierHeld: false, evidence: "MotionQueueDrained"
+            ), statusCode: status)
+            do {
+                _ = try await printerService.submitControlOperation(
+                    printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+                    request: .init(kind: .homeAll)
+                )
+                XCTFail("Only 202 acceptance or 200 terminal replay is the submission contract")
+            } catch { }
+            XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+        }
+    }
+
+    func testControlOperationSubmissionRejectsHTTP200UnresolvedReceipt() async {
+        mockAPIClient.stubResponse(json: ControlOperationTestJSON.operation(), statusCode: 200)
+        do {
+            _ = try await printerService.submitControlOperation(
+                printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+                request: .init(kind: .homeAll)
+            )
+            XCTFail("HTTP 200 submission is reserved for a terminal replay")
+        } catch PrinterControlOperationError.invalidResponse { }
+        catch { XCTFail("Unexpected error: \(error)") }
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+    }
+
+    func testControlOperationSubmissionRejectsHTTP202TerminalReceiptUntilCanonicalRead() async throws {
+        let receipt = ControlOperationTestJSON.operation(
+            state: "Succeeded", barrierHeld: false, evidence: "MotionQueueDrained", y: nil, f: nil
+        )
+        mockAPIClient.stubResponse(json: receipt, statusCode: 202)
+        var admission: PrinterControlOperation?
+        do {
+            admission = try await printerService.submitControlOperation(
+                printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+                request: .init(kind: .homeAll)
+            )
+            XCTFail("HTTP 202 must not return a terminal admission receipt")
+        } catch PrinterControlOperationError.invalidResponse { }
+        XCTAssertNil(admission, "An invalid status/state pair must not publish an admission record")
+        XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+
+        mockAPIClient.stubResponse(json: receipt)
+        let confirmed = try await printerService.getControlOperation(
+            printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId
+        )
+        XCTAssertTrue(confirmed.isSafelyComplete)
+        XCTAssertEqual(confirmed.operationId, ControlOperationTestJSON.operationId)
+        XCTAssertEqual(mockAPIClient.capturedRequests.map(\.httpMethod), ["POST", "GET"])
+    }
+
+    func testControlOperationSubmissionStatusStateMatrix() async throws {
+        let states: [(state: PrinterControlOperationState, evidence: PrinterControlCompletionEvidence, terminal: Bool)] = [
+            (.queued, .none, false),
+            (.running, .none, false),
+            (.unknown, .none, false),
+            (.recovering, .none, false),
+            (.succeeded, .motionQueueDrained, true),
+            (.failed, .notSent, true),
+            (.recovered, .operatorVerifiedRecovery, true)
+        ]
+        let intent = PrinterControlOperationRequest(kind: .homeAll)
+        for status in [200, 202, 201, 204, 206, 299] {
+            for (state, evidence, terminal) in states {
+                mockAPIClient.reset()
+                let shouldAccept = status == (terminal ? 200 : 202)
+                let context = "HTTP \(status), state \(state.rawValue)"
+                mockAPIClient.stubResponse(json: ControlOperationTestJSON.operation(
+                    state: state.rawValue, barrierHeld: !terminal,
+                    evidence: evidence.rawValue, y: nil, f: nil,
+                    requiresRecovery: state == .unknown || state == .recovering
+                ), statusCode: status)
+                var admission: PrinterControlOperation?
+                do {
+                    admission = try await printerService.submitControlOperation(
+                        printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+                        request: intent
+                    )
+                    XCTAssertTrue(shouldAccept, context)
+                } catch PrinterControlOperationError.invalidResponse {
+                    XCTAssertFalse(shouldAccept, context)
+                } catch {
+                    XCTFail("Unexpected error for \(context): \(error)")
+                }
+                if shouldAccept {
+                    XCTAssertEqual(admission?.state, state, context)
+                    XCTAssertEqual(admission?.operationId, ControlOperationTestJSON.operationId, context)
+                } else {
+                    XCTAssertNil(admission, context)
+                }
+                XCTAssertEqual(mockAPIClient.capturedRequests.count, 1, context)
+                let sent = try XCTUnwrap(mockAPIClient.capturedRequests.first)
+                XCTAssertEqual(sent.httpMethod, "POST", context)
+                XCTAssertEqual(sent.value(forHTTPHeaderField: "Idempotency-Key"),
+                               ControlOperationTestJSON.operationId.uuidString, context)
+                let body = try XCTUnwrap(sent.capturedHTTPBody())
+                XCTAssertEqual(try JSONDecoder().decode(PrinterControlOperationRequest.self, from: body), intent, context)
+            }
+        }
+    }
+
+    func testControlOperationProblemCodePreservedAndOldServerNeverFallsBack() async {
+        for status in [409, 412, 428, 404, 405, 501] {
+            mockAPIClient.reset()
+            mockAPIClient.stubResponse(json: """
+            {"code":"async_control_required","detail":"Use durable controls"}
+            """, statusCode: status)
+            do {
+                _ = try await printerService.submitControlOperation(
+                    printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+                    request: .init(kind: .homeAll)
+                )
+                XCTFail("Expected error")
+            } catch PrinterControlOperationError.problem(let actual, let code, let message) {
+                XCTAssertEqual(actual, status)
+                XCTAssertEqual(code, "async_control_required")
+                XCTAssertEqual(message, "Use durable controls")
+            } catch PrinterControlOperationError.updateRequired {
+                XCTAssertTrue([405, 501].contains(status))
+            } catch { XCTFail("Unexpected error \(error)") }
+            XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+        }
+    }
+
+    func testLostSubmissionAndCancellationNeverRetryOrFallBack() async {
+        for code in [URLError.Code.timedOut, .networkConnectionLost, .cancelled] {
+            mockAPIClient.reset()
+            mockAPIClient.stubError(code)
+            do {
+                _ = try await printerService.submitControlOperation(
+                    printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+                    request: .init(kind: .homeAll)
+                )
+                XCTFail("Transport failure must not fabricate completion")
+            } catch { }
+            XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+        }
+    }
+
+    func testAlreadyCancelledSubmissionDoesNotSend() async {
+        let gate = AsyncBarrier()
+        defer { gate.close() }
+        let service = printerService!
+        let submission = Task {
+            await gate.arriveAndWait()
+            return try await service.submitControlOperation(
+                printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+                request: .init(kind: .homeAll)
+            )
+        }
+        await gate.waitUntilArrived()
+        submission.cancel()
+        gate.release()
+        do {
+            _ = try await submission.value
+            XCTFail("Cancelled submission must throw")
+        } catch { }
+        XCTAssertTrue(mockAPIClient.capturedRequests.isEmpty)
+    }
 
     private var mockAPIClient: MockAPIClient!
     private var apiClient: APIClient!

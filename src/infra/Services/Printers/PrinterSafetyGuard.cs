@@ -69,6 +69,10 @@ public interface IPrinterSafetyGuard
         PrinterSafetyOperation operation,
         PrinterSafetyMoveRequest? move,
         CancellationToken ct);
+
+    /// <summary>Validates target and current position against fresh command-channel facts, never cached position.</summary>
+    Task<PrinterSafetyValidationResult> ValidateObservedMoveAsync(
+        Guid printerId, PrinterSafetyMoveRequest target, PrinterStatusDto observedStatus, CancellationToken ct);
 }
 
 /// <inheritdoc />
@@ -88,11 +92,23 @@ public sealed class PrinterSafetyGuard(
         timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
 
     /// <inheritdoc />
-    public async Task<PrinterSafetyValidationResult> ValidateAsync(
+    public Task<PrinterSafetyValidationResult> ValidateAsync(
         Guid printerId,
         PrinterSafetyOperation operation,
         PrinterSafetyMoveRequest? move,
-        CancellationToken ct)
+        CancellationToken ct) => ValidateCoreAsync(printerId, operation, move, null, ct);
+
+    /// <inheritdoc />
+    public Task<PrinterSafetyValidationResult> ValidateObservedMoveAsync(
+        Guid printerId, PrinterSafetyMoveRequest target, PrinterStatusDto observedStatus, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(observedStatus);
+        return ValidateCoreAsync(printerId, PrinterSafetyOperation.AbsoluteMovement, target, observedStatus, ct);
+    }
+
+    private async Task<PrinterSafetyValidationResult> ValidateCoreAsync(
+        Guid printerId, PrinterSafetyOperation operation, PrinterSafetyMoveRequest? move,
+        PrinterStatusDto? observedStatus, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         _capabilitiesService.InvalidateVerifiedSafety(printerId);
@@ -124,12 +140,12 @@ public sealed class PrinterSafetyGuard(
                 "The printer does not support bounded extrusion.");
         }
 
-        return operation switch
+        PrinterSafetyValidationResult result = operation switch
         {
             PrinterSafetyOperation.AbsoluteMovement =>
                 ValidateAbsoluteMovement(
                     safety,
-                    _statusCache.GetStatus(printerId),
+                    observedStatus ?? _statusCache.GetStatus(printerId),
                     move,
                     _timeProvider.GetUtcNow().UtcDateTime),
             PrinterSafetyOperation.MmuChangeTool or
@@ -146,6 +162,22 @@ public sealed class PrinterSafetyGuard(
                     _timeProvider.GetUtcNow().UtcDateTime),
             _ => PrinterSafetyValidationResult.Allowed,
         };
+
+        if (result.Success && observedStatus is not null)
+        {
+            // Current and requested positions must share the verified frame and envelope.
+            // This also bounds any relative delta by the corresponding axis travel span.
+            if (observedStatus is not { X: double x, Y: double y, Z: double z } ||
+                observedStatus.SafetyTelemetry?.CoordinateOriginOffsetMm.Value is not { } offset ||
+                safety.Positioning.TravelEnvelopeMm.Value is not { } envelope ||
+                !IsFinite(new(x, y, z)) || !Contains(envelope, new(x + offset.X, y + offset.Y, z + offset.Z)))
+            {
+                return PrinterSafetyValidationResult.Reject(409, "printer_move_out_of_bounds",
+                    "Current position must be within the verified travel envelope.");
+            }
+        }
+
+        return result;
     }
 
     private static VerifiedSafetyOperationCapabilityDto GetOperationCapability(
