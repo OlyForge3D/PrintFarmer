@@ -458,7 +458,7 @@ struct PrinterDetailView: View {
             temperatureSection(printer)
             filamentSectionView(printer)
             currentJobBlock(printer)
-            if let homedAxes = printer.homedAxes ?? viewModel.statusDetail?.homedAxes {
+            if let homedAxes = resolvedHomedAxes(printer) {
                 homedAxesBadges(homedAxes)
             }
             ejectFilamentUtility(printer)
@@ -1133,24 +1133,42 @@ struct PrinterDetailView: View {
 
     // MARK: - Homed Axes
 
+    /// The list DTO can carry an empty homing string while `/status` carries the real
+    /// one, and `??` only falls through on `nil` — so a stale empty value used to win
+    /// and badge a homed printer as unhomed. Prefer the first value that names an axis,
+    /// and fall back to an empty-but-present value so "nothing is homed" still renders.
+    static func resolveHomedAxes(_ candidates: [String?]) -> String? {
+        let present = candidates.compactMap { $0 }
+        return present.first { !$0.isEmpty } ?? present.first
+    }
+
+    private func resolvedHomedAxes(_ printer: Printer) -> String? {
+        Self.resolveHomedAxes([printer.homedAxes, viewModel.statusDetail?.homedAxes])
+    }
+
     /// Compact X/Y/Z badges showing which axes have been homed. Hidden entirely when
     /// the backend doesn't supply the field (older backend or unsupported printer).
     @ViewBuilder
     private func homedAxesBadges(_ homedAxes: String) -> some View {
         let normalized = homedAxes.lowercased()
-        HStack(spacing: 4) {
-            ForEach(["x", "y", "z"], id: \.self) { axis in
-                let isHomed = normalized.contains(axis)
-                Text(axis.uppercased())
-                    .font(.caption2.weight(.bold))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(
-                        isHomed ? Color.pfSuccess.opacity(0.12) : Color.pfBackgroundTertiary,
-                        in: Capsule()
-                    )
-                    .foregroundStyle(isHomed ? Color.pfSuccess : Color.pfTextSecondary)
-                    .accessibilityLabel("\(axis.uppercased()) axis \(isHomed ? "homed" : "not homed")")
+        HStack(spacing: 8) {
+            Text("Homed axes")
+                .font(.caption)
+                .foregroundStyle(Color.pfTextSecondary)
+            HStack(spacing: 4) {
+                ForEach(["x", "y", "z"], id: \.self) { axis in
+                    let isHomed = normalized.contains(axis)
+                    Text(axis.uppercased())
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(
+                            isHomed ? Color.pfSuccess.opacity(0.12) : Color.pfBackgroundTertiary,
+                            in: Capsule()
+                        )
+                        .foregroundStyle(isHomed ? Color.pfSuccess : Color.pfTextSecondary)
+                        .accessibilityLabel("\(axis.uppercased()) axis \(isHomed ? "homed" : "not homed")")
+                }
             }
         }
         .accessibilityElement(children: .combine)

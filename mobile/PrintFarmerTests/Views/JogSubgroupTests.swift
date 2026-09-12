@@ -23,13 +23,19 @@ final class JogSubgroupTests: XCTestCase {
 
     func test_absoluteInputs_requireXYZPreserveZeroAndRejectEveryCustomFeedrate() throws {
         typealias Editor = JogSubgroup.AbsolutePositionControls
-        for (x, y, z) in [("", "1", "10"), ("0", " ", "10"), ("0", "1", "")] {
-            XCTAssertThrowsError(try Editor.destination(x: x, y: y, z: z)) {
-                XCTAssertEqual($0.localizedDescription, ControlNumberInput.absoluteCoordinatesMessage)
-            }
+        XCTAssertThrowsError(try Editor.destination(x: "", y: "", z: "")) {
+            XCTAssertEqual($0.localizedDescription, ControlNumberInput.absoluteCoordinatesMessage)
         }
-        XCTAssertEqual(try Editor.destination(x: "0", y: "-1.234", z: "10"),
-                       SafetyVector3Dto(x: 0, y: -1.234, z: 10))
+        let partial = try Editor.destination(x: "", y: "1", z: "10")
+        XCTAssertNil(partial.x)
+        XCTAssertEqual(partial.y, 1.0)
+        XCTAssertEqual(partial.z, 10.0)
+
+        let full = try Editor.destination(x: "0", y: "-1.234", z: "10")
+        XCTAssertEqual(full.x, 0.0)
+        XCTAssertEqual(full.y, -1.234)
+        XCTAssertEqual(full.z, 10.0)
+
         XCTAssertThrowsError(try Editor.destination(x: "1.2345", y: "0", z: "10"))
         XCTAssertNil(try ControlNumberInput.optional("  "))
         XCTAssertEqual(try ControlNumberInput.optional("0"), 0)
@@ -221,6 +227,64 @@ final class JogSubgroupTests: XCTestCase {
         )
         let view = JogSubgroup(viewModel: vm)
         XCTAssertEqual(view.jogAccessibilityValue(isPending: false, hasError: false), "")
+    }
+
+    // MARK: - Homing-aware position display
+
+    func test_isAxisHomed_distinguishesUnreportedHomingFromNothingHomed() {
+        // nil means the backend never reports the field, which is not the same
+        // claim as "this axis is not homed".
+        for axis in ["X", "Y", "Z"] {
+            XCTAssertNil(JogSubgroup.isAxisHomed(axis, homedAxes: nil), axis)
+            XCTAssertEqual(JogSubgroup.isAxisHomed(axis, homedAxes: ""), false, axis)
+            XCTAssertEqual(JogSubgroup.isAxisHomed(axis, homedAxes: "xyz"), true, axis)
+            XCTAssertEqual(JogSubgroup.isAxisHomed(axis, homedAxes: "XYZ"), true, axis)
+        }
+        XCTAssertEqual(JogSubgroup.isAxisHomed("X", homedAxes: "xy"), true)
+        XCTAssertEqual(JogSubgroup.isAxisHomed("Y", homedAxes: "xy"), true)
+        XCTAssertEqual(JogSubgroup.isAxisHomed("Z", homedAxes: "xy"), false)
+        XCTAssertEqual(JogSubgroup.isAxisHomed("Y", homedAxes: "xz"), false)
+        XCTAssertEqual(JogSubgroup.isAxisHomed("z", homedAxes: "XZ"), true)
+    }
+
+    func test_positionDisplay_withholdsStaleCoordinateForExplicitlyUnhomedAxis() {
+        // Firmware keeps reporting the last kinematic position after homing is
+        // invalidated, so the number must not be presented as a position.
+        let display = JogSubgroup.positionDisplay(axis: "Z", value: 12.3, homedAxes: "xy", unit: "mm")
+        XCTAssertEqual(display.text, "—")
+        XCTAssertEqual(display.accessibilityLabel, "Z position unavailable, axis not homed")
+
+        let compact = JogSubgroup.positionDisplay(axis: "Z", value: 12.3, homedAxes: "xy")
+        XCTAssertEqual(compact.text, "—")
+        XCTAssertEqual(compact.accessibilityLabel, "Z position unavailable, axis not homed")
+
+        // Nothing homed at all still withholds every axis.
+        for axis in ["X", "Y", "Z"] {
+            XCTAssertEqual(JogSubgroup.positionDisplay(axis: axis, value: 1.0, homedAxes: "", unit: "mm").text, "—", axis)
+        }
+    }
+
+    func test_positionDisplay_keepsReportedCoordinateWhenHomingIsUnreportedOrHomed() {
+        // nil homing is not evidence of an unhomed axis, so the reported
+        // coordinate is all we have and must still render.
+        let unreported = JogSubgroup.positionDisplay(axis: "X", value: 120.0, homedAxes: nil, unit: "mm")
+        XCTAssertEqual(unreported.text, "120.0 mm")
+        XCTAssertEqual(unreported.accessibilityLabel, "X 120.0 mm")
+
+        let homed = JogSubgroup.positionDisplay(axis: "Y", value: 85.5, homedAxes: "xyz", unit: "mm")
+        XCTAssertEqual(homed.text, "85.5 mm")
+        XCTAssertEqual(homed.accessibilityLabel, "Y 85.5 mm")
+
+        let compact = JogSubgroup.positionDisplay(axis: "Y", value: 85.5, homedAxes: "xyz")
+        XCTAssertEqual(compact.text, "85.5")
+        XCTAssertEqual(compact.accessibilityLabel, "Y 85.5")
+    }
+
+    func test_positionDisplay_reportsUnknownForMissingOrNonFiniteCoordinates() {
+        for value in [nil, Double.nan, .infinity] as [Double?] {
+            XCTAssertEqual(JogSubgroup.positionDisplay(axis: "X", value: value, homedAxes: "xyz", unit: "mm").text, "Unknown")
+            XCTAssertEqual(JogSubgroup.positionDisplay(axis: "X", value: value, homedAxes: "xyz").text, "---")
+        }
     }
 
 }

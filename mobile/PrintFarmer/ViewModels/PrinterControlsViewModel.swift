@@ -96,7 +96,7 @@ enum Heater: String, CaseIterable, Sendable {
 }
 
 enum ControlNumberInput {
-    static let absoluteCoordinatesMessage = "Enter finite X, Y and Z destinations. All three coordinates are required; no current position is filled in."
+    static let absoluteCoordinatesMessage = "Enter destination coordinate in mm for X, Y, or Z. Unspecified axes remain unchanged."
     static let heaterPrecisionMessage = "Use whole degrees Celsius. Fractional targets are not supported; no rounding is applied."
     static let coordinatePrecisionMessage = "Use at most 3 decimal places in millimetres. No rounding is applied."
     static let customFeedrateMessage = "Custom feedrates are unavailable without a verified maximum. Leave this field blank to use the established axis-specific rate."
@@ -133,14 +133,20 @@ enum ControlNumberInput {
         return value
     }
 
-    static func absolutePosition(x: Double?, y: Double?, z: Double?) throws -> SafetyVector3Dto {
-        guard let x, let y, let z, x.isFinite, y.isFinite, z.isFinite else {
+    static func absolutePosition(x: Double?, y: Double?, z: Double?) throws -> (x: Double?, y: Double?, z: Double?) {
+        guard x != nil || y != nil || z != nil else {
             throw PrinterControlError.invalidRequest(absoluteCoordinatesMessage)
         }
-        guard [x, y, z].allSatisfy(hasCoordinatePrecision) else {
+        if let x, (!x.isFinite || !hasCoordinatePrecision(x)) {
             throw PrinterControlError.invalidRequest(coordinatePrecisionMessage)
         }
-        return SafetyVector3Dto(x: x, y: y, z: z)
+        if let y, (!y.isFinite || !hasCoordinatePrecision(y)) {
+            throw PrinterControlError.invalidRequest(coordinatePrecisionMessage)
+        }
+        if let z, (!z.isFinite || !hasCoordinatePrecision(z)) {
+            throw PrinterControlError.invalidRequest(coordinatePrecisionMessage)
+        }
+        return (x: x, y: y, z: z)
     }
 
     static func isWholeDegree(_ value: Double) -> Bool {
@@ -1226,16 +1232,24 @@ final class PrinterControlsViewModel: ObservableObject {
     func absoluteMoveBlockedReason(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int? = nil) -> String? {
         if let reason = blockedReason { return reason }
         guard feedrateMmMin == nil else { return ControlNumberInput.customFeedrateMessage }
-        let point: SafetyVector3Dto
+        let target: (x: Double?, y: Double?, z: Double?)
         do {
-            point = try ControlNumberInput.absolutePosition(x: x, y: y, z: z)
+            target = try ControlNumberInput.absolutePosition(x: x, y: y, z: z)
         } catch { return error.localizedDescription }
         guard capabilities?.supportsAbsoluteMovement == true,
               Set(capabilities?.supportedAxes ?? []).isSuperset(of: ["X", "Y", "Z"]) else {
             return "Absolute movement requires confirmed support for all X, Y and Z axes."
         }
+        guard let current = reportedSafetyPosition else {
+            return positioningEvidenceBlockedReason ?? "Reported X, Y and Z positions are required to validate safe movement."
+        }
+        let fullPoint = SafetyVector3Dto(
+            x: target.x ?? current.x,
+            y: target.y ?? current.y,
+            z: target.z ?? current.z
+        )
         return supportReason(capabilities?.verifiedSafety?.operations.absoluteMovement, title: "Absolute positioning")
-            ?? safeMoveReason(point)
+            ?? safeMoveReason(fullPoint)
     }
 
     func moveTo(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int?) async {

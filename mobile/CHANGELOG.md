@@ -15,8 +15,9 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   temperatures remain in the reading strip above it.
 - Keep unsupported Controls actions visible and disabled instead of hiding
   them or rearranging Heat, Move & home, and Filament tools.
-- Keep Z-offset's unsupported-operation explanation behind Details & safety
-  until calibration starts; active workflow warnings remain immediately visible.
+- Remove the obsolete Details & safety entry points from material and Z-offset
+  calibration controls while retaining their operational controls and active
+  workflow warnings.
 - Replace the Controls page's Home All/XY/Z text row with accessible house
   glyphs in the web UI movement arrangement, including centered XY homing and
   Z homing between Z+ and Z-. Preserve independent capability gating.
@@ -36,7 +37,7 @@ All notable changes to PrintFarmer iOS will be documented in this file.
   Match the original CSS geometry and typography hierarchy: divided temperature
   strip, bordered controls, ruled motion rows, paired motor/calibration entries,
   and 1.1:1 iPad columns. Compact assignment delegates to the existing host;
-  native Details & safety retains Clear/NFC and truthful inventory information.
+  compact assignment retains Clear/NFC and truthful inventory information.
 
 - **Guarded native material controls** — Separate physical filament requests
   from spool assignment and preserve NFC/Eject. Add signed extrusion choices,

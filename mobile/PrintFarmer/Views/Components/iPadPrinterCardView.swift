@@ -34,7 +34,7 @@ struct iPadPrinterCardView: View {
                 } else {
                     Label("No spool loaded", systemImage: "cylinder")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.pfTextSecondary)
                 }
 
                 // Bed clear banner
@@ -135,10 +135,10 @@ struct iPadPrinterCardView: View {
                 .monospacedDigit()
             if let target, target > 0 {
                 Text("→")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color.pfTextTertiary)
                 Text(String(format: "%.0f°C", target))
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.pfTextSecondary)
             }
         }
     }
@@ -165,7 +165,7 @@ struct iPadPrinterCardView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(printer.fileName ?? printer.jobName ?? "---")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.pfTextSecondary)
                 .lineLimit(1)
 
             HStack(spacing: 6) {
@@ -173,7 +173,7 @@ struct iPadPrinterCardView: View {
 
                 Text((printer.progress ?? 0).percentFormatted)
                     .font(.caption.weight(.medium).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.pfTextSecondary)
             }
         }
     }
@@ -194,16 +194,16 @@ struct iPadPrinterCardView: View {
             if let material = spool.material {
                 Text(material)
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.pfTextSecondary)
             }
 
             // Filament name
             if let name = spool.filamentName {
                 Text("·")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color.pfTextTertiary)
                 Text(name)
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color.pfTextTertiary)
                     .lineLimit(1)
             }
 
@@ -218,7 +218,7 @@ struct iPadPrinterCardView: View {
                     Image(systemName: "scalemass")
                         .font(.caption2)
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.pfTextSecondary)
             }
         }
     }
@@ -237,7 +237,7 @@ struct iPadPrinterCardView: View {
 
             Image(systemName: "chevron.right")
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Color.pfTextTertiary)
         }
         .padding(10)
         .background(Color.pfWarning.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))

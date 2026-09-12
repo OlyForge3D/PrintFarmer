@@ -320,9 +320,9 @@ struct DashboardView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "tray")
                             .font(.largeTitle)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.pfTextSecondary)
                         Text("No active jobs")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.pfTextSecondary)
                     }
                     .padding(.vertical, 24)
                     Spacer()
@@ -361,7 +361,7 @@ struct DashboardView: View {
                     Text("\(viewModel.queuedJobCount) job(s) queued across fleet")
                         .font(.caption)
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.pfTextSecondary)
             }
         }
     }
@@ -417,13 +417,13 @@ struct DashboardView: View {
                 if !suffix.isEmpty {
                     Text(suffix)
                         .font(sizeClass == .regular ? .subheadline : .caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.pfTextSecondary)
                 }
             }
 
             Text(title)
                 .font(sizeClass == .regular ? .caption : .caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.pfTextSecondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, sizeClass == .regular ? 16 : 12)
@@ -456,7 +456,7 @@ struct DashboardView: View {
                 if stat.currentlyPrinting > 0 {
                     Text("\(stat.currentlyPrinting) printing")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.pfTextSecondary)
                 }
             }
 
@@ -468,7 +468,7 @@ struct DashboardView: View {
                     .foregroundStyle(Color.pfAccent)
                 Text("queued")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.pfTextSecondary)
             }
         }
         .padding(12)
@@ -500,7 +500,7 @@ struct DashboardView: View {
                     .lineLimit(1)
                 Label(printer.name, systemImage: "printer")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.pfTextSecondary)
                     .lineLimit(1)
             }
 
@@ -513,12 +513,12 @@ struct DashboardView: View {
                         .foregroundStyle(Color.pfAccent)
                     Text("printing")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.pfTextSecondary)
                 }
             } else {
                 Text("—")
                     .font(.subheadline)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color.pfTextTertiary)
             }
         }
         .padding(12)
@@ -551,12 +551,12 @@ struct DashboardView: View {
                 if let printerName = jobMeta.assignedPrinter?.name {
                     Label(printerName, systemImage: "printer")
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.pfTextSecondary)
                         .lineLimit(1)
                 } else if let model = jobMeta.job.printerModel {
                     Label("Any \(model)", systemImage: "printer")
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Color.pfTextTertiary)
                         .lineLimit(1)
                 }
             }
@@ -570,7 +570,7 @@ struct DashboardView: View {
                 if let eta = jobMeta.estimatedStartTime {
                     Text(eta.relativeFormatted)
                         .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.pfTextSecondary)
                 }
             }
         }
@@ -612,7 +612,7 @@ struct DashboardView: View {
 
             Text("Last 24 Hours")
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.pfTextSecondary)
                 .padding(.top, 4)
 
             LazyVGrid(columns: threeColumns, spacing: 12) {
@@ -657,7 +657,7 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Avg Dispatch Score (24h)")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.pfTextSecondary)
                 Text(String(format: "%.1f", dispatchViewModel.averageScoreLast24h))
                     .font(.title3.bold().monospacedDigit())
             }
@@ -680,7 +680,7 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Printer Queues")
                 .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.pfTextSecondary)
                 .padding(.top, 4)
 
             ForEach(depths, id: \.printerId) { printer in
@@ -696,7 +696,7 @@ struct DashboardView: View {
 
                     Text("\(printer.queueDepth) queued")
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.pfTextSecondary)
 
                     Circle()
                         .fill(printer.isPrinting ? Color.pfAccent : (printer.isAvailable ? .pfSuccess : .secondary))
@@ -729,13 +729,13 @@ struct DashboardView: View {
 
             Text(title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.pfTextSecondary)
                 .multilineTextAlignment(.center)
 
             if let subtitle {
                 Text(subtitle)
                     .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Color.pfTextTertiary)
                     .multilineTextAlignment(.center)
             }
         }
@@ -756,7 +756,7 @@ struct DashboardView: View {
             if dispatchViewModel.history.isEmpty {
                 Text("No recent dispatch history")
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.pfTextSecondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 20)
             } else {
@@ -781,11 +781,11 @@ struct DashboardView: View {
                     if let printer = entry.printerName {
                         Label(printer, systemImage: "printer")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.pfTextSecondary)
                     }
                     Text(entry.action)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.pfTextSecondary)
                 }
             }
 
@@ -793,7 +793,7 @@ struct DashboardView: View {
 
             Text(entry.createdAtUtc, style: .relative)
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Color.pfTextTertiary)
         }
         .padding(10)
         .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 8))
@@ -854,7 +854,7 @@ struct DashboardView: View {
                 .font(.title3.bold().monospacedDigit())
             Text(title)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.pfTextSecondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
@@ -1035,7 +1035,7 @@ private struct SummaryCard: View {
 
             Text(title)
                 .font(isLarge ? .subheadline : .caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.pfTextSecondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, isLarge ? 20 : 14)
@@ -1075,7 +1075,7 @@ private struct ActiveJobRow: View {
 
                     Label(printer.name, systemImage: "printer")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Color.pfTextSecondary)
                         .lineLimit(1)
                 }
 
@@ -1090,7 +1090,7 @@ private struct ActiveJobRow: View {
                     Text("\(Int(progress * 100))%")
                         .font(.caption.weight(.medium).monospacedDigit())
                         .foregroundStyle(Color.pfAccent)
-                        .frame(width: 36, alignment: .trailing)
+                        .frame(minWidth: 40, alignment: .trailing)
                 }
             }
 
@@ -1103,7 +1103,7 @@ private struct ActiveJobRow: View {
                             .font(.caption)
                         Text("·")
                             .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Color.pfTextTertiary)
                         Text("Done \(eta.completion.shortTimeFormatted)")
                             .font(.caption)
                     } else {
@@ -1111,7 +1111,7 @@ private struct ActiveJobRow: View {
                             .font(.caption)
                     }
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Color.pfTextSecondary)
             }
         }
         .padding(12)
