@@ -18,6 +18,11 @@ internal sealed class PrinterState
 
     public double? Z { get; set; }
 
+    /// <summary>
+    /// Most recent valid G-code-frame position, retained across incremental toolhead-only updates.
+    /// </summary>
+    public SafetyVector3Dto? GcodePositionMm { get; set; }
+
     public double? HotendTemp { get; set; }
 
     public DateTime? HotendTempObservedAtUtc { get; set; }
