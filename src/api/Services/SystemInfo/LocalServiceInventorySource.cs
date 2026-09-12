@@ -36,8 +36,8 @@ public sealed class LocalServiceInventorySource(ISettingsService settings, IConf
                 ServiceId = "discovery", Component = "discovery", Required = discovery?.EnableDiscovery == true,
 
                 // The legacy anonymous heartbeat proves neither build nor replica identity.
-                ObservationState = discovery?.EnableDiscovery == false ? InventoryObservationState.NotInstalled : InventoryObservationState.Unknown,
-                Source = "TopologyConfiguration", ReasonCode = discovery?.EnableDiscovery == false ? "OptionalDisabled" : "HeartbeatHasNoAuthenticatedBuildIdentity",
+                ObservationState = InventoryObservationState.Unknown,
+                Source = "TopologyConfiguration", ReasonCode = discovery?.EnableDiscovery == false ? "OptionalDisabledInstallationUnknown" : "HeartbeatHasNoAuthenticatedBuildIdentity",
             },
             new()
             {

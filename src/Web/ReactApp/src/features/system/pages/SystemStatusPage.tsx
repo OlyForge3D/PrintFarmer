@@ -229,7 +229,7 @@ export function SystemStatusPage() {
   });
 
   if (!canViewInventory) {
-    return <Alert variant="warning" title="Access denied">System settings admin permission is required.</Alert>;
+    return <Alert type="warning" title="Access denied">System settings admin permission is required.</Alert>;
   }
 
   if (isLoading) {
@@ -245,7 +245,7 @@ export function SystemStatusPage() {
 
   if (error || !data) {
     return (
-      <Alert variant="error" title="Failed to load system status">
+      <Alert type="error" title="Failed to load system status">
         {getErrorMessage(error)}
       </Alert>
     );
@@ -278,7 +278,7 @@ export function SystemStatusPage() {
         {isFetching ? 'Refreshing system status.' : 'System snapshot loaded; review individual observation times.'}
       </p>
 
-      {data.inventory ? <ServiceVersionsTable inventory={data.inventory} /> : <Alert variant="warning" title="Inventory unknown">This server does not report detailed service observations.</Alert>}
+      {data.inventory ? <ServiceVersionsTable inventory={data.inventory} /> : <Alert type="warning" title="Inventory unknown">This server does not report detailed service observations.</Alert>}
 
       <div className="grid gap-4 xl:grid-cols-2">
         <StatusCard

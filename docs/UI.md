@@ -199,7 +199,8 @@ JSON; legacy workers continue to report engine version with unknown app build.
 Worker endpoints, credentials, raw capability JSON and arbitrary metadata are not
 returned. Native builds remain useful with null image and release evidence.
 The anonymous discovery heartbeat is **not** authenticated build/replica evidence;
-unknown discovery and external slicer-host slots remain visible rather than
+disabling scanning does not prove that a discovery process is uninstalled. Unknown
+discovery and external slicer-host slots remain visible rather than
 borrowing the API version. An unavailable registry remains unavailable/unknown,
 not an empty healthy worker set. No new outbound requests are made by inventory.
 

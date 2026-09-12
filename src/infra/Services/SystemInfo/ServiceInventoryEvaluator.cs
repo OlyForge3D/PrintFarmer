@@ -26,7 +26,7 @@ public static partial class ServiceInventoryEvaluator
         InventoryChannelState channelState = channels.Length > 1 ? InventoryChannelState.Mixed
             : installed.Any(row => row.ChannelState == InventoryChannelState.Mismatch) ? InventoryChannelState.Mismatch
             : installed.Any(row => row.ObservationState == InventoryObservationState.Stale) ? InventoryChannelState.Stale
-            : installed.Length == 0 || installed.Any(row => row.ObservedChannel is null) ? InventoryChannelState.Unknown
+            : installed.Length == 0 || installed.Any(row => row.ChannelState == InventoryChannelState.Unknown) ? InventoryChannelState.Unknown
             : InventoryChannelState.Observed;
         bool blocked = compatibility is InventoryCompatibilityState.MixedChannel or InventoryCompatibilityState.MixedRelease or InventoryCompatibilityState.Incompatible
             || channelState == InventoryChannelState.Mismatch;
@@ -52,9 +52,20 @@ public static partial class ServiceInventoryEvaluator
     // Source adapters retain original timestamps; reading an old snapshot cannot make it fresh.
     private static ServiceReplicaObservationDto Normalize(ServiceReplicaObservationDto row, string selection, DateTimeOffset now)
     {
+        if (row.ObservationState == InventoryObservationState.NotInstalled && !row.Required)
+        {
+            return row with
+            {
+                Identity = null, ObservedChannel = null, ChannelState = InventoryChannelState.Unknown,
+                PlatformDigest = null, IndexDigest = null, ManifestDigest = null,
+                VerificationSource = null, VerifiedAt = null,
+            };
+        }
+
+        // A source cannot make required absence healthy by labelling it optional absence.
         if (row.ObservationState == InventoryObservationState.NotInstalled)
         {
-            return row with { Identity = null, ObservedChannel = null, ChannelState = InventoryChannelState.Unknown };
+            row = row with { ObservationState = InventoryObservationState.Unavailable, ReasonCode = "RequiredServiceAbsent" };
         }
 
         bool verified = HasBoundAuthorization(row);
@@ -79,6 +90,9 @@ public static partial class ServiceInventoryEvaluator
             Identity = verified ? row.Identity : null,
             VerificationSource = verified ? row.VerificationSource : null,
             VerifiedAt = verified ? row.VerifiedAt : null,
+            PlatformDigest = row.Source == "SelfReport" ? null : NormalizeDigest(row.PlatformDigest),
+            IndexDigest = row.Source == "SelfReport" ? null : NormalizeDigest(row.IndexDigest),
+            ManifestDigest = row.Source == "SelfReport" ? null : NormalizeDigest(row.ManifestDigest),
             ObservedChannel = channel,
             ObservationState = state,
             ChannelState = channel is null ? InventoryChannelState.Unknown
@@ -136,9 +150,15 @@ public static partial class ServiceInventoryEvaluator
             return InventoryCompatibilityState.MixedRelease;
         }
 
-        return rows.Length > 0 && rows.All(row => row.Identity is not null && row.PlatformDigest is not null && row.ManifestDigest is not null)
+        return rows.Length > 0 && rows.All(row => row.Identity is not null && !string.IsNullOrWhiteSpace(row.Platform) && row.PlatformDigest is not null && row.ManifestDigest is not null)
             ? InventoryCompatibilityState.Compatible : InventoryCompatibilityState.Unknown;
     }
+
+    private static string? NormalizeDigest(string? digest) =>
+        digest is not null && Sha256Digest().IsMatch(digest) ? digest : null;
+
+    [GeneratedRegex("^sha256:[0-9a-f]{64}$", RegexOptions.CultureInvariant)]
+    private static partial Regex Sha256Digest();
 
     [GeneratedRegex("^[0-9a-f]{40}$", RegexOptions.CultureInvariant)]
     private static partial Regex FullCommit();

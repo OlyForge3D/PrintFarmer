@@ -1,4 +1,4 @@
-import type { CanonicalReleaseIdentity } from '@/types/api';
+import type { CanonicalReleaseIdentity, PromotionOrigin } from '@/types/api';
 
 /** Copies the release authority's build record. Reject inconsistent commit bindings; never derive identity. */
 export function readReleaseIdentity(value: string | undefined, sourceCommit: string): CanonicalReleaseIdentity | null {
@@ -16,5 +16,13 @@ export function readReleaseIdentity(value: string | undefined, sourceCommit: str
   }
   // Do not copy arbitrary fields, evidence paths or purported verification flags into public assets.
   const identity = Object.fromEntries(keys.map(key => [key, input[key]]));
-  return { ...identity, promotionOrigin: null } as unknown as CanonicalReleaseIdentity;
+  let promotionOrigin: PromotionOrigin | null = null;
+  if (input.promotionOrigin != null) {
+    if (typeof input.promotionOrigin !== 'object' || Array.isArray(input.promotionOrigin)) throw new Error('Invalid promotion origin.');
+    const promotion = input.promotionOrigin as Record<string, unknown>;
+    const promotionKeys = ['releaseId', 'canonicalVersion', 'sourceCommit', 'manifestDigest', 'evidence'] as const;
+    if (promotionKeys.some(key => typeof promotion[key] !== 'string' || !promotion[key])) throw new Error('Incomplete promotion origin.');
+    promotionOrigin = Object.fromEntries(promotionKeys.map(key => [key, promotion[key]])) as unknown as PromotionOrigin;
+  }
+  return { ...identity, promotionOrigin } as unknown as CanonicalReleaseIdentity;
 }

@@ -204,6 +204,40 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         (await denied.Content.ReadAsStringAsync()).Should().NotContain("platformDigest").And.NotContain("sourceCommit");
     }
 
+    [Fact]
+    public async Task GetInfo_CustomRoleWithExactAdminPermission_ReturnsInventory()
+    {
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            User user = await db.Users.SingleAsync(row => row.Username == "system-info-user");
+            Resource resource = await db.Resources.SingleAsync(row => row.Name == "system_settings");
+            UserAction action = await db.UserActions.SingleAsync(row => row.Name == "admin");
+            Role role = new() { Id = Guid.NewGuid(), Name = "inventory-reader", DisplayName = "Inventory reader", IsActive = true };
+            db.Roles.Add(role);
+            db.RolePermissions.Add(new RolePermission { Id = Guid.NewGuid(), RoleId = role.Id, ResourceId = resource.Id, ActionId = action.Id, Granted = true });
+            db.UserRoles.Add(new UserRole { Id = Guid.NewGuid(), UserId = user.Id, RoleId = role.Id, IsActive = true, AssignedAt = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+        }
+
+        using HttpClient customAdmin = await _factory.CreateAuthenticatedClientAsync("system-info-user", "system-info-user@example.com");
+        HttpResponseMessage response = await customAdmin.GetAsync("/api/system/info");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("platformDigest");
+    }
+
+    [Fact]
+    public async Task GetInfo_ProductionSignalRSerializer_MatchesRestInventoryContract()
+    {
+        string rest = await _adminClient!.GetStringAsync("/api/system/info");
+        SystemInfoDto dto = JsonSerializer.Deserialize<SystemInfoDto>(rest, JsonOptions)!;
+        var options = _factory.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.SignalR.JsonHubProtocolOptions>>();
+        string signalR = JsonSerializer.Serialize(dto.Inventory, options.Value.PayloadSerializerOptions);
+        using JsonDocument restJson = JsonDocument.Parse(rest);
+        using JsonDocument signalRJson = JsonDocument.Parse(signalR);
+        JsonElement.DeepEquals(restJson.RootElement.GetProperty("inventory"), signalRJson.RootElement).Should().BeTrue();
+    }
+
     private async Task SeedSystemInfoDataAsync()
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();

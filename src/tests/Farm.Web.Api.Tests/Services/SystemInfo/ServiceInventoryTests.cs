@@ -199,6 +199,83 @@ public sealed class ServiceInventoryTests
         }
     }
 
+    [Fact]
+    public void Evaluate_SelfReportedDigests_AreNotAttestation()
+    {
+        ServiceInventoryDto result = Evaluate([Verified("a") with { Source = "SelfReport", IndexDigest = Digest }]);
+        Assert.Null(result.Services[0].PlatformDigest);
+        Assert.Null(result.Services[0].ManifestDigest);
+        Assert.Null(result.Services[0].IndexDigest);
+        Assert.Null(result.Services[0].Identity);
+    }
+
+    [Theory]
+    [InlineData("sha256:bad")]
+    [InlineData("")]
+    [InlineData("latest")]
+    public void Evaluate_InvalidDigest_CannotEstablishCompatibility(string digest)
+    {
+        ServiceInventoryDto result = Evaluate([Verified("a") with { PlatformDigest = digest }]);
+        Assert.Null(result.Services[0].PlatformDigest);
+        Assert.Equal(InventoryCompatibilityState.Unknown, result.CompatibilityState);
+    }
+
+    [Fact]
+    public void Evaluate_UnavailableVerifiedReplica_DoesNotReportFreshChannel()
+    {
+        ServiceInventoryDto result = Evaluate([Verified("a") with { ObservationState = InventoryObservationState.Unavailable }]);
+        Assert.Equal(InventoryChannelState.Unknown, result.ChannelState);
+        Assert.Equal(InventoryCompatibilityState.Compatible, result.CompatibilityState);
+    }
+
+    [Fact]
+    public void Evaluate_RequiredAbsence_IsNotOptionalNotInstalled()
+    {
+        ServiceInventoryDto result = Evaluate([Verified("a") with { ObservationState = InventoryObservationState.NotInstalled }]);
+        Assert.Equal(InventoryObservationState.Unavailable, result.Services[0].ObservationState);
+        Assert.Equal("RequiredServiceAbsent", result.Services[0].ReasonCode);
+    }
+
+    [Fact]
+    public void Evaluate_FutureTimestamp_InvalidatesFreshnessAndVerification()
+    {
+        ServiceInventoryDto result = Evaluate([Verified("a") with { ObservedAt = Now.AddMinutes(1) }]);
+        Assert.Equal(InventoryObservationState.Unknown, result.Services[0].ObservationState);
+        Assert.Null(result.Services[0].Identity);
+        Assert.Equal(InventoryChannelState.Unknown, result.ChannelState);
+    }
+
+    [Fact]
+    public void Evaluate_PromotionOrigin_KeepsFullHistoricalEvidence()
+    {
+        PromotionOriginDto promotion = new()
+        {
+            ReleaseId = "insider:1.2.3-insider.10", CanonicalVersion = "1.2.3-insider.10", SourceCommit = new string('c', 40),
+            ManifestDigest = Digest, Evidence = "qualification-10",
+        };
+        ServiceReplicaObservationDto original = Verified("a");
+        ServiceInventoryDto result = Evaluate([original with { Identity = original.Identity! with { PromotionOrigin = promotion } }]);
+        Assert.Equal(promotion, result.Services[0].Identity!.PromotionOrigin);
+    }
+
+    [Fact]
+    public void Deserialize_SharedFrontendBackendAuthorityRecord_AgreesWithoutDerivation()
+    {
+        DirectoryInfo? root = new(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "VERSION")))
+        {
+            root = root.Parent;
+        }
+
+        Assert.NotNull(root);
+        string json = File.ReadAllText(Path.Combine(root.FullName, "fixtures", "service-inventory", "canonical-release-identity.json"));
+        CanonicalReleaseIdentityDto identity = JsonSerializer.Deserialize<CanonicalReleaseIdentityDto>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        ServiceInventoryDto result = Evaluate([Verified("a", "insider") with { Identity = identity }], "insider");
+        Assert.Equal(identity, result.Services[0].Identity);
+        Assert.Equal("1.2.3-insider.10", result.Services[0].Identity!.CanonicalVersion);
+        Assert.Equal(Commit, result.Services[0].Identity!.SourceCommit);
+    }
+
     private static ServiceInventoryDto Evaluate(ServiceReplicaObservationDto[] rows, string? selection = null) =>
         ServiceInventoryEvaluator.Evaluate(rows, selection, Now);
 
