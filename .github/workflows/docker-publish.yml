@@ -32,7 +32,6 @@ env:
   ORCA_SHA256: d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
   RELEASE_PUBLIC_IDENTITY: ${{ inputs.identity }}
   RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
-  RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
 
 permissions:
   contents: read

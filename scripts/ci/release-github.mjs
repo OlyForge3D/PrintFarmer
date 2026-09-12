@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import {
-  repository, ledgerBranch, requireThat, validateLedger, verifyTag, compareVersions, verifyProtectionEvidence,
+  repository, ledgerBranch, requireThat, validateLedger, verifyTag, compareVersions, normalizeProtectionEvidence,
   hash, identityLabels,
 } from './release-policy.mjs';
 import { publicAuthorization, writePublicSet } from './release-authorization.mjs';
@@ -153,25 +153,30 @@ export function gitLedger(api, anchor) {
 }
 
 export async function verifyProtection(api, channel, publisherAppId = process.env.RELEASE_PUBLISHER_APP_ID) {
+  const readPolicy = async endpoint => {
+    try { return await api(endpoint); }
+    catch (error) {
+      throw new Error(`Protection policy read failed${Number.isInteger(error.status) ? `: HTTP ${error.status}` : ''}`);
+    }
+  };
   const branch = channel === 'stable' ? 'main' : 'development';
-  const branchRules = await api(`rules/branches/${branch}`);
-  const environment = await api(`environments/release-${channel}`);
-  const branchPolicies = await api(`environments/release-${channel}/deployment-branch-policies`);
-  const allRulesets = await api('rulesets?per_page=100');
+  const branchRules = await readPolicy(`rules/branches/${branch}`);
+  const environment = await readPolicy(`environments/release-${channel}`);
+  const branchPolicies = await readPolicy(`environments/release-${channel}/deployment-branch-policies`);
+  const allRulesets = await readPolicy('rulesets?per_page=100');
   requireThat(allRulesets.length < 100, 'Ruleset listing may be truncated');
   const rulesets = [];
   for (const name of ['release-canonical-tags', 'release-ledger-continuity',
     'release-tag-creators', 'release-ledger-writer']) {
     const summary = allRulesets.find(rule => rule.name === name && rule.enforcement === 'active');
     requireThat(summary, `Owner blocker: active ${name} ruleset missing`);
-    const detail = await api(`rulesets/${summary.id}`);
+    const detail = await readPolicy(`rulesets/${summary.id}`);
     requireThat(detail.id === summary.id && detail.name === name, 'Ruleset identity changed during verification');
     rulesets.push(detail);
   }
   const evidence = { schema: 1, repository, channel, branch, publisherAppId,
     verifiedAt: new Date().toISOString(), branchRules, environment, branchPolicies, rulesets };
-  verifyProtectionEvidence(evidence, channel, publisherAppId);
-  return evidence;
+  return normalizeProtectionEvidence(evidence, channel, publisherAppId);
 }
 
 export async function ensureSourceTag(api, store, record, transact) {

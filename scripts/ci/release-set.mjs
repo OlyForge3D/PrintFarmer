@@ -1,7 +1,7 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { components, identityLabels, requireThat, validateCompleteSet } from './release-policy.mjs';
 import { command } from './release-github.mjs';
-import { emitPublicReleaseAssets, privateSetPath, readPrivateJson, verifyAuthorization } from './release-authorization.mjs';
+import { emitPublicReleaseAssets, privateSetPath, readPrivateJson, verifyAuthorization, writeAuthorizationSet } from './release-authorization.mjs';
 
 export function inspectCompleteSet(record, digests, run = command) {
   const set = { schema: 1, identity: record, managedEligible: false, images: {} };
@@ -27,7 +27,8 @@ export function inspectCompleteSet(record, digests, run = command) {
       `Missing platform provenance/SBOM descriptor: ${name}/${platform}`);
       const config = JSON.parse(run('docker', ['buildx', 'imagetools', 'inspect',
         `${image}@${platformDigest}`, '--format', '{{json .Image}}']));
-      platforms[platform] = { digest: platformDigest, labels: config.config.Labels };
+      platforms[platform] = { digest: platformDigest, labels: Object.fromEntries(
+        Object.keys(identityLabels(record)).map(key => [key, config.config.Labels?.[key]])) };
     }
     set.images[name] = { digest, platforms };
   }
@@ -57,7 +58,7 @@ function main() {
     const digests = Object.fromEntries(Object.keys(components).map(name =>
       [name, readFileSync(`artifacts/digest-${name}/digest-${name}.txt`, 'utf8').trim()]));
     const set = inspectCompleteSet(record, digests);
-    writeFileSync(privateSetPath, JSON.stringify(set), { mode: 0o600 });
+    writeAuthorizationSet(record, set);
     emitPublicReleaseAssets(record, set, identityLabels(record));
   } else if (process.argv[2] === 'tag') {
     const set = readPrivateJson(privateSetPath);

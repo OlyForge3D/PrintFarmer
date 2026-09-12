@@ -23,9 +23,6 @@ on:
 permissions:
   contents: read
 
-env:
-  RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
-
 concurrency:
   group: release-${{ inputs.channel || 'insider' }}
   cancel-in-progress: false
@@ -115,6 +112,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
+          RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
           RELEASE_CHANNEL: ${{ inputs.channel }}
           RELEASE_STAGE: ${{ inputs.stage }}
           RELEASE_TAG: ${{ inputs.version }}
@@ -122,14 +120,13 @@ jobs:
         run: node scripts/ci/release-control.mjs authorize
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2
-      - name: Sign immutable source and App-verified protection evidence
+      - name: Sign immutable source and App-verified protection attestation
         run: |
           set -euo pipefail
           umask 077
           cosign sign-blob --yes \
             --bundle .artifacts/release-authorization/release-identity.bundle.json \
-            .artifacts/release-authorization/release-identity.json \
-            > .artifacts/release-authorization/sign.log 2>&1
+            .artifacts/release-authorization/release-identity.json
           cosign sign-blob --yes \
             --bundle .artifacts/release-authorization/public-identity.bundle.json \
             .artifacts/release-authorization/public-identity.json

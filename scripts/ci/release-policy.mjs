@@ -96,7 +96,7 @@ export function allocationKey(admission) {
     admission.buildAttempt, admission.sourceCommit, admission.baseVersion]);
 }
 
-export function verifyProtectionEvidence(evidence, channel, publisherAppId) {
+export function verifyRawProtectionEvidence(evidence, channel, publisherAppId) {
   const branch = channel === 'stable' ? 'main' : 'development';
   requireThat(evidence?.schema === 1 && evidence.repository === repository &&
     ['stable', 'insider'].includes(channel) && evidence.channel === channel && evidence.branch === branch &&
@@ -146,6 +146,45 @@ export function verifyProtectionEvidence(evidence, channel, publisherAppId) {
       `Owner blocker: ${name} must restrict writes to one explicitly approved publisher app`);
     }
   }
+}
+
+const protectionProfile = 'printfarmer-release-protection/v1';
+const protectionClaims = [
+  'branchDeletionBlocked', 'branchRewritesBlocked', 'codeOwnerApprovalRequired',
+  'requiredChecksEnforced', 'canonicalEnvironmentBranchOnly', 'nonSelfApprovalRequired',
+  'canonicalTagsImmutable', 'ledgerContinuityProtected', 'exclusiveApprovedPublisher',
+];
+
+export function normalizeProtectionEvidence(evidence, channel, publisherAppId) {
+  verifyRawProtectionEvidence(evidence, channel, publisherAppId);
+  // Digest only public claims, never low-entropy actor IDs or raw API payloads.
+  const attestation = {
+    schema: 2, repository, channel, branch: evidence.branch,
+    verifiedAt: evidence.verifiedAt, policyProfile: protectionProfile,
+    claims: Object.fromEntries(protectionClaims.map(claim => [claim, true])),
+  };
+  return { ...attestation, policyDigest: hash(attestation) };
+}
+
+export function verifyProtectionEvidence(evidence, channel) {
+  const fields = ['schema', 'repository', 'channel', 'branch', 'verifiedAt', 'policyProfile', 'claims', 'policyDigest'];
+  requireThat(evidence && Object.keys(evidence).sort().join() === fields.sort().join() &&
+    evidence.schema === 2 && evidence.repository === repository &&
+    ['stable', 'insider'].includes(channel) && evidence.channel === channel &&
+    evidence.branch === (channel === 'stable' ? 'main' : 'development') &&
+    evidence.policyProfile === protectionProfile &&
+    typeof evidence.verifiedAt === 'string' && Number.isFinite(Date.parse(evidence.verifiedAt)) &&
+    new Date(evidence.verifiedAt).toISOString() === evidence.verifiedAt,
+  'Missing or mismatched normalized protection attestation');
+  requireThat(evidence.claims && Object.keys(evidence.claims).sort().join() === [...protectionClaims].sort().join() &&
+    protectionClaims.every(claim => evidence.claims[claim] === true),
+  'Required normalized protection claims missing or weakened');
+  const canonical = {
+    schema: evidence.schema, repository, channel, branch: evidence.branch,
+    verifiedAt: evidence.verifiedAt, policyProfile: protectionProfile,
+    claims: Object.fromEntries(protectionClaims.map(claim => [claim, evidence.claims[claim]])),
+  };
+  requireThat(evidence.policyDigest === hash(canonical), 'Normalized protection digest mismatch');
 }
 
 export function validateLedger(state, anchor) {
@@ -214,7 +253,11 @@ export function reserve(state, admission, created, protection) {
       requireThat(typeof qualification.hotfixReason === 'string' && qualification.hotfixReason.trim().length >= 10,
         'Direct stable release requires an explicit non-promotion qualification reason');
     }
-    record.qualification = qualification;
+    record.qualification = {
+      sourceCommit: qualification.sourceCommit, reviewed: true, tests: 'passed',
+      compatibility: 'passed', migrations: 'passed', recovery: 'passed',
+      mode: qualification.promotionOrigin ? 'promotion' : 'hotfix',
+    };
   }
   const reservation = { admission, record, sequence };
   state.reservations[key] = reservation;

@@ -69,7 +69,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
         return saved;
       }
       const reservation = reserve(state, admission, new Date().toISOString(), protection);
-      verifyProtectionEvidence(reservation.record.protection, admission.channel, env.RELEASE_PUBLISHER_APP_ID);
+      verifyProtectionEvidence(reservation.record.protection, admission.channel);
       if (context.requestedTag) requireThat(reservation.record.sourceTag === context.requestedTag,
         'Requested tag is not the durable reservation; omit version to allocate');
       writeAuthorization(reservation.record);
@@ -86,7 +86,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   const entry = state.reservations[record.allocationKey];
   requireThat(entry, 'Unknown release authorization');
   verifyConsumer(record, entry.record, context, entry.identitySha256);
-  verifyProtectionEvidence(record.protection, record.channel, env.RELEASE_PUBLISHER_APP_ID);
+  verifyProtectionEvidence(record.protection, record.channel);
   requireThat(Date.parse(record.protection.verifiedAt) <= Date.parse(record.created),
     'Protection evidence postdates authorization');
   verifyTag(record, entry.tagObject, await readTag(api, record.sourceTag));

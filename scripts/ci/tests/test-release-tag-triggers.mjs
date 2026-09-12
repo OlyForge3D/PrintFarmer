@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import test from 'node:test';
@@ -14,7 +14,7 @@ import { runContext, runReleaseControl } from '../release-control.mjs';
 import { inspectCompleteSet, publishImmutableTags } from '../release-set.mjs';
 import {
   authorizationPath, authorizationBundle, privateSetPath, publicAuthorization, verifyAuthorization,
-  writeAuthorization, emitPublicReleaseAssets,
+  writeAuthorization, writeAuthorizationSet, emitPublicReleaseAssets,
 } from '../release-authorization.mjs';
 import { publicIdentity, publicIdentityFields } from '../../../src/Web/ReactApp/public-release-identity.mjs';
 
@@ -338,9 +338,14 @@ test('stable promotion requires exact-main qualification and never reuses inside
   assert.throws(() => reserve(ledger, stable, created), /qualification/);
   ledger.qualifications[sha] = { sourceCommit: sha, reviewed: true, tests: 'passed',
     compatibility: 'passed', migrations: 'passed', recovery: 'passed', sourceTreeReviewed: true,
+    reviewers: [{ id: 7, login: 'private-value' }],
     promotionOrigin: { allocationKey: insider.allocationKey, releaseId: insider.releaseId,
       sourceCommit: sha, setHash: hash(set) } };
   const stableRecord = reserve(ledger, stable, created).record;
+  assert.deepEqual(stableRecord.qualification, {
+    sourceCommit: sha, reviewed: true, tests: 'passed', compatibility: 'passed',
+    migrations: 'passed', recovery: 'passed', mode: 'promotion',
+  });
   assert.throws(() => validateCompleteSet(stableRecord, set), /identity/);
   advance(ledger, stableRecord, completeSet(stableRecord), sha, '');
   assert.equal(ledger.pointers.stable.canonicalVersion, '1.2.3');
@@ -476,15 +481,17 @@ test('GitHub CAS distinguishes a competing head from a rejected protected write'
 function protectionFixture() {
   const names = ['release-canonical-tags', 'release-ledger-continuity', 'release-tag-creators', 'release-ledger-writer'];
   const rulesets = names.map((name, id) => ({
-    id, name, enforcement: 'active',
+    id, name, enforcement: 'active', privateMarker: 'raw-policy-sentinel',
     target: id % 2 === 0 ? 'tag' : 'branch',
     conditions: { ref_name: { include: [id % 2 === 0 ? 'refs/tags/v*' : 'refs/heads/release-ledger'], exclude: [] } },
     bypass_actors: id < 2 ? [] : [{ actor_type: 'Integration', actor_id: 123 }],
     rules: (id === 0 ? ['update', 'deletion'] : id === 1 ? ['non_fast_forward', 'deletion']
       : id === 2 ? ['creation'] : ['update']).map(type => ({ type })),
   }));
-  const environment = { name: 'release-insider', deployment_branch_policy: { custom_branch_policies: true },
-    protection_rules: [{ type: 'required_reviewers', prevent_self_review: true, reviewers: [{ id: 7 }] }] };
+  const environment = { name: 'release-insider', privateMarker: 'raw-environment-sentinel',
+    deployment_branch_policy: { custom_branch_policies: true },
+    protection_rules: [{ type: 'required_reviewers', prevent_self_review: true,
+      reviewers: [{ id: 7, login: 'raw-reviewer-sentinel' }] }] };
   const api = async (endpoint, method = 'GET') => {
     assert.equal(method, 'GET');
     if (endpoint === 'rules/branches/development') return [
@@ -504,11 +511,11 @@ function protectionFixture() {
 test('live protection adapter accepts only scoped reviewer-gated environments and exclusive publisher rules', async () => {
   const { api, environment, rulesets } = protectionFixture();
   const evidence = await verifyProtection(api, 'insider', '123');
-  assert.equal(evidence.rulesets.length, 4);
-  verifyProtectionEvidence(evidence, 'insider', '123');
-  assert.equal(evidence.environment.protection_rules[0].prevent_self_review, true);
-  assert.throws(() => verifyProtectionEvidence(evidence, 'stable', '123'), /mismatched/);
-  assert.throws(() => verifyProtectionEvidence(evidence, 'insider', '999'), /mismatched/);
+  assert.equal(evidence.schema, 2);
+  verifyProtectionEvidence(evidence, 'insider');
+  assert.equal(evidence.claims.nonSelfApprovalRequired, true);
+  assert.doesNotMatch(JSON.stringify(evidence), /rulesets|environment"|reviewers|publisherAppId|actor_id/);
+  assert.throws(() => verifyProtectionEvidence(evidence, 'stable'), /mismatched/);
   await assert.rejects(verifyProtection(api, 'insider', '999'), /approved publisher app/);
   environment.protection_rules[0].prevent_self_review = false;
   await assert.rejects(verifyProtection(api, 'insider', '123'), /non-self reviewer/);
@@ -520,6 +527,162 @@ test('live protection adapter accepts only scoped reviewer-gated environments an
     ? rulesets.map(rule => ({ ...rule, enforcement: 'active' })) : api(endpoint);
   rulesets[0].enforcement = 'disabled';
   await assert.rejects(verifyProtection(staleListing, 'insider', '123'), /active release-canonical-tags/);
+});
+
+async function authorizedRecord() {
+  const protection = await verifyProtection(protectionFixture().api, 'insider', '123');
+  return { ...record(), created: protection.verifiedAt, protection };
+}
+
+const privateFields = /"(?:branchRules|environment|branchPolicies|rulesets|reviewers|publisherAppId|actor_id|bypass_actors|rules|privateMarker|futurePrivate|reviewerId)"|raw-(?:policy|environment|reviewer)-sentinel|private-value/;
+
+function artifactUploads(workflow) {
+  const text = readFileSync(workflow, 'utf8');
+  return [...text.matchAll(/uses: actions\/upload-artifact@[^\n]+\n([\s\S]*?)(?=^      -|^  [\w-]+:|(?![\s\S]))/gm)]
+    .map(([, step]) => {
+      const [, path] = step.match(/^          path: (.+)$/m) || [];
+      assert.ok(path, 'Every upload must declare paths');
+      return path.trim() === '|'
+        ? [...step.matchAll(/^            ([^\n]+)$/gm)].map(([, value]) => value.trim())
+        : [path.trim()];
+    });
+}
+
+test('every release artifact upload path is explicitly inventoried, including both signed handoffs', () => {
+  const authority = '.github/workflows/consolidated-release.yml';
+  const docker = '.github/workflows/docker-publish.yml';
+  assert.deepEqual(artifactUploads(authority), [[
+    authorizationPath, authorizationBundle,
+    '.artifacts/release-authorization/public-identity.json',
+    '.artifacts/release-authorization/public-identity.bundle.json',
+  ]]);
+  assert.deepEqual(artifactUploads(docker), [
+    ['./publish/slicer-host'], ['./publish/api'], ['./publish/orcaslicer-worker'],
+    ['./publish/printer-discovery'], ['./publish/compliance/license-inventory.json'],
+    ['src/Web/ReactApp/dist'], ['release-artifacts/*.spdx.json'],
+    ['release-artifacts/digest-*.txt'], ['release-artifacts/*.spdx.json'],
+    ['release-artifacts/digest-monolith.txt'], [authorizationPath, authorizationBundle, privateSetPath],
+  ]);
+  // Keep the call graph closed: a new reusable workflow/action must be inventoried too.
+  const action = '.github/actions/release-authorization/action.yml';
+  for (const file of [authority, docker, action]) {
+    const text = readFileSync(file, 'utf8');
+    assert.equal(artifactUploads(file).length, (text.match(/uses:\s*actions\/upload-artifact@/g) || []).length);
+    for (const [, local] of text.matchAll(/uses: \.\/([^\s]+)/g)) {
+      assert.ok(['.github/workflows/docker-publish.yml', '.github/actions/release-authorization'].includes(local), local);
+    }
+    assert.doesNotMatch(text, /(?:gh api|curl).*(?:rulesets|environments|rules\/branches)|sign\.log/);
+  }
+});
+
+test('normalized attestation and artifact writers reject raw, unknown and weakened fields before persistence', async () => {
+  const identity = await authorizedRecord();
+  const root = resolve('.artifacts', `normalized-writers-${process.pid}`);
+  const cwd = process.cwd();
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  try {
+    for (const [key, value] of [
+      ['rulesets', [{ id: 7 }]], ['publisherAppId', '123'], ['reviewerId', 'private-value'],
+      ['futurePrivate', { secret: 'private-value' }],
+    ]) {
+      assert.throws(() => writeAuthorization({ ...identity, [key]: value }), /Unknown authorization/);
+      assert.throws(() => writeAuthorization({ ...identity,
+        protection: { ...identity.protection, [key]: value } }), /normalized protection/);
+      assert.equal(existsSync(authorizationPath), false);
+    }
+    for (const claim of Object.keys(identity.protection.claims)) {
+      for (const value of [false, 1, 'true', undefined]) {
+        const weakened = structuredClone(identity);
+        weakened.protection.claims[claim] = value;
+        const { policyDigest: ignored, ...payload } = weakened.protection;
+        weakened.protection.policyDigest = hash(payload);
+        assert.throws(() => writeAuthorization(weakened), /claims missing or weakened/);
+      }
+      for (const field of Object.keys(identity).filter(field => field !== 'protection')) {
+        assert.throws(() => writeAuthorization({ ...identity, [field]: { privateMarker: 'private-value' } }));
+        assert.equal(existsSync(authorizationPath), false);
+      }
+    }
+    writeAuthorization(identity);
+    const set = completeSet(identity);
+    set.futurePrivate = { secret: 'private-value' };
+    set.images.api.platforms['linux/amd64'].labels.reviewerId = 'private-value';
+    writeAuthorizationSet(identity, set);
+    assert.doesNotMatch(readFileSync(privateSetPath, 'utf8'), privateFields);
+    assert.deepEqual(JSON.parse(readFileSync(privateSetPath, 'utf8')), completeSet(identity));
+    const env = { GITHUB_REPOSITORY: context().repository, GITHUB_REF: context().ref,
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
+    const changed = structuredClone(identity);
+    changed.protection.claims.canonicalTagsImmutable = false;
+    const { policyDigest: ignored, ...payload } = changed.protection;
+    changed.protection.policyDigest = hash(payload);
+    writeFileSync(authorizationPath, JSON.stringify(changed));
+    assert.throws(() => verifyAuthorization(env, () => {}), /differs from public identity/);
+    env.RELEASE_PUBLIC_IDENTITY = JSON.stringify(publicAuthorization(changed));
+    assert.throws(() => verifyAuthorization(env, () => {}), /claims missing or weakened/);
+  } finally {
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('stable artifact qualification retains pass claims but never owner free text or reviewer identities', async () => {
+  const protection = await verifyProtection(protectionFixture().api, 'insider', '123');
+  const { policyDigest: ignored, ...payload } = {
+    ...protection, channel: 'stable', branch: 'main',
+  };
+  const stableProtection = { ...payload, policyDigest: hash(payload) };
+  const stable = admit(context({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
+    workflowIdentity: context().workflowIdentity.replace('/development', '/main') }), sha, 'v1.2.3');
+  const ledger = state();
+  ledger.qualifications[sha] = {
+    sourceCommit: sha, reviewed: true, tests: 'passed', compatibility: 'passed',
+    migrations: 'passed', recovery: 'passed', hotfixReason: 'private-value owner explanation',
+    reviewers: [{ login: 'raw-reviewer-sentinel', id: 7 }],
+  };
+  const identity = reserve(ledger, stable, protection.verifiedAt, stableProtection).record;
+  assert.equal(identity.qualification.mode, 'hotfix');
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `stable-normalized-${process.pid}`);
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  try {
+    writeAuthorization(identity);
+    assert.doesNotMatch(readFileSync(authorizationPath, 'utf8'), privateFields);
+    const original = readFileSync(authorizationPath, 'utf8');
+    for (const field of ['reviewers', 'hotfixReason', 'futurePrivate']) {
+      const changed = structuredClone(identity);
+      changed.qualification[field] = 'private-value';
+      assert.throws(() => writeAuthorization(changed), /normalized stable qualification/);
+      assert.equal(readFileSync(authorizationPath, 'utf8'), original);
+    }
+  } finally {
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('raw policy identity changes do not affect normalized digests and API errors cannot disclose raw payloads', async () => {
+  const fixture = protectionFixture();
+  const first = await verifyProtection(fixture.api, 'insider', '123');
+  fixture.environment.protection_rules[0].reviewers = [{ id: 999, login: 'another-private-reviewer' }];
+  for (const rule of fixture.rulesets) {
+    rule.privateMarker = 'changed-private-rule';
+    if (rule.bypass_actors.length) rule.bypass_actors[0].actor_id = 456;
+  }
+  const second = await verifyProtection(fixture.api, 'insider', '456');
+  const { policyDigest: ignoredFirst, verifiedAt: firstTime, ...a } = first;
+  const { policyDigest: ignoredSecond, verifiedAt: secondTime, ...b } = second;
+  assert.deepEqual(a, b, 'No raw policy data or identity fingerprint may survive normalization');
+  const { policyDigest: digest, ...payload } = first;
+  assert.equal(digest, hash(payload));
+  for (const endpointPrefix of ['rules/branches', 'environments/', 'rulesets']) {
+    await assert.rejects(verifyProtection(async endpoint => {
+      if (endpoint.startsWith(endpointPrefix)) throw new Error('raw-reviewer-sentinel private-value');
+      return fixture.api(endpoint);
+    }, 'insider', '456'), error => error.message === 'Protection policy read failed');
+  }
 });
 
 function authorizationFixture(initial = state()) {
@@ -639,7 +802,7 @@ test('actual control flow keeps github.token read-only and requires App verifica
     await runReleaseControl('authorize', fixture.env);
     assert.equal(readFileSync(authorizationPath, 'utf8'), signedBytes, 'Retry retains original evidence bytes');
     fixture.calls.length = 0;
-    const consumer = { ...fixture.env, RELEASE_PUBLISHER_TOKEN: undefined,
+    const consumer = { ...fixture.env, RELEASE_PUBLISHER_TOKEN: undefined, RELEASE_PUBLISHER_APP_ID: undefined,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
     await runReleaseControl('consume', consumer, verify);
     assert.ok(fixture.calls.every(call => !call.admin && !call.publisher && call.method === 'GET'));
@@ -657,14 +820,12 @@ test('actual control flow keeps github.token read-only and requires App verifica
       'Pointer writer needs the App, not Administration permission');
     fixture.calls.length = 0;
     const changed = structuredClone(identity);
-    changed.protection.publisherAppId = '999';
+    changed.protection.claims.exclusiveApprovedPublisher = false;
     writeFileSync(authorizationPath, JSON.stringify(changed));
     await assert.rejects(runReleaseControl('consume', consumer, verify), /differs from public identity/);
     writeFileSync(authorizationPath, signedBytes);
     await assert.rejects(runReleaseControl('consume', { ...consumer, GITHUB_RUN_ATTEMPT: '2' }, verify),
       /Unauthorized consumer/);
-    await assert.rejects(runReleaseControl('consume', { ...consumer, RELEASE_PUBLISHER_APP_ID: '999' }, verify),
-      /mismatched publisher/);
     fixture.deleteTag();
     await assert.rejects(runReleaseControl('consume', consumer, verify), /tag missing/);
     assert.ok(fixture.calls.every(call => call.method === 'GET'));
@@ -673,6 +834,9 @@ test('actual control flow keeps github.token read-only and requires App verifica
     assert.ok(outputs.includes(`identity_hash=${hash(identity)}`));
     const projectedOutput = JSON.parse(outputs.split('\n').find(line => line.startsWith('public_identity=')).split('=').slice(1).join('='));
     assert.deepEqual(projectedOutput, publicAuthorization(identity));
+    for (const file of readdirSync(root, { recursive: true, withFileTypes: true }).filter(entry => entry.isFile())) {
+      assert.doesNotMatch(readFileSync(resolve(file.parentPath, file.name), 'utf8'), privateFields);
+    }
   } finally {
     if (previousOutput === undefined) delete process.env.GITHUB_OUTPUT;
     else process.env.GITHUB_OUTPUT = previousOutput;
@@ -687,13 +851,15 @@ test('missing, malformed and weakened signed protection evidence always fails cl
   for (const mutate of [
     item => { item.schema = 0; }, item => { item.repository = 'fork/repo'; },
     item => { item.verifiedAt = 'invalid'; }, item => { item.branchRules = []; },
-    item => { item.environment.protection_rules = []; }, item => { item.rulesets.pop(); },
-    item => { item.rulesets[0].enforcement = 'disabled'; },
-    item => { item.rulesets[3].bypass_actors[0].actor_id = 456; },
+    item => { item.claims.nonSelfApprovalRequired = false; }, item => { delete item.claims.canonicalTagsImmutable; },
+    item => { item.policyProfile = 'unknown/v1'; },
+    item => { item.policyDigest = '0'.repeat(64); },
+    item => { item.verifiedAt = '2026-09-12T20:00:01.000Z'; },
+    item => { item.claims.actor_id = 456; },
   ]) {
     const invalid = structuredClone(evidence);
     mutate(invalid);
-    assert.throws(() => verifyProtectionEvidence(invalid, 'insider', '123'));
+    assert.throws(() => verifyProtectionEvidence(invalid, 'insider'));
   }
   assert.throws(() => verifyProtectionEvidence(undefined, 'insider', '123'), /Missing/);
   const ledger = state();
@@ -704,12 +870,13 @@ test('missing, malformed and weakened signed protection evidence always fails cl
   const root = resolve('.artifacts', `invalid-authorization-${process.pid}`);
   mkdirSync(root, { recursive: true });
   process.chdir(root);
-  writeAuthorization(identity);
+  mkdirSync(resolve(authorizationPath, '..'), { recursive: true });
+  writeFileSync(authorizationPath, JSON.stringify(identity));
   globalThis.fetch = fixture.fetch;
   try {
     await assert.rejects(runReleaseControl('consume', {
       ...fixture.env, RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)), RELEASE_PUBLISHER_TOKEN: undefined,
-    }, () => {}), /Missing or mismatched publisher protection evidence/);
+    }, () => {}), /Missing or mismatched normalized protection attestation/);
     assert.ok(fixture.calls.every(call => !call.admin && call.method === 'GET'));
     assert.ok(!fixture.calls.some(call => call.endpoint.startsWith('git/ref/tags/')));
   } finally {
@@ -719,7 +886,7 @@ test('missing, malformed and weakened signed protection evidence always fails cl
   }
 });
 
-test('workflow wiring transports only public outputs and each consumer verifies the private artifact', () => {
+test('workflow wiring transports only public outputs and each consumer verifies the normalized artifact', () => {
   const authority = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
   const action = readFileSync('.github/actions/release-authorization/action.yml', 'utf8');
@@ -763,13 +930,13 @@ test('workflow wiring transports only public outputs and each consumer verifies 
   assert.match(readFileSync('.gitignore', 'utf8'), /^\.artifacts\/$/m);
 });
 
-test('signed-artifact verification fails closed without logging private payloads or accepting full JSON transport', () => {
+test('signed-artifact verification fails closed without logging payloads or accepting full JSON transport', async () => {
   const root = resolve('.artifacts', `signature-gate-${process.pid}`);
   const cwd = process.cwd();
   mkdirSync(root, { recursive: true });
   process.chdir(root);
   try {
-    const identity = { ...record(), protection: { privateMarker: 'private-value' } };
+    const identity = await authorizedRecord();
     writeAuthorization(identity);
     const env = { GITHUB_REPOSITORY: context().repository, GITHUB_REF: context().ref,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
@@ -857,23 +1024,26 @@ test('the shared public field projection rejects wrong types rather than coercin
   }
 });
 
-test('executed signing and asset-copy commands never substitute the private signed record', () => {
+test('executed signing and asset-copy commands keep normalized authorization separate from public projection', async () => {
   const authority = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
-  const signing = authority.split('      - name: Sign immutable source and App-verified protection evidence\n')[1]
+  const signing = authority.split('      - name: Sign immutable source and App-verified protection attestation\n')[1]
     .split('      - uses: actions/upload-artifact')[0].split('        run: |\n')[1]
     .split('\n').map(line => line.replace(/^          /, '')).join('\n');
   const publication = docker.split('\n').filter(line =>
     /^\s+(cmp -s release-assets\/release-identity|cp \.artifacts\/release-authorization\/public-identity)/.test(line))
     .map(line => line.trim()).join('\n');
+  const uploadedAuthorizationFiles = [...artifactUploads('.github/workflows/consolidated-release.yml'),
+    ...artifactUploads('.github/workflows/docker-publish.yml')].flat()
+    .filter(path => path.startsWith('.artifacts/release-authorization/'));
   const root = resolve('.artifacts', `sign-public-${process.pid}`);
   const cwd = process.cwd();
   mkdirSync(root, { recursive: true });
   process.chdir(root);
   try {
-    const identity = { ...record(), protection: { publisherId: 'private-publisher' },
-      futurePrivate: 'private-future-value' };
+    const identity = await authorizedRecord();
     writeAuthorization(identity);
+    writeAuthorizationSet(identity, completeSet(identity));
     emitPublicReleaseAssets(identity, completeSet(identity), identityLabels(identity));
     // Echo the signing input into the mock bundle to detect any wrong-file publication.
     const mock = `cosign() {
@@ -896,6 +1066,10 @@ test('executed signing and asset-copy commands never substitute the private sign
     assert.doesNotMatch(bundle, /protection|publisher|futurePrivate|private-/);
     assert.equal(readFileSync(authorizationBundle, 'utf8'), JSON.stringify(identity));
     assert.equal(readFileSync(authorizationPath, 'utf8'), JSON.stringify(identity));
+    for (const file of uploadedAuthorizationFiles) {
+      assert.ok(existsSync(file), `Missing uploaded authorization artifact: ${file}`);
+      assert.doesNotMatch(readFileSync(file, 'utf8'), privateFields, file);
+    }
   } finally {
     process.chdir(cwd);
     rmSync(root, { recursive: true, force: true });
