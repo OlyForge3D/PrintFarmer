@@ -2611,24 +2611,30 @@ final class GuardedMaterialControlsTests: XCTestCase {
         return (model, service)
     }
 
-    func test_absoluteMoveRequiresEveryCoordinateAndNeverFillsFromTelemetry() async throws {
-        let (model, service) = try await fixture()
-        for point in [(nil, 30.0, 10.0), (20.0, nil, 10.0), (20.0, 30.0, nil)]
+    func test_absoluteMoveAcceptsPartialCoordinatesAndRequiresAtLeastOne() async throws {
+        let (blank, blankService) = try await fixture()
+        XCTAssertEqual(blank.absoluteMoveBlockedReason(x: nil, y: nil, z: nil),
+                       ControlNumberInput.absoluteCoordinatesMessage)
+        await blank.moveTo(x: nil, y: nil, z: nil, feedrateMmMin: nil)
+        XCTAssertNil(blankService.moveToCalledWith)
+        XCTAssertNil(blank.pendingCommand)
+        XCTAssertEqual(blank.lastError?.message, ControlNumberInput.absoluteCoordinatesMessage)
+
+        // A partial destination is permitted; unspecified axes stay unchanged and are
+        // dispatched as nil rather than being back-filled from telemetry. Each point
+        // needs its own fixture because a command lease is consumed per dispatch.
+        for point in [(nil, 30.0, 10.0), (20.0, nil, 10.0), (20.0, 30.0, nil), (0.0, -2.5, 10.0)]
             as [(Double?, Double?, Double?)] {
-            XCTAssertEqual(model.absoluteMoveBlockedReason(x: point.0, y: point.1, z: point.2),
-                           ControlNumberInput.absoluteCoordinatesMessage)
+            let (model, service) = try await fixture()
+            XCTAssertNil(model.absoluteMoveBlockedReason(x: point.0, y: point.1, z: point.2))
             await model.moveTo(x: point.0, y: point.1, z: point.2, feedrateMmMin: nil)
-            XCTAssertNil(service.moveToCalledWith)
-            XCTAssertNil(model.pendingCommand)
-            XCTAssertEqual(model.lastError?.message, ControlNumberInput.absoluteCoordinatesMessage)
+            XCTAssertNil(model.lastError)
+            XCTAssertEqual(service.moveToCalledWith?.x, point.0)
+            XCTAssertEqual(service.moveToCalledWith?.y, point.1)
+            XCTAssertEqual(service.moveToCalledWith?.z, point.2)
+            XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 600)
+            XCTAssertNil(service.moveCalledWith)
         }
-        await model.moveTo(x: 0, y: -2.5, z: 10, feedrateMmMin: nil)
-        XCTAssertNil(model.lastError)
-        XCTAssertEqual(service.moveToCalledWith?.x, 0)
-        XCTAssertEqual(service.moveToCalledWith?.y, -2.5)
-        XCTAssertEqual(service.moveToCalledWith?.z, 10)
-        XCTAssertEqual(service.moveToCalledWith?.feedrateMmMin, 600)
-        XCTAssertNil(service.moveCalledWith)
     }
 
     func test_absoluteMoveRejectsUnknownUnsupportedOrStaleVerifiedEvidence() async throws {

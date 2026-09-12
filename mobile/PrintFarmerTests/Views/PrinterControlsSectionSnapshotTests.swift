@@ -1061,18 +1061,24 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         }
         let move = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.move" })
         XCTAssertFalse(move.isEnabled)
-        for missing in fields.indices {
-            for index in fields.indices {
-                fields[index].text = index == missing ? "" : ["0", "-2.5", "10"][index]
-                fields[index].sendActions(for: .editingChanged)
-            }
-            try await settle(controller)
-            XCTAssertFalse(move.isEnabled)
-            move.sendActions(for: .touchUpInside)
-            try await settle(controller)
-            XCTAssertNil(service.moveToCalledWith)
-            XCTAssertNil(model.lastError, "Missing coordinates are blocked in the editor before the owner")
+        // With optional coordinates allowed, move is enabled when 1, 2, or 3 coordinates are supplied.
+        fields[0].text = "10"
+        fields[0].sendActions(for: .editingChanged)
+        try await settle(controller)
+        XCTAssertTrue(move.isEnabled)
+
+        // When all fields are cleared, move is disabled.
+        for field in fields {
+            field.text = ""
+            field.sendActions(for: .editingChanged)
         }
+        try await settle(controller)
+        XCTAssertFalse(move.isEnabled)
+        move.sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertNil(service.moveToCalledWith)
+        XCTAssertNil(model.lastError, "Missing coordinates are blocked in the editor before the owner")
+
         for index in fields.indices {
             fields[index].text = ["0", "-2.5", "10"][index]
             fields[index].sendActions(for: .editingChanged)
@@ -1156,7 +1162,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                 XCTAssertTrue(controls.isEmpty, "Offline setup controls remain hidden by the host contract")
                 continue
             } else {
-                for label in ["Hotend target in degrees Celsius", "X required absolute destination in millimeters"] {
+                for label in ["Hotend target in degrees Celsius", "X destination in millimeters"] {
                     let control = try XCTUnwrap(controls.first { $0.accessibilityLabel == label })
                     XCTAssertFalse(control.isEnabled)
                 }
@@ -1218,8 +1224,8 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let controls = nativeControls(in: controller.view)
         for label in [
             "Hotend target in degrees Celsius", "Bed target in degrees Celsius",
-            "X required absolute destination in millimeters", "Y required absolute destination in millimeters",
-            "Z required absolute destination in millimeters",
+            "X destination in millimeters", "Y destination in millimeters",
+            "Z destination in millimeters",
             "Go, set heater targets", "Move to position", "Disable motors"
         ] {
             let target = try XCTUnwrap(controls.first { $0.accessibilityLabel == label }, label)
