@@ -5,12 +5,14 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 import {
   admit, advance, allocationKey, compareVersions, components, hash, identityLabels,
-  parseTag, parseVersionFile, reserve, transact, validateCandidate, validateCompleteSet,
-  validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence,
+  parseTag, parseVersionFile, reserve as reserveRelease, transact, validateCandidate, validateCompleteSet,
+  validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence, hotfixReasonDigest, ReleasePolicyError,
+  validateRecord,
 } from '../release-policy.mjs';
-import { ensureSourceTag, githubClient, gitLedger, publicLedger, publicLedgerFields, readTag, verifyProtection } from '../release-github.mjs';
+import { ensureSourceTag, githubClient, gitLedger, publicLedger, publicLedgerFields, readTag, verifyProtection,
+  verifyStableQualification } from '../release-github.mjs';
 import { buildMetadata, emitBuildIdentity } from '../release-metadata.mjs';
-import { runContext, runReleaseControl } from '../release-control.mjs';
+import { runContext, runReleaseControl, output } from '../release-control.mjs';
 import { inspectCompleteSet, publishImmutableTags } from '../release-set.mjs';
 import {
   authorizationPath, authorizationBundle, privateSetPath, publicAuthorization, verifyAuthorization,
@@ -29,11 +31,26 @@ const context = (overrides = {}) => ({
   workflowSha: sha, workflowBranch: 'development', buildId: '42', buildAttempt: '1',
   channel: 'insider', ...overrides,
 });
-const state = () => ({ schema: 1, anchor, counter: '0', reservations: {}, identities: {}, pointers: {}, qualifications: {} });
+const state = () => ({ schema: 1, anchor, counter: '0', reservations: {}, identities: {}, pointers: {}, stages: {}, qualifications: {} });
 const hotfixQualification = () => ({
   schema: 1, sourceCommit: sha, reviewed: true, tests: true, compatibility: true,
-  migrations: true, recovery: true, mode: 'hotfix', nonPromotionApproved: true,
+  migrations: true, recovery: true, mode: 'hotfix',
+  reasonSha256: hotfixReasonDigest('Emergency recovery fix cannot wait for the next insider qualification.'),
 });
+function fixtureProtection(channel) {
+  const payload = {
+    schema: 2, repository: context().repository, channel, branch: channel === 'stable' ? 'main' : 'development',
+    verifiedAt: created, policyProfile: 'printfarmer-release-protection/v1',
+    claims: Object.fromEntries([
+      'branchDeletionBlocked', 'branchRewritesBlocked', 'codeOwnerApprovalRequired',
+      'requiredChecksEnforced', 'canonicalEnvironmentBranchOnly', 'nonSelfApprovalRequired',
+      'canonicalTagsImmutable', 'ledgerContinuityProtected', 'exclusiveApprovedPublisher',
+    ].map(claim => [claim, true])),
+  };
+  return { ...payload, policyDigest: hash(payload) };
+}
+const reserve = (ledger, admitted, timestamp, protection = fixtureProtection(admitted.channel), qualification) =>
+  reserveRelease(ledger, admitted, timestamp, protection, qualification);
 const admission = (overrides = {}) => admit(context(overrides), overrides.eventSha || sha, 'v1.2.3\n', '1.2.2');
 const record = (ledger = state(), overrides = {}) => reserve(ledger, admission(overrides), created).record;
 const completeSet = identity => ({
@@ -45,6 +62,43 @@ const completeSet = identity => ({
     }])),
   }])),
 });
+const publicSetHash = set => hash(writePublicSet(set.identity, set));
+function promotionQualification(identity, set, sourceCommit = newerSha) {
+  const tree = { schema: 1, originTree: 'd'.repeat(40), sourceTree: 'd'.repeat(40), metadataChanges: [] };
+  return {
+    schema: 1, sourceCommit, reviewed: true, tests: true, compatibility: true,
+    migrations: true, recovery: true, mode: 'promotion',
+    promotionOrigin: { allocationKey: identity.allocationKey, releaseId: identity.releaseId,
+      sourceCommit: identity.sourceCommit, setHash: publicSetHash(set) },
+    treeEvidence: { ...tree, diffSha256: hash(tree) },
+  };
+}
+
+function promotionApi(options = {}) {
+  const treeSha = 'd'.repeat(40);
+  const leaves = [
+    { path: 'VERSION', type: 'blob', mode: '100644', sha: 'e'.repeat(40) },
+    { path: 'src/api.cs', type: 'blob', mode: '100644', sha: 'f'.repeat(40) },
+  ];
+  let selected;
+  return async (endpoint, method = 'GET') => {
+    assert.equal(method, 'GET', 'Qualification is read-only');
+    if (endpoint.startsWith('git/commits/')) {
+      selected = endpoint.split('/').at(-1);
+      return { sha: selected, tree: { sha: selected === newerSha && options.sourceTree || treeSha } };
+    }
+    if (endpoint.startsWith('git/trees/')) {
+      const entries = structuredClone(leaves);
+      if (selected === newerSha) options.mutate?.(entries);
+      return { sha: endpoint.split('/').at(-1).split('?')[0],
+        tree: entries, truncated: options.truncated ?? false };
+    }
+    if (endpoint.startsWith('contents/VERSION?')) return {
+      encoding: 'base64', content: Buffer.from(options.version ?? 'v1.2.3\n').toString('base64'),
+    };
+    throw new Error(`Unexpected qualification read: ${endpoint}`);
+  };
+}
 
 function memoryStore(initial = state()) {
   let ledger = structuredClone(initial);
@@ -109,7 +163,7 @@ test('admission denies untrusted events, caller spoofing, source drift and swapp
   assert.throws(() => admit({ ...stable, event: 'schedule' }, sha, 'v1.2.3'));
 });
 
-test('durable reservation returns same N for retries and larger N for attempts/base/workflow migration', async () => {
+test('durable reservation preserves retries and increases N across attempts/bases but rejects arbitrary workflow migration', async () => {
   const store = memoryStore();
   const first = await transact(store, state => reserve(state, admission(), created).record);
   const retry = await transact(store, state => reserve(state, admission(), 'later').record);
@@ -118,12 +172,13 @@ test('durable reservation returns same N for retries and larger N for attempts/b
   assert.equal(second.sequence, '2');
   const baseBump = { ...admission({ buildId: '43' }), baseVersion: '1.3.0' };
   const migrated = { ...baseBump, workflowIdentity: 'owner-approved-replacement' };
-  const next = await transact(store, state => reserve(state, migrated, created).record);
+  assert.throws(() => reserve(state(), migrated, created), /workflow/);
+  const next = await transact(store, state => reserve(state, baseBump, created).record);
   assert.equal(next.sequence, '3');
   assert.notEqual(allocationKey(baseBump), allocationKey(migrated));
   const { state: persisted } = await store.read();
   const resumedStore = memoryStore(persisted);
-  assert.equal((await transact(resumedStore, state => reserve(state, migrated, created).record)).sequence, '3');
+  assert.equal((await transact(resumedStore, state => reserve(state, baseBump, created).record)).sequence, '3');
   assert.equal(persisted.reservations[first.allocationKey].record.sequence, '1');
 });
 
@@ -212,7 +267,7 @@ test('record consumers reject direct tags, foreign run/attempt and changed signe
   for (const override of [{ repository: 'fork/repo' }, { releaseId: 'stable:1.2.3' },
     { canonicalVersion: '1.2.4-insider.1' }, { stage: 'rc' }, { allocationKey: 'forged' }]) {
     const malformed = { ...identity, ...override };
-    assert.throws(() => verifyConsumer(malformed, malformed, context()), /Invalid canonical record/);
+    assert.throws(() => verifyConsumer(malformed, malformed, context()), ReleasePolicyError);
   }
 });
 
@@ -225,7 +280,7 @@ test('complete-set CAS rejects mixed/missing platforms and stale-source high-N r
   advance(ledger, current, set, newerSha, '');
   const previous = structuredClone(ledger.pointers);
   const highOld = record(ledger, { buildAttempt: '2' });
-  assert.throws(() => advance(ledger, highOld, completeSet(highOld), newerSha, hash(set)), /Stale source/);
+  assert.throws(() => advance(ledger, highOld, completeSet(highOld), newerSha, publicSetHash(set)), /Stale source/);
   assert.throws(() => advance(ledger, old, completeSet(old), sha, ''), /compare-and-set/);
   assert.deepEqual(ledger.pointers, previous);
   const missing = completeSet(current);
@@ -233,14 +288,14 @@ test('complete-set CAS rejects mixed/missing platforms and stale-source high-N r
   assert.throws(() => validateCompleteSet(current, missing), /component/);
   const mixed = completeSet(current);
   mixed.images.frontend.platforms['linux/arm64'].labels['org.printfarmer.release-id'] = old.releaseId;
-  assert.throws(() => validateCompleteSet(current, mixed), /Mixed/);
+  assert.throws(() => validateCompleteSet(current, mixed), /identity label/);
   const noArm = completeSet(current);
   delete noArm.images.api.platforms['linux/arm64'];
-  assert.throws(() => validateCompleteSet(current, noArm), /platforms/);
+  assert.throws(() => validateCompleteSet(current, noArm), /platform/);
   const differentBytes = completeSet(current);
   differentBytes.images.api.digest = `sha256:${'f'.repeat(64)}`;
-  assert.throws(() => advance(ledger, current, differentBytes, newerSha, hash(set)), /different bytes/);
-  assert.equal(advance(ledger, current, set, newerSha, hash(set)).setHash, hash(set));
+  assert.throws(() => advance(ledger, current, differentBytes, newerSha, publicSetHash(set)), /different bytes/);
+  assert.equal(advance(ledger, current, set, newerSha, publicSetHash(set)).setHash, publicSetHash(set));
 });
 
 test('two concurrent complete sets cannot both win the same expected pointer', async () => {
@@ -332,39 +387,261 @@ test('registry inspection executes complete platform/provenance checks rather th
     () => JSON.stringify({ manifests: [] })), /platform/);
 });
 
-test('stable promotion requires exact-main qualification and never reuses insider bytes', () => {
+test('stable promotion requires exact-main qualification and never reuses insider bytes', async () => {
   const ledger = state();
   const insider = record(ledger);
   const set = completeSet(insider);
   advance(ledger, insider, set, sha, '');
-  const stable = admit(context({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
-    workflowIdentity: context().workflowIdentity.replace('/development', '/main') }), sha, 'v1.2.3');
+  const stable = admission({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
+    eventSha: newerSha, workflowSha: newerSha, workflowIdentity: context().workflowIdentity.replace('/development', '/main') });
   assert.throws(() => reserve(ledger, stable, created), /qualification/);
-  ledger.qualifications[sha] = { schema: 1, sourceCommit: sha, reviewed: true, tests: true,
-    compatibility: true, migrations: true, recovery: true, sourceTreeReviewed: true, mode: 'promotion',
-    promotionOrigin: { allocationKey: insider.allocationKey, releaseId: insider.releaseId,
-      sourceCommit: sha, setHash: hash(set) } };
+  ledger.qualifications[newerSha] = promotionQualification(insider, set);
   for (const [field, value] of Object.entries({
     allocationKey: 'd'.repeat(64), releaseId: 'insider:1.2.3-insider.99',
     sourceCommit: newerSha, setHash: 'd'.repeat(64),
   })) {
     const changed = structuredClone(ledger);
-    changed.qualifications[sha].promotionOrigin[field] = value;
+    changed.qualifications[newerSha].promotionOrigin[field] = value;
     assert.throws(() => reserve(publicLedger(changed), stable, created), /qualified immutable insider set/);
   }
-  const unreviewed = structuredClone(ledger);
-  unreviewed.qualifications[sha].sourceTreeReviewed = false;
-  assert.throws(() => reserve(unreviewed, stable, created), /promotion qualification/);
+  assert.throws(() => reserve(ledger, stable, created), /verified at authorization/);
   Object.assign(ledger, publicLedger(ledger));
-  const stableRecord = reserve(ledger, stable, created).record;
-  assert.deepEqual(stableRecord.qualification, {
-    sourceCommit: sha, reviewed: true, tests: 'passed', compatibility: 'passed',
-    migrations: 'passed', recovery: 'passed', mode: 'promotion',
-  });
+  const qualification = await verifyStableQualification(promotionApi(), ledger, stable);
+  const stableRecord = reserve(ledger, stable, created, undefined, qualification).record;
+  assert.deepEqual(stableRecord.qualification, ledger.qualifications[newerSha]);
   assert.throws(() => validateCompleteSet(stableRecord, set), /identity/);
-  advance(ledger, stableRecord, completeSet(stableRecord), sha, '');
+  advance(ledger, stableRecord, completeSet(stableRecord), newerSha, '');
   assert.equal(ledger.pointers.stable.canonicalVersion, '1.2.3');
   assert.equal(ledger.pointers.insider.canonicalVersion, insider.canonicalVersion);
+});
+
+test('promotion authorization reproduces full Git trees and rejects unqualified changes, truncation and retagging', async () => {
+  const ledger = state();
+  const insider = record(ledger);
+  const set = completeSet(insider);
+  advance(ledger, insider, set, sha, '');
+  ledger.qualifications[newerSha] = promotionQualification(insider, set);
+  const stable = admission({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
+    eventSha: newerSha, workflowSha: newerSha, workflowIdentity: context().workflowIdentity.replace('/development', '/main') });
+  for (const options of [
+    { mutate: entries => { entries[1].sha = '1'.repeat(40); } },
+    { mutate: entries => { entries[1].mode = '100755'; } },
+    { mutate: entries => { entries.pop(); } },
+    { mutate: entries => { entries.push({ path: '.github/workflows/publish.yml', type: 'blob',
+      mode: '100644', sha: '1'.repeat(40) }); } },
+    { mutate: entries => { entries.push({ path: 'empty-directory', type: 'tree',
+      mode: '040000', sha: '1'.repeat(40) }); } },
+    { mutate: entries => { entries.push(JSON.parse('null')); } },
+    { mutate: entries => { entries[0].mode = '120000'; } },
+    { mutate: entries => { entries.push(entries[0]); } },
+    { truncated: true }, { sourceTree: '1'.repeat(40) }, { version: 'v1.2.4\n' },
+  ]) {
+    await assert.rejects(verifyStableQualification(promotionApi(options), ledger, stable), ReleasePolicyError);
+  }
+  const retag = structuredClone(ledger);
+  delete retag.qualifications[newerSha];
+  retag.qualifications[sha] = promotionQualification(insider, set, sha);
+  await assert.rejects(verifyStableQualification(promotionApi(), retag, { ...stable, sourceCommit: sha }),
+    /distinct resulting main/);
+  const metadata = structuredClone(ledger);
+  const evidence = { schema: 1, originTree: 'd'.repeat(40), sourceTree: '1'.repeat(40),
+    metadataChanges: [{ path: 'VERSION', before: 'e'.repeat(40), after: '2'.repeat(40) }] };
+  metadata.qualifications[newerSha].treeEvidence = { ...evidence, diffSha256: hash(evidence) };
+  const api = promotionApi({ sourceTree: '1'.repeat(40), mutate: entries => { entries[0].sha = '2'.repeat(40); } });
+  const qualification = await verifyStableQualification(api, metadata, stable);
+  const identity = reserve(metadata, stable, created, undefined, qualification).record;
+  assert.deepEqual(identity.qualification.treeEvidence, metadata.qualifications[newerSha].treeEvidence);
+  assert.throws(() => validateCompleteSet(identity, set), /identity/);
+});
+
+test('hotfix qualification requires a normalized non-secret rationale digest, never a boolean', async () => {
+  assert.equal(hotfixReasonDigest('  Emergency fix cannot wait   for insider validation. '),
+    hotfixReasonDigest('Emergency fix cannot wait for insider validation.'));
+  for (const invalid of [undefined, true, '', 'hotfix', 'reason\rspoof', 'reason\nspoof']) {
+    assert.throws(() => hotfixReasonDigest(invalid), ReleasePolicyError);
+  }
+  const stable = admission({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
+    workflowIdentity: context().workflowIdentity.replace('/development', '/main') });
+  for (const reasonSha256 of [undefined, true, 'approved', '', 'f'.repeat(63), `${'f'.repeat(64)}\r`]) {
+    const ledger = state();
+    ledger.qualifications[sha] = { ...hotfixQualification(), reasonSha256 };
+    await assert.rejects(verifyStableQualification(promotionApi(), ledger, stable), ReleasePolicyError);
+  }
+  const legacy = state();
+  const { reasonSha256, ...qualification } = hotfixQualification();
+  legacy.qualifications[sha] = { ...qualification, nonPromotionApproved: true };
+  await assert.rejects(verifyStableQualification(promotionApi(), legacy, stable), ReleasePolicyError);
+});
+
+function nestedSchemaPoisons(object, path = []) {
+  const mutations = [];
+  const at = value => path.reduce((item, key) => item[key], value);
+  if (!object || typeof object !== 'object' || Array.isArray(object)) return mutations;
+  mutations.push(value => { at(value).unknownPrivate = { private: 'private-value' }; });
+  for (const [key, child] of Object.entries(object)) {
+    mutations.push(value => { delete at(value)[key]; });
+    for (const invalid of [undefined, JSON.parse('null'), [], {}, '', true, 1]) {
+      if (JSON.stringify(child) === JSON.stringify(invalid)) continue;
+      mutations.push(value => { at(value)[key] = invalid; });
+    }
+    if (typeof child === 'string') {
+      mutations.push(value => { at(value)[key] = `${child}\r`; });
+      mutations.push(value => { at(value)[key] = `${child}\n`; });
+    }
+    if (Array.isArray(child)) {
+      child.forEach((entry, index) => mutations.push(...nestedSchemaPoisons(entry, [...path, key, index])));
+    } else mutations.push(...nestedSchemaPoisons(child, [...path, key]));
+  }
+  return mutations;
+}
+
+test('all private/projected reservation variants reject every required nested deletion, alteration and unknown field before writes', async t => {
+  const insiderState = state();
+  const insider = record(insiderState);
+  const insiderSet = completeSet(insider);
+  advance(insiderState, insider, insiderSet, sha, '');
+  const hotfixState = state();
+  hotfixState.qualifications[sha] = hotfixQualification();
+  const stableAdmission = admission({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
+    workflowIdentity: context().workflowIdentity.replace('/development', '/main') });
+  const hotfix = reserve(hotfixState, stableAdmission, created, undefined, hotfixQualification()).record;
+  const promotionState = structuredClone(insiderState);
+  promotionState.qualifications[newerSha] = promotionQualification(insider, insiderSet);
+  const promotedAdmission = { ...stableAdmission, sourceCommit: newerSha, authorizedBranchHead: newerSha, workflowCommit: newerSha };
+  const promotion = reserve(promotionState, promotedAdmission, created, undefined,
+    await verifyStableQualification(promotionApi(), promotionState, promotedAdmission)).record;
+  let rejected = 0;
+  for (const [original, identity] of [[insiderState, insider], [hotfixState, hotfix], [promotionState, promotion]]) {
+    for (const initial of [original, publicLedger(original)]) {
+      for (const stage of ['reserved', 'tagObject', 'tagPublished', 'completeSet']) {
+        const ledger = structuredClone(initial);
+        const entry = ledger.reservations[identity.allocationKey];
+        if (stage !== 'completeSet') {
+          delete entry.set;
+          delete entry.setHash;
+          delete ledger.pointers[identity.channel];
+        }
+        if (stage !== 'reserved') entry.tagObject = 'e'.repeat(40);
+        if (['tagPublished', 'completeSet'].includes(stage)) entry.tagPublished = true;
+        const poisons = [];
+        const required = ['admission', 'record', ...(entry.identitySha256 ? ['identitySha256'] : []),
+          ...(entry.sequence ? ['sequence'] : [])];
+        poisons.push(value => { value.unknownPrivate = true; });
+        for (const field of required) {
+          poisons.push(value => { delete value[field]; });
+          for (const invalid of [undefined, JSON.parse('null'), [], {}, true, 1, '']) {
+            poisons.push(value => { value[field] = invalid; });
+          }
+        }
+        for (const field of ['admission', 'record']) {
+          poisons.push(...nestedSchemaPoisons(entry[field]).map(mutate => value => mutate(value[field])));
+        }
+        for (const poison of poisons) {
+          const contaminated = structuredClone(ledger);
+          poison(contaminated.reservations[identity.allocationKey]);
+          let writes = 0;
+          const api = async (_endpoint, method = 'GET') => {
+            if (method !== 'GET') writes++;
+            throw new Error('Unexpected Git API call');
+          };
+          const store = {
+            read: async () => ({ revision: sha, state: structuredClone(contaminated) }),
+            compareAndSet: gitLedger(api, anchor).compareAndSet,
+          };
+          assert.throws(() => publicLedger(contaminated), ReleasePolicyError);
+          await assert.rejects(store.compareAndSet(sha, contaminated), ReleasePolicyError);
+          await assert.rejects(ensureSourceTag(api, store, identity, transact), ReleasePolicyError);
+          assert.equal(writes, 0);
+          rejected++;
+        }
+      }
+    }
+  }
+  t.diagnostic(`${rejected} nested schema mutations reject projection, CAS and source-tag writes with policy errors`);
+});
+
+test('source tagging preflights unrelated qualification, set, reservation and pointer poison before POST git/tags', async () => {
+  const initial = state();
+  const previous = record(initial);
+  advance(initial, previous, completeSet(previous), sha, '');
+  const identity = record(initial, { buildAttempt: '2' });
+  initial.qualifications[sha] = hotfixQualification();
+  const clean = publicLedger(initial);
+  for (const mutate of [
+    value => { value.qualifications[sha].reviewers = [{ login: 'private-value' }]; },
+    value => { value.reservations[previous.allocationKey].set.images.api.digest = 'bad'; },
+    value => { delete value.reservations[previous.allocationKey].admission; },
+    value => { value.pointers.insider.setHash = 'f'.repeat(64); },
+    value => { value.reservations[previous.allocationKey].setHash = 'f'.repeat(64); },
+  ]) {
+    for (const tagReserved of [false, true]) {
+      const ledger = structuredClone(clean);
+      if (tagReserved) ledger.reservations[identity.allocationKey].tagObject = 'e'.repeat(40);
+      mutate(ledger);
+      const writes = [];
+      const api = async (endpoint, method = 'GET') => {
+        if (method !== 'GET') writes.push({ endpoint, method });
+        throw Object.assign(new Error('missing'), { status: 404 });
+      };
+      const store = { read: async () => ({ revision: sha, state: ledger }),
+        compareAndSet: gitLedger(api, anchor).compareAndSet };
+      await assert.rejects(ensureSourceTag(api, store, identity, transact), ReleasePolicyError);
+      assert.deepEqual(writes, []);
+    }
+  }
+});
+
+test('workflow output rejects CR, LF and CRLF before writing output bytes', () => {
+  for (const value of ['a\rb', 'a\nb', 'a\r\nb']) assert.throws(() => output('value', value), ReleasePolicyError);
+});
+
+test('well-typed record and admission substitutions cannot break canonical or hash bindings', () => {
+  const ledger = state();
+  const identity = record(ledger);
+  const set = completeSet(identity);
+  advance(ledger, identity, set, sha, '');
+  for (const variant of [ledger, publicLedger(ledger)]) {
+    const overrides = {
+      repository: 'other/repository', channel: 'stable', baseVersion: '1.2.4', sourceBranch: 'main',
+      sourceCommit: newerSha, authorizedBranchHead: newerSha, workflowCommit: newerSha,
+      buildId: '43', buildAttempt: '2', workflowIdentity: context().workflowIdentity.replace('/development', '/main'),
+      releaseId: 'insider:1.2.4-insider.1', canonicalVersion: '1.2.4-insider.1',
+      sourceTag: 'v1.2.4-insider.1', stage: 'rc', sequence: '2', allocationKey: 'f'.repeat(64),
+      created: '2026-09-12T19:00:00.000Z',
+      ...(variant.reservations[identity.allocationKey].identitySha256
+        ? { identitySha256: 'f'.repeat(64), buildTime: '2026-09-12T21:00:00.000Z' } : {}),
+    };
+    for (const [field, value] of Object.entries(overrides)) {
+      const changed = structuredClone(variant);
+      changed.reservations[identity.allocationKey].record[field] = value;
+      assert.throws(() => publicLedger(changed), ReleasePolicyError, field);
+      if (Object.hasOwn(variant.reservations[identity.allocationKey].admission, field)) {
+        const changedAdmission = structuredClone(variant);
+        changedAdmission.reservations[identity.allocationKey].admission[field] = value;
+        assert.throws(() => publicLedger(changedAdmission), ReleasePolicyError, `admission.${field}`);
+      }
+    }
+  }
+  const projected = publicLedger(ledger);
+  const entry = projected.reservations[identity.allocationKey];
+  assert.equal(entry.setHash, hash(entry.set), 'Anyone can reproduce the hash from the public set alone');
+  assert.notEqual(entry.setHash, hash(set), 'The public set hash must not claim to cover hidden authorization fields');
+  for (const field of ['setHash', 'releaseId', 'canonicalVersion', 'sourceCommit', 'allocationKey']) {
+    const changed = structuredClone(projected);
+    delete changed.pointers.insider[field];
+    assert.throws(() => publicLedger(changed), ReleasePolicyError);
+  }
+  const stableLedger = state();
+  stableLedger.qualifications[sha] = hotfixQualification();
+  const stableAdmission = admission({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
+    workflowIdentity: context().workflowIdentity.replace('/development', '/main') });
+  const stable = reserve(stableLedger, stableAdmission, created, undefined, hotfixQualification()).record;
+  validateRecord(stable);
+  for (const field of ['stage', 'sequence']) {
+    for (const value of [undefined, 'insider', '1']) {
+      assert.throws(() => validateRecord({ ...stable, [field]: value }), ReleasePolicyError);
+    }
+  }
 });
 
 test('candidate lifecycle rejects expiry, direct publication, deletion without merge-back and version regression', () => {
@@ -457,28 +734,28 @@ test('GitHub ledger reads pinned Git blobs and rejects ancestry, rollback, trunc
   await assert.rejects(gitLedger(fixture(erased), anchor).read(), /immutable tagObject/);
   const replaced = structuredClone(current);
   replaced.reservations[identity.allocationKey].record.sourceCommit = newerSha;
-  await assert.rejects(gitLedger(fixture(replaced), anchor).read(), /immutable reservation/);
+  await assert.rejects(gitLedger(fixture(replaced), anchor).read(), ReleasePolicyError);
   const lostPointer = structuredClone(current);
   delete lostPointer.pointers.insider;
   await assert.rejects(gitLedger(fixture(lostPointer), anchor).read(), /pointer rollback/);
   const lostStage = structuredClone(current);
   delete lostStage.stages;
-  await assert.rejects(gitLedger(fixture(lostStage), anchor).read(), /stage rollback/);
+  await assert.rejects(gitLedger(fixture(lostStage), anchor).read(), /stages/);
   const changedAdmission = structuredClone(current);
   changedAdmission.reservations[identity.allocationKey].admission.buildId = '999';
-  await assert.rejects(gitLedger(fixture(changedAdmission), anchor).read(), /immutable reservation/);
+  await assert.rejects(gitLedger(fixture(changedAdmission), anchor).read(), /admission\/record/);
   const orphan = structuredClone(current);
   orphan.identities['1.2.4-insider.9'] = 'unknown';
-  await assert.rejects(gitLedger(fixture(orphan), anchor).read(), /identity continuity/);
-  // Owner-approved seed floors may exist before the first reservation.
+  await assert.rejects(gitLedger(fixture(orphan), anchor).read(), /identity reference/);
+  // Floors may not fabricate pointers/stages without their immutable reservations.
   previous.reservations = {};
   previous.identities = {};
   const seedNext = structuredClone(previous);
   delete seedNext.pointers.insider;
-  await assert.rejects(gitLedger(fixture(seedNext), anchor).read(), /pointer rollback/);
+  await assert.rejects(gitLedger(fixture(seedNext), anchor).read(), ReleasePolicyError);
   seedNext.pointers = structuredClone(previous.pointers);
   delete seedNext.stages;
-  await assert.rejects(gitLedger(fixture(seedNext), anchor).read(), /stage rollback/);
+  await assert.rejects(gitLedger(fixture(seedNext), anchor).read(), ReleasePolicyError);
 });
 
 test('GitHub CAS distinguishes a competing head from a rejected protected write', async () => {
@@ -493,7 +770,8 @@ test('GitHub CAS distinguishes a competing head from a rejected protected write'
   await assert.rejects(gitLedger(api(sha), anchor).compareAndSet(sha, state()), /policy, not a CAS/);
 });
 
-function protectionFixture() {
+function protectionFixture(channel = 'insider') {
+  const branch = channel === 'stable' ? 'main' : 'development';
   const names = ['release-canonical-tags', 'release-ledger-continuity', 'release-tag-creators', 'release-ledger-writer'];
   const rulesets = names.map((name, id) => ({
     id, name, enforcement: 'active', privateMarker: 'raw-policy-sentinel',
@@ -503,19 +781,19 @@ function protectionFixture() {
     rules: (id === 0 ? ['update', 'deletion'] : id === 1 ? ['non_fast_forward', 'deletion']
       : id === 2 ? ['creation'] : ['update']).map(type => ({ type })),
   }));
-  const environment = { name: 'release-insider', privateMarker: 'raw-environment-sentinel',
+  const environment = { name: `release-${channel}`, privateMarker: 'raw-environment-sentinel',
     deployment_branch_policy: { custom_branch_policies: true },
     protection_rules: [{ type: 'required_reviewers', prevent_self_review: true,
       reviewers: [{ id: 7, login: 'raw-reviewer-sentinel' }] }] };
   const api = async (endpoint, method = 'GET') => {
     assert.equal(method, 'GET');
-    if (endpoint === 'rules/branches/development') return [
+    if (endpoint === `rules/branches/${branch}`) return [
       { type: 'deletion' }, { type: 'non_fast_forward' },
       { type: 'pull_request', parameters: { require_code_owner_review: true, required_approving_review_count: 1 } },
       { type: 'required_status_checks', parameters: { required_status_checks: [{ context: 'CI' }] } },
     ];
-    if (endpoint === 'environments/release-insider') return environment;
-    if (endpoint.endsWith('/deployment-branch-policies')) return { branch_policies: [{ name: 'development', type: 'branch' }] };
+    if (endpoint === `environments/release-${channel}`) return environment;
+    if (endpoint.endsWith('/deployment-branch-policies')) return { branch_policies: [{ name: branch, type: 'branch' }] };
     if (endpoint === 'rulesets?per_page=100') return rulesets;
     if (endpoint.startsWith('rulesets/')) return rulesets[Number(endpoint.split('/')[1])];
     throw new Error(endpoint);
@@ -601,7 +879,7 @@ test('normalized attestation and artifact writers reject raw, unknown and weaken
       ['rulesets', [{ id: 7 }]], ['publisherAppId', '123'], ['reviewerId', 'private-value'],
       ['futurePrivate', { secret: 'private-value' }],
     ]) {
-      assert.throws(() => writeAuthorization({ ...identity, [key]: value }), /Unknown authorization/);
+      assert.throws(() => writeAuthorization({ ...identity, [key]: value }), /authorization fields/);
       assert.throws(() => writeAuthorization({ ...identity,
         protection: { ...identity.protection, [key]: value } }), /normalized protection/);
       assert.equal(existsSync(authorizationPath), false);
@@ -652,7 +930,8 @@ test('stable artifact qualification retains pass claims but never owner free tex
     workflowIdentity: context().workflowIdentity.replace('/development', '/main') }), sha, 'v1.2.3');
   const ledger = state();
   ledger.qualifications[sha] = hotfixQualification();
-  const identity = reserve(ledger, stable, protection.verifiedAt, stableProtection).record;
+  const qualification = await verifyStableQualification(() => assert.fail('No hotfix tree lookup'), ledger, stable);
+  const identity = reserve(ledger, stable, protection.verifiedAt, stableProtection, qualification).record;
   assert.equal(identity.qualification.mode, 'hotfix');
   const cwd = process.cwd();
   const root = resolve('.artifacts', `stable-normalized-${process.pid}`);
@@ -665,7 +944,7 @@ test('stable artifact qualification retains pass claims but never owner free tex
     for (const field of ['reviewers', 'hotfixReason', 'futurePrivate']) {
       const changed = structuredClone(identity);
       changed.qualification[field] = 'private-value';
-      assert.throws(() => writeAuthorization(changed), /normalized stable qualification/);
+      assert.throws(() => writeAuthorization(changed), /public ledger qualification/);
       assert.equal(readFileSync(authorizationPath, 'utf8'), original);
     }
   } finally {
@@ -696,8 +975,16 @@ test('raw policy identity changes do not affect normalized digests and API error
   }
 });
 
-function authorizationFixture(initial = state()) {
-  const { api: policies } = protectionFixture();
+function authorizationFixture(initial = state(), settings = {}) {
+  const channel = settings.channel ?? 'insider';
+  const sourceCommit = settings.sourceCommit ?? sha;
+  const branch = channel === 'stable' ? 'main' : 'development';
+  const selected = context({ channel, eventSha: sourceCommit, workflowSha: sourceCommit,
+    ref: `refs/heads/${branch}`, workflowBranch: branch,
+    workflowIdentity: context().workflowIdentity.replace('/development', `/${branch}`) });
+  const { api: policies } = protectionFixture(channel);
+  const trees = promotionApi(settings.treeOptions);
+  let comparedTree = false;
   const objects = new Map();
   let serial = 100;
   const put = value => {
@@ -714,10 +1001,10 @@ function authorizationFixture(initial = state()) {
   const env = {
     GH_TOKEN: 'github-fixture', RELEASE_PUBLISHER_TOKEN: 'publisher-fixture',
     RELEASE_PUBLISHER_APP_ID: '123', RELEASE_LEDGER_ANCHOR: anchor,
-    GITHUB_REPOSITORY: context().repository, GITHUB_EVENT_NAME: context().event,
-    GITHUB_REF: context().ref, GITHUB_SHA: sha,
-    GITHUB_WORKFLOW_REF: context().workflowIdentity, GITHUB_WORKFLOW_SHA: sha,
-    GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '1', RELEASE_CHANNEL: 'insider',
+    GITHUB_REPOSITORY: selected.repository, GITHUB_EVENT_NAME: selected.event,
+    GITHUB_REF: selected.ref, GITHUB_SHA: sourceCommit,
+    GITHUB_WORKFLOW_REF: selected.workflowIdentity, GITHUB_WORKFLOW_SHA: sourceCommit,
+    GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '1', RELEASE_CHANNEL: channel,
   };
   return {
     env, calls, ledgerWrites,
@@ -732,13 +1019,15 @@ function authorizationFixture(initial = state()) {
       const response = (body, status = 200) => new Response(JSON.stringify(body), { status });
       if ((admin || method !== 'GET') && !publisher) return response({}, 403);
       if (admin) return response(await policies(endpoint));
-      if (endpoint === 'git/ref/heads/development') return response({ object: { sha } });
+      if (endpoint === `git/ref/heads/${branch}`) return response({
+        object: { sha: settings.headDriftAfterTree && comparedTree ? 'f'.repeat(40) : sourceCommit },
+      });
       if (endpoint === 'git/ref/heads/release-ledger') return response({ object: { sha: head } });
       if (endpoint.startsWith('compare/')) return response({ status: 'ahead' });
       if (endpoint.startsWith('contents/VERSION?')) {
         return response({ encoding: 'base64', content: Buffer.from('v1.2.3\n').toString('base64') });
       }
-      if (endpoint.startsWith(`commits/${sha}/check-runs`)) {
+      if (endpoint.startsWith(`commits/${sourceCommit}/check-runs`)) {
         return response({ total_count: 3, check_runs: ['CI tooling tests', '.NET build', 'Frontend build & tests']
           .map((name, id) => ({ name, id, conclusion: 'success', app: { slug: 'github-actions' } })) });
       }
@@ -746,10 +1035,16 @@ function authorizationFixture(initial = state()) {
         return tag ? response({ object: { sha: tag, type: 'tag' } }) : response({}, 404);
       }
       if (method === 'GET') {
+        if (channel === 'stable' && (endpoint === `git/commits/${sha}` || endpoint === `git/commits/${newerSha}` ||
+          endpoint.includes('?recursive=1'))) {
+          if (endpoint.includes('?recursive=1')) comparedTree = true;
+          return response(await trees(endpoint));
+        }
         const object = objects.get(endpoint.split('/').at(-1));
         assert.ok(object, `Missing fixture object: ${endpoint}`);
         return response(object);
       }
+
       const body = JSON.parse(options.body);
       if (endpoint === 'git/blobs') {
         ledgerWrites.push(JSON.parse(body.content));
@@ -771,6 +1066,46 @@ function authorizationFixture(initial = state()) {
     },
   };
 }
+
+test('stable authority verifies tree evidence and rechecks main HEAD before any Git write', async () => {
+  const ledger = state();
+  const insider = record(ledger);
+  const set = completeSet(insider);
+  advance(ledger, insider, set, sha, '');
+  ledger.qualifications[newerSha] = promotionQualification(insider, set);
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `stable-authority-${process.pid}`);
+  const originalFetch = globalThis.fetch;
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  try {
+    for (const options of [
+      { treeOptions: { mutate: entries => { entries[1].sha = '1'.repeat(40); } } },
+      { treeOptions: { truncated: true } }, { headDriftAfterTree: true }, {},
+    ]) {
+      const fixture = authorizationFixture(publicLedger(ledger), { channel: 'stable', sourceCommit: newerSha, ...options });
+      globalThis.fetch = fixture.fetch;
+      if (Object.keys(options).length) {
+        await assert.rejects(runReleaseControl('authorize', fixture.env), ReleasePolicyError);
+        assert.ok(fixture.calls.every(call => call.method === 'GET'));
+        assert.equal(existsSync(authorizationPath), false);
+      } else {
+        await runReleaseControl('authorize', fixture.env);
+        const firstWrite = fixture.calls.findIndex(call => call.method !== 'GET');
+        const preflight = fixture.calls.slice(0, firstWrite);
+        assert.equal(preflight.filter(call => call.endpoint.includes('?recursive=1')).length, 2);
+        assert.ok(preflight.findLastIndex(call => call.endpoint === 'git/ref/heads/main') >
+          preflight.findLastIndex(call => call.endpoint.includes('?recursive=1')));
+        const identity = JSON.parse(readFileSync(authorizationPath, 'utf8'));
+        assert.deepEqual(identity.qualification, ledger.qualifications[newerSha]);
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('every ledger write path removes unknown top-level seed fields without changing immutable references', async () => {
   const seed = state();
@@ -799,7 +1134,7 @@ test('every ledger write path removes unknown top-level seed fields without chan
       (_store, mutate) => write(mutate));
     const set = completeSet(identity);
     await write(current => advance(current, identity, set, sha, ''));
-    await write(current => advance(current, identity, set, sha, hash(set)));
+    await write(current => advance(current, identity, set, sha, publicSetHash(set)));
     assert.equal(fixture.ledgerWrites.length, 6, 'Allocation, retry, tag object, tag publication, set and set retry');
     for (const persisted of fixture.ledgerWrites) {
       assert.deepEqual(Object.keys(persisted).sort(), [...publicLedgerFields].sort());
@@ -814,11 +1149,11 @@ test('every ledger write path removes unknown top-level seed fields without chan
     }
     const persisted = (await store.read()).state; // Also verifies adjacent-commit CAS continuity.
     const entry = persisted.reservations[identity.allocationKey];
-    assert.equal(entry.setHash, hash(set));
+    assert.equal(entry.setHash, publicSetHash(set));
     assert.equal(entry.set.identity.identitySha256, hash(identity));
     assert.deepEqual(entry.set.images, set.images);
     assert.equal(entry.tagPublished, true);
-    assert.equal(persisted.pointers.insider.setHash, hash(set));
+    assert.equal(persisted.pointers.insider.setHash, publicSetHash(set));
     assert.deepEqual(fixture.ledgerWrites[4], fixture.ledgerWrites[5]);
     verifyConsumer(identity, entry.record, context(), entry.identitySha256);
   } finally {
@@ -837,17 +1172,11 @@ test('every transaction rejects private qualification seed fields before any Git
     current => reserve(current, admission({ buildAttempt: '3' }), created),
     current => reserve(current, admission(), created),
     current => { current.reservations[identity.allocationKey].tagObject = newerSha; },
-    current => { current.reservations[identity.allocationKey].tagPublished = true; },
-    current => advance(current, nextIdentity, completeSet(nextIdentity), sha, hash(set)),
-    current => advance(current, identity, set, sha, hash(set)),
+    current => { Object.assign(current.reservations[identity.allocationKey], { tagObject: newerSha, tagPublished: true }); },
+    current => advance(current, nextIdentity, completeSet(nextIdentity), sha, publicSetHash(set)),
+    current => advance(current, identity, set, sha, publicSetHash(set)),
   ];
-  const promotion = {
-    schema: 1, sourceCommit: sha, reviewed: true, tests: true, compatibility: true,
-    migrations: true, recovery: true, mode: 'promotion', sourceTreeReviewed: true,
-    promotionOrigin: {
-      allocationKey: identity.allocationKey, releaseId: identity.releaseId, sourceCommit: sha, setHash: hash(set),
-    },
-  };
+  const promotion = promotionQualification(identity, set);
   const poisonedQualifications = [
     ...['reviewers', 'reviewerLogin', 'reviewerId', 'publisherAppId', 'rawPolicy', 'hotfixReason', 'ownerNotes', 'futurePrivate']
       .map(field => ({ ...hotfixQualification(), [field]: { secret: 'private-value' } })),
@@ -859,7 +1188,7 @@ test('every transaction rejects private qualification seed fields before any Git
   for (const qualification of poisonedQualifications) {
     for (const operation of operations) {
       const contaminated = structuredClone(clean);
-      contaminated.qualifications[sha] = qualification;
+      contaminated.qualifications[qualification.sourceCommit === newerSha ? newerSha : sha] = qualification;
       let writes = 0;
       const adapter = gitLedger(async () => { writes++; throw new Error('Unexpected Git write'); }, anchor);
       const store = {
@@ -871,8 +1200,8 @@ test('every transaction rejects private qualification seed fields before any Git
     }
   }
   const qualified = structuredClone(clean);
-  qualified.qualifications[sha] = promotion;
-  assert.deepEqual(publicLedger(qualified).qualifications[sha], promotion);
+  qualified.qualifications[newerSha] = promotion;
+  assert.deepEqual(publicLedger(qualified).qualifications[newerSha], promotion);
 });
 
 function publicSetPoisons(identity) {
@@ -944,8 +1273,8 @@ test('public complete-set projection is closed, canonical and idempotent for pri
   assert.deepEqual(writePublicSet(entry.record, entry.set), projected);
   assert.deepEqual(publicLedger(ledger), ledger);
   assert.equal(entry.identitySha256, hash(identity));
-  assert.equal(entry.setHash, hash(set));
-  assert.equal(ledger.pointers.insider.setHash, hash(set));
+  assert.equal(entry.setHash, publicSetHash(set));
+  assert.equal(ledger.pointers.insider.setHash, publicSetHash(set));
   for (const poison of publicSetPoisons(identity)) {
     for (const original of [completeSet(identity), projected]) {
       const changed = structuredClone(original);
@@ -953,7 +1282,7 @@ test('public complete-set projection is closed, canonical and idempotent for pri
       assert.throws(() => writePublicSet(identity, changed), /public set/i);
     }
   }
-  for (const invalid of ['', 'f'.repeat(63), `${'f'.repeat(64)}\n`, {}, []]) {
+  for (const invalid of ['', 'f'.repeat(63), `${'f'.repeat(64)}\n`, {}, [], JSON.parse('null')]) {
     assert.throws(() => writePublicSet(identity, projected, invalid), /identity hash/);
   }
 });
@@ -969,9 +1298,9 @@ test('every ledger write path rejects poisoned stored public sets before Git blo
     current => reserve(current, admission({ buildAttempt: '3' }), created),
     current => reserve(current, admission(), created),
     current => { current.reservations[identity.allocationKey].tagObject = newerSha; },
-    current => { current.reservations[identity.allocationKey].tagPublished = true; },
-    current => advance(current, nextIdentity, completeSet(nextIdentity), sha, hash(set)),
-    current => advance(current, identity, set, sha, hash(set)),
+    current => { Object.assign(current.reservations[identity.allocationKey], { tagObject: newerSha, tagPublished: true }); },
+    current => advance(current, nextIdentity, completeSet(nextIdentity), sha, publicSetHash(set)),
+    current => advance(current, identity, set, sha, publicSetHash(set)),
   ];
   let rejected = 0;
   for (const poison of publicSetPoisons(identity)) {
@@ -1021,13 +1350,13 @@ test('every ledger write path rejects poisoned stored public sets before Git blo
     assert.doesNotMatch(JSON.stringify(persisted), /futurePrivate|private-value/);
     assert.deepEqual(persisted.reservations[identity.allocationKey].set, clean.reservations[identity.allocationKey].set);
     assert.equal(persisted.reservations[identity.allocationKey].identitySha256, hash(identity));
-    assert.equal(persisted.reservations[identity.allocationKey].setHash, hash(set));
+    assert.equal(persisted.reservations[identity.allocationKey].setHash, publicSetHash(set));
     assert.deepEqual(publicLedger(persisted), persisted);
   }
   t.diagnostic(`${rejected} poisoned-set/transaction combinations rejected before any Git call`);
 });
 
-test('public ledger schema rejects malformed maps and typed references; stable owner approval remains mandatory', () => {
+test('public ledger schema rejects malformed maps and typed references; stable owner approval remains mandatory', async () => {
   for (const field of ['reservations', 'identities', 'pointers', 'stages', 'qualifications']) {
     const malformed = state();
     malformed[field] = [{ ownerNotes: 'private-value' }];
@@ -1035,7 +1364,7 @@ test('public ledger schema rejects malformed maps and typed references; stable o
   }
   const stable = admit(context({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
     workflowIdentity: context().workflowIdentity.replace('/development', '/main') }), sha, 'v1.2.3');
-  for (const field of ['reviewed', 'tests', 'compatibility', 'migrations', 'recovery', 'nonPromotionApproved']) {
+  for (const field of ['reviewed', 'tests', 'compatibility', 'migrations', 'recovery', 'reasonSha256']) {
     for (const invalid of [false, 'true', { private: 'private-value' }, undefined]) {
       const ledger = state();
       ledger.qualifications[sha] = { ...hotfixQualification(), [field]: invalid };
@@ -1053,7 +1382,8 @@ test('public ledger schema rejects malformed maps and typed references; stable o
   }
   ledger.qualifications[sha] = hotfixQualification();
   const normalized = publicLedger(ledger);
-  assert.equal(reserve(normalized, stable, created).record.qualification.mode, 'hotfix');
+  const qualification = await verifyStableQualification(() => assert.fail('No hotfix tree lookup'), normalized, stable);
+  assert.equal(reserve(normalized, stable, created, undefined, qualification).record.qualification.mode, 'hotfix');
   assert.throws(() => publicLedger({ ...ledger, lastHistoricalStable: '1.2.3-insider.1' }), /stable floor/);
 });
 
@@ -1162,6 +1492,7 @@ test('missing, malformed and weakened signed protection evidence always fails cl
   assert.throws(() => verifyProtectionEvidence(undefined, 'insider', '123'), /Missing/);
   const ledger = state();
   const identity = record(ledger);
+  delete identity.protection;
   const fixture = authorizationFixture(ledger);
   const originalFetch = globalThis.fetch;
   const cwd = process.cwd();
@@ -1174,7 +1505,7 @@ test('missing, malformed and weakened signed protection evidence always fails cl
   try {
     await assert.rejects(runReleaseControl('consume', {
       ...fixture.env, RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)), RELEASE_PUBLISHER_TOKEN: undefined,
-    }, () => {}), /Missing or mismatched normalized protection attestation/);
+    }, () => {}), /authorization fields/);
     assert.ok(fixture.calls.every(call => !call.admin && call.method === 'GET'));
     assert.ok(!fixture.calls.some(call => call.endpoint.startsWith('git/ref/tags/')));
   } finally {
@@ -1266,19 +1597,21 @@ test('signed-artifact verification fails closed without logging payloads or acce
 
 test('public assets, tag annotations and ledger retain hashes but no private or unknown authorization fields', async () => {
   const ledger = state();
-  const identity = reserve(ledger, admission(), created, await verifyProtection(protectionFixture().api, 'insider', '123')).record;
-  identity.futurePrivate = { value: 'private-future-value' };
-  identity.reviewerId = 'private-reviewer';
-  identity.publisherId = 'private-publisher';
+  const identity = record(ledger);
+  for (const field of ['futurePrivate', 'reviewerId', 'publisherId']) {
+    const poisoned = structuredClone(ledger);
+    poisoned.reservations[identity.allocationKey].record[field] = { value: 'private-value' };
+    assert.throws(() => publicLedger(poisoned), ReleasePolicyError);
+  }
   const set = completeSet(identity);
-  set.futurePrivate = identity.futurePrivate;
+  set.futurePrivate = { value: 'private-future-value' };
   set.images.api.platforms['linux/amd64'].labels.futurePrivate = 'private-label';
   advance(ledger, identity, set, sha, '');
   const sanitized = publicLedger(ledger);
   const serialized = JSON.stringify(sanitized);
   assert.doesNotMatch(serialized, /protection|rulesets|environment|reviewer|publisher|futurePrivate|private-/);
   assert.equal(sanitized.reservations[identity.allocationKey].identitySha256, hash(identity));
-  assert.equal(sanitized.reservations[identity.allocationKey].setHash, hash(set));
+  assert.equal(sanitized.reservations[identity.allocationKey].setHash, publicSetHash(set));
   assert.deepEqual(publicLedger(sanitized), sanitized, 'Public ledger serialization must be idempotent');
   const root = resolve('.artifacts', `public-assets-${process.pid}`);
   try {
@@ -1318,7 +1651,7 @@ test('the shared public field projection rejects wrong types rather than coercin
   }
   for (const source of [undefined, [], 123, 'identity']) assert.throws(() => publicIdentity(source));
   for (const value of [{ private: 'value' }, 42]) {
-    assert.throws(() => buildMetadata({ ...record(), releaseId: value }), /Invalid public identity field/);
+    assert.throws(() => buildMetadata({ ...record(), releaseId: value }), ReleasePolicyError);
   }
 });
 

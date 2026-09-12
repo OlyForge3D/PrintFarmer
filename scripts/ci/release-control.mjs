@@ -5,10 +5,11 @@ import {
 } from './release-policy.mjs';
 import {
   branchHead, command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion, verifyProtection,
+  verifyStableQualification,
 } from './release-github.mjs';
 import { emitBuildIdentity } from './release-metadata.mjs';
 import {
-  privateSetPath, publicAuthorization, readPrivateAuthorization, readPrivateJson, verifyAuthorization, writeAuthorization,
+  privateSetPath, publicAuthorization, readPrivateAuthorization, readPrivateJson, verifyAuthorization, writeAuthorization, writePublicSet,
 } from './release-authorization.mjs';
 
 export function runContext(env = process.env) {
@@ -25,8 +26,8 @@ export function runContext(env = process.env) {
   };
 }
 
-function output(name, value) {
-  requireThat(!String(value).includes('\n'), 'Multiline workflow output rejected');
+export function output(name, value) {
+  requireThat(!/[\r\n]/.test(String(value)), 'Multiline workflow output rejected');
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
 }
 
@@ -61,6 +62,8 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     const protection = await verifyProtection(api, admission.channel, env.RELEASE_PUBLISHER_APP_ID);
     const record = await transact(store, async state => {
       requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during allocation retry');
+      const qualification = await verifyStableQualification(api, state, admission);
+      requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during qualification');
       const existing = state.reservations[allocationKey(admission)];
       if (existing?.identitySha256) {
         // A lost private artifact cannot be reconstructed from public ledger data.
@@ -68,7 +71,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
         requireThat(hash(saved) === existing.identitySha256, 'Original authorization unavailable; rerun with a new attempt');
         return saved;
       }
-      const reservation = reserve(state, admission, new Date().toISOString(), protection);
+      const reservation = reserve(state, admission, new Date().toISOString(), protection, qualification);
       verifyProtectionEvidence(reservation.record.protection, admission.channel);
       if (context.requestedTag) requireThat(reservation.record.sourceTag === context.requestedTag,
         'Requested tag is not the durable reservation; omit version to allocate');
@@ -109,7 +112,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     const expectedPointer = state.pointers[record.channel]?.setHash || '';
     await transact(store, async latest => advance(latest, record, set,
       await branchHead(api, record.sourceBranch), expectedPointer));
-    output('set_hash', hash(set));
+    output('set_hash', hash(writePublicSet(record, set)));
   } else {
     throw new Error(`Unknown operation: ${operation}`);
   }

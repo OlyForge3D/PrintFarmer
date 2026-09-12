@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import {
   repository, ledgerBranch, requireThat, validateLedger, verifyTag, compareVersions, normalizeProtectionEvidence,
-  hash, parseTag, publicLedgerQualification,
+  hash, parseTag, publicLedgerQualification, publicRecord, validateRecord, requireKeys, requireString,
+  validatePromotionOrigin, parseVersionFile, requireObject,
 } from './release-policy.mjs';
 import { publicAuthorization, writePublicSet } from './release-authorization.mjs';
 
@@ -28,21 +29,7 @@ function publicReservation(entry, key) {
   publicReference(key, hashPattern);
   const record = entry.record;
   const identitySha256 = publicReference(entry.identitySha256 || hash(record), hashPattern);
-  const projected = { ...publicAuthorization(record), identitySha256 };
-  for (const field of ['repository', 'workflowCommit', 'allocationKey', 'created', 'stage', 'sequence']) {
-    requireThat(record[field] === undefined || typeof record[field] === 'string', 'Invalid ledger identity field');
-    if (record[field] !== undefined) projected[field] = record[field];
-  }
-  requireThat(record.schema === 1, 'Invalid ledger identity schema');
-  projected.schema = 1;
-  const admission = {};
-  for (const field of ['repository', 'channel', 'baseVersion', 'sourceBranch', 'stage',
-    'sourceCommit', 'authorizedBranchHead', 'buildId', 'buildAttempt', 'workflowIdentity', 'workflowCommit']) {
-    requireThat(entry.admission[field] === undefined || typeof entry.admission[field] === 'string',
-      'Invalid ledger admission field');
-    if (entry.admission[field] !== undefined) admission[field] = entry.admission[field];
-  }
-  const result = { admission, record: projected, identitySha256 };
+  const result = { admission: { ...entry.admission }, record: publicRecord(record, identitySha256), identitySha256 };
   if (entry.sequence !== undefined) result.sequence = publicReference(entry.sequence, sequencePattern);
   if (entry.tagObject !== undefined) result.tagObject = publicReference(entry.tagObject, shaPattern);
   if (entry.setHash !== undefined) result.setHash = publicReference(entry.setHash, hashPattern);
@@ -95,6 +82,8 @@ export function publicLedger(state) {
     requireThat(stable.channel === 'stable', 'Invalid public ledger stable floor');
     projectedState.lastHistoricalStable = stable.canonicalVersion;
   }
+  requireKeys(projectedState, publicLedgerFields.filter(field => field !== 'lastHistoricalStable'),
+    ['lastHistoricalStable'], 'public ledger');
   validateLedger(projectedState, projectedState.anchor);
   return projectedState;
 }
@@ -245,8 +234,17 @@ export async function verifyProtection(api, channel, publisherAppId = process.en
 }
 
 export async function ensureSourceTag(api, store, record, transact) {
+  validateRecord(record);
+  const preflight = state => {
+    const projected = publicLedger(state);
+    const entry = projected.reservations[record.allocationKey];
+    requireThat(entry?.identitySha256 === hash(record) &&
+      hash(entry.record) === hash(publicRecord(record)), 'Source tag authorization mismatch');
+    return entry;
+  };
   // Reserve the annotated object in the ledger BEFORE creating its public ref.
   await transact(store, async state => {
+    preflight(state);
     const entry = state.reservations[record.allocationKey];
     if (entry.tagObject) return;
     requireThat(!await readTag(api, record.sourceTag), 'Existing tag has no immutable authorization');
@@ -258,15 +256,69 @@ export async function ensureSourceTag(api, store, record, transact) {
     entry.tagObject = tag.sha;
   });
   const { state } = await store.read();
-  const expected = state.reservations[record.allocationKey].tagObject;
+  const entry = preflight(state);
+  const expected = entry.tagObject;
   const actual = await readTag(api, record.sourceTag);
-  requireThat(!state.reservations[record.allocationKey].tagPublished || actual,
+  requireThat(!entry.tagPublished || actual,
     'Previously published tag was deleted; never recreate it');
   if (!actual) {
     await api('git/refs', 'POST', { ref: `refs/tags/${record.sourceTag}`, sha: expected });
   }
   verifyTag(record, expected, await readTag(api, record.sourceTag));
   await transact(store, state => { state.reservations[record.allocationKey].tagPublished = true; });
+}
+
+export async function verifyStableQualification(api, state, admission) {
+  if (admission.channel !== 'stable') return undefined;
+  publicLedger(state);
+  const qualification = publicLedgerQualification(state.qualifications[admission.sourceCommit], admission.sourceCommit);
+  if (qualification.mode === 'hotfix') return qualification;
+  const candidate = validatePromotionOrigin(state, qualification);
+  requireThat(candidate.record.baseVersion === admission.baseVersion, 'Promotion target differs from qualified insider base');
+  const readTree = async commitSha => {
+    const commit = await api(`git/commits/${commitSha}`);
+    requireThat(commit?.sha === commitSha, 'Promotion commit response mismatch');
+    requireString(commit.tree?.sha, shaPattern, 'promotion commit tree');
+    const tree = await api(`git/trees/${commit.tree.sha}?recursive=1`);
+    requireThat(tree?.sha === commit.tree.sha && tree.truncated === false && Array.isArray(tree.tree),
+      'Promotion tree missing or truncated');
+    const entries = new Map();
+    const paths = new Set();
+    for (const entry of tree.tree) {
+      requireObject(entry, 'promotion tree entry');
+      requireString(entry.path, /^[^\u0000-\u001f\u007f]+$/, 'promotion tree path');
+      requireString(entry.sha, shaPattern, 'promotion tree object');
+      requireThat(!paths.has(entry.path) &&
+        ((entry.type === 'tree' && entry.mode === '040000') ||
+         (entry.type === 'blob' && ['100644', '100755', '120000'].includes(entry.mode)) ||
+         (entry.type === 'commit' && entry.mode === '160000')), 'Invalid promotion tree entry');
+      paths.add(entry.path);
+      entries.set(entry.path, { mode: entry.mode, type: entry.type,
+        ...(entry.type === 'tree' ? {} : { sha: entry.sha }) });
+    }
+    requireThat(entries.get('VERSION')?.mode === '100644', 'Missing regular VERSION metadata in promotion tree');
+    return { sha: tree.sha, entries };
+  };
+  const origin = await readTree(candidate.record.sourceCommit);
+  const source = await readTree(admission.sourceCommit);
+  const metadataChanges = [];
+  for (const path of [...new Set([...origin.entries.keys(), ...source.entries.keys()])].sort()) {
+    const before = origin.entries.get(path);
+    const after = source.entries.get(path);
+    if (JSON.stringify(before) === JSON.stringify(after)) continue;
+    requireThat(path === 'VERSION' && before?.type === 'blob' && after?.type === 'blob' &&
+      before.mode === '100644' && after.mode === '100644',
+    'Unqualified tree change: promotion permits only VERSION metadata');
+    metadataChanges.push({ path, before: before.sha, after: after.sha });
+  }
+  for (const commit of [candidate.record.sourceCommit, admission.sourceCommit]) {
+    requireThat(parseVersionFile(await readVersion(api, commit)) === admission.baseVersion,
+      'Promotion VERSION differs from qualified base');
+  }
+  const evidence = { schema: 1, originTree: origin.sha, sourceTree: source.sha, metadataChanges };
+  requireThat(hash(qualification.treeEvidence) === hash({ ...evidence, diffSha256: hash(evidence) }),
+    'Promotion tree evidence differs from reproducible Git comparison');
+  return qualification;
 }
 
 export function command(file, args) {

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { publicIdentityFields } from '../../src/Web/ReactApp/public-release-identity.mjs';
 
 export const repository = 'OlyForge3D/PrintFarmer';
 export const workflow = '.github/workflows/consolidated-release.yml';
@@ -7,6 +8,8 @@ const numeric = '(0|[1-9][0-9]*)';
 const basePattern = `${numeric}\\.${numeric}\\.${numeric}`;
 const tagPattern = new RegExp(`^v(${basePattern})(?:-(insider|beta|rc)\\.([1-9][0-9]*))?$`);
 const shaPattern = /^[a-f0-9]{40}$/;
+const hashPattern = /^[a-f0-9]{64}$/;
+const positivePattern = /^[1-9][0-9]*$/;
 export const components = {
   api: ['linux/amd64', 'linux/arm64'],
   frontend: ['linux/amd64', 'linux/arm64'],
@@ -16,8 +19,32 @@ export const components = {
   monolith: ['linux/amd64', 'linux/arm64'],
 };
 
+export class ReleasePolicyError extends Error {
+  name = 'ReleasePolicyError';
+}
+
 export function requireThat(condition, message) {
-  if (!condition) throw new Error(message);
+  if (!condition) throw new ReleasePolicyError(message);
+}
+
+export function requireObject(value, description) {
+  requireThat(value && typeof value === 'object' && !Array.isArray(value), `Invalid ${description} object`);
+}
+
+export function requireKeys(value, required, optional = [], description = 'release schema') {
+  requireObject(value, description);
+  requireThat(required.every(key => Object.hasOwn(value, key)) &&
+    Object.keys(value).every(key => [...required, ...optional].includes(key) && value[key] !== undefined),
+  `Invalid ${description} fields`);
+}
+
+export function requireString(value, pattern, description) {
+  requireThat(typeof value === 'string' && !/[\r\n]/.test(value) && pattern.test(value), `Invalid ${description}`);
+}
+
+export function requireTimestamp(value, description) {
+  requireThat(typeof value === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value) &&
+    Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value, `Invalid ${description}`);
 }
 
 export function parseTag(tag) {
@@ -30,6 +57,7 @@ export function parseTag(tag) {
 
 export function parseVersionFile(text) {
   // Permit the text-file final newline, not arbitrary whitespace normalization.
+  requireThat(typeof text === 'string', 'Invalid VERSION content');
   const tag = text.replace(/\r?\n$/, '');
   requireThat(!parseTag(tag).stage, 'VERSION must contain only vX.Y.Z');
   return tag.slice(1);
@@ -55,6 +83,7 @@ export function hash(value) {
 }
 
 export function admit(context, selectedHead, versionText, lastStable) {
+  requireObject(context, 'release admission context');
   requireThat(context.repository === repository, 'Untrusted repository');
   requireThat(['workflow_dispatch', 'schedule'].includes(context.event), 'Event cannot authorize publication');
   requireThat(context.workflowIdentity === `${repository}/${workflow}@refs/heads/${context.workflowBranch}`,
@@ -68,7 +97,7 @@ export function admit(context, selectedHead, versionText, lastStable) {
   requireThat(shaPattern.test(selectedHead) && context.eventSha === selectedHead,
     'Source must equal canonical branch HEAD at admission; reselect and requalify');
   for (const field of ['buildId', 'buildAttempt']) {
-    requireThat(/^[1-9][0-9]*$/.test(context[field]), `Invalid ${field}`);
+    requireString(context[field], positivePattern, field);
   }
   const baseVersion = parseVersionFile(versionText);
   const stage = channel === 'stable' ? undefined : (context.stage || 'insider');
@@ -84,7 +113,7 @@ export function admit(context, selectedHead, versionText, lastStable) {
       'Requested tag disagrees with VERSION/channel/stage');
   }
   return {
-    repository, channel, baseVersion, sourceBranch, stage,
+    repository, channel, baseVersion, sourceBranch, ...(stage ? { stage } : {}),
     sourceCommit: selectedHead, authorizedBranchHead: selectedHead,
     buildId: context.buildId, buildAttempt: context.buildAttempt,
     workflowIdentity: context.workflowIdentity, workflowCommit: context.workflowSha,
@@ -94,6 +123,145 @@ export function admit(context, selectedHead, versionText, lastStable) {
 export function allocationKey(admission) {
   return hash([admission.repository, admission.workflowIdentity, admission.buildId,
     admission.buildAttempt, admission.sourceCommit, admission.baseVersion]);
+}
+
+const admissionFields = [
+  'repository', 'channel', 'baseVersion', 'sourceBranch', 'sourceCommit', 'authorizedBranchHead',
+  'buildId', 'buildAttempt', 'workflowIdentity', 'workflowCommit',
+];
+
+function channelFields(record) {
+  return record?.channel === 'insider' ? ['stage'] : [];
+}
+
+export function validateAdmission(admission) {
+  requireKeys(admission, [...admissionFields, ...channelFields(admission)], [], 'ledger admission');
+  requireThat(admission.repository === repository && ['stable', 'insider'].includes(admission.channel),
+    'Invalid ledger admission repository/channel');
+  requireThat(parseTag(`v${admission.baseVersion}`).channel === 'stable', 'Invalid ledger admission base version');
+  const branch = admission.channel === 'stable' ? 'main' : 'development';
+  requireThat(admission.sourceBranch === branch &&
+    admission.workflowIdentity === `${repository}/${workflow}@refs/heads/${branch}`,
+  'Invalid ledger admission workflow/branch');
+  requireString(admission.sourceCommit, shaPattern, 'ledger admission source commit');
+  requireThat(admission.authorizedBranchHead === admission.sourceCommit &&
+    admission.workflowCommit === admission.sourceCommit, 'Invalid ledger admission commit binding');
+  for (const field of ['buildId', 'buildAttempt']) requireString(admission[field], positivePattern, `ledger admission ${field}`);
+  requireThat(admission.channel === 'stable' || ['insider', 'beta', 'rc'].includes(admission.stage),
+    'Invalid ledger admission stage');
+  return admission;
+}
+
+function recordAdmission(record) {
+  return Object.fromEntries([...admissionFields, ...channelFields(record)].map(field => [field, record[field]]));
+}
+
+export function validateRecord(record, projected = false) {
+  const fields = [
+    'schema', ...admissionFields, ...channelFields(record), 'releaseId', 'canonicalVersion',
+    'sourceTag', 'allocationKey', 'created', ...(record?.channel === 'insider' ? ['sequence'] : []),
+    ...(projected ? ['buildTime', 'identitySha256'] : ['protection', ...(record?.channel === 'stable' ? ['qualification'] : [])]),
+  ];
+  requireKeys(record, fields, [], projected ? 'projected ledger record' : 'authorization');
+  requireThat(record.schema === 1, 'Invalid ledger identity schema');
+  validateAdmission(recordAdmission(record));
+  const tag = parseTag(record.sourceTag);
+  requireThat(record.canonicalVersion === tag.canonicalVersion && record.baseVersion === tag.baseVersion &&
+    record.channel === tag.channel && record.stage === tag.stage && record.sequence === tag.sequence &&
+    record.releaseId === `${tag.channel}:${tag.canonicalVersion}` &&
+    record.allocationKey === allocationKey(record), 'Invalid canonical record identity');
+  requireTimestamp(record.created, 'authorization timestamp');
+  if (projected) {
+    requireThat(record.buildTime === record.created, 'Invalid projected record timestamp binding');
+    requireString(record.identitySha256, hashPattern, 'ledger authorization hash');
+  } else {
+    verifyProtectionEvidence(record.protection, record.channel);
+    requireThat(Date.parse(record.protection.verifiedAt) <= Date.parse(record.created),
+      'Protection attestation postdates authorization');
+    if (record.channel === 'stable') publicLedgerQualification(record.qualification, record.sourceCommit);
+  }
+  return record;
+}
+
+export function publicAuthorization(record) {
+  requireObject(record, 'public identity');
+  const identity = {
+    ...Object.fromEntries(publicIdentityFields.map(field => [field, record[field]])),
+    buildTime: Object.hasOwn(record, 'created') ? record.created : record.buildTime,
+    identitySha256: Object.hasOwn(record, 'identitySha256') ? record.identitySha256 : hash(record),
+  };
+  validatePublicAuthorization(identity);
+  return identity;
+}
+
+export function validatePublicAuthorization(identity) {
+  requireKeys(identity, [...publicIdentityFields, 'buildTime', 'identitySha256'], [], 'public authorization');
+  const tag = parseTag(identity.sourceTag);
+  requireThat(identity.canonicalVersion === tag.canonicalVersion && identity.baseVersion === tag.baseVersion &&
+    identity.channel === tag.channel && identity.releaseId === `${tag.channel}:${tag.canonicalVersion}`,
+  'Invalid public authorization canonical identity');
+  validateAdmission({
+    repository, channel: identity.channel, baseVersion: identity.baseVersion, sourceBranch: identity.sourceBranch,
+    sourceCommit: identity.sourceCommit, authorizedBranchHead: identity.authorizedBranchHead,
+    buildId: identity.buildId, buildAttempt: identity.buildAttempt, workflowIdentity: identity.workflowIdentity,
+    workflowCommit: identity.sourceCommit, ...(tag.stage ? { stage: tag.stage } : {}),
+  });
+  requireTimestamp(identity.buildTime, 'authorization timestamp');
+  requireString(identity.identitySha256, hashPattern, 'public authorization identity hash');
+}
+
+export function publicRecord(record, identitySha256) {
+  requireObject(record, 'ledger record');
+  validateRecord(record, Object.hasOwn(record, 'identitySha256'));
+  if (identitySha256 === undefined) identitySha256 = Object.hasOwn(record, 'identitySha256') ? record.identitySha256 : hash(record);
+  requireString(identitySha256, hashPattern, 'ledger authorization hash');
+  return {
+    ...publicAuthorization(record), identitySha256, schema: 1, repository,
+    workflowCommit: record.workflowCommit, allocationKey: record.allocationKey, created: record.created,
+    ...(record.channel === 'insider' ? { stage: record.stage, sequence: record.sequence } : {}),
+  };
+}
+
+function publicDigest(value) {
+  requireString(value, /^sha256:[a-f0-9]{64}$/, 'public set digest');
+  return value;
+}
+
+export function writePublicSet(record, set, identitySha256) {
+  requireObject(record, 'public set identity');
+  if (identitySha256 === undefined) identitySha256 = Object.hasOwn(record, 'identitySha256') ? record.identitySha256 : hash(record);
+  requireString(identitySha256, hashPattern, 'public set identity hash');
+  const identity = { ...publicAuthorization(record), identitySha256 };
+  requireObject(set, 'public set');
+  requireThat(set.schema === 1 && set.managedEligible === false, 'Invalid public set schema/eligibility');
+  requireObject(set.identity, 'public set identity');
+  requireThat(hash(set.identity) === hash(identity) ||
+    (hash(set.identity) === identitySha256 && hash(publicAuthorization(set.identity)) === hash(identity)),
+  'Public set identity mismatch');
+  const labels = {
+    ...identityLabels({ ...identity, repository, created: identity.buildTime }),
+    'org.printfarmer.identity-sha256': identitySha256,
+  };
+  requireKeys(set.images, Object.keys(components), [], 'public set component');
+  const images = {};
+  for (const [name, expectedPlatforms] of Object.entries(components)) {
+    const image = set.images[name];
+    requireObject(image, 'public set image');
+    const digest = publicDigest(image.digest);
+    requireKeys(image.platforms, expectedPlatforms, [], 'public set platform');
+    const platforms = {};
+    for (const platform of expectedPlatforms) {
+      const value = image.platforms[platform];
+      requireObject(value, 'public set platform');
+      requireObject(value.labels, 'public set labels');
+      for (const [key, expected] of Object.entries(labels)) {
+        requireThat(Object.hasOwn(value.labels, key) && value.labels[key] === expected, 'Invalid public set identity label');
+      }
+      platforms[platform] = { digest: publicDigest(value.digest), labels: { ...labels } };
+    }
+    images[name] = { digest, platforms };
+  }
+  return { schema: 1, identity, managedEligible: false, images };
 }
 
 export function verifyRawProtectionEvidence(evidence, channel, publisherAppId) {
@@ -188,37 +356,97 @@ export function verifyProtectionEvidence(evidence, channel) {
 }
 
 export function validateLedger(state, anchor) {
-  requireThat(state?.schema === 1 && shaPattern.test(anchor) && state.anchor === anchor,
+  requireThat(state?.schema === 1 && typeof anchor === 'string' && !/[\r\n]/.test(anchor) &&
+    shaPattern.test(anchor) && state.anchor === anchor,
     'Ledger missing or continuity anchor mismatch: owner recovery required');
-  requireThat(/^(0|[1-9][0-9]*)$/.test(state.counter), 'Invalid ledger counter');
-  requireThat(state.reservations && state.pointers && state.identities, 'Incomplete ledger');
+  requireString(state.counter, /^(0|[1-9][0-9]*)$/, 'ledger counter');
+  for (const field of ['reservations', 'identities', 'pointers', 'stages', 'qualifications']) {
+    requireObject(state[field], `public ledger ${field}`);
+  }
+  if (Object.hasOwn(state, 'lastHistoricalStable')) {
+    requireThat(typeof state.lastHistoricalStable === 'string' &&
+      parseTag(`v${state.lastHistoricalStable}`).channel === 'stable', 'Invalid public ledger stable floor');
+  }
   for (const [version, key] of Object.entries(state.identities)) {
-    requireThat(state.reservations[key]?.record.canonicalVersion === version,
+    parseTag(`v${version}`);
+    requireString(key, hashPattern, 'ledger identity reference');
+    requireThat(state.reservations[key]?.record?.canonicalVersion === version,
       'Ledger identity continuity violation');
   }
   const sequences = new Set();
   for (const [key, reservation] of Object.entries(state.reservations)) {
-    if (reservation.identitySha256 !== undefined) {
-      requireThat(typeof reservation.identitySha256 === 'string' &&
-        /^[a-f0-9]{64}$/.test(reservation.identitySha256) &&
-        reservation.record?.identitySha256 === reservation.identitySha256,
+    requireString(key, hashPattern, 'ledger allocation key');
+    requireObject(reservation, 'public ledger reservation');
+    const projected = Object.hasOwn(reservation, 'identitySha256') || Object.hasOwn(reservation.record ?? {}, 'identitySha256');
+    requireKeys(reservation, ['admission', 'record',
+      ...(projected ? ['identitySha256'] : []),
+      ...(reservation.record?.channel === 'insider' ? ['sequence'] : [])],
+    ['tagObject', 'tagPublished', 'setHash', 'set'], 'public ledger reservation');
+    validateRecord(reservation.record, projected);
+    validateAdmission(reservation.admission);
+    requireThat(Object.entries(reservation.admission).every(([field, value]) => reservation.record[field] === value),
+      'Ledger admission/record mismatch');
+    if (projected) requireThat(reservation.record.identitySha256 === reservation.identitySha256,
       'Ledger authorization hash mismatch');
-    }
-    requireThat(reservation.record?.allocationKey === key &&
+    requireThat(reservation.record.allocationKey === key &&
       state.identities[reservation.record.canonicalVersion] === key &&
       reservation.sequence === reservation.record.sequence, 'Ledger identity continuity violation');
-    if (!reservation.sequence) continue;
-    requireThat(/^[1-9][0-9]*$/.test(reservation.sequence) &&
-      BigInt(reservation.sequence) <= BigInt(state.counter) &&
-      !sequences.has(reservation.sequence), 'Ledger sequence continuity violation');
-    sequences.add(reservation.sequence);
+    if (Object.hasOwn(reservation, 'tagObject')) requireString(reservation.tagObject, shaPattern, 'public ledger tag object');
+    if (Object.hasOwn(reservation, 'tagPublished')) requireThat(reservation.tagPublished === true &&
+      reservation.tagObject, 'Invalid public ledger tag publication claim');
+    requireThat(Object.hasOwn(reservation, 'setHash') === Object.hasOwn(reservation, 'set'),
+      'Incomplete public ledger set/hash');
+    if (Object.hasOwn(reservation, 'set')) {
+      requireString(reservation.setHash, hashPattern, 'public ledger set hash');
+      requireThat(reservation.setHash === hash(writePublicSet(reservation.record, reservation.set,
+        reservation.identitySha256 ?? hash(reservation.record))), 'Public set hash mismatch');
+    }
+    if (reservation.sequence) {
+      requireThat(BigInt(reservation.sequence) <= BigInt(state.counter) &&
+        !sequences.has(reservation.sequence), 'Ledger sequence continuity violation');
+      sequences.add(reservation.sequence);
+      requireThat(state.stages[reservation.record.baseVersion] &&
+        compareVersions(state.stages[reservation.record.baseVersion], reservation.record.canonicalVersion) >= 0,
+      'Ledger stage continuity violation');
+    }
+    if (reservation.record.channel === 'stable') {
+      const qualification = state.qualifications[reservation.record.sourceCommit];
+      publicLedgerQualification(qualification, reservation.record.sourceCommit);
+      if (qualification.mode === 'promotion') requireThat(
+        validatePromotionOrigin(state, qualification).record.baseVersion === reservation.record.baseVersion,
+        'Promotion target differs from qualified insider base');
+      if (!projected) requireThat(
+        hash(publicLedgerQualification(qualification, reservation.record.sourceCommit)) ===
+        hash(publicLedgerQualification(reservation.record.qualification, reservation.record.sourceCommit)),
+        'Ledger stable qualification mismatch');
+    }
+  }
+  for (const [base, version] of Object.entries(state.stages)) {
+    const tag = parseTag(`v${version}`);
+    requireThat(tag.channel === 'insider' && tag.baseVersion === base && state.identities[version],
+      'Invalid public ledger stage');
+  }
+  for (const [channel, pointer] of Object.entries(state.pointers)) {
+    requireKeys(pointer, ['releaseId', 'canonicalVersion', 'sourceCommit', 'setHash', 'allocationKey'],
+      [], 'public ledger pointer');
+    requireThat(['stable', 'insider'].includes(channel), 'Invalid public ledger pointer channel');
+    const reservation = state.reservations[pointer.allocationKey];
+    requireThat(reservation?.set && reservation.record.channel === channel &&
+      pointer.setHash === reservation.setHash && pointer.releaseId === reservation.record.releaseId &&
+      pointer.canonicalVersion === reservation.record.canonicalVersion &&
+      pointer.sourceCommit === reservation.record.sourceCommit, 'Invalid public ledger pointer binding');
+  }
+  for (const [sourceCommit, qualification] of Object.entries(state.qualifications)) {
+    publicLedgerQualification(qualification, sourceCommit);
+    if (qualification.mode === 'promotion') validatePromotionOrigin(state, qualification);
   }
 }
 
 export function publicLedgerQualification(qualification, sourceCommit) {
   const claims = ['reviewed', 'tests', 'compatibility', 'migrations', 'recovery'];
   const fields = ['schema', 'sourceCommit', ...claims, 'mode',
-    ...(qualification?.mode === 'promotion' ? ['promotionOrigin', 'sourceTreeReviewed'] : ['nonPromotionApproved'])];
+    ...(qualification?.mode === 'promotion' ? ['promotionOrigin', 'treeEvidence'] : ['reasonSha256'])];
+  requireString(sourceCommit, shaPattern, 'public ledger qualification source');
   requireThat(qualification && !Array.isArray(qualification) &&
     Object.keys(qualification).sort().join() === fields.sort().join() &&
     qualification.schema === 1 && typeof sourceCommit === 'string' && shaPattern.test(sourceCommit) &&
@@ -229,7 +457,10 @@ export function publicLedgerQualification(qualification, sourceCommit) {
   };
   if (qualification.mode === 'promotion') {
     const origin = qualification.promotionOrigin;
-    requireThat(qualification.sourceTreeReviewed === true && origin && !Array.isArray(origin) &&
+    requireKeys(origin, ['allocationKey', 'releaseId', 'sourceCommit', 'setHash'], [], 'public ledger promotion qualification');
+    for (const field of ['allocationKey', 'setHash']) requireString(origin[field], hashPattern, 'public ledger promotion qualification hash');
+    requireString(origin.sourceCommit, shaPattern, 'public ledger promotion qualification source');
+    requireThat(origin && !Array.isArray(origin) &&
       Object.keys(origin).sort().join() === ['allocationKey', 'releaseId', 'sourceCommit', 'setHash'].sort().join() &&
       typeof origin.allocationKey === 'string' && /^[a-f0-9]{64}$/.test(origin.allocationKey) &&
       typeof origin.setHash === 'string' && /^[a-f0-9]{64}$/.test(origin.setHash) &&
@@ -241,16 +472,52 @@ export function publicLedgerQualification(qualification, sourceCommit) {
       allocationKey: origin.allocationKey, releaseId: origin.releaseId,
       sourceCommit: origin.sourceCommit, setHash: origin.setHash,
     };
-    result.sourceTreeReviewed = true;
+    const evidence = qualification.treeEvidence;
+    requireKeys(evidence, ['schema', 'originTree', 'sourceTree', 'metadataChanges', 'diffSha256'],
+      [], 'public ledger promotion tree evidence');
+    requireThat(evidence.schema === 1, 'Invalid promotion tree evidence schema');
+    for (const field of ['originTree', 'sourceTree']) requireString(evidence[field], shaPattern, 'promotion tree reference');
+    requireThat(Array.isArray(evidence.metadataChanges) && evidence.metadataChanges.length <= 1,
+      'Invalid promotion metadata changes');
+    for (const change of evidence.metadataChanges) {
+      requireKeys(change, ['path', 'before', 'after'], [], 'promotion metadata change');
+      requireThat(change.path === 'VERSION' && change.before !== change.after, 'Invalid promotion metadata path/change');
+      for (const field of ['before', 'after']) requireString(change[field], shaPattern, 'promotion metadata blob');
+    }
+    const payload = { schema: 1, originTree: evidence.originTree, sourceTree: evidence.sourceTree,
+      metadataChanges: evidence.metadataChanges.map(change => ({
+        path: change.path, before: change.before, after: change.after,
+      })) };
+    requireThat(evidence.diffSha256 === hash(payload), 'Invalid promotion tree evidence digest');
+    result.treeEvidence = { ...payload, diffSha256: evidence.diffSha256 };
   } else {
-    requireThat(qualification.nonPromotionApproved === true,
-      'Direct stable release requires explicit owner non-promotion approval');
-    result.nonPromotionApproved = true;
+    requireString(qualification.reasonSha256, hashPattern, 'public ledger hotfix rationale digest');
+    result.reasonSha256 = qualification.reasonSha256;
   }
   return result;
 }
 
-export function reserve(state, admission, created, protection) {
+export function hotfixReasonDigest(reason) {
+  requireThat(typeof reason === 'string' && !/[\u0000-\u001f\u007f]/.test(reason),
+    'Hotfix requires a non-secret single-line rationale');
+  const normalized = reason.trim().replace(/\s+/gu, ' ');
+  requireThat(normalized.length >= 20 && normalized.length <= 2000, 'Hotfix rationale must explain non-promotion');
+  return hash(normalized);
+}
+
+export function validatePromotionOrigin(state, qualification) {
+  const origin = qualification.promotionOrigin;
+  const candidate = state.reservations[origin.allocationKey];
+  requireThat(candidate?.set && candidate.setHash === origin.setHash && candidate.record.channel === 'insider' &&
+    candidate.record.sourceCommit === origin.sourceCommit && candidate.record.releaseId === origin.releaseId &&
+    qualification.sourceCommit !== origin.sourceCommit,
+  'Promotion requires a qualified immutable insider set and a distinct resulting main commit');
+  return candidate;
+}
+
+export function reserve(state, admission, created, protection, verifiedQualification) {
+  validateLedger(state, state.anchor);
+  validateAdmission(admission);
   const key = allocationKey(admission);
   const existing = state.reservations[key];
   if (existing) {
@@ -267,27 +534,17 @@ export function reserve(state, admission, created, protection) {
   }
   const record = {
     schema: 1, ...admission, releaseId: `${admission.channel}:${canonicalVersion}`,
-    canonicalVersion, sourceTag: `v${canonicalVersion}`, sequence, allocationKey: key, created,
-    ...(protection ? { protection } : {}),
+    canonicalVersion, sourceTag: `v${canonicalVersion}`, ...(sequence ? { sequence } : {}),
+    allocationKey: key, created, protection,
   };
   if (admission.channel === 'stable') {
     const qualification = publicLedgerQualification(state.qualifications?.[admission.sourceCommit], admission.sourceCommit);
-    if (qualification.mode === 'promotion') {
-      const origin = qualification.promotionOrigin;
-      const candidate = state.reservations[origin.allocationKey];
-      requireThat(candidate?.setHash === origin.setHash && candidate.record.channel === 'insider' &&
-        candidate.record.sourceCommit === origin.sourceCommit &&
-        candidate.record.releaseId === origin.releaseId &&
-        qualification.sourceTreeReviewed === true,
-      'Promotion requires a qualified immutable insider set and reviewed main source-tree changes');
-    }
-    record.qualification = {
-      sourceCommit: qualification.sourceCommit, reviewed: true, tests: 'passed',
-      compatibility: 'passed', migrations: 'passed', recovery: 'passed',
-      mode: qualification.mode,
-    };
+    requireThat(verifiedQualification && hash(verifiedQualification) === hash(qualification),
+      'Stable qualification must be verified at authorization');
+    record.qualification = qualification;
   }
-  const reservation = { admission, record, sequence };
+  validateRecord(record);
+  const reservation = { admission, record, ...(sequence ? { sequence } : {}) };
   state.reservations[key] = reservation;
   state.identities[canonicalVersion] = key;
   if (sequence) {
@@ -305,6 +562,7 @@ export function verifyTag(record, expectedObject, actualTag) {
 
 export function verifyConsumer(record, stored, context, identitySha256 = hash(stored)) {
   requireThat(hash(record) === identitySha256, 'Canonical record was changed');
+  validateRecord(record);
   const tag = parseTag(record.sourceTag);
   requireThat(record.schema === 1 && record.repository === repository &&
     record.canonicalVersion === tag.canonicalVersion && record.baseVersion === tag.baseVersion &&
@@ -343,33 +601,25 @@ export function identityLabels(record) {
 }
 
 export function validateCompleteSet(record, set) {
+  validateRecord(record);
+  requireObject(set, 'public set');
+  requireObject(set.identity, 'public set identity');
   requireThat(set.schema === 1 && set.managedEligible === false,
     'Preparatory release sets are not managed eligibility manifests');
   requireThat(hash(set.identity) === hash(record), 'Set identity mismatch');
-  requireThat(Object.keys(set.images).sort().join() === Object.keys(components).sort().join(),
-    'Incomplete or mixed component set');
-  for (const [component, platforms] of Object.entries(components)) {
-    const image = set.images[component];
-    requireThat(/^sha256:[a-f0-9]{64}$/.test(image.digest), 'Invalid image digest');
-    requireThat(Object.keys(image.platforms).sort().join() === [...platforms].sort().join(),
-      `Incomplete platforms: ${component}`);
-    for (const platform of Object.values(image.platforms)) {
-      requireThat(/^sha256:[a-f0-9]{64}$/.test(platform.digest), 'Invalid platform digest');
-      for (const [key, value] of Object.entries(identityLabels(record))) {
-        requireThat(platform.labels[key] === value, `Mixed identity: ${component}/${key}`);
-      }
-    }
-  }
+  writePublicSet(record, set);
 }
 
 export function advance(state, record, set, currentHead, expectedPointer) {
+  validateLedger(state, state.anchor);
+  validateRecord(record);
   validateCompleteSet(record, set);
   requireThat(record.sourceCommit === currentHead, 'Stale source cannot advance channel, regardless of N');
   const reservation = state.reservations[record.allocationKey];
   requireThat(reservation && (reservation.identitySha256 || hash(reservation.record)) === hash(record), 'Unknown authorization');
   const pointer = state.pointers[record.channel];
   requireThat((pointer?.setHash || '') === expectedPointer, 'Channel compare-and-set conflict');
-  const setHash = hash(set);
+  const setHash = hash(writePublicSet(record, set));
   if (reservation.setHash) requireThat(reservation.setHash === setHash, 'Same identity, different bytes');
   if (pointer?.releaseId === record.releaseId) {
     requireThat(pointer.setHash === setHash, 'Same identity, different bytes');
@@ -390,7 +640,9 @@ export function advance(state, record, set, currentHead, expectedPointer) {
 export async function transact(store, mutate, retries = 20) {
   for (let attempt = 0; attempt < retries; attempt++) {
     const { revision, state } = await store.read();
+    validateLedger(state, state?.anchor);
     const result = await mutate(state);
+    validateLedger(state, state.anchor);
     if (await store.compareAndSet(revision, state)) return result;
   }
 

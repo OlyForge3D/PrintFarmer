@@ -49,8 +49,9 @@ and updates the ref with `force: false`. Competing sibling commits cannot both
 fast-forward: the loser rereads and retries. Workflow concurrency is an additional
 serialization measure, not the allocator.
 
-One global decimal counter covers beta, insider and RC, across bases and
-approved workflow migrations. Allocation keys include repository, workflow ref,
+One global decimal counter covers beta, insider and RC, across bases.
+Workflow migration requires an owner-reviewed code/policy change; arbitrary
+replacement workflow identities are rejected. Allocation keys include repository, workflow ref,
 run ID, attempt, full source SHA and base. Same-key retries reuse the entire
 record; new attempts reserve a larger N. Failed reservations remain consumed.
 Re-run all jobs for a new insider attempt: build, authorization, SBOM and digest
@@ -92,8 +93,9 @@ prevention, required code-owner approval/checks, canonical environment branch
 restriction, non-self approval, immutable canonical tags, ledger continuity and
 exclusive writes by the owner-approved publisher. No actor/App IDs, reviewer
 identities, raw rules or hashes of private API responses survive normalization.
-Stable qualification is also reduced to exact-SHA pass assertions and
-promotion/hotfix mode; free-form owner text is not copied into the artifact.
+Stable qualification retains exact-SHA pass assertions plus reproducible
+promotion tree evidence or a hotfix rationale digest. The same qualification
+is bound into the signed record; free-form owner text is not copied.
 
 **All Actions artifacts in this public repository are treated as broadly
 readable.** File permissions and artifact access controls are not a confidentiality
@@ -120,40 +122,95 @@ an Administration-capable App token first.
 Public release identity is separately signed; its bundle authenticates the
 projected JSON, not the full authorization record. The public complete-set asset and ledger
 reservations contain only projected identities and approved image labels, while
-retaining full-record/full-set hashes. Unknown future authorization fields are
-not copied. The normalized complete set and original authorization bundle remain
+retaining full-record hashes and publicly reproducible set hashes. Unknown
+authorization fields are rejected, not silently approved. The normalized complete set and original authorization bundle remain
 available to downstream consumers without relying on artifact confidentiality.
 Ledger schema 1 explicitly permits only `schema`, `anchor`, decimal `counter`,
 optional `lastHistoricalStable`, and the `reservations`, `identities`, `pointers`,
-`stages`, and `qualifications` maps. Every Git transaction projects this schema
-before creating a blob, including allocation/tag/set retries. Unknown top-level
-fields are omitted; map keys, references and scalar claims are validated.
+`stages`, and `qualifications` maps. Every transaction validates the complete
+ledger before mutation and again before persistence. Source tagging additionally
+projects the complete ledger and binds the original signed record before
+**any write**, including `POST git/tags`, then rechecks before creating the public
+ref. Unknown top-level fields are omitted; malformed retained fields fail with
+policy errors, never raw property-access exceptions.
+
+Reservation, admission and record variants are closed: every required field must
+exist with its declared type, and unknown or explicitly undefined fields fail.
+
+| Variant | Required fields |
+| --- | --- |
+| Admission | `repository`, `channel`, `baseVersion`, `sourceBranch`, `sourceCommit`, `authorizedBranchHead`, `buildId`, `buildAttempt`, `workflowIdentity`, `workflowCommit`; insider also requires `stage` |
+| Private authorization | Admission fields plus `schema`, `releaseId`, `canonicalVersion`, `sourceTag`, `allocationKey`, `created`, `protection`; insider also requires `sequence`, stable requires `qualification` |
+| Projected ledger record | Private identity fields, excluding `protection`/`qualification`, plus `buildTime` and `identitySha256` |
+| Private reservation | `admission`, `record`; insider also requires `sequence` |
+| Public reservation | Private reservation fields plus `identitySha256` |
+
+Stable records/admissions must not contain `stage` or `sequence`. Repository,
+workflow ref and branch are fixed by channel. Tag, base, canonical version,
+release ID and sequence must agree; source, authorized head and workflow commit
+must be the same lowercase 40-hex SHA. Run/attempt/sequence are positive decimal
+strings without leading zeros; timestamps are canonical UTC ISO milliseconds.
+Allocation keys are recomputed, admission must equal the record, and the public
+reservation/record authorization hashes must agree. `created` equals `buildTime`.
+Private protection must predate or equal authorization.
+
+Progress fields are constrained variants: `tagObject` is a 40-hex SHA;
+`tagPublished`, when present, must be `true` and requires `tagObject`.
+`set` and `setHash` must occur together. Pointers bind to an existing matching
+complete reservation; stage high-water entries bind to real insider identities.
+Adjacent ledger commits still forbid loss or alteration of immutable
+reservations, tags, sets and pointer identities. A counter seed alone cannot
+fabricate a pointer or stage without its supporting reservation.
 Complete sets use the same idempotent projection for original authorization
 records and already-projected ledger records. Only declared components and their
 expected platforms are traversed; missing or extra component/platform keys,
 malformed digests, mismatched identities and noncanonical identity-label values
-are rejected before any Git blob is created, including writes that only allocate
+are rejected before any Git write, including writes that only allocate
 or retry another release. Labels are emitted from the canonical public identity
 and retained authorization hash, never from caller-selected values or keys.
 Unknown fields within sets, images, platforms and label maps are omitted, not
-copied. Projection leaves the original `setHash`, `identitySha256`, pointer and
-CAS semantics unchanged.
+copied. `setHash` is SHA-256 of UTF-8 `JSON.stringify(writePublicSet(record, set))`,
+using the projector's fixed field/component/platform order. It covers the exact
+public set, not an unavailable private payload; public assets and persisted sets
+can reproduce it. Every ledger read/write recomputes it and verifies pointer
+binding. `identitySha256` continues to cover the original full authorization.
+CAS and immutable-tag semantics are unchanged.
 
 Owner-entered qualifications are strict public schema-1 records keyed by the
 exact source commit. They contain `schema: 1`, matching `sourceCommit`, boolean
 `reviewed`, `tests`, `compatibility`, `migrations`, and `recovery` claims (all
-`true`), and `mode`. `mode: promotion` additionally requires
-`sourceTreeReviewed: true` and `promotionOrigin` containing only `allocationKey`,
-`releaseId`, `sourceCommit`, and `setHash` of the qualified immutable insider set.
-`mode: hotfix` instead requires the owner's explicit
-`nonPromotionApproved: true` assertion. The owner retains the non-promotion
-rationale outside public ledger/artifact payloads; no free-form reason is copied.
+`true`), and `mode`. `mode: promotion` additionally requires `promotionOrigin`
+containing only `allocationKey`, `releaseId`, `sourceCommit`, and public `setHash`
+of the qualified immutable insider set, plus `treeEvidence`:
+
+- `schema: 1`, `originTree`, `sourceTree`: exact Git tree IDs.
+- `metadataChanges`: either empty or one `{path: "VERSION", before, after}`
+  entry containing the old/new blob SHAs. No other path is exempt.
+- `diffSha256`: `hash({schema, originTree, sourceTree, metadataChanges})`
+  using the release policy's SHA-256/JSON function and this field order.
+
+At authorization (including retries), the workflow fetches both immutable
+commit trees recursively, rejects truncation/duplicate paths, and compares every
+leaf's path, type, mode and object SHA. Changes outside `VERSION` fail, including
+workflow, code, symlink, submodule, executable-bit, addition and deletion changes.
+Both `VERSION` blobs must parse to the same target base; the exception permits
+only stable version-file formatting, not a new feature version or arbitrary
+metadata. The computed evidence must equal the owner's evidence exactly.
+Main HEAD is checked again after comparison, before allocation. Main must be a
+distinct commit from the qualified insider source; stable then rebuilds images
+with its own identity, rather than retagging insider bytes.
+
+`mode: hotfix` instead requires `reasonSha256`, the immutable digest returned by
+`hotfixReasonDigest(nonSecretReason)`. It hashes a trimmed, whitespace-normalized
+20–2000-character single-line explanation of why insider promotion is unsuitable.
+The owner retains the corresponding non-secret rationale for audit; neither
+secrets nor free-form text belong in public artifacts. A boolean is not rationale.
 Unknown fields, raw policy objects, reviewer/publisher identities and legacy
-`hotfixReason` or string-valued pass claims are rejected, not auto-approved or
-migrated. Owners must review and replace legacy qualification inputs before
-enabling publication. Both source-tree and immutable-set promotion checks remain
-mandatory at reservation. Signed authorization retains its existing normalized
-pass-claim schema.
+`sourceTreeReviewed`, `nonPromotionApproved`, `hotfixReason` or string-valued pass
+claims are rejected, not auto-approved or migrated. Owners must review legacy
+qualification inputs and public-set hash semantics before enabling publication.
+Existing immutable live evidence must not be rewritten to pass the new schema:
+use the owner-approved continuity recovery process if such evidence exists.
 Same-attempt retries require the retained original authorization file; if it is lost,
 fail closed and rerun all jobs with a new attempt rather than recreating evidence.
 Artifact retention therefore bounds attestation recovery.
@@ -218,10 +275,10 @@ digest-pinned installer references belongs to that signed-manifest consumer.
 
 Stable requires an owner-reviewed ledger qualification at the exact main SHA:
 tests, compatibility, migrations and recovery must pass. Promotion references
-an existing immutable insider set/hash/source, plus reviewed main source-tree
-changes. Stable rebuilds every image with stable identity; retagging insider
+an existing immutable insider set/hash/source, plus the authorization-verified
+tree comparison described above. Stable rebuilds every image with stable identity; retagging insider
 bytes fails complete-set identity checks. A direct stable hotfix instead requires
-`nonPromotionApproved: true` and equivalent qualification; its owner-reviewed
+an immutable `reasonSha256` and equivalent qualification; its owner-reviewed
 non-promotion rationale stays outside public ledger/artifact payloads.
 
 No permanent extra channel branch exists. Optional `release/vX.Y.Z` branches
@@ -266,7 +323,9 @@ Before enabling:
 2. Create a reviewed ledger seed after the approved ancestry checkpoint with
    `schema: 1`, `anchor`, decimal `counter`, `lastHistoricalStable`,
    `reservations`, `identities`, `pointers`, `stages`, and `qualifications`
-   using the strict public schemas above. Set
+   using the strict public schemas above, including verifiable public-set hashes
+   and tree/rationale evidence for stable qualifications. Do not seed dangling
+   stage/pointer references or carry legacy boolean-only qualifications. Set
    `RELEASE_LEDGER_ANCHOR` to that checkpoint. The workflow never auto-initializes.
 3. Enforce main/development code-owner review, non-force/non-delete rules and
    exact-SHA status checks. Protect `release-stable`/`release-insider` with

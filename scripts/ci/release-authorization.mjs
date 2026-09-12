@@ -1,7 +1,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { components, hash, identityLabels, repository, requireThat, validateCompleteSet, verifyProtectionEvidence } from './release-policy.mjs';
-import { publicIdentity, publicIdentityFields } from '../../src/Web/ReactApp/public-release-identity.mjs';
+import {
+  requireThat, validateCompleteSet, validateRecord, publicAuthorization, validatePublicAuthorization, writePublicSet,
+} from './release-policy.mjs';
+export { publicAuthorization, writePublicSet } from './release-policy.mjs';
 
 export const authorizationDirectory = '.artifacts/release-authorization';
 export const authorizationPath = `${authorizationDirectory}/release-identity.json`;
@@ -9,40 +11,7 @@ export const authorizationBundle = `${authorizationDirectory}/release-identity.b
 export const privateSetPath = `${authorizationDirectory}/release-set.json`;
 
 export function validateAuthorizationRecord(record) {
-  const fields = ['schema', 'repository', 'channel', 'baseVersion', 'sourceBranch', 'stage',
-    'sourceCommit', 'authorizedBranchHead', 'buildId', 'buildAttempt', 'workflowIdentity',
-    'workflowCommit', 'releaseId', 'canonicalVersion', 'sourceTag', 'sequence', 'allocationKey',
-    'created', 'protection', 'qualification'];
-  requireThat(record && !Array.isArray(record) && Object.keys(record).every(field => fields.includes(field)),
-    'Unknown authorization field');
-  requireThat(record.schema === 1, 'Invalid authorization schema');
-  for (const field of fields.filter(field => !['schema', 'protection', 'qualification'].includes(field))) {
-    requireThat((['stage', 'sequence'].includes(field) && record[field] === undefined) ||
-      (typeof record[field] === 'string' && record[field].length > 0 && !/[\r\n]/.test(record[field])),
-    'Invalid authorization field');
-  }
-  verifyProtectionEvidence(record.protection, record.channel);
-  requireThat(Number.isFinite(Date.parse(record.created)) &&
-    Date.parse(record.protection.verifiedAt) <= Date.parse(record.created),
-  'Protection attestation postdates authorization');
-  if (record.channel === 'stable') {
-    const qualification = record.qualification;
-    requireThat(qualification && Object.keys(qualification).sort().join() ===
-      ['sourceCommit', 'reviewed', 'tests', 'compatibility', 'migrations', 'recovery', 'mode'].sort().join() &&
-      qualification.sourceCommit === record.sourceCommit && qualification.reviewed === true &&
-      ['tests', 'compatibility', 'migrations', 'recovery'].every(field => qualification[field] === 'passed') &&
-      ['promotion', 'hotfix'].includes(qualification.mode), 'Invalid normalized stable qualification');
-  } else {
-    requireThat(record.qualification === undefined, 'Unexpected stable qualification');
-  }
-}
-
-export function publicAuthorization(record) {
-  const identity = publicIdentity(record);
-  requireThat(typeof record.created === 'string' && Number.isFinite(Date.parse(record.created)) &&
-    !/[\r\n]/.test(record.created), 'Invalid authorization timestamp');
-  return { ...Object.fromEntries(publicIdentityFields.filter(field => identity[field] !== undefined)
-    .map(field => [field, identity[field]])), buildTime: record.created, identitySha256: hash(record) };
+  validateRecord(record);
 }
 
 export function writeAuthorization(record) {
@@ -57,8 +26,7 @@ export function writeAuthorization(record) {
 export function verifyAuthorization(env, run) {
   requireThat(!env.RELEASE_IDENTITY, 'Full identity environment transport is forbidden');
   const projected = JSON.parse(env.RELEASE_PUBLIC_IDENTITY || '{}');
-  requireThat(Object.keys(publicIdentity(projected)).sort().join() === Object.keys(projected).sort().join() &&
-    /^[a-f0-9]{64}$/.test(projected.identitySha256), 'Invalid public authorization projection');
+  validatePublicAuthorization(projected);
   const identity = `${env.GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@${env.GITHUB_REF}`;
   requireThat(env.GITHUB_REPOSITORY === 'OlyForge3D/PrintFarmer' &&
     ['refs/heads/main', 'refs/heads/development'].includes(env.GITHUB_REF) &&
@@ -85,62 +53,6 @@ export function readPrivateAuthorization() {
 export function readPrivateJson(path) {
   try { return JSON.parse(readFileSync(path, 'utf8')); }
   catch { throw new Error('Private authorization unavailable or malformed'); }
-}
-
-function requirePublicObject(value) {
-  requireThat(value && typeof value === 'object' && !Array.isArray(value), 'Invalid public set object');
-}
-
-function requirePublicKeys(value, keys) {
-  requirePublicObject(value);
-  requireThat(Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key)),
-    'Invalid public set component/platform keys');
-}
-
-function publicDigest(value) {
-  requireThat(typeof value === 'string' && value.length === 71 && /^sha256:[a-f0-9]{64}$/.test(value),
-    'Invalid public set digest');
-  return value;
-}
-
-export function writePublicSet(record, set, identitySha256 = record.identitySha256 ?? hash(record)) {
-  requireThat(typeof identitySha256 === 'string' && identitySha256.length === 64 && /^[a-f0-9]{64}$/.test(identitySha256),
-    'Invalid public set identity hash');
-  const identity = {
-    ...publicAuthorization({ ...record, created: record.created ?? record.buildTime }), identitySha256,
-  };
-  requireThat(publicIdentityFields.every(field => typeof identity[field] === 'string'),
-    'Incomplete public set identity');
-  requirePublicObject(set);
-  requireThat(set.schema === 1 && set.managedEligible === false, 'Invalid public set schema/eligibility');
-  requirePublicObject(set.identity);
-  requireThat(hash(set.identity) === hash(identity) ||
-    (hash(set.identity) === identitySha256 && hash(publicAuthorization(set.identity)) === hash(identity)),
-  'Public set identity mismatch');
-  const labels = {
-    ...identityLabels({ ...identity, repository, created: identity.buildTime }),
-    'org.printfarmer.identity-sha256': identitySha256,
-  };
-  requirePublicKeys(set.images, Object.keys(components));
-  const images = {};
-  for (const [name, expectedPlatforms] of Object.entries(components)) {
-    const image = set.images[name];
-    requirePublicObject(image);
-    const digest = publicDigest(image.digest);
-    requirePublicKeys(image.platforms, expectedPlatforms);
-    const platforms = {};
-    for (const platform of expectedPlatforms) {
-      const value = image.platforms[platform];
-      requirePublicObject(value);
-      requirePublicObject(value.labels);
-      for (const [key, expected] of Object.entries(labels)) {
-        requireThat(Object.hasOwn(value.labels, key) && value.labels[key] === expected, 'Invalid public set identity label');
-      }
-      platforms[platform] = { digest: publicDigest(value.digest), labels: { ...labels } };
-    }
-    images[name] = { digest, platforms };
-  }
-  return { schema: 1, identity, managedEligible: false, images };
 }
 
 export function writeAuthorizationSet(record, set) {

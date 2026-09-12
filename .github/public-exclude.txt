@@ -50,19 +50,16 @@ devnotes/
 .github/workflows/publish-to-public.yml
 
 # Internal workflows not needed in public repo
-# Keep only: docker-publish.yml, orcaslicer-base-image.yml, ci.yml
+# Retain the consolidated release authority, its reusable publisher and schedule.
 .github/workflows/appimage-preseed-uploader.yml
-.github/workflows/auto-bump-release.yml
 .github/workflows/bootstrap-ubuntu-ci.yml
 .github/workflows/ci-lint.yml
 .github/workflows/compose-validate.yml
 .github/workflows/devcontainer-multiarch.yml
-.github/workflows/draft-release.yml
 .github/workflows/enforce-path-casing.yml
 .github/workflows/orcaslicer-strict-build.yml
 .github/workflows/prusa-preseed-build.yml
 .github/workflows/prusaslicer-strict-build.yml
-.github/workflows/release.yml
 .github/workflows/slicer-assets-ci.yml
 .github/workflows/slicer-worker-security.yml
 .github/workflows/squad-heartbeat.yml
