@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Printers;
+﻿using Farm.Infrastructure.Services.Printers;
 using Moq;
 using Xunit;
 
@@ -105,6 +105,29 @@ public sealed class PrinterSafetyGuardTests
             printerId,
             PrinterSafetyOperation.AbsoluteMovement,
             new PrinterSafetyMoveRequest(50, 60, 10),
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_OriginOffset_UsesTheVerifiedEnvelopeCoordinateSpace()
+    {
+        Guid printerId = Guid.NewGuid();
+        PrinterSafetyGuard guard = CreateGuard(
+            printerId,
+            CreateSafety(),
+            CreateStatus(
+                printerId,
+                220,
+                0,
+                Now,
+                new SafetyVector3Dto(10, 20, 30)));
+
+        PrinterSafetyValidationResult result = await guard.ValidateAsync(
+            printerId,
+            PrinterSafetyOperation.AbsoluteMovement,
+            new PrinterSafetyMoveRequest(190, 180, 170),
             CancellationToken.None);
 
         Assert.True(result.Success);
@@ -219,7 +242,8 @@ public sealed class PrinterSafetyGuardTests
         Guid printerId,
         double measured,
         double target,
-        DateTime observedAtUtc) =>
+        DateTime observedAtUtc,
+        SafetyVector3Dto? coordinateOriginOffset = null) =>
         new(
             printerId,
             IsOnline: true,
@@ -241,7 +265,7 @@ public sealed class PrinterSafetyGuardTests
                     15,
                     "test.homed"),
                 new SafetyVectorTelemetryFactDto(
-                    new SafetyVector3Dto(0, 0, 0),
+                    coordinateOriginOffset ?? new SafetyVector3Dto(0, 0, 0),
                     observedAtUtc,
                     15,
                     "test.offset")));

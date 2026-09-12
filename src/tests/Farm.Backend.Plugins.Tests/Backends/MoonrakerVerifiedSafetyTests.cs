@@ -1,5 +1,6 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
+using System.Text.Json;
 using Farm.Backend.Plugin.Moonraker;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Printers;
@@ -11,6 +12,59 @@ namespace Farm.Backend.Plugins.Tests.Backends;
 
 public sealed class MoonrakerVerifiedSafetyTests
 {
+    [Fact]
+    public void HandleGcodeMoveUpdate_GcodePositionPresent_OverridesToolheadPositionWithoutChangingSafetyOffset()
+    {
+        var state = new PrinterState
+        {
+            X = 1,
+            Y = 2,
+            Z = 3,
+        };
+        using JsonDocument document = JsonDocument.Parse(
+            """
+            {
+              "gcode_position":[10,20,30,0],
+              "homing_origin":[100,200,300,0]
+            }
+            """);
+
+        MoonrakerSubscriptionService.HandleGcodeMoveUpdate(
+            state,
+            document.RootElement);
+
+        Assert.Equal(10, state.X);
+        Assert.Equal(20, state.Y);
+        Assert.Equal(30, state.Z);
+        Assert.Equal(
+            new SafetyVector3Dto(100, 200, 300),
+            state.CoordinateOriginOffsetMm);
+    }
+
+    [Fact]
+    public void HandleGcodeMoveUpdate_GcodePositionAbsent_RetainsToolheadPosition()
+    {
+        var state = new PrinterState();
+        using JsonDocument toolheadDocument = JsonDocument.Parse(
+            """{"position":[10,20,30,0]}""");
+        using JsonDocument gcodeMoveDocument = JsonDocument.Parse(
+            """{"homing_origin":[100,200,300,0]}""");
+
+        MoonrakerSubscriptionService.HandleToolheadUpdate(
+            state,
+            toolheadDocument.RootElement);
+        MoonrakerSubscriptionService.HandleGcodeMoveUpdate(
+            state,
+            gcodeMoveDocument.RootElement);
+
+        Assert.Equal(10, state.X);
+        Assert.Equal(20, state.Y);
+        Assert.Equal(30, state.Z);
+        Assert.Equal(
+            new SafetyVector3Dto(100, 200, 300),
+            state.CoordinateOriginOffsetMm);
+    }
+
     [Fact]
     public async Task DiscoverVerifiedSafetyAsync_AuthoritativeResponses_ReportsBackendFacts()
     {

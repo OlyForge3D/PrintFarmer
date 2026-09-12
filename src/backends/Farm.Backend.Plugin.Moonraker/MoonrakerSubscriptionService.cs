@@ -1474,7 +1474,8 @@ public sealed class MoonrakerSubscriptionService(
     /// </summary>
     /// <param name="state">The persistent printer state to update.</param>
     /// <param name="th">The toolhead JSON element from the status update.</param>
-    private static void HandleToolheadUpdate(PrinterState state, JsonElement th)
+    /// <summary>Updates the live position and homed axes reported by the toolhead.</summary>
+    internal static void HandleToolheadUpdate(PrinterState state, JsonElement th)
     {
         double? x = null, y = null, z = null;
         string? homedAxes = null;
@@ -1600,10 +1601,28 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
-    private static void HandleGcodeMoveUpdate(
+    /// <summary>
+    /// Updates the preferred G-code coordinate position and independent safety origin offset.
+    /// </summary>
+    internal static void HandleGcodeMoveUpdate(
         PrinterState state,
         JsonElement gcodeMove)
     {
+        if (gcodeMove.TryGetProperty("gcode_position", out JsonElement gcodePosition) &&
+            gcodePosition.ValueKind == JsonValueKind.Array &&
+            gcodePosition.GetArrayLength() >= 3 &&
+            gcodePosition[0].TryGetDouble(out double gcodeX) &&
+            gcodePosition[1].TryGetDouble(out double gcodeY) &&
+            gcodePosition[2].TryGetDouble(out double gcodeZ) &&
+            double.IsFinite(gcodeX) &&
+            double.IsFinite(gcodeY) &&
+            double.IsFinite(gcodeZ))
+        {
+            state.X = gcodeX;
+            state.Y = gcodeY;
+            state.Z = gcodeZ;
+        }
+
         if (!gcodeMove.TryGetProperty(
                 "homing_origin",
                 out JsonElement homingOrigin) ||
