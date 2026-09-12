@@ -132,6 +132,43 @@ public sealed class MoonrakerVerifiedSafetyTests
     }
 
     [Fact]
+    public async Task DiscoverVerifiedSafetyAsync_HappyHareMmuObject_ReportsMmuFilamentControlsSupported()
+    {
+        using var handler = new InlineHandler(request =>
+        {
+            string json = request.RequestUri!.AbsolutePath.EndsWith(
+                "/list",
+                StringComparison.Ordinal)
+                ? """{"result":{"objects":["mmu"]}}"""
+                : """{"result":{"status":{}}}""";
+            return JsonResponse(json);
+        });
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+
+        PrinterVerifiedSafetyDto result =
+            await ((ISupportsVerifiedSafetyDiscovery)client)
+                .DiscoverVerifiedSafetyAsync(
+                    "http://printer.local/",
+                    null,
+                    "1",
+                    CancellationToken.None);
+
+        Assert.Equal(
+            VerifiedSafetySupport.Supported,
+            result.Operations.FilamentLoad.Support);
+        Assert.Equal(
+            VerifiedSafetySupport.Supported,
+            result.Operations.FilamentUnload.Support);
+        Assert.Equal(
+            VerifiedSafetySupport.Supported,
+            result.Operations.FilamentChange.Support);
+    }
+
+    [Fact]
     public async Task MoveToAsync_ValidCoordinates_SendsModeAndMoveAsSeparateCommands()
     {
         string? body = null;

@@ -875,6 +875,13 @@ public class MoonrakerClient(
                         : VerifiedSafetySupport.Unsupported,
                     macroSource,
                     observedAtUtc);
+            VerifiedSafetyOperationCapabilityDto FilamentControl(string genericMacro) =>
+                objects.Contains("mmu")
+                    ? new(
+                        VerifiedSafetySupport.Supported,
+                        "moonraker:mmu object (Happy Hare MMU controls)",
+                        observedAtUtc)
+                    : Macro(genericMacro);
 
             bool hasMovementEvidence =
                 objects.Contains("toolhead") &&
@@ -943,9 +950,9 @@ public class MoonrakerClient(
                 new VerifiedSafetyOperationsDto(
                     absoluteMovement,
                     firmwareSave,
-                    Macro("LOAD_FILAMENT"),
-                    Macro("UNLOAD_FILAMENT"),
-                    Macro("M600")),
+                    FilamentControl("LOAD_FILAMENT"),
+                    FilamentControl("UNLOAD_FILAMENT"),
+                    FilamentControl("M600")),
                 new VerifiedSafetyExtrusionDto(unknownThreshold),
                 new VerifiedSafetyPositioningDto(
                     originFact,
