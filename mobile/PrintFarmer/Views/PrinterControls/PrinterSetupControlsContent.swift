@@ -117,22 +117,6 @@ struct PrinterSetupControlsContent: View {
                     }
                 }
 
-                if let notice = viewModel.commandNotice {
-                    Text(notice)
-                        .font(.footnote)
-                        .foregroundStyle(Color.pfTextSecondary)
-                        .padding(.top, 12)
-                }
-                if viewModel.pendingCommand != nil {
-                    ControlActionButton(
-                        title: "Stop waiting for command", identifier: "printer.controls.stop-waiting",
-                        hint: "Does not stop the printer. Physical execution may continue."
-                    ) { viewModel.cancelPendingCommand() }
-                }
-                if let error = viewModel.lastError {
-                    errorBanner(error)
-                        .padding(.top, 12)
-                }
             }
         }
     }
@@ -164,26 +148,63 @@ struct PrinterSetupControlsContent: View {
         )
     }
 
+}
+
+/// The same command owner drives each card; only the originating card shows
+/// its feedback, including after HTTP/telemetry observation has ended.
+struct PrinterControlCommandFeedback: View {
+    @ObservedObject var viewModel: PrinterControlsViewModel
+    let section: ControlCommand.Section
+
+    var body: some View {
+        if viewModel.feedbackSection == section {
+            VStack(alignment: .leading, spacing: 8) {
+                if let error = viewModel.lastError {
+                    errorBanner(error)
+                } else {
+                    if viewModel.pendingCommand != nil {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("Command pending").font(.footnote.weight(.semibold))
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                    if let notice = viewModel.commandNotice {
+                        Label(notice, systemImage: "info.circle")
+                            .font(.footnote)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if viewModel.pendingCommand != nil {
+                    ControlActionButton(
+                        title: "Stop waiting for command", identifier: "printer.controls.stop-waiting",
+                        hint: "Does not stop the printer. Physical execution may continue."
+                    ) { viewModel.cancelPendingCommand() }
+                }
+            }
+            .foregroundStyle(Color.pfTextPrimary)
+            .padding(.bottom, viewModel.pendingCommand != nil || viewModel.commandNotice != nil || viewModel.lastError != nil ? 14 : 0)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("printer.controls.\(section.rawValue).feedback")
+        }
+    }
+
     private func errorBanner(_ error: ControlsError) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Color.pfError)
             VStack(alignment: .leading, spacing: 4) {
+                Text("Command failed")
+                    .font(.footnote.weight(.semibold))
                 Text(error.message)
                     .font(.footnote)
                     .foregroundStyle(Color.pfTextPrimary)
             }
-            Spacer()
-            Button {
-                viewModel.dismissError()
-            } label: {
-                Text("Dismiss")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Color.pfTextPrimary)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
+            ControlActionButton(
+                title: "Dismiss", identifier: "printer.controls.dismiss-error",
+                compact: true, textSize: 13, textOnly: true
+            ) { viewModel.dismissError() }
+            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(12)
         .background(Color.pfError.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
@@ -211,6 +232,7 @@ struct PrinterMaterialControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             EssentialControlHeading(title: "Filament tools").padding(.bottom, 14)
+            PrinterControlCommandFeedback(viewModel: viewModel, section: .material)
             if let materialPresentation {
                 PrinterFilamentSection(
                     presentation: materialPresentation, actions: materialActions,
