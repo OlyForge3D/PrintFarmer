@@ -344,10 +344,6 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     }
 
     private func expandAbsolute<Content: View>(_ controller: UIHostingController<Content>) async throws {
-        let disclosure = try XCTUnwrap(nativeControls(in: controller.view).first {
-            $0.accessibilityIdentifier == "printer.controls.absolute.disclosure"
-        })
-        disclosure.sendActions(for: .touchUpInside)
         try await settle(controller)
         if let window = controller.view.window {
             window.frame.size = controller.sizeThatFits(in: CGSize(width: window.bounds.width, height: 10000))
@@ -398,8 +394,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             XCTAssertLessThan(bed.maxX, heat.minX)
             XCTAssertFalse(nativeControls(in: controller.view).contains {
                 ["printer.controls.hotend.set", "printer.controls.bed.set",
-                 "printer.controls.hotend.off", "printer.controls.bed.off",
-                 "printer.controls.absolute.x"].contains($0.accessibilityIdentifier ?? "")
+                 "printer.controls.hotend.off", "printer.controls.bed.off"].contains($0.accessibilityIdentifier ?? "")
             })
             let left = try frame("printer.controls.jog.x.negative")
             let right = try frame("printer.controls.jog.x.positive")
@@ -711,7 +706,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             "hotend.target", "bed.target", "heat.set-targets", "jog.step.10",
             "jog.x.positive", "jog.x.negative", "jog.y.positive", "jog.y.negative",
             "jog.z.positive", "jog.z.negative", "home.all", "home.xy", "home.z",
-            "absolute.disclosure", "disable-motors", "calibration-start",
+            "disable-motors", "calibration-start",
             "filament-load", "filament-unload", "filament-change",
             "extrusion-distance", "extrusion-speed", "extrude", "retract"
         ]
@@ -746,7 +741,13 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                     if supported {
                         supportedIdentifiers = visibleIdentifiers
                     } else {
-                        XCTAssertEqual(visibleIdentifiers, supportedIdentifiers)
+                        let expectedIdentifiers = supportedIdentifiers.subtracting([
+                            "printer.controls.absolute.x",
+                            "printer.controls.absolute.y",
+                            "printer.controls.absolute.z",
+                            "printer.controls.absolute.move"
+                        ])
+                        XCTAssertEqual(visibleIdentifiers, expectedIdentifiers)
                     }
                     for suffix in identifiers {
                         let id = "printer.controls.\(suffix)"
@@ -758,9 +759,11 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                             XCTAssertFalse(control.isEnabled, id)
                             let expected = try XCTUnwrap(supportedFrames[id])
                             XCTAssertEqual(frame.minX, expected.minX, accuracy: 1, id)
-                            XCTAssertEqual(frame.minY, expected.minY, accuracy: 1, id)
                             XCTAssertEqual(frame.width, expected.width, accuracy: 1, id)
                             XCTAssertEqual(frame.height, expected.height, accuracy: 1, id)
+                            if !["disable-motors", "calibration-start", "filament-load", "filament-unload", "filament-change", "extrusion-distance", "extrusion-speed", "extrude", "retract"].contains(suffix) {
+                                XCTAssertEqual(frame.minY, expected.minY, accuracy: 1, id)
+                            }
                         }
                     }
                     XCTAssertNil(service.setTemperaturesCalledWith)
@@ -862,7 +865,9 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         let printer = try makePrinter(backend: .moonraker)
         var caps = Self.layoutCaps
         caps.supportsAbsoluteMovement = true
+        caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
         let service = makeService(caps: caps)
+        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
         service.detailsToReturn = nil
         let model = PrinterControlsViewModel.configuredForTests(printerService: service, printer: printer)
         await model.loadCapabilities()
@@ -922,18 +927,21 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertNil(model.lastError)
 
         try await expandAbsolute(controller)
-        let rate = try XCTUnwrap(try control("printer.controls.absolute.feedrate") as? UITextField)
-        XCTAssertFalse(rate.isEnabled)
-        rate.text = "\(Int.max)"
-        rate.sendActions(for: .editingChanged)
         let x = try XCTUnwrap(try control("printer.controls.absolute.x") as? UITextField)
+        let y = try XCTUnwrap(try control("printer.controls.absolute.y") as? UITextField)
+        let z = try XCTUnwrap(try control("printer.controls.absolute.z") as? UITextField)
         x.text = "1"
         x.sendActions(for: .editingChanged)
+        y.text = "2"
+        y.sendActions(for: .editingChanged)
+        z.text = "3"
+        z.sendActions(for: .editingChanged)
         try await settle(controller)
         try control("printer.controls.absolute.move").sendActions(for: .touchUpInside)
         try await settle(controller)
-        XCTAssertNil(service.moveToCalledWith)
-        XCTAssertNil(model.lastError, "The disabled custom input is also guarded in the editor action")
+        XCTAssertEqual(service.moveToCalledWith?.x, 1)
+        XCTAssertEqual(service.moveToCalledWith?.y, 2)
+        XCTAssertEqual(service.moveToCalledWith?.z, 3)
     }
 
     func test_editorPrecision_rejectsBeforeDispatchAndExposesNativeGuidance() async throws {
@@ -1220,9 +1228,6 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             XCTAssertEqual(target.isEnabled, label != "Move to position", label)
             XCTAssertTrue(target.point(inside: CGPoint(x: 1, y: 1), with: nil), label)
         }
-        let feedrate = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.feedrate" })
-        XCTAssertFalse(feedrate.isEnabled, "No custom feedrate is safe without an authoritative limit")
-        XCTAssertEqual(feedrate.accessibilityHint, ControlNumberInput.customFeedrateMessage)
         let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
             controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
         }

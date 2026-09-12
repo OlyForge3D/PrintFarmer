@@ -119,6 +119,8 @@ struct JogSubgroup: View {
         @State private var feedrate = ""
         @State private var inputError: String?
 
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
         static func isVisible(_ capabilities: PrinterBackendCapabilities?) -> Bool {
             capabilities?.supportsAbsoluteMovement == true
                 && Set(capabilities?.supportedAxes ?? []).isSuperset(of: ["X", "Y", "Z"])
@@ -146,39 +148,44 @@ struct JogSubgroup: View {
             } catch { return error.localizedDescription }
         }
 
+        private var rowLayout: AnyLayout {
+            dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(alignment: .bottom, spacing: 8))
+        }
+
         var body: some View {
-            Group {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Absolute position")
-                        .font(.headline)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("Enter all X, Y and Z destinations in mm; zero is explicit. Verified frame, travel bounds, homing and clearance are required. The server rechecks before dispatch.")
-                        .font(.footnote)
-                        .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 8) {
+                rowLayout {
                     ForEach(["X", "Y", "Z"], id: \.self) { axis in
-                        Text("\(axis) reported: \(positionText(axis))")
-                            .font(.footnote)
-                        ControlNumberField(
-                            placeholder: "\(axis) destination (mm)", text: binding(axis),
-                            label: "\(axis) required absolute destination in millimeters",
-                            identifier: "printer.controls.absolute.\(axis.lowercased())",
-                            hint: ControlNumberInput.coordinatePrecisionMessage
-                        )
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 3) {
+                                Text(axis)
+                                    .font(.caption.bold())
+                                    .foregroundStyle(Color.pfTextPrimary)
+                                Text("[ \(positionText(axis)) ]")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(Color.pfTextSecondary)
+                            }
+                            ControlNumberField(
+                                placeholder: "\(axis) (mm)",
+                                text: binding(axis),
+                                label: "\(axis) required absolute destination in millimeters",
+                                identifier: "printer.controls.absolute.\(axis.lowercased())",
+                                hint: ControlNumberInput.coordinatePrecisionMessage
+                            )
+                        }
                     }
 
-
-                    Text("Homed axes: \(viewModel.printer.homedAxes ?? "Unknown")")
-                        .font(.footnote)
-                    ControlNumberField(
-                        placeholder: "Custom feedrate unavailable", text: $feedrate,
-                        label: "Absolute movement feedrate in millimeters per minute",
-                        identifier: "printer.controls.absolute.feedrate",
-                        hint: ControlNumberInput.customFeedrateMessage
-                    )
-                    .disabled(true)
-                    Text("No verified custom feedrate maximum. Uses \(PrinterControlsViewModel.zFeedrateMmMin) mm/min because every absolute move includes Z.")
-                        .font(.footnote)
-                    ControlActionButton(title: "Move to position", identifier: "printer.controls.absolute.move") {
+                    ControlActionButton(
+                        title: "GO",
+                        identifier: "printer.controls.absolute.move",
+                        accessibilityTitle: "Move to position",
+                        hint: "Move printer head to specified absolute X, Y, Z position in millimeters.",
+                        compact: true,
+                        prominent: true,
+                        matchesInputHeight: true
+                    ) {
                         do {
                             let point = try Self.destination(x: x, y: y, z: z)
                             let f = try ControlNumberInput.feedrate(feedrate)
@@ -195,19 +202,31 @@ struct JogSubgroup: View {
                         }
                     }
                     .disabled(validationMessage != nil)
-                    if let message = validationMessage ?? inputError {
-                        Text(message)
-                            .font(.footnote)
-                            .foregroundStyle(
-                                Self.hasDestinationInput(x: x, y: y, z: z) || inputError != nil
-                                    ? Color.pfError : Color.pfTextSecondary
-                            )
-                            .accessibilityAddTraits(.isStaticText)
-                    }
                 }
-                .foregroundStyle(Color.pfTextPrimary)
-                .disabled(!viewModel.canControl || viewModel.isExecuting || !Self.isVisible(viewModel.capabilities))
+
+                ControlNumberField(
+                    placeholder: "Custom feedrate unavailable",
+                    text: $feedrate,
+                    label: "Absolute movement feedrate in millimeters per minute",
+                    identifier: "printer.controls.absolute.feedrate",
+                    hint: ControlNumberInput.customFeedrateMessage
+                )
+                .disabled(true)
+                .frame(height: 0)
+                .hidden()
+
+                if let message = validationMessage ?? inputError {
+                    Text(message)
+                        .font(.footnote)
+                        .foregroundStyle(
+                            Self.hasDestinationInput(x: x, y: y, z: z) || inputError != nil
+                                ? Color.pfError : Color.pfTextSecondary
+                        )
+                        .accessibilityAddTraits(.isStaticText)
+                }
             }
+            .foregroundStyle(Color.pfTextPrimary)
+            .disabled(!viewModel.canControl || viewModel.isExecuting || !Self.isVisible(viewModel.capabilities))
         }
 
         private func binding(_ axis: String) -> Binding<String> {
@@ -220,8 +239,8 @@ struct JogSubgroup: View {
 
         private func positionText(_ axis: String) -> String {
             let value = axis == "X" ? viewModel.printer.x : axis == "Y" ? viewModel.printer.y : viewModel.printer.z
-            guard let value, value.isFinite else { return "Unknown" }
-            return "\(value.formatted()) mm"
+            guard let value, value.isFinite else { return "---" }
+            return "\(value.formatted(.number.precision(.fractionLength(1))))"
         }
     }
 
@@ -348,7 +367,6 @@ struct JogSubgroup: View {
 struct PrinterMotionControls: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
     @State private var step = 1.0
-    @State private var showsAbsolute = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var row: AnyLayout {
@@ -426,19 +444,9 @@ struct PrinterMotionControls: View {
                     .frame(width: 68)
                 }
             }
-            Group {
+            if JogSubgroup.AbsolutePositionControls.isVisible(viewModel.capabilities) {
                 EssentialControlSeparator()
-                ControlActionButton(
-                    title: showsAbsolute ? "Hide absolute movement" : "Go to XYZ…",
-                    identifier: "printer.controls.absolute.disclosure",
-                    hint: JogSubgroup.AbsolutePositionControls.isVisible(viewModel.capabilities)
-                        ? "Enter a verified absolute destination." : "Absolute movement is unsupported by this printer.",
-                    compact: true, value: showsAbsolute ? "Expanded" : "Collapsed"
-                ) { showsAbsolute.toggle() }
-                .disabled(!JogSubgroup.AbsolutePositionControls.isVisible(viewModel.capabilities))
-                if showsAbsolute {
-                    JogSubgroup.AbsolutePositionControls(viewModel: viewModel)
-                }
+                JogSubgroup.AbsolutePositionControls(viewModel: viewModel)
             }
             EssentialControlSeparator()
             row {
