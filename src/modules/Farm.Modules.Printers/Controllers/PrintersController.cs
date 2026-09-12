@@ -3688,6 +3688,7 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "Tool index must be between 0 and 16."));
         }
 
+        _printerBackendCapabilitiesService.InvalidateVerifiedSafety(id);
         return await ExecuteDirectBooleanControlAsync(
             id,
             "mmu_change_tool",
@@ -3710,6 +3711,7 @@ public class PrintersController(
     [ProducesResponseType(404)]
     public async Task<ActionResult<CommandResult>> MmuEjectAsync(Guid id, CancellationToken ct)
     {
+        _printerBackendCapabilitiesService.InvalidateVerifiedSafety(id);
         return await ExecuteDirectBooleanControlAsync(
             id,
             "mmu_eject",
@@ -3732,6 +3734,7 @@ public class PrintersController(
     [ProducesResponseType(404)]
     public async Task<ActionResult<CommandResult>> MmuLoadAsync(Guid id, CancellationToken ct)
     {
+        _printerBackendCapabilitiesService.InvalidateVerifiedSafety(id);
         return await ExecuteDirectBooleanControlAsync(
             id,
             "mmu_load",
