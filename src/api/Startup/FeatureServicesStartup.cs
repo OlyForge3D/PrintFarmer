@@ -327,6 +327,11 @@ public static class FeatureServicesStartup
         services.AddSingleton<Farm.Infrastructure.Services.Monitoring.IMonitoringSessionService, Farm.Infrastructure.Services.Monitoring.MonitoringSessionService>();
         services.AddScoped<Farm.Infrastructure.Services.Monitoring.IMonitoringHealthService, Farm.Infrastructure.Services.Monitoring.MonitoringHealthService>();
         services.AddScoped<Farm.Infrastructure.Services.SystemStatus.ISystemInfoService, Farm.Infrastructure.Services.SystemStatus.SystemInfoService>();
+        services.AddScoped<Farm.Infrastructure.Services.SystemStatus.IServiceInventorySource, Farm.Web.Api.Services.SystemInfo.LocalServiceInventorySource>();
+        services.AddScoped<Farm.Infrastructure.Services.SystemStatus.IServiceInventorySource>(sp =>
+            new Farm.Web.Api.Services.SystemInfo.SlicerServiceInventorySource(
+                sp.GetService<Farm.Slicer.Module.Data.SlicerDbContext>(),
+                sp.GetRequiredService<ILogger<Farm.Web.Api.Services.SystemInfo.SlicerServiceInventorySource>>()));
 
         // Admin Control Center overview aggregation (issue #933) moved to
         // Farm.Modules.Administration's IApiModule registration (issue #2042).

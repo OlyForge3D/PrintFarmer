@@ -36,6 +36,11 @@ internal static class BuildVersion
             ? parts[1]
             : null;
 
+        if (commit?.StartsWith("sha.", StringComparison.Ordinal) == true)
+        {
+            commit = commit[4..];
+        }
+
         return (version, commit);
     }
 

@@ -146,6 +146,81 @@ disagree, so each states what it measures and points at the other. A "Critical"
 service pill alongside "nothing needs your attention" is a domain difference, not a
 contradiction.
 
+### Read-only service and replica inventory
+
+`/admin/status` extends the existing `GET /api/system/info` with an additive
+`inventory` object. Both require `system_settings:admin`, including custom roles
+with that permission. Ordinary users receive no detailed inventory; the System
+pill remains a service-health summary, not an update advertisement. The response
+is `no-store`, and identity transitions purge the admin query cache.
+
+The table separates application build, engine version, canonical release identity,
+channel, and running platform/image-index/release-manifest digests. Full commit
+and digest details are available in keyboard-operable disclosures. A database
+engine version is not the application context's migration head. Background monitor
+rows no longer borrow the API build: their legacy version string is `Unknown`.
+
+- `Observed` means a source was observed, **not** digest attestation. Null build,
+  digest, or release fields render as **Unknown**, not version zero.
+- Original observations older than 90 seconds become `Stale`; reading an import
+  does not refresh its timestamp. `Unavailable` identifies a failed source read
+  or an offline registration. `Unknown` means insufficient evidence.
+- `NotInstalled` identifies an absent optional topology slot, not a failed
+  application. Each registered slicer replica is retained; its engine version
+  is separate from the worker assembly build reported at registration.
+- Compatibility is `Compatible`, `Incompatible`, `Unknown`, `MixedRelease`, or
+  `MixedChannel`, independently of freshness. Conflicting digests for replicas of
+  the same component/platform/version are incompatible; different components
+  naturally have different digests. Mixed application channels block normal
+  eligibility and are explicitly labelled unsafe.
+
+Selection defaults to **stable**, including native and legacy installations.
+The read-only host configuration key `Deployment:SelectedChannel` can describe an
+explicit administrator selection (`stable` or `insider`). It is not an unrestricted
+settings API field and creates no enrollment, release check, or execution action.
+Unknown values fall back to stable selection, never observed stable provenance.
+Observed channel comes only from bound, independently verified release evidence;
+a target channel is null because this increment does not discover targets.
+When insider is selected or reported, the page persistently states:
+
+> Insider updates may arrive more frequently and have reduced stability compared
+> with stable releases.
+
+The browser displays its **loaded asset** commit/build time, not the API build.
+A source/release mismatch is incompatible under the conservative same-build policy
+and calls for refresh; if it persists, operators must reconcile the deployment.
+Refreshing alone does not establish compatibility or update eligibility.
+
+### Inventory evidence boundaries
+
+The API reads its own assembly and the existing local/shared slicer registration
+store. Worker `applicationBuild` is an additive self-report in existing capability
+JSON; legacy workers continue to report engine version with unknown app build.
+Worker endpoints, credentials, raw capability JSON and arbitrary metadata are not
+returned. Native builds remain useful with null image and release evidence.
+The anonymous discovery heartbeat is **not** authenticated build/replica evidence;
+unknown discovery and external slicer-host slots remain visible rather than
+borrowing the API version. An unavailable registry remains unavailable/unknown,
+not an empty healthy worker set. No new outbound requests are made by inventory.
+
+The canonical consumer vocabulary belongs to #2668. `IServiceInventorySource`
+accepts trusted, already-verified local observations; its binding checks are not
+signature verification. Current self-report adapters cannot populate canonical
+verification or running digests. #2668/#2660 must provide the authoritative record
+and verification adapter before those values can be known. There is no public
+snapshot import or caller-supplied `verified` flag in this increment.
+Historical authorization is retained without querying current branch heads or
+requiring an old stabilization branch to exist. Aliases such as `latest` remain
+secondary configured references, never installed versions.
+
+Frontend builds may consume the authority's JSON record through
+`PRINTFARMER_RELEASE_IDENTITY`. The allowlisted record is embedded identically in
+loaded assets and `version.json`, bound to the full frontend source commit; it is
+explicitly self-reported, not verified provenance. Without it, release association
+stays unknown. No per-service version allocation or publication algorithm is added.
+The read-only contract never reports `Eligible`; verified compatibility alone
+cannot establish updater authorization, complete topology, or recovery readiness.
+
 **A failed refresh keeps the last-known snapshot.** React Query retains the last
 successful overview when a background refetch fails, so the hub distinguishes two
 failures. With no snapshot at all it shows the error state and a retry. With a
