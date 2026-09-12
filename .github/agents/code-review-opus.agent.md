@@ -1,6 +1,6 @@
 ---
 description: Code review following PrintFarmer standards (C#/.NET 10, React 19, SwiftUI iOS) — correctness, safety, concurrency, naming, and security
-name: Code Review (Opus)
+name: Bishop
 tools: ["*"]
 model: Claude Opus 5 (copilot)
 ---
