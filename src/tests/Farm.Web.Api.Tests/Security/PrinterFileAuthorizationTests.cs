@@ -109,7 +109,7 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
-    public async Task DeletePrinterFile_BackendException_IsRedactedAndRetainsBarrier()
+    public async Task DeletePrinterFile_BackendException_IsRedactedAndClearsBarrier()
     {
         Guid actorId = Guid.NewGuid();
         Guid printerId = await SeedAuthorizedPrinterAsync();
@@ -137,8 +137,8 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime, IDisposable
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         PrinterDispatchState state = await db.PrinterDispatchStates
             .SingleAsync(candidate => candidate.PrinterId == printerId);
-        state.PhysicalControlCommandId.Should().NotBeNull();
-        state.PhysicalControlRequiresReconciliation.Should().BeTrue();
+        state.PhysicalControlCommandId.Should().BeNull();
+        state.PhysicalControlRequiresReconciliation.Should().BeFalse();
     }
 
     private HttpClient CreateOperatorClient(Guid actorId)
