@@ -132,9 +132,25 @@ ledger before mutation and again before persistence. Source tagging additionally
 projects the complete ledger and binds the original signed record before
 **any write**, including `POST git/tags`, then rechecks before creating the public
 ref. Unknown top-level fields in in-memory inputs are omitted on projection;
-persisted ledger reads reject unknown top-level fields in both the current and
-parent snapshot. Malformed retained fields fail with
+persisted ledger reads reject unknown top-level fields in **every** snapshot
+after the pinned checkpoint, not just the head and its immediate parent.
+Malformed retained fields fail with
 policy errors, never raw property-access exceptions.
+
+Each read walks the complete single-parent chain from the observed ledger head
+back to `RELEASE_LEDGER_ANCHOR`, loading and validating every snapshot and every
+parent-to-child transition before returning. Existing qualifications must remain
+byte-identical under `JSON.stringify`, including nested evidence and field order.
+Immutable reservations, admission/record identities, tag claims and complete sets,
+nonregressing counters, pointers and stages are checked at every edge. A
+multi-commit fast-forward cannot hide an earlier deletion/replacement, even if a
+later commit restores the original state. Merge/octopus commits, cycles, missing
+objects, truncated trees and an unreachable checkpoint block reads, allocation
+and source-tag publication before any POST/PATCH.
+
+There is no history depth cap or reliance on the compare API's paginated commit
+list. All required Git reads must succeed; rate limits and unavailable history
+fail closed rather than skipping old snapshots.
 
 Reservation, admission and record variants are closed: every required field must
 exist with its declared type, and unknown or explicitly undefined fields fail.
@@ -336,7 +352,15 @@ Before enabling:
    using the strict public schemas above, including verifiable public-set hashes
    and tree/rationale evidence for stable qualifications. Do not seed dangling
    stage/pointer references or carry legacy boolean-only qualifications. Set
-   `RELEASE_LEDGER_ANCHOR` to that checkpoint. The workflow never auto-initializes.
+   `RELEASE_LEDGER_ANCHOR` to that checkpoint. It is an **exclusive pre-seed
+   boundary**, not a ledger snapshot: the checkpoint commit must resolve, but its
+   tree/state and parents are not traversed or validated as ledger history. It
+   may be a root or merge commit. Its immediate child must be a fully valid,
+   single-parent seed; no continuity comparison is possible against the
+   non-ledger checkpoint. The owner approves that seed's initial floor and
+   evidence. A head equal to the checkpoint has no seed and is rejected.
+   Every subsequent snapshot and edge back through the seed is mandatory.
+   The workflow never auto-initializes.
 3. Enforce main/development code-owner review, non-force/non-delete rules and
    exact-SHA status checks. Protect `release-stable`/`release-insider` with
    non-self reviewer approval and only their respective branch allowed.
@@ -381,5 +405,10 @@ Fixtures execute admission denials without writes, positive stable/insider/
 beta/RC paths, numeric ordering, atomic contention, retry/attempt/migration
 semantics, tag peeling/movement, same-identity byte conflicts, complete-set/
 platform checks, stale-source races, promotion and candidate lifecycle policy.
+History fixtures include three-snapshot retained/restored qualification mutations,
+intermediate merges and invalid snapshots, missing/truncated objects, explicit
+checkpoint semantics and a 1,005-snapshot chain. Read, allocation and source-tag
+paths assert zero POST/PATCH calls on rejection; executed admission/authorization
+also reject evidence rewrites before writes.
 YAML/compliance checks and the focused Vite metadata test remain required.
 No PR may open before fresh exact-head high-risk panel approval.

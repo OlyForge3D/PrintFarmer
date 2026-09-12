@@ -712,6 +712,7 @@ test('GitHub ledger reads pinned Git blobs and rejects ancestry, rollback, trunc
   const fixture = (next = current, options = {}) => async endpoint => {
     if (endpoint === 'git/ref/heads/release-ledger') return { object: { sha: newerSha } };
     if (endpoint.startsWith('compare/')) return { status: options.ancestry || 'ahead' };
+    if (endpoint === `git/commits/${anchor}`) return { tree: { sha: anchor }, parents: [] };
     if (endpoint === `git/commits/${newerSha}`) return { tree: { sha: 'head-tree' }, parents: [{ sha }] };
     if (endpoint === `git/commits/${sha}`) return { tree: { sha: 'previous-tree' }, parents: [{ sha: anchor }] };
     if (endpoint.startsWith('git/trees/')) return {
@@ -777,6 +778,7 @@ function adjacentLedgerFixture(previous, current) {
     assert.equal(method, 'GET', 'Invalid history must fail before any Git write');
     if (endpoint === 'git/ref/heads/release-ledger') return { object: { sha: newerSha } };
     if (endpoint.startsWith('compare/')) return { status: 'ahead' };
+    if (endpoint === `git/commits/${anchor}`) return { tree: { sha: anchor }, parents: [] };
     if (endpoint === `git/commits/${newerSha}`) return { tree: { sha: 'head-tree' }, parents: [{ sha }] };
     if (endpoint === `git/commits/${sha}`) return { tree: { sha: 'previous-tree' }, parents: [{ sha: anchor }] };
     if (endpoint.startsWith('git/trees/')) return {
@@ -792,9 +794,56 @@ function adjacentLedgerFixture(previous, current) {
   return { api, calls, store: gitLedger(api, anchor) };
 }
 
+function ledgerHistoryFixture(snapshots, mutate = () => {}) {
+  const objects = new Map();
+  const revisions = snapshots.map((_, index) => (index + 1).toString(16).padStart(40, '0'));
+  snapshots.forEach((snapshot, index) => {
+    const tree = (snapshots.length + index + 1).toString(16).padStart(40, '0');
+    const blob = (snapshots.length * 2 + index + 1).toString(16).padStart(40, '0');
+    objects.set(`git/commits/${revisions[index]}`, {
+      sha: revisions[index], tree: { sha: tree }, parents: [{ sha: revisions[index - 1] ?? anchor }],
+    });
+    objects.set(`git/trees/${tree}`, {
+      truncated: false, tree: [{ path: 'state.json', type: 'blob', sha: blob }],
+    });
+    objects.set(`git/blobs/${blob}`, {
+      encoding: 'base64', content: Buffer.from(JSON.stringify(snapshot)).toString('base64'),
+    });
+  });
+  objects.set(`git/commits/${anchor}`, { sha: anchor, tree: { sha: 'd'.repeat(40) }, parents: [] });
+  objects.set('git/ref/heads/release-ledger', { object: { sha: revisions.at(-1) } });
+  objects.set(`compare/${anchor}...${revisions.at(-1)}`, {
+    status: 'ahead', total_commits: revisions.length, commits: [{ sha: revisions.at(-1) }],
+  });
+  mutate(objects, revisions);
+  const calls = [];
+  const api = async (endpoint, method = 'GET') => {
+    calls.push({ endpoint, method });
+    assert.equal(method, 'GET', 'Invalid history must fail before any Git write');
+    const object = objects.get(endpoint);
+    if (!object) throw Object.assign(new Error(`Unresolvable ledger object: ${endpoint}`), { status: 404 });
+    return structuredClone(object);
+  };
+  return { api, calls, revisions, store: gitLedger(api, anchor) };
+}
+
+async function assertHistoryRejected(fixtureFactory, identity, expected, label) {
+  for (const [operation, run] of [
+    ['ledger read', fixture => fixture.store.read()],
+    ['allocation transaction', fixture => transact(fixture.store,
+      next => reserve(next, admission({ buildAttempt: '3' }), created))],
+    ['source tag publication', fixture => ensureSourceTag(fixture.api, fixture.store, identity, transact)],
+  ]) {
+    const fixture = fixtureFactory();
+    await assert.rejects(run(fixture), expected, `${label}: ${operation}`);
+    assert.equal(fixture.calls.filter(call => call.method === 'POST' || call.method === 'PATCH').length, 0,
+      `${label}: ${operation} must reject before creating blobs, tags, commits or refs`);
+  }
+}
+
 for (const mode of ['promotion', 'hotfix']) {
   for (const consumed of [false, true]) {
-    test(`adjacent commits preserve ${consumed ? 'consumed' : 'unconsumed'} ${mode} qualifications before every write`, async () => {
+    test(`complete history preserves ${consumed ? 'consumed' : 'unconsumed'} ${mode} qualifications before every write`, async () => {
       const seed = state();
       const insider = record(seed);
       const insiderSet = completeSet(insider);
@@ -839,6 +888,9 @@ for (const mode of ['promotion', 'hotfix']) {
       assert.equal(JSON.stringify(persisted[0].qualifications), JSON.stringify(appended.qualifications),
         'Actual serialized Git blob preserves existing and appended qualification bytes');
       assert.deepEqual((await adjacentLedgerFixture(previous, persisted[0]).store.read()).state, appended);
+      const appendedAgain = structuredClone(appended);
+      appendedAgain.qualifications['d'.repeat(40)] = { ...hotfix, sourceCommit: 'd'.repeat(40) };
+      assert.deepEqual((await ledgerHistoryFixture([previous, appended, appendedAgain]).store.read()).state, appendedAgain);
 
       const mutations = [
         ['delete qualification', next => { delete next.qualifications[newerSha]; }, !consumed],
@@ -864,22 +916,17 @@ for (const mode of ['promotion', 'hotfix']) {
           }, true],
         ]),
       ];
-      const operations = [
-        ['ledger read', fixture => fixture.store.read()],
-        ['allocation transaction', fixture => transact(fixture.store,
-          next => reserve(next, admission({ buildAttempt: '3' }), created))],
-        ['source tag publication', fixture => ensureSourceTag(fixture.api, fixture.store, identity, transact)],
-      ];
       for (const [name, mutate, structurallyValid] of mutations) {
         const next = structuredClone(previous);
         mutate(next);
         if (structurallyValid) validateLedger(next, anchor);
-        for (const [operation, run] of operations) {
-          const fixture = adjacentLedgerFixture(previous, next);
-          await assert.rejects(run(fixture), structurallyValid ? /immutable qualification/ : ReleasePolicyError,
-            `${name}: ${operation}`);
-          assert.equal(fixture.calls.filter(call => call.method === 'POST' || call.method === 'PATCH').length, 0,
-            `${name}: ${operation} must reject before creating blobs, tags, commits or refs`);
+        for (const [history, snapshots] of [
+          ['adjacent', [previous, next]],
+          ['retained at head', [previous, next, next]],
+          ['restored at head', [previous, next, previous]],
+        ]) {
+          await assertHistoryRejected(() => ledgerHistoryFixture(snapshots), identity,
+            structurallyValid ? /immutable qualification/ : ReleasePolicyError, `${name}, ${history}`);
         }
       }
     });
@@ -904,6 +951,182 @@ test('persisted ledger schema rejects unknown top-level fields in either adjacen
       assert.equal(fixture.calls.filter(call => call.method === 'POST' || call.method === 'PATCH').length, 0);
     }
   }
+});
+
+test('every continuity invariant is enforced before writes across older history edges', async () => {
+  const seed = state();
+  const first = record(seed);
+  seed.reservations[first.allocationKey].tagObject = 'd'.repeat(40);
+  seed.reservations[first.allocationKey].tagPublished = true;
+  advance(seed, first, completeSet(first), sha, '');
+  const second = record(seed, { buildAttempt: '2' });
+  advance(seed, second, completeSet(second), sha, publicSetHash(completeSet(first)));
+  seed.counter = '10';
+  const previous = publicLedger(seed);
+  const mutations = [
+    ['counter rollback', next => { next.counter = '2'; }, /counter rollback/],
+    ['reservation deletion', next => {
+      delete next.reservations[first.allocationKey];
+      delete next.identities[first.canonicalVersion];
+    }, /immutable reservation/],
+    ['tag object replacement', next => {
+      next.reservations[first.allocationKey].tagObject = 'e'.repeat(40);
+    }, /immutable tagObject/],
+    ['tag publication deletion', next => {
+      delete next.reservations[first.allocationKey].tagPublished;
+    }, /immutable tagPublished/],
+    ['complete set deletion', next => {
+      delete next.reservations[first.allocationKey].set;
+      delete next.reservations[first.allocationKey].setHash;
+    }, /immutable setHash/],
+    ['complete set replacement', next => {
+      const entry = next.reservations[first.allocationKey];
+      entry.set.images.api.digest = `sha256:${'a'.repeat(64)}`;
+      entry.setHash = hash(writePublicSet(entry.record, entry.set, entry.identitySha256));
+    }, /immutable setHash/],
+    ['pointer deletion', next => { delete next.pointers.insider; }, /pointer rollback/],
+    ['pointer rollback', next => {
+      next.pointers.insider = { releaseId: first.releaseId, canonicalVersion: first.canonicalVersion,
+        sourceCommit: first.sourceCommit, allocationKey: first.allocationKey,
+        setHash: next.reservations[first.allocationKey].setHash };
+    }, /pointer rollback/],
+  ];
+  for (const [name, mutate, expected] of mutations) {
+    const changed = structuredClone(previous);
+    mutate(changed);
+    validateLedger(changed, anchor);
+    await assertHistoryRejected(() => ledgerHistoryFixture([previous, changed, changed]), second, expected, name);
+  }
+  for (const [name, mutate] of [
+    ['stage rollback', next => { next.stages[first.baseVersion] = first.canonicalVersion; }],
+    ['stage deletion', next => { delete next.stages[first.baseVersion]; }],
+    ['admission replacement', next => { next.reservations[first.allocationKey].admission.buildId = '999'; }],
+    ['record replacement', next => { next.reservations[first.allocationKey].record.sourceCommit = newerSha; }],
+  ]) {
+    const changed = structuredClone(previous);
+    mutate(changed);
+    await assertHistoryRejected(() => ledgerHistoryFixture([previous, changed, changed]), second, ReleasePolicyError, name);
+  }
+});
+
+test('every historical snapshot is closed-schema validated even when the head restores clean state', async () => {
+  const seed = state();
+  const identity = record(seed);
+  const clean = publicLedger(seed);
+  for (const index of [0, 1, 2]) {
+    for (const [name, mutate] of [
+      ['unknown top-level field', next => { next.ownerNotes = 'not a public field'; }],
+      ['unknown nested field', next => { next.reservations[identity.allocationKey].admission.ownerNotes = 'invalid'; }],
+      ['missing map', next => { delete next.qualifications; }],
+      ['missing nested field', next => { delete next.reservations[identity.allocationKey].record.created; }],
+    ]) {
+      const snapshots = [clean, clean, clean].map(snapshot => structuredClone(snapshot));
+      mutate(snapshots[index]);
+      await assertHistoryRejected(() => ledgerHistoryFixture(snapshots), identity, ReleasePolicyError, `${name} at ${index}`);
+    }
+  }
+});
+
+test('history rejects merges, cycles, missing objects and truncation despite an ahead comparison', async () => {
+  const seed = state();
+  const identity = record(seed);
+  const clean = publicLedger(seed);
+  const mutations = [
+    ['intermediate merge', (objects, revisions) => {
+      objects.get(`git/commits/${revisions[1]}`).parents.push({ sha: anchor });
+    }, /single-parent/],
+    ['intermediate octopus', (objects, revisions) => {
+      objects.get(`git/commits/${revisions[1]}`).parents.push({ sha: anchor }, { sha: sha });
+    }, /single-parent/],
+    ['unreachable anchor', (objects, revisions) => {
+      objects.get(`git/commits/${revisions[0]}`).parents = [];
+    }, /single-parent/],
+    ['self cycle', (objects, revisions) => {
+      objects.get(`git/commits/${revisions[1]}`).parents = [{ sha: revisions[1] }];
+    }, /cycle/],
+    ['multi-commit cycle', (objects, revisions) => {
+      objects.get(`git/commits/${revisions[0]}`).parents = [{ sha: revisions[2] }];
+    }, /cycle/],
+    ['missing parent list', (objects, revisions) => {
+      delete objects.get(`git/commits/${revisions[1]}`).parents;
+    }, /single-parent/],
+    ['invalid parent SHA', (objects, revisions) => {
+      objects.get(`git/commits/${revisions[1]}`).parents = [{ sha: 'not-a-sha' }];
+    }, /ledger parent commit/],
+    ['unresolvable boundary', objects => { objects.delete(`git/commits/${anchor}`); }, /Unresolvable/],
+    ['malformed boundary', objects => { objects.set(`git/commits/${anchor}`, {}); }, /ledger anchor tree/],
+  ];
+  for (const index of [0, 1, 2]) {
+    mutations.push(
+      [`merge at ${index}`, (objects, revisions) => {
+        objects.get(`git/commits/${revisions[index]}`).parents.push({ sha: anchor });
+      }, /single-parent/],
+      [`unresolvable commit at ${index}`, (objects, revisions) => {
+        objects.delete(`git/commits/${revisions[index]}`);
+      }, /Unresolvable/],
+      [`unresolvable tree at ${index}`, (objects, revisions) => {
+        objects.delete(`git/trees/${objects.get(`git/commits/${revisions[index]}`).tree.sha}`);
+      }, /Unresolvable/],
+      [`truncated tree at ${index}`, (objects, revisions) => {
+        objects.get(`git/trees/${objects.get(`git/commits/${revisions[index]}`).tree.sha}`).truncated = true;
+      }, /truncated/],
+      [`missing state at ${index}`, (objects, revisions) => {
+        objects.get(`git/trees/${objects.get(`git/commits/${revisions[index]}`).tree.sha}`).tree = [];
+      }, /state is missing/],
+      [`unresolvable blob at ${index}`, (objects, revisions) => {
+        const tree = objects.get(`git/trees/${objects.get(`git/commits/${revisions[index]}`).tree.sha}`);
+        objects.delete(`git/blobs/${tree.tree[0].sha}`);
+      }, /Unresolvable/],
+      [`malformed snapshot at ${index}`, (objects, revisions) => {
+        const tree = objects.get(`git/trees/${objects.get(`git/commits/${revisions[index]}`).tree.sha}`);
+        objects.get(`git/blobs/${tree.tree[0].sha}`).content = Buffer.from('{').toString('base64');
+      }, SyntaxError],
+    );
+  }
+  for (const [name, mutate, expected] of mutations) {
+    await assertHistoryRejected(() => ledgerHistoryFixture([clean, clean, clean], mutate), identity, expected, name);
+  }
+});
+
+test('the pinned anchor is an exclusive resolved pre-seed boundary, not a ledger snapshot', async () => {
+  const seed = state();
+  seed.counter = '100';
+  const identity = record(seed);
+  const clean = publicLedger(seed);
+  for (const parents of [[], [{ sha }], [{ sha }, { sha: newerSha }]]) {
+    const fixture = ledgerHistoryFixture([clean], objects => {
+      objects.get(`git/commits/${anchor}`).parents = parents;
+    });
+    const result = await fixture.store.read();
+    assert.deepEqual(result.state, clean);
+    assert.equal(result.revision, fixture.revisions[0]);
+    assert.equal(fixture.calls.filter(call => call.endpoint === `git/commits/${anchor}`).length, 1);
+    assert.equal(fixture.calls.some(call => call.endpoint === `git/trees/${'d'.repeat(40)}`), false,
+      'Boundary tree/state and pre-boundary parents are deliberately outside the ledger chain');
+    assert.equal(fixture.calls.filter(call => call.endpoint.startsWith('git/commits/')).length, 2);
+  }
+  await assertHistoryRejected(() => ledgerHistoryFixture([clean], objects => {
+    objects.get('git/ref/heads/release-ledger').object.sha = anchor;
+  }), identity, /seed is missing/, 'head equals checkpoint');
+  const invalidSeed = structuredClone(clean);
+  invalidSeed.extra = true;
+  await assertHistoryRejected(() => ledgerHistoryFixture([invalidSeed]), identity,
+    /persisted public ledger/, 'first child of checkpoint is fully validated');
+});
+
+test('history traversal never trusts a truncated compare list or skips old edges at a depth limit', async () => {
+  const seed = state();
+  const identity = record(seed);
+  const clean = publicLedger(seed);
+  const snapshots = Array.from({ length: 1005 }, () => clean);
+  const fixture = ledgerHistoryFixture(snapshots);
+  assert.deepEqual((await fixture.store.read()).state, clean);
+  assert.equal(fixture.calls.filter(call => call.endpoint.startsWith('git/commits/')).length, snapshots.length + 1);
+  const highWater = structuredClone(clean);
+  highWater.counter = '100';
+  snapshots[0] = highWater;
+  await assertHistoryRejected(() => ledgerHistoryFixture(snapshots), identity,
+    /counter rollback/, 'rollback beyond the first 1000 snapshots');
 });
 
 function protectionFixture(channel = 'insider') {
@@ -1122,15 +1345,19 @@ function authorizationFixture(initial = state(), settings = {}) {
   const trees = promotionApi(settings.treeOptions);
   let comparedTree = false;
   const objects = new Map();
+  objects.set(anchor, { tree: { sha: anchor }, parents: [] });
   let serial = 100;
   const put = value => {
     const id = (++serial).toString(16).padStart(40, '0');
     objects.set(id, value);
     return id;
   };
-  const blob = put({ encoding: 'base64', content: Buffer.from(JSON.stringify(initial)).toString('base64') });
-  const tree = put({ truncated: false, tree: [{ path: 'state.json', type: 'blob', sha: blob }] });
-  let head = put({ tree: { sha: tree }, parents: [{ sha: anchor }] });
+  let head = anchor;
+  for (const snapshot of settings.history ?? [initial]) {
+    const blob = put({ encoding: 'base64', content: Buffer.from(JSON.stringify(snapshot)).toString('base64') });
+    const tree = put({ truncated: false, tree: [{ path: 'state.json', type: 'blob', sha: blob }] });
+    head = put({ tree: { sha: tree }, parents: [{ sha: head }] });
+  }
   let tag;
   const calls = [];
   const ledgerWrites = [];
@@ -1202,6 +1429,28 @@ function authorizationFixture(initial = state(), settings = {}) {
     },
   };
 }
+
+test('executed admission and authorization reject multi-commit evidence rewrites before any writes', async () => {
+  const seed = state();
+  record(seed, { buildId: '41' });
+  seed.qualifications[newerSha] = { ...hotfixQualification(), sourceCommit: newerSha };
+  const previous = publicLedger(seed);
+  const changed = structuredClone(previous);
+  changed.qualifications[newerSha].reasonSha256 = hotfixReasonDigest('Different rationale retained by the fast-forward head.');
+  validateLedger(changed, anchor);
+  const savedFetch = globalThis.fetch;
+  try {
+    for (const operation of ['admit', 'authorize']) {
+      const fixture = authorizationFixture(previous, { history: [previous, changed, changed] });
+      globalThis.fetch = fixture.fetch;
+      await assert.rejects(runReleaseControl(operation, fixture.env), /immutable qualification/);
+      assert.equal(fixture.calls.filter(call => call.method === 'POST' || call.method === 'PATCH').length, 0);
+      assert.equal(fixture.ledgerWrites.length, 0);
+    }
+  } finally {
+    globalThis.fetch = savedFetch;
+  }
+});
 
 test('stable authority verifies tree evidence and rechecks main HEAD before any Git write', async () => {
   const ledger = state();

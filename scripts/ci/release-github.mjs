@@ -137,6 +137,9 @@ export async function readTag(api, tag) {
 export function gitLedger(api, anchor) {
   async function snapshot(revision) {
     const commit = await api(`git/commits/${revision}`);
+    requireThat(Array.isArray(commit?.parents) && commit.parents.length === 1,
+      'Ledger must have a linear single-parent history');
+    requireString(commit.parents[0]?.sha, shaPattern, 'ledger parent commit');
     const tree = await api(`git/trees/${commit.tree.sha}`);
     requireThat(tree.truncated === false, 'Ledger tree is truncated');
     const entry = tree.tree.find(file => file.path === 'state.json' && file.type === 'blob');
@@ -146,50 +149,65 @@ export function gitLedger(api, anchor) {
     const state = JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8'));
     requireKeys(state, publicLedgerFields.filter(field => field !== 'lastHistoricalStable'),
       ['lastHistoricalStable'], 'persisted public ledger');
+    validateLedger(state, anchor);
     return { commit, state };
+  }
+  function validateContinuity(previous, state) {
+    requireThat(BigInt(state.counter) >= BigInt(previous.counter), 'Ledger counter rollback');
+    for (const [sourceCommit, qualification] of Object.entries(previous.qualifications)) {
+      requireThat(JSON.stringify(state.qualifications[sourceCommit]) === JSON.stringify(qualification),
+        'Ledger lost or changed an immutable qualification');
+    }
+    for (const [key, reservation] of Object.entries(previous.reservations)) {
+      requireThat(JSON.stringify(state.reservations[key]?.record) === JSON.stringify(reservation.record) &&
+        JSON.stringify(state.reservations[key]?.admission) === JSON.stringify(reservation.admission) &&
+        state.reservations[key]?.identitySha256 === reservation.identitySha256,
+        'Ledger lost or changed an immutable reservation');
+      for (const field of ['tagObject', 'tagPublished', 'setHash', 'set']) {
+        if (reservation[field] !== undefined) {
+          requireThat(JSON.stringify(state.reservations[key]?.[field]) === JSON.stringify(reservation[field]),
+            `Ledger lost or changed immutable ${field}`);
+        }
+      }
+    }
+    for (const [channel, pointer] of Object.entries(previous.pointers)) {
+      const next = state.pointers[channel];
+      requireThat(next && compareVersions(next.canonicalVersion, pointer.canonicalVersion) >= 0,
+        'Ledger pointer rollback');
+      if (next.canonicalVersion === pointer.canonicalVersion) {
+        requireThat(JSON.stringify(next) === JSON.stringify(pointer), 'Ledger changed immutable pointer identity');
+      }
+    }
+    for (const [base, stage] of Object.entries(previous.stages || {})) {
+      requireThat(state.stages?.[base] && compareVersions(state.stages[base], stage) >= 0,
+        'Ledger stage rollback');
+    }
   }
   return {
     async read() {
       requireThat(/^[a-f0-9]{40}$/.test(anchor || ''), 'Owner must approve and pin RELEASE_LEDGER_ANCHOR');
       const revision = await branchHead(api, ledgerBranch);
+      requireString(revision, shaPattern, 'ledger head commit');
+      requireThat(revision !== anchor, 'Ledger seed is missing after the pinned anchor; owner recovery required');
       const ancestry = await api(`compare/${anchor}...${revision}`);
       requireThat(['ahead', 'identical'].includes(ancestry.status), 'Ledger anchor not in ancestry');
-      const { commit: head, state } = await snapshot(revision);
-      validateLedger(state, anchor);
-      requireThat(head.parents.length === 1, 'Ledger must have a linear single-parent history');
-      if (head.parents[0].sha !== anchor) {
-        const { state: previous } = await snapshot(head.parents[0].sha);
-        validateLedger(previous, anchor);
-        requireThat(BigInt(state.counter) >= BigInt(previous.counter), 'Ledger counter rollback');
-        for (const [sourceCommit, qualification] of Object.entries(previous.qualifications)) {
-          requireThat(JSON.stringify(state.qualifications[sourceCommit]) === JSON.stringify(qualification),
-            'Ledger lost or changed an immutable qualification');
-        }
-        for (const [key, reservation] of Object.entries(previous.reservations)) {
-          requireThat(JSON.stringify(state.reservations[key]?.record) === JSON.stringify(reservation.record) &&
-            JSON.stringify(state.reservations[key]?.admission) === JSON.stringify(reservation.admission) &&
-            state.reservations[key]?.identitySha256 === reservation.identitySha256,
-            'Ledger lost or changed an immutable reservation');
-          for (const field of ['tagObject', 'tagPublished', 'setHash', 'set']) {
-            if (reservation[field] !== undefined) {
-              requireThat(JSON.stringify(state.reservations[key]?.[field]) === JSON.stringify(reservation[field]),
-                `Ledger lost or changed immutable ${field}`);
-            }
-          }
-        }
-        for (const [channel, pointer] of Object.entries(previous.pointers)) {
-          const next = state.pointers[channel];
-          requireThat(next && compareVersions(next.canonicalVersion, pointer.canonicalVersion) >= 0,
-            'Ledger pointer rollback');
-          if (next.canonicalVersion === pointer.canonicalVersion) {
-            requireThat(JSON.stringify(next) === JSON.stringify(pointer), 'Ledger changed immutable pointer identity');
-          }
-        }
-        for (const [base, stage] of Object.entries(previous.stages || {})) {
-          requireThat(state.stages?.[base] && compareVersions(state.stages[base], stage) >= 0,
-            'Ledger stage rollback');
-        }
+      let current = revision;
+      let state;
+      let child;
+      const visited = new Set();
+      while (current !== anchor) {
+        requireThat(!visited.has(current), 'Ledger history contains a cycle');
+        visited.add(current);
+        const snapshotAtCommit = await snapshot(current);
+        state ??= snapshotAtCommit.state;
+        if (child) validateContinuity(snapshotAtCommit.state, child);
+        child = snapshotAtCommit.state;
+        current = snapshotAtCommit.commit.parents[0].sha;
       }
+      // The pinned checkpoint precedes the seed: resolve it, but do not treat it as ledger state.
+      const boundary = await api(`git/commits/${anchor}`);
+      requireObject(boundary, 'ledger anchor commit');
+      requireString(boundary.tree?.sha, shaPattern, 'ledger anchor tree');
       return { revision, state };
     },
     async compareAndSet(revision, state) {
