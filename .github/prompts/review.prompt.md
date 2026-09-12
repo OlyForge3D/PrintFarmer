@@ -9,7 +9,7 @@ Run a 3-way multi-model code review across the adversarial review panel:
    - **Hicks**: `name: "hicks"`, `agent_type: "Code Review (Codex)"` (or `code-review` with `model: "gpt-5.6-sol"`), `reasoning_effort: "medium"`
    - **Vasquez**: `name: "vasquez"`, `agent_type: "Code Review (Gemini)"` (or `code-review` with `model: "gemini-3.8-flash"`), `reasoning_effort: "medium"`
 2. Pass complete context in each dispatch prompt: repository worktree root path (`cwd`), current branch name, base branch (`origin/development`), and exact head commit SHA to review.
-3. Reviewers are strictly read-only: inspect diffs via `git diff origin/development...HEAD` or read-only tools (`view`, `grep`, `glob`, `lsp`). Do NOT modify code or files, do NOT create, edit, or delete `Copilot-Processing.md` or tracking files, and do NOT run builds, package installations, or test suites.
+3. Reviewers are strictly read-only: verify `git rev-parse HEAD` matches the target SHA and inspect diffs via `git diff origin/development...<target-head-sha>` or read-only tools (`view`, `grep`, `glob`, `lsp`). Do NOT modify code or files, do NOT create, edit, or delete `Copilot-Processing.md` or tracking files, and do NOT run builds, package installations, or test suites.
 4. Each reviewer outputs a structured verdict with the canonical record block:
    ```markdown
    <!-- squad-verdict -->

@@ -93,6 +93,10 @@ test('reviewer agent definitions: tool grants, model diversity, and read-only bo
         'Agent prompt must include Squad-Reviewer field in template',
       );
       assert.ok(
+        body.includes(`Squad-Reviewer: ${spec.expectedReviewer}`),
+        `Agent prompt must include Squad-Reviewer: ${spec.expectedReviewer}`,
+      );
+      assert.ok(
         body.includes('Squad-Verdict:'),
         'Agent prompt must include Squad-Verdict field in template',
       );
@@ -118,3 +122,5 @@ test('review prompt template (.github/prompts/review.prompt.md)', async () => {
   assert.ok(body.includes('read-only'));
   assert.ok(body.includes('<!-- squad-verdict -->'));
 });
+
+
