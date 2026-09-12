@@ -3160,6 +3160,8 @@ load_previous_config() {
         # Source the config file to load variables
         # shellcheck disable=SC1090
         source "$CONFIG_FILE"
+        validate_deployment_network || exit 1
+        apply_discovery_override
         enforce_supported_orcaslicer_release
 
         # Explicit overrides win over persisted values.
@@ -4097,8 +4099,26 @@ configure_database() {
     esac
 }
 
+validate_deployment_network() {
+    case "${NETWORK_MODE:-bridge}" in
+        bridge) NETWORK_MODE=bridge ;;
+        *)
+            print_error "Only bridge networking is supported. Set NETWORK_MODE to bridge in the environment and saved deployment configuration."
+            return 1
+            ;;
+    esac
+}
+
+apply_discovery_override() {
+    if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "true" ]; then
+        INCLUDE_DISCOVERY=true
+        ENABLE_DISCOVERY=true
+    fi
+}
+
 # Configure networking
 configure_networking() {
+    validate_deployment_network || return 1
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${NETWORK_MODE:-}" ]; then
         print_info "Using configured network mode: $NETWORK_MODE"
@@ -4940,7 +4960,6 @@ AUTO_ADMIN_PASSWORD=$AUTO_ADMIN_PASSWORD
 ALLOW_LOCAL_NETWORK=$ALLOW_LOCAL_NETWORK
 ALLOWED_NETWORK_RANGES=$NETWORK_RANGES
 NETWORK_MODE=${NETWORK_MODE:-bridge}
-DOCKER_HOST_NETWORK=false
 
 # CORS Configuration
 CORS__AllowedOrigins=$CORS_ORIGINS
@@ -7397,6 +7416,8 @@ redeploy_existing() {
     capture_config_overrides
     # shellcheck disable=SC1090
     source "$CONFIG_FILE"
+    validate_deployment_network || exit 1
+    apply_discovery_override
     enforce_supported_orcaslicer_release
     restore_config_overrides
     if ! normalize_worker_configuration; then
@@ -7574,6 +7595,9 @@ main() {
         show_help
         # Function exits, so we never reach here
     fi
+
+    validate_deployment_network || exit 1
+    apply_discovery_override
     
     # Handle redeploy mode
     if [ "${REDEPLOY:-false}" = "true" ]; then
@@ -7600,6 +7624,8 @@ main() {
         capture_config_overrides
         # shellcheck disable=SC1090
         source "$CONFIG_FILE" || { print_error "Failed to load config"; exit 1; }
+        validate_deployment_network || exit 1
+        apply_discovery_override
         enforce_supported_orcaslicer_release
         restore_config_overrides
         if ! normalize_worker_configuration; then
@@ -8026,6 +8052,10 @@ while [ $# -gt 0 ]; do
             ;;
         --include-registry)
             CLI_INCLUDE_REGISTRY=true
+            shift
+            ;;
+        --include-discovery)
+            CLI_INCLUDE_DISCOVERY=true
             shift
             ;;
         --include-go2rtc)

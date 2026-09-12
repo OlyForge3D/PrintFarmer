@@ -24,7 +24,10 @@ TEMPLATES = ROOT / "scripts" / "docker" / "compose-templates"
 OBSOLETE_GUIDANCE = re.compile(
     r"\bhost[\s_-]+network(?:ing)?|host\.docker\.internal|NET_ADMIN|NET_RAW|"
     r"privileged\s*:\s*(?:true|yes)|--privileged|privileged\s+mode|"
-    r"network_mode\s*:\s*[\"']?host|--net(?:work)?(?:=|\s+)host",
+    r"\b(?:docker_)?network_mode[\"']?\s*[:=]\s*[\"']?host\b|"
+    r"\bbridge(?:\s*(?:-|→|->|=>)\s*|\s+)(?:to[\s-]+)?host\b|"
+    r"NGINX_FRONTEND_CONFIG|DOCKER_HOST_NETWORK|"
+    r"--net(?:work)?(?:=|\s+)host",
     re.IGNORECASE,
 )
 
@@ -34,6 +37,20 @@ def assert_current_guidance(text, path):
     if match:
         line = text.count("\n", 0, match.start()) + 1
         raise AssertionError(f"{path}:{line}: obsolete topology guidance: {match.group()}")
+
+
+def supported_guidance_paths():
+    paths = set((ROOT / "docs").rglob("*.md"))
+    paths.update(path for path in (ROOT / "scripts" / "docker").rglob("*")
+                 if path.suffix in {".sh", ".ps1", ".py", ".md", ".conf", ".yml", ".yaml"}
+                 or path.name.startswith("Dockerfile"))
+    paths.update((ROOT / "scripts").glob("deploy-*"))
+    paths.update((ROOT / "scripts").glob("fix-*.sh"))
+    paths.add(ROOT / "scripts" / "start-all-local-with-workers.sh")
+    paths.update(path for path in (ROOT / "deploy" / "nginx").rglob("*")
+                 if path.suffix in {".conf", ".md", ".yml", ".yaml"})
+    paths.add(ROOT / "README.md")
+    return paths
 
 
 def load_compose(path):
@@ -202,16 +219,24 @@ class DiscoveryBoundaryTests(unittest.TestCase):
                     str(path.relative_to(ROOT)))
 
     def test_supported_guides_and_deployment_scripts(self):
-        paths = set((ROOT / "docs").rglob("*.md"))
-        paths.update(path for path in (ROOT / "scripts" / "docker").rglob("*")
-                     if path.suffix in {".sh", ".ps1", ".py", ".md"})
-        paths.update((ROOT / "scripts").glob("fix-*.sh"))
-        paths.add(ROOT / "scripts" / "deploy-docker.sh")
         # Historical devnotes/archived files are not supported operating guides.
-        for path in sorted(paths):
+        for path in sorted(supported_guidance_paths()):
             with self.subTest(path=str(path.relative_to(ROOT))):
-                assert_current_guidance(path.read_text(encoding="utf-8-sig"),
-                                        path.relative_to(ROOT))
+                text = path.read_text(encoding="utf-8-sig")
+                if path == ROOT / "scripts" / "start-all-local-with-workers.sh":
+                    exception = '    -e Worker__StorageEndpoint="http://host.docker.internal:5245" \\'
+                    self.assertEqual(1, text.count(exception))
+                    self.assertIn("Local development only:", text)
+                    text = text.replace(exception, "")
+                assert_current_guidance(text, path.relative_to(ROOT))
+
+    def test_guidance_scan_covers_build_and_proxy_configuration(self):
+        paths = supported_guidance_paths()
+        for relative in ("scripts/docker/dockerfiles/Dockerfile.frontend",
+                         "scripts/docker/compose-templates/docker-compose.yml",
+                         "scripts/deploy-docker.ps1", "deploy/nginx/conf.d/frontend-app.conf"):
+            self.assertIn(ROOT / relative, paths)
+        self.assertFalse((ROOT / "deploy/nginx/conf.d/frontend-app-host-network.conf").exists())
 
     def test_guidance_guard_rejects_old_recommendations(self):
         for text in (
@@ -219,6 +244,11 @@ class DiscoveryBoundaryTests(unittest.TestCase):
             "privileged: true", "docker run --privileged", "Use privileged mode",
             "http://host.docker.internal:5245", "docker run --network=host",
             "[Supported guide](HOST_NETWORK_DEPLOYMENT.md)",
+            "NETWORK_MODE=host", 'NETWORK_MODE="host"', "NETWORK_MODE='HOST'",
+            '"NETWORK_MODE": "host"', "$env:NETWORK_MODE = 'host'",
+            "DOCKER_NETWORK_MODE: host", "bridge → host", "bridge-to-host",
+            "bridge to host", "bridge -> host", "bridge => host",
+            "ARG NGINX_FRONTEND_CONFIG=old.conf", "DOCKER_HOST_NETWORK=false",
         ):
             with self.subTest(text=text):
                 with self.assertRaisesRegex(AssertionError, "fixture.md:2:"):
@@ -418,6 +448,142 @@ export -f bash
                 self.assertNotIn("extra_hosts", proxy)
                 self.assertEqual(["8080:80"] + ([] if https_port == "0" else ["443:443"]),
                                  proxy["ports"])
+
+    def run_deploy_configuration(self, mode, include, saved_mode="bridge", inherited_mode="bridge"):
+        """Run real parser/configuration functions; stop at the generation boundary."""
+        deploy = (ROOT / "scripts/deploy-docker.sh").read_text(encoding="utf-8")
+        names = ("main", "redeploy_existing", "load_previous_config",
+                 "validate_deployment_network", "apply_discovery_override",
+                 "configure_networking", "configure_additional")
+        functions = []
+        for name in names:
+            match = re.search(rf"^{name}\(\) \{{\n.*?^\}}", deploy, re.MULTILINE | re.DOTALL)
+            self.assertIsNotNone(match, name)
+            functions.append(match.group())
+        parser = deploy.split("# Parse leftover CLI args", 1)[1].split("# Apply --native-arch", 1)[0]
+        saved = self.workspace / "entry-point.conf"
+        saved.write_text(
+            f"NETWORK_MODE='{saved_mode}'\nINCLUDE_DISCOVERY=false\nENABLE_DISCOVERY=false\n"
+            "ENVIRONMENT=Production\nARCHITECTURE=microservices\nDB_PROVIDER=postgres\n"
+            "COMPOSE_FILE=unused.yml\nINCLUDE_MONITORING=false\nINCLUDE_TELEMETRY=false\n"
+            "INCLUDE_SECURITY=false\nINCLUDE_REGISTRY=false\n", encoding="utf-8")
+        driver = "\n".join(functions) + r"""
+set -euo pipefail
+REPO_ROOT="$1"; CONFIG_FILE="$2"; NETWORK_MODE="$3"; shift 3
+BLUE=; NC=; SHOW_HELP=false; TEAR_DOWN=false; VALIDATE_STORAGE_ONLY=false
+PREPARE_OFFLINE=false; DEPLOY_OFFLINE=false; PULL_IMAGES=false; SAVE_IMAGES=false
+LOAD_IMAGES=false; CACHE_ORCASLICER=false; LOAD_CACHED_ORCASLICER=false
+NON_INTERACTIVE=false; _ARGS_KEEP=()
+print_info() { :; }
+print_success() { :; }
+print_header() { :; }
+print_error() { echo "$*" >&2; }
+capture_config_overrides() { :; }
+restore_config_overrides() { :; }
+enforce_supported_orcaslicer_release() { :; }
+migrate_legacy_db_credentials() { :; }
+normalize_worker_configuration() { :; }
+resolve_deployment_shared_keys() { :; }
+save_deployment_config() { echo "SAVE:$INCLUDE_DISCOVERY:$ENABLE_DISCOVERY:$NETWORK_MODE"; }
+generate_env_file() { :; }
+generate_react_env_production() { :; }
+prepare_pgadmin_setup() { :; }
+detect_environment() { :; }
+choose_architecture() { :; }
+configure_database() { :; }
+adjust_connection_strings_for_network_mode() { :; }
+configure_slicing() { :; }
+configure_external_storage() { :; }
+validate_configuration() { :; }
+generate_deployment_config() { echo "GENERATE:$5"; exit 0; }
+""" + "\n# Parse leftover CLI args" + parser + "\nmain\n"
+        args = ["--non-interactive"] + ([mode] if mode else []) + (["--include-discovery"] if include else [])
+        return subprocess.run(
+            [self.bash, "-s", "--", ROOT.as_posix(), saved.as_posix(),
+             inherited_mode, *args], input=driver, cwd=self.workspace, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=20,
+        )
+
+    def test_discovery_cli_overrides_saved_disable_in_every_deploy_flow(self):
+        for mode in ("", "--regenerate-config", "--redeploy"):
+            for include in (False, True):
+                with self.subTest(mode=mode, include=include):
+                    result = self.run_deploy_configuration(mode, include)
+                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                    expected = str(include).lower()
+                    self.assertIn(f"SAVE:{expected}:{expected}:bridge", result.stdout)
+                    self.assertIn(f"GENERATE:{expected}", result.stdout)
+
+    def test_invalid_network_mode_stops_every_deploy_flow_before_writes(self):
+        for mode in ("", "--regenerate-config", "--redeploy"):
+            for saved_mode, inherited_mode in (("host", "bridge"), ("HOST", "bridge"),
+                                                ("bridge", "host"), ("invalid", "bridge")):
+                with self.subTest(mode=mode, saved=saved_mode, inherited=inherited_mode):
+                    result = self.run_deploy_configuration(mode, True, saved_mode, inherited_mode)
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn("Only bridge networking is supported", result.stderr)
+                    self.assertNotIn("SAVE:", result.stdout)
+                    self.assertNotIn("GENERATE:", result.stdout)
+
+    def test_generator_entry_point_rejects_stale_mode_and_accepts_bridge(self):
+        for provider in ("postgres", "sqlserver"):
+            for mode in ("bridge", "host"):
+                with self.subTest(provider=provider, mode=mode):
+                    result = subprocess.run(
+                        [self.bash, (ROOT / "scripts/docker/compose-generator.sh").as_posix(),
+                         "--db-provider", provider, "--include-discovery", "--dry-run",
+                         "--output-dir", self.workspace.as_posix()],
+                        cwd=ROOT, env=dict(os.environ, NETWORK_MODE=mode),
+                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+                    )
+                    if mode == "bridge":
+                        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                    else:
+                        self.assertNotEqual(0, result.returncode)
+                        self.assertIn("Only bridge networking is supported", result.stderr)
+
+    def test_powershell_entry_point_fails_fast(self):
+        pwsh = shutil.which("pwsh")
+        if not pwsh:
+            raise RuntimeError("PowerShell is required for deployment entry-point regression tests")
+        script = ROOT / "scripts/deploy-docker.ps1"
+        for args, mode, message in ((["-IncludeDiscovery"], "bridge", "does not support it"),
+                                    ([], "host", "Only bridge networking is supported")):
+            with self.subTest(args=args, mode=mode):
+                result = subprocess.run(
+                    [pwsh, "-NoProfile", "-File", str(script), *args],
+                    cwd=self.workspace, env=dict(os.environ, NETWORK_MODE=mode),
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
+                )
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(message, result.stderr)
+
+        # Execute the actual config loader without running deployment/image operations.
+        text = script.read_text(encoding="utf-8")
+        loader = re.search(r"^function Load-DeploymentConfig \{.*?^\}", text,
+                           re.MULTILINE | re.DOTALL)
+        self.assertIsNotNone(loader)
+        saved = self.workspace / "powershell.conf"
+        for value in ('host', '"HOST"', 'bridge'):
+            with self.subTest(saved=value):
+                saved.write_text(f"NETWORK_MODE={value}\n", encoding="utf-8")
+                command = (
+                    "$ErrorActionPreference='Stop'; function Write-Info {};"
+                    "function Set-SupportedOrcaSlicerConfig {};\n" + loader.group()
+                    + "\n$config = Load-DeploymentConfig -ConfigPath $env:TEST_CONFIG;"
+                    "Write-Output $config['NETWORK_MODE']"
+                )
+                result = subprocess.run(
+                    [pwsh, "-NoProfile", "-Command", command], cwd=self.workspace,
+                    env=dict(os.environ, TEST_CONFIG=str(saved)), capture_output=True,
+                    text=True, encoding="utf-8", errors="replace", timeout=20,
+                )
+                if value == 'bridge':
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    self.assertEqual("bridge", result.stdout.strip())
+                else:
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn("Only bridge networking is supported", result.stderr)
 
 
 if __name__ == "__main__":

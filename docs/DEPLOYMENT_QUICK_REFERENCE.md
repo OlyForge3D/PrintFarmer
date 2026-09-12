@@ -1,7 +1,7 @@
 # Deployment Script - Quick Reference Card
 
 **PrintFarmer Docker Deployment**  
-**Last Updated:** October 6, 2025
+**Last Updated:** September 12, 2026
 
 ---
 
@@ -59,15 +59,29 @@ omitted dependent worker settings default to `ENABLE_ORCA_WORKER=no` and
 
 ---
 
-## 🌐 Network Modes
+## 🌐 Deployment Networking
 
-### Bridge (Default - All Platforms)
+### Bridge (All Platforms)
 ```bash
-export NETWORK_MODE_CHOICE=1
 ./scripts/deploy-docker.sh --non-interactive
 ```
 - ✅ Works on macOS, Windows, Linux
-- ❌ Limited network discovery (known IPs only)
+- Discovery probes configured IP ranges using routed TCP/HTTP.
+
+`NETWORK_MODE` accepts only `bridge`. Other saved or environment values fail
+before configuration generation or deployment, including regeneration and
+redeployment. Update stale configuration to `bridge` and regenerate/recreate
+services; do not reuse old generated Compose files.
+
+`--include-discovery` overrides saved discovery disables on normal deployment,
+regeneration and redeployment. The PowerShell entry point rejects
+`-IncludeDiscovery`; use the Bash entry point for discovery deployments.
+
+The legacy `scripts/start-all-local-with-workers.sh` helper is local-dev-only:
+its optional Docker Desktop worker uses the host gateway to reach a natively
+running API. It is not a deployment template or discovery-service exception.
+Normal local development runs API and React natively; deployment containers
+always use Compose service DNS.
 
 ---
 
@@ -168,7 +182,7 @@ chown $USER:$USER .deploy-config
 - `ARCHITECTURE` - `monolithic` or `microservices`
 - `DB_PROVIDER` - `postgres` or `sqlserver`
 - `DB_PASSWORD` - Database password
-- `NETWORK_MODE` - `bridge` or `host`
+- `NETWORK_MODE` - `bridge` only
 - `HTTP_PORT` - Frontend port (default: 8080)
 - `API_PORT` - API port (default: 5245, microservices only)
 
@@ -240,7 +254,7 @@ cp .deploy-config .deploy-config.backup
     cat > .deploy-config << EOF
     ARCHITECTURE=microservices
     DB_PASSWORD=$DB_PASSWORD
-    NETWORK_MODE=host
+    NETWORK_MODE=bridge
     # ... other settings
     EOF
     ./scripts/deploy-docker.sh --non-interactive
@@ -267,7 +281,7 @@ cp .deploy-config .deploy-config.backup
 **Production Deployment:**
 - [ ] Use `ENVIRONMENT=Production`
 - [ ] Set strong `DB_PASSWORD`
-- [ ] Enable `NETWORK_MODE=host` (Linux)
+- [ ] Keep `NETWORK_MODE=bridge` on every platform
 - [ ] Configure firewall rules
 - [ ] Set `ENABLE_SWAGGER=false`
 - [ ] Backup `.deploy-config` securely
@@ -307,7 +321,7 @@ nano .deploy-config
 ```bash
 nano .deploy-config
 # Change: ENABLE_DISCOVERY=no → ENABLE_DISCOVERY=yes
-# Change: NETWORK_MODE=bridge → NETWORK_MODE=host
+# Keep: NETWORK_MODE=bridge
 # Add: NETWORK_RANGES=192.168.0.0/16
 
 ./scripts/deploy-docker.sh --non-interactive

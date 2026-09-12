@@ -226,6 +226,11 @@ npm run test:run
 
 ## 🐳 Deployment
 
+Deployment networking is bridge-only. Stale network-mode settings are rejected;
+`--include-discovery` explicitly enables discovery even when saved settings
+disable it. See the [deployment networking reference](./docs/DEPLOYMENT_QUICK_REFERENCE.md#-deployment-networking)
+for migration and the local-dev-only worker exception.
+
 ### Docker Deployment Modes
 
 **Monolith Mode** (single container, perfect for Raspberry Pi):

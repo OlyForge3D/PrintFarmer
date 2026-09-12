@@ -147,8 +147,15 @@ Issue #2665 adds `python tests/test-discovery-boundary.py` (requires the
 existing `ruamel.yaml` dependency). It inspects canonical templates, merged
 PostgreSQL/SQL Server configurations with discovery on/off, and adversarial
 socket/proxy/capability fixtures without Docker daemon access.
-It also scans every supported guide under `docs/` and deployment/repair scripts
-for obsolete topology advice, checks sensitive runtime-directory descendants
+It also scans every supported guide under `docs/`, deployment/repair scripts, Dockerfile templates
+and `deploy/nginx` for obsolete topology advice, including configuration-style
+network values and obsolete migration recommendations. The single
+local-dev worker gateway line is an exact, tested exception, not a deployment
+allowlist. Entry-point tests execute the Bash parser and configuration flows
+with side effects stubbed, covering saved discovery disables and rejected
+network modes on normal, regenerate and redeploy paths. Direct generator
+dry-runs and PowerShell fail-fast checks complement these isolated tests.
+The suite checks sensitive runtime-directory descendants
 without rejecting similarly named data paths, and executes the diagnostic
 script against controlled Docker responses. Failure fixtures cover missing or
 stopped services, unsafe isolation, mismatched networks, and each HTTP probe.

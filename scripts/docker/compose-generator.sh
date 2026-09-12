@@ -1266,6 +1266,10 @@ show_dry_run() {
 
 # Main execution
 main() {
+    if [[ "${NETWORK_MODE:-bridge}" != "bridge" ]]; then
+        log_error "Only bridge networking is supported. Set NETWORK_MODE to bridge before generating deployment files."
+        exit 1
+    fi
     parse_args "$@"
     log_info "Docker Compose Generator for PrintFarmer"
     log_info "Output directory: $OUTPUT_DIR"

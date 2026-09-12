@@ -36,6 +36,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+if ($IncludeDiscovery) {
+    throw "Discovery generation requires scripts/deploy-docker.sh --include-discovery. The PowerShell deploy entry point does not support it."
+}
+if ($env:NETWORK_MODE -and $env:NETWORK_MODE -cne 'bridge') {
+    throw "Only bridge networking is supported. Set NETWORK_MODE to bridge before deploying."
+}
 $script:SupportedOrcaSlicerVersion = "2.4.2"
 $script:SupportedOrcaSlicerSha256 = "d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
 $env:ORCASLICER_VERSION = $script:SupportedOrcaSlicerVersion
@@ -1251,6 +1257,10 @@ function Load-DeploymentConfig {
                 $config[$matches[1]] = $matches[2]
             }
         }
+        if ($config['NETWORK_MODE'] -and $config['NETWORK_MODE'].Trim().Trim('"', "'") -cne 'bridge') {
+            throw "Only bridge networking is supported. Set NETWORK_MODE to bridge in the saved deployment configuration."
+        }
+        $config['NETWORK_MODE'] = 'bridge'
         Set-SupportedOrcaSlicerConfig -Config $config
         return $config
     }
