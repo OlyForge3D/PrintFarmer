@@ -354,6 +354,7 @@ jobs:
             build-for-testing
 
       - name: Run login XCUI
+        id: login-xcui
         if: matrix.shard == 1
         timeout-minutes: 25
         run: |
@@ -375,7 +376,7 @@ jobs:
             2>&1 | tee "build-${{ matrix.key }}/Login.log"
 
       - name: Run XCUI shard
-        if: ${{ !cancelled() }}
+        if: ${{ success() || steps.login-xcui.conclusion == 'failure' }}
         timeout-minutes: 25
         env:
           SELECTORS: ${{ matrix.selectors }}

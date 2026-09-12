@@ -120,9 +120,15 @@ class EventTests(unittest.TestCase):
             login_step,
         )
         self.assertIn("test-without-building", login_step)
+        shard_step = workflow.split("      - name: Run XCUI shard\n", 1)[1]
+        shard_step = shard_step.split("\n      - name:", 1)[0]
+        self.assertIn(
+            "if: ${{ success() || steps.login-xcui.conclusion == 'failure' }}",
+            shard_step,
+        )
         self.assertIn(
             'selectors=("${selectors[@]:1}")',
-            workflow.split("      - name: Run XCUI shard\n", 1)[1],
+            shard_step,
         )
         for key in ("iphone-1", "ipad-1"):
             with self.subTest(key=key):
