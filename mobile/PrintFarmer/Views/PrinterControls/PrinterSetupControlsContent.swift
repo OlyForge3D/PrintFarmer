@@ -194,8 +194,6 @@ struct PrinterControlCommandFeedback: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(Color.pfError)
             VStack(alignment: .leading, spacing: 4) {
-                Text("Command failed")
-                    .font(.footnote.weight(.semibold))
                 Text(error.message)
                     .font(.footnote)
                     .foregroundStyle(Color.pfTextPrimary)
