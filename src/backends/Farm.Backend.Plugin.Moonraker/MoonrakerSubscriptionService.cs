@@ -1588,6 +1588,25 @@ public sealed class MoonrakerSubscriptionService(
     {
         if (TryGetFinitePosition(
                 statusObj,
+                "gcode_move",
+                "gcode_position",
+                out double gcodeX,
+                out double gcodeY,
+                out double gcodeZ))
+        {
+            state.GcodePositionMm = new SafetyVector3Dto(gcodeX, gcodeY, gcodeZ);
+        }
+
+        if (state.GcodePositionMm is { } gcodePosition)
+        {
+            state.X = gcodePosition.X;
+            state.Y = gcodePosition.Y;
+            state.Z = gcodePosition.Z;
+            return;
+        }
+
+        if (TryGetFinitePosition(
+                statusObj,
                 "toolhead",
                 "position",
                 out double toolheadX,
@@ -1597,19 +1616,6 @@ public sealed class MoonrakerSubscriptionService(
             state.X = toolheadX;
             state.Y = toolheadY;
             state.Z = toolheadZ;
-        }
-
-        if (TryGetFinitePosition(
-                statusObj,
-                "gcode_move",
-                "gcode_position",
-                out double gcodeX,
-                out double gcodeY,
-                out double gcodeZ))
-        {
-            state.X = gcodeX;
-            state.Y = gcodeY;
-            state.Z = gcodeZ;
         }
     }
 

@@ -93,6 +93,27 @@ public sealed class MoonrakerVerifiedSafetyTests
     }
 
     [Fact]
+    public void HandlePositionUpdate_ToolheadDeltaAfterGcodePosition_RetainsGcodeCoordinates()
+    {
+        var state = new PrinterState();
+        using JsonDocument gcodeDocument = JsonDocument.Parse(
+            """{"gcode_move":{"gcode_position":[10,20,30,0]}}""");
+        using JsonDocument toolheadDocument = JsonDocument.Parse(
+            """{"toolhead":{"position":[100,200,300,0]}}""");
+
+        MoonrakerSubscriptionService.HandlePositionUpdate(
+            state,
+            gcodeDocument.RootElement);
+        MoonrakerSubscriptionService.HandlePositionUpdate(
+            state,
+            toolheadDocument.RootElement);
+
+        Assert.Equal(10, state.X);
+        Assert.Equal(20, state.Y);
+        Assert.Equal(30, state.Z);
+    }
+
+    [Fact]
     public async Task DiscoverVerifiedSafetyAsync_AuthoritativeResponses_ReportsBackendFacts()
     {
         using var handler = new InlineHandler(request =>
