@@ -2,10 +2,9 @@ import XCTest
 
 /// UI tests for the F9 printed-parts inventory list (issue #714).
 ///
-/// Verifies the Inventory tab's segmented Spools/Printed Parts switch
-/// renders real demo catalog data (seeded by `DemoPartsInventoryService`)
-/// and that tapping a part row opens the reusable part-detail sheet with
-/// genuine adjustment controls.
+/// Verifies the accessibility cue and critical adjustment-sheet interaction
+/// against the deterministic printed-parts catalog. Repository loading and
+/// list filtering are covered by `PartsInventoryViewModelTests`.
 @MainActor
 final class PartsInventoryUITests: PrintFarmerUITestCase {
     override var waitsForNavigationReadiness: Bool { true }
@@ -40,18 +39,6 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
                       "Inventory tab should default to the existing Spools segment")
     }
 
-    func testPrintedPartsSegmentRendersDemoCatalog() {
-        openPrintedPartsSegment()
-
-        let bracketRow = app.buttons["partsInventory.row.BRKT-01"]
-        XCTAssertTrue(bracketRow.waitForExistence(timeout: 5),
-                      "Demo SKU BRKT-01 should render in the printed-parts list")
-
-        let clipRow = app.buttons["partsInventory.row.CLIP-02"]
-        XCTAssertTrue(clipRow.waitForExistence(timeout: 3),
-                      "Demo SKU CLIP-02 should render in the printed-parts list")
-    }
-
     func testReorderNeededPartExposesWarningInAccessibilityLabel() {
         openPrintedPartsSegment()
 
@@ -84,38 +71,4 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
         XCTAssertTrue(applyButton.waitForExistence(timeout: 3))
     }
 
-    func testReorderOnlyToggleFiltersList() {
-        openPrintedPartsSegment()
-
-        let clipRow = app.buttons["partsInventory.row.CLIP-02"]
-        XCTAssertTrue(clipRow.waitForExistence(timeout: 5))
-
-        let toggle = app.switches["partsInventory.reorderToggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 3))
-        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
-
-        let toggleActivated = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == '1'"),
-            object: toggle
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [toggleActivated], timeout: 3),
-            .completed,
-            "Needs Reorder Only should expose its active state through the accessible switch control"
-        )
-
-        let clipRemoved = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"),
-            object: clipRow
-        )
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [clipRemoved], timeout: 3),
-            .completed,
-            "Filtering should remove non-reorder rows from the accessibility hierarchy"
-        )
-        XCTAssertTrue(app.buttons["partsInventory.row.BRKT-01"].exists,
-                      "BRKT-01 needs reorder and should remain visible when the toggle is on")
-        XCTAssertFalse(clipRow.exists,
-                       "CLIP-02 does not need reorder and should be hidden when the toggle is on")
-    }
 }

@@ -54,6 +54,38 @@ final class PartsInventoryViewModelTests: XCTestCase {
     }
 
     @MainActor
+    func testInjectedRepositoryLoadPreservesCatalogState() async {
+        let (viewModel, service) = makeSubject()
+        service.partsToReturn = [
+            makePart(sku: "BRKT-01", name: "Mounting Bracket", needsReorder: true),
+            makePart(sku: "CLIP-02", name: "Cable Clip", needsReorder: false)
+        ]
+
+        await viewModel.loadParts()
+
+        XCTAssertEqual(service.listPartsCalls, [false])
+        XCTAssertEqual(viewModel.parts.map(\.sku), ["BRKT-01", "CLIP-02"])
+        XCTAssertEqual(viewModel.parts.map(\.needsReorder), [true, false])
+        XCTAssertFalse(viewModel.isLoading)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    @MainActor
+    func testInjectedRepositoryReorderFilterExcludesNonReorderCatalogItems() async {
+        let (viewModel, service) = makeSubject()
+        service.partsToReturn = [
+            makePart(sku: "BRKT-01", name: "Mounting Bracket", needsReorder: true),
+            makePart(sku: "CLIP-02", name: "Cable Clip", needsReorder: false)
+        ]
+
+        await viewModel.loadParts()
+
+        viewModel.showOnlyNeedingReorder = true
+
+        XCTAssertEqual(viewModel.filteredParts.map(\.sku), ["BRKT-01"])
+    }
+
+    @MainActor
     func testFilteredPartsAppliesSearchTextAcrossSkuNameAndDescription() async {
         let (viewModel, service) = makeSubject()
         service.partsToReturn = [

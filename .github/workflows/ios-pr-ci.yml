@@ -212,10 +212,10 @@ jobs:
   xcui-shards:
     name: XCUI (${{ matrix.family }}, shard ${{ matrix.shard }})
     runs-on: macos-latest
-    needs: select
-    # See the `test` job: skip only on an explicit `false`, never on a
-    # selector failure.
-    if: ${{ !cancelled() && needs.select.outputs.should_run != 'false' }}
+    needs: [select, test]
+    # Avoid allocating eight macOS runners until selection and unit coverage
+    # both pass; run only when the selector marks the change relevant.
+    if: ${{ !cancelled() && needs.select.result == 'success' && needs.test.result == 'success' && needs.select.outputs.should_run != 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -245,7 +245,9 @@ jobs:
             prefix: iPhone
             device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
             selectors: >-
-              -only-testing:PrintFarmerUITests/PartsInventoryUITests
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testReorderNeededPartExposesWarningInAccessibilityLabel
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testTappingPartRowOpensAdjustmentSheet
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testInventoryTabDefaultsToSpoolsSegment
               -only-testing:PrintFarmerUITests/PrinterListUITests
               -only-testing:PrintFarmerUITests/FilamentCoverageUITests
           - key: iphone-4
@@ -285,7 +287,9 @@ jobs:
             prefix: iPad
             device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
             selectors: >-
-              -only-testing:PrintFarmerUITests/PartsInventoryUITests
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testReorderNeededPartExposesWarningInAccessibilityLabel
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testTappingPartRowOpensAdjustmentSheet
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testInventoryTabDefaultsToSpoolsSegment
               -only-testing:PrintFarmerUITests/PrinterListUITests
               -only-testing:PrintFarmerUITests/FilamentCoverageUITests
           - key: ipad-4

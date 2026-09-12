@@ -60,6 +60,13 @@ class EventTests(unittest.TestCase):
         mobile = SCRIPT.parents[1]
         workflow = (mobile.parent / ".github/workflows/ios-pr-ci.yml").read_text()
         matrix = workflow.split("  xcui-shards:\n", 1)[1].split("    defaults:", 1)[0]
+        self.assertIn("needs: [select, test]", matrix)
+        self.assertIn(
+            "if: ${{ !cancelled() && needs.select.result == 'success' && "
+            "needs.test.result == 'success' && "
+            "needs.select.outputs.should_run != 'false' }}",
+            matrix,
+        )
         shards = re.findall(
             r"^          - key: (?P<key>\S+)\n"
             r"            family: (?P<family>iPhone|iPad)\n"
@@ -95,7 +102,9 @@ class EventTests(unittest.TestCase):
             "PrintFarmerUITests/OperatorFeatureVisibilityUITests",
             "PrintFarmerUITests/ScanStationUITests",
             "PrintFarmerUITests/HarvestUITests",
-            "PrintFarmerUITests/PartsInventoryUITests",
+            "PrintFarmerUITests/PartsInventoryUITests/testReorderNeededPartExposesWarningInAccessibilityLabel",
+            "PrintFarmerUITests/PartsInventoryUITests/testTappingPartRowOpensAdjustmentSheet",
+            "PrintFarmerUITests/PartsInventoryUITests/testInventoryTabDefaultsToSpoolsSegment",
             "PrintFarmerUITests/PrinterListUITests",
             "PrintFarmerUITests/FilamentCoverageUITests",
             "PrintFarmerUITests/ColdOfflineShellUITests",
@@ -146,13 +155,25 @@ class EventTests(unittest.TestCase):
                 )
 
         declarations = set()
+        sources_by_suite = {}
         for source in (mobile / "PrintFarmerUITests").glob("*.swift"):
-            declarations.update(re.findall(r"\bclass\s+(\w+)\s*:", source.read_text()))
+            contents = source.read_text()
+            for suite in re.findall(r"\bclass\s+(\w+)\s*:", contents):
+                declarations.add(suite)
+                sources_by_suite[suite] = contents
         for selectors in selectors_by_family.values():
             for selector in selectors:
-                suite = selector.split("/")[1]
+                selector_parts = selector.split("/")
+                suite = selector_parts[1]
                 with self.subTest(suite=suite):
                     self.assertIn(suite, declarations, "A stale class selector executes zero XCTest cases")
+                if len(selector_parts) == 3:
+                    with self.subTest(selector=selector):
+                        self.assertRegex(
+                            sources_by_suite[suite],
+                            rf"\bfunc\s+{selector_parts[2]}\s*\(",
+                            "A stale method selector executes zero XCTest cases",
+                        )
         self.assertIn(
             "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
             (mobile / "PrintFarmerUITests/AttentionActionsUITests.swift").read_text(),
