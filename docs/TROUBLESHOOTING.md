@@ -385,26 +385,24 @@ kill -9 <PID>
 
 **Solutions:**
 
-1. **Use Host Network**
+1. **Check the actual bridge paths**
    ```bash
-   # In docker-compose.yml
-   network_mode: "host"
+   ./scripts/docker/verify-discovery-service.sh
    ```
+   Discovery and API must share the application bridge and communicate at
+   `http://api:5245`. Regenerate with saved deployment settings and recreate
+   stale containers; do not edit templates or generated YAML to repair networking.
 
-2. **Check Container Network**
-   ```bash
-   # Inspect network
-   docker network inspect <network-name>
-   
-   # Test connectivity from container
-   docker exec printfarmer-api ping <printer-ip>
-   ```
+2. **Check routing and printer endpoints**
+   Use configured `DISCOVERY_SUBNETS` and test the printer's TCP/HTTP endpoint.
+   VLAN ACLs, VPNs and Docker Desktop may prevent LAN access; broadcast/multicast
+   traversal is not guaranteed. Fix approved routes or add reachable printers
+   manually rather than granting additional container privileges.
 
-3. **Verify DNS**
-   ```bash
-   # Test DNS resolution
-   docker exec printfarmer-api nslookup <hostname>
-   ```
+3. **Check authentication separately**
+   A healthy HTTP response does not prove heartbeat ingestion. Check recent
+   heartbeat status as an administrator and scan a known reachable printer.
+   See [discovery troubleshooting](DISCOVERY_SERVICE_TROUBLESHOOTING.md).
 
 ## Performance Issues
 

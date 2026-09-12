@@ -24,7 +24,6 @@ This will:
 Use the `--tear-down` option when:
 
 - **Switching database types** (e.g., PostgreSQL → SQL Server)
-- **Changing network modes** (e.g., bridge → host)
 - **Troubleshooting deployment issues** that require a clean slate
 - **Port conflicts** with existing containers
 - **Starting completely fresh** after testing

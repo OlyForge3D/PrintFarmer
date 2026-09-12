@@ -769,6 +769,8 @@ if [[ $NO_ORCA -eq 0 ]]; then
     docker rm -f "$ORCA_CONTAINER_NAME" >/dev/null
   fi
 
+  # Local development only: the optional worker reaches the natively running API
+  # via Docker Desktop's host gateway. Never use this endpoint in deployments.
   ORCA_CONTAINER_ID=$(docker run -d --name "$ORCA_CONTAINER_NAME" \
     -p ${ORCA_WORKER_URL##*:}:8080 \
     -e WorkerAuth__SharedKey="$WorkerAuth__SharedKey" \

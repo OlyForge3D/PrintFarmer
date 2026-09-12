@@ -285,7 +285,7 @@ These should be implemented first:
 2. **YAML validation** (compose file structure)
 3. **Database initialization** (service order, healthchecks)
 4. **Data persistence** (volume mounting)
-5. **Network configuration** (host-network binding)
+5. **Network configuration** (shared bridge and internal service DNS)
 
 ### Medium Priority Gaps (Quality Improvements)
 

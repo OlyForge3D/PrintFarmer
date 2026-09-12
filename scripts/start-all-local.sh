@@ -471,7 +471,7 @@ else
   API_PID=$!
 fi
 
-# Start Printer Discovery service (requires host network for mDNS/broadcast)
+# Start native Printer Discovery service (routed TCP/HTTP probes).
 log_info "Starting Printer Discovery service on 0.0.0.0:5246..."
 cd "$SRC_DIR"
 if [[ $FOREGROUND -eq 1 ]]; then
