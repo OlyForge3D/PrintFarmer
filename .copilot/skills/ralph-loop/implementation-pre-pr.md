@@ -24,8 +24,7 @@ conflicts, and rerun targeted validation. Do not rebase. Reviewer count and risk
 `.github/copilot-instructions.md` § `Risk-Based Review Scope`. For standard and
 documentation-only changes, dispatch one qualified non-author reviewer using a different model
 family than the implementation agent. For high-risk changes, dispatch Bishop, Hicks, and Vasquez
-as parallel read-only task agents—not sessions—and explicitly prohibit builds, installs, and
-tests. An unavailable required model blocks the PR; never substitute or self-review. Post exactly
+as parallel read-only task agents—not sessions—with `tools: ["*"]` (via `.github/agents/code-review-*.agent.md` or `code-review` task agents), provide complete workspace worktree root path (`cwd`), base branch, and target head commit SHA, and explicitly prohibit builds, installs, tests, or file modifications. An unavailable required model blocks the PR; never substitute or self-review. Post exactly
 the number of genuine canonical verdict comments the canonical rule requires: one for a standard
 or documentation-only change and three for a high-risk change.
 If a required high-risk panel member authored the PR, block the PR; never substitute Dallas or
