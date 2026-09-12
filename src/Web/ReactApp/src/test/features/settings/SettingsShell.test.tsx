@@ -15,6 +15,10 @@ vi.mock('@/features/printer-groups/pages/PrinterGroupsPage', () => ({
   PrinterGroupsPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="printer-groups-page" data-embedded={String(embedded)}>Printer Groups Page</div>,
 }));
 
+vi.mock('@/features/cameras/pages/CamerasPage', () => ({
+  CamerasPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="cameras-page" data-embedded={String(embedded)}>Cameras Page</div>,
+}));
+
 vi.mock('@/features/nfc/pages/NfcBindingsPage', () => ({
   NfcBindingsPage: ({ embedded }: { embedded?: boolean }) => <div data-testid="nfc-bindings-page" data-embedded={String(embedded)}>NFC Bindings Page</div>,
 }));
@@ -364,6 +368,17 @@ describe('SettingsShell', () => {
     for (const label of ['Locations', 'Power Monitors', 'Catalog']) {
       expect(screen.queryByRole('link', { name: label })).not.toBeInTheDocument();
     }
+  });
+
+  it('renders the accessible Cameras destination on its canonical admin settings URL (#2644)', () => {
+    setAuthRoles(['farm_admin']);
+    renderSettings('/admin/settings?tab=hardware&sub=cameras');
+
+    expect(getCategoryButton('Cameras')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('cameras-page')).toHaveAttribute('data-embedded', 'true');
+    expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/settings');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('tab=hardware');
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=cameras');
   });
 
   it('never falls back to personal content for a user with no admin grants', () => {    setAuthRoles(['farm_user']);
