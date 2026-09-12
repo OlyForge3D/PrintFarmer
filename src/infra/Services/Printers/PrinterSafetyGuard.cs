@@ -132,12 +132,13 @@ public sealed class PrinterSafetyGuard(
                     _statusCache.GetStatus(printerId),
                     move,
                     _timeProvider.GetUtcNow().UtcDateTime),
+            PrinterSafetyOperation.MmuChangeTool or
+            PrinterSafetyOperation.MmuLoad or
+            PrinterSafetyOperation.MmuEject =>
+                PrinterSafetyValidationResult.Allowed,
             PrinterSafetyOperation.FilamentLoad or
             PrinterSafetyOperation.FilamentUnload or
             PrinterSafetyOperation.FilamentChange or
-            PrinterSafetyOperation.MmuChangeTool or
-            PrinterSafetyOperation.MmuLoad or
-            PrinterSafetyOperation.MmuEject or
             PrinterSafetyOperation.Extrusion =>
                 ValidateExtrusion(
                     safety,
