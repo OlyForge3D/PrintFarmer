@@ -689,6 +689,15 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             },
             "Removing obsolete surfaces must preserve material controls"
         )
+
+        // Verify active workflow behaviour when calibration is started
+        XCTAssertNotNil(model.calibrationBlockedReason)
+        await model.startCalibration()
+        try await settle(controller)
+        XCTAssertNotNil(model.calibrationStep)
+        XCTAssertNotNil(model.calibrationBlockedReason)
+        XCTAssertNil(service.homeCalledWith)
+        XCTAssertNil(service.saveZOffsetCalledWith)
     }
 
     func test_unsupportedControlsStayDisabledInTheSamePositions() async throws {
