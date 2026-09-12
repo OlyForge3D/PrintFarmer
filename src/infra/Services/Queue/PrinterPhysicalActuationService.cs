@@ -604,8 +604,11 @@ public sealed class PrinterPhysicalActuationService(
             return;
         }
 
-        state.PhysicalControlRequiresReconciliation = retainBarrier;
-        if (!retainBarrier)
+        if (retainBarrier)
+        {
+            state.PhysicalControlRequiresReconciliation = true;
+        }
+        else
         {
             ClearBarrier(state);
         }

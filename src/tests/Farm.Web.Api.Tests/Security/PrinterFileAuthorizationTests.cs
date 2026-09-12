@@ -109,7 +109,7 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
-    public async Task DeletePrinterFile_BackendException_IsRedactedAndRetainsBarrier()
+    public async Task DeletePrinterFile_BackendException_IsRedactedAndFencesSubsequentActuation()
     {
         Guid actorId = Guid.NewGuid();
         Guid printerId = await SeedAuthorizedPrinterAsync();
@@ -133,6 +133,16 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime, IDisposable
         string body = await response.Content.ReadAsStringAsync();
         body.Should().NotContain("private");
         body.Should().NotContain("token");
+
+        using HttpRequestMessage retryRequest = new(
+            HttpMethod.Delete,
+            $"/api/printers/{printerId}/files")
+        {
+            Content = JsonContent.Create(new { fileName = "reviewed.gcode" }),
+        };
+        HttpResponseMessage retryResponse = await client.SendAsync(retryRequest);
+        retryResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
+
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         PrinterDispatchState state = await db.PrinterDispatchStates
