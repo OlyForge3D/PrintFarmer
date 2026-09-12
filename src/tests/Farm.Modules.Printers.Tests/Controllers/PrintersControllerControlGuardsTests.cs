@@ -159,9 +159,9 @@ public class PrintersControllerControlGuardsTests
     }
 
     [Theory]
-    [InlineData("change", PrinterSafetyOperation.FilamentChange)]
-    [InlineData("load", PrinterSafetyOperation.FilamentLoad)]
-    [InlineData("eject", PrinterSafetyOperation.FilamentUnload)]
+    [InlineData("change", PrinterSafetyOperation.MmuChangeTool)]
+    [InlineData("load", PrinterSafetyOperation.MmuLoad)]
+    [InlineData("eject", PrinterSafetyOperation.MmuEject)]
     [InlineData("qidibox-unload", PrinterSafetyOperation.FilamentUnload)]
     [InlineData("qidibox-eject", PrinterSafetyOperation.FilamentUnload)]
     [InlineData("afc-load", PrinterSafetyOperation.FilamentChange)]
@@ -246,7 +246,7 @@ public class PrintersControllerControlGuardsTests
             It.IsAny<CancellationToken>()), Times.Once);
         capabilities.Verify(
             service => service.InvalidateVerifiedSafety(id),
-            route is "change" or "load" or "eject" ? Times.Once() : Times.Never());
+            Times.Never());
         printersService.Verify(service => service.SendGcodeAsync(
             It.IsAny<Guid>(),
             It.IsAny<string>(),

@@ -263,6 +263,9 @@ public sealed class PrinterSafetyGuardTests
                 supported,
                 supported,
                 supported,
+                supported,
+                supported,
+                supported,
                 supported),
             new VerifiedSafetyExtrusionDto(
                 new VerifiedSafetyScalarFactDto(

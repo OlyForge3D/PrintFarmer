@@ -3688,14 +3688,13 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "Tool index must be between 0 and 16."));
         }
 
-        _printerBackendCapabilitiesService.InvalidateVerifiedSafety(id);
         return await ExecuteDirectBooleanControlAsync(
             id,
             "mmu_change_tool",
             "mmu_change_tool",
             token => _printersService.SendGcodeAsync(id, $"MMU_CHANGE_TOOL TOOL={tool}", token),
             ct,
-            safetyOperation: PrinterSafetyOperation.FilamentChange);
+            safetyOperation: PrinterSafetyOperation.MmuChangeTool);
     }
 
     /// <summary>
@@ -3711,14 +3710,13 @@ public class PrintersController(
     [ProducesResponseType(404)]
     public async Task<ActionResult<CommandResult>> MmuEjectAsync(Guid id, CancellationToken ct)
     {
-        _printerBackendCapabilitiesService.InvalidateVerifiedSafety(id);
         return await ExecuteDirectBooleanControlAsync(
             id,
             "mmu_eject",
             "mmu_eject",
             token => _printersService.SendGcodeAsync(id, "MMU_EJECT", token),
             ct,
-            safetyOperation: PrinterSafetyOperation.FilamentUnload);
+            safetyOperation: PrinterSafetyOperation.MmuEject);
     }
 
     /// <summary>
@@ -3734,14 +3732,13 @@ public class PrintersController(
     [ProducesResponseType(404)]
     public async Task<ActionResult<CommandResult>> MmuLoadAsync(Guid id, CancellationToken ct)
     {
-        _printerBackendCapabilitiesService.InvalidateVerifiedSafety(id);
         return await ExecuteDirectBooleanControlAsync(
             id,
             "mmu_load",
             "mmu_load",
             token => _printersService.SendGcodeAsync(id, "MMU_LOAD", token),
             ct,
-            safetyOperation: PrinterSafetyOperation.FilamentLoad);
+            safetyOperation: PrinterSafetyOperation.MmuLoad);
     }
 
     /// <summary>

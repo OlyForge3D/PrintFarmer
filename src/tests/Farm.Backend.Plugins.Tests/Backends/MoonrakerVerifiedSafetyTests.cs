@@ -132,7 +132,7 @@ public sealed class MoonrakerVerifiedSafetyTests
     }
 
     [Fact]
-    public async Task DiscoverVerifiedSafetyAsync_HappyHareMmuObject_ReportsMmuFilamentControlsSupported()
+    public async Task DiscoverVerifiedSafetyAsync_HappyHareMmuObject_ReportsOnlyMmuControlsSupported()
     {
         using var handler = new InlineHandler(request =>
         {
@@ -158,14 +158,23 @@ public sealed class MoonrakerVerifiedSafetyTests
                     CancellationToken.None);
 
         Assert.Equal(
-            VerifiedSafetySupport.Supported,
+            VerifiedSafetySupport.Unsupported,
             result.Operations.FilamentLoad.Support);
         Assert.Equal(
-            VerifiedSafetySupport.Supported,
+            VerifiedSafetySupport.Unsupported,
             result.Operations.FilamentUnload.Support);
         Assert.Equal(
-            VerifiedSafetySupport.Supported,
+            VerifiedSafetySupport.Unsupported,
             result.Operations.FilamentChange.Support);
+        Assert.Equal(
+            VerifiedSafetySupport.Supported,
+            result.Operations.MmuChangeTool.Support);
+        Assert.Equal(
+            VerifiedSafetySupport.Supported,
+            result.Operations.MmuLoad.Support);
+        Assert.Equal(
+            VerifiedSafetySupport.Supported,
+            result.Operations.MmuEject.Support);
     }
 
     [Fact]
