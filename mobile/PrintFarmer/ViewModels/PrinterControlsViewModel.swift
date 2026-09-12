@@ -32,6 +32,22 @@ struct ControlCommand: Equatable, Sendable {
 
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
 
+    enum Section: String, CaseIterable {
+        case heat, motion, material
+    }
+
+    var section: Section {
+        switch kind {
+        case .preheat, .heater, .heaterTargets:
+            return .heat
+        case .home, .jog, .moveTo, .disableMotors,
+             .calibrationHome, .calibrationPosition, .calibrationAdjust, .calibrationSave:
+            return .motion
+        case .extrusion, .filament:
+            return .material
+        }
+    }
+
     enum Kind: Equatable, Sendable {
         /// A preheat/cool-down carries the concrete target setpoints it
         /// requested (not just the preset) so confirmation compares against the
@@ -269,6 +285,8 @@ final class PrinterControlsViewModel: ObservableObject {
     @Published private(set) var isLoadingHardware = false
     @Published private(set) var hardwareLoadError: String?
     @Published private(set) var commandNotice: String?
+    // Keep the originating card after pendingCommand is cleared by an outcome.
+    @Published private(set) var feedbackSection: ControlCommand.Section?
     @Published private(set) var isActive = true
     @Published private(set) var calibrationStep: ZOffsetCalibrationStep?
     @Published private(set) var calibrationOffset: Double?
@@ -594,6 +612,9 @@ final class PrinterControlsViewModel: ObservableObject {
         do {
             feedrate = try MaterialControlInput.feedrate(distance: distanceMm, speed: speedMmPerSecond)
         } catch {
+            guard pendingCommand == nil else { return }
+            feedbackSection = .material
+            lastError = nil
             commandNotice = error.localizedDescription
             return
         }
@@ -1494,11 +1515,14 @@ final class PrinterControlsViewModel: ObservableObject {
             case .calibrationHome, .calibrationPosition, .calibrationAdjust, .calibrationSave:
                 break
             default:
+                feedbackSection = command.section
+                lastError = nil
                 commandNotice = "Cancel calibration before another setup command. Emergency Stop remains independent."
                 return false
             }
         }
         guard canControl else {
+            feedbackSection = command.section
             commandNotice = nil
             lastError = ControlsError(
                 command: command,
@@ -1510,6 +1534,7 @@ final class PrinterControlsViewModel: ObservableObject {
         guard let identity = commandIdentity,
               let lifetime = commandLeases.acquire(identity, token: command.id, workflow: calibrationLease) else { return false }
         commandLease = (command.id, lifetime)
+        feedbackSection = command.section
         lastError = nil
         commandNotice = nil
         telemetryConfirmed = false

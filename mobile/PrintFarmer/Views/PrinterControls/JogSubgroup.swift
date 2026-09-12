@@ -410,6 +410,7 @@ struct PrinterMotionControls: View {
         VStack(alignment: .leading, spacing: 0) {
             EssentialControlHeading(title: "Move & home", detail: homingDescription)
                 .padding(.bottom, 14)
+            PrinterControlCommandFeedback(viewModel: viewModel, section: .motion)
             row {
                 position("X", value: viewModel.printer.x)
                 position("Y", value: viewModel.printer.y)
@@ -527,7 +528,8 @@ struct PrinterMotionControls: View {
             title: title, identifier: "printer.controls.jog.\(axis.lowercased()).\(direction)",
             accessibilityTitle: "Move \(axis) \(direction)",
             hint: available ? "Moves \(step.formatted()) millimeters." : "\(axis) movement is unavailable.",
-            compact: true, systemImage: symbol, value: pending ? "Pending" : nil, minimumHeight: 48
+            compact: true, systemImage: symbol, value: pending ? "Pending" : nil, minimumHeight: 48,
+            isPending: pending
         ) { Task { await viewModel.jog(axis: axis, distanceMm: sign * step) } }
         .disabled(!available || !viewModel.canControl || viewModel.isExecuting)
     }
@@ -547,7 +549,8 @@ struct PrinterMotionControls: View {
             hint: available ? "Homes \(axes.joined(separator: ", "))." : "This homing operation is unavailable.",
             compact: true, systemImage: "house.fill",
             value: viewModel.pendingCommand?.kind == .home(axes: axes) ? "Pending" : nil,
-            tinted: true, minimumHeight: 48
+            tinted: true, minimumHeight: 48,
+            isPending: viewModel.pendingCommand?.kind == .home(axes: axes)
         ) { Task { await action() } }
         .disabled(!available || !viewModel.canControl || viewModel.isExecuting)
     }

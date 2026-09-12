@@ -58,6 +58,76 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     // MARK: - Helpers
 
+    func test_feedbackSection_coversEveryEssentialCommand() {
+        let target = SafetyVector3Dto(x: 1, y: 1, z: 1)
+        let commands: [(ControlCommand.Kind, ControlCommand.Section)] = [
+            (.preheat(.pla, hotendTarget: 200, bedTarget: 60), .heat),
+            (.heater(.hotend, target: 200), .heat),
+            (.heaterTargets(hotend: 200, bed: 60), .heat),
+            (.home(axes: ["X", "Y", "Z"]), .motion),
+            (.jog(axis: "X", distanceMm: 1), .motion),
+            (.moveTo(x: 1, y: 1, z: 1, feedrateMmMin: nil), .motion),
+            (.disableMotors, .motion),
+            (.calibrationHome, .motion),
+            (.calibrationPosition(target: target, centered: true), .motion),
+            (.calibrationAdjust(delta: 0.01, expectedZ: 1), .motion),
+            (.calibrationSave(offsetMm: 0), .motion),
+            (.extrusion(distanceMm: 10, feedrateMmMin: 60), .material),
+            (.filament(.load), .material),
+            (.filament(.unload), .material),
+            (.filament(.change), .material)
+        ]
+        for (kind, section) in commands {
+            XCTAssertEqual(ControlCommand(kind: kind, startedAt: Date()).section, section)
+        }
+    }
+
+    func test_feedbackSection_survivesOutcomesAndFollowsNextCommand() async throws {
+        var printer = try idlePrinter()
+        printer.homedAxes = ""
+        let model = try makeViewModel(printer: printer, capabilities: Self.fullCaps)
+        await model.loadCapabilities()
+        await model.homeXY()
+        XCTAssertEqual(model.feedbackSection, .motion)
+        XCTAssertNotNil(model.pendingCommand)
+
+        await model.preheat(.pla)
+        XCTAssertEqual(model.feedbackSection, .motion, "A rejected concurrent action must not steal pending feedback")
+        printer.homedAxes = "xy"
+        model.handlePrinterUpdate(printer)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertEqual(model.feedbackSection, .motion)
+        XCTAssertTrue(model.commandNotice?.contains("Matching telemetry") == true)
+
+        mockService.errorToThrow = NetworkError.timeout
+        await model.setHeaterTarget(.hotend, target: 200)
+        XCTAssertEqual(model.feedbackSection, .heat)
+        XCTAssertNotNil(model.lastError)
+        XCTAssertNil(model.commandNotice)
+        model.dismissError()
+        XCTAssertNil(model.lastError)
+
+        mockService.errorToThrow = nil
+        await model.homeZ()
+        XCTAssertEqual(model.feedbackSection, .motion)
+        model.cancelPendingCommand()
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertEqual(model.feedbackSection, .motion)
+        XCTAssertTrue(model.commandNotice?.contains("may still execute") == true)
+
+        await model.extrude(distanceMm: 2, speedMmPerSecond: 1)
+        XCTAssertEqual(model.feedbackSection, .material)
+        XCTAssertTrue(model.commandNotice?.contains("Choose") == true)
+    }
+
+    func test_feedbackSection_blockedCommandIsReportedAtItsOrigin() async throws {
+        let model = try makeViewModel(capabilities: Self.fullCaps)
+        await model.homeAll()
+        XCTAssertEqual(model.feedbackSection, .motion)
+        XCTAssertEqual(model.lastError?.command.section, .motion)
+        XCTAssertNil(mockService.homeCalledWith)
+    }
+
     private func makeViewModel(
         printer: Printer? = nil,
         capabilities: PrinterBackendCapabilities? = nil,
