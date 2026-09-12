@@ -1,11 +1,14 @@
+using System.Reflection;
 using Farm.Infrastructure.Dtos;
-using Farm.Infrastructure.Services.SystemStatus;
 using Farm.Infrastructure.Settings;
 
-namespace Farm.Web.Api.Services.SystemInfo;
+namespace Farm.Infrastructure.Services.SystemStatus;
 
 /// <summary>Reads this API process and configured topology without network or host inspection.</summary>
-public sealed class LocalServiceInventorySource(ISettingsService settings, IConfiguration configuration) : IServiceInventorySource
+/// <param name="settings">Configured discovery topology.</param>
+/// <param name="applicationAssembly">The API assembly supplied by the host, not this infrastructure assembly.</param>
+/// <param name="splitDeployment">The host's existing deployment-mode decision.</param>
+public sealed class LocalServiceInventorySource(ISettingsService settings, Assembly applicationAssembly, bool splitDeployment) : IServiceInventorySource
 {
     private static readonly string ProcessInstanceId = Guid.NewGuid().ToString("N");
 
@@ -14,9 +17,8 @@ public sealed class LocalServiceInventorySource(ISettingsService settings, IConf
     {
         cancellationToken.ThrowIfCancellationRequested();
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        (string? version, string? commit) = ApplicationBuildObservation.FromAssembly(typeof(LocalServiceInventorySource).Assembly);
+        (string? version, string? commit) = ApplicationBuildObservation.FromAssembly(applicationAssembly);
         NetworkDiscoverySettings? discovery = settings.GetByKey(NetworkDiscoverySettings.SectionName) as NetworkDiscoverySettings;
-        bool split = Farm.Modules.Calibration.Startup.CalibrationProfileResolutionStartup.IsSplitDeployment(configuration);
         IReadOnlyList<ServiceReplicaObservationDto> rows =
         [
             new()
@@ -41,9 +43,9 @@ public sealed class LocalServiceInventorySource(ISettingsService settings, IConf
             },
             new()
             {
-                ServiceId = "slicer-host", Component = "slicer-host", Required = split,
-                ObservationState = split ? InventoryObservationState.Unknown : InventoryObservationState.NotInstalled,
-                Source = "TopologyConfiguration", ReasonCode = split ? "ExternalHostNotObserved" : "NoSeparateHostConfigured",
+                ServiceId = "slicer-host", Component = "slicer-host", Required = splitDeployment,
+                ObservationState = splitDeployment ? InventoryObservationState.Unknown : InventoryObservationState.NotInstalled,
+                Source = "TopologyConfiguration", ReasonCode = splitDeployment ? "ExternalHostNotObserved" : "NoSeparateHostConfigured",
             },
         ];
         return Task.FromResult(rows);

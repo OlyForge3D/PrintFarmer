@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -7,6 +7,8 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Infrastructure.Services.SystemStatus;
+using Farm.Slicer.Module.Services.SystemInfo;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -66,6 +68,24 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         _adminClient?.Dispose();
         _nonAdminClient?.Dispose();
         return Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task InventorySources_HostDiResolvesModuleImplementationsAndPreservesApiBuild()
+    {
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IServiceInventorySource[] sources = scope.ServiceProvider.GetServices<IServiceInventorySource>().ToArray();
+        sources.Should().HaveCount(2);
+        LocalServiceInventorySource local = sources.OfType<LocalServiceInventorySource>().Single();
+        SlicerServiceInventorySource slicer = sources.OfType<SlicerServiceInventorySource>().Single();
+        Assert.Same(typeof(ISystemInfoService).Assembly, local.GetType().Assembly);
+        Assert.Same(typeof(SlicerDbContext).Assembly, slicer.GetType().Assembly);
+
+        IReadOnlyList<ServiceReplicaObservationDto> rows = await local.ReadAsync(CancellationToken.None);
+        ServiceReplicaObservationDto api = rows.Single(row => row.Component == "api");
+        (string? version, string? commit) = ApplicationBuildObservation.FromAssembly(typeof(Program).Assembly);
+        api.ApplicationVersion.Should().Be(version);
+        api.SourceCommit.Should().Be(commit);
     }
 
     [Fact]

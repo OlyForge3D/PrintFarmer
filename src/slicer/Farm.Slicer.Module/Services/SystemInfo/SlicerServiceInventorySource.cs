@@ -3,8 +3,9 @@ using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.SystemStatus;
 using Farm.Slicer.Module.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Services.SystemInfo;
+namespace Farm.Slicer.Module.Services.SystemInfo;
 
 /// <summary>Projects existing slicer registrations, including every replica, without reading worker endpoints.</summary>
 public sealed class SlicerServiceInventorySource(SlicerDbContext? db, ILogger<SlicerServiceInventorySource> logger) : IServiceInventorySource
