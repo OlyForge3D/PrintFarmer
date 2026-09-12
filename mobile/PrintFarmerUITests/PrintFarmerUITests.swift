@@ -1151,11 +1151,16 @@ class PrintFarmerUITestCase: XCTestCase {
     ) -> T? {
         do {
             let observeInterruption: () throws -> ShellNode? = navigationAlertDismissals.isEmpty ? { nil } : {
-                let alert = self.app.alerts.firstMatch
-                guard budget.exists(alert, named: "navigation interruption") else { return nil }
-                return try budget.perform("observed alert snapshot") {
-                    ShellNode(try alert.snapshot())
+                for title in self.navigationAlertDismissals.keys.sorted() {
+                    let alert = self.app.alerts[title]
+                    guard budget.exists(alert, named: "navigation interruption: \(title)") else {
+                        continue
+                    }
+                    return try budget.perform("observed alert snapshot") {
+                        ShellNode(try alert.snapshot())
+                    }
                 }
+                return nil
             }
             return try budget.waitForShell(
                 observe: {
