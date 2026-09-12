@@ -35,7 +35,7 @@ if [[ -x "$SYNC_SCRIPT" ]]; then
   "$SYNC_SCRIPT" --check
 fi
 
-TAG="v${BASE_VERSION}-beta.${BETA_NUM}"
+TAG="ios/v${BASE_VERSION}-beta.${BETA_NUM}"
 RELEASE_REMOTE="ios-release"
 FORBIDDEN_PATHS=(.squad/ .ai-team/ .ai-team-templates/ team-docs/ docs/proposals/)
 

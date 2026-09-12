@@ -4,8 +4,8 @@
 // doesn't trigger for an accepted insider-channel tag, the release step times out.
 //
 // This test asserts:
-//   1. The GH Actions tag globs accept stable and supported insider-channel tags.
-//   2. The globs reject arbitrary suffixes, matching the release validators.
+//   1. Container globs accept only stable and insider server tags.
+//   2. TestFlight globs accept only ios/* prerelease tags.
 //   3. Stable and insider branch guards remain explicit.
 //   4. Promotion keeps stable/latest and insider channel pointers isolated.
 
@@ -57,18 +57,18 @@ function globToRegex(glob) {
   return new RegExp(regex);
 }
 
-// Extract the `on.push.tags` block from docker-publish.yml as a list of
-// raw glob strings. Parsed with a targeted line scanner (not a full YAML
+// Extract a workflow's `on.push.tags` block as a list of raw glob strings.
+// Parsed with a targeted line scanner (not a full YAML
 // parser) so this test has no runtime deps beyond node:*.
-async function loadDockerPublishTagGlobs() {
+async function loadWorkflowTagGlobs(workflowName) {
   const workflowPath = path.join(
-    repositoryRoot, '.github', 'workflows', 'docker-publish.yml',
+    repositoryRoot, '.github', 'workflows', workflowName,
   );
   const source = await readFile(workflowPath, 'utf8');
   const lines = source.split(/\r?\n/);
 
   const pushIndex = lines.findIndex((line) => /^\s{2}push:\s*$/.test(line));
-  assert.notEqual(pushIndex, -1, 'docker-publish.yml: `on.push` block not found');
+  assert.notEqual(pushIndex, -1, `${workflowName}: on.push block not found`);
 
   let tagsIndex = -1;
   for (let index = pushIndex + 1; index < lines.length; index += 1) {
@@ -81,7 +81,7 @@ async function loadDockerPublishTagGlobs() {
       break;
     }
   }
-  assert.notEqual(tagsIndex, -1, 'docker-publish.yml: `on.push.tags` block not found');
+  assert.notEqual(tagsIndex, -1, `${workflowName}: on.push.tags block not found`);
 
   const globs = [];
   for (let index = tagsIndex + 1; index < lines.length; index += 1) {
@@ -95,7 +95,7 @@ async function loadDockerPublishTagGlobs() {
       break;
     }
   }
-  assert.ok(globs.length > 0, 'docker-publish.yml: no tag globs parsed');
+  assert.ok(globs.length > 0, `${workflowName}: no tag globs parsed`);
   return globs;
 }
 
@@ -115,7 +115,7 @@ async function loadReleasePolicy() {
 }
 
 test('docker-publish tag globs cover stable and insider release validators', async () => {
-  const globs = await loadDockerPublishTagGlobs();
+  const globs = await loadWorkflowTagGlobs('docker-publish.yml');
   const globRegexes = globs.map(globToRegex);
   const policy = await loadReleasePolicy();
   const matchesAnyGlob = (tag) => globRegexes.some((rx) => rx.test(tag));
@@ -126,8 +126,6 @@ test('docker-publish tag globs cover stable and insider release validators', asy
     ['stable', 'v10.20.30'],
     ['insider', 'v1.2.3-insider.1'],
     ['insider', 'v1.2.3-insider.42'],
-    ['insider', 'v1.2.3-beta.1'],
-    ['insider', 'v1.2.3-rc.99'],
   ];
   for (const [channel, tag] of accepted) {
     assert.ok(policy[channel].test(tag),
@@ -138,6 +136,10 @@ test('docker-publish tag globs cover stable and insider release validators', asy
 
   const rejected = [
     'v1.2.3-alpha.1',
+    'v1.2.3-beta.1',
+    'v1.2.3-rc.1',
+    'ios/v1.2-beta.1',
+    'ios/v1.2.3-beta.1',
     'v1.2.3-preview',
     'v1.2.3-insider',
     'v1.2.3-beta',
@@ -161,6 +163,40 @@ test('docker-publish tag globs cover stable and insider release validators', asy
     'insider releases must remain bound to development');
 });
 
+test('TestFlight and container tag namespaces are disjoint', async () => {
+  const dockerGlobs = (await loadWorkflowTagGlobs('docker-publish.yml')).map(globToRegex);
+  const iosGlobs = (await loadWorkflowTagGlobs('testflight-beta.yml')).map(globToRegex);
+  const matches = (globs, tag) => globs.some((rx) => rx.test(tag));
+
+  for (const tag of [
+    'ios/v1.0-alpha.1',
+    'ios/v1.0-beta.106',
+    'ios/v1.0-rc.2',
+    'ios/v1.2.3-beta.4',
+  ]) {
+    assert.ok(matches(iosGlobs, tag), `TestFlight must accept ${tag}`);
+    assert.ok(!matches(dockerGlobs, tag), `Docker must reject mobile tag ${tag}`);
+  }
+
+  for (const tag of ['v1.2.3', 'v1.2.3-insider.4', 'v1.0-beta.106']) {
+    assert.ok(!matches(iosGlobs, tag), `TestFlight must reject unscoped tag ${tag}`);
+  }
+
+  const consolidatedPath = path.join(
+    repositoryRoot, '.github', 'workflows', 'consolidated-release.yml',
+  );
+  const consolidated = await readFile(consolidatedPath, 'utf8');
+  assert.doesNotMatch(consolidated, /mobile-release:|skip_mobile|iOS Release \(TestFlight\)/,
+    'container releases must not embed or implicitly trigger TestFlight');
+
+  const testflightPath = path.join(
+    repositoryRoot, '.github', 'workflows', 'testflight-beta.yml',
+  );
+  const testflight = await readFile(testflightPath, 'utf8');
+  assert.match(testflight, /TAG_NAME="ios\/v\$\{VERSION\}-beta\./,
+    'automatic TestFlight tags must use the ios/ namespace');
+});
+
 test('Docker promotion isolates stable and insider channel pointers', async () => {
   const workflowPath = path.join(
     repositoryRoot, '.github', 'workflows', 'docker-publish.yml',
@@ -169,8 +205,8 @@ test('Docker promotion isolates stable and insider channel pointers', async () =
 
   assert.match(source, /TAGS\+=\("\$\{major\}\.\$\{minor\}" "\$major" stable latest\)/,
     'stable releases must promote stable, latest, major, and minor pointers');
-  assert.match(source, /VERSION" =~ -\(insider\|beta\|rc\)\\\.\[0-9\]\+\$/,
-    'supported prereleases must be recognized as insider-channel builds');
+  assert.match(source, /VERSION" =~ -insider\\\.\[0-9\]\+\$/,
+    'only server insider prereleases may move the insider pointer');
   assert.match(source, /TAGS\+=\(insider\)/,
     'insider releases must promote the insider pointer');
   assert.equal(

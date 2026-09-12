@@ -9,11 +9,16 @@ PrintFarmer publishes two end-user channels:
 | Stable | `main` | `vX.Y.Z` | `stable` and `latest` | Default for all installations |
 | Insider | `development` | `vX.Y.Z-insider.N` | `insider` | Explicit opt-in for faster, potentially less stable builds |
 
-`-beta.N` and `-rc.N` tags remain supported prerelease stages and also move only
-the `insider` container pointer. Prereleases never move `stable`, `latest`, or
-stable major/minor tags. The repository `VERSION` file stores the base version
-(`vX.Y.Z`); an insider, beta, or RC suffix is supplied when dispatching the
-release workflow.
+Container prereleases use only `vX.Y.Z-insider.N`; they never move `stable`,
+`latest`, or stable major/minor tags. Mobile TestFlight releases use the separate
+`ios/vX.Y-beta.N`, `ios/vX.Y-alpha.N`, or `ios/vX.Y-rc.N` namespace and never
+trigger container publication. The repository `VERSION` file stores the server
+base version (`vX.Y.Z`); the insider suffix is supplied when dispatching the
+container release workflow.
+
+Historical `v1.0-beta.*` mobile tags remain immutable for compatibility. Matching
+`ios/v1.0-beta.*` aliases point to the same commits; only the namespaced tags are
+used for future TestFlight releases.
 
 Dispatch `.github/workflows/consolidated-release.yml` from the branch matching
 the selected channel. The workflow rejects branch/channel/version mismatches.

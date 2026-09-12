@@ -434,9 +434,12 @@ server.
 
 ## TestFlight Betas
 
-The iOS beta line is authoritative for TestFlight versions. Use `v1.0-beta.N`
-tags for beta releases; the repo-root `VERSION` file is not used to derive iOS
-beta marketing versions.
+The iOS beta line is authoritative for TestFlight versions. Use
+`ios/v1.0-beta.N` tags for beta releases; the `ios/` namespace prevents mobile
+tags from triggering server container publication. The repo-root `VERSION` file
+is not used to derive iOS beta marketing versions. Historical unscoped
+`v1.0-beta.*` tags remain available, with matching `ios/v1.0-beta.*` aliases at
+the same commits; future releases use only the namespaced form.
 
 To cut an on-demand internal beta from GitHub Actions:
 
@@ -444,14 +447,15 @@ To cut an on-demand internal beta from GitHub Actions:
 gh workflow run testflight-beta.yml -f environment=internal
 ```
 
-The workflow creates and pushes the next `v1.0-beta.N` tag from the latest beta
-tag series unless `marketing_version` or `beta_number` inputs are supplied.
+The workflow creates and pushes the next `ios/v1.0-beta.N` tag from the latest
+namespaced beta tag series unless `marketing_version` or `beta_number` inputs
+are supplied.
 
 The canonical tag-based method is:
 
 ```bash
-git tag -a v1.0-beta.<N> -m "PrintFarmer iOS beta v1.0-beta.<N>"
-git push origin v1.0-beta.<N>
+git tag -a ios/v1.0-beta.<N> -m "PrintFarmer iOS beta ios/v1.0-beta.<N>"
+git push origin ios/v1.0-beta.<N>
 ```
 
 ## License

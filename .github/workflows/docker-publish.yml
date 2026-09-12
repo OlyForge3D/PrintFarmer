@@ -18,14 +18,12 @@ on:
     # one-or-more of the preceding character, `.` is literal, `*` is zero-or-more
     # of any non-`/` character. The three patterns below must match — and only
     # match — the release-tag set accepted by consolidated-release.yml's
-    # channel validator. Stable tags are vX.Y.Z; insider-channel tags use
-    # -insider.N, -beta.N, or -rc.N. See the regression guard at
-    # scripts/ci/tests/test-release-tag-triggers.mjs.
+    # channel validator. Stable tags are vX.Y.Z and insider tags use
+    # -insider.N. Mobile releases use the separate ios/* namespace. See the
+    # regression guard at scripts/ci/tests/test-release-tag-triggers.mjs.
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+-insider.[0-9]+'
-      - 'v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+'
-      - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
   workflow_dispatch:
     inputs:
       tag_suffix:
@@ -897,7 +895,7 @@ jobs:
             if [[ "$VERSION" != *-* ]]; then
               IFS='.' read -r major minor patch <<< "$VERSION"
               TAGS+=("${major}.${minor}" "$major" stable latest)
-            elif [[ "$VERSION" =~ -(insider|beta|rc)\.[0-9]+$ ]]; then
+            elif [[ "$VERSION" =~ -insider\.[0-9]+$ ]]; then
               # Every prerelease belongs to the opt-in insider channel. Never
               # move stable/latest/major/minor pointers from a prerelease tag.
               TAGS+=(insider)

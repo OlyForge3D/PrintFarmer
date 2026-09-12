@@ -2,13 +2,13 @@
 set -euo pipefail
 
 # Bump a semantic version stored in the repository `VERSION` file.
-# Usage: bump-version.sh <major|minor|patch> [--prerelease <beta|rc>] [--sequence <N>]
+# Usage: bump-version.sh <major|minor|patch> [--prerelease insider] [--sequence <N>]
 
 ROOT=$(git rev-parse --show-toplevel)
 VERSION_FILE="$ROOT/VERSION"
 
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 <major|minor|patch> [--prerelease <beta|rc>] [--sequence <N>]" >&2
+  echo "Usage: $0 <major|minor|patch> [--prerelease insider] [--sequence <N>]" >&2
   exit 2
 fi
 BUMP="$1"
@@ -34,8 +34,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -n "$PRERELEASE_KIND" && ! "$PRERELEASE_KIND" =~ ^(beta|rc)$ ]]; then
-  echo "--prerelease must be 'beta' or 'rc'." >&2
+if [[ -n "$PRERELEASE_KIND" && "$PRERELEASE_KIND" != "insider" ]]; then
+  echo "--prerelease must be 'insider'." >&2
   exit 2
 fi
 
