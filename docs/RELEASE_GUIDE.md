@@ -131,7 +131,9 @@ optional `lastHistoricalStable`, and the `reservations`, `identities`, `pointers
 ledger before mutation and again before persistence. Source tagging additionally
 projects the complete ledger and binds the original signed record before
 **any write**, including `POST git/tags`, then rechecks before creating the public
-ref. Unknown top-level fields are omitted; malformed retained fields fail with
+ref. Unknown top-level fields in in-memory inputs are omitted on projection;
+persisted ledger reads reject unknown top-level fields in both the current and
+parent snapshot. Malformed retained fields fail with
 policy errors, never raw property-access exceptions.
 
 Reservation, admission and record variants are closed: every required field must
@@ -159,7 +161,15 @@ Progress fields are constrained variants: `tagObject` is a 40-hex SHA;
 `set` and `setHash` must occur together. Pointers bind to an existing matching
 complete reservation; stage high-water entries bind to real insider identities.
 Adjacent ledger commits still forbid loss or alteration of immutable
-reservations, tags, sets and pointer identities. A counter seed alone cannot
+reservations, tags, sets and pointer identities. Qualifications are append-only:
+every prior source-SHA entry must remain byte-for-byte identical under
+`JSON.stringify` in the child, including field order, `promotionOrigin`,
+`treeEvidence` and hotfix `reasonSha256`. This also applies after a stable
+reservation consumes the qualification and to entries not yet consumed.
+Deletion or replacement fails during ledger read, before any Git POST/PATCH;
+new source-SHA qualifications may be appended without rewriting old evidence.
+Projection validates and copies qualifications without reordering their fields.
+A counter seed alone cannot
 fabricate a pointer or stage without its supporting reservation.
 Complete sets use the same idempotent projection for original authorization
 records and already-projected ledger records. Only declared components and their

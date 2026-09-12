@@ -740,7 +740,7 @@ test('GitHub ledger reads pinned Git blobs and rejects ancestry, rollback, trunc
   await assert.rejects(gitLedger(fixture(lostPointer), anchor).read(), /pointer rollback/);
   const lostStage = structuredClone(current);
   delete lostStage.stages;
-  await assert.rejects(gitLedger(fixture(lostStage), anchor).read(), /stages/);
+  await assert.rejects(gitLedger(fixture(lostStage), anchor).read(), /persisted public ledger/);
   const changedAdmission = structuredClone(current);
   changedAdmission.reservations[identity.allocationKey].admission.buildId = '999';
   await assert.rejects(gitLedger(fixture(changedAdmission), anchor).read(), /admission\/record/);
@@ -768,6 +768,142 @@ test('GitHub CAS distinguishes a competing head from a rejected protected write'
   };
   assert.equal(await gitLedger(api(newerSha), anchor).compareAndSet(sha, state()), false);
   await assert.rejects(gitLedger(api(sha), anchor).compareAndSet(sha, state()), /policy, not a CAS/);
+});
+
+function adjacentLedgerFixture(previous, current) {
+  const calls = [];
+  const api = async (endpoint, method = 'GET') => {
+    calls.push({ endpoint, method });
+    assert.equal(method, 'GET', 'Invalid history must fail before any Git write');
+    if (endpoint === 'git/ref/heads/release-ledger') return { object: { sha: newerSha } };
+    if (endpoint.startsWith('compare/')) return { status: 'ahead' };
+    if (endpoint === `git/commits/${newerSha}`) return { tree: { sha: 'head-tree' }, parents: [{ sha }] };
+    if (endpoint === `git/commits/${sha}`) return { tree: { sha: 'previous-tree' }, parents: [{ sha: anchor }] };
+    if (endpoint.startsWith('git/trees/')) return {
+      truncated: false,
+      tree: [{ path: 'state.json', type: 'blob', sha: endpoint.endsWith('head-tree') ? 'head-blob' : 'previous-blob' }],
+    };
+    if (endpoint.startsWith('git/blobs/')) return {
+      encoding: 'base64',
+      content: Buffer.from(JSON.stringify(endpoint.endsWith('head-blob') ? current : previous)).toString('base64'),
+    };
+    throw new Error(`Unexpected endpoint: ${endpoint}`);
+  };
+  return { api, calls, store: gitLedger(api, anchor) };
+}
+
+for (const mode of ['promotion', 'hotfix']) {
+  for (const consumed of [false, true]) {
+    test(`adjacent commits preserve ${consumed ? 'consumed' : 'unconsumed'} ${mode} qualifications before every write`, async () => {
+      const seed = state();
+      const insider = record(seed);
+      const insiderSet = completeSet(insider);
+      advance(seed, insider, insiderSet, sha, '');
+      const alternative = record(seed, { buildAttempt: '2', eventSha: 'f'.repeat(40), workflowSha: 'f'.repeat(40) });
+      const alternativeSet = completeSet(alternative);
+      advance(seed, alternative, alternativeSet, alternative.sourceCommit, publicSetHash(insiderSet));
+      const promotion = promotionQualification(insider, insiderSet);
+      const hotfix = { ...hotfixQualification(), sourceCommit: newerSha };
+      const qualification = structuredClone(mode === 'promotion' ? promotion : hotfix);
+      if (mode === 'promotion') {
+        qualification.promotionOrigin = Object.fromEntries(Object.entries(qualification.promotionOrigin).reverse());
+        qualification.treeEvidence = Object.fromEntries(Object.entries(qualification.treeEvidence).reverse());
+      }
+      seed.qualifications[newerSha] = Object.fromEntries(Object.entries(qualification).reverse());
+      let identity = insider;
+      if (consumed) {
+        const stableAdmission = admission({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
+          workflowIdentity: context().workflowIdentity.replace('/development', '/main'),
+          eventSha: newerSha, workflowSha: newerSha });
+        identity = reserve(seed, stableAdmission, created, undefined, mode === 'promotion' ? promotion : hotfix).record;
+      }
+      const previous = publicLedger(seed);
+      assert.equal(JSON.stringify(previous.qualifications[newerSha]), JSON.stringify(seed.qualifications[newerSha]),
+        'Projection must not rewrite valid qualification field order');
+      if (consumed) assert.equal(Object.hasOwn(previous.reservations[identity.allocationKey].record, 'qualification'), false,
+        'Persisted stable records omit qualification: continuity must bind the separate retained evidence');
+      const appended = structuredClone(previous);
+      appended.qualifications['e'.repeat(40)] = { ...hotfix, sourceCommit: 'e'.repeat(40) };
+      const valid = adjacentLedgerFixture(previous, appended);
+      assert.deepEqual((await valid.store.read()).state, appended);
+      assert.equal(JSON.stringify(appended.qualifications[newerSha]), JSON.stringify(previous.qualifications[newerSha]));
+      assert.equal(valid.calls.filter(call => call.method === 'POST' || call.method === 'PATCH').length, 0);
+      const persisted = [];
+      const writer = gitLedger(async (endpoint, method, body) => {
+        if (endpoint === `git/commits/${sha}`) return { tree: { sha: anchor } };
+        if (endpoint === 'git/blobs' && method === 'POST') persisted.push(JSON.parse(body.content));
+        return { sha: newerSha };
+      }, anchor);
+      assert.equal(await writer.compareAndSet(sha, appended), true);
+      assert.equal(persisted.length, 1);
+      assert.equal(JSON.stringify(persisted[0].qualifications), JSON.stringify(appended.qualifications),
+        'Actual serialized Git blob preserves existing and appended qualification bytes');
+      assert.deepEqual((await adjacentLedgerFixture(previous, persisted[0]).store.read()).state, appended);
+
+      const mutations = [
+        ['delete qualification', next => { delete next.qualifications[newerSha]; }, !consumed],
+        ['replace qualification', next => { next.qualifications[newerSha] = mode === 'promotion' ? hotfix : promotion; }, true],
+        ['reorder qualification fields', next => {
+          next.qualifications[newerSha] = Object.fromEntries(Object.entries(next.qualifications[newerSha]).reverse());
+        }, true],
+        ...(mode === 'promotion' ? [
+          ['delete promotionOrigin', next => { delete next.qualifications[newerSha].promotionOrigin; }, false],
+          ['replace promotionOrigin', next => {
+            next.qualifications[newerSha].promotionOrigin = promotionQualification(alternative, alternativeSet).promotionOrigin;
+          }, true],
+          ['delete treeEvidence', next => { delete next.qualifications[newerSha].treeEvidence; }, false],
+          ['replace treeEvidence with valid digest', next => {
+            const evidence = { schema: 1, originTree: 'e'.repeat(40), sourceTree: 'f'.repeat(40),
+              metadataChanges: [{ path: 'VERSION', before: '1'.repeat(40), after: '2'.repeat(40) }] };
+            next.qualifications[newerSha].treeEvidence = { ...evidence, diffSha256: hash(evidence) };
+          }, true],
+        ] : [
+          ['delete reasonSha256', next => { delete next.qualifications[newerSha].reasonSha256; }, false],
+          ['replace reasonSha256', next => {
+            next.qualifications[newerSha].reasonSha256 = hotfixReasonDigest('Different emergency rationale replaces the approved original.');
+          }, true],
+        ]),
+      ];
+      const operations = [
+        ['ledger read', fixture => fixture.store.read()],
+        ['allocation transaction', fixture => transact(fixture.store,
+          next => reserve(next, admission({ buildAttempt: '3' }), created))],
+        ['source tag publication', fixture => ensureSourceTag(fixture.api, fixture.store, identity, transact)],
+      ];
+      for (const [name, mutate, structurallyValid] of mutations) {
+        const next = structuredClone(previous);
+        mutate(next);
+        if (structurallyValid) validateLedger(next, anchor);
+        for (const [operation, run] of operations) {
+          const fixture = adjacentLedgerFixture(previous, next);
+          await assert.rejects(run(fixture), structurallyValid ? /immutable qualification/ : ReleasePolicyError,
+            `${name}: ${operation}`);
+          assert.equal(fixture.calls.filter(call => call.method === 'POST' || call.method === 'PATCH').length, 0,
+            `${name}: ${operation} must reject before creating blobs, tags, commits or refs`);
+        }
+      }
+    });
+  }
+}
+
+test('persisted ledger schema rejects unknown top-level fields in either adjacent snapshot before writes', async () => {
+  const seed = state();
+  const identity = record(seed);
+  const clean = publicLedger(seed);
+  for (const location of ['parent', 'child']) {
+    const previous = structuredClone(clean);
+    const next = structuredClone(clean);
+    (location === 'parent' ? previous : next).ownerNotes = 'unapproved persisted field';
+    for (const run of [
+      fixture => fixture.store.read(),
+      fixture => transact(fixture.store, ledger => reserve(ledger, admission({ buildAttempt: '2' }), created)),
+      fixture => ensureSourceTag(fixture.api, fixture.store, identity, transact),
+    ]) {
+      const fixture = adjacentLedgerFixture(previous, next);
+      await assert.rejects(run(fixture), /persisted public ledger/);
+      assert.equal(fixture.calls.filter(call => call.method === 'POST' || call.method === 'PATCH').length, 0);
+    }
+  }
 });
 
 function protectionFixture(channel = 'insider') {
@@ -1116,7 +1252,6 @@ test('every ledger write path removes unknown top-level seed fields without chan
     protection: { rulesets: [{ id: 7 }] }, ownerNotes: 'private-value',
     futurePrivate: { nested: 'private-value' },
   };
-  Object.assign(seed, privateSeed);
   const fixture = authorizationFixture(seed);
   const originalFetch = globalThis.fetch;
   globalThis.fetch = fixture.fetch;

@@ -12,7 +12,7 @@ TestFlight build, TestFlight beta, or iOS beta release.
 ## The Actual Mechanism (verified 2026-09-10/11)
 
 `.github/workflows/testflight-beta.yml` triggers automatically on **any pushed
-tag matching `ios/v*-beta*` (or `ios/v*-alpha*` / `ios/v*-rc*`)**, or via manual
+tag matching `v*-beta*` (or `v*-alpha*` / `v*-rc*`)**, or via manual
 `workflow_dispatch`. **Pushing the tag is the entire trigger** — no separate
 dispatch step is needed once the tag exists on `origin`.
 
@@ -20,9 +20,9 @@ dispatch step is needed once the tag exists on `origin`.
 on:
   push:
     tags:
-      - 'ios/v*-alpha*'
-      - 'ios/v*-beta*'
-      - 'ios/v*-rc*'
+      - 'v*-alpha*'
+      - 'v*-beta*'
+      - 'v*-rc*'
   workflow_dispatch:
     inputs:
       environment: { default: 'internal', options: [internal, external] }
@@ -39,8 +39,8 @@ From the **repo root**, with `origin` fetched:
 
 ```bash
 git fetch origin development --quiet
-git tag ios/v1.0-beta.<N> origin/development   # <N> = next integer after the latest existing tag
-git push origin ios/v1.0-beta.<N>
+git tag v1.0-beta.<N> origin/development   # <N> = next integer after the latest existing tag
+git push origin v1.0-beta.<N>
 ```
 
 Then confirm the workflow fired:
@@ -54,7 +54,7 @@ gh run list --workflow=testflight-beta.yml --limit 3 \
 ### Finding the next beta number
 
 ```bash
-git tag -l 'ios/v*-beta.*' | sort -V | tail -1
+git tag -l 'v*-beta.*' | sort -V | tail -1
 ```
 
 Increment the trailing integer by 1. The leading version (`v1.0` at time of
@@ -99,6 +99,6 @@ then appears in App Store Connect for the configured TestFlight groups.
 ## Verification After Trigger
 
 ```bash
-git tag -l 'ios/v*-beta.*' | sort -V | tail -1   # new tag present
+git tag -l 'v*-beta.*' | sort -V | tail -1   # new tag present
 gh run list --workflow=testflight-beta.yml --limit 1 --json status,conclusion,url -R OlyForge3D/PrintFarmer
 ```

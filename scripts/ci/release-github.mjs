@@ -74,7 +74,10 @@ export function publicLedger(state) {
       requireThat(tag.baseVersion === base && tag.channel === 'insider', 'Invalid public ledger stage');
       return tag.canonicalVersion;
     }),
-    qualifications: publicMap(state.qualifications ?? {}, publicLedgerQualification),
+    qualifications: publicMap(state.qualifications ?? {}, (qualification, sourceCommit) => {
+      publicLedgerQualification(qualification, sourceCommit);
+      return structuredClone(qualification);
+    }),
   };
   if (state.lastHistoricalStable !== undefined) {
     requireThat(typeof state.lastHistoricalStable === 'string', 'Invalid public ledger stable floor');
@@ -140,7 +143,10 @@ export function gitLedger(api, anchor) {
     requireThat(entry, 'Ledger state is missing; owner recovery required');
     const blob = await api(`git/blobs/${entry.sha}`);
     requireThat(blob.encoding === 'base64', 'Unsupported ledger blob encoding');
-    return { commit, state: JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8')) };
+    const state = JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8'));
+    requireKeys(state, publicLedgerFields.filter(field => field !== 'lastHistoricalStable'),
+      ['lastHistoricalStable'], 'persisted public ledger');
+    return { commit, state };
   }
   return {
     async read() {
@@ -155,6 +161,10 @@ export function gitLedger(api, anchor) {
         const { state: previous } = await snapshot(head.parents[0].sha);
         validateLedger(previous, anchor);
         requireThat(BigInt(state.counter) >= BigInt(previous.counter), 'Ledger counter rollback');
+        for (const [sourceCommit, qualification] of Object.entries(previous.qualifications)) {
+          requireThat(JSON.stringify(state.qualifications[sourceCommit]) === JSON.stringify(qualification),
+            'Ledger lost or changed an immutable qualification');
+        }
         for (const [key, reservation] of Object.entries(previous.reservations)) {
           requireThat(JSON.stringify(state.reservations[key]?.record) === JSON.stringify(reservation.record) &&
             JSON.stringify(state.reservations[key]?.admission) === JSON.stringify(reservation.admission) &&
