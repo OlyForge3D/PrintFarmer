@@ -347,6 +347,9 @@ test('workflow entry points have no direct tag/manual Docker bypass; iOS namespa
   assert.doesNotMatch(docker, /^\s{2}(push|workflow_dispatch|schedule):/m);
   assert.match(docker, /uses: actions\/download-artifact@v8/);
   assert.match(docker, /cosign verify-blob/);
+  assert.doesNotMatch(docker, /^\s+(?:packages|contents): write$/m);
+  assert.match(docker, /password: \$\{\{ secrets\.RELEASE_REGISTRY_TOKEN \}\}/);
+  assert.match(docker, /Publish and verify public corresponding-source assets\n\s+env:\n\s+GH_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
   for (const step of docker.split(/^\s{6}- /m)) {
     if (!/uses: actions\/(?:upload|download)-artifact@/.test(step)) continue;
     const selector = step.match(/^\s{10}(?:name|pattern): (.+)$/m)?.[1];

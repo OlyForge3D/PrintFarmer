@@ -150,6 +150,9 @@ Read-only live API evidence on 2026-09-12:
 - No `RELEASE_*` variables are configured. Repository access reports admin,
   but #2668 retains explicit owner approval of storage/continuity/publisher policy.
   No live ruleset/environment was changed and no publisher app was provisioned.
+- Reading the application package metadata returns **403**, requiring
+  `read:packages`. The current credential cannot attest package ACL cutover;
+  repository admin access is not proof of registry permission.
 
 Owner acceptance must name policy/VERSION reviewers, publisher and bypass owners,
 approve this Git-CAS storage and recovery design, and choose candidate expiry.
@@ -178,8 +181,19 @@ Before enabling:
    `RELEASE_PUBLISHER_PRIVATE_KEY`. It needs contents write plus check,
    administration and Actions read permissions for verification.
    Do not reuse an unrestricted repository PAT.
+   Application GHCR writes separately require `RELEASE_REGISTRY_USER` and an
+   environment-only `RELEASE_REGISTRY_TOKEN` with package-write scope, not
+   repository-content scope. Remove inherited/repository Actions **write**
+   access to all six application packages and reserve their names for the
+   designated registry principal; retain read access as needed. A protected job
+   alone does not constrain another workflow's `GITHUB_TOKEN`, so this package
+   ACL cutover is mandatory owner evidence, not implied by environment setup.
+   Infrastructure package ownership is unchanged.
 6. Read the effective policies back and rehearse denied publication before
-   first authorized publication. Package write access also requires owner setup.
+   first authorized publication, including rejected writes with a generic
+   repository workflow token. Release jobs request no repository-token contents
+   or package write scope: the protected App publishes source assets and the
+   protected package credential publishes application images.
 
 Missing state, invalid ancestry, counter rollback or lost reservations block
 publication. Recovery is owner-only: stop publishers, compare retained ledger

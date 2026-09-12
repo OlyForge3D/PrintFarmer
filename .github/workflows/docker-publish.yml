@@ -252,8 +252,7 @@ jobs:
     permissions:
       actions: write
       contents: read
-      id-token: write
-      packages: write
+      packages: read
     outputs:
       base_image: ${{ steps.verify.outputs.base_image }}
     steps:
@@ -362,7 +361,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      packages: write
+      packages: read
       actions: read
     strategy:
       fail-fast: false
@@ -424,8 +423,8 @@ jobs:
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ vars.RELEASE_REGISTRY_USER }}
+          password: ${{ secrets.RELEASE_REGISTRY_TOKEN }}
 
       - name: Create optimized Dockerfile
         run: |
@@ -685,7 +684,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      packages: write
+      packages: read
       actions: read
     steps:
       - name: Checkout code
@@ -725,8 +724,8 @@ jobs:
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ vars.RELEASE_REGISTRY_USER }}
+          password: ${{ secrets.RELEASE_REGISTRY_TOKEN }}
 
       - name: Extract metadata
         id: meta
@@ -843,8 +842,8 @@ jobs:
     needs: [build-containers, build-monolith]
     environment: release-${{ fromJSON(inputs.identity).channel }}
     permissions:
-      contents: write
-      packages: write
+      contents: read
+      packages: read
       actions: read
     outputs:
       smoke_tag: ${{ steps.tags.outputs.smoke_tag }}
@@ -966,8 +965,8 @@ jobs:
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ vars.RELEASE_REGISTRY_USER }}
+          password: ${{ secrets.RELEASE_REGISTRY_TOKEN }}
 
       - name: Smoke test ARM64 image digests
         run: |
@@ -1008,7 +1007,7 @@ jobs:
 
       - name: Publish and verify public corresponding-source assets
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.publisher.outputs.token }}
           VERSION: ${{ fromJSON(inputs.identity).sourceTag }}
         run: |
           set -euo pipefail

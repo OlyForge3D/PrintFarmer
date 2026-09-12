@@ -94,14 +94,16 @@
         "    permissions:",
         "      contents: read",
         "      id-token: write",
-        "      packages: write",
+        "      packages: read",
         "    strategy:",
         "Smoke test ARM64 image digests",
         "Publish and verify public corresponding-source assets",
         "Promote validated digests"
       ],
       "notContains": [
-        "--clobber"
+        "--clobber",
+        "      packages: write",
+        "      contents: write"
       ]
     },
     {

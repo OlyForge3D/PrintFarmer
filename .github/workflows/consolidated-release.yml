@@ -80,7 +80,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: release-${{ needs.admit.outputs.channel }}
     permissions:
-      contents: write
+      contents: read
       id-token: write
     outputs:
       identity: ${{ steps.authorize.outputs.identity }}
@@ -95,6 +95,11 @@ jobs:
           node-version: 24
       - name: Check sole authored version base
         run: bash scripts/sync-monorepo-version.sh --check
+      - name: Require owner-provisioned registry authority before reservation
+        env:
+          REGISTRY_USER: ${{ vars.RELEASE_REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.RELEASE_REGISTRY_TOKEN }}
+        run: test -n "$REGISTRY_USER" && test -n "$REGISTRY_TOKEN"
       - name: Obtain protected publisher app token
         id: publisher
         uses: actions/create-github-app-token@v2
@@ -132,8 +137,8 @@ jobs:
     uses: ./.github/workflows/docker-publish.yml
     permissions:
       actions: write
-      contents: write
-      packages: write
+      contents: read
+      packages: read
       id-token: write
     with:
       identity: ${{ needs.authorize.outputs.identity }}
