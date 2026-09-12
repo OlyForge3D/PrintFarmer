@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
+import './test-reviewer-dispatch.mjs';
 import {
   canAutoScope,
   classifyChangeScope,

@@ -84,3 +84,28 @@ supplement these component goldens.
 The follow-up references remove Heat's trailing caption and place a compact
 Go beside the target inputs. Native geometry assertions require matching
 temperature, Go, and extrusion-selector heights, including accessibility sizes.
+
+## Absolute-move and Cool-down polish revision (#2643)
+
+The same six Controls goldens now reflect three deliberate changes:
+
+- **Cool down** is a single enlarged snowflake glyph with no text label. It is
+  marked `accessibilityHidden` on the inner glyph so the button keeps its own
+  accessible name. The PLA/PETG/ABS presets keep their two-line label.
+- **Preset button height** derives from type metrics only
+  (`max(54, presetFontSize * 2 + 14)`) rather than rendered content. Previously
+  the tallest cell decided the row height, so a capability-dependent second line
+  (`200/60°` with a bed, `200°` without) shifted the whole Heat card by ~10pt
+  between supported and unsupported capability sets. The geometry assertion in
+  `test_unsupportedControlsStayDisabledInTheSamePositions` covers this.
+- **Numeric field placeholders** render with `pfTextSecondary` via
+  `attributedPlaceholder`, so the X/Y/Z axis hints in the absolute-move row read
+  clearly instead of the washed-out system placeholder grey.
+
+Absolute move no longer requires all three coordinates — any single axis is a
+valid destination — and per-axis current positions render `—` when that axis is
+not homed.
+
+References were regenerated on the resolver-selected iPhone 15 (3x) and iPad Pro
+13-inch M5 (2x) hosts using Xcode 26.6 (17F113) and iOS 26.5 (23F77), with the
+unchanged `.iPhone13` component configuration.

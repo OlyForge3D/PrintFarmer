@@ -97,12 +97,14 @@ struct PrinterSetupControlsContent: View {
                 // Geometry changes, not view identity: retain drafts and disclosures.
                 layout {
                     VStack(alignment: .leading, spacing: EssentialControlsStyle.groupSpacing) {
-                        PrinterDetailTemperatureStrip(
-                            hotend: .init(measured: printer.hotendTemp, target: printer.hotendTarget, isOnline: printer.isOnline),
-                            bed: .init(measured: printer.bedTemp, target: printer.bedTarget, isOnline: printer.isOnline),
-                            showsBed: true,
-                            identifier: "printer.controls.temperatures", essentialControls: true
-                        )
+                        insetGroup {
+                            PrinterDetailTemperatureStrip(
+                                hotend: .init(measured: printer.hotendTemp, target: printer.hotendTarget, isOnline: printer.isOnline),
+                                bed: .init(measured: printer.bedTemp, target: printer.bedTarget, isOnline: printer.isOnline),
+                                showsBed: true,
+                                identifier: "printer.controls.temperatures", essentialControls: true
+                            )
+                        }
                         insetGroup { PreheatSubgroup(viewModel: viewModel) }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -152,9 +154,9 @@ struct PrinterSetupControlsContent: View {
         }
 
 
-        .padding(10)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.pfWarning.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .background(Color.pfWarning.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             String(localized: "Controls disabled, print is active.",
@@ -176,14 +178,15 @@ struct PrinterSetupControlsContent: View {
                 viewModel.dismissError()
             } label: {
                 Text("Dismiss")
-                    .font(.footnote)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Color.pfTextPrimary)
                     .frame(minWidth: 44, minHeight: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
         }
-        .padding(10)
-        .background(Color.pfError.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .padding(12)
+        .background(Color.pfError.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
         .accessibilityElement(children: .contain)
     }
 }
@@ -271,40 +274,6 @@ struct PrinterMaterialControls: View {
                 }
             }
             .disabled(viewModel.isExecuting || viewModel.extrusionBlockedReason != nil)
-            Text("Assignment tracks a spool. It does not physically load filament.")
-                .font(.footnote).foregroundStyle(Color.pfTextSecondary).padding(.top, 10)
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 8) {
-                    if let materialPresentation {
-                        PrinterFilamentSection(
-                            presentation: materialPresentation, actions: materialActions,
-                            onAction: onMaterialAction, embedded: true
-                        ).details
-                    }
-                    Text("Printer-level commands only; no tool or MMU slot is selected. Assignment and NFC do not physically load filament. A hot target is not a measured safe temperature.")
-                        .font(.footnote)
-                    if let reason = viewModel.extrusionBlockedReason {
-                        Text(reason).font(.footnote)
-                            .accessibilityIdentifier("printer.controls.extrusion-unavailable")
-                    }
-                    ForEach(PhysicalFilamentOperation.allCases) { operation in
-                        if let reason = viewModel.filamentBlockedReason(operation) {
-                            Text("\(operation.title): \(reason)").font(.footnote)
-                        }
-                    }
-                    ControlActionButton(
-                        title: viewModel.isRefreshingSafety ? "Refreshing safety checks…" : "Refresh safety checks",
-                        identifier: "printer.controls.refresh-safety",
-                        hint: "Reads support and timestamped telemetry. Never retries a printer command.", compact: true
-                    ) { Task { await viewModel.refreshSafetyEvidence() } }
-                    .disabled(viewModel.isRefreshingSafety || !viewModel.isActive)
-                    if let error = viewModel.safetyReadError {
-                        Text(error).font(.footnote).foregroundStyle(Color.pfTextSecondary)
-                    }
-                }
-            } label: {
-                Text("Details & safety").font(.footnote).frame(minHeight: 44)
-            }
         }
         .foregroundStyle(Color.pfTextPrimary)
         .accessibilityElement(children: .contain)
@@ -336,7 +305,6 @@ struct PrinterZOffsetCalibrationControls: View {
     @ObservedObject var viewModel: PrinterControlsViewModel
     var showsEntry = true
     @State private var increment = 0.05
-    @State private var showsSafetyDetails = false
     @AccessibilityFocusState private var stepFocused: Bool
 
     var body: some View {
@@ -344,7 +312,8 @@ struct PrinterZOffsetCalibrationControls: View {
             if let step = viewModel.calibrationStep {
                 Text("Z-offset calibration").font(.headline).accessibilityAddTraits(.isHeader)
                 Text("Step: \(step.rawValue.capitalized)")
-                    .font(.headline)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.pfTextSecondary)
                     .accessibilityAddTraits(.isHeader)
                     .accessibilityIdentifier("printer.controls.calibration-step")
                     .accessibilityFocused($stepFocused)
@@ -364,21 +333,9 @@ struct PrinterZOffsetCalibrationControls: View {
                 .disabled(!viewModel.canControl || viewModel.isExecuting || viewModel.isReviewingCalibration
                           || viewModel.calibrationBlockedReason != nil)
             }
-            if viewModel.calibrationStep == nil {
-                ControlActionButton(
-                    title: "Details & safety", identifier: "printer.controls.calibration.details",
-                    accessibilityTitle: "Z-offset details and safety",
-                    compact: true, value: showsSafetyDetails ? "Expanded" : "Collapsed", textOnly: true
-                ) { showsSafetyDetails.toggle() }
-            }
-            if viewModel.calibrationStep != nil || showsSafetyDetails {
-                if let reason = viewModel.calibrationBlockedReason {
-                    Text(reason).font(.footnote)
-                        .accessibilityIdentifier("printer.controls.calibration-unavailable")
-                } else if showsSafetyDetails && viewModel.calibrationStep == nil {
-                    Text("Calibration requires verified firmware support, homing and safe positioning. Checks are repeated before each physical action.")
-                        .font(.footnote)
-                }
+            if viewModel.calibrationStep != nil, let reason = viewModel.calibrationBlockedReason {
+                Text(reason).font(.footnote)
+                    .accessibilityIdentifier("printer.controls.calibration-unavailable")
             }
         }
         .foregroundStyle(Color.pfTextPrimary)
@@ -433,6 +390,7 @@ struct PrinterZOffsetCalibrationControls: View {
                     Text("\(value.formatted()) mm").tag(value)
                 }
             }
+            .pickerStyle(.segmented)
             .frame(minHeight: 44)
             ControlActionButton(title: "Closer −\(increment.formatted()) mm", identifier: "printer.controls.calibration-closer") {
                 Task { await viewModel.adjustCalibration(delta: -increment) }

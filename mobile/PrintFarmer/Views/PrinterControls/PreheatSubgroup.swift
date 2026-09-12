@@ -89,8 +89,15 @@ struct ControlNumberField: UIViewRepresentable {
     func updateUIView(_ field: UITextField, context: Context) {
         context.coordinator.text = $text
         if field.text != text { field.text = text }
-        field.placeholder = placeholder
-        field.font = .systemFont(ofSize: fontSize)
+        let placeholderFont = UIFont.systemFont(ofSize: fontSize)
+        field.attributedPlaceholder = NSAttributedString(
+            string: placeholder,
+            attributes: [
+                .foregroundColor: UIColor(Color.pfTextSecondary),
+                .font: placeholderFont
+            ]
+        )
+        field.font = placeholderFont
         field.isEnabled = isEnabled
         field.accessibilityLabel = label
         field.accessibilityIdentifier = identifier
@@ -275,8 +282,8 @@ struct PreheatSubgroup: View {
 
             grid.padding(.top, 14).padding(.bottom, 8)
 
-            Text("Hotend max \(viewModel.maximum(for: .hotend).map { $0.formatted() + "°" } ?? "unknown") · Bed max \(viewModel.maximum(for: .bed).map { $0.formatted() + "°" } ?? "unknown").")
-                .font(.footnote).foregroundStyle(Color.pfTextSecondary)
+            Text("Hotend max \(viewModel.maximum(for: .hotend).map { $0.formatted() + "°C" } ?? "unknown") · Bed max \(viewModel.maximum(for: .bed).map { $0.formatted() + "°C" } ?? "unknown").")
+                .font(.footnote.monospacedDigit()).foregroundStyle(Color.pfTextSecondary)
                 .padding(.top, 10)
             if let message = blockedReasonMessage {
                 Text(message)
@@ -476,21 +483,24 @@ struct PreheatSubgroup: View {
     private func buttonLabel(preset: PreheatPreset, isPending: Bool) -> some View {
         VStack(spacing: 3) {
             if preset == .coolDown {
-                // Matches the web UI's snowflake glyph on the Cooldown control.
+                // Larger snowflake icon with no text, matching web UI styling.
                 Image(systemName: "snowflake")
-                    .font(.system(size: presetFontSize))
+                    .font(.system(size: presetFontSize * 1.5, weight: .semibold))
+                    .opacity(isPending ? 0 : 1)
                     .accessibilityHidden(true)
-            }
-            Text(preset.displayLabel)
-                .font(.system(size: presetFontSize))
-            if preset != .coolDown {
+            } else {
+                Text(preset.displayLabel)
+                    .font(.system(size: presetFontSize))
                 Text(viewModel.supports(.bed) ? preset.temperatureLabel : "\(Int(preset.hotend))°")
                     .font(.caption2.monospacedDigit())
                     .opacity(isPending ? 0 : 1)
             }
         }
-        // Same footprint as PLA/PETG/ABS so Cool down matches ABS exactly.
-        .frame(maxWidth: .infinity, minHeight: 54)
+        // Height comes from the type metrics alone, never the rendered label, so
+        // every preset matches Cool down and the row keeps one height whichever
+        // readings the backend supports.
+        .frame(height: max(54, presetFontSize * 2 + 14))
+        .frame(maxWidth: .infinity)
         .overlay {
             if isPending {
                 ProgressView()
