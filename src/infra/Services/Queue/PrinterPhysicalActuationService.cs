@@ -387,6 +387,7 @@ public sealed class PrinterPhysicalActuationService(
             accepted ? QueueAuditOutcomes.Success : QueueAuditOutcomes.Failed,
             accepted ? EventTypeCompleted : EventTypeFailed,
             accepted ? null : failureCode ?? "backend_control_rejected",
+            retainBarrier: false,
             ct);
 
     /// <inheritdoc />
@@ -399,6 +400,7 @@ public sealed class PrinterPhysicalActuationService(
             QueueAuditOutcomes.Unknown,
             EventTypeUnknown,
             failureCode,
+            retainBarrier: true,
             ct);
 
     /// <inheritdoc />
@@ -585,6 +587,7 @@ public sealed class PrinterPhysicalActuationService(
         string outcome,
         string eventType,
         string? failureCode,
+        bool retainBarrier,
         CancellationToken ct)
     {
         PrinterDispatchState? state = await _db.PrinterDispatchStates
@@ -601,7 +604,14 @@ public sealed class PrinterPhysicalActuationService(
             return;
         }
 
-        ClearBarrier(state);
+        if (retainBarrier)
+        {
+            state.PhysicalControlRequiresReconciliation = true;
+        }
+        else
+        {
+            ClearBarrier(state);
+        }
 
         await using QueueOutboxTransactionScope transaction =
             await QueueOutboxTransactionScope.BeginAsync(_db, ct);
@@ -616,7 +626,7 @@ public sealed class PrinterPhysicalActuationService(
             dispatchAttemptId: lease.AttemptId,
             reasonCode: failureCode,
             dispatchStateRowVersion: state.RowVersion,
-            detail: new { lease.CommandId, lease.Operation, barrierRetained = false });
+            detail: new { lease.CommandId, lease.Operation, barrierRetained = retainBarrier });
         await AddPrinterEventAsync(
             eventType,
             lease.CommandId,
@@ -626,7 +636,7 @@ public sealed class PrinterPhysicalActuationService(
             failureCode,
             state.RowVersion,
             ct,
-            failureRequiresReconciliation: false);
+            failureRequiresReconciliation: retainBarrier);
         await _db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
     }
