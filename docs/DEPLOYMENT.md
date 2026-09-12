@@ -136,6 +136,37 @@ credentials, and rotate both services together. It is accepted only as
 `X-Discovery-Service-Key` on internal discovery-event ingestion routes and is
 never a user-facing API credential.
 
+### Socket-free printer discovery
+
+Discovery uses routed TCP/HTTP printer probes on the application bridge network.
+It does not need Docker inventory, a Docker socket, a socket proxy, host
+networking, or `NET_RAW`. The canonical discovery template has no host mounts,
+drops all capabilities, blocks privilege escalation, retains its non-root image
+user and read-only root, and bounds scratch space, CPU, memory and open files.
+Its service port is unpublished; other containers on the deployment network can
+still reach it, so existing service authentication remains required.
+Firewall rules must permit the configured printer subnets and API connection;
+bridge discovery does not promise broadcast/multicast across VLANs or Docker
+Desktop networking. Configure reachable subnets or add unreachable printers
+manually rather than granting Docker control.
+
+For installations generated before #2665, regenerate Compose from
+`scripts/docker/compose-templates/` using the existing deployment options.
+Review local overrides too: remove Docker/Podman sockets, engine named pipes,
+parent runtime-directory mounts, `DOCKER_HOST`, generic proxies and extra
+discovery capabilities. Recreate `printer-discovery` with the reviewed
+configuration; a restart alone does not change mounts. On the host, inspect
+only that container's `Mounts`, `HostConfig.CapAdd`, `HostConfig.CapDrop`,
+`HostConfig.SecurityOpt` and `Config.User` (not its secret-bearing environment),
+then verify service health and a manual discovery scan against a known printer.
+Do not restore the socket when troubleshooting.
+
+Native/custom installations retain ordinary network discovery but have no
+container inventory or managed replacement guarantee. There is no supported
+host enrollment, host updater, pull reconciler or UI execution helper in this
+change. See the [host enrollment security contract](HOST_ENROLLMENT_SECURITY.md)
+for proposed opt-in boundaries and the outstanding maintainer/security gates.
+
 ## Deployment Architectures
 
 ### Architecture Comparison

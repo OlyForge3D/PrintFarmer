@@ -141,6 +141,32 @@ Shows full output from each test including error messages and stack traces.
 
 ## Individual Test Files
 
+### Discovery security boundary
+
+Issue #2665 adds `python tests/test-discovery-boundary.py` (requires the
+existing `ruamel.yaml` dependency). It inspects canonical templates, merged
+PostgreSQL/SQL Server configurations with discovery on/off, and adversarial
+socket/proxy/capability fixtures without Docker daemon access.
+
+For actual generator outputs, the deployment workflow invokes
+`test_discovery_network_consistency` for both providers and the existing
+shared-key wiring test. The function also runs
+`python tests/test-discovery-boundary.py --compose <generated-file>`.
+These guards must fail on reintroduced read-only sockets too, not just writable
+mounts. They are structural regression checks, not a sandbox for arbitrary
+custom images/overrides.
+
+Run the focused .NET discovery cohort from `src/` with
+`dotnet test tests/Farm.Infrastructure.Tests/Farm.Infrastructure.Tests.csproj --filter "FullyQualifiedName~Discovery"`.
+`SocketFreeDiscoveryTests` uses a real loopback HTTP printer; it needs no
+container-control socket or printer hardware. Still verify a known printer and
+the recreated container's actual isolation before deployment.
+
+Capture results in a workspace-relative log directory. If the execution
+environment prohibits the legacy harness's temporary-file operations, report
+that limitation explicitly: direct merge/Compose checks are not a completed
+`run-deployment-tests.sh` or actual-generator run.
+
 For targeted testing when debugging:
 
 ```bash

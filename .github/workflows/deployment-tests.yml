@@ -48,6 +48,18 @@ jobs:
       - name: Show Docker Compose version
         run: docker compose version
 
+      - name: Run discovery socket boundary regression tests
+        run: |
+          set -euo pipefail
+          python3 tests/test-discovery-boundary.py
+          source tests/test-framework.sh
+          source tests/test-compose-generator.sh
+          setup
+          trap teardown EXIT
+          test_discovery_network_consistency
+          test_discovery_network_consistency sqlserver
+          test_discovery_shared_key_wiring
+
       # These four suites are the documented, CI-safe subset called out in
       # issue #1308: they guard scripts/deploy-docker.sh and
       # scripts/docker/compose-generator.sh, need only Docker + Python (both
