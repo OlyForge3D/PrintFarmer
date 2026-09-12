@@ -4,7 +4,9 @@ on:
   pull_request:
     paths:
       - 'scripts/deploy-docker.sh'
+      - 'scripts/fix-*.sh'
       - 'scripts/docker/**'
+      - 'docs/**'
       - 'tests/**'
       - 'deploy/nginx/**'
       - '.github/workflows/deployment-tests.yml'
@@ -15,7 +17,9 @@ on:
       - master
     paths:
       - 'scripts/deploy-docker.sh'
+      - 'scripts/fix-*.sh'
       - 'scripts/docker/**'
+      - 'docs/**'
       - 'tests/**'
       - 'deploy/nginx/**'
       - '.github/workflows/deployment-tests.yml'

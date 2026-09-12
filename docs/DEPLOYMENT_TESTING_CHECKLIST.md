@@ -113,7 +113,7 @@ Test Execution Statistics:
 
 ### ❌ Failure (Example)
 ```
-✗ host-network + sqlserver configuration failed
+✗ microservices bridge + sqlserver configuration failed
   • Docker compose validation failed
   • Error: mapping key 'volumes' already defined at line 148
 ```
@@ -147,6 +147,12 @@ Issue #2665 adds `python tests/test-discovery-boundary.py` (requires the
 existing `ruamel.yaml` dependency). It inspects canonical templates, merged
 PostgreSQL/SQL Server configurations with discovery on/off, and adversarial
 socket/proxy/capability fixtures without Docker daemon access.
+It also scans every supported guide under `docs/` and deployment/repair scripts
+for obsolete topology advice, checks sensitive runtime-directory descendants
+without rejecting similarly named data paths, and executes the diagnostic
+script against controlled Docker responses. Failure fixtures cover missing or
+stopped services, unsafe isolation, mismatched networks, and each HTTP probe.
+These fixtures verify diagnostic behavior, not a live production deployment.
 
 For actual generator outputs, the deployment workflow invokes
 `test_discovery_network_consistency` for both providers and the existing
@@ -261,7 +267,7 @@ Before running `git commit`:
 
 - Full details: `docs/DEPLOYMENT_TESTING.md`
 - Architecture: `docs/DEPLOYMENT_OVERVIEW.md`
-- User scenario: `docs/DEPLOY_HOST_NETWORK_SQLSERVER.md`
+- User scenario: [Microservices deployment](MICROSERVICES_DEPLOYMENT_GUIDE.md)
 - Test scripts: `tests/test-*.sh`
 
 ---

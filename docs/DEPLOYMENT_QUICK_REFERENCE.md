@@ -202,7 +202,7 @@ chown $USER:$USER .deploy-config
 ## 📚 Documentation
 
 - **Config Persistence:** `docs/DEPLOYMENT_CONFIG_PERSISTENCE.md`
-- **Host Networking:** `docs/HOST_NETWORK_DEPLOYMENT.md`
+- **Bridge networking and discovery:** [Discovery troubleshooting](DISCOVERY_SERVICE_TROUBLESHOOTING.md)
 - **Quick Start:** `docs/UBUNTU_DEPLOYMENT_QUICKSTART.md`
 - **Full Summary:** `docs/DEPLOYMENT_ENHANCEMENTS_SUMMARY.md`
 

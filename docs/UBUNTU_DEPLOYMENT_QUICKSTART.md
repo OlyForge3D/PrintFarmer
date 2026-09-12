@@ -27,7 +27,7 @@ cd PrintFarmer
 
 ---
 
-## Quick Deployment (Host Network Mode)
+## Quick Deployment (Bridge Networking)
 
 ### Option 1: Interactive (First Time)
 
@@ -40,7 +40,7 @@ cd PrintFarmer
 - Database: Your choice (PostgreSQL recommended)
 - Enable discovery: `yes`
 - Network ranges: `192.168.0.0/16,10.0.0.0/8` (adjust for your network)
-- **Network mode: `2` (Host)** ← **IMPORTANT for discovery**
+- **Networking:** Generated application bridge; discovery uses `http://api:5245`
 - HTTP Port: `8080`
 - API Port: `5245`
 
@@ -67,7 +67,6 @@ export DB_PROVIDER=postgres
 export DB_PASSWORD=YourSecurePassword123!
 export ENABLE_DISCOVERY=yes
 export NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
-export NETWORK_MODE_CHOICE=1
 export HTTP_PORT=8080
 export API_PORT=5245
 export ENVIRONMENT=Production
@@ -103,9 +102,8 @@ docker ps
 curl http://localhost:5245/healthz
 # Expected: {"status":"ok"}
 
-# 3. Verify host networking
-docker inspect printfarmer-api-1 | grep NetworkMode
-# Expected: "NetworkMode": "host"
+# 3. Verify discovery isolation and real bridge HTTP paths
+./scripts/docker/verify-discovery-service.sh
 
 # 4. Check logs
 docker compose --env-file .env.microservices logs -f api
@@ -195,19 +193,23 @@ export API_PORT=5246
 ### Network Discovery Not Working
 
 ```bash
-# 1. Verify network configuration
-docker inspect printfarmer-api-1 | grep NetworkMode
+# 1. Verify the actual bridge connection to http://api:5245
+./scripts/docker/verify-discovery-service.sh
 
-# 2. Check environment
-docker compose --env-file .env.microservices exec api printenv | grep NETWORK
-
-# 3. Check firewall
+# 2. Check host firewall rules
 sudo ufw status
-
-# 4. Test broadcast (requires tcpdump)
-docker compose --env-file .env.microservices exec api sh -c "apt update && apt install -y tcpdump"
-docker compose --env-file .env.microservices exec api tcpdump -i any udp port 8089
 ```
+
+Configure reachable `DISCOVERY_SUBNETS` and allow required printer TCP/HTTP
+connections. VLANs need approved routes; broadcast/multicast and Docker Desktop
+LAN access are not guaranteed. Do not install diagnostic packages inside the
+read-only container or add capabilities. Add reachable printers manually when
+automatic enumeration is unavailable.
+
+For older deployments, use `./scripts/docker/fix-discovery-heartbeat.sh` to
+regenerate from saved settings and recreate discovery, not manual template edits.
+See [discovery troubleshooting](DISCOVERY_SERVICE_TROUBLESHOOTING.md) for custom
+deployment paths and authenticated heartbeat/known-printer verification.
 
 ### Cannot Access from Another Computer
 
@@ -252,7 +254,7 @@ cat .deploy-config
 # Example output:
 # ARCHITECTURE=microservices
 # DB_PROVIDER=postgres
-# NETWORK_MODE=host
+# NETWORK_MODE=bridge
 # HTTP_PORT=8080
 # ...
 ```
@@ -331,8 +333,8 @@ git status .deploy-config
 
 ## Support
 
-- **Documentation:** `/docs/HOST_NETWORK_DEPLOYMENT.md`
-- **Implementation Details:** `/docs/HOST_NETWORK_IMPLEMENTATION.md`
+- **Documentation:** [Deployment](DEPLOYMENT.md)
+- **Discovery:** [Bridge troubleshooting](DISCOVERY_SERVICE_TROUBLESHOOTING.md)
 - **Issues:** Check logs with `docker compose logs -f`
 
 ---

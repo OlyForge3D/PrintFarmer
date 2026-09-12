@@ -4114,7 +4114,7 @@ configure_networking() {
     print_header "🌐 Network Configuration"
     
     # All services run on the docker bridge network for service discovery by hostname
-    # Printer discovery runs on host network to enable local network scanning
+    # Printer discovery uses routed TCP/HTTP probes on the application bridge.
     print_success "All services on bridge network with service discovery"
     NETWORK_MODE="bridge"
     print_info "API will be accessible at http://api:5245 within the docker network"
@@ -4889,9 +4889,6 @@ EOF
     esac
 
     # Write unified default connection string key consumed by Program.cs
-    # If we're deploying in host network mode, rewrite any Docker service hostnames
-    # (e.g., 'database', 'postgres', 'sqlserver') to 'localhost' so the
-    # API running in host network mode connects to the host services correctly.
     # Use the configured connection string as-is (bridge networking expected)
     CONNECTION_STRING_TO_WRITE="$CONNECTION_STRING"
     # IMPORTANT: Do NOT quote the connection string in the .env file - Docker Compose
@@ -8280,7 +8277,7 @@ if [ "$VERIFY_DEPLOYMENT" = "true" ]; then
 
     # Basic compose file defaults when not set by config
     COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
-    # Select compose file based on architecture; host-network mode removed
+    # Select the canonical generated Compose file.
     if [ -f docker-compose.yml ]; then
         COMPOSE_FILE="docker-compose.yml"
     fi

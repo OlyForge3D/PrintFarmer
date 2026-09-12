@@ -8,17 +8,17 @@ The PrintFarmer microservices architecture separates components into dedicated c
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ HOST NETWORK (Direct Host Access)                           │
+│ APPLICATION BRIDGE (Docker Internal)                        │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │ API Container (PrintFarmer Backend)                    │ │
-│  │ • Listens on host port 5245                            │ │
-│  │ • Full network access for device discovery             │ │
+│  │ • Internal port 5245; configurable published host port  │ │
+│  │ • Routed TCP/HTTP access to reachable printers         │ │
 │  │ • Connects to database via bridge network service name │ │
 │  └────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
-│ BRIDGE NETWORK (Docker Internal)                            │
+│ SAME APPLICATION BRIDGE (printfarmer-network)                │
 │  ┌──────────────────┐  ┌──────────────┐  ┌──────────────┐  │
 │  │ Frontend Service │  │ Database     │  │ OrcaSlicer   │  │
 │  │ (Nginx/React)    │  │ (PostgreSQL/ │  │ Workers     │  │
@@ -29,7 +29,8 @@ The PrintFarmer microservices architecture separates components into dedicated c
 │  └──────────────────┘                                       │
 │                                                              │
 │  Internal DNS:                                              │
-│  • api (resolves to API container on host network)         │
+│  • api (resolves to API container on this bridge)          │
+│  • printer-discovery (internal port 5247, unpublished)     │
 │  • database (resolves to DB container)                     │
 │  • orcaslicer-worker (resolves to worker container)        │
 └─────────────────────────────────────────────────────────────┘
@@ -37,17 +38,17 @@ The PrintFarmer microservices architecture separates components into dedicated c
 
 ## Key Benefits
 
-### API on Host Network
-- **Full Network Access**: API can broadcast to local network for printer discovery
-- **Device Discovery**: Supports Moonraker/PrusaLink printer auto-discovery on network
-- **Direct Port Access**: API listens directly on host port (default 5245)
-- **Multicast Support**: Can send/receive multicast packets for printer discovery
+### API and Discovery on the Application Bridge
+- **Routed Access**: TCP/HTTP probes scan configured, reachable printer subnets
+- **Service DNS**: Discovery connects to `http://api:5245`
+- **Published Ports**: Host mappings are separate from internal service ports
+- **Isolation**: No additional capabilities or Docker control access for discovery
 
 ### Services on Bridge Network
 - **Isolation**: Database, frontend, and workers are isolated from host
 - **Container Communication**: Services communicate via Docker internal DNS
 - **Port Mapping**: Only frontend (80/8080) and API (5245) exposed to host
-- **Security**: Database credentials not exposed to host network
+- **Security**: Database connections remain inside the application network
 
 ## Deployment Steps
 
@@ -102,29 +103,30 @@ After deployment, access PrintFarmer at:
    ```
    - Frontend proxy routes `/api/*` requests to API service
    - API is accessible via DNS name `api` on bridge network
-   - Connection tunnels through bridge network tunnel to host network
+   - Both containers share the same application bridge
 
 2. **API → Database**:
    ```
-   api (host network) → database:5432 (bridge network)
+   api (bridge network) → database:5432 (bridge network)
    ```
    - API container connects to database via DNS name
-   - Host network API can reach bridge network services
-   - Connection uses Docker network tunnel
+   - Both services communicate directly on the shared bridge
 
 3. **Frontend → SignalR**:
    ```
-   browser (host) → nginx:8080 (bridge) → /hubs/* → api:5245 (host) via WebSocket
+   browser → published nginx port → /hubs/* → api:5245 (bridge) via WebSocket
    ```
    - WebSocket connections tunneled through nginx proxy
    - SignalR hub on API handles real-time printer updates
 
 4. **Device Discovery**:
    ```
-   api (host network) → broadcast to local network:5353 (mDNS)
+   printer-discovery (bridge) → routed TCP/HTTP → configured printer subnets
    ```
-   - API discovers printers via mDNS on host network
-   - Reads local network configuration from ALLOWED_NETWORK_RANGES
+   - Discovery scans explicit `DISCOVERY_SUBNETS` without additional privileges
+   - VLANs need routes and firewall permission; broadcast/multicast traversal
+     and Docker Desktop LAN access are not guaranteed
+   - Add reachable printers manually if automatic enumeration is unavailable
 
 5. **API → Slicer Host (calibration profile resolution)**:
    ```
@@ -358,9 +360,12 @@ docker compose logs api | grep -i discovery
 - Verify database port: `docker compose exec database psql -U postgres -c "SELECT 1"`
 
 **Device discovery not working**:
-- Verify API is on host network: `docker inspect $(docker ps -q -f "name=.*api") | grep NetworkMode`
-- Check network ranges: `curl http://localhost:5245/api/system/discovery`
-- Verify firewall allows mDNS: `sudo netstat -ln | grep 5353`
+- Run `./scripts/docker/verify-discovery-service.sh` to verify actual bridge health/API paths.
+- Check reachable `DISCOVERY_SUBNETS`, routing and printer TCP/HTTP firewall rules.
+- For old deployments, regenerate with saved settings and recreate containers via
+  `./scripts/docker/fix-discovery-heartbeat.sh`; do not manually edit templates.
+- Verify recent heartbeats as an authenticated administrator and scan a known printer.
+  See [discovery troubleshooting](DISCOVERY_SERVICE_TROUBLESHOOTING.md).
 
 ## Cleanup & Teardown
 

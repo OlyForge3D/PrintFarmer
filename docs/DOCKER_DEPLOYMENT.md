@@ -265,7 +265,7 @@ NON_INTERACTIVE=1 ./scripts/deploy-docker.sh --non-interactive
 
 - In **interactive** mode, if a requested host port is busy you are prompted to accept a suggested alternative.
 - In **non-interactive** mode, the script automatically accepts the first free suggested port within +200 of the original.
-- In **monolithic** deployments, worker ports (8081/8082) cannot be remapped (host networking) — warnings are emitted instead.
+- Supported deployments use bridge networking; published worker ports can be configured independently of internal service ports.
 
 ### Generated Artifacts
 
@@ -438,34 +438,25 @@ ALLOW_LOCAL_NETWORK=true
 ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
 ```
 
-**Docker Networking Modes:**
+**Supported networking:**
 
-1. **Bridge Mode (Default):**
-   ```yaml
-   networks:
-     - bridge
-   ```
-   - Isolated container network
-   - May not reach WiFi devices on macOS
+All application services use the generated `printfarmer-network` bridge.
+Discovery connects to `http://api:5245` using Docker DNS and scans explicit
+`DISCOVERY_SUBNETS` with routed TCP/HTTP probes. Keep all capabilities dropped
+and the canonical isolation controls; additional container privileges are not
+a discovery repair.
 
-2. **Network Considerations:**
-   ```yaml
-   network_mode: host
-   ```
-   - Direct access to host network
-   - Best for device discovery
-   - Not available on macOS/Windows
+For older installations, regenerate via `deploy-docker.sh` with the saved
+configuration and recreate containers, rather than editing YAML by hand.
+Run `./scripts/docker/verify-discovery-service.sh` to verify actual bridge
+connectivity, then verify an authenticated heartbeat and known-printer scan.
 
-3. **Enhanced Bridge with Capabilities:**
-   ```yaml
-   cap_add:
-     - NET_ADMIN
-     - NET_RAW
-   privileged: true
-   ```
-   - Enhanced network capabilities
-   - Better device discovery
-   - Works on Linux
+VLANs require routes and firewall permission for printer connections; automatic
+broadcast/multicast traversal is not promised. Docker Desktop, VPNs, cloud
+networks and Wi-Fi isolation can further restrict reachability. Use explicit
+reachable subnets or manual printer entry, not privilege escalation. Manual
+entries also require a working network route.
+See [discovery troubleshooting](DISCOVERY_SERVICE_TROUBLESHOOTING.md).
 
 ## Container Services
 
@@ -991,8 +982,8 @@ USE_HTTPS_REDIRECT=true
 ### Platform-Specific Notes
 
 **Linux (Recommended for production):**
-- Full networking capabilities
-- Host networking mode available  
+- Routed TCP/HTTP printer access through the application bridge
+- Configure reachable printer subnets and network ACLs
 - Best performance and compatibility
 
 **macOS (Development only):**
