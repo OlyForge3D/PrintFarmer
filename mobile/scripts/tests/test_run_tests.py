@@ -109,6 +109,12 @@ class EventTests(unittest.TestCase):
             Counter(selectors_by_family["iPad"]),
             Counter(shared + ["PrintFarmerUITests/JobDetailIPadNavigationUITests"]),
         )
+        for family, selectors in selectors_by_family.items():
+            self.assertLess(
+                selectors.index("PrintFarmerUITests/LoginFlowUITests"),
+                selectors.index("PrintFarmerUITests/AttentionActionsUITests"),
+                f"{family} login coverage must run before state-mutating Attention actions",
+            )
 
         declarations = set()
         for source in (mobile / "PrintFarmerUITests").glob("*.swift"):

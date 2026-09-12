@@ -226,8 +226,8 @@ jobs:
             prefix: iPhone
             device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
             selectors: >-
-              -only-testing:PrintFarmerUITests/AttentionActionsUITests
               -only-testing:PrintFarmerUITests/LoginFlowUITests
+              -only-testing:PrintFarmerUITests/AttentionActionsUITests
               -only-testing:PrintFarmerUITests/OperatorShellUITests
               -only-testing:PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations
           - key: iphone-2
@@ -266,8 +266,8 @@ jobs:
             prefix: iPad
             device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
             selectors: >-
-              -only-testing:PrintFarmerUITests/AttentionActionsUITests
               -only-testing:PrintFarmerUITests/LoginFlowUITests
+              -only-testing:PrintFarmerUITests/AttentionActionsUITests
               -only-testing:PrintFarmerUITests/OperatorShellUITests
               -only-testing:PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations
           - key: ipad-2
