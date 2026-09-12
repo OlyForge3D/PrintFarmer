@@ -1,6 +1,6 @@
 ---
 description: Code review following PrintFarmer standards (C#/.NET 10, React 19, SwiftUI iOS) — correctness, safety, concurrency, naming, and security
-name: Code Review (Gemini)
+name: Vasquez
 tools: ["*"]
 model: Gemini 3.8 Flash (copilot)
 ---
