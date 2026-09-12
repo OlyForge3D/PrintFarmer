@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { frontendVersionMetadata, resolveGitHash } from './vite.config';
 
@@ -63,7 +63,9 @@ describe('canonical frontend release identity', () => {
       writeFileSync(resolve(root, 'index.html'), '<!doctype html><title>Release metadata fixture</title>');
       writeFileSync(resolve(root, 'public/sw.js'), '// __PRINTFARMER_BUILD_TIME__ __PRINTFARMER_GIT_HASH__');
       writeFileSync(resolve(root, 'public/release-identity.json'), input);
-      execFileSync(process.execPath, [vite, 'build', '--config', config], {
+      copyFileSync(config, resolve(root, 'vite.config.ts'));
+      copyFileSync(resolve('public-release-identity.mjs'), resolve(root, 'public-release-identity.mjs'));
+      execFileSync(process.execPath, [vite, 'build', '--config', resolve(root, 'vite.config.ts')], {
         cwd: root, encoding: 'utf8', timeout: 60_000, stdio: 'pipe',
         env: { ...process.env, VITE_GIT_SHA: identity.sourceCommit },
       });
@@ -81,6 +83,14 @@ describe('canonical frontend release identity', () => {
     expect(() => frontendVersionMetadata('a'.repeat(40), 'now', { sourceCommit: 'b'.repeat(40) }))
       .toThrow(/does not match/);
     expect(frontendVersionMetadata('dev', 'now')).toEqual({ service: 'frontend', commit: 'dev', buildTime: 'now' });
+  });
+  it('fails closed on malformed known fields instead of silently dropping or coercing them', () => {
+    for (const field of ['releaseId', 'identitySha256', 'buildTime', 'channel']) {
+      for (const value of [42, {}, [], null, '', 'line\nbreak']) {
+        expect(() => frontendVersionMetadata('a'.repeat(40), 'now',
+          { sourceCommit: 'a'.repeat(40), [field]: value })).toThrow(/Invalid public identity field/);
+      }
+    }
   });
 });
 

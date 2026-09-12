@@ -159,6 +159,12 @@ export function validateLedger(state, anchor) {
   }
   const sequences = new Set();
   for (const [key, reservation] of Object.entries(state.reservations)) {
+    if (reservation.identitySha256 !== undefined) {
+      requireThat(typeof reservation.identitySha256 === 'string' &&
+        /^[a-f0-9]{64}$/.test(reservation.identitySha256) &&
+        reservation.record?.identitySha256 === reservation.identitySha256,
+      'Ledger authorization hash mismatch');
+    }
     requireThat(reservation.record?.allocationKey === key &&
       state.identities[reservation.record.canonicalVersion] === key &&
       reservation.sequence === reservation.record.sequence, 'Ledger identity continuity violation');
@@ -226,8 +232,8 @@ export function verifyTag(record, expectedObject, actualTag) {
     'Source tag missing, moved, recreated, or not the exact authorized peeled SHA');
 }
 
-export function verifyConsumer(record, stored, context) {
-  requireThat(hash(record) === hash(stored), 'Canonical record was changed');
+export function verifyConsumer(record, stored, context, identitySha256 = hash(stored)) {
+  requireThat(hash(record) === identitySha256, 'Canonical record was changed');
   const tag = parseTag(record.sourceTag);
   requireThat(record.schema === 1 && record.repository === repository &&
     record.canonicalVersion === tag.canonicalVersion && record.baseVersion === tag.baseVersion &&
@@ -289,7 +295,7 @@ export function advance(state, record, set, currentHead, expectedPointer) {
   validateCompleteSet(record, set);
   requireThat(record.sourceCommit === currentHead, 'Stale source cannot advance channel, regardless of N');
   const reservation = state.reservations[record.allocationKey];
-  requireThat(reservation && hash(reservation.record) === hash(record), 'Unknown authorization');
+  requireThat(reservation && (reservation.identitySha256 || hash(reservation.record)) === hash(record), 'Unknown authorization');
   const pointer = state.pointers[record.channel];
   requireThat((pointer?.setHash || '') === expectedPointer, 'Channel compare-and-set conflict');
   const setHash = hash(set);

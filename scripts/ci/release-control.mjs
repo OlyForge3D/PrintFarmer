@@ -1,12 +1,15 @@
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync } from 'node:fs';
 import {
-  admit, advance, hash, requireThat, reserve, transact, verifyConsumer, verifyTag,
+  admit, advance, allocationKey, hash, requireThat, reserve, transact, verifyConsumer, verifyTag,
   identityLabels, parseTag, verifyProtectionEvidence,
 } from './release-policy.mjs';
 import {
-  branchHead, ensureSourceTag, githubClient, gitLedger, readTag, readVersion, verifyProtection,
+  branchHead, command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion, verifyProtection,
 } from './release-github.mjs';
 import { emitBuildIdentity } from './release-metadata.mjs';
+import {
+  privateSetPath, publicAuthorization, readPrivateAuthorization, readPrivateJson, verifyAuthorization, writeAuthorization,
+} from './release-authorization.mjs';
 
 export function runContext(env = process.env) {
   const ref = env.GITHUB_REF;
@@ -27,7 +30,7 @@ function output(name, value) {
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
 }
 
-export async function runReleaseControl(operation, env = process.env) {
+export async function runReleaseControl(operation, env = process.env, verify = command) {
   requireThat(['admit', 'authorize', 'consume', 'advance'].includes(operation), 'Unknown release operation');
   const writes = ['authorize', 'advance'].includes(operation);
   if (writes) {
@@ -58,23 +61,31 @@ export async function runReleaseControl(operation, env = process.env) {
     const protection = await verifyProtection(api, admission.channel, env.RELEASE_PUBLISHER_APP_ID);
     const record = await transact(store, async state => {
       requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during allocation retry');
+      const existing = state.reservations[allocationKey(admission)];
+      if (existing?.identitySha256) {
+        // A lost private artifact cannot be reconstructed from public ledger data.
+        const saved = readPrivateAuthorization();
+        requireThat(hash(saved) === existing.identitySha256, 'Original authorization unavailable; rerun with a new attempt');
+        return saved;
+      }
       const reservation = reserve(state, admission, new Date().toISOString(), protection);
       verifyProtectionEvidence(reservation.record.protection, admission.channel, env.RELEASE_PUBLISHER_APP_ID);
       if (context.requestedTag) requireThat(reservation.record.sourceTag === context.requestedTag,
         'Requested tag is not the durable reservation; omit version to allocate');
+      writeAuthorization(reservation.record);
       return reservation.record;
     });
     await ensureSourceTag(api, store, record, transact);
-    writeFileSync('release-identity.json', JSON.stringify(record));
-    output('identity', JSON.stringify(record));
+    writeAuthorization(record);
+    output('public_identity', JSON.stringify(publicAuthorization(record)));
     return;
   }
 
-  const record = JSON.parse(env.RELEASE_IDENTITY || readFileSync('release-identity.json', 'utf8'));
+  const record = verifyAuthorization(env, verify);
   const { state } = await store.read();
   const entry = state.reservations[record.allocationKey];
   requireThat(entry, 'Unknown release authorization');
-  verifyConsumer(record, entry.record, context);
+  verifyConsumer(record, entry.record, context, entry.identitySha256);
   verifyProtectionEvidence(record.protection, record.channel, env.RELEASE_PUBLISHER_APP_ID);
   requireThat(Date.parse(record.protection.verifiedAt) <= Date.parse(record.created),
     'Protection evidence postdates authorization');
@@ -94,7 +105,7 @@ export async function runReleaseControl(operation, env = process.env) {
       'Unknown release component');
     output('sbom_url', `https://github.com/${record.repository}/releases/download/${record.sourceTag}/printfarmer-${component ? `${component}-` : ''}${record.sourceTag}.spdx.json`);
   } else if (operation === 'advance') {
-    const set = JSON.parse(readFileSync('release-set.json', 'utf8'));
+    const set = readPrivateJson(privateSetPath);
     const expectedPointer = state.pointers[record.channel]?.setHash || '';
     await transact(store, async latest => advance(latest, record, set,
       await branchHead(api, record.sourceBranch), expectedPointer));

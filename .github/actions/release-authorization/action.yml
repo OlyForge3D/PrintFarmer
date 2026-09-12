@@ -1,0 +1,36 @@
+name: Consume private release authorization
+description: Download this attempt's signed authorization and verify before emitting public metadata
+outputs:
+  version:
+    value: ${{ steps.consume.outputs.version }}
+    description: Canonical source tag
+  container_version:
+    value: ${{ steps.consume.outputs.container_version }}
+    description: Canonical container version
+  channel:
+    value: ${{ steps.consume.outputs.channel }}
+    description: Release channel
+  identity_hash:
+    value: ${{ steps.consume.outputs.identity_hash }}
+    description: Full authorization SHA256
+  source_archive_url:
+    value: ${{ steps.consume.outputs.source_archive_url }}
+    description: Public source archive
+  sbom_url:
+    value: ${{ steps.consume.outputs.sbom_url }}
+    description: Public SBOM
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v8
+      with:
+        name: release-authorization-${{ github.run_attempt }}
+        path: .artifacts/release-authorization
+    - uses: sigstore/cosign-installer@v4.1.2
+    - id: consume
+      shell: bash
+      run: |
+        set -euo pipefail
+        chmod 700 .artifacts/release-authorization
+        chmod 600 .artifacts/release-authorization/*
+        node scripts/ci/release-control.mjs consume

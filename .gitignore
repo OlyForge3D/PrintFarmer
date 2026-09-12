@@ -156,6 +156,7 @@ snapshots/
 .copilot/skills/ralph-loop/.state.json
 
 # Temp/debug artifacts
+.artifacts/
 .tmp-*
 .qa/
 layout_diff.txt

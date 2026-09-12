@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { publicIdentity } from './public-release-identity.mjs';
 
 const fullCommitShaPattern = /^[0-9a-f]{40}$/i;
 
@@ -50,15 +51,10 @@ export function frontendVersionMetadata(
   if (releaseIdentity && releaseIdentity.sourceCommit !== gitHash) {
     throw new Error('Frontend release identity does not match the build source SHA.');
   }
-  const fields = ['releaseId', 'channel', 'canonicalVersion', 'baseVersion', 'sourceBranch',
-    'sourceTag', 'sourceCommit', 'authorizedBranchHead', 'buildId', 'buildAttempt',
-    'workflowIdentity', 'identitySha256'];
-  const publicIdentity = Object.fromEntries(fields
-    .filter(field => typeof releaseIdentity?.[field] === 'string')
-    .map(field => [field, releaseIdentity![field]]));
+  const projection = releaseIdentity ? publicIdentity(releaseIdentity) : {};
   return { service: 'frontend', commit: gitHash,
     buildTime: typeof releaseIdentity?.buildTime === 'string' ? releaseIdentity.buildTime : buildTime,
-    ...publicIdentity };
+    ...projection };
 }
 
 function emitVersionJson(gitHash: string, buildTime: string) {

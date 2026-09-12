@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { components, requireThat, validateCompleteSet } from './release-policy.mjs';
+import { components, identityLabels, requireThat, validateCompleteSet } from './release-policy.mjs';
 import { command } from './release-github.mjs';
+import { emitPublicReleaseAssets, privateSetPath, readPrivateJson, verifyAuthorization } from './release-authorization.mjs';
 
 export function inspectCompleteSet(record, digests, run = command) {
   const set = { schema: 1, identity: record, managedEligible: false, images: {} };
@@ -51,13 +52,15 @@ export function publishImmutableTags(record, set, inspect, create) {
 }
 
 function main() {
-  const record = JSON.parse(process.env.RELEASE_IDENTITY);
+  const record = verifyAuthorization(process.env, command);
   if (process.argv[2] === 'inspect') {
     const digests = Object.fromEntries(Object.keys(components).map(name =>
       [name, readFileSync(`artifacts/digest-${name}/digest-${name}.txt`, 'utf8').trim()]));
-    writeFileSync('release-set.json', JSON.stringify(inspectCompleteSet(record, digests)));
+    const set = inspectCompleteSet(record, digests);
+    writeFileSync(privateSetPath, JSON.stringify(set), { mode: 0o600 });
+    emitPublicReleaseAssets(record, set, identityLabels(record));
   } else if (process.argv[2] === 'tag') {
-    const set = JSON.parse(readFileSync('release-set.json', 'utf8'));
+    const set = readPrivateJson(privateSetPath);
     publishImmutableTags(record, set, tag => {
       try {
         const output = command('docker', ['buildx', 'imagetools', 'inspect', tag]);

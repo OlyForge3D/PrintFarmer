@@ -86,13 +86,30 @@ The immutable record retains the verified policy responses, approved App ID,
 repository/channel/branch and verification time in `protection`. Its exact bytes
 (including protection evidence) are signed with the existing Cosign GitHub OIDC
 flow. Same-key retries retain the original evidence rather than rewriting it.
-The Docker admission job verifies the exact workflow certificate identity and
-record bytes; every downstream build/publisher depends on that successful gate.
-Consumers validate the evidence and its binding to the immutable ledger record,
+The full JSON and signature live only in attempt-scoped workflow artifacts
+(subject to GitHub Actions artifact access permissions) and permission-restricted
+`.artifacts/release-authorization/` files, excluded from Git and Docker contexts.
+They are never reusable-workflow inputs, job outputs, public release assets or
+tag annotations. Workflow handoffs carry only the public projection and its
+`identitySha256`. Every consuming job downloads its own attempt's artifact and
+verifies the exact workflow certificate identity and full-record hash before
+emitting metadata. Verification failures never echo the private payload.
+Consumers validate the evidence and its binding to the immutable ledger hash,
 then recheck read-only source VERSION and tag-object/peeled-commit state. They do
 not need Administration permission. The final pointer writer uses an App token
 without Administration scope; any future live policy revalidation must obtain
 an Administration-capable App token first.
+
+Public release identity is separately signed; its bundle authenticates the
+redacted JSON, not the private record. The public complete-set asset and ledger
+reservations contain only projected identities and approved image labels, while
+retaining full-record/full-set hashes. Unknown future authorization fields are
+not copied. The private complete set and original authorization bundle remain
+available to artifact-authorized downstream consumers. Existing owner-entered
+ledger qualifications remain public policy inputs; do not place secrets in them.
+Same-attempt retries require the retained original private file; if it is lost,
+fail closed and rerun all jobs with a new attempt rather than recreating evidence.
+Artifact retention therefore bounds private-evidence recovery.
 
 This is evidence of policy **at authorization**, not a claim that downstream
 jobs observed current administrative policy. Continuous protections and the
@@ -116,8 +133,11 @@ Every job consumes the same record. `release-control.mjs consume` emits:
   `workflowIdentity` and `identitySha256`, plus frontend `service`, `commit`
   and `buildTime`. Vite also sanitizes the copied `dist/release-identity.json`.
   Protection evidence, ruleset/environment/reviewer IDs and any future private
-  fields are not frontend assets. The root authorization record remains complete
-  and unchanged for signing and downstream verification; `identitySha256`
+  fields are not public assets. Generation and Vite share one typed allow-list;
+  malformed known fields fail rather than being dropped or coerced.
+  The root `release-identity.json` is public; the private authorization remains
+  complete and unchanged under `.artifacts/release-authorization/`.
+  `identitySha256`
   continues to hash that full record, not the public projection.
 - OCI version/revision/source/created and release/channel/run/attempt/workflow/
   record-hash labels, identical across API, frontend, slicer-host, discovery,

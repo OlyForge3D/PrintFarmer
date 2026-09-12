@@ -1,7 +1,39 @@
 import { execFileSync } from 'node:child_process';
 import {
   repository, ledgerBranch, requireThat, validateLedger, verifyTag, compareVersions, verifyProtectionEvidence,
+  hash, identityLabels,
 } from './release-policy.mjs';
+import { publicAuthorization, writePublicSet } from './release-authorization.mjs';
+
+export function publicLedger(state) {
+  return { ...state, reservations: Object.fromEntries(Object.entries(state.reservations).map(([key, entry]) => {
+    const record = entry.record;
+    const identitySha256 = entry.identitySha256 || hash(record);
+    const projected = { ...publicAuthorization(record), identitySha256 };
+    for (const field of ['repository', 'workflowCommit', 'allocationKey', 'created', 'stage', 'sequence']) {
+      requireThat(record[field] === undefined || typeof record[field] === 'string', 'Invalid ledger identity field');
+      if (record[field] !== undefined) projected[field] = record[field];
+    }
+    requireThat(record.schema === 1, 'Invalid ledger identity schema');
+    projected.schema = 1;
+    const admission = {};
+    for (const field of ['repository', 'channel', 'baseVersion', 'sourceBranch', 'stage',
+      'sourceCommit', 'authorizedBranchHead', 'buildId', 'buildAttempt', 'workflowIdentity', 'workflowCommit']) {
+      requireThat(entry.admission[field] === undefined || typeof entry.admission[field] === 'string',
+        'Invalid ledger admission field');
+      if (entry.admission[field] !== undefined) admission[field] = entry.admission[field];
+    }
+    const result = { admission, record: projected, sequence: entry.sequence, identitySha256 };
+    for (const field of ['tagObject', 'tagPublished', 'setHash']) {
+      if (entry[field] !== undefined) result[field] = entry[field];
+    }
+    if (entry.set) {
+      result.set = writePublicSet(record, entry.set, identityLabels(record));
+      result.set.identity = { ...publicAuthorization(record), identitySha256 };
+    }
+    return [key, result];
+  })) };
+}
 
 export function githubClient(token = process.env.GH_TOKEN) {
   requireThat(token, 'Missing GitHub credential');
@@ -14,7 +46,8 @@ export function githubClient(token = process.env.GH_TOKEN) {
       }, body: body ? JSON.stringify(body) : undefined,
     });
     if (!response.ok) {
-      const error = new Error(`GitHub ${method} ${endpoint}: HTTP ${response.status}`);
+      const target = /^(rules\/|rulesets|environments\/)/.test(endpoint) ? 'protection policy' : endpoint;
+      const error = new Error(`GitHub ${method} ${target}: HTTP ${response.status}`);
       error.status = response.status;
       throw error;
     }
@@ -71,7 +104,8 @@ export function gitLedger(api, anchor) {
         requireThat(BigInt(state.counter) >= BigInt(previous.counter), 'Ledger counter rollback');
         for (const [key, reservation] of Object.entries(previous.reservations)) {
           requireThat(JSON.stringify(state.reservations[key]?.record) === JSON.stringify(reservation.record) &&
-            JSON.stringify(state.reservations[key]?.admission) === JSON.stringify(reservation.admission),
+            JSON.stringify(state.reservations[key]?.admission) === JSON.stringify(reservation.admission) &&
+            state.reservations[key]?.identitySha256 === reservation.identitySha256,
             'Ledger lost or changed an immutable reservation');
           for (const field of ['tagObject', 'tagPublished', 'setHash', 'set']) {
             if (reservation[field] !== undefined) {
@@ -97,7 +131,7 @@ export function gitLedger(api, anchor) {
     },
     async compareAndSet(revision, state) {
       const parent = await api(`git/commits/${revision}`);
-      const blob = await api('git/blobs', 'POST', { content: JSON.stringify(state), encoding: 'utf-8' });
+      const blob = await api('git/blobs', 'POST', { content: JSON.stringify(publicLedger(state)), encoding: 'utf-8' });
       const tree = await api('git/trees', 'POST', {
         base_tree: parent.tree.sha, tree: [{ path: 'state.json', mode: '100644', type: 'blob', sha: blob.sha }],
       });
@@ -148,7 +182,7 @@ export async function ensureSourceTag(api, store, record, transact) {
     requireThat(!await readTag(api, record.sourceTag), 'Existing tag has no immutable authorization');
     const tag = await api('git/tags', 'POST', {
       tag: record.sourceTag, object: record.sourceCommit, type: 'commit',
-      message: JSON.stringify(record),
+      message: JSON.stringify(publicAuthorization(record)),
       tagger: { name: 'PrintFarmer Release', email: 'release@users.noreply.github.com', date: record.created },
     });
     entry.tagObject = tag.sha;

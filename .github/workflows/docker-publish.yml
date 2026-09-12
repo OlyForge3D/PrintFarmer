@@ -15,6 +15,7 @@ on:
   workflow_call:
     inputs:
       identity:
+        description: Redacted public identity and full authorization hash; never authorization JSON
         type: string
         required: true
 
@@ -29,7 +30,7 @@ env:
   NODE_VERSION: '24'
   ORCA_VERSION: '2.4.2'
   ORCA_SHA256: d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
-  RELEASE_IDENTITY: ${{ inputs.identity }}
+  RELEASE_PUBLIC_IDENTITY: ${{ inputs.identity }}
   RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
   RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
 
@@ -56,23 +57,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@v8
-        with:
-          name: release-authorization-${{ github.run_attempt }}
-      - uses: sigstore/cosign-installer@v4.1.2
       - name: Verify signed branch-at-authorization evidence
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          cosign verify-blob --bundle release-identity.bundle.json \
-            --certificate-identity "https://github.com/${{ fromJSON(inputs.identity).workflowIdentity }}" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com release-identity.json
-          node --input-type=module <<'JS'
-          import { readFileSync } from 'node:fs';
-          if (readFileSync('release-identity.json', 'utf8') !== process.env.RELEASE_IDENTITY) process.exit(1);
-          JS
-          node scripts/ci/release-control.mjs consume
+        uses: ./.github/actions/release-authorization
 
   # ====================
   # JOB 1: Build .NET projects natively
@@ -101,7 +89,7 @@ jobs:
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/ci/release-control.mjs consume
+        uses: ./.github/actions/release-authorization
 
       - name: Verify repository version metadata
         env:
@@ -214,7 +202,7 @@ jobs:
       - name: Consume canonical frontend identity
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/ci/release-control.mjs consume
+        uses: ./.github/actions/release-authorization
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -398,7 +386,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_COMPONENT: ${{ matrix.image }}
-        run: node scripts/ci/release-control.mjs consume
+        uses: ./.github/actions/release-authorization
 
       - name: Download artifact
         uses: actions/download-artifact@v8
@@ -590,7 +578,7 @@ jobs:
             org.opencontainers.image.licenses=AGPL-3.0-only
             org.opencontainers.image.revision=${{ fromJSON(inputs.identity).sourceCommit }}
             org.opencontainers.image.version=${{ fromJSON(inputs.identity).canonicalVersion }}
-            org.opencontainers.image.created=${{ fromJSON(inputs.identity).created }}
+            org.opencontainers.image.created=${{ fromJSON(inputs.identity).buildTime }}
             org.printfarmer.release-channel=${{ steps.source.outputs.channel }}
             org.printfarmer.release-id=${{ fromJSON(inputs.identity).releaseId }}
             org.printfarmer.build-id=${{ fromJSON(inputs.identity).buildId }}
@@ -707,7 +695,7 @@ jobs:
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/ci/release-control.mjs consume
+        uses: ./.github/actions/release-authorization
 
       - name: Set up QEMU for multi-arch builds
         uses: docker/setup-qemu-action@v4
@@ -744,7 +732,7 @@ jobs:
             org.opencontainers.image.licenses=AGPL-3.0-only
             org.opencontainers.image.revision=${{ fromJSON(inputs.identity).sourceCommit }}
             org.opencontainers.image.version=${{ fromJSON(inputs.identity).canonicalVersion }}
-            org.opencontainers.image.created=${{ fromJSON(inputs.identity).created }}
+            org.opencontainers.image.created=${{ fromJSON(inputs.identity).buildTime }}
             org.printfarmer.release-channel=${{ steps.source.outputs.channel }}
             org.printfarmer.release-id=${{ fromJSON(inputs.identity).releaseId }}
             org.printfarmer.build-id=${{ fromJSON(inputs.identity).buildId }}
@@ -857,7 +845,7 @@ jobs:
       - name: Revalidate immutable source tag before publication
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/ci/release-control.mjs consume
+        uses: ./.github/actions/release-authorization
 
       - name: Obtain protected publisher app token
         id: publisher
@@ -879,12 +867,6 @@ jobs:
         with:
           pattern: digest-*-attempt-${{ github.run_attempt }}
           path: artifacts
-
-      - name: Download durable authorization signature
-        uses: actions/download-artifact@v8
-        with:
-          name: release-authorization-${{ github.run_attempt }}
-          path: release-authorization
 
       - name: Download image SPDX SBOMs
         uses: actions/download-artifact@v8
@@ -1017,7 +999,11 @@ jobs:
             --version "$VERSION" \
             --output release-assets
           cp LICENSE THIRD-PARTY-NOTICES.md release-assets/
-          cp release-identity.json release-set.json release-authorization/release-identity.bundle.json release-assets/
+          cmp -s release-assets/release-identity.json .artifacts/release-authorization/public-identity.json
+          cp .artifacts/release-authorization/public-identity.bundle.json release-assets/release-identity.bundle.json
+          cosign verify-blob --bundle release-assets/release-identity.bundle.json \
+            --certificate-identity "https://github.com/${GITHUB_WORKFLOW_REF}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com release-assets/release-identity.json
 
           mapfile -d '' sbom_files < <(
             find artifacts -type f -name '*.spdx.json' -print0 | sort -z
@@ -1158,8 +1144,10 @@ jobs:
         with:
           name: release-identity-and-complete-set-${{ github.run_attempt }}
           path: |
-            release-identity.json
-            release-set.json
+            .artifacts/release-authorization/release-identity.json
+            .artifacts/release-authorization/release-identity.bundle.json
+            .artifacts/release-authorization/release-set.json
+          include-hidden-files: true
           if-no-files-found: error
 
   # ====================

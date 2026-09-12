@@ -1,6 +1,8 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { hash, identityLabels, parseTag, requireThat } from './release-policy.mjs';
+import { publicIdentityFields } from '../../src/Web/ReactApp/public-release-identity.mjs';
+import { publicAuthorization } from './release-authorization.mjs';
 
 export function buildMetadata(record) {
   const parsed = parseTag(record.sourceTag);
@@ -12,8 +14,9 @@ export function buildMetadata(record) {
   }
   const escape = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;');
-  const fields = ['releaseId', 'channel', 'canonicalVersion', 'baseVersion', 'sourceBranch',
-    'sourceTag', 'sourceCommit', 'authorizedBranchHead', 'buildId', 'buildAttempt', 'workflowIdentity'];
+  const projection = publicAuthorization(record);
+  const fields = publicIdentityFields;
+  requireThat(fields.every(field => typeof projection[field] === 'string'), 'Incomplete public build identity');
   return {
     props: `<Project>
   <PropertyGroup>
@@ -30,9 +33,7 @@ ${fields.map(field => `    <AssemblyMetadata Include="${field}" Value="${escape(
 </Project>
 `,
     frontend: JSON.stringify({ service: 'frontend', commit: record.sourceCommit,
-      buildTime: record.created,
-      ...Object.fromEntries(fields.map(field => [field, record[field]])),
-      identitySha256: hash(record) }),
+      ...projection }),
     labels: Object.entries(identityLabels(record)).map(([key, value]) => `${key}=${value}`).join('\n'),
   };
 }
@@ -42,6 +43,6 @@ export function emitBuildIdentity(record, root = '.') {
   mkdirSync(join(root, 'src', 'Web', 'ReactApp', 'public'), { recursive: true });
   writeFileSync(join(root, 'src', 'ReleaseIdentity.props'), metadata.props);
   writeFileSync(join(root, 'src', 'Web', 'ReactApp', 'public', 'release-identity.json'), metadata.frontend);
-  writeFileSync(join(root, 'release-identity.json'), JSON.stringify(record));
+  writeFileSync(join(root, 'release-identity.json'), JSON.stringify(publicAuthorization(record)));
   writeFileSync(join(root, 'release-labels.txt'), metadata.labels);
 }

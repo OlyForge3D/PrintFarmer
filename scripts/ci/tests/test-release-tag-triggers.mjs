@@ -8,10 +8,15 @@ import {
   parseTag, parseVersionFile, reserve, transact, validateCandidate, validateCompleteSet,
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence,
 } from '../release-policy.mjs';
-import { ensureSourceTag, gitLedger, readTag, verifyProtection } from '../release-github.mjs';
+import { ensureSourceTag, gitLedger, publicLedger, readTag, verifyProtection } from '../release-github.mjs';
 import { buildMetadata, emitBuildIdentity } from '../release-metadata.mjs';
 import { runContext, runReleaseControl } from '../release-control.mjs';
 import { inspectCompleteSet, publishImmutableTags } from '../release-set.mjs';
+import {
+  authorizationPath, authorizationBundle, privateSetPath, publicAuthorization, verifyAuthorization,
+  writeAuthorization, emitPublicReleaseAssets,
+} from '../release-authorization.mjs';
+import { publicIdentity, publicIdentityFields } from '../../../src/Web/ReactApp/public-release-identity.mjs';
 
 const sha = 'a'.repeat(40);
 const newerSha = 'b'.repeat(40);
@@ -268,7 +273,7 @@ test('emitted public identity excludes private and future fields without alterin
       workflowIdentity: identity.workflowIdentity, identitySha256: hash(identity),
     });
     assert.doesNotMatch(emitted, /protection|ruleset|environment|reviewer|futureAuthorization|private-/);
-    assert.equal(readFileSync(resolve(root, 'release-identity.json'), 'utf8'), original);
+    assert.deepEqual(JSON.parse(readFileSync(resolve(root, 'release-identity.json'), 'utf8')), publicAuthorization(identity));
     assert.equal(JSON.stringify(identity), original);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -595,10 +600,18 @@ test('actual control flow keeps github.token read-only and requires App verifica
   const fixture = authorizationFixture();
   const originalFetch = globalThis.fetch;
   const cwd = process.cwd();
+  const previousOutput = process.env.GITHUB_OUTPUT;
   const root = resolve('.artifacts', `authorization-${process.pid}`);
   mkdirSync(root, { recursive: true });
   globalThis.fetch = fixture.fetch;
   process.chdir(root);
+  process.env.GITHUB_OUTPUT = resolve('workflow-output.txt');
+  const verify = (file, args) => {
+    assert.equal(file, 'cosign');
+    assert.deepEqual(args, ['verify-blob', '--bundle', authorizationBundle,
+      '--certificate-identity', `https://github.com/${context().workflowIdentity}`,
+      '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com', authorizationPath]);
+  };
   try {
     await runReleaseControl('admit', { ...fixture.env, RELEASE_PUBLISHER_TOKEN: undefined });
     assert.ok(fixture.calls.length > 0);
@@ -616,44 +629,53 @@ test('actual control flow keeps github.token read-only and requires App verifica
     assert.ok(fixture.calls.every(call => call.method === 'GET'), '403 must not allocate or tag');
     fixture.calls.length = 0;
     await runReleaseControl('authorize', fixture.env);
-    const identity = JSON.parse(readFileSync('release-identity.json', 'utf8'));
+    const identity = JSON.parse(readFileSync(authorizationPath, 'utf8'));
     verifyProtectionEvidence(identity.protection, 'insider', '123');
     const firstWrite = fixture.calls.findIndex(call => call.method !== 'GET');
     const adminCalls = fixture.calls.filter(call => call.admin);
     assert.ok(adminCalls.length >= 8 && adminCalls.every(call => call.publisher));
     assert.ok(fixture.calls.slice(firstWrite).every(call => !call.admin), 'Protection must precede allocation');
-    const signedBytes = readFileSync('release-identity.json', 'utf8');
+    const signedBytes = readFileSync(authorizationPath, 'utf8');
     await runReleaseControl('authorize', fixture.env);
-    assert.equal(readFileSync('release-identity.json', 'utf8'), signedBytes, 'Retry retains original evidence bytes');
+    assert.equal(readFileSync(authorizationPath, 'utf8'), signedBytes, 'Retry retains original evidence bytes');
     fixture.calls.length = 0;
-    const consumer = { ...fixture.env, RELEASE_PUBLISHER_TOKEN: undefined, RELEASE_IDENTITY: signedBytes };
-    await runReleaseControl('consume', consumer);
+    const consumer = { ...fixture.env, RELEASE_PUBLISHER_TOKEN: undefined,
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
+    await runReleaseControl('consume', consumer, verify);
     assert.ok(fixture.calls.every(call => !call.admin && !call.publisher && call.method === 'GET'));
     assert.match(readFileSync('src/ReleaseIdentity.props', 'utf8'), /1\.2\.3-insider\.1/);
-    assert.equal(readFileSync('release-identity.json', 'utf8'), signedBytes,
+    assert.equal(readFileSync(authorizationPath, 'utf8'), signedBytes,
       'Public projection must preserve the signed private record bytes');
     const publicIdentity = readFileSync('src/Web/ReactApp/public/release-identity.json', 'utf8');
     assert.doesNotMatch(publicIdentity, /protection|rulesets|environment|reviewers|publisherAppId/);
     assert.equal(JSON.parse(publicIdentity).identitySha256, hash(identity));
     fixture.calls.length = 0;
-    writeFileSync('release-set.json', JSON.stringify(completeSet(identity)));
-    await runReleaseControl('advance', { ...fixture.env, RELEASE_IDENTITY: signedBytes });
+    writeFileSync(privateSetPath, JSON.stringify(completeSet(identity)));
+    await runReleaseControl('advance', { ...fixture.env, RELEASE_PUBLIC_IDENTITY: consumer.RELEASE_PUBLIC_IDENTITY }, verify);
     assert.ok(fixture.calls.some(call => call.method === 'PATCH'));
     assert.ok(fixture.calls.every(call => call.publisher && !call.admin),
       'Pointer writer needs the App, not Administration permission');
     fixture.calls.length = 0;
     const changed = structuredClone(identity);
     changed.protection.publisherAppId = '999';
-    await assert.rejects(runReleaseControl('consume', { ...consumer, RELEASE_IDENTITY: JSON.stringify(changed) }),
-      /record was changed/);
-    await assert.rejects(runReleaseControl('consume', { ...consumer, GITHUB_RUN_ATTEMPT: '2' }),
+    writeFileSync(authorizationPath, JSON.stringify(changed));
+    await assert.rejects(runReleaseControl('consume', consumer, verify), /differs from public identity/);
+    writeFileSync(authorizationPath, signedBytes);
+    await assert.rejects(runReleaseControl('consume', { ...consumer, GITHUB_RUN_ATTEMPT: '2' }, verify),
       /Unauthorized consumer/);
-    await assert.rejects(runReleaseControl('consume', { ...consumer, RELEASE_PUBLISHER_APP_ID: '999' }),
+    await assert.rejects(runReleaseControl('consume', { ...consumer, RELEASE_PUBLISHER_APP_ID: '999' }, verify),
       /mismatched publisher/);
     fixture.deleteTag();
-    await assert.rejects(runReleaseControl('consume', consumer), /tag missing/);
+    await assert.rejects(runReleaseControl('consume', consumer, verify), /tag missing/);
     assert.ok(fixture.calls.every(call => call.method === 'GET'));
+    const outputs = readFileSync(process.env.GITHUB_OUTPUT, 'utf8');
+    assert.doesNotMatch(outputs, /protection|rulesets|environments|reviewers|publisherAppId|actor_id/);
+    assert.ok(outputs.includes(`identity_hash=${hash(identity)}`));
+    const projectedOutput = JSON.parse(outputs.split('\n').find(line => line.startsWith('public_identity=')).split('=').slice(1).join('='));
+    assert.deepEqual(projectedOutput, publicAuthorization(identity));
   } finally {
+    if (previousOutput === undefined) delete process.env.GITHUB_OUTPUT;
+    else process.env.GITHUB_OUTPUT = previousOutput;
     process.chdir(cwd);
     globalThis.fetch = originalFetch;
     rmSync(root, { recursive: true, force: true });
@@ -678,21 +700,29 @@ test('missing, malformed and weakened signed protection evidence always fails cl
   const identity = record(ledger);
   const fixture = authorizationFixture(ledger);
   const originalFetch = globalThis.fetch;
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `invalid-authorization-${process.pid}`);
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  writeAuthorization(identity);
   globalThis.fetch = fixture.fetch;
   try {
     await assert.rejects(runReleaseControl('consume', {
-      ...fixture.env, RELEASE_IDENTITY: JSON.stringify(identity), RELEASE_PUBLISHER_TOKEN: undefined,
-    }), /Missing or mismatched publisher protection evidence/);
+      ...fixture.env, RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)), RELEASE_PUBLISHER_TOKEN: undefined,
+    }, () => {}), /Missing or mismatched publisher protection evidence/);
     assert.ok(fixture.calls.every(call => !call.admin && call.method === 'GET'));
     assert.ok(!fixture.calls.some(call => call.endpoint.startsWith('git/ref/tags/')));
   } finally {
     globalThis.fetch = originalFetch;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('workflow credential wiring and signature gate reject failure or changed bytes before consumers', () => {
+test('workflow wiring transports only public outputs and each consumer verifies the private artifact', () => {
   const authority = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
+  const action = readFileSync('.github/actions/release-authorization/action.yml', 'utf8');
   const authorize = authority.split('\n  authorize:')[1].split('\n  publish:')[0];
   assert.match(authorize, /environment: release-/);
   assert.ok(authorize.indexOf('uses: actions/create-github-app-token@v2') <
@@ -705,33 +735,169 @@ test('workflow credential wiring and signature gate reject failure or changed by
   const gated = name => name === 'admission' || (jobs[name]?.match(/^    needs: (.+)$/m)?.[1]
     .replace(/[[\]]/g, '').split(',').map(item => item.trim()).some(gated) ?? false);
   for (const [name, job] of Object.entries(jobs)) {
-    if (/release-control\.mjs (consume|advance)|RELEASE_REGISTRY_TOKEN/.test(job)) {
+    if (/uses: \.\/\.github\/actions\/release-authorization|release-control\.mjs advance|RELEASE_REGISTRY_TOKEN/.test(job)) {
       assert.ok(gated(name), `${name} can bypass signature admission`);
     }
   }
-  const script = docker.split('      - name: Verify signed branch-at-authorization evidence')[1]
-    .split('\n  #')[0].split('        run: |\n')[1].split('\n')
-    .map(line => line.replace(/^          /, '')).join('\n')
-    .replace('${{ fromJSON(inputs.identity).workflowIdentity }}', context().workflowIdentity)
-    .replace('node scripts/ci/release-control.mjs consume', 'printf "CONSUMED"');
+  assert.match(authority, /public_identity: \$\{\{ steps\.authorize\.outputs\.public_identity \}\}/);
+  assert.match(authority, /identity: \$\{\{ needs\.authorize\.outputs\.public_identity \}\}/);
+  assert.doesNotMatch(authority + docker + action, /RELEASE_IDENTITY:|outputs\.identity\b/);
+  assert.doesNotMatch(docker, /cp (?:release-identity|release-set|\.artifacts\/release-authorization\/release-identity)/);
+  assert.match(docker, /cp \.artifacts\/release-authorization\/public-identity\.bundle\.json release-assets\/release-identity\.bundle\.json/);
+  assert.match(authority, /--bundle \.artifacts\/release-authorization\/public-identity\.bundle\.json \\\n\s+\.artifacts\/release-authorization\/public-identity\.json/);
+  assert.match(docker, /cmp -s release-assets\/release-identity\.json \.artifacts\/release-authorization\/public-identity\.json/);
+  for (const match of docker.matchAll(/fromJSON\(inputs\.identity\)\.(\w+)/g)) {
+    assert.ok([...publicIdentityFields, 'identitySha256', 'buildTime'].includes(match[1]), match[1]);
+  }
+  for (const match of (authority + docker + action).matchAll(/steps\.(?:authorize|consume)\.outputs\.(\w+)/g)) {
+    assert.ok(['public_identity', 'version', 'container_version', 'channel', 'identity_hash',
+      'source_archive_url', 'sbom_url'].includes(match[1]), match[1]);
+  }
+  assert.match(action, /name: release-authorization-\$\{\{ github.run_attempt \}\}/);
+  assert.match(action, /path: \.artifacts\/release-authorization/);
+  assert.ok(action.indexOf('actions/download-artifact') < action.indexOf('release-control.mjs consume'));
+  assert.ok(action.indexOf('cosign-installer') < action.indexOf('release-control.mjs consume'));
+  assert.equal((docker.match(/uses: \.\/\.github\/actions\/release-authorization/g) || []).length, 6);
+  assert.doesNotMatch(docker, /run: node scripts\/ci\/release-control\.mjs consume/);
+  assert.match(readFileSync('.dockerignore', 'utf8'), /\*\*\/\.artifacts\//);
+  assert.match(readFileSync('.gitignore', 'utf8'), /^\.artifacts\/$/m);
+});
+
+test('signed-artifact verification fails closed without logging private payloads or accepting full JSON transport', () => {
   const root = resolve('.artifacts', `signature-gate-${process.pid}`);
+  const cwd = process.cwd();
   mkdirSync(root, { recursive: true });
+  process.chdir(root);
   try {
-    writeFileSync(resolve(root, 'release-identity.json'), '{"signed":true}');
-    const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
-    for (const [exit, bytes, expected] of [
-      ['1', '{"signed":true}', false],
-      ['0', '{"signed":false}', false],
-      ['0', '{"signed":true}', true],
-    ]) {
-      const result = spawnSync(shell, ['-c', `cosign() { return "$VERIFY_EXIT"; }\n${script}`], {
-        cwd: root, encoding: 'utf8', env: { ...process.env, VERIFY_EXIT: exit, RELEASE_IDENTITY: bytes },
-      });
-      assert.ifError(result.error);
-      assert.equal(result.status === 0, expected, result.stderr);
-      assert.equal(result.stdout.includes('CONSUMED'), expected);
-    }
+    const identity = { ...record(), protection: { privateMarker: 'private-value' } };
+    writeAuthorization(identity);
+    const env = { GITHUB_REPOSITORY: context().repository, GITHUB_REF: context().ref,
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
+    assert.throws(() => verifyAuthorization(env, () => { throw new Error(JSON.stringify(identity)); }),
+      error => error.message === 'Authorization signature verification failed');
+    const verify = (file, args) => {
+      assert.equal(file, 'cosign');
+      assert.ok(args.includes(authorizationPath) && args.includes(authorizationBundle));
+      assert.ok(args.includes(`https://github.com/${identity.workflowIdentity}`));
+      assert.doesNotMatch(JSON.stringify(args), /privateMarker|private-value/);
+    };
+    assert.deepEqual(verifyAuthorization(env, verify), identity);
+    assert.throws(() => verifyAuthorization({ ...env, RELEASE_IDENTITY: JSON.stringify(identity) }, verify), /forbidden/);
+    writeFileSync(authorizationPath, JSON.stringify({ ...identity, protection: {} }));
+    assert.throws(() => verifyAuthorization(env, verify), /differs from public identity/);
+    writeFileSync(authorizationPath, '{"privateMarker": private-value}');
+    assert.throws(() => verifyAuthorization(env, verify),
+      error => error.message === 'Private authorization unavailable or malformed');
+    writeAuthorization(identity);
+    assert.throws(() => verifyAuthorization({ ...env, RELEASE_PUBLIC_IDENTITY: JSON.stringify({
+      ...publicAuthorization(identity), futurePrivate: 'private-value',
+    }) }, verify), /Invalid public authorization/);
+    assert.throws(() => verifyAuthorization({ ...env, GITHUB_REF: 'refs/heads/attacker' }, verify), /Untrusted/);
   } finally {
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('public assets, tag annotations and ledger retain hashes but no private or unknown authorization fields', async () => {
+  const ledger = state();
+  const identity = reserve(ledger, admission(), created, await verifyProtection(protectionFixture().api, 'insider', '123')).record;
+  identity.futurePrivate = { value: 'private-future-value' };
+  identity.reviewerId = 'private-reviewer';
+  identity.publisherId = 'private-publisher';
+  const set = completeSet(identity);
+  set.futurePrivate = identity.futurePrivate;
+  set.images.api.platforms['linux/amd64'].labels.futurePrivate = 'private-label';
+  advance(ledger, identity, set, sha, '');
+  const sanitized = publicLedger(ledger);
+  const serialized = JSON.stringify(sanitized);
+  assert.doesNotMatch(serialized, /protection|rulesets|environment|reviewer|publisher|futurePrivate|private-/);
+  assert.equal(sanitized.reservations[identity.allocationKey].identitySha256, hash(identity));
+  assert.equal(sanitized.reservations[identity.allocationKey].setHash, hash(set));
+  assert.deepEqual(publicLedger(sanitized), sanitized, 'Public ledger serialization must be idempotent');
+  const root = resolve('.artifacts', `public-assets-${process.pid}`);
+  try {
+    emitPublicReleaseAssets(identity, set, identityLabels(identity), root);
+    for (const file of ['release-identity.json', 'release-set.json']) {
+      const content = readFileSync(resolve(root, 'release-assets', file), 'utf8');
+      assert.doesNotMatch(content, /protection|rulesets|environment|reviewer|publisher|futurePrivate|private-/);
+      assert.ok(content.includes(hash(identity)));
+    }
+    const published = JSON.parse(readFileSync(resolve(root, 'release-assets/release-identity.json'), 'utf8'));
+    assert.deepEqual(published, publicAuthorization(identity));
+    let tag;
+    const store = memoryStore(ledger);
+    await ensureSourceTag(async (endpoint, method, body) => {
+      if (endpoint.startsWith('git/ref/tags/')) {
+        if (!tag) throw Object.assign(new Error('missing'), { status: 404 });
+        return { object: { sha: newerSha, type: 'tag' } };
+      }
+      if (endpoint === 'git/tags' && method === 'POST') {
+        assert.deepEqual(JSON.parse(body.message), published);
+        return { sha: newerSha };
+      }
+      if (endpoint === `git/tags/${newerSha}`) return { object: { sha, type: 'commit' } };
+      if (endpoint === 'git/refs') { tag = true; return {}; }
+      throw new Error('Unexpected fixture endpoint');
+    }, store, identity, transact);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the shared public field projection rejects wrong types rather than coercing private objects', () => {
+  for (const field of [...publicIdentityFields, 'identitySha256', 'buildTime']) {
+    for (const value of [123, {}, [], undefined, '', 'line\nbreak']) {
+      assert.throws(() => publicIdentity({ ...record(), [field]: value }), /Invalid public identity field/);
+    }
+  }
+  for (const source of [undefined, [], 123, 'identity']) assert.throws(() => publicIdentity(source));
+  for (const value of [{ private: 'value' }, 42]) {
+    assert.throws(() => buildMetadata({ ...record(), releaseId: value }), /Invalid public identity field/);
+  }
+});
+
+test('executed signing and asset-copy commands never substitute the private signed record', () => {
+  const authority = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
+  const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
+  const signing = authority.split('      - name: Sign immutable source and App-verified protection evidence\n')[1]
+    .split('      - uses: actions/upload-artifact')[0].split('        run: |\n')[1]
+    .split('\n').map(line => line.replace(/^          /, '')).join('\n');
+  const publication = docker.split('\n').filter(line =>
+    /^\s+(cmp -s release-assets\/release-identity|cp \.artifacts\/release-authorization\/public-identity)/.test(line))
+    .map(line => line.trim()).join('\n');
+  const root = resolve('.artifacts', `sign-public-${process.pid}`);
+  const cwd = process.cwd();
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  try {
+    const identity = { ...record(), protection: { publisherId: 'private-publisher' },
+      futurePrivate: 'private-future-value' };
+    writeAuthorization(identity);
+    emitPublicReleaseAssets(identity, completeSet(identity), identityLabels(identity));
+    // Echo the signing input into the mock bundle to detect any wrong-file publication.
+    const mock = `cosign() {
+      local bundle="" source="" previous=""
+      for arg in "$@"; do
+        if [[ "$previous" == "--bundle" ]]; then bundle="$arg"; fi
+        previous="$arg"
+        source="$arg"
+      done
+      cp "$source" "$bundle"
+    }\n`;
+    const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+    const result = spawnSync(shell, ['-c', `${mock}${signing}\n${publication}`],
+      { cwd: root, encoding: 'utf8' });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stdout + result.stderr, /private-publisher|private-future/);
+    const bundle = readFileSync('release-assets/release-identity.bundle.json', 'utf8');
+    assert.deepEqual(JSON.parse(bundle), publicAuthorization(identity));
+    assert.doesNotMatch(bundle, /protection|publisher|futurePrivate|private-/);
+    assert.equal(readFileSync(authorizationBundle, 'utf8'), JSON.stringify(identity));
+    assert.equal(readFileSync(authorizationPath, 'utf8'), JSON.stringify(identity));
+  } finally {
+    process.chdir(cwd);
     rmSync(root, { recursive: true, force: true });
   }
 });

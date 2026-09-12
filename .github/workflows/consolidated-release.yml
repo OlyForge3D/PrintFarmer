@@ -83,7 +83,7 @@ jobs:
       contents: read
       id-token: write
     outputs:
-      identity: ${{ steps.authorize.outputs.identity }}
+      public_identity: ${{ steps.authorize.outputs.public_identity }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -124,13 +124,24 @@ jobs:
         uses: sigstore/cosign-installer@v4.1.2
       - name: Sign immutable source and App-verified protection evidence
         run: |
-          cosign sign-blob --yes --bundle release-identity.bundle.json release-identity.json
+          set -euo pipefail
+          umask 077
+          cosign sign-blob --yes \
+            --bundle .artifacts/release-authorization/release-identity.bundle.json \
+            .artifacts/release-authorization/release-identity.json \
+            > .artifacts/release-authorization/sign.log 2>&1
+          cosign sign-blob --yes \
+            --bundle .artifacts/release-authorization/public-identity.bundle.json \
+            .artifacts/release-authorization/public-identity.json
       - uses: actions/upload-artifact@v7
         with:
           name: release-authorization-${{ github.run_attempt }}
           path: |
-            release-identity.json
-            release-identity.bundle.json
+            .artifacts/release-authorization/release-identity.json
+            .artifacts/release-authorization/release-identity.bundle.json
+            .artifacts/release-authorization/public-identity.json
+            .artifacts/release-authorization/public-identity.bundle.json
+          include-hidden-files: true
           if-no-files-found: error
 
   publish:
@@ -142,5 +153,5 @@ jobs:
       packages: read
       id-token: write
     with:
-      identity: ${{ needs.authorize.outputs.identity }}
+      identity: ${{ needs.authorize.outputs.public_identity }}
     secrets: inherit
