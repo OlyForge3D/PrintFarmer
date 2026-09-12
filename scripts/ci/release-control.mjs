@@ -1,7 +1,7 @@
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import {
   admit, advance, hash, requireThat, reserve, transact, verifyConsumer, verifyTag,
-  identityLabels, parseTag,
+  identityLabels, parseTag, verifyProtectionEvidence,
 } from './release-policy.mjs';
 import {
   branchHead, ensureSourceTag, githubClient, gitLedger, readTag, readVersion, verifyProtection,
@@ -27,11 +27,16 @@ function output(name, value) {
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
 }
 
-async function main() {
-  const operation = process.argv[2];
-  const api = githubClient();
-  const context = runContext();
-  const store = gitLedger(api, process.env.RELEASE_LEDGER_ANCHOR);
+export async function runReleaseControl(operation, env = process.env) {
+  requireThat(['admit', 'authorize', 'consume', 'advance'].includes(operation), 'Unknown release operation');
+  const writes = ['authorize', 'advance'].includes(operation);
+  if (writes) {
+    requireThat(env.RELEASE_PUBLISHER_TOKEN && env.RELEASE_PUBLISHER_TOKEN !== env.GH_TOKEN,
+      'Protected publisher App token required; github.token cannot verify Administration or publish');
+  }
+  const api = githubClient(writes ? env.RELEASE_PUBLISHER_TOKEN : env.GH_TOKEN);
+  const context = runContext(env);
+  const store = gitLedger(api, env.RELEASE_LEDGER_ANCHOR);
   if (['admit', 'authorize'].includes(operation)) {
     const channel = context.event === 'schedule' ? 'insider' : context.channel;
     const branch = channel === 'stable' ? 'main' : 'development';
@@ -39,7 +44,6 @@ async function main() {
     const selectedHead = await branchHead(api, branch);
     const admission = admit(context, selectedHead, await readVersion(api, selectedHead),
       state.pointers.stable?.canonicalVersion || state.lastHistoricalStable);
-    await verifyProtection(api, admission.channel);
     const checks = await api(`commits/${selectedHead}/check-runs?per_page=100`);
     requireThat(checks.total_count <= 100, 'Check evidence truncated');
     for (const required of ['CI tooling tests', '.NET build', 'Frontend build & tests']) {
@@ -51,9 +55,11 @@ async function main() {
     output('source_sha', selectedHead);
     output('channel', admission.channel);
     if (operation === 'admit') return;
+    const protection = await verifyProtection(api, admission.channel, env.RELEASE_PUBLISHER_APP_ID);
     const record = await transact(store, async state => {
       requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during allocation retry');
-      const reservation = reserve(state, admission, new Date().toISOString());
+      const reservation = reserve(state, admission, new Date().toISOString(), protection);
+      verifyProtectionEvidence(reservation.record.protection, admission.channel, env.RELEASE_PUBLISHER_APP_ID);
       if (context.requestedTag) requireThat(reservation.record.sourceTag === context.requestedTag,
         'Requested tag is not the durable reservation; omit version to allocate');
       return reservation.record;
@@ -64,12 +70,14 @@ async function main() {
     return;
   }
 
-  const record = JSON.parse(process.env.RELEASE_IDENTITY || readFileSync('release-identity.json', 'utf8'));
+  const record = JSON.parse(env.RELEASE_IDENTITY || readFileSync('release-identity.json', 'utf8'));
   const { state } = await store.read();
   const entry = state.reservations[record.allocationKey];
   requireThat(entry, 'Unknown release authorization');
   verifyConsumer(record, entry.record, context);
-  await verifyProtection(api, record.channel);
+  verifyProtectionEvidence(record.protection, record.channel, env.RELEASE_PUBLISHER_APP_ID);
+  requireThat(Date.parse(record.protection.verifiedAt) <= Date.parse(record.created),
+    'Protection evidence postdates authorization');
   verifyTag(record, entry.tagObject, await readTag(api, record.sourceTag));
   requireThat(parseTag(record.sourceTag).baseVersion ===
     (await readVersion(api, record.sourceCommit)).replace(/\r?\n$/, '').slice(1), 'Source VERSION changed');
@@ -81,7 +89,7 @@ async function main() {
     output('identity_hash', hash(record));
     output('labels', Object.entries(identityLabels(record)).map(([key, value]) => `${key}=${value}`).join('\\n'));
     output('source_archive_url', `https://github.com/${record.repository}/releases/download/${record.sourceTag}/PrintFarmer-${record.sourceTag}-source.tar.gz`);
-    const component = process.env.RELEASE_COMPONENT;
+    const component = env.RELEASE_COMPONENT;
     requireThat(!component || ['api', 'frontend', 'printer-discovery', 'slicer-host', 'orcaslicer-worker'].includes(component),
       'Unknown release component');
     output('sbom_url', `https://github.com/${record.repository}/releases/download/${record.sourceTag}/printfarmer-${component ? `${component}-` : ''}${record.sourceTag}.spdx.json`);
@@ -97,5 +105,5 @@ async function main() {
 }
 
 if (process.argv[1]?.endsWith('release-control.mjs')) {
-  main().catch(error => { console.error(error.message); process.exitCode = 1; });
+  runReleaseControl(process.argv[2]).catch(error => { console.error(error.message); process.exitCode = 1; });
 }

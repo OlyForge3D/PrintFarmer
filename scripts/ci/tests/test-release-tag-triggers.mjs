@@ -6,11 +6,11 @@ import test from 'node:test';
 import {
   admit, advance, allocationKey, compareVersions, components, hash, identityLabels,
   parseTag, parseVersionFile, reserve, transact, validateCandidate, validateCompleteSet,
-  validateLedger, verifyConsumer, verifyTag,
+  validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence,
 } from '../release-policy.mjs';
 import { ensureSourceTag, gitLedger, readTag, verifyProtection } from '../release-github.mjs';
 import { buildMetadata } from '../release-metadata.mjs';
-import { runContext } from '../release-control.mjs';
+import { runContext, runReleaseControl } from '../release-control.mjs';
 import { inspectCompleteSet, publishImmutableTags } from '../release-set.mjs';
 
 const sha = 'a'.repeat(40);
@@ -200,6 +200,11 @@ test('record consumers reject direct tags, foreign run/attempt and changed signe
     assert.throws(() => verifyConsumer(identity, identity, context(override)));
   }
   assert.throws(() => verifyConsumer({ ...identity, sourceCommit: newerSha }, identity, context()));
+  for (const override of [{ repository: 'fork/repo' }, { releaseId: 'stable:1.2.3' },
+    { canonicalVersion: '1.2.4-insider.1' }, { stage: 'rc' }, { allocationKey: 'forged' }]) {
+    const malformed = { ...identity, ...override };
+    assert.throws(() => verifyConsumer(malformed, malformed, context()), /Invalid canonical record/);
+  }
 });
 
 test('complete-set CAS rejects mixed/missing platforms and stale-source high-N reruns', async () => {
@@ -404,6 +409,21 @@ test('GitHub ledger reads pinned Git blobs and rejects ancestry, rollback, trunc
   const lostStage = structuredClone(current);
   delete lostStage.stages;
   await assert.rejects(gitLedger(fixture(lostStage), anchor).read(), /stage rollback/);
+  const changedAdmission = structuredClone(current);
+  changedAdmission.reservations[identity.allocationKey].admission.buildId = '999';
+  await assert.rejects(gitLedger(fixture(changedAdmission), anchor).read(), /immutable reservation/);
+  const orphan = structuredClone(current);
+  orphan.identities['1.2.4-insider.9'] = 'unknown';
+  await assert.rejects(gitLedger(fixture(orphan), anchor).read(), /identity continuity/);
+  // Owner-approved seed floors may exist before the first reservation.
+  previous.reservations = {};
+  previous.identities = {};
+  const seedNext = structuredClone(previous);
+  delete seedNext.pointers.insider;
+  await assert.rejects(gitLedger(fixture(seedNext), anchor).read(), /pointer rollback/);
+  seedNext.pointers = structuredClone(previous.pointers);
+  delete seedNext.stages;
+  await assert.rejects(gitLedger(fixture(seedNext), anchor).read(), /stage rollback/);
 });
 
 test('GitHub CAS distinguishes a competing head from a rejected protected write', async () => {
@@ -418,7 +438,7 @@ test('GitHub CAS distinguishes a competing head from a rejected protected write'
   await assert.rejects(gitLedger(api(sha), anchor).compareAndSet(sha, state()), /policy, not a CAS/);
 });
 
-test('live protection adapter accepts only scoped reviewer-gated environments and exclusive publisher rules', async () => {
+function protectionFixture() {
   const names = ['release-canonical-tags', 'release-ledger-continuity', 'release-tag-creators', 'release-ledger-writer'];
   const rulesets = names.map((name, id) => ({
     id, name, enforcement: 'active',
@@ -443,13 +463,242 @@ test('live protection adapter accepts only scoped reviewer-gated environments an
     if (endpoint.startsWith('rulesets/')) return rulesets[Number(endpoint.split('/')[1])];
     throw new Error(endpoint);
   };
-  assert.equal((await verifyProtection(api, 'insider', '123')).rulesets.length, 4);
+  return { api, environment, rulesets };
+}
+
+test('live protection adapter accepts only scoped reviewer-gated environments and exclusive publisher rules', async () => {
+  const { api, environment, rulesets } = protectionFixture();
+  const evidence = await verifyProtection(api, 'insider', '123');
+  assert.equal(evidence.rulesets.length, 4);
+  verifyProtectionEvidence(evidence, 'insider', '123');
+  assert.equal(evidence.environment.protection_rules[0].prevent_self_review, true);
+  assert.throws(() => verifyProtectionEvidence(evidence, 'stable', '123'), /mismatched/);
+  assert.throws(() => verifyProtectionEvidence(evidence, 'insider', '999'), /mismatched/);
   await assert.rejects(verifyProtection(api, 'insider', '999'), /approved publisher app/);
   environment.protection_rules[0].prevent_self_review = false;
   await assert.rejects(verifyProtection(api, 'insider', '123'), /non-self reviewer/);
   environment.protection_rules[0].prevent_self_review = true;
   rulesets[0].bypass_actors.push({ actor_type: 'RepositoryRole', actor_id: 5 });
   await assert.rejects(verifyProtection(api, 'insider', '123'), /continuity bypass/);
+  rulesets[0].bypass_actors = [];
+  const staleListing = async endpoint => endpoint === 'rulesets?per_page=100'
+    ? rulesets.map(rule => ({ ...rule, enforcement: 'active' })) : api(endpoint);
+  rulesets[0].enforcement = 'disabled';
+  await assert.rejects(verifyProtection(staleListing, 'insider', '123'), /active release-canonical-tags/);
+});
+
+function authorizationFixture(initial = state()) {
+  const { api: policies } = protectionFixture();
+  const objects = new Map();
+  let serial = 100;
+  const put = value => {
+    const id = (++serial).toString(16).padStart(40, '0');
+    objects.set(id, value);
+    return id;
+  };
+  const blob = put({ encoding: 'base64', content: Buffer.from(JSON.stringify(initial)).toString('base64') });
+  const tree = put({ truncated: false, tree: [{ path: 'state.json', type: 'blob', sha: blob }] });
+  let head = put({ tree: { sha: tree }, parents: [{ sha: anchor }] });
+  let tag;
+  const calls = [];
+  const env = {
+    GH_TOKEN: 'github-fixture', RELEASE_PUBLISHER_TOKEN: 'publisher-fixture',
+    RELEASE_PUBLISHER_APP_ID: '123', RELEASE_LEDGER_ANCHOR: anchor,
+    GITHUB_REPOSITORY: context().repository, GITHUB_EVENT_NAME: context().event,
+    GITHUB_REF: context().ref, GITHUB_SHA: sha,
+    GITHUB_WORKFLOW_REF: context().workflowIdentity, GITHUB_WORKFLOW_SHA: sha,
+    GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '1', RELEASE_CHANNEL: 'insider',
+  };
+  return {
+    env, calls,
+    deleteTag() { tag = undefined; },
+    async fetch(url, options) {
+      const endpoint = url.split('/repos/OlyForge3D/PrintFarmer/')[1];
+      assert.ok(endpoint, `Unexpected API host/path: ${url}`);
+      const method = options.method;
+      const publisher = options.headers.Authorization === `Bearer ${env.RELEASE_PUBLISHER_TOKEN}`;
+      const admin = /^(rules\/|rulesets|environments\/)/.test(endpoint);
+      calls.push({ endpoint, method, publisher, admin });
+      const response = (body, status = 200) => new Response(JSON.stringify(body), { status });
+      if ((admin || method !== 'GET') && !publisher) return response({}, 403);
+      if (admin) return response(await policies(endpoint));
+      if (endpoint === 'git/ref/heads/development') return response({ object: { sha } });
+      if (endpoint === 'git/ref/heads/release-ledger') return response({ object: { sha: head } });
+      if (endpoint.startsWith('compare/')) return response({ status: 'ahead' });
+      if (endpoint.startsWith('contents/VERSION?')) {
+        return response({ encoding: 'base64', content: Buffer.from('v1.2.3\n').toString('base64') });
+      }
+      if (endpoint.startsWith(`commits/${sha}/check-runs`)) {
+        return response({ total_count: 3, check_runs: ['CI tooling tests', '.NET build', 'Frontend build & tests']
+          .map((name, id) => ({ name, id, conclusion: 'success', app: { slug: 'github-actions' } })) });
+      }
+      if (endpoint.startsWith('git/ref/tags/')) {
+        return tag ? response({ object: { sha: tag, type: 'tag' } }) : response({}, 404);
+      }
+      if (method === 'GET') {
+        const object = objects.get(endpoint.split('/').at(-1));
+        assert.ok(object, `Missing fixture object: ${endpoint}`);
+        return response(object);
+      }
+      const body = JSON.parse(options.body);
+      if (endpoint === 'git/blobs') {
+        return response({ sha: put({ encoding: 'base64', content: Buffer.from(body.content).toString('base64') }) });
+      }
+      if (endpoint === 'git/trees') return response({ sha: put({ truncated: false, tree: body.tree }) });
+      if (endpoint === 'git/commits') {
+        return response({ sha: put({ tree: { sha: body.tree }, parents: body.parents.map(sha => ({ sha })) }) });
+      }
+      if (endpoint === 'git/refs/heads/release-ledger') {
+        assert.equal(body.force, false);
+        assert.equal(objects.get(body.sha).parents[0].sha, head);
+        head = body.sha;
+        return response({});
+      }
+      if (endpoint === 'git/tags') return response({ sha: put({ object: { sha: body.object, type: body.type } }) });
+      if (endpoint === 'git/refs') { tag = body.sha; return response({}); }
+      throw new Error(`Unexpected request: ${method} ${endpoint}`);
+    },
+  };
+}
+
+test('actual control flow keeps github.token read-only and requires App verification before any writes', async () => {
+  const fixture = authorizationFixture();
+  const originalFetch = globalThis.fetch;
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `authorization-${process.pid}`);
+  mkdirSync(root, { recursive: true });
+  globalThis.fetch = fixture.fetch;
+  process.chdir(root);
+  try {
+    await runReleaseControl('admit', { ...fixture.env, RELEASE_PUBLISHER_TOKEN: undefined });
+    assert.ok(fixture.calls.length > 0);
+    assert.ok(fixture.calls.every(call => !call.admin && !call.publisher && call.method === 'GET'));
+    fixture.calls.length = 0;
+    for (const operation of ['authorize', 'advance']) {
+      for (const token of [undefined, fixture.env.GH_TOKEN]) {
+        await assert.rejects(runReleaseControl(operation, { ...fixture.env, RELEASE_PUBLISHER_TOKEN: token }),
+          /Protected publisher App token required/);
+      }
+    }
+    assert.equal(fixture.calls.length, 0, 'Missing App credential must fail before API calls');
+    const denied = { ...fixture.env, RELEASE_PUBLISHER_TOKEN: 'not-authorized-fixture' };
+    await assert.rejects(runReleaseControl('authorize', denied), /HTTP 403/);
+    assert.ok(fixture.calls.every(call => call.method === 'GET'), '403 must not allocate or tag');
+    fixture.calls.length = 0;
+    await runReleaseControl('authorize', fixture.env);
+    const identity = JSON.parse(readFileSync('release-identity.json', 'utf8'));
+    verifyProtectionEvidence(identity.protection, 'insider', '123');
+    const firstWrite = fixture.calls.findIndex(call => call.method !== 'GET');
+    const adminCalls = fixture.calls.filter(call => call.admin);
+    assert.ok(adminCalls.length >= 8 && adminCalls.every(call => call.publisher));
+    assert.ok(fixture.calls.slice(firstWrite).every(call => !call.admin), 'Protection must precede allocation');
+    const signedBytes = readFileSync('release-identity.json', 'utf8');
+    await runReleaseControl('authorize', fixture.env);
+    assert.equal(readFileSync('release-identity.json', 'utf8'), signedBytes, 'Retry retains original evidence bytes');
+    fixture.calls.length = 0;
+    const consumer = { ...fixture.env, RELEASE_PUBLISHER_TOKEN: undefined, RELEASE_IDENTITY: signedBytes };
+    await runReleaseControl('consume', consumer);
+    assert.ok(fixture.calls.every(call => !call.admin && !call.publisher && call.method === 'GET'));
+    assert.match(readFileSync('src/ReleaseIdentity.props', 'utf8'), /1\.2\.3-insider\.1/);
+    fixture.calls.length = 0;
+    writeFileSync('release-set.json', JSON.stringify(completeSet(identity)));
+    await runReleaseControl('advance', { ...fixture.env, RELEASE_IDENTITY: signedBytes });
+    assert.ok(fixture.calls.some(call => call.method === 'PATCH'));
+    assert.ok(fixture.calls.every(call => call.publisher && !call.admin),
+      'Pointer writer needs the App, not Administration permission');
+    fixture.calls.length = 0;
+    const changed = structuredClone(identity);
+    changed.protection.publisherAppId = '999';
+    await assert.rejects(runReleaseControl('consume', { ...consumer, RELEASE_IDENTITY: JSON.stringify(changed) }),
+      /record was changed/);
+    await assert.rejects(runReleaseControl('consume', { ...consumer, GITHUB_RUN_ATTEMPT: '2' }),
+      /Unauthorized consumer/);
+    await assert.rejects(runReleaseControl('consume', { ...consumer, RELEASE_PUBLISHER_APP_ID: '999' }),
+      /mismatched publisher/);
+    fixture.deleteTag();
+    await assert.rejects(runReleaseControl('consume', consumer), /tag missing/);
+    assert.ok(fixture.calls.every(call => call.method === 'GET'));
+  } finally {
+    process.chdir(cwd);
+    globalThis.fetch = originalFetch;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('missing, malformed and weakened signed protection evidence always fails closed', async () => {
+  const evidence = await verifyProtection(protectionFixture().api, 'insider', '123');
+  for (const mutate of [
+    item => { item.schema = 0; }, item => { item.repository = 'fork/repo'; },
+    item => { item.verifiedAt = 'invalid'; }, item => { item.branchRules = []; },
+    item => { item.environment.protection_rules = []; }, item => { item.rulesets.pop(); },
+    item => { item.rulesets[0].enforcement = 'disabled'; },
+    item => { item.rulesets[3].bypass_actors[0].actor_id = 456; },
+  ]) {
+    const invalid = structuredClone(evidence);
+    mutate(invalid);
+    assert.throws(() => verifyProtectionEvidence(invalid, 'insider', '123'));
+  }
+  assert.throws(() => verifyProtectionEvidence(undefined, 'insider', '123'), /Missing/);
+  const ledger = state();
+  const identity = record(ledger);
+  const fixture = authorizationFixture(ledger);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = fixture.fetch;
+  try {
+    await assert.rejects(runReleaseControl('consume', {
+      ...fixture.env, RELEASE_IDENTITY: JSON.stringify(identity), RELEASE_PUBLISHER_TOKEN: undefined,
+    }), /Missing or mismatched publisher protection evidence/);
+    assert.ok(fixture.calls.every(call => !call.admin && call.method === 'GET'));
+    assert.ok(!fixture.calls.some(call => call.endpoint.startsWith('git/ref/tags/')));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('workflow credential wiring and signature gate reject failure or changed bytes before consumers', () => {
+  const authority = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
+  const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
+  const authorize = authority.split('\n  authorize:')[1].split('\n  publish:')[0];
+  assert.match(authorize, /environment: release-/);
+  assert.ok(authorize.indexOf('uses: actions/create-github-app-token@v2') <
+    authorize.indexOf('node scripts/ci/release-control.mjs authorize'));
+  assert.match(authorize, /permission-administration: read/);
+  assert.match(authorize, /GH_TOKEN: \$\{\{ github\.token \}\}\n\s+RELEASE_PUBLISHER_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
+  assert.doesNotMatch(authority.split('\n  admit:')[1].split('\n  authorize:')[0], /permission-administration|RELEASE_PUBLISHER_TOKEN/);
+  const jobs = Object.fromEntries([...docker.matchAll(/^  ([\w-]+):\n([\s\S]*?)(?=^  [\w-]+:\n|(?![\s\S]))/gm)]
+    .map(match => [match[1], match[2]]));
+  const gated = name => name === 'admission' || (jobs[name]?.match(/^    needs: (.+)$/m)?.[1]
+    .replace(/[[\]]/g, '').split(',').map(item => item.trim()).some(gated) ?? false);
+  for (const [name, job] of Object.entries(jobs)) {
+    if (/release-control\.mjs (consume|advance)|RELEASE_REGISTRY_TOKEN/.test(job)) {
+      assert.ok(gated(name), `${name} can bypass signature admission`);
+    }
+  }
+  const script = docker.split('      - name: Verify signed branch-at-authorization evidence')[1]
+    .split('\n  #')[0].split('        run: |\n')[1].split('\n')
+    .map(line => line.replace(/^          /, '')).join('\n')
+    .replace('${{ fromJSON(inputs.identity).workflowIdentity }}', context().workflowIdentity)
+    .replace('node scripts/ci/release-control.mjs consume', 'printf "CONSUMED"');
+  const root = resolve('.artifacts', `signature-gate-${process.pid}`);
+  mkdirSync(root, { recursive: true });
+  try {
+    writeFileSync(resolve(root, 'release-identity.json'), '{"signed":true}');
+    const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+    for (const [exit, bytes, expected] of [
+      ['1', '{"signed":true}', false],
+      ['0', '{"signed":false}', false],
+      ['0', '{"signed":true}', true],
+    ]) {
+      const result = spawnSync(shell, ['-c', `cosign() { return "$VERIFY_EXIT"; }\n${script}`], {
+        cwd: root, encoding: 'utf8', env: { ...process.env, VERIFY_EXIT: exit, RELEASE_IDENTITY: bytes },
+      });
+      assert.ifError(result.error);
+      assert.equal(result.status === 0, expected, result.stderr);
+      assert.equal(result.stdout.includes('CONSUMED'), expected);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('candidate CLI validates real ancestry and fails expiry, bare branches and publication', () => {

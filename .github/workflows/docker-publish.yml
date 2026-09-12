@@ -867,7 +867,6 @@ jobs:
           private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
           permission-contents: write
           permission-checks: read
-          permission-administration: read
           permission-actions: read
 
       - name: Setup Node.js
@@ -1150,7 +1149,8 @@ jobs:
 
       - name: Compare-and-set complete channel candidate last
         env:
-          GH_TOKEN: ${{ steps.publisher.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
         run: node scripts/ci/release-control.mjs advance
 
       - name: Export identity prerequisite for signed-manifest consumer

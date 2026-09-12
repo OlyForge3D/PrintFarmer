@@ -113,7 +113,8 @@ jobs:
       - name: Reserve sequence before source tag
         id: authorize
         env:
-          GH_TOKEN: ${{ steps.publisher.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
           RELEASE_CHANNEL: ${{ inputs.channel }}
           RELEASE_STAGE: ${{ inputs.stage }}
           RELEASE_TAG: ${{ inputs.version }}
@@ -121,7 +122,7 @@ jobs:
         run: node scripts/ci/release-control.mjs authorize
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2
-      - name: Sign immutable branch-at-authorization evidence
+      - name: Sign immutable source and App-verified protection evidence
         run: |
           cosign sign-blob --yes --bundle release-identity.bundle.json release-identity.json
       - uses: actions/upload-artifact@v7

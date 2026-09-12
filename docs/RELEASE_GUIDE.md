@@ -75,10 +75,30 @@ Consumers check both object ID and peeled commit. Missing, moved or recreated
 tags fail. No tag force-update/delete API is used. Continuous tag protection
 prevents a delete/recreate of the identical object between observations.
 
-The authorization record is signed with the existing Cosign GitHub OIDC flow,
-and the Docker admission job verifies the exact workflow certificate identity
-and record bytes. This is an authorization prerequisite, not the #2660 signed
-complete-manifest format or its offline trust policy.
+Read-only admission uses `github.token` only for source, ledger and qualification
+checks. It does **not** call Administration APIs. After environment approval,
+authorization obtains the protected publisher App token and verifies live branch
+rules, tag/ledger rulesets and environment restrictions before reserving anything.
+Missing App credentials or any denied protection read fails without publication;
+the CLI never falls back to `github.token` for authorization or ledger writes.
+
+The immutable record retains the verified policy responses, approved App ID,
+repository/channel/branch and verification time in `protection`. Its exact bytes
+(including protection evidence) are signed with the existing Cosign GitHub OIDC
+flow. Same-key retries retain the original evidence rather than rewriting it.
+The Docker admission job verifies the exact workflow certificate identity and
+record bytes; every downstream build/publisher depends on that successful gate.
+Consumers validate the evidence and its binding to the immutable ledger record,
+then recheck read-only source VERSION and tag-object/peeled-commit state. They do
+not need Administration permission. The final pointer writer uses an App token
+without Administration scope; any future live policy revalidation must obtain
+an Administration-capable App token first.
+
+This is evidence of policy **at authorization**, not a claim that downstream
+jobs observed current administrative policy. Continuous protections and the
+owner-only activation/recovery requirements below remain mandatory. This is an
+authorization prerequisite, not the #2660 signed complete-manifest format or
+its offline trust policy.
 
 ## Shared build identity and complete-set boundary
 

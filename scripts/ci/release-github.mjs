@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import {
-  repository, ledgerBranch, requireThat, validateLedger, verifyTag, compareVersions,
+  repository, ledgerBranch, requireThat, validateLedger, verifyTag, compareVersions, verifyProtectionEvidence,
 } from './release-policy.mjs';
 
 export function githubClient(token = process.env.GH_TOKEN) {
@@ -70,7 +70,8 @@ export function gitLedger(api, anchor) {
         validateLedger(previous, anchor);
         requireThat(BigInt(state.counter) >= BigInt(previous.counter), 'Ledger counter rollback');
         for (const [key, reservation] of Object.entries(previous.reservations)) {
-          requireThat(JSON.stringify(state.reservations[key]?.record) === JSON.stringify(reservation.record),
+          requireThat(JSON.stringify(state.reservations[key]?.record) === JSON.stringify(reservation.record) &&
+            JSON.stringify(state.reservations[key]?.admission) === JSON.stringify(reservation.admission),
             'Ledger lost or changed an immutable reservation');
           for (const field of ['tagObject', 'tagPublished', 'setHash', 'set']) {
             if (reservation[field] !== undefined) {
@@ -78,18 +79,18 @@ export function gitLedger(api, anchor) {
                 `Ledger lost or changed immutable ${field}`);
             }
           }
-          for (const [channel, pointer] of Object.entries(previous.pointers)) {
-            const next = state.pointers[channel];
-            requireThat(next && compareVersions(next.canonicalVersion, pointer.canonicalVersion) >= 0,
-              'Ledger pointer rollback');
-            if (next.canonicalVersion === pointer.canonicalVersion) {
-              requireThat(JSON.stringify(next) === JSON.stringify(pointer), 'Ledger changed immutable pointer identity');
-            }
+        }
+        for (const [channel, pointer] of Object.entries(previous.pointers)) {
+          const next = state.pointers[channel];
+          requireThat(next && compareVersions(next.canonicalVersion, pointer.canonicalVersion) >= 0,
+            'Ledger pointer rollback');
+          if (next.canonicalVersion === pointer.canonicalVersion) {
+            requireThat(JSON.stringify(next) === JSON.stringify(pointer), 'Ledger changed immutable pointer identity');
           }
-          for (const [base, stage] of Object.entries(previous.stages || {})) {
-            requireThat(state.stages?.[base] && compareVersions(state.stages[base], stage) >= 0,
-              'Ledger stage rollback');
-          }
+        }
+        for (const [base, stage] of Object.entries(previous.stages || {})) {
+          requireThat(state.stages?.[base] && compareVersions(state.stages[base], stage) >= 0,
+            'Ledger stage rollback');
         }
       }
       return { revision, state };
@@ -119,58 +120,24 @@ export function gitLedger(api, anchor) {
 
 export async function verifyProtection(api, channel, publisherAppId = process.env.RELEASE_PUBLISHER_APP_ID) {
   const branch = channel === 'stable' ? 'main' : 'development';
-  const rules = await api(`rules/branches/${branch}`);
-  for (const type of ['deletion', 'non_fast_forward', 'pull_request', 'required_status_checks']) {
-    requireThat(rules.some(rule => rule.type === type), `Owner blocker: ${branch} lacks active ${type} rule`);
-  }
-  requireThat(rules.some(rule => rule.type === 'pull_request' &&
-    rule.parameters?.require_code_owner_review && rule.parameters?.required_approving_review_count >= 1),
-  'Owner blocker: workflow/VERSION code-owner review not enforced');
-  requireThat(rules.some(rule => rule.type === 'required_status_checks' &&
-    rule.parameters?.required_status_checks?.length > 0),
-  'Owner blocker: no exact-SHA required checks');
+  const branchRules = await api(`rules/branches/${branch}`);
   const environment = await api(`environments/release-${channel}`);
-  requireThat(environment.deployment_branch_policy?.custom_branch_policies,
-    'Owner blocker: publishing environment lacks branch restrictions');
-  const policies = await api(`environments/release-${channel}/deployment-branch-policies`);
-  requireThat(policies.branch_policies?.length === 1 &&
-    policies.branch_policies[0].name === branch && policies.branch_policies[0].type === 'branch',
-  'Owner blocker: publishing environment must allow only its canonical branch');
-  requireThat(environment.protection_rules?.some(rule => rule.type === 'required_reviewers' &&
-    rule.prevent_self_review === true && rule.reviewers?.length > 0),
-  'Owner blocker: publishing environment requires non-self reviewer approval');
+  const branchPolicies = await api(`environments/release-${channel}/deployment-branch-policies`);
   const allRulesets = await api('rulesets?per_page=100');
   requireThat(allRulesets.length < 100, 'Ruleset listing may be truncated');
-  const evidence = [];
-  for (const name of ['release-canonical-tags', 'release-ledger-continuity']) {
+  const rulesets = [];
+  for (const name of ['release-canonical-tags', 'release-ledger-continuity',
+    'release-tag-creators', 'release-ledger-writer']) {
     const summary = allRulesets.find(rule => rule.name === name && rule.enforcement === 'active');
     requireThat(summary, `Owner blocker: active ${name} ruleset missing`);
-    const rule = await api(`rulesets/${summary.id}`);
-    requireThat(rule.bypass_actors?.length === 0, `Owner blocker: ${name} permits continuity bypass`);
-    const target = name === 'release-canonical-tags' ? 'tag' : 'branch';
-    const include = target === 'tag' ? 'refs/tags/v*' : `refs/heads/${ledgerBranch}`;
-    requireThat(rule.target === target && rule.conditions?.ref_name?.include?.includes(include) &&
-      rule.conditions?.ref_name?.exclude?.length === 0, `Owner blocker: ${name} has incorrect scope`);
-    for (const type of target === 'tag' ? ['update', 'deletion'] : ['non_fast_forward', 'deletion']) {
-      requireThat(rule.rules.some(item => item.type === type), `Owner blocker: ${name} lacks ${type}`);
-    }
-    evidence.push({ id: rule.id, name: rule.name, enforcement: rule.enforcement });
+    const detail = await api(`rulesets/${summary.id}`);
+    requireThat(detail.id === summary.id && detail.name === name, 'Ruleset identity changed during verification');
+    rulesets.push(detail);
   }
-  for (const name of ['release-tag-creators', 'release-ledger-writer']) {
-      const summary = allRulesets.find(rule => rule.name === name && rule.enforcement === 'active');
-      requireThat(summary, `Owner blocker: active ${name} restriction missing`);
-      const rule = await api(`rulesets/${summary.id}`);
-      const tag = name === 'release-tag-creators';
-      requireThat(rule.target === (tag ? 'tag' : 'branch') &&
-        rule.conditions?.ref_name?.include?.includes(tag ? 'refs/tags/v*' : `refs/heads/${ledgerBranch}`) &&
-        rule.conditions?.ref_name?.exclude?.length === 0 &&
-        rule.rules.some(item => item.type === (tag ? 'creation' : 'update')) &&
-        rule.bypass_actors?.length === 1 && rule.bypass_actors[0].actor_type === 'Integration' &&
-        String(rule.bypass_actors[0].actor_id) === publisherAppId,
-      `Owner blocker: ${name} must restrict writes to one explicitly approved publisher app`);
-      evidence.push({ id: rule.id, name: rule.name, publisher: rule.bypass_actors[0].actor_id });
-  }
-  return { branch, environment: environment.name, rulesets: evidence };
+  const evidence = { schema: 1, repository, channel, branch, publisherAppId,
+    verifiedAt: new Date().toISOString(), branchRules, environment, branchPolicies, rulesets };
+  verifyProtectionEvidence(evidence, channel, publisherAppId);
+  return evidence;
 }
 
 export async function ensureSourceTag(api, store, record, transact) {

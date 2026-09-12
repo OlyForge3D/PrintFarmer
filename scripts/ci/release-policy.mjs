@@ -96,11 +96,67 @@ export function allocationKey(admission) {
     admission.buildAttempt, admission.sourceCommit, admission.baseVersion]);
 }
 
+export function verifyProtectionEvidence(evidence, channel, publisherAppId) {
+  const branch = channel === 'stable' ? 'main' : 'development';
+  requireThat(evidence?.schema === 1 && evidence.repository === repository &&
+    ['stable', 'insider'].includes(channel) && evidence.channel === channel && evidence.branch === branch &&
+    /^[1-9][0-9]*$/.test(publisherAppId || '') && evidence.publisherAppId === publisherAppId &&
+    Number.isFinite(Date.parse(evidence.verifiedAt)),
+  'Missing or mismatched publisher protection evidence');
+  const { branchRules: rules, environment, branchPolicies: policies, rulesets } = evidence;
+  requireThat(Array.isArray(rules) && Array.isArray(rulesets) && rulesets.length === 4,
+    'Incomplete protection evidence');
+  for (const type of ['deletion', 'non_fast_forward', 'pull_request', 'required_status_checks']) {
+    requireThat(rules.some(rule => rule.type === type), `Owner blocker: ${branch} lacks active ${type} rule`);
+  }
+  requireThat(rules.some(rule => rule.type === 'pull_request' &&
+    rule.parameters?.require_code_owner_review && rule.parameters?.required_approving_review_count >= 1),
+  'Owner blocker: workflow/VERSION code-owner review not enforced');
+  requireThat(rules.some(rule => rule.type === 'required_status_checks' &&
+    rule.parameters?.required_status_checks?.length > 0),
+  'Owner blocker: no exact-SHA required checks');
+  requireThat(environment?.name === `release-${channel}` &&
+    environment.deployment_branch_policy?.custom_branch_policies,
+  'Owner blocker: publishing environment lacks branch restrictions');
+  requireThat(policies?.branch_policies?.length === 1 &&
+    policies.branch_policies[0].name === branch && policies.branch_policies[0].type === 'branch',
+  'Owner blocker: publishing environment must allow only its canonical branch');
+  requireThat(environment.protection_rules?.some(rule => rule.type === 'required_reviewers' &&
+    rule.prevent_self_review === true && rule.reviewers?.length > 0),
+  'Owner blocker: publishing environment requires non-self reviewer approval');
+  for (const name of ['release-canonical-tags', 'release-ledger-continuity',
+    'release-tag-creators', 'release-ledger-writer']) {
+    const rule = rulesets.find(item => item.name === name && item.enforcement === 'active');
+    requireThat(rule, `Owner blocker: active ${name} ruleset missing`);
+    const tag = name === 'release-canonical-tags' || name === 'release-tag-creators';
+    requireThat(rule.target === (tag ? 'tag' : 'branch') &&
+      rule.conditions?.ref_name?.include?.includes(tag ? 'refs/tags/v*' : `refs/heads/${ledgerBranch}`) &&
+      rule.conditions?.ref_name?.exclude?.length === 0,
+    `Owner blocker: ${name} has incorrect scope`);
+    const continuity = name === 'release-canonical-tags' || name === 'release-ledger-continuity';
+    if (continuity) {
+      requireThat(rule.bypass_actors?.length === 0, `Owner blocker: ${name} permits continuity bypass`);
+      for (const type of tag ? ['update', 'deletion'] : ['non_fast_forward', 'deletion']) {
+        requireThat(rule.rules?.some(item => item.type === type), `Owner blocker: ${name} lacks ${type}`);
+      }
+    } else {
+      requireThat(rule.rules?.some(item => item.type === (tag ? 'creation' : 'update')) &&
+        rule.bypass_actors?.length === 1 && rule.bypass_actors[0].actor_type === 'Integration' &&
+        String(rule.bypass_actors[0].actor_id) === publisherAppId,
+      `Owner blocker: ${name} must restrict writes to one explicitly approved publisher app`);
+    }
+  }
+}
+
 export function validateLedger(state, anchor) {
   requireThat(state?.schema === 1 && shaPattern.test(anchor) && state.anchor === anchor,
     'Ledger missing or continuity anchor mismatch: owner recovery required');
   requireThat(/^(0|[1-9][0-9]*)$/.test(state.counter), 'Invalid ledger counter');
   requireThat(state.reservations && state.pointers && state.identities, 'Incomplete ledger');
+  for (const [version, key] of Object.entries(state.identities)) {
+    requireThat(state.reservations[key]?.record.canonicalVersion === version,
+      'Ledger identity continuity violation');
+  }
   const sequences = new Set();
   for (const [key, reservation] of Object.entries(state.reservations)) {
     requireThat(reservation.record?.allocationKey === key &&
@@ -114,7 +170,7 @@ export function validateLedger(state, anchor) {
   }
 }
 
-export function reserve(state, admission, created) {
+export function reserve(state, admission, created, protection) {
   const key = allocationKey(admission);
   const existing = state.reservations[key];
   if (existing) {
@@ -132,6 +188,7 @@ export function reserve(state, admission, created) {
   const record = {
     schema: 1, ...admission, releaseId: `${admission.channel}:${canonicalVersion}`,
     canonicalVersion, sourceTag: `v${canonicalVersion}`, sequence, allocationKey: key, created,
+    ...(protection ? { protection } : {}),
   };
   if (admission.channel === 'stable') {
     const qualification = state.qualifications?.[admission.sourceCommit];
@@ -171,6 +228,15 @@ export function verifyTag(record, expectedObject, actualTag) {
 
 export function verifyConsumer(record, stored, context) {
   requireThat(hash(record) === hash(stored), 'Canonical record was changed');
+  const tag = parseTag(record.sourceTag);
+  requireThat(record.schema === 1 && record.repository === repository &&
+    record.canonicalVersion === tag.canonicalVersion && record.baseVersion === tag.baseVersion &&
+    record.channel === tag.channel && record.stage === tag.stage && record.sequence === tag.sequence &&
+    record.releaseId === `${tag.channel}:${tag.canonicalVersion}` &&
+    record.allocationKey === allocationKey(record) &&
+    shaPattern.test(record.sourceCommit) && record.workflowCommit === record.sourceCommit &&
+    record.workflowIdentity === `${repository}/${workflow}@refs/heads/${record.sourceBranch}`,
+  'Invalid canonical record identity');
   requireThat(context.repository === repository &&
     context.workflowIdentity === record.workflowIdentity &&
     context.workflowSha === record.workflowCommit &&
