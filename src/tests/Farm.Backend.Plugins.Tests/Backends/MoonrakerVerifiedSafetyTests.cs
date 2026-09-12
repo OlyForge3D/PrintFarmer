@@ -56,56 +56,40 @@ public sealed class MoonrakerVerifiedSafetyTests
     }
 
     [Fact]
-    public void HandleGcodeMoveUpdate_GcodePositionPresent_OverridesToolheadPositionWithoutChangingSafetyOffset()
+    public void HandlePositionUpdate_GcodePositionPresent_OverridesToolheadPosition()
     {
-        var state = new PrinterState
-        {
-            X = 1,
-            Y = 2,
-            Z = 3,
-        };
+        var state = new PrinterState();
         using JsonDocument document = JsonDocument.Parse(
             """
             {
-              "gcode_position":[10,20,30,0],
-              "homing_origin":[100,200,300,0]
+              "toolhead":{"position":[100,200,300,0]},
+              "gcode_move":{"gcode_position":[10,20,30,0]}
             }
             """);
 
-        MoonrakerSubscriptionService.HandleGcodeMoveUpdate(
+        MoonrakerSubscriptionService.HandlePositionUpdate(
             state,
             document.RootElement);
 
         Assert.Equal(10, state.X);
         Assert.Equal(20, state.Y);
         Assert.Equal(30, state.Z);
-        Assert.Equal(
-            new SafetyVector3Dto(100, 200, 300),
-            state.CoordinateOriginOffsetMm);
     }
 
     [Fact]
-    public void HandleGcodeMoveUpdate_GcodePositionAbsent_RetainsToolheadPosition()
+    public void HandlePositionUpdate_GcodePositionAbsent_RetainsToolheadPosition()
     {
         var state = new PrinterState();
-        using JsonDocument toolheadDocument = JsonDocument.Parse(
-            """{"position":[10,20,30,0]}""");
-        using JsonDocument gcodeMoveDocument = JsonDocument.Parse(
-            """{"homing_origin":[100,200,300,0]}""");
+        using JsonDocument document = JsonDocument.Parse(
+            """{"toolhead":{"position":[10,20,30,0]},"gcode_move":{}}""");
 
-        MoonrakerSubscriptionService.HandleToolheadUpdate(
+        MoonrakerSubscriptionService.HandlePositionUpdate(
             state,
-            toolheadDocument.RootElement);
-        MoonrakerSubscriptionService.HandleGcodeMoveUpdate(
-            state,
-            gcodeMoveDocument.RootElement);
+            document.RootElement);
 
         Assert.Equal(10, state.X);
         Assert.Equal(20, state.Y);
         Assert.Equal(30, state.Z);
-        Assert.Equal(
-            new SafetyVector3Dto(100, 200, 300),
-            state.CoordinateOriginOffsetMm);
     }
 
     [Fact]

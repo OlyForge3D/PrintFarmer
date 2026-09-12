@@ -1268,6 +1268,8 @@ public sealed class MoonrakerSubscriptionService(
             HandleGcodeMoveUpdate(state, gcodeMove);
         }
 
+        HandlePositionUpdate(state, statusObj);
+
         // MMU (Happy Hare) status updates
         if (statusObj.TryGetProperty("mmu", out JsonElement mmu))
         {
@@ -1475,39 +1477,9 @@ public sealed class MoonrakerSubscriptionService(
     /// <param name="state">The persistent printer state to update.</param>
     /// <param name="th">The toolhead JSON element from the status update.</param>
     /// <summary>Updates the live position and homed axes reported by the toolhead.</summary>
-    internal static void HandleToolheadUpdate(PrinterState state, JsonElement th)
+    private static void HandleToolheadUpdate(PrinterState state, JsonElement th)
     {
-        double? x = null, y = null, z = null;
         string? homedAxes = null;
-
-        // Extract position
-        if (th.TryGetProperty("position", out JsonElement pos) &&
-            pos.ValueKind == JsonValueKind.Array && pos.GetArrayLength() >= 3)
-        {
-            try
-            {
-                x = pos[0].GetDouble();
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                y = pos[1].GetDouble();
-            }
-            catch
-            {
-            }
-
-            try
-            {
-                z = pos[2].GetDouble();
-            }
-            catch
-            {
-            }
-        }
 
         // Extract homed_axes
         if (th.TryGetProperty("homed_axes", out JsonElement ha) && ha.ValueKind == JsonValueKind.String)
@@ -1527,22 +1499,6 @@ public sealed class MoonrakerSubscriptionService(
             {
                 state.ActiveExtruderIndex = parsedExtruderIndex;
             }
-        }
-
-        // Update persistent state
-        if (x.HasValue)
-        {
-            state.X = x;
-        }
-
-        if (y.HasValue)
-        {
-            state.Y = y;
-        }
-
-        if (z.HasValue)
-        {
-            state.Z = z;
         }
 
         // Persist homed axes state whenever the field is present, even when it's empty.
@@ -1601,28 +1557,11 @@ public sealed class MoonrakerSubscriptionService(
         }
     }
 
-    /// <summary>
-    /// Updates the preferred G-code coordinate position and independent safety origin offset.
-    /// </summary>
-    internal static void HandleGcodeMoveUpdate(
+    /// <summary>Updates the independent safety origin offset reported by G-code movement.</summary>
+    private static void HandleGcodeMoveUpdate(
         PrinterState state,
         JsonElement gcodeMove)
     {
-        if (gcodeMove.TryGetProperty("gcode_position", out JsonElement gcodePosition) &&
-            gcodePosition.ValueKind == JsonValueKind.Array &&
-            gcodePosition.GetArrayLength() >= 3 &&
-            gcodePosition[0].TryGetDouble(out double gcodeX) &&
-            gcodePosition[1].TryGetDouble(out double gcodeY) &&
-            gcodePosition[2].TryGetDouble(out double gcodeZ) &&
-            double.IsFinite(gcodeX) &&
-            double.IsFinite(gcodeY) &&
-            double.IsFinite(gcodeZ))
-        {
-            state.X = gcodeX;
-            state.Y = gcodeY;
-            state.Z = gcodeZ;
-        }
-
         if (!gcodeMove.TryGetProperty(
                 "homing_origin",
                 out JsonElement homingOrigin) ||
@@ -1640,6 +1579,61 @@ public sealed class MoonrakerSubscriptionService(
 
         state.CoordinateOriginOffsetMm = new SafetyVector3Dto(x, y, z);
         state.CoordinateOriginOffsetObservedAtUtc = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Applies the position reported by a status payload in the G-code coordinate frame.
+    /// </summary>
+    internal static void HandlePositionUpdate(PrinterState state, JsonElement statusObj)
+    {
+        if (TryGetFinitePosition(
+                statusObj,
+                "toolhead",
+                "position",
+                out double toolheadX,
+                out double toolheadY,
+                out double toolheadZ))
+        {
+            state.X = toolheadX;
+            state.Y = toolheadY;
+            state.Z = toolheadZ;
+        }
+
+        if (TryGetFinitePosition(
+                statusObj,
+                "gcode_move",
+                "gcode_position",
+                out double gcodeX,
+                out double gcodeY,
+                out double gcodeZ))
+        {
+            state.X = gcodeX;
+            state.Y = gcodeY;
+            state.Z = gcodeZ;
+        }
+    }
+
+    private static bool TryGetFinitePosition(
+        JsonElement statusObj,
+        string objectName,
+        string propertyName,
+        out double x,
+        out double y,
+        out double z)
+    {
+        x = 0;
+        y = 0;
+        z = 0;
+        return statusObj.TryGetProperty(objectName, out JsonElement obj) &&
+            obj.TryGetProperty(propertyName, out JsonElement position) &&
+            position.ValueKind == JsonValueKind.Array &&
+            position.GetArrayLength() >= 3 &&
+            position[0].TryGetDouble(out x) &&
+            position[1].TryGetDouble(out y) &&
+            position[2].TryGetDouble(out z) &&
+            double.IsFinite(x) &&
+            double.IsFinite(y) &&
+            double.IsFinite(z);
     }
 
     /// <summary>

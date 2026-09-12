@@ -127,10 +127,12 @@ public sealed class PrinterSafetyGuardTests
         PrinterSafetyValidationResult result = await guard.ValidateAsync(
             printerId,
             PrinterSafetyOperation.AbsoluteMovement,
-            new PrinterSafetyMoveRequest(190, 180, 170),
+            new PrinterSafetyMoveRequest(195, 190, 180),
             CancellationToken.None);
 
-        Assert.True(result.Success);
+        Assert.False(result.Success);
+        Assert.Equal(409, result.StatusCode);
+        Assert.Equal("printer_move_out_of_bounds", result.Code);
     }
 
     [Theory]
