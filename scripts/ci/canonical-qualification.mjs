@@ -5,7 +5,7 @@ export const qualificationWorkflow = '.github/workflows/qualify-canonical-releas
 export const evidenceWorkflow = '.github/workflows/record-canonical-qualification.yml';
 const shaPattern = /^[a-f0-9]{40}$/;
 const idPattern = /^[1-9][0-9]*$/;
-const loginPattern = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,38})$/;
+const loginPattern = /^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$/;
 const maximumAge = 24 * 60 * 60 * 1000;
 const runUrl = id => `https://github.com/${repository}/actions/runs/${id}`;
 
@@ -119,6 +119,11 @@ async function permission(api, login) {
   return result.permission;
 }
 
+function loginIdentity(login, description) {
+  requireString(login, loginPattern, description);
+  return login.toLowerCase();
+}
+
 async function workflowRun(api, id, path, branch, sha, complete = true) {
   requireString(String(id), idPattern, 'run ID');
   const run = await api(`actions/runs/${id}`);
@@ -181,13 +186,17 @@ async function verifyRequiredChecks(api, branch, sha, ci, jobs) {
   }
 }
 
-async function verifyNativeReview(api, binding, sha, ci, comment) {
-  const commenter = comment.user.login;
+async function verifyNativeReview(api, binding, sha, ci, comment, qualifier) {
+  const commenter = loginIdentity(comment.user.login, 'native reviewer login');
   const pr = await api(`pulls/${binding.nativePr}`);
+  const author = loginIdentity(pr.user?.login, 'PR author login');
+  const ciActor = loginIdentity(ci.actor?.login, 'CI actor login');
+  requireThat(commenter !== author && commenter !== ciActor && commenter !== qualifier,
+    'Native reviewer must not be the PR author or validation/qualification initiator');
   requireThat(String(pr.number) === binding.nativePr && pr.head?.sha === sha &&
     pr.head.repo?.full_name === repository && pr.base?.repo?.full_name === repository &&
     pr.base.ref === (binding.channel === 'stable' ? 'main' : 'development') &&
-    pr.user?.login !== commenter && pr.draft === false,
+    pr.draft === false,
   'Native review must cover canonical SHA, not a squash predecessor or self-authored PR');
   const ownersFile = await api(`contents/.github/CODEOWNERS?ref=${sha}`);
   requireThat(ownersFile.encoding === 'base64', 'Missing canonical CODEOWNERS');
@@ -195,14 +204,14 @@ async function verifyNativeReview(api, binding, sha, ci, comment) {
     .split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
   // A final catch-all overrides all earlier patterns. More complex ownership needs reviewed support.
   const catchAll = /^\*\s+(@[a-zA-Z0-9][a-zA-Z0-9-]{0,38}(?:\s+@[a-zA-Z0-9][a-zA-Z0-9-]{0,38})*)$/.exec(lines.at(-1) ?? '');
-  requireThat(catchAll && catchAll[1].split(/\s+/).includes(`@${commenter}`),
+  requireThat(catchAll && catchAll[1].toLowerCase().split(/\s+/).includes(`@${commenter}`),
     'Fresh native reviewer must be a canonical catch-all code owner; teams/pattern-only policy needs explicit support');
   const reviews = array(await api(`pulls/${binding.nativePr}/reviews?per_page=100`));
   const decisive = reviews.filter(review => ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(review.state));
   const latest = new Map();
   for (const review of decisive.sort((a, b) => a.id - b.id)) {
     requireThat(Number.isSafeInteger(review.id) && review.id > 0, 'Invalid native review identity');
-    latest.set(review.user?.login, review);
+    latest.set(loginIdentity(review.user?.login, 'native review login'), review);
   }
   requireThat(![...latest.values()].some(review => review.state === 'CHANGES_REQUESTED'),
     'Outstanding native change request');
@@ -222,8 +231,10 @@ export async function verifyQualification(api, runId, mode, now = Date.now(), co
   requireThat(binding.mode === mode, 'Qualification approval mode mismatch');
   const run = await workflowRun(api, runId, qualificationWorkflow, repo.default_branch, trustedHead, complete);
   requireThat(run.event === 'workflow_dispatch', 'Qualification requires default-branch dispatch');
+  const qualifier = loginIdentity(run.actor?.login, 'qualification actor login');
+  const triggeringActor = loginIdentity(run.triggering_actor?.login, 'qualification triggering actor login');
   await permission(api, run.actor?.login);
-  requireThat(run.triggering_actor?.login === run.actor?.login, 'Qualification actor changed');
+  requireThat(triggeringActor === qualifier, 'Qualification actor changed');
   const branch = binding.channel === 'stable' ? 'main' : 'development';
   const sha = await head(api, branch);
   const ci = await workflowRun(api, binding.validationRun, '.github/workflows/ci.yml', branch, sha);
@@ -255,9 +266,7 @@ export async function verifyQualification(api, runId, mode, now = Date.now(), co
   if (mode === 'single-maintainer') {
     requireThat(commenter === 'jpapiez' && authority === 'admin', 'Fresh owner confirmation required');
   } else {
-    requireThat(commenter !== ci.actor?.login && commenter !== run.actor?.login,
-      'Native reviewer must not be the validation/qualification initiator');
-    await verifyNativeReview(api, binding, sha, ci, comment);
+    await verifyNativeReview(api, binding, sha, ci, comment, qualifier);
   }
   if (complete) await requireJobs(api, run, ['Verify canonical qualification']);
   requireThat(await head(api, branch) === sha && await head(api, repo.default_branch) === trustedHead,

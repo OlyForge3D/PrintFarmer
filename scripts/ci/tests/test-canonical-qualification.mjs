@@ -199,6 +199,15 @@ for (const mode of [undefined, '', 'unknown', 'SINGLE-MAINTAINER']) {
 for (const [name, mutate] of [
   ['self-authored native PR', f => { f.data.pr.user.login = 'reviewer'; }],
   ['native reviewer is initiator', f => { f.data.runs[10].actor.login = 'reviewer'; }],
+  ['native reviewer is qualifier', f => {
+    f.data.runs[20].actor.login = f.data.runs[20].triggering_actor.login = 'reviewer';
+  }],
+  ['case-variant PR author is reviewer', f => { f.data.pr.user.login = 'Reviewer'; }],
+  ['case-variant CI actor is reviewer', f => { f.data.runs[10].actor.login = 'Reviewer'; }],
+  ['case-variant qualifier is reviewer', f => {
+    f.data.runs[20].actor.login = f.data.runs[20].triggering_actor.login = 'Reviewer';
+    f.data.permissions.Reviewer = 'write';
+  }],
   ['squash predecessor', f => { f.data.pr.head.sha = 'c'.repeat(40); }],
   ['stale native review', f => { f.data.reviews[0].commit_id = 'c'.repeat(40); }],
   ['native approval before CI', f => { f.data.reviews[0].submitted_at = '2026-09-13T05:00:00Z'; }],
@@ -208,12 +217,71 @@ for (const [name, mutate] of [
   ['unsupported complex code ownership', f => { f.data.owners = '/src/ @reviewer'; }],
   ['native change request', f => { f.data.reviews.push({ ...f.data.reviews[0], id: 71, state: 'CHANGES_REQUESTED' }); }],
   ['dismissed approval', f => { f.data.reviews.push({ ...f.data.reviews[0], id: 71, state: 'DISMISSED' }); }],
+  ['case-variant dismissal', f => {
+    f.data.reviews.push({ ...f.data.reviews[0], id: 71, user: { login: 'Reviewer' }, state: 'DISMISSED' });
+  }],
   ['no native reviewer permission', f => { f.data.permissions.reviewer = 'triage'; }],
 ]) {
   test(`separation-of-duties rejects ${name}`, async () => {
     const f = fixture('stable', 'separation-of-duties');
     mutate(f);
     await assert.rejects(verifyQualification(f.api, '20', f.mode, now));
+  });
+}
+
+for (const [role, assign] of [
+  ['PR author', (f, user) => { f.data.pr.user = user; }],
+  ['CI actor', (f, user) => { f.data.runs[10].actor = user; }],
+  ['qualifier', (f, user) => { f.data.runs[20].actor = user; }],
+  ['triggering qualifier', (f, user) => { f.data.runs[20].triggering_actor = user; }],
+  ['confirmation reviewer', (f, user) => { f.data.comments[0].user = user; }],
+  ['native reviewer', (f, user) => { f.data.reviews[0].user = user; }],
+]) {
+  for (const [name, user] of [
+    ['null identity', null],
+    ['missing identity', undefined],
+    ['missing login', { type: 'User' }],
+    ...[null, '', ' ', ' reviewer', 'reviewer ', 'reviewer\n', 123, {}, [],
+      '-reviewer', 'reviewer-', 're--viewer', 'review_er', 'a'.repeat(40)]
+      .map(login => [`invalid login ${JSON.stringify(login)}`, { login, type: 'User' }]),
+  ]) {
+    test(`separation-of-duties rejects ${role}: ${name}`, async () => {
+      const f = fixture('stable', 'separation-of-duties');
+      assign(f, user);
+      await assert.rejects(verifyQualification(f.api, '20', f.mode, now),
+        /Invalid .*login|Invalid review account|Missing, edited, stale or mismatched canonical review/);
+      assert.equal(f.posts.length, 0);
+    });
+  }
+}
+
+test('separation-of-duties allows distinct author/initiators and case-variant native evidence', async () => {
+  const f = fixture('stable', 'separation-of-duties');
+  f.data.pr.user.login = 'author';
+  f.data.runs[10].actor.login = 'ci-initiator';
+  f.data.owners = '* @Reviewer\n';
+  f.data.reviews[0].user.login = 'REVIEWER';
+  f.data.runs[20].triggering_actor.login = 'JPAPIEZ';
+  assert.equal((await verifyQualification(f.api, '20', f.mode, now)).sourceCommit, f.sha);
+  assert.equal(f.posts.length, 0);
+});
+
+for (const [role, mutate] of [
+  ['PR author', f => { f.data.pr.user = null; }],
+  ['CI actor', f => { f.data.runs[10].actor = null; }],
+]) {
+  test(`unknown ${role} blocks release consumption and writes only bounded qualification failure`, async () => {
+    const f = fixture('stable', 'separation-of-duties');
+    mutate(f);
+    await assert.rejects(verifyCanonicalReleaseEvidence(f.api, f.sha, f.channel, f.mode, now),
+      /Invalid .*login/);
+    assert.equal(f.posts.length, 0);
+    f.data.runs[30].status = 'in_progress';
+    await assert.rejects(recordQualification(f.api, '20', f.env, now), /Invalid .*login/);
+    assert.equal(f.posts.length, 1);
+    assert.equal(f.posts[0].body.state, 'failure');
+    assert.equal(f.posts[0].endpoint, `statuses/${f.sha}`);
+    assert.doesNotMatch(JSON.stringify(f.posts), /jpapiez|reviewer|PR author|CI actor/);
   });
 }
 

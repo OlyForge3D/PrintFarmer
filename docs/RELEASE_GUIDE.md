@@ -555,7 +555,12 @@ In `separation-of-duties`, change the last two values to
 The commenter must hold live write-or-better permission, be a canonical
 CODEOWNER, and have a fresh native `APPROVED` review on that PR's exact canonical
 head SHA after CI. They must differ from the PR author and both CI/qualification
-initiators. Later change requests or dismissal invalidate evidence.
+initiators. All of these identities must have valid, non-empty GitHub logins;
+missing, deleted, or malformed identity evidence fails closed. Comparisons are
+case-insensitive. The PR author and CI/qualification initiators may share an
+account, but none may be the reviewer. Native review identities must also be
+valid before approval/change-request reconciliation.
+Later change requests or dismissal invalidate evidence.
 The PR must belong to this repository and target the selected canonical branch.
 The implemented ownership parser supports the repository's final user-only
 catch-all `* @login` rule (which overrides earlier rules). Team ownership or a
