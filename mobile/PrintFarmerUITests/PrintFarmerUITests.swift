@@ -1053,12 +1053,8 @@ class PrintFarmerUITestCase: XCTestCase {
         app.launchArguments.append("--uitesting")
         app.launchArguments.append(contentsOf: additionalLaunchArguments)
         app.launch()
-        if waitsForNavigationReadiness, let testBudget {
-            let ready = waitForObservedShell(budget: testBudget) {
-                $0.isLaunchReady ? true : nil
-            }
-            XCTAssertEqual(ready, true,
-                           "Authenticated shell did not finish launching within the test allowance; \(testBudget.diagnostic)")
+        if waitsForNavigationReadiness {
+            waitForAuthenticatedShell()
         }
     }
 
@@ -1069,6 +1065,24 @@ class PrintFarmerUITestCase: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    func waitForAuthenticatedShell(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let testBudget else {
+            return XCTFail("Shell readiness requires the existing test allowance", file: file, line: line)
+        }
+        let ready = waitForObservedShell(budget: testBudget, file: file, line: line) {
+            $0.isLaunchReady ? true : nil
+        }
+        XCTAssertEqual(
+            ready, true,
+            "Authenticated shell did not finish launching within the test allowance; \(testBudget.diagnostic)",
+            file: file,
+            line: line
+        )
+    }
 
     /// Wait for an element to exist with a timeout.
     func waitForElement(_ element: XCUIElement, timeout: TimeInterval = 5) {
