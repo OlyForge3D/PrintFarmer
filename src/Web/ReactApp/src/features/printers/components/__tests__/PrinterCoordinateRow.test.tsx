@@ -22,6 +22,29 @@ beforeEach(() => { accountMode = 'Guided'; });
 afterEach(cleanup);
 
 describe('shared coordinate row', () => {
+  it('emits only parsed numbers or empty values to narrow numeric state setters', () => {
+    const changed = vi.fn();
+    function NumericStateEntry() {
+      const [x, setX] = useState<number | ''>('');
+      const [y, setY] = useState<number | ''>('');
+      const [z, setZ] = useState<number | ''>('');
+      return <PrinterCoordinateRow
+        values={{ X: x, Y: y, Z: z }} disabled={false} onMove={vi.fn()}
+        onChange={(axis, value) => {
+          ({ X: setX, Y: setY, Z: setZ })[axis](value);
+          changed(axis, value);
+        }}
+      />;
+    }
+    render(<NumericStateEntry />);
+    enter('X', '-12.5', false);
+    expect(changed).toHaveBeenLastCalledWith('X', -12.5);
+    expect(screen.getByLabelText('X movement amount')).toHaveValue(-12.5);
+    enter('X', '', false);
+    expect(changed).toHaveBeenLastCalledWith('X', '');
+    expect(screen.getByLabelText('X movement amount')).toHaveValue(null);
+  });
+
   it('has no pristine errors and does not infer missing targets from telemetry', () => {
     const onMoveTo = vi.fn();
     render(<Entry onMoveTo={onMoveTo} positions={{ X: 100, Y: 200, Z: 10 }} />);

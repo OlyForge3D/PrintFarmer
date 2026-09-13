@@ -13,7 +13,8 @@ const isFiniteCoordinate = (value: Coordinate) => isEntered(value) && Number.isF
 interface PrinterCoordinateRowProps {
   values: Record<Axis, Coordinate>;
   positions?: Partial<Record<Axis, number | null>>;
-  onChange: (axis: Axis, value: Coordinate) => void;
+  /** Number inputs emit parsed numbers or an empty field, never arbitrary strings. */
+  onChange: (axis: Axis, value: number | '') => void;
   onMove: (axis: Axis, distance: number) => void | Promise<void>;
   onMoveTo?: (position: MoveRequest) => void | Promise<void>;
   disabled: boolean;
