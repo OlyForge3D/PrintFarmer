@@ -3,6 +3,7 @@ import { repository, releaseBuildChecks, releaseReviewStatus, requireThat, requi
 
 export const qualificationWorkflow = '.github/workflows/qualify-canonical-release.yml';
 export const evidenceWorkflow = '.github/workflows/record-canonical-qualification.yml';
+export const canonicalValidationChecks = ['path-casing', 'Build (iOS)', 'Contract drift gate'];
 const shaPattern = /^[a-f0-9]{40}$/;
 const idPattern = /^[1-9][0-9]*$/;
 const loginPattern = /^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$/;
@@ -165,8 +166,9 @@ async function verifyRequiredChecks(api, branch, sha, ci, jobs) {
   requireThat(required.every(rule => rule && typeof rule.context === 'string' &&
     rule.context.length > 0 && rule.context.length <= 100 && !/[\r\n]/.test(rule.context)),
   'Owner blocker: malformed required check context');
-  requireThat([...releaseBuildChecks, releaseReviewStatus].every(name => required.some(rule => rule.context === name)),
-    'Owner blocker: live policy must require canonical review and all release build checks');
+  requireThat([...releaseBuildChecks, ...canonicalValidationChecks, releaseReviewStatus]
+    .every(name => required.some(rule => rule.context === name)),
+  'Owner blocker: live policy must require canonical review, all release build checks and all canonical validation checks');
   const checks = list(await api(`commits/${sha}/check-runs?per_page=100`), 'check_runs');
   for (const rule of required) {
     requireThat(typeof rule.context === 'string' &&
@@ -176,11 +178,14 @@ async function verifyRequiredChecks(api, branch, sha, ci, jobs) {
       requireThat(rule.integration_id == null, 'Commit review status cannot satisfy an App-bound check');
       continue;
     }
-    const job = jobs.find(entry => entry.name === rule.context);
-    requireThat(job && checks.some(check => check.name === rule.context && check.head_sha === sha &&
+    const matchingJobs = jobs.filter(entry => entry.name === rule.context);
+    const matchingChecks = checks.filter(check => check.name === rule.context &&
+      check.check_suite?.id === ci.check_suite_id);
+    requireThat(matchingJobs.length === 1 && matchingChecks.length === 1 &&
+      matchingChecks.every(check => check.head_sha === sha &&
       check.status === 'completed' && check.conclusion === 'success' && check.app?.slug === 'github-actions' &&
       check.check_suite?.id === ci.check_suite_id && Number.isSafeInteger(ci.check_suite_id) &&
-      check.url === job.check_run_url &&
+      check.url === matchingJobs[0].check_run_url &&
       (rule.integration_id == null || rule.integration_id === check.app?.id)),
     'Owner blocker: required qualification check did not execute successfully in the fresh canonical CI run');
   }
@@ -244,7 +249,7 @@ export async function verifyQualification(api, runId, mode, now = Date.now(), co
   const runs = list(await api(`actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`), 'workflow_runs');
   requireThat(runs.some(candidate => candidate.id === ci.id) &&
     runs.every(candidate => candidate.id <= ci.id), 'Newer CI run invalidates qualification');
-  const jobs = await requireJobs(api, ci, [...releaseBuildChecks, 'Select affected tests', 'CI summary',
+  const jobs = await requireJobs(api, ci, [...releaseBuildChecks, ...canonicalValidationChecks, 'Select affected tests', 'CI summary',
     'Dependency license & provenance validation', '.NET provider tests (DbHeavy)']);
   await verifyRequiredChecks(api, branch, sha, ci, jobs);
   const qualifications = list(await api(`actions/workflows/qualify-canonical-release.yml/runs?created=${encodeURIComponent(`>=${ci.created_at}`)}&per_page=100`), 'workflow_runs');

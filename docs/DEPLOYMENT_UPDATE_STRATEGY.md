@@ -89,6 +89,11 @@ requires new full-safe manual CI on live `main`/`development` HEAD and a fresh
 commit/run-bound review confirmation. Default-branch verification and a separate
 bounded status writer establish a live, completed audit chain; no PR verdict is
 copied to a squash SHA and no tree-equality review inference is permitted.
+Manual CI includes the genuine `path-casing`, `Contract drift gate` and unsigned
+`Build (iOS)` archive executions in that same run/check suite (#2688).
+External same-name green checks cannot substitute. The archive runs on macOS;
+this graph makes no Windows-build or iOS-simulator-test claim. Evidence expires
+24 hours after CI creation, including queue time; a new graph requires new CI.
 Single-maintainer confirmation is honestly owner-confirmed/self-attested.
 Separation-of-duties additionally requires eligible native code-owner/non-self
 approval on that exact canonical SHA; missing evidence remains blocked.

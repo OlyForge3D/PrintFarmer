@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import test from 'node:test';
 import { canonicalAuthorizationFixture } from './fixtures/canonical-qualification.mjs';
+import { canonicalValidationChecks } from '../canonical-qualification.mjs';
 import {
   admit, advance, allocationKey, compareVersions, components, hash, identityLabels,
   parseTag, parseVersionFile, reserve as reserveRelease, transact, validateCandidate, validateCompleteSet,
@@ -2352,6 +2353,8 @@ function authorizationFixture(initial = state(), settings = {}) {
     workflowIdentity: context().workflowIdentity.replace('/development', `/${branch}`) });
   const policy = protectionFixture(channel, settings.approvalMode);
   const { api: policies, environment, branchRules } = policy;
+  branchRules.find(rule => rule.type === 'required_status_checks').parameters.required_status_checks
+    .push(...canonicalValidationChecks.map(context => ({ context })));
   settings.mutateEnvironment?.(environment);
   settings.mutatePolicy?.(policy);
   const trees = promotionApi(settings.treeOptions);
@@ -2419,7 +2422,8 @@ function authorizationFixture(initial = state(), settings = {}) {
         return response({ encoding: 'base64', content: Buffer.from('v1.2.3\n').toString('base64') });
       }
       if (endpoint.startsWith(`commits/${sourceCommit}/check-runs`)) {
-        const checks = { total_count: 3, check_runs: releaseBuildChecks
+        const names = [...releaseBuildChecks, ...canonicalValidationChecks];
+        const checks = { total_count: names.length, check_runs: names
           .map((name, id) => ({ name, id: id + 1, head_sha: sourceCommit, status: 'completed',
             conclusion: 'success', app: { slug: 'github-actions' }, check_suite: { id: 100 },
             url: `https://api.github.com/repos/OlyForge3D/PrintFarmer/check-runs/${id + 1}` })) };
