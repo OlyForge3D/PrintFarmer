@@ -279,6 +279,102 @@ public sealed class MoonrakerVerifiedSafetyTests
             result.Positioning.MinimumClearanceZMm.State);
     }
 
+    [Theory]
+    [InlineData("jog", null)]
+    [InlineData("move_to", null)]
+    [InlineData("z_only", null)]
+    [InlineData("configured_negative_z", null)]
+    [InlineData("unhomed", "printer_axes_not_homed")]
+    [InlineData("stale_homing", "printer_telemetry_stale")]
+    [InlineData("stale_frame", "printer_telemetry_stale")]
+    [InlineData("future_frame", "printer_telemetry_stale")]
+    [InlineData("missing_frame", "printer_telemetry_missing")]
+    [InlineData("missing_position", "printer_move_out_of_bounds")]
+    [InlineData("nonfinite_position", "printer_move_out_of_bounds")]
+    [InlineData("outside_current", "printer_move_out_of_bounds")]
+    [InlineData("outside_target", "printer_move_out_of_bounds")]
+    [InlineData("offset_target", "printer_move_out_of_bounds")]
+    [InlineData("missing_geometry", "printer_safety_evidence_unknown")]
+    [InlineData("strict_workflow", "printer_safety_evidence_unknown")]
+    public async Task ValidateObservedManualMoveAsync_RealMoonrakerDiscovery_EnforcesManualPolicy(
+        string scenario, string? expectedCode)
+    {
+        // Only the HTTP transport is replaced: discovery must retain its real Unknown clearance.
+        using var handler = new InlineHandler(request =>
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            string json = request.RequestUri!.AbsolutePath.EndsWith("/list", StringComparison.Ordinal)
+                ? """{"result":{"objects":["toolhead","gcode_move"]}}"""
+                : scenario == "missing_geometry"
+                    ? """{"result":{"status":{}}}"""
+                    : """{"result":{"status":{"toolhead":{"axis_minimum":[0,0,-2,0],"axis_maximum":[250,210,220,0]},"gcode_move":{"homing_origin":[0,0,0,0]}}}}""";
+            return JsonResponse(json);
+        });
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
+        Guid printerId = Guid.NewGuid();
+        var capabilities = new Mock<IPrinterBackendCapabilitiesService>(MockBehavior.Strict);
+        capabilities.Setup(service => service.InvalidateVerifiedSafety(printerId));
+        capabilities.Setup(service => service.GetByPrinterIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .Returns(async (Guid id, CancellationToken token) =>
+            {
+                PrinterVerifiedSafetyDto discovered = await ((ISupportsVerifiedSafetyDiscovery)client)
+                    .DiscoverVerifiedSafetyAsync("http://printer.invalid/", null, "1", token);
+                Assert.Equal(VerifiedSafetyFactState.Unknown, discovered.Positioning.MinimumClearanceZMm.State);
+                Assert.Null(discovered.Positioning.MinimumClearanceZMm.Value);
+                return new PrinterBackendCapabilitiesDto(id, "Moonraker", PrinterBackend.Moonraker)
+                {
+                    VerifiedSafety = discovered,
+                };
+            });
+        DateTime now = DateTime.UtcNow;
+        var facts = PrinterSafetyTelemetryDto.Empty with
+        {
+            HomedAxes = new(["x", "y", "z"], now, 15, "moonraker:toolhead.homed_axes"),
+            CoordinateOriginOffsetMm = new(new(0, 0, 0), now, 15, "moonraker:gcode_move.position-gcode_position"),
+        };
+        var observed = new PrinterStatusDto(printerId, true, "Idle", X: 50, Y: 60, Z: 0, SafetyTelemetry: facts);
+        observed = scenario switch
+        {
+            "unhomed" => observed with { SafetyTelemetry = facts with { HomedAxes = facts.HomedAxes with { Value = ["x", "y"] } } },
+            "stale_homing" => observed with { SafetyTelemetry = facts with { HomedAxes = facts.HomedAxes with { ObservedAtUtc = now.AddMinutes(-1) } } },
+            "stale_frame" => observed with { SafetyTelemetry = facts with { CoordinateOriginOffsetMm = facts.CoordinateOriginOffsetMm with { ObservedAtUtc = now.AddMinutes(-1) } } },
+            "future_frame" => observed with { SafetyTelemetry = facts with { CoordinateOriginOffsetMm = facts.CoordinateOriginOffsetMm with { ObservedAtUtc = now.AddMinutes(1) } } },
+            "missing_frame" => observed with { SafetyTelemetry = facts with { CoordinateOriginOffsetMm = facts.CoordinateOriginOffsetMm with { Value = null } } },
+            "offset_target" => observed with { SafetyTelemetry = facts with { CoordinateOriginOffsetMm = facts.CoordinateOriginOffsetMm with { Value = new(200, 0, 0) } } },
+            "missing_position" => observed with { Y = null },
+            "nonfinite_position" => observed with { Y = double.NaN },
+            "outside_current" => observed with { X = 251 },
+            _ => observed,
+        };
+        PrinterSafetyMoveRequest target = scenario switch
+        {
+            "jog" => new(observed.X + 1, observed.Y, observed.Z),
+            "z_only" => new(null, null, 1),
+            "configured_negative_z" => new(null, null, -1),
+            "outside_target" => new(251, null, null),
+            _ => new(51, null, null),
+        };
+        var cache = new Mock<IPrinterStatusCacheReader>(MockBehavior.Strict);
+        if (scenario == "strict_workflow")
+        {
+            cache.Setup(reader => reader.GetStatus(printerId)).Returns(observed);
+        }
+        var guard = new PrinterSafetyGuard(capabilities.Object, cache.Object, TimeProvider.System);
+
+        PrinterSafetyValidationResult result = scenario == "strict_workflow"
+            ? await guard.ValidateAsync(printerId, PrinterSafetyOperation.AbsoluteMovement, new(51, 60, 0), default)
+            : await guard.ValidateObservedManualMoveAsync(printerId, target, observed, default);
+
+        Assert.Equal(expectedCode is null, result.Success);
+        Assert.Equal(expectedCode, result.Code);
+        capabilities.Verify(service => service.InvalidateVerifiedSafety(printerId), Times.Once);
+        if (scenario != "strict_workflow")
+        {
+            cache.VerifyNoOtherCalls();
+        }
+    }
+
     [Fact]
     public async Task DiscoverVerifiedSafetyAsync_MalformedObjectList_ReturnsUnavailableUnknowns()
     {

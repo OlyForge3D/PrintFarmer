@@ -21,9 +21,7 @@ public static class PrinterControlIntent
 
         return request.Kind is PrinterControlKind.HomeAll or PrinterControlKind.HomeXY or PrinterControlKind.HomeZ
             ? request.X is null && request.Y is null && request.Z is null && request.F is null
-            : (request.Kind == PrinterControlKind.MoveTo
-                ? request.X.HasValue && request.Y.HasValue && request.Z.HasValue
-                : request.X.HasValue || request.Y.HasValue || request.Z.HasValue) && (request.F is null || request.F > 0);
+            : (request.X.HasValue || request.Y.HasValue || request.Z.HasValue) && (request.F is null || request.F > 0);
     }
 
     public static string Normalize(PrinterControlRequest request) =>

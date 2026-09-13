@@ -225,8 +225,12 @@ public sealed class PrinterSafetyGuardTests
         Assert.Equal(code, result.Code);
     }
 
-    [Fact]
-    public async Task ValidateAsync_UnknownClearance_RejectsUnknownEvidence()
+    [Theory]
+    [InlineData(VerifiedSafetyFactState.Unknown, null)]
+    [InlineData(VerifiedSafetyFactState.Verified, null)]
+    [InlineData(VerifiedSafetyFactState.Verified, double.NaN)]
+    [InlineData(VerifiedSafetyFactState.Verified, double.PositiveInfinity)]
+    public async Task ValidateAsync_InvalidClearance_RejectsUnknownEvidence(VerifiedSafetyFactState state, double? clearance)
     {
         Guid printerId = Guid.NewGuid();
         PrinterVerifiedSafetyDto safety = CreateSafety() with
@@ -234,8 +238,8 @@ public sealed class PrinterSafetyGuardTests
             Positioning = CreateSafety().Positioning with
             {
                 MinimumClearanceZMm = new VerifiedSafetyScalarFactDto(
-                    VerifiedSafetyFactState.Unknown,
-                    null,
+                    state,
+                    clearance,
                     "test",
                     Now),
             },
@@ -254,6 +258,23 @@ public sealed class PrinterSafetyGuardTests
         Assert.False(result.Success);
         Assert.Equal(503, result.StatusCode);
         Assert.Equal("printer_safety_evidence_unknown", result.Code);
+    }
+
+    [Fact]
+    public async Task ValidateObservedManualMoveAsync_VerifiedWorkflowClearance_DoesNotConstrainManualBedApproach()
+    {
+        Guid printerId = Guid.NewGuid();
+        PrinterStatusDto observed = CreateStatus(printerId, 0, 0, Now) with { X = 50, Y = 60, Z = 10 };
+        PrinterSafetyGuard guard = CreateGuard(printerId, CreateSafety(), observed);
+
+        PrinterSafetyValidationResult manual = await guard.ValidateObservedManualMoveAsync(
+            printerId, new(null, null, 0), observed, default);
+        PrinterSafetyValidationResult workflow = await guard.ValidateAsync(
+            printerId, PrinterSafetyOperation.AbsoluteMovement, new(50, 60, 0), default);
+
+        Assert.True(manual.Success);
+        Assert.False(workflow.Success);
+        Assert.Equal("printer_clearance_not_met", workflow.Code);
     }
 
     [Fact]
