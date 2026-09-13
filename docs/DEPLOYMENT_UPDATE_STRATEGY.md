@@ -83,17 +83,27 @@ live rulesets/environments/ledger/publisher setup. #2660 still owns signed
 managed eligibility, image aliases and generated installer references; no
 source-only release or unsigned candidate pointer is an update candidate.
 
-**Approval correction (#2682):** activation under #2668 must wait for the
-explicit `RELEASE_APPROVAL_MODE` correction to merge. `single-maintainer`
+**Approval corrections (#2682, #2684):** activation under #2668 requires the
+explicit `RELEASE_APPROVAL_MODE` policy. `single-maintainer`
 requires manual approval by the owner or an explicitly owner-approved user,
 with self-review prevention disabled; its assurance is honestly
 owner-confirmed/self-attested, never separation of duties. The alternative
 `separation-of-duties` mode requires self-review prevention and at least one
-eligible reviewer. Both require the live environment response to explicitly
+eligible reviewer, plus native branch code-owner review and at least one
+non-self native PR approval. Single-maintainer instead requires zero native
+approvals and no code-owner/last-push approval requirement; its PR-only branch
+flow uses the exact-SHA `squad/pre-pr-verdict` status and build checks,
+conversation resolution and no bypass/force-push/deletion. Both modes retain
+these branch/check controls and require the live environment response to explicitly
 report `can_admins_bypass: false` before reservation; required reviewers alone
 are insufficient. Missing/unknown modes and admission/authorization mode drift
-fail closed. Mode-specific normalized schema 4/v3 claims include administrator
-bypass prevention and expose no reviewer identities or raw policy evidence.
+fail closed. Mode-specific normalized schema 5/v4 claims distinguish
+`selfAttestedReviewRequired` from `codeOwnerApprovalRequired` and
+`nonSelfApprovalRequired`, include administrator bypass prevention, and expose
+no reviewer identities or raw policy evidence. Earlier evidence fails closed.
+The current review producer targets open PR heads, not subsequent squash commits:
+canonical-SHA review evidence remains an explicit #2668 activation prerequisite,
+never a status copied from another SHA or a fabricated independent approver.
 See [approval configuration](RELEASE_GUIDE.md#explicit-release-approval-configuration)
 for private delegation evidence and cutover. All other #2679 controls, including
 package ACL isolation and negative rehearsals, remain unchanged.

@@ -104,19 +104,23 @@ the CLI never falls back to `github.token` for authorization or ledger writes.
 
 Raw policy responses stay **only in memory** during App-token verification:
 never in files, logs, outputs, bundles or uploads. The immutable record contains
-only a strict, normalized `protection` attestation (schema 4):
+only a strict, normalized `protection` attestation (schema 5):
 repository/channel/branch, ISO `verifiedAt`, the
-`printfarmer-release-protection/v3` profile, `approvalMode`, `approvalAssurance`,
+`printfarmer-release-protection/v4` profile, `approvalMode`, `approvalAssurance`,
 boolean policy claims and a SHA-256
 digest of those normalized fields. Claims assert branch deletion/rewrite
-prevention, required code-owner approval/checks, canonical environment branch
+prevention, PR-only flow without bypass, conversation resolution, the required
+self-attested review status and exact-SHA checks, canonical environment branch
 restriction, manual approval with administrator bypass blocked, immutable canonical tags, ledger continuity and
 exclusive writes by the owner-approved publisher. No actor/App IDs, reviewer
 identities, raw rules or hashes of private API responses survive normalization.
-`nonSelfApprovalRequired` is `false` only in `single-maintainer` mode and `true`
-in `separation-of-duties` mode; every other claim must remain `true`.
+`codeOwnerApprovalRequired` and `nonSelfApprovalRequired` are `false` in
+`single-maintainer` mode and `true` in `separation-of-duties` mode.
+`selfAttestedReviewRequired` means the existing Squad review gate (including its
+explicit owner override), not an independent approver. It and every other claim
+must remain `true`.
 The mode, assurance and claims are bound into the normalized digest and signed
-authorization. Schema 2/v1 and schema 3/v2 evidence, missing modes, unknown fields and
+authorization. Earlier evidence, including schema 4/v3, missing modes, unknown fields and
 contradictory claims fail closed; there is no compatibility default. Existing
 public ledger projections remain unchanged and retain their original hashes.
 Retries require the original signed artifact and the same approval mode;
@@ -432,10 +436,70 @@ configuration and rerun all jobs. The output is a consistency check, not a
 replacement for protected authorization policy. Never accept this policy from
 dispatch input or infer it from the number of maintainers.
 
-| Mode | Required environment policy | Normalized assurance |
-| --- | --- | --- |
-| `single-maintainer` | Manual required-reviewer gate, `prevent_self_review: false`; every configured reviewer must be an owner-approved user | `owner-confirmed/self-attested` |
-| `separation-of-duties` | Manual required-reviewer gate, `prevent_self_review: true`; at least one configured eligible user/team reviewer | `non-self-review-enforced` |
+| Mode | Required native branch PR policy | Required environment policy | Normalized assurance |
+| --- | --- | --- | --- |
+| `single-maintainer` | Zero native approvals, code-owner review disabled, last-push approval disabled | Manual required-reviewer gate, `prevent_self_review: false`; every configured reviewer must be an owner-approved user | `owner-confirmed/self-attested` |
+| `separation-of-duties` | At least one native approval and native code-owner review; GitHub does not let PR authors approve their own PR | Manual required-reviewer gate, `prevent_self_review: true`; at least one configured eligible user/team reviewer | `non-self-review-enforced` |
+
+**Both modes require PR-only branch flow**, resolved review conversations,
+stale native approval dismissal on push, strict up-to-date required status checks,
+and deletion/force-push prevention on `main` and `development`. In the REST
+ruleset `pull_request` parameters, set `required_review_thread_resolution: true`
+and `dismiss_stale_reviews_on_push: true`; use actual booleans and an integer
+`required_approving_review_count` (0 in single-maintainer, 1–6 otherwise).
+Single-maintainer must explicitly set `require_code_owner_review: false` and
+`require_last_push_approval: false`; an unsatisfiable native review requirement
+is rejected, not described as a stronger assurance.
+
+Use active branch rulesets with explicit canonical ref includes (or `~ALL`),
+no exclusions, and **empty bypass lists**. The adapter reads effective rules
+and their referenced ruleset details, rejecting missing, truncated, conflicting
+or bypassable evidence. An owner merges through the PR/check/conversation gates,
+not a ruleset bypass. The existing gate's explicit `APPROVE (owner)` override
+can satisfy the review status, but is owner confirmation, not an independent
+authorization of an owner-authored PR. Owner administrative power to change
+configuration remains a trust boundary: stop publishers, privately record and
+review any emergency policy change, then restore and reverify protections.
+There is no normal force-push/delete or release-environment bypass.
+
+### Exact-SHA required-check contract
+
+Set `strict_required_status_checks_policy: true` and require these exact contexts
+in the effective branch rules:
+
+- `CI tooling tests`
+- `.NET build`
+- `Frontend build & tests`
+- `squad/pre-pr-verdict`
+
+The first three are GitHub Actions **check runs**, not check-suite conclusions.
+The last is a **commit status** produced by `squad-review-verdict.yml` using
+`repos.createCommitStatus` and `squad-verdict-gate.mjs`'s `verdictContext`.
+A green workflow job cannot substitute for that status. Read-only admission and
+protected authorization query the selected full SHA's check runs and combined
+commit status; authorization also checks every additional configured context.
+Latest required runs must be completed/successful at that SHA and the latest
+review status must be successful with an exact-head `REVIEWED (self-attested)`,
+`REVIEWED (self-attested, carried across sync)` or `APPROVE (owner)` description.
+`NOT_APPLICABLE` is not review evidence. The API response SHA, not the shortened
+description alone, establishes the full-SHA binding. Raw descriptions/identities
+are never emitted in normalized evidence or errors.
+
+For check-run integration bindings, the adapter verifies `check.app.id`;
+commit-status responses contain no integration ID, so leave that optional
+ruleset binding unset for `squad/pre-pr-verdict` and other status-only contexts.
+An unprovable integration binding fails closed rather than inventing status or
+check-suite fields. Paginated evidence at the 100-entry cap fails closed.
+
+**Activation prerequisite:** the current Squad producer posts to an open PR's
+head, not a later squash/merge commit. A PR-head verdict must never be copied to
+a different canonical release SHA. The inspected baseline had no status on its
+canonical SHA; release remains blocked until an owner-approved exact-canonical-SHA
+qualification path supplies genuine review evidence. #2668 owns that activation
+work; this change neither posts statuses nor changes the verdict producer or live
+configuration. Required checks alone do not manufacture missing review evidence.
+
+### Environment approval and cutover
 
 **Both modes require administrator bypass to be disabled.** In each release
 environment, deselect **Allow administrators to bypass configured protection
@@ -476,7 +540,7 @@ approving; an empty/malformed reviewer list never qualifies.
 Single-maintainer approval is **owner-confirmed/self-attested**, not separation
 of duties, four-eyes control or independent approval. The normalized evidence
 attests the checked environment policy, not the identity of a particular
-approver. Switching modes changes only this approval policy: exact SHA and
+approver. Switching modes changes the branch and environment approval policy: exact SHA and
 branch restrictions, App isolation, immutable tags, ledger continuity, package
 ACL isolation and negative rehearsals remain mandatory.
 
@@ -499,8 +563,10 @@ Before enabling:
    evidence. A head equal to the checkpoint has no seed and is rejected.
    Every subsequent snapshot and edge back through the seed is mandatory.
    The workflow never auto-initializes.
-3. Enforce main/development code-owner review, non-force/non-delete rules and
-   exact-SHA status checks. Protect `release-stable`/`release-insider` with
+3. Enforce the mode-specific main/development PR policy, non-force/non-delete
+   rules without bypass, conversation resolution and all exact-SHA checks above.
+   Do not enable native approval requirements in single-maintainer mode.
+   Protect `release-stable`/`release-insider` with
    manual reviewer approval under the explicit mode above and only their
    respective branch allowed. Configure the variable and any owner-approved
    delegate secret; disable administrator bypass and read back each environment's
@@ -512,7 +578,7 @@ Before enabling:
    creation/update to one explicitly approved publisher App.
 5. Provision its scoped `RELEASE_PUBLISHER_APP_ID` and environment-only
    `RELEASE_PUBLISHER_PRIVATE_KEY`. It needs contents write plus check,
-   administration and Actions read permissions for verification.
+   commit-status, administration and Actions read permissions for verification.
    Do not reuse an unrestricted repository PAT.
    Application GHCR writes separately require `RELEASE_REGISTRY_USER` and an
    environment-only `RELEASE_REGISTRY_TOKEN` with package-write scope, not
@@ -557,6 +623,12 @@ missing/manual-reviewer gates, self-review contradictions, unapproved delegates,
 malformed owner configuration, mode-change retries and redaction. Both modes
 execute the real admission/authorization/consumer flow with fake API transport;
 single-maintainer policy denials prove no reservation/tag/ledger writes.
+Branch fixtures reject native-review mode mismatches, every missing required
+context, non-strict checks, malformed parameters and bypasses (including the
+owner and publisher App). Exact-SHA fixtures reject wrong/missing SHA, pending
+or failed latest statuses/runs, truncated responses, `NOT_APPLICABLE`, and
+green check-run/check-suite substitutes for the review status. Schema/profile
+downgrades and mode/claim contradictions fail even with recomputed digests.
 Stable-floor fixtures cover initial historical floors, current pointers,
 direct valid-schema history insertions, stable advancement between admission
 and allocation, and advancement during a losing CAS. Exact old reservations
