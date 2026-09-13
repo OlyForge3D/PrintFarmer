@@ -1012,11 +1012,52 @@ test('label exclusion prevents secondary issue/label writes even though tag push
   assert.ok(document.on.push.paths.length > 0);
   assert.equal(startsForFixtureTag(document, `${context.marker}-update`), false);
   verifyFixtureWorkflow(source);
-  const unfiltered = source.replace(/    tags-ignore:\n      - 'v-rehearsal-2668-\*'\n/, '');
+  const branchOnly = source.replace(/    tags-ignore:\n      - 'v-rehearsal-2668-\*'\n/, '');
+  assert.notEqual(source, branchOnly);
+  assert.equal(startsForFixtureTag(load(branchOnly), 'v1.2.3'), false,
+    'Branch-only filters disable all tag pushes');
+  verifyFixtureWorkflow(branchOnly);
+  const unfiltered = branchOnly.replace(/    branches: \['\*\*'\]\n/, '');
   assert.notEqual(source, unfiltered);
   assert.equal(startsForFixtureTag(load(unfiltered), `${context.marker}-update`), true);
   assert.throws(() => verifyFixtureWorkflow(unfiltered), /Unfiltered/);
   assert.equal(startsForFixtureTag(document, 'v1.2.3'), true, 'Existing non-fixture tag behavior is preserved');
+});
+
+test('label sync retains all branch pushes with matching paths alongside fixture tag exclusion', () => {
+  const source = readFileSync('.github/workflows/sync-squad-labels.yml', 'utf8');
+  const document = load(source);
+  const paths = ['.squad/team.md', '.github/workflows/sync-squad-labels.yml', 'scripts/ci/squad-routing.cjs'];
+  assert.deepEqual(document.on.push.branches, ['**']);
+  assert.deepEqual(document.on.push.paths, paths);
+  assert.deepEqual(document.on.push['tags-ignore'], ['v-rehearsal-2668-*']);
+
+  // GitHub disables branch pushes when only tag filters are specified; paths do not re-enable them.
+  function startsForBranch(workflow, branch, changedPaths) {
+    const push = workflow.on.push;
+    if (!push.branches && (push.tags || push['tags-ignore'])) return false;
+    return (!push.branches || push.branches.some(pattern => pattern === '**' || pattern === branch)) &&
+      changedPaths.some(path => push.paths.includes(path));
+  }
+
+  const tagOnly = structuredClone(document);
+  delete tagOnly.on.push.branches;
+  for (const branch of ['main', 'development', 'feature/example', 'squad/parker-2668-fixture-provisioner']) {
+    for (const path of paths) {
+      assert.equal(startsForBranch(document, branch, [path]), true, `${branch}: ${path}`);
+      assert.equal(startsForBranch(tagOnly, branch, [path]), false,
+        'Removing the explicit branch filter must reproduce the blocker');
+    }
+    assert.equal(startsForBranch(document, branch, ['README.md']), false);
+    assert.equal(startsForBranch(document, branch, ['README.md', paths[0]]), true);
+  }
+  for (const tag of [context.marker, `${context.marker}-update`]) {
+    assert.equal(startsForFixtureTag(document, tag), false);
+  }
+  for (const tag of ['v1.2.3', 'v1.2.3-insider.42', 'ios/v1.2.3-beta.1']) {
+    assert.equal(startsForFixtureTag(document, tag), true, 'Tag pushes ignore path filters');
+  }
+  verifyFixtureWorkflow(source);
 });
 
 test('workflow target rejects ambiguous YAML, arbitrary push/create/indirect events and ignores path filters for tags', () => {
@@ -1066,7 +1107,7 @@ test('unsafe issue/label consumers on either ledger or default tree block before
 });
 
 test('workflow tree walk verifies target blobs and fails truncated, missing or rewritten workflow data', async () => {
-  const source = Buffer.from('on: {push: {branches: [main]}}\njobs: {}\n');
+  const source = readFileSync('.github/workflows/sync-squad-labels.yml');
   const blobSha = createHash('sha1').update(`blob ${source.length}\0`).update(source).digest('hex');
   function data() {
     return new Map([

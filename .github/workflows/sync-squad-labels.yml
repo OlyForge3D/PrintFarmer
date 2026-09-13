@@ -2,6 +2,8 @@ name: Sync Squad Labels
 
 on:
   push:
+    # tags-ignore alone disables branch pushes; retain all branches and their path filter.
+    branches: ['**']
     tags-ignore:
       - 'v-rehearsal-2668-*'
     paths:
