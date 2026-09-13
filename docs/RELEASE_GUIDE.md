@@ -104,14 +104,23 @@ the CLI never falls back to `github.token` for authorization or ledger writes.
 
 Raw policy responses stay **only in memory** during App-token verification:
 never in files, logs, outputs, bundles or uploads. The immutable record contains
-only a strict, normalized `protection` attestation (schema 2):
+only a strict, normalized `protection` attestation (schema 4):
 repository/channel/branch, ISO `verifiedAt`, the
-`printfarmer-release-protection/v1` profile, boolean policy claims and a SHA-256
+`printfarmer-release-protection/v3` profile, `approvalMode`, `approvalAssurance`,
+boolean policy claims and a SHA-256
 digest of those normalized fields. Claims assert branch deletion/rewrite
 prevention, required code-owner approval/checks, canonical environment branch
-restriction, non-self approval, immutable canonical tags, ledger continuity and
+restriction, manual approval with administrator bypass blocked, immutable canonical tags, ledger continuity and
 exclusive writes by the owner-approved publisher. No actor/App IDs, reviewer
 identities, raw rules or hashes of private API responses survive normalization.
+`nonSelfApprovalRequired` is `false` only in `single-maintainer` mode and `true`
+in `separation-of-duties` mode; every other claim must remain `true`.
+The mode, assurance and claims are bound into the normalized digest and signed
+authorization. Schema 2/v1 and schema 3/v2 evidence, missing modes, unknown fields and
+contradictory claims fail closed; there is no compatibility default. Existing
+public ledger projections remain unchanged and retain their original hashes.
+Retries require the original signed artifact and the same approval mode;
+a mode change needs a new attempt, never a rewritten reservation.
 Stable qualification retains exact-SHA pass assertions plus reproducible
 promotion tree evidence or a hotfix rationale digest. The same qualification
 is bound into the signed record; free-form owner text is not copied.
@@ -406,8 +415,70 @@ approve this Git-CAS storage and recovery design, and choose candidate expiry.
 CODEOWNERS currently names `jpapiez`; that is existing ownership, not approval
 of this new policy.
 The ledger is a data-only coordination ref, never an additional release source
-branch. Required non-self environment approval also needs an eligible reviewer;
-admin API access alone does not supply that reviewer or approve the new policy.
+branch. Manual environment approval always needs an eligible reviewer and an
+explicit approval mode; admin API access alone does not approve the new policy.
+Live activation under #2668 must wait until #2682 is merged.
+
+### Explicit release approval configuration
+
+Set repository variable `RELEASE_APPROVAL_MODE` to exactly one of the values
+below. There is **no default**: missing, misspelled, whitespace-padded and unknown
+values block admission and authorization before any API read or write.
+Admission emits its validated mode as a job output. The protected authorization
+job independently resolves the variable and requires exact equality with that
+output before any API access. Environment overrides must match the repository
+value; a mismatch or missing admission output blocks reservation. Align the
+configuration and rerun all jobs. The output is a consistency check, not a
+replacement for protected authorization policy. Never accept this policy from
+dispatch input or infer it from the number of maintainers.
+
+| Mode | Required environment policy | Normalized assurance |
+| --- | --- | --- |
+| `single-maintainer` | Manual required-reviewer gate, `prevent_self_review: false`; every configured reviewer must be an owner-approved user | `owner-confirmed/self-attested` |
+| `separation-of-duties` | Manual required-reviewer gate, `prevent_self_review: true`; at least one configured eligible user/team reviewer | `non-self-review-enforced` |
+
+**Both modes require administrator bypass to be disabled.** In each release
+environment, deselect **Allow administrators to bypass configured protection
+rules**. Read back the environment using the publisher App: the REST
+`GET /repos/{owner}/{repo}/environments/{environment_name}` response must contain
+`can_admins_bypass: false` as a boolean. `true`, omission, null, string values
+and failed reads all block authorization before reservation or source-tag writes.
+Required reviewers alone do not prove that manual approval cannot be bypassed.
+
+This response field is supported by the REST API and its
+[environment SDK model](https://github.com/google/go-github/blob/master/github/repos_environments.go),
+although the rendered REST documentation omits it. GitHub documents the
+[administrator bypass control](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
+The verifier uses the live control, not an invented field or run-wide approval
+history that cannot bind approval to the current attempt. Normalization adds
+only `environmentAdminBypassBlocked: true`; raw environment data stays in memory.
+Disabling bypass is an activation requirement, not a claim of independent
+approval or proof that administrators cannot later change configuration.
+
+In single-maintainer mode, `jpapiez` is the approved owner reviewer. To delegate,
+the owner must explicitly approve the users in private activation evidence and
+provision the optional **environment secret** `RELEASE_OWNER_APPROVED_REVIEWERS`
+as a JSON array of GitHub user logins. The owner remains allowed; an unset/empty
+secret adds no delegates. Invalid JSON, empty arrays or malformed logins fail
+closed. Do not put identities in repository variables, workflow YAML, logs or
+public evidence. This secret is an owner-provisioned allowlist, not independent
+proof of who approved it; access to environment-secret administration is a
+trust boundary. Keep the owner's approval record private and review changes.
+
+GitHub accepts any one required reviewer, so **every** configured reviewer must
+be on that allowlist in single-maintainer mode; adding an unapproved user beside
+the owner is not sufficient. Teams are rejected in that mode because team
+membership does not establish explicit approval of each possible reviewer.
+In separation-of-duties mode, GitHub's configured user/team reviewer object
+provides eligibility evidence and the environment prevents the initiator from
+approving; an empty/malformed reviewer list never qualifies.
+
+Single-maintainer approval is **owner-confirmed/self-attested**, not separation
+of duties, four-eyes control or independent approval. The normalized evidence
+attests the checked environment policy, not the identity of a particular
+approver. Switching modes changes only this approval policy: exact SHA and
+branch restrictions, App isolation, immutable tags, ledger continuity, package
+ACL isolation and negative rehearsals remain mandatory.
 
 Before enabling:
 
@@ -430,7 +501,11 @@ Before enabling:
    The workflow never auto-initializes.
 3. Enforce main/development code-owner review, non-force/non-delete rules and
    exact-SHA status checks. Protect `release-stable`/`release-insider` with
-   non-self reviewer approval and only their respective branch allowed.
+   manual reviewer approval under the explicit mode above and only their
+   respective branch allowed. Configure the variable and any owner-approved
+   delegate secret; disable administrator bypass and read back each environment's
+   actual reviewer/self-review settings and boolean `can_admins_bypass: false`
+   before enabling publication.
 4. Activate `release-canonical-tags` (`v*`, no update/delete, **no bypass**) and
    `release-ledger-continuity` (ledger branch, no force/delete, **no bypass**).
    Separate `release-tag-creators` and `release-ledger-writer` rules restrict
@@ -477,6 +552,11 @@ intermediate merges and invalid snapshots, missing/truncated objects, explicit
 checkpoint semantics and a 1,005-snapshot chain. Read, allocation and source-tag
 paths assert zero POST/PATCH calls on rejection; executed admission/authorization
 also reject evidence rewrites before writes.
+Approval fixtures cover both modes on both channels, absent/invalid mode,
+missing/manual-reviewer gates, self-review contradictions, unapproved delegates,
+malformed owner configuration, mode-change retries and redaction. Both modes
+execute the real admission/authorization/consumer flow with fake API transport;
+single-maintainer policy denials prove no reservation/tag/ledger writes.
 Stable-floor fixtures cover initial historical floors, current pointers,
 direct valid-schema history insertions, stable advancement between admission
 and allocation, and advancement during a losing CAS. Exact old reservations

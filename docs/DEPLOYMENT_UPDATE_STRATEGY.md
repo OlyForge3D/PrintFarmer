@@ -83,6 +83,21 @@ live rulesets/environments/ledger/publisher setup. #2660 still owns signed
 managed eligibility, image aliases and generated installer references; no
 source-only release or unsigned candidate pointer is an update candidate.
 
+**Approval correction (#2682):** activation under #2668 must wait for the
+explicit `RELEASE_APPROVAL_MODE` correction to merge. `single-maintainer`
+requires manual approval by the owner or an explicitly owner-approved user,
+with self-review prevention disabled; its assurance is honestly
+owner-confirmed/self-attested, never separation of duties. The alternative
+`separation-of-duties` mode requires self-review prevention and at least one
+eligible reviewer. Both require the live environment response to explicitly
+report `can_admins_bypass: false` before reservation; required reviewers alone
+are insufficient. Missing/unknown modes and admission/authorization mode drift
+fail closed. Mode-specific normalized schema 4/v3 claims include administrator
+bypass prevention and expose no reviewer identities or raw policy evidence.
+See [approval configuration](RELEASE_GUIDE.md#explicit-release-approval-configuration)
+for private delegation evidence and cutover. All other #2679 controls, including
+package ACL isolation and negative rehearsals, remain unchanged.
+
 The local #2668 implementation establishes the following publication policy,
 as documented in the [release guide](RELEASE_GUIDE.md#release-channels-and-branches):
 
