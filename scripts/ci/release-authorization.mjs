@@ -23,16 +23,14 @@ function writeAuthorizationFile(path, content) {
       requireThat(info.isDirectory() && !info.isSymbolicLink(), 'Authorization directory must not be linked');
     }
   }
-  const previous = lstatSync(path, { throwIfNoEntry: false });
-  requireThat(!previous || (previous.isFile() && !previous.isSymbolicLink() && previous.nlink === 1),
-    'Authorization destination must be a single-link regular file');
   const mode = path === 'release-identity.json' ? 0o644 : 0o600;
   const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW, mode);
   try {
     const actual = fstatSync(descriptor);
-    requireThat(actual.isFile() && actual.nlink === 1 &&
-      (!previous || (actual.ino === previous.ino && actual.dev === previous.dev)),
-    'Authorization destination changed');
+    const named = lstatSync(path);
+    requireThat(actual.isFile() && actual.nlink === 1 && named.isFile() && !named.isSymbolicLink() &&
+      named.nlink === 1 && actual.ino === named.ino && actual.dev === named.dev,
+    'Authorization destination must be the same single-link regular file');
     fchmodSync(descriptor, mode);
     ftruncateSync(descriptor, 0);
     writeFileSync(descriptor, content);

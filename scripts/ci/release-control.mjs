@@ -41,14 +41,13 @@ export function output(name, value) {
     /^set_output_[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(basename(path)) &&
     path === resolve(path) && !/[\r\n]/.test(path),
   'Invalid runner output destination');
-  const expected = lstatSync(path);
-  requireThat(expected.isFile() && !expected.isSymbolicLink() && expected.nlink === 1,
-    'Runner output must be an existing single-link regular file');
   const descriptor = openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
   try {
     const actual = fstatSync(descriptor);
-    requireThat(actual.isFile() && actual.nlink === 1 && actual.dev === expected.dev && actual.ino === expected.ino,
-      'Runner output file changed');
+    const named = lstatSync(path);
+    requireThat(actual.isFile() && actual.nlink === 1 && named.isFile() && !named.isSymbolicLink() &&
+      named.nlink === 1 && actual.dev === named.dev && actual.ino === named.ino,
+    'Runner output must be the same single-link regular file');
     appendFileSync(descriptor, `${name}=${text}\n`);
   } finally {
     closeSync(descriptor);
