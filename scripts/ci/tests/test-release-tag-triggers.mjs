@@ -1147,6 +1147,7 @@ test('all executable scripts, actions and workflows have only the reviewed relea
     !/(?:^|\/)(?:tests?|__tests__|e2e|node_modules)(?:\/|$)|(?:^|\/)test-[^/]+$|\.(?:test|spec)\./.test(file));
   const approved = {
     'scripts/ci/release-github.mjs': ['tag-write'],
+    'scripts/ci/release-rehearsal-probes.mjs': ['tag-write'],
     '.github/workflows/docker-publish.yml': ['release-write'],
     '.github/workflows/testflight-beta.yml': ['tag-write', 'release-write'],
     'mobile/scripts/release-beta.sh': ['tag-write'],

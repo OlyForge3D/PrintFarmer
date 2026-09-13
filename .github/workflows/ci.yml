@@ -324,6 +324,7 @@ jobs:
         run: >-
           node --test scripts/ci/tests/test-release-tag-triggers.mjs
           scripts/ci/tests/test-canonical-qualification.mjs
+          scripts/ci/tests/test-release-rehearsal.mjs
 
       - name: Test daily development image-set policy
         run: node --test scripts/ci/tests/test-daily-development-images.mjs

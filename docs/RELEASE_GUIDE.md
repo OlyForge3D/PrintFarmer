@@ -769,12 +769,146 @@ high water without changing old reservations, and review a continuity checkpoint
 migration. Never reset N after a base/workflow change. An unprovable floor means
 publication remains disabled. No normal workflow has a reset/bypass operation.
 
+### Bounded protection rehearsal (#2668)
+
+`release-protection-rehearsal.yml` is a separate, manually dispatched verifier,
+**not** a mode of `consolidated-release.yml`. Its receipts have the distinct
+`release-rehearsal-only` kind and are never release identities, signatures,
+reservations or publication authorization. Do not approve a production
+`Reserve and authorize immutable source` job to obtain rehearsal evidence.
+Rejected production run
+[34760943915](https://github.com/OlyForge3D/PrintFarmer/actions/runs/34760943915)
+failed closed: admission succeeded, authorization failed with zero executed
+steps, and publication was skipped. That is zero-publication evidence for
+that run, not App-permission or denied-write proof.
+
+Merge the reviewed harness through the normal high-risk review gate, then obtain
+fresh canonical CI/review/qualification at the new HEAD. Run insider only from
+`development`; stable requires the harness merged and freshly qualified on
+`main`. An unconditional, credential-free admission job checks the repository,
+dispatch event, selected branch, workflow ref/SHA and first run attempt. Invalid
+dispatches fail the run rather than skipping every job and appearing green.
+Admission performs no checkout or API requests and has no token permissions or
+environment secrets. Both protected jobs depend on admission and use the existing
+canonical `release-<channel>` owner gate; never widen environment branch policies.
+Because GitHub can rerun either protected job without rerunning admission, each
+also repeats the credential-free check as its first step, before checkout,
+third-party actions, App token creation or step-level credential exposure.
+Environment approval still precedes job startup; no environment secrets or
+tokens are passed to the pre-check. Artifact uploads require that job's admission
+to succeed, even on failure paths. A single-job rerun therefore fails locally
+without executing later steps, regardless of an earlier admission success.
+The three embedded JavaScript bodies must match the `rehearsalAdmissionSource`
+constant in `scripts/ci/release-rehearsal-admission.mjs` byte-for-byte; regression
+tests enforce source parity and step ordering. The constant preserves LF line
+endings across checkouts. Embedding avoids fetching code before admission.
+The workflow shares the channel's publication concurrency group and refuses
+active/pending publishers on either channel. Keep production dispatches paused
+throughout the window; any observed
+concurrent drift invalidates the evidence.
+
+The default `denial_probes=false` performs only reads. The protected App token
+is explicitly repository-scoped and downscoped to contents, checks, commit
+statuses, administration and Actions **read**. Token issuance fails if the
+installation has not accepted those permissions. The adapter also enforces GET
+only, rejects redirects and limits requests. Real policy/check/status reads,
+the complete ledger ancestry, and independent canonical qualification must
+succeed. App settings alone, an administrative token, or ordinary admission
+are not equivalent evidence. Token creation/revocation and Actions/environment
+audit records are intended effects.
+
+The receipt's `commitStatusReadObserved` means only that an authenticated App
+request read commit statuses. This public repository's status endpoint can be
+read without a commit-status permission grant, so neither that observation nor
+`appReadsVerified` proves the installation grant. The receipt explicitly sets
+`commitStatusGrantEvidenceRequired: true`. Before accepting the rehearsal, the
+owner must separately retain secret-free evidence of the installation's accepted
+`statuses: read` permission (or stronger, downscoped to read for this token),
+paired with successful issuance using the workflow's explicit
+`permission-statuses: read` request. App settings alone are insufficient.
+The harness does not obtain extra credentials to read installation permissions.
+Never retain the private key or token response as evidence.
+
+Live denial probes additionally require explicit owner consent to bounded
+canary effects, `denial_probes=true`, and environment variable
+`RELEASE_REHEARSAL_APPROVED_SHA` equal to the exact reviewed workflow/source SHA.
+This variable is not a release authorization. Clear it after the window.
+Before approving the first environment gate, the owner must separately provision
+one lightweight **inert** tag
+`refs/tags/v-rehearsal-2668-<run_id>-1-update` at the current ledger head.
+The run ID is available while the positive job waits for approval. Provisioning
+requires separately authorized use of the designated creator App; the harness
+cannot create this fixture with its GET-only App token. Do not weaken rulesets
+or grant an update/deletion bypass. Record this intended fixture in the owner's
+window approval and retain it permanently. Without it the probe job fails
+before any mutation; a missing-ref or same-SHA update is not a valid denial test.
+
+The separate probe job receives only its generic `GITHUB_TOKEN`, requesting
+contents/package write and read-only verification permissions. Review its
+**Set up job → GITHUB_TOKEN Permissions** log for effective contents/package
+write before accepting results; preserve that Actions log with the receipts.
+The runner additionally verifies positive repository push capability, package
+metadata and registry read access. No publisher App token, registry secret,
+signing credential, release creation, manifest PUT, blob completion, package
+tag, alias update or production dispatch is available in this job.
+
+The nine target probes run serially, never retrying a write:
+
+- Create the absent `refs/tags/v-rehearsal-2668-<run_id>-1` at the reviewed
+  source SHA. Both fixture names match protected `v*` but fail canonical
+  SemVer parsing; they cannot trigger server publication.
+- Intentionally create one unreferenced Git commit with the ledger head's
+  **identical tree** and sole parent. Attempt real fast-forwards of the inert
+  update fixture and the ledger ref to that child, always `force:false`.
+  The object is an explicit intended effect even when both updates are denied.
+  No tree/blob, state, counter, allocation, qualification or pointer is authored.
+  If both updates are denied, no ref retains this child: GitHub may garbage-collect
+  the unreferenced object, and later SHA lookup is not guaranteed. The receipt's
+  `retain-never-reset` disposition prohibits harness deletion/reset; it is not
+  a durability guarantee. Preserve the secret-free receipt (child, parent and
+  tree SHAs and verified attempt outcomes) and run logs beyond the artifact's
+  30-day retention window. Do not add a ref or weaken protections to retain it.
+- For every production component in `release-policy.mjs`, authenticate the
+  generic token, prove registry read access, then attempt one zero-body upload
+  initiation. A scope request alone never counts as a write denial.
+
+Only operation-specific Git ruleset denials and authenticated registry
+write/scope denials count. Malformed responses, authentication failures,
+conflicts, non-fast-forwards, throttling, redirects, network errors and unknown
+outcomes fail closed. Any unexpected success stops all subsequent probes.
+Retain unexpectedly created refs or ledger edges: never reset history or delete
+immutable markers. The only automatic cleanup is cancellation of the exact new
+same-host/same-package upload session returned by an accepted upload start,
+followed by confirmation that the session is unknown. Failed/ambiguous cleanup
+requires owner recovery. Successful cleanup **does not turn failure into pass**.
+
+Receipts inventory all paginated historical tags (including `ios/`), canonical
+heads, ledger head/tree/state digest, releases and their assets, and all six
+package version/digest records. Inventories must match across the positive
+job, before every probe and after the final attempt, including failure paths.
+Incomplete pagination or mismatched package counts fail closed. Passing also
+requires exactly one denied upload result per production package; an empty or
+partial upload list cannot pass. Raw policy, reviewer data, API errors, release
+bodies, credentials and upload-state URLs are not emitted. Preserve both
+`release-rehearsal-*` artifacts and run logs.
+
+GHCR does not expose a global unfinished-upload listing API. Upload evidence
+therefore accounts for **every initiation attempted by this harness**, including
+unknown outcomes and confirmed cancellation, alongside full package-version
+inventories; it is not a claim to inventory unrelated clients' pending uploads.
+“Zero unintended writes” is an observed passing condition, not a guarantee
+that the controls under test cannot fail or that no external writer exists.
+Package-admin ACL attestation, effective token-permission logs and owner
+acceptance remain required. A passing rehearsal does not close #2668, qualify
+an unqualified stable branch, authorize publication, or unblock #2660.
+
 ## Validation
 
 Run from the repository root:
 
 ```text
 node --test scripts/ci/tests/test-release-tag-triggers.mjs scripts/ci/tests/test-daily-development-images.mjs
+node --test scripts/ci/tests/test-release-rehearsal.mjs
 ```
 
 Fixtures execute admission denials without writes, positive stable/insider/
@@ -804,8 +938,9 @@ remain retryable; new stale reservations cannot reach publication.
 The same suite scans repository executable scripts, actions and workflows for
 tag creation, force pushes and direct release/API publication. Its explicit
 writer inventory permits only the guarded ledger adapter, authorized Docker
-consumer, and separate `ios/` TestFlight writers. This is a source regression
-check, not a substitute for repository protection or runtime authorization.
+consumer, bounded rehearsal probe module, and separate `ios/` TestFlight writers.
+This is a source regression check, not a substitute for repository protection
+or runtime authorization.
 Both retired server helpers execute against sentinel publication commands for
 normal, dry-run, help and force arguments; every call exits 2 without invoking
 those commands. Use Git Bash rather than WSL bash for these tests on Windows.
