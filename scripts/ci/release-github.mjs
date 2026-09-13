@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import {
   repository, ledgerBranch, requireThat, validateLedger, verifyTag, compareVersions, normalizeProtectionEvidence,
   hash, parseTag, publicLedgerQualification, publicRecord, validateRecord, requireKeys, requireString,
-  validatePromotionOrigin, parseVersionFile, requireObject,
+  validatePromotionOrigin, parseVersionFile, requireObject, validateReservationAdmission,
 } from './release-policy.mjs';
 import { publicAuthorization, writePublicSet } from './release-authorization.mjs';
 
@@ -163,6 +163,7 @@ export function gitLedger(api, anchor) {
       .filter(([key]) => !Object.hasOwn(previous.reservations, key))
       .map(([, reservation]) => reservation);
     requireThat(additions.length <= 1, 'Ledger transaction added multiple reservations');
+    for (const reservation of additions) validateReservationAdmission(previous, reservation.admission);
     if (counterDelta === 1n) {
       requireThat(additions.length === 1 && additions[0].record.channel === 'insider' &&
         additions[0].sequence === state.counter,

@@ -412,4 +412,6 @@ stable from `main`, explicitly opted-in insider from `development`. Release
 activation requires owner-approved protections and allocator continuity.
 Source-only releases are not managed-update candidates without the complete
 signed manifest; historical image aliases remain unchanged during cutover.
+The retired `scripts/release.sh` and `scripts/publish-to-public.sh` helpers
+exit without publication; use the consolidated workflow instead.
 **Current Phase:** Phase 4 - COMPLETE (Phase 4.5 Load Balancing planned next)

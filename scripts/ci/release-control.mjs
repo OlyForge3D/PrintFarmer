@@ -1,7 +1,7 @@
 import { appendFileSync } from 'node:fs';
 import {
-  admit, advance, allocationKey, hash, requireThat, reserve, transact, verifyConsumer, verifyTag,
-  identityLabels, parseTag, verifyProtectionEvidence,
+  admit, advance, hash, requireThat, reserve, transact, verifyConsumer, verifyTag,
+  identityLabels, parseTag, verifyProtectionEvidence, validateReservationAdmission,
 } from './release-policy.mjs';
 import {
   branchHead, command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion, verifyProtection,
@@ -46,8 +46,8 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     const branch = channel === 'stable' ? 'main' : 'development';
     const { state } = await store.read();
     const selectedHead = await branchHead(api, branch);
-    const admission = admit(context, selectedHead, await readVersion(api, selectedHead),
-      state.pointers.stable?.canonicalVersion || state.lastHistoricalStable);
+    const admission = admit(context, selectedHead, await readVersion(api, selectedHead));
+    validateReservationAdmission(state, admission);
     const checks = await api(`commits/${selectedHead}/check-runs?per_page=100`);
     requireThat(checks.total_count <= 100, 'Check evidence truncated');
     for (const required of ['CI tooling tests', '.NET build', 'Frontend build & tests']) {
@@ -61,10 +61,10 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     if (operation === 'admit') return;
     const protection = await verifyProtection(api, admission.channel, env.RELEASE_PUBLISHER_APP_ID);
     const record = await transact(store, async state => {
+      const existing = validateReservationAdmission(state, admission);
       requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during allocation retry');
       const qualification = await verifyStableQualification(api, state, admission);
       requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during qualification');
-      const existing = state.reservations[allocationKey(admission)];
       if (existing?.identitySha256) {
         // A lost private artifact cannot be reconstructed from public ledger data.
         const saved = readPrivateAuthorization();

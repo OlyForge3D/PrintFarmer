@@ -21,6 +21,14 @@ the default changes. Branch pushes and direct tag pushes do not publish.
 The reusable Docker workflow requires the signed record from this exact
 workflow/run/attempt; arbitrary reusable callers cannot authorize a release.
 
+`scripts/release.sh` and `scripts/publish-to-public.sh` are retired and exit
+with status 2 for every invocation, including `--dry-run` and `--help`.
+They do not merge, force-push `main`, create tags, publish GitHub releases or
+upload assets/images. There is no private-to-public snapshot publishing path.
+Review `VERSION` on the selected canonical branch and dispatch
+[`consolidated-release.yml`](../.github/workflows/consolidated-release.yml).
+Do not replace these helpers with direct Git or GitHub release commands.
+
 | Channel | Base authority | Canonical version | Source tag |
 | --- | --- | --- | --- |
 | Stable | `main:VERSION` | `X.Y.Z` | `vX.Y.Z` |
@@ -62,6 +70,17 @@ identity. Resume byte-identical transfer within its original attempt, or qualify
 a reviewed new base; never replace a stable identity with new build bytes.
 Big integers are compared numerically, not lexically or through floating point.
 No timestamp, run-number concatenation or local tag scan allocates identities.
+
+Every **new** stable canonical version and insider base must exceed the current
+effective stable floor: `pointers.stable.canonicalVersion`, or the immutable
+`lastHistoricalStable` when no stable pointer exists. Admission checks the floor,
+and each reservation transaction checks it again against its own freshly read
+state before mutation or persistence, including after a lost CAS. A concurrent
+stable advancement can therefore invalidate an earlier admission without
+allowing source-tag, release, asset or container publication. A losing CAS may
+leave unreachable ledger objects, never a persisted reservation or source tag.
+Exact existing reservations remain idempotent even after stable advances above
+their base; this exemption never permits a new attempt or changed admission.
 
 SemVer orders stages **beta < insider < rc** for a fixed base. Stage changes
 must follow that order; after RC, bump the reviewed base before returning to
@@ -151,9 +170,14 @@ equals the new counter, with no other reservation additions. An unchanged
 counter permits no new insider sequence; a single qualified stable reservation
 or a non-allocation transaction leaves the counter unchanged. Gaps, jumps,
 duplicate sequences and unbound counter changes fail closed. These checks do not
-reinterpret the owner-approved seed's initial counter floor. A
-multi-commit fast-forward cannot hide an earlier deletion/replacement, even if a
-later commit restores the original state. Merge/octopus commits, cycles, missing
+reinterpret the owner-approved seed's initial counter floor.
+A new reservation at each historical edge must also exceed its **parent's**
+effective stable floor. A structurally valid direct insertion below that floor
+therefore blocks the entire read before any writes. Existing reservations are
+not compared to a later floor, so legitimate history and exact retries survive
+stable advancement. A multi-commit fast-forward cannot hide an earlier
+deletion/replacement, even if a later commit restores the original state.
+Merge/octopus commits, cycles, missing
 objects, truncated trees and an unreachable checkpoint block reads, allocation
 and source-tag publication before any POST/PATCH.
 
@@ -419,5 +443,17 @@ intermediate merges and invalid snapshots, missing/truncated objects, explicit
 checkpoint semantics and a 1,005-snapshot chain. Read, allocation and source-tag
 paths assert zero POST/PATCH calls on rejection; executed admission/authorization
 also reject evidence rewrites before writes.
+Stable-floor fixtures cover initial historical floors, current pointers,
+direct valid-schema history insertions, stable advancement between admission
+and allocation, and advancement during a losing CAS. Exact old reservations
+remain retryable; new stale reservations cannot reach publication.
+The same suite scans repository executable scripts, actions and workflows for
+tag creation, force pushes and direct release/API publication. Its explicit
+writer inventory permits only the guarded ledger adapter, authorized Docker
+consumer, and separate `ios/` TestFlight writers. This is a source regression
+check, not a substitute for repository protection or runtime authorization.
+Both retired server helpers execute against sentinel publication commands for
+normal, dry-run, help and force arguments; every call exits 2 without invoking
+those commands. Use Git Bash rather than WSL bash for these tests on Windows.
 YAML/compliance checks and the focused Vite metadata test remain required.
 No PR may open before fresh exact-head high-risk panel approval.

@@ -515,15 +515,25 @@ export function validatePromotionOrigin(state, qualification) {
   return candidate;
 }
 
-export function reserve(state, admission, created, protection, verifiedQualification) {
-  validateLedger(state, state.anchor);
+export function validateReservationAdmission(state, admission) {
   validateAdmission(admission);
-  const key = allocationKey(admission);
-  const existing = state.reservations[key];
+  const existing = state.reservations[allocationKey(admission)];
   if (existing) {
     requireThat(hash(existing.admission) === hash(admission), 'Same allocation key changed its admission');
     return existing;
   }
+  const stableFloor = state.pointers.stable?.canonicalVersion ?? state.lastHistoricalStable;
+  if (stableFloor !== undefined) {
+    requireThat(compareVersions(admission.baseVersion, stableFloor) > 0,
+      `New ${admission.channel} ${admission.channel === 'stable' ? 'canonical' : 'base'} version must exceed effective stable floor`);
+  }
+}
+
+export function reserve(state, admission, created, protection, verifiedQualification) {
+  validateLedger(state, state.anchor);
+  const existing = validateReservationAdmission(state, admission);
+  if (existing) return existing;
+  const key = allocationKey(admission);
   const sequence = admission.channel === 'insider' ? (BigInt(state.counter) + 1n).toString() : undefined;
   const canonicalVersion = admission.baseVersion + (sequence ? `-${admission.stage}.${sequence}` : '');
   requireThat(!state.identities[canonicalVersion], 'Immutable identity already reserved');

@@ -52,6 +52,20 @@ function fixtureProtection(channel) {
 const reserve = (ledger, admitted, timestamp, protection = fixtureProtection(admitted.channel), qualification) =>
   reserveRelease(ledger, admitted, timestamp, protection, qualification);
 const admission = (overrides = {}) => admit(context(overrides), overrides.eventSha || sha, 'v1.2.3\n', '1.2.2');
+const stableAdmission = (baseVersion = '1.2.3', overrides = {}) => admit(context({
+  channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
+  workflowIdentity: context().workflowIdentity.replace('/development', '/main'), ...overrides,
+}), sha, `v${baseVersion}\n`);
+function stableFloorLedger(kind, floor) {
+  const ledger = state();
+  ledger.qualifications[sha] = hotfixQualification();
+  ledger.lastHistoricalStable = kind === 'historical' ? floor : '1.2.0';
+  if (kind === 'pointer') {
+    const stable = reserve(ledger, stableAdmission(floor), created, undefined, hotfixQualification()).record;
+    advance(ledger, stable, completeSet(stable), sha, '');
+  }
+  return ledger;
+}
 const record = (ledger = state(), overrides = {}) => reserve(ledger, admission(overrides), created).record;
 const completeSet = identity => ({
   schema: 1, identity, managedEligible: false,
@@ -192,6 +206,75 @@ test('concurrent allocators use a real CAS retry boundary and never recycle fail
   assert.equal(retry.sequence, results[0].sequence);
   const next = await transact(store, state => reserve(state, admission({ buildId: '999' }), created).record);
   assert.equal(next.sequence, '13');
+});
+
+test('every new stable and insider reservation exceeds the historical or current stable floor before persistence', async () => {
+  for (const kind of ['historical', 'pointer']) {
+    for (const channel of ['stable', 'insider']) {
+      for (const baseVersion of ['1.2.3', '1.2.4']) {
+        const initial = stableFloorLedger(kind, '1.2.4');
+        const selected = channel === 'stable' ? stableAdmission(baseVersion, { buildAttempt: '2' })
+          : { ...admission(), baseVersion };
+        const store = memoryStore(initial);
+        await assert.rejects(transact(store, next => reserve(next, selected, created, undefined, hotfixQualification())),
+          /must exceed effective stable floor/, `${kind}: ${channel} ${baseVersion}`);
+        assert.equal(store.writes, 0);
+        assert.deepEqual((await store.read()).state, initial);
+      }
+      const initial = stableFloorLedger(kind, '1.2.4');
+      const selected = channel === 'stable' ? stableAdmission('1.2.5')
+        : { ...admission(), baseVersion: '1.2.5' };
+      const store = memoryStore(initial);
+      const added = await transact(store, next => reserve(next, selected, created, undefined, hotfixQualification()));
+      assert.equal(added.record.baseVersion, '1.2.5');
+      assert.equal(store.writes, 1);
+    }
+  }
+});
+
+test('CAS retry rejects an insider admitted before concurrent stable advancement without persisting its reservation', async () => {
+  const initial = stableFloorLedger('historical', '1.2.2');
+  const stable = reserve(initial, stableAdmission(), created, undefined, hotfixQualification()).record;
+  const admitted = admission();
+  const committed = memoryStore(initial);
+  let attempts = 0;
+  const store = {
+    read: () => committed.read(),
+    async compareAndSet(revision) {
+      attempts++;
+      assert.equal(attempts, 1, 'No second CAS/write is allowed after the floor changes');
+      const latest = (await committed.read()).state;
+      advance(latest, stable, completeSet(stable), sha, '');
+      await committed.compareAndSet(revision, latest);
+      return false;
+    },
+  };
+  await assert.rejects(transact(store, next => reserve(next, admitted, created)), /effective stable floor/);
+  const { state: persisted } = await committed.read();
+  assert.equal(persisted.pointers.stable.canonicalVersion, '1.2.3');
+  assert.equal(persisted.counter, '0');
+  assert.equal(persisted.reservations[allocationKey(admitted)], undefined);
+  assert.equal(committed.writes, 1, 'Only the competing stable pointer transaction was persisted');
+});
+
+test('exact stable and insider reservation retries survive a later stable floor while changed admissions do not', async () => {
+  const ledger = stableFloorLedger('historical', '1.2.2');
+  const insider = record(ledger);
+  const admittedStable = stableAdmission();
+  const stable = reserve(ledger, admittedStable, created, undefined, hotfixQualification()).record;
+  const newer = reserve(ledger, stableAdmission('1.2.4', { buildAttempt: '2' }),
+    created, undefined, hotfixQualification()).record;
+  advance(ledger, newer, completeSet(newer), sha, '');
+  for (const original of [ledger, publicLedger(ledger)]) {
+    const store = memoryStore(original);
+    for (const [admitted, identity] of [[admission(), insider], [admittedStable, stable]]) {
+      const retried = await transact(store, next => reserve(next, admitted, 'ignored for exact retry'));
+      assert.deepEqual(retried, original.reservations[identity.allocationKey]);
+    }
+    await assert.rejects(transact(store, next => reserve(next, admission({ stage: 'rc' }), created)),
+      /changed its admission/);
+    assert.deepEqual((await store.read()).state, original);
+  }
 });
 
 test('continuity loss, reset and malformed persisted state fail closed', () => {
@@ -702,6 +785,126 @@ test('workflow entry points have no direct tag/manual Docker bypass; iOS namespa
   }
 });
 
+function releaseWriteKinds(text) {
+  const source = text.replace(/^\s*(?:#|\/\/).*$/gm, '').replace(/\\\r?\n\s*/g, ' ');
+  const kinds = [];
+  if (/(?:^|[;&|]|\$\()\s*(?:if\s+)?git\s+(?:(?:-C|-c)\s+(?:"[^"]*"|'[^']*'|\S+)\s+)*push\b[^\n]*(?:--force\b|--force-with-lease\b|(?:^|\s)-f\b|\s["']?\+)/m.test(source)) {
+    kinds.push('force-push');
+  }
+  if (/(?:^|[;&|]|\$\()\s*(?:if\s+)?git\s+(?:(?:-C|-c)\s+(?:"[^"]*"|'[^']*'|\S+)\s+)*tag\s+(?!-(?:l|d|v)\b|--(?:list|delete|verify|sort|contains|points-at)\b)[^\n]+/m.test(source) ||
+    /(?:execFile(?:Sync)?|spawn(?:Sync)?|command)\(\s*['"]git['"]\s*,\s*\[\s*['"]tag['"]\s*,\s*(?!['"](?:-l|-d|-v|--list|--delete|--verify|--sort)\b)/.test(source) ||
+    /(?:createRef|createTag|create_git_ref|create_git_tag)\s*\(/.test(source) ||
+    /['"`]git\/(?:refs|tags)['"`]\s*,\s*['"]POST['"]/.test(source)) {
+    kinds.push('tag-write');
+  }
+  if (/\b(?:gh\s+)?release\s+(?:create|upload|edit)\b/.test(source) ||
+    /['"]gh['"]\s*,\s*\[\s*['"]release['"]\s*,\s*['"](?:create|upload|edit)['"]/.test(source) ||
+    /(?:createRelease|uploadReleaseAsset|updateRelease|create_release)\s*\(/.test(source) ||
+    /uses:\s*(?:softprops\/action-gh-release|ncipollo\/release-action|actions\/(?:create-release|upload-release-asset))@/.test(source)) {
+    kinds.push('release-write');
+  }
+  const publicationEndpoint = /(?:\/releases(?:[/'"`\s]|$)|\/git\/(?:refs|tags))/;
+  const publicationVariables = [...source.matchAll(/^\s*(\w+)=([^\n]+)$/gm)]
+    .filter(([, , value]) => publicationEndpoint.test(value)).map(([, name]) => name);
+  const apiWrites = [...source.matchAll(/\b(?:gh\s+api|curl)\b[^\n]*/g)].map(([call]) => call)
+    .filter(call => /(?:(?:--method|-X)\s*['"]?(?:POST|PUT|PATCH)|--data(?:-raw|-binary)?\b|\s-d\b)/.test(call));
+  if (apiWrites.some(call => publicationEndpoint.test(call) ||
+    publicationVariables.some(name => new RegExp(`\\$\\{?${name}\\b`).test(call)))) {
+    kinds.push('publication-api-write');
+  }
+  return kinds;
+}
+
+test('release-writer scanner detects literal, variable, multiline, force-ref and API bypass forms', () => {
+  for (const source of [
+    'git tag v1.2.3', 'git tag "$NEW_VERSION"', 'git -C "$ROOT" tag -a "$TAG" -m release',
+    'git tag \\\n "$VERSION"', 'git tag -f "$MARKER"',
+    'execFileSync("git", ["tag", version])',
+    'git push origin main --force', 'git push --force-with-lease origin main',
+    'git push origin -f main', 'git -C "$ROOT" push origin "+HEAD:main"',
+    'gh release create "$VERSION"', 'gh release upload "$VERSION" asset.zip',
+    'create_args=(\n release create "$VERSION"\n --draft\n)\ngh "${create_args[@]}"',
+    'gh release \\\n edit "$VERSION" --draft=false',
+    'command("gh", ["release", "create", version])',
+    'await api("git/refs", "POST", { ref: tag })',
+    'await octokit.rest.git.createRef({ ref: tag })',
+    'await octokit.rest.repos.createRelease({ tag_name: version })',
+    'gh api --method POST "repos/$REPO/releases"',
+    'curl -X POST \\\n "https://api.github.com/repos/$REPO/git/refs" -d "$body"',
+    'API_URL="https://api.github.com/repos/$REPO/releases"\ncurl -X POST "$API_URL" -d "$body"',
+    'uses: softprops/action-gh-release@v3',
+  ]) assert.ok(releaseWriteKinds(source).length, source);
+  for (const source of [
+    'git tag -l "v*"', 'git tag --sort=-version:refname', 'git tag -d "$TAG"',
+    'git push origin feature', 'git fetch --tags --force',
+    'gh release view "$VERSION"', 'curl -s "https://api.github.com/repos/$REPO/releases"',
+    'curl -s "https://api.github.com/repos/$REPO/releases"\ncurl -X PUT "https://api.github.com/orgs/$OWNER/packages/container/$NAME/visibility"',
+    '# git tag "$VERSION"\n// gh release create version',
+  ]) assert.deepEqual(releaseWriteKinds(source), [], source);
+});
+
+test('all executable scripts, actions and workflows have only the reviewed release writers and no force pushes', t => {
+  const gitOptions = { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 };
+  const executables = new Set(execFileSync('git', ['ls-files', '--stage', '-z'], gitOptions)
+    .split('\0').filter(entry => entry.startsWith('100755 ')).map(entry => entry.split('\t')[1]));
+  const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
+    gitOptions).split('\0').filter(file =>
+    (executables.has(file) || /\.(?:sh|bash|ps1|py|rb|js|mjs|cjs)$/.test(file) || /(?:^|\/)Fastfile$/.test(file) ||
+      /^(?:scripts|tools|mobile\/scripts|\.github\/scripts)\/(?:[^/]+\/)*[^/.]+$/.test(file) ||
+      /^\.github\/.*\.ya?ml$/.test(file) || /^(?:scripts|tools|\.github|\.squad)\/.*\.ts$/.test(file)) &&
+    !/(?:^|\/)(?:tests?|__tests__|e2e|node_modules)(?:\/|$)|(?:^|\/)test-[^/]+$|\.(?:test|spec)\./.test(file));
+  const approved = {
+    'scripts/ci/release-github.mjs': ['tag-write'],
+    '.github/workflows/docker-publish.yml': ['release-write'],
+    '.github/workflows/testflight-beta.yml': ['tag-write', 'release-write'],
+    'mobile/scripts/release-beta.sh': ['tag-write'],
+  };
+  const found = {};
+  for (const file of files) {
+    const kinds = releaseWriteKinds(readFileSync(file, 'utf8'));
+    if (kinds.length) {
+      assert.deepEqual(kinds, approved[file], `Unreviewed publication writer: ${file}`);
+      found[file] = kinds;
+    }
+  }
+  assert.deepEqual(found, approved, 'Review the writer inventory explicitly when entry points change');
+  const mobile = readFileSync('mobile/scripts/release-beta.sh', 'utf8');
+  assert.deepEqual(mobile.match(/^TAG=.*$/gm), ['TAG="ios/v${BASE_VERSION}-beta.${BETA_NUM}"']);
+  assert.deepEqual(mobile.match(/^git tag .*$/gm), ['git tag "$TAG"']);
+  const ios = readFileSync('.github/workflows/testflight-beta.yml', 'utf8');
+  assert.match(ios, /TAG_NAME="\$REF_NAME"\s+if \[\[ "\$TAG_NAME" =~ \^ios\/v/);
+  assert.match(ios, /tag_name: \$\{\{ steps\.version\.outputs\.tag_name \}\}/);
+  assert.doesNotMatch(ios, /\bgit tag\s+-(?:f|-force)\b/);
+  t.diagnostic(`Scanned ${files.length} executable script/action/workflow sources, including mobile release helpers`);
+});
+
+test('retired server release helpers fail closed for every invocation without executing publication commands', () => {
+  const root = resolve('.artifacts', `retired-publishers-${process.pid}`);
+  const bin = resolve(root, 'bin');
+  mkdirSync(bin, { recursive: true });
+  for (const command of ['git', 'gh', 'docker', 'curl', 'cosign', 'skopeo', 'oras', 'crane', 'npm', 'node']) {
+    writeFileSync(resolve(bin, command), '#!/usr/bin/env bash\nprintf "%s\\n" "$0 $*" >> "$SENTINEL_LOG"\nexit 99\n',
+      { mode: 0o755 });
+  }
+  const env = { ...process.env, PATH: `${bin}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH}`,
+    SENTINEL_LOG: resolve(root, 'commands.log') };
+  try {
+    for (const helper of ['scripts/publish-to-public.sh', 'scripts/release.sh']) {
+      assert.doesNotMatch(readFileSync(helper, 'utf8'), /\r/, `${helper} must run with Linux Bash, not only Git Bash`);
+      for (const args of [[], ['micro'], ['minor'], ['major'], ['patch'], ['--dry-run'],
+        ['micro', '--dry-run'], ['--help'], ['v1.2.3'], ['--force']]) {
+        const result = spawnSync('bash', [helper, ...args], { env, encoding: 'utf8' });
+        assert.equal(result.status, 2, `${helper} ${args.join(' ')}: ${result.error ?? result.stderr}`);
+        assert.match(result.stdout + result.stderr, /consolidated-release\.yml/);
+        assert.match(result.stdout + result.stderr, /main \(stable\) or development \(insider\)/);
+        assert.equal(existsSync(env.SENTINEL_LOG), false, `${helper} must not invoke external publication tools`);
+      }
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('GitHub ledger reads pinned Git blobs and rejects ancestry, rollback, truncation and evidence loss', async () => {
   const previous = state();
   const identity = record(previous);
@@ -867,6 +1070,33 @@ test('every historical stable floor edge preserves exact presence and value befo
   }
 });
 
+test('history rejects valid-schema new reservations at or below the preceding stable floor before every write', async () => {
+  for (const kind of ['historical', 'pointer']) {
+    for (const channel of ['stable', 'insider']) {
+      for (const baseVersion of ['1.2.2', '1.2.3', ...(kind === 'historical' || channel === 'insider' ? ['1.2.4'] : [])]) {
+        const previous = publicLedger(stableFloorLedger(kind, '1.2.4'));
+        const isolated = state();
+        isolated.counter = previous.counter;
+        isolated.qualifications[sha] = hotfixQualification();
+        const selected = channel === 'stable' ? stableAdmission(baseVersion, { buildAttempt: '2' })
+          : { ...admission(), baseVersion };
+        const identity = reserve(isolated, selected, created, undefined, hotfixQualification()).record;
+        const added = publicLedger(isolated);
+        const changed = structuredClone(previous);
+        Object.assign(changed.reservations, added.reservations);
+        Object.assign(changed.identities, added.identities);
+        Object.assign(changed.stages, added.stages);
+        changed.counter = added.counter;
+        validateLedger(changed, anchor);
+        for (const snapshots of [[previous, changed], [previous, changed, changed]]) {
+          await assertHistoryRejected(() => ledgerHistoryFixture(snapshots), identity,
+            /effective stable floor/, `${kind}: ${channel} ${baseVersion}`);
+        }
+      }
+    }
+  }
+});
+
 test('every counter edge requires exactly one matching insider reservation and no unexplained additions', async () => {
   const seed = state();
   seed.counter = '10';
@@ -952,9 +1182,12 @@ test('valid every-edge allocations preserve seed floors, stable semantics and no
     append(next => reserve(next, stableAdmission, created, undefined, hotfixQualification()));
     append(next => advance(next, stable, completeSet(stable), sha, ''));
     assert.equal(ledger.counter, insider.sequence, 'Stable allocations and pointer updates consume no sequence');
-    const rc = append(next => record(next, { buildAttempt: '2', stage: 'rc' }));
+    append(next => reserve(next, admission(), created));
+    append(next => reserve(next, stableAdmission, created));
+    const rcAdmission = admit(context({ buildAttempt: '2', stage: 'rc' }), sha, 'v1.2.4\n', '1.2.3');
+    const rc = append(next => reserve(next, rcAdmission, created).record);
     assert.equal(rc.sequence, '9007199254740995');
-    const betaAdmission = admit(context({ buildAttempt: '3', stage: 'beta' }), sha, 'v1.2.4\n', '1.2.2');
+    const betaAdmission = admit(context({ buildAttempt: '3', stage: 'beta' }), sha, 'v1.2.5\n', '1.2.3');
     const beta = append(next => reserve(next, betaAdmission, created).record);
     assert.equal(beta.sequence, '9007199254740996');
     const fixture = ledgerHistoryFixture(snapshots);
@@ -1480,11 +1713,13 @@ function authorizationFixture(initial = state(), settings = {}) {
     return id;
   };
   let head = anchor;
-  for (const snapshot of settings.history ?? [initial]) {
+  const appendSnapshot = snapshot => {
     const blob = put({ encoding: 'base64', content: Buffer.from(JSON.stringify(snapshot)).toString('base64') });
     const tree = put({ truncated: false, tree: [{ path: 'state.json', type: 'blob', sha: blob }] });
     head = put({ tree: { sha: tree }, parents: [{ sha: head }] });
-  }
+  };
+  for (const snapshot of settings.history ?? [initial]) appendSnapshot(snapshot);
+  let advanced = false;
   let tag;
   const calls = [];
   const ledgerWrites = [];
@@ -1508,7 +1743,13 @@ function authorizationFixture(initial = state(), settings = {}) {
       calls.push({ endpoint, method, publisher, admin });
       const response = (body, status = 200) => new Response(JSON.stringify(body), { status });
       if ((admin || method !== 'GET') && !publisher) return response({}, 403);
-      if (admin) return response(await policies(endpoint));
+      if (admin) {
+        if (settings.advanceBeforeAllocation && !advanced) {
+          appendSnapshot(settings.advanceBeforeAllocation);
+          advanced = true;
+        }
+        return response(await policies(endpoint));
+      }
       if (endpoint === `git/ref/heads/${branch}`) return response({
         object: { sha: settings.headDriftAfterTree && comparedTree ? 'f'.repeat(40) : sourceCommit },
       });
@@ -1547,6 +1788,11 @@ function authorizationFixture(initial = state(), settings = {}) {
       if (endpoint === 'git/refs/heads/release-ledger') {
         assert.equal(body.force, false);
         assert.equal(objects.get(body.sha).parents[0].sha, head);
+        if (settings.advanceOnCas && !advanced) {
+          appendSnapshot(settings.advanceOnCas);
+          advanced = true;
+          return response({}, 409);
+        }
         head = body.sha;
         return response({});
       }
@@ -1556,6 +1802,95 @@ function authorizationFixture(initial = state(), settings = {}) {
     },
   };
 }
+
+test('executed authority rejects initial and newly advanced stable floors before any source or publication write', async () => {
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `stable-floor-authority-${process.pid}`);
+  const savedFetch = globalThis.fetch;
+  const savedOutput = process.env.GITHUB_OUTPUT;
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  delete process.env.GITHUB_OUTPUT;
+  try {
+    for (const channel of ['stable', 'insider']) {
+      for (const kind of ['historical', 'pointer']) {
+        const initial = publicLedger(stableFloorLedger(kind, '1.2.4'));
+        for (const operation of ['admit', 'authorize']) {
+          const fixture = authorizationFixture(initial, { channel });
+          globalThis.fetch = fixture.fetch;
+          await assert.rejects(runReleaseControl(operation, fixture.env), /effective stable floor/);
+          assert.ok(fixture.calls.every(call => call.method === 'GET'));
+          assert.equal(fixture.ledgerWrites.length, 0);
+          assert.equal(existsSync(authorizationPath), false);
+        }
+      }
+      for (const timing of ['advanceBeforeAllocation', 'advanceOnCas']) {
+        const initial = stableFloorLedger('historical', '1.2.2');
+        const stable = reserve(initial, stableAdmission('1.2.4', { buildAttempt: '2' }),
+          created, undefined, hotfixQualification()).record;
+        const advanced = structuredClone(initial);
+        advance(advanced, stable, completeSet(stable), sha, '');
+        const fixture = authorizationFixture(publicLedger(initial), { channel, [timing]: publicLedger(advanced) });
+        globalThis.fetch = fixture.fetch;
+        await assert.rejects(runReleaseControl('authorize', fixture.env), /effective stable floor/);
+        const writes = fixture.calls.filter(call => call.method !== 'GET');
+        if (timing === 'advanceBeforeAllocation') {
+          assert.deepEqual(writes, []);
+          assert.equal(existsSync(authorizationPath), false);
+        } else {
+          assert.deepEqual(writes.map(call => call.endpoint),
+            ['git/blobs', 'git/trees', 'git/commits', 'git/refs/heads/release-ledger'],
+            'Only the losing ledger CAS may attempt writes; no retry or source/release/asset writes');
+        }
+        const current = await gitLedger(githubClient(fixture.env.RELEASE_PUBLISHER_TOKEN), anchor).read();
+        assert.deepEqual(current.state, publicLedger(advanced), 'Rejected reservation never reaches the ledger ref');
+        assert.equal(current.state.counter, '0');
+        rmSync('.artifacts', { recursive: true, force: true });
+      }
+    }
+  } finally {
+    globalThis.fetch = savedFetch;
+    if (savedOutput !== undefined) process.env.GITHUB_OUTPUT = savedOutput;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('executed authority preserves existing exact reservations after stable advances above their base', async () => {
+  const ledger = stableFloorLedger('historical', '1.2.2');
+  const insider = record(ledger);
+  const stable = reserve(ledger, stableAdmission(), created, undefined, hotfixQualification()).record;
+  const newer = reserve(ledger, stableAdmission('1.2.4', { buildAttempt: '2' }),
+    created, undefined, hotfixQualification()).record;
+  advance(ledger, newer, completeSet(newer), sha, '');
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `stable-floor-retry-${process.pid}`);
+  const savedFetch = globalThis.fetch;
+  const savedOutput = process.env.GITHUB_OUTPUT;
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  delete process.env.GITHUB_OUTPUT;
+  try {
+    for (const identity of [insider, stable]) {
+      writeAuthorization(identity);
+      const original = readFileSync(authorizationPath, 'utf8');
+      const fixture = authorizationFixture(publicLedger(ledger), { channel: identity.channel });
+      globalThis.fetch = fixture.fetch;
+      await runReleaseControl('admit', fixture.env);
+      await runReleaseControl('authorize', fixture.env);
+      assert.equal(readFileSync(authorizationPath, 'utf8'), original);
+      for (const snapshot of fixture.ledgerWrites) {
+        assert.equal(snapshot.counter, ledger.counter);
+        assert.deepEqual(Object.keys(snapshot.reservations), Object.keys(ledger.reservations));
+      }
+    }
+  } finally {
+    globalThis.fetch = savedFetch;
+    if (savedOutput !== undefined) process.env.GITHUB_OUTPUT = savedOutput;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('executed admission and authorization reject multi-commit evidence rewrites before any writes', async () => {
   const seed = state();
