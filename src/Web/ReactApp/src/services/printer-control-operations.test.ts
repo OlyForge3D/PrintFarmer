@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from '@/services/api';
-import { PrinterControlTracker } from '@/services/printer-control-operations';
+import { CONTROL_RECHECK_MS, PrinterControlTracker } from '@/services/printer-control-operations';
 import type { PrinterControlCurrent, PrinterControlOperation, PrinterControlRecovery } from '@/types/api';
 
 vi.mock('@/services/api', () => ({
@@ -61,6 +61,69 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('durable motion tracking', () => {
+  it('clears a previous operation immediately when reserving a new motion', async () => {
+    localStorage.setItem(storageKey, JSON.stringify({ operationId, intent }));
+    tracker = new PrinterControlTracker(printerId, storageKey, () => sessionCurrent);
+    active = completed();
+    await tracker.refresh();
+    expect(tracker.getSnapshot().operation?.state).toBe('Succeeded');
+    vi.mocked(crypto.randomUUID).mockReturnValue(successorId);
+    let admit!: () => void;
+    vi.mocked(apiClient.createPrinterControlOperation).mockImplementationOnce(() => new Promise(resolve => {
+      admit = () => {
+        active = operation({ operationId: successorId });
+        resolve({ operation: active, etag: '"new"' });
+      };
+    }));
+    const controller = new AbortController();
+    const task = tracker.execute(intent, controller.signal).catch(error => error);
+    expect(tracker.getSnapshot()).toMatchObject({
+      saved: { operationId: successorId }, operation: null, etag: null, admitting: true,
+    });
+    admit();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tracker.getSnapshot().operation?.operationId).toBe(successorId);
+    expect(tracker.getSnapshot().admitting).toBe(false);
+    controller.abort();
+    expect(await task).toBeInstanceOf(Error);
+    expect(apiClient.createPrinterControlOperation).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a pre-reservation background read replace a newly saved receipt', async () => {
+    await tracker.refresh();
+    let read!: (value: PrinterControlCurrent) => void;
+    vi.mocked(apiClient.getCurrentPrinterControlOperation).mockReturnValueOnce(new Promise(resolve => { read = resolve; }));
+    const background = tracker.refresh();
+    let admit!: () => void;
+    vi.mocked(apiClient.createPrinterControlOperation).mockImplementationOnce(() => new Promise(resolve => {
+      admit = () => {
+        active = operation();
+        resolve({ operation: active, etag: '"new"' });
+      };
+    }));
+    const controller = new AbortController();
+    const task = tracker.execute(intent, controller.signal).catch(error => error);
+    read(current());
+    await background;
+    expect(tracker.getSnapshot().saved?.operationId).toBe(operationId);
+    expect(tracker.isBlocked()).toBe(true);
+    admit();
+    await vi.advanceTimersByTimeAsync(0);
+    controller.abort();
+    await task;
+    expect(apiClient.createPrinterControlOperation).toHaveBeenCalledTimes(1);
+  });
+
+  it('observes completion within one second without a SignalR hint or another send', async () => {
+    await tracker.refresh();
+    const task = tracker.execute(intent, new AbortController().signal);
+    await vi.advanceTimersByTimeAsync(0);
+    active = completed();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(await task).toEqual({ success: true });
+    expect(apiClient.createPrinterControlOperation).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['HomeAll', 'HomeXY', 'HomeZ'] as const)('persists and completes %s without crypto.randomUUID', async kind => {
     const getRandomValues = vi.fn(crypto.getRandomValues.bind(crypto));
     vi.stubGlobal('crypto', { getRandomValues });
@@ -276,7 +339,7 @@ describe('durable motion tracking', () => {
     await vi.advanceTimersByTimeAsync(0);
     const readCount = vi.mocked(apiClient.getPrinterControlOperation).mock.calls.length;
     await vi.advanceTimersByTimeAsync(27_110);
-    expect(apiClient.getPrinterControlOperation).toHaveBeenCalledTimes(readCount + 13);
+    expect(apiClient.getPrinterControlOperation).toHaveBeenCalledTimes(readCount + Math.floor(27_110 / CONTROL_RECHECK_MS));
     expect(tracker.isBlocked()).toBe(true);
     active = completed();
     await vi.advanceTimersByTimeAsync(2_000);
