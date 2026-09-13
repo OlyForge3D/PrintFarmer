@@ -489,7 +489,9 @@ For check-run integration bindings, the adapter verifies `check.app.id`;
 commit-status responses contain no integration ID, so leave that optional
 ruleset binding unset for `squad/pre-pr-verdict` and other status-only contexts.
 An unprovable integration binding fails closed rather than inventing status or
-check-suite fields. Paginated evidence at the 100-entry cap fails closed.
+check-suite fields. Check/status evidence is collected in pages of 100 with
+stable totals, unique IDs and exact-source pagination links. Missing pages,
+changed totals, duplicate IDs, redirects and foreign links fail closed.
 
 The PR producer still posts only to the reviewed PR head. Release admission
 additionally requires the canonical qualification below; an ordinary PR verdict,
@@ -532,7 +534,9 @@ branches fail closed. Requalify after either the source or trusted default HEAD
 changes. Do not dispatch the verifier from a feature branch or an arbitrary SHA.
 
 The commit confirmation is an exact, unfenced six-line body, without extra text
-or a final newline. Replace the two placeholders with the full lowercase SHA
+or a final newline. Only the canonical LF body or its fully CRLF-transformed
+equivalent is accepted; mixed LF/CRLF, lone CR, blank lines, duplicate fields
+and extra text remain invalid. Replace the two placeholders with the full lowercase SHA
 and decimal CI run ID; the attempt is always `1`:
 
 ```text
@@ -612,9 +616,19 @@ new confirmation**. Any newer CI run for the SHA or newer qualification for
 the channel supersedes the old evidence, including failed/cancelled runs.
 A CI run may be named by only one qualification run. Edited confirmations,
 missing/unknown modes, mode drift, unavailable permission reads, truncation,
-partial checks and stale HEADs fail closed. API lists are bounded below 100
-entries; qualification history is time-filtered from the selected CI creation,
-not an unbounded lifetime count. Exceeding a bound requires a reviewed pagination
+partial checks and stale HEADs fail closed. CI runs/jobs, checks, statuses,
+commit comments and native reviews are collected in pages of 100, with a
+100-page budget per collection, including any empty terminal probe.
+Counted lists must agree on totals across pages;
+uncounted lists require a short terminal page (an exactly full final page needs
+an additional empty-page read). On that verified empty uncounted probe only,
+with no `next` link, `last` may point to the preceding page. Links accept only
+`/repos/OlyForge3D/PrintFarmer/` or `/repositories/1044049720/` on the GitHub API
+origin, with the same endpoint and query filters. Links are validated, never
+followed; every request is synthesized locally. Pagination cannot change the
+repository, source SHA, run, attempt or query filters. Qualification history
+remains time-filtered from the selected CI creation, not an unbounded lifetime count. Policy lists
+retain their existing single-page bounds. Exceeding a bound requires a reviewed
 extension rather than deleting audit evidence.
 The macOS archive must finish within that same 24-hour window; runner queue
 time does not extend evidence lifetime. Land this graph on each canonical branch

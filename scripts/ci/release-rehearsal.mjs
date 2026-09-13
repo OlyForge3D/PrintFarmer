@@ -5,6 +5,7 @@ import {
 } from './release-policy.mjs';
 import { githubRequestUrl, gitLedger, verifyProtection } from './release-github.mjs';
 import { qualificationRequestUrl, verifyCanonicalReleaseEvidence } from './canonical-qualification.mjs';
+import { evidenceCollection, readEvidencePages } from './github-evidence-pages.mjs';
 
 export const rehearsalWorkflow = '.github/workflows/release-protection-rehearsal.yml';
 export const packageNames = Object.keys(components).map(name => `printfarmer-${name}`);
@@ -103,15 +104,20 @@ export function readOnlyClient(token, fetcher = fetch) {
   let remaining = 2000;
   const api = async (endpoint, method = 'GET', body) => {
     requireThat(method === 'GET' && body === undefined, 'Rehearsal adapter is GET-only');
-    requireThat(remaining-- > 0, 'Rehearsal read budget exceeded');
-    const url = rehearsalReadUrl(endpoint);
-    const response = await boundedFetch(fetcher, url, { method: 'GET', headers: githubHeaders(token) });
-    requireThat(response.status === 200, 'Rehearsal read denied');
-    const data = await responseJson(response);
+    const request = async path => {
+      requireThat(remaining-- > 0, 'Rehearsal read budget exceeded');
+      const url = rehearsalReadUrl(path);
+      const response = await boundedFetch(fetcher, url, { method: 'GET', headers: githubHeaders(token) });
+      requireThat(response.status === 200, 'Rehearsal read denied');
+      const data = await responseJson(response);
+      return { data, link: response.headers.get('link') };
+    };
+    if (evidenceCollection(endpoint) !== undefined) return readEvidencePages(endpoint, request);
+    const { data, link } = await request(endpoint);
     // A paginated response may not silently become an apparently complete shorter page.
-    if (response.headers.get('link')) {
+    if (link) {
       requireThat(/(?:[?&])page=[1-9][0-9]*/.test(endpoint), 'Unbounded response pagination');
-      api.nextPages.set(endpoint, response.headers.get('link'));
+      api.nextPages.set(endpoint, link);
     }
     return data;
   };
@@ -245,8 +251,8 @@ export async function positiveRehearsal(app, generic, context, settings) {
   // This endpoint is checked separately even if protection policy were to omit status checks.
   const statuses = await app(`commits/${context.sha}/status?per_page=100`);
   requireThat(statuses.sha === context.sha && Array.isArray(statuses.statuses) &&
-    statuses.total_count === statuses.statuses.length && statuses.total_count > 0 &&
-    statuses.total_count < 100, 'Missing positive App commit-status read observation');
+    statuses.total_count === statuses.statuses.length && statuses.total_count > 0,
+  'Missing positive App commit-status read observation');
   const ledger = await gitLedger(app, context.anchor).read();
   requireThat(ledger.revision === before.ledger.head && digest(ledger.state) === before.ledger.state,
     'App ledger proof differs from inventory');

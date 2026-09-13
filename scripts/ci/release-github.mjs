@@ -6,6 +6,7 @@ import {
   releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks,
 } from './release-policy.mjs';
 import { publicAuthorization, writePublicSet } from './release-authorization.mjs';
+import { evidenceCollection, evidenceBaseEndpoint, readEvidencePages } from './github-evidence-pages.mjs';
 
 // Schema 1 contains only these public maps, immutable references and scalar claims.
 export const publicLedgerFields = [
@@ -107,7 +108,7 @@ export function githubRequestUrl(endpoint, method) {
     /^environments\/release-(?:stable|insider)(?:\/deployment-branch-policies)?$/,
     /^rulesets(?:\/[1-9][0-9]*|\?per_page=100)$/,
   ];
-  requireThat((method === 'GET' && reads.some(pattern => pattern.test(endpoint))) ||
+  requireThat((method === 'GET' && reads.some(pattern => pattern.test(evidenceBaseEndpoint(endpoint)))) ||
     (method === 'POST' && ['git/blobs', 'git/trees', 'git/commits', 'git/tags', 'git/refs'].includes(endpoint)) ||
     (method === 'PATCH' && endpoint === 'git/refs/heads/release-ledger'),
   'Release API route or method is not allowlisted');
@@ -118,23 +119,31 @@ export function githubRequestUrl(endpoint, method) {
   return `https://api.github.com/repos/${repository}/${encodedPath}${search}`;
 }
 
-export function githubClient(token = process.env.GH_TOKEN) {
+export function githubClient(token = process.env.GH_TOKEN, fetcher = fetch) {
   requireThat(token, 'Missing GitHub credential');
   return async (endpoint, method = 'GET', body) => {
-    const response = await fetch(githubRequestUrl(endpoint, method), {
-      method, redirect: 'error', headers: {
-        Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-      }, body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!response.ok) {
-      const target = /^(rules\/|rulesets|environments\/)/.test(endpoint) ? 'protection policy' : endpoint;
-      const error = new Error(`GitHub ${method} ${target}: HTTP ${response.status}`);
-      error.status = response.status;
-      throw error;
+    const request = async path => {
+      const response = await fetcher(githubRequestUrl(path, method), {
+        method, redirect: 'error', headers: {
+          Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+        }, body: body ? JSON.stringify(body) : undefined,
+      });
+      if (!response.ok || response.redirected) {
+        const target = /^(rules\/|rulesets|environments\/)/.test(endpoint) ? 'protection policy' : endpoint;
+        const error = new Error(`GitHub ${method} ${target}: HTTP ${response.status}`);
+        error.status = response.status;
+        throw error;
+      }
+      return { data: response.status === 204 ? undefined : await response.json(), link: response.headers.get('link') };
+    };
+    if (method === 'GET' && evidenceCollection(endpoint) !== undefined) {
+      return readEvidencePages(endpoint, request);
     }
-    return response.status === 204 ? undefined : response.json();
+    const { data, link } = await request(endpoint);
+    requireThat(!link, 'Uncollected release pagination');
+    return data;
   };
 }
 
@@ -288,11 +297,11 @@ export async function verifyReleaseChecks(api, sourceCommit, required = releaseR
   requireString(sourceCommit, shaPattern, 'qualification source commit');
   const checks = await api(`commits/${sourceCommit}/check-runs?per_page=100`);
   const statuses = await api(`commits/${sourceCommit}/status?per_page=100`);
-  requireThat(Number.isSafeInteger(checks?.total_count) && checks.total_count >= 0 && checks.total_count < 100 &&
+  requireThat(Number.isSafeInteger(checks?.total_count) && checks.total_count >= 0 &&
     Array.isArray(checks.check_runs) && checks.check_runs.length === checks.total_count,
   'Check evidence malformed or truncated');
   requireThat(statuses?.sha === sourceCommit && Number.isSafeInteger(statuses.total_count) &&
-    statuses.total_count >= 0 && statuses.total_count < 100 &&
+    statuses.total_count >= 0 &&
     Array.isArray(statuses.statuses) && statuses.statuses.length === statuses.total_count,
   'Status evidence malformed, truncated or not bound to exact SHA');
   for (const policy of required) {
