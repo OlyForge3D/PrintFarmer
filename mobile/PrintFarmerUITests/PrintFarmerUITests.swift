@@ -51,7 +51,6 @@ final class UIWaitBudget {
 
     func observeShell(
         observeInterruption: () throws -> ShellNode?,
-        observeTerminalInterruption: () throws -> ShellNode? = { nil },
         observeApplication: () throws -> ShellObservation
     ) rethrows -> ShellObservation {
         // Login's password prompt is a separate accessibility root. Check it
@@ -64,8 +63,19 @@ final class UIWaitBudget {
                 .application, frame: interruption.frame, children: [interruption]
             ))
         }
-        let application = try perform("application shell snapshot", observeApplication)
+        return try perform("application shell snapshot", observeApplication)
             ?? ShellObservation(ShellNode(.application))
+    }
+
+    func observeShell(
+        observeInterruption: () throws -> ShellNode?,
+        observeTerminalInterruption: () throws -> ShellNode?,
+        observeApplication: () throws -> ShellObservation
+    ) rethrows -> ShellObservation {
+        let application = try observeShell(
+            observeInterruption: observeInterruption,
+            observeApplication: observeApplication
+        )
         if case .notReady = application.state {
             return application
         }
