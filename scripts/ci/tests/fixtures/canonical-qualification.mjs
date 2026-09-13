@@ -1,6 +1,6 @@
 import { repository, releaseBuildChecks, releaseReviewStatus } from '../../release-policy.mjs';
 import { confirmationBody, qualificationTitle, qualificationDescription,
-  qualificationWorkflow, evidenceWorkflow } from '../../canonical-qualification.mjs';
+  qualificationWorkflow, evidenceWorkflow, canonicalValidationChecks } from '../../canonical-qualification.mjs';
 
 export function canonicalAuthorizationFixture(sha, channel, mode) {
   const at = minutes => new Date(Date.now() - minutes * 60_000).toISOString();
@@ -23,7 +23,7 @@ export function canonicalAuthorizationFixture(sha, channel, mode) {
   runs[0].check_suite_id = 100;
   runs[2].display_title = 'Canonical evidence for 20';
   const names = [
-    [...releaseBuildChecks, 'Select affected tests', 'CI summary',
+    [...releaseBuildChecks, ...canonicalValidationChecks, 'Select affected tests', 'CI summary',
       'Dependency license & provenance validation', '.NET provider tests (DbHeavy)'],
     ['Verify canonical qualification'], ['Record canonical evidence'],
   ];

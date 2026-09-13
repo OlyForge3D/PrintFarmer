@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { spawnSync, execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { load } from 'js-yaml';
 import { repository, releaseBuildChecks, releaseReviewStatus } from '../release-policy.mjs';
 import { confirmationBody, qualificationTitle, parseQualificationTitle, qualificationRequestUrl,
-  qualificationWorkflow, evidenceWorkflow, verifyQualification, recordQualification,
+  qualificationWorkflow, evidenceWorkflow, canonicalValidationChecks, verifyQualification, recordQualification,
   verifyCanonicalReleaseEvidence, qualificationDescription } from '../canonical-qualification.mjs';
 
 const stableSha = 'a'.repeat(40);
@@ -13,6 +16,15 @@ const defaultSha = 'b'.repeat(40);
 const now = Date.parse('2026-09-13T08:00:00Z');
 const url = id => `https://github.com/${repository}/actions/runs/${id}`;
 const read = path => readFileSync(fileURLToPath(new URL(`../../../${path}`, import.meta.url)), 'utf8');
+const root = fileURLToPath(new URL('../../../', import.meta.url));
+const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+
+function scratch(t) {
+  const directory = join(root, '.artifacts', `canonical-check-${randomUUID()}`);
+  mkdirSync(directory, { recursive: true });
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  return directory;
+}
 
 function fixture(channel = 'stable', mode = 'single-maintainer') {
   const branch = channel === 'stable' ? 'main' : 'development';
@@ -54,7 +66,7 @@ function fixture(channel = 'stable', mode = 'single-maintainer') {
     runs: { 10: ci, 20: qualifier, 30: writer },
     ciRuns: [ci], qualifications: [qualifier], comments: [comment],
     jobs: {
-      10: jobs(ci, [...releaseBuildChecks, 'Select affected tests', 'CI summary',
+      10: jobs(ci, [...releaseBuildChecks, ...canonicalValidationChecks, 'Select affected tests', 'CI summary',
         'Dependency license & provenance validation', '.NET provider tests (DbHeavy)', '.NET test (example)']),
       20: jobs(qualifier, ['Verify canonical qualification']),
       30: jobs(writer, ['Record canonical evidence']),
@@ -70,7 +82,8 @@ function fixture(channel = 'stable', mode = 'single-maintainer') {
       description: qualificationDescription({ approvalMode: mode, sourceCommit: sha }) }],
   };
   data.rules = [{ type: 'required_status_checks', parameters: { strict_required_status_checks_policy: true,
-    required_status_checks: [...releaseBuildChecks, releaseReviewStatus].map(context => ({ context })) } }];
+    required_status_checks: [...releaseBuildChecks, ...canonicalValidationChecks, releaseReviewStatus]
+      .map(context => context === releaseReviewStatus ? { context } : { context, integration_id: 15368 }) } }];
   data.checks = data.jobs[10].map(job => ({ name: job.name, head_sha: sha, status: 'completed',
     conclusion: 'success', app: { id: 15368, slug: 'github-actions' }, check_suite: { id: 100 }, url: job.check_run_url }));
   const calls = [];
@@ -126,6 +139,53 @@ for (const channel of ['stable', 'insider']) {
       } }]);
       f.data.runs[30].status = 'completed';
       assert.equal((await verifyCanonicalReleaseEvidence(f.api, f.sha, channel, mode, now)).sourceCommit, f.sha);
+    });
+    for (const name of canonicalValidationChecks) {
+      for (const [reason, mutate] of [
+        ['missing job', (f, job) => { f.data.jobs[10] = f.data.jobs[10].filter(item => item !== job); }],
+        ['duplicate job', (f, job) => { f.data.jobs[10].push({ ...job }); }],
+        ['failed job', (f, job) => { job.conclusion = 'failure'; }],
+        ['cancelled job', (f, job) => { job.conclusion = 'cancelled'; }],
+        ['selected but skipped job', (f, job) => { job.conclusion = 'skipped'; }],
+        ['wrong job SHA', (f, job) => { job.head_sha = 'c'.repeat(40); }],
+        ['wrong run job', (f, job) => { job.run_id = 11; }],
+        ['rerun job', (f, job) => { job.run_attempt = 2; }],
+        ['missing check', (f, job, check) => { f.data.checks = f.data.checks.filter(item => item !== check); }],
+        ['duplicate check', (f, job, check) => { f.data.checks.push({ ...check }); }],
+        ['external suite check', (f, job, check) => { check.check_suite.id = 999; }],
+        ['wrong integration', (f, job, check) => { check.app.id = 999; }],
+        ['foreign App', (f, job, check) => { check.app.slug = 'other'; }],
+        ['wrong check SHA', (f, job, check) => { check.head_sha = 'c'.repeat(40); }],
+        ['wrong check URL', (f, job, check) => { check.url += '9'; }],
+        ['stale check', (f, job, check) => { check.status = 'in_progress'; }],
+        ['failed check', (f, job, check) => { check.conclusion = 'failure'; }],
+        ['cancelled check', (f, job, check) => { check.conclusion = 'cancelled'; }],
+        ['wrong workflow', f => { f.data.runs[10].path = '.github/workflows/ios-pr-ci.yml'; }],
+        ['missing run', f => { delete f.data.runs[10]; }],
+        ['stale run', f => { f.data.runs[10].created_at = '2026-09-11T05:00:00Z'; }],
+        ['failed run', f => { f.data.runs[10].conclusion = 'failure'; }],
+        ['cancelled run', f => { f.data.runs[10].conclusion = 'cancelled'; }],
+        ['replay', f => { f.data.qualifications.push({ ...f.data.runs[20], id: 19 }); }],
+      ]) {
+        test(`${channel}/${mode}: ${name} rejects ${reason}`, async () => {
+          const f = fixture(channel, mode);
+          mutate(f, f.data.jobs[10].find(job => job.name === name), f.data.checks.find(check => check.name === name));
+          await assert.rejects(verifyCanonicalReleaseEvidence(f.api, f.sha, channel, mode, now));
+          assert.equal(f.posts.length, 0);
+        });
+      }
+    }
+    test(`${channel}/${mode}: head movement after reading canonical checks rejects`, async () => {
+      const f = fixture(channel, mode);
+      const api = async (...args) => {
+        const response = await f.api(...args);
+        if (args[0].endsWith('/check-runs?per_page=100')) {
+          f.data.heads[channel === 'stable' ? 'main' : 'development'] = 'c'.repeat(40);
+        }
+        return response;
+      };
+      await assert.rejects(verifyQualification(api, '20', mode, now), /HEAD moved/);
+      assert.equal(f.posts.length, 0);
     });
   }
 }
@@ -382,4 +442,120 @@ test('workflow trust/permissions and release gates remain separate from publishi
   assert.equal((control.match(/await verifyCanonicalReleaseEvidence/g) ?? []).length, 2);
   assert.match(control, /qualificationClient\(env\.GH_TOKEN\)/);
   assert.match(read('.github/workflows/ci.yml'), /test-canonical-qualification\.mjs/);
+});
+
+test('manual CI executes equivalent required checks without shadowing PR check names', () => {
+  const ci = load(read('.github/workflows/ci.yml'));
+  const path = load(read('.github/workflows/enforce-path-casing.yml')).jobs['path-casing'];
+  const drift = load(read('.github/workflows/contract-drift.yml')).jobs['contract-drift'];
+  const ios = load(read('.github/workflows/ios-pr-ci.yml')).jobs.build;
+  const expected = [
+    ['canonical-path-casing', 'path-casing', path, 'Canonical path casing (not selected)'],
+    ['canonical-contract-drift', 'Contract drift gate', drift, 'Canonical contract drift (not selected)'],
+    ['canonical-ios-build', 'Build (iOS)', ios, 'Canonical iOS build (not selected)'],
+  ];
+  assert.deepEqual(ci.permissions, { contents: 'read' });
+  for (const [id, name, original, skippedName] of expected) {
+    const job = ci.jobs[id];
+    assert.equal(job.if, "github.event_name == 'workflow_dispatch'");
+    assert.equal(job.name, `\${{ github.event_name == 'workflow_dispatch' && '${name}' || '${skippedName}' }}`);
+    assert.equal(job['runs-on'], original['runs-on']);
+    assert.ok(ci.jobs.summary.needs.includes(id));
+    assert.equal(job.permissions, undefined);
+    assert.equal(job.environment, undefined);
+    assert.equal(job['continue-on-error'], undefined);
+    const checkout = job.steps.find(step => step.uses?.startsWith('actions/checkout@'));
+    assert.equal(checkout.with.ref, '${{ github.sha }}');
+    assert.equal(checkout.with['persist-credentials'], false);
+    for (const step of job.steps.filter(step => step.uses)) {
+      assert.match(step.uses, /@[a-f0-9]{40}$/);
+      if (step.uses.startsWith('actions/setup-node@')) assert.equal(step.with['package-manager-cache'], false);
+    }
+    assert.doesNotMatch(JSON.stringify(job), /secrets|packages:|id-token|create-github-app-token|download-artifact/);
+    for (const step of original.steps.filter(step => step.run &&
+      !['Report skip reason', 'Compute change set', 'Fail closed if the diff could not be computed'].includes(step.name))) {
+      const equivalent = job.steps.find(candidate => candidate.name === step.name);
+      const { if: selection, ...unconditional } = step;
+      assert.deepEqual(equivalent, unconditional, `${name}: actual execution must match ${step.name}`);
+    }
+  }
+  const diff = ci.jobs['canonical-contract-drift'].steps.find(step => step.id === 'diff');
+  assert.equal(diff.run, 'bash scripts/ci/compute-change-set.sh');
+  assert.equal(diff.env.EVENT_NAME, 'push');
+  assert.equal(diff.env.BEFORE_SHA, '${{ github.sha }}^1');
+  assert.equal(diff.env.AFTER_SHA, '${{ github.sha }}');
+  const guard = ci.jobs['canonical-contract-drift'].steps.find(step => step.if);
+  assert.equal(guard.if, "steps.diff.outputs.force_full_safe != ''");
+  assert.match(guard.run, /exit 1/);
+  const iosBuild = ci.jobs['canonical-ios-build'];
+  assert.deepEqual(iosBuild.defaults, ios.defaults);
+  assert.ok(iosBuild.steps.every(step => !step.if && !step['continue-on-error']));
+  const summary = ci.jobs.summary.steps.find(step => step.name === 'Require all manual canonical checks');
+  assert.equal(summary.if, "github.event_name == 'workflow_dispatch'");
+  for (const key of ['PATH_CASING_RESULT', 'CONTRACT_DRIFT_RESULT', 'IOS_BUILD_RESULT']) {
+    assert.ok(summary.run.includes(`test "$${key}" = success`));
+  }
+});
+
+test('manual summary executes fail-closed for failed, cancelled, missing or skipped canonical checks', t => {
+  const cwd = scratch(t);
+  const ci = load(read('.github/workflows/ci.yml'));
+  const summary = ci.jobs.summary.steps.find(step => step.name === 'Require all manual canonical checks');
+  const base = { PATH_CASING_RESULT: 'success', CONTRACT_DRIFT_RESULT: 'success', IOS_BUILD_RESULT: 'success' };
+  const execute = overrides => spawnSync(shell, ['-e', '-o', 'pipefail', '-s'], {
+    cwd, input: summary.run, encoding: 'utf8',
+    env: { ...process.env, ...base, ...overrides, GITHUB_STEP_SUMMARY: 'summary.md' },
+  });
+  assert.equal(execute({}).status, 0);
+  for (const key of Object.keys(base)) {
+    for (const value of ['failure', 'cancelled', 'skipped', '', 'unknown']) {
+      assert.notEqual(execute({ [key]: value }).status, 0, `${key}=${value}`);
+    }
+  }
+});
+
+test('manual contract gate examines real first-parent fixture changes and rejects missing ancestry', t => {
+  const cwd = scratch(t);
+  const git = args => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git(['init']);
+  const commit = message => git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test',
+    '-c', 'core.hooksPath=', 'commit', '-m', message]);
+  writeFileSync(join(cwd, 'baseline'), 'baseline');
+  git(['add', '.']);
+  commit('baseline');
+  const baseline = git(['rev-parse', 'HEAD']);
+  const changedPath = 'fixtures/wire-contracts/api/tasks/tasks.populated.json';
+  mkdirSync(join(cwd, 'fixtures', 'wire-contracts', 'api', 'tasks'), { recursive: true });
+  writeFileSync(join(cwd, ...changedPath.split('/')), '{}');
+  git(['add', '.']);
+  commit('fixture-only squash change');
+  const sha = git(['rev-parse', 'HEAD']);
+  const ci = load(read('.github/workflows/ci.yml'));
+  const steps = ci.jobs['canonical-contract-drift'].steps;
+  const diff = steps.find(step => step.id === 'diff');
+  const runDiff = head => {
+    const env = Object.fromEntries(Object.entries(diff.env).map(([key, value]) =>
+      [key, value.replaceAll('${{ github.sha }}', head)]));
+    writeFileSync(join(cwd, 'outputs'), '');
+    return spawnSync(shell, ['-s'], {
+      cwd, encoding: 'utf8', input: read('scripts/ci/compute-change-set.sh'),
+      env: { ...process.env, ...env, OUT_FILE: 'changed.z', GITHUB_OUTPUT: 'outputs' },
+    });
+  };
+  assert.equal(runDiff(sha).status, 0);
+  assert.equal(readFileSync(join(cwd, 'changed.z'), 'utf8'), `${changedPath}\0`);
+  assert.match(readFileSync(join(cwd, 'outputs'), 'utf8'), /force_full_safe=\r?\n/);
+  const gate = spawnSync(process.execPath, ['scripts/ci/check-contract-drift.mjs'], {
+    cwd: root, encoding: 'utf8',
+    env: { ...process.env, CONTRACT_DRIFT_CHANGED_FILE: join(cwd, 'changed.z') },
+  });
+  assert.equal(gate.status, 1, 'fixture-only canonical change must not be silently green');
+  assert.match(gate.stdout + gate.stderr, /no accompanying producer-side change/);
+  assert.equal(runDiff(baseline).status, 0);
+  assert.match(readFileSync(join(cwd, 'outputs'), 'utf8'), /force_full_safe=diff-failed/);
+  const guard = steps.find(step => step.if);
+  const rejected = spawnSync(shell, ['-s'], {
+    cwd, encoding: 'utf8', input: guard.run, env: { ...process.env, FORCE_FULL_SAFE: 'diff-failed' },
+  });
+  assert.equal(rejected.status, 1);
 });

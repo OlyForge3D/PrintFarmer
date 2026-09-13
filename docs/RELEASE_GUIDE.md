@@ -504,7 +504,9 @@ The qualification mechanism has three deliberately separate parts:
 1. Manually dispatch the existing **CI** workflow on the canonical branch:
    `main` for stable, `development` for insider. This executes the full-safe
    selector, tooling, frontend build/lint/tests, .NET build/tests, provider tests,
-   migration drift and dependency validation. Wait for successful completion.
+   migration drift and dependency validation, plus `path-casing`,
+   `Contract drift gate` and `Build (iOS)` in the **same CI run/check suite**.
+   Wait for every job to finish successfully before reviewing.
 2. Review the **actual canonical SHA**, after CI completes, and post the fresh
    confirmation described below as a comment on that commit. Do not copy a
    PR-head verdict, infer review from tree equality, or name invented reviewers.
@@ -573,9 +575,29 @@ replay a pre-squash approval or switch modes merely to evade the requirement.
 Every CI job must succeed, including the required named jobs. Live applied
 branch rules must retain strict checks and the mandatory release contexts.
 Every additional configured check must also have executed in that CI run:
-job URL, check-suite ID, SHA and optional integration ID must agree. Checks from
-other workflows require a reviewed extension of the qualification execution
-plan; a coincidentally green status is insufficient.
+exactly one job and one check in its suite must match; job URL, check-suite ID,
+SHA and optional integration ID must agree. Separate workflow runs are not
+accepted, even when they have green checks with identical names on the same SHA.
+No ruleset contexts are removed or status results copied.
+
+Manual CI executes the existing path-casing command on Linux and the existing
+contract-drift corpus/self-tests on Linux. Producer coupling examines the selected
+commit's first-parent delta (including a squash commit's complete change), rather
+than treating dispatch's absent event diff as an empty change. An unavailable
+parent/diff fails closed. This is not a review of all historical changes.
+The iOS job runs the same marketing-version checks and **real unsigned Release
+archive** as the PR build on macOS; there is no iOS selector or skip path for
+manual CI. It needs Xcode/package access, not signing or publishing credentials.
+Structural tests keep these execution steps equivalent to their PR workflows.
+
+PR/push CI gives these unselected jobs distinct `Canonical … (not selected)`
+names, so skipped canonical jobs cannot shadow the standalone PR required checks.
+The existing iOS PR selector still may skip Xcode on unrelated PRs; such a green
+PR check is **not** canonical archive evidence. Manual CI does not run Windows
+builds, iOS simulator unit/XCUI tests or TestFlight packaging. Linux and macOS
+results must not be represented as Windows or simulator validation. A newly
+required context outside this graph blocks qualification until reviewed execution
+support is added; never substitute an unrelated run.
 
 CI and review evidence expire 24 hours after CI creation. Only attempt 1 is
 accepted; **all reruns, including failed-jobs-only reruns, require new CI and a
@@ -587,6 +609,12 @@ partial checks and stale HEADs fail closed. API lists are bounded below 100
 entries; qualification history is time-filtered from the selected CI creation,
 not an unbounded lifetime count. Exceeding a bound requires a reviewed pagination
 extension rather than deleting audit evidence.
+The macOS archive must finish within that same 24-hour window; runner queue
+time does not extend evidence lifetime. Land this graph on each canonical branch
+before qualifying that channel. A previous 38-job rehearsal lacks the three
+executions and cannot be repaired with extra statuses: dispatch new CI and review
+the new exact HEAD. Local tests verify the graph and evidence rejection, not a
+live canonical CI/archive execution; the first post-merge rehearsal remains required.
 
 **Evidence writer:** `record-canonical-qualification.yml` runs from the trusted
 default branch after qualification completes. It revalidates the entire chain,
