@@ -281,13 +281,6 @@ final class UIWaitBudget {
             }
         }
 
-        var canAttemptNavigation: Bool {
-            switch state {
-            case .compact, .sidebar, .collapsed: true
-            case .notReady: false
-            }
-        }
-
         var roots: [RenderedShellRoot] {
             let nodes: [ShellNode]
             let surface: RenderedShellRoot.Surface
