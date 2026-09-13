@@ -534,9 +534,9 @@ branches fail closed. Requalify after either the source or trusted default HEAD
 changes. Do not dispatch the verifier from a feature branch or an arbitrary SHA.
 
 The commit confirmation is an exact, unfenced six-line body, without extra text
-or a final newline. GitHub API CRLF line endings are normalized to LF only at
-this comparison boundary; lone CR, blank lines, duplicate fields and extra text
-remain invalid. Replace the two placeholders with the full lowercase SHA
+or a final newline. Only the canonical LF body or its fully CRLF-transformed
+equivalent is accepted; mixed LF/CRLF, lone CR, blank lines, duplicate fields
+and extra text remain invalid. Replace the two placeholders with the full lowercase SHA
 and decimal CI run ID; the attempt is always `1`:
 
 ```text
@@ -618,11 +618,16 @@ A CI run may be named by only one qualification run. Edited confirmations,
 missing/unknown modes, mode drift, unavailable permission reads, truncation,
 partial checks and stale HEADs fail closed. CI runs/jobs, checks, statuses,
 commit comments and native reviews are collected in pages of 100, with a
-100-page budget per collection. Counted lists must agree on totals across pages;
+100-page budget per collection, including any empty terminal probe.
+Counted lists must agree on totals across pages;
 uncounted lists require a short terminal page (an exactly full final page needs
-an additional empty-page read). Pagination cannot change the repository, source
-SHA, run, attempt or query filters. Qualification history remains time-filtered
-from the selected CI creation, not an unbounded lifetime count. Policy lists
+an additional empty-page read). On that verified empty uncounted probe only,
+with no `next` link, `last` may point to the preceding page. Links accept only
+`/repos/OlyForge3D/PrintFarmer/` or `/repositories/1044049720/` on the GitHub API
+origin, with the same endpoint and query filters. Links are validated, never
+followed; every request is synthesized locally. Pagination cannot change the
+repository, source SHA, run, attempt or query filters. Qualification history
+remains time-filtered from the selected CI creation, not an unbounded lifetime count. Policy lists
 retain their existing single-page bounds. Exceeding a bound requires a reviewed
 extension rather than deleting audit evidence.
 The macOS archive must finish within that same 24-hour window; runner queue

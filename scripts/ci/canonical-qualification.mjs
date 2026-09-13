@@ -271,9 +271,10 @@ export async function verifyQualification(api, runId, mode, now = Date.now(), co
   }
   const comments = array(await api(`commits/${sha}/comments?per_page=100`));
   const comment = comments.find(entry => String(entry.id) === binding.comment);
+  const expectedBody = confirmationBody(sha, binding.validationRun, mode);
   requireThat(comment?.commit_id === sha && comment.user?.type === 'User' &&
     typeof comment.body === 'string' &&
-    comment.body.replace(/\r\n/g, '\n') === confirmationBody(sha, binding.validationRun, mode) &&
+    (comment.body === expectedBody || comment.body === expectedBody.replace(/\n/g, '\r\n')) &&
     comment.created_at === comment.updated_at && time(comment.created_at) >= time(ci.updated_at) &&
     time(comment.created_at) <= time(run.created_at), 'Missing, edited, stale or mismatched canonical review');
   const commenter = comment.user.login;

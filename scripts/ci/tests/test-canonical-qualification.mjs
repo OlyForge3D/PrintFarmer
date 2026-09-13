@@ -146,7 +146,7 @@ function paginatedApi(f) {
     const entries = field ? data[field] : data;
     const slice = entries.slice((page - 1) * 100, page * 100);
     const link = page * 100 < entries.length ?
-      `<https://api.github.com/repos/${repository}/${base}&page=${page + 1}>; rel="next"` : '';
+      `<https://api.github.com/repositories/1044049720/${base}&page=${page + 1}>; rel="next"` : '';
     return new Response(JSON.stringify(field ? { ...data, [field]: slice } : slice),
       { headers: { link } });
   });
@@ -161,6 +161,9 @@ for (const mode of ['single-maintainer', 'separation-of-duties']) {
     });
   }
   for (const [name, body] of [
+    ['mixed LF and CRLF', text => text.replace('\n', '\r\n')],
+    ['mixed CRLF and LF', text => text.replace(/\n/g, '\r\n').replace('\r\n', '\n')],
+    ['non-string', () => ({})],
     ['lone CR', text => text.replace('\n', '\r')],
     ['CR before CRLF', text => text.replace('\n', '\r\r\n')],
     ['final LF', text => `${text}\n`],
