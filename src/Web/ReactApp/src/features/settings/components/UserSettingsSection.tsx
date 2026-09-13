@@ -104,6 +104,7 @@ function UserSettingsForm({
     mutation.mutate(
       {
         theme: data.theme,
+        printerControlMode: data.printerControlMode ?? 'Guided',
         locale,
         itemsPerPage: items,
         defaultSlicerPreset: data.defaultSlicerPreset ?? null,

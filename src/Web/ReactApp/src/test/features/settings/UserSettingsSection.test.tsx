@@ -87,4 +87,18 @@ describe('UserSettingsSection', () => {
 
     expect(toast.error).toHaveBeenCalledWith("Printables username must not begin with '@'.");
   });
+  it('preserves the latest printer mode when saving unrelated preferences', () => {
+    const { rerender } = render(<UserSettingsSection />);
+    fireEvent.change(screen.getByLabelText('Items per page'), { target: { value: '50' } });
+    mockUseUserSettings.mockReturnValue({
+      data: { ...baseUserSettings, printerControlMode: 'Expert', rowVersion: 'next-revision' },
+      isLoading: false, error: null, refetch: vi.fn(), isFetching: false,
+    });
+    rerender(<UserSettingsSection />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
+    expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({
+      itemsPerPage: 50, printerControlMode: 'Expert', rowVersion: 'next-revision',
+    }), expect.any(Object));
+  });
+
 });
