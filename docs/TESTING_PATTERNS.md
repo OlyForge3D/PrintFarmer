@@ -24,6 +24,15 @@ The production SQLite suite exercises upgrade/downgrade sender-evidence preserva
 `PrintersControllerControlGuardsTests.LegacyMotionAsync_Moonraker_*` asserts
 zero old-route sends for all five replaced motion routes.
 
+`PrinterControlRecoveryAuthorizationTests` exercises real HTTP recovery with the
+motion worker disabled and real SQLite operation/barrier rows. Non-admin operators
+need `queue:reconcile` plus printer Submit access; administrator bypass is tested
+without either explicit grant. Anonymous, missing-permission, View-only, unrelated
+group and stale/missing revision cases must leave operation, barrier, audit and
+outbox state unchanged. Successful recovery records actor/evidence and `Recovered`,
+never motion success. Update the route snapshot and exact migration lists for all
+three providers when adding durable-control routes or migrations.
+
 `MoonrakerMotionChannelTests` drives a fake WebSocket with exact JSON-RPC IDs,
 fragmented frames, unrelated notifications, partial-write errors and disposal.
 Its long-homing regression deliberately holds the response for **28 seconds**,

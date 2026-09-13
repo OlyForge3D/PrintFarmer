@@ -348,6 +348,8 @@ GET /api/printers/{id:guid}/toolheads/{toolheadIndex:int}/swap-validation -> Far
 GET /api/printers/{id}/history -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetHistoryAsync
 GET /api/printers/{id}/history/totals -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetHistoryTotalsAsync
 GET /api/printers/{id}/history/{jobId} -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.GetHistoryJobAsync
+GET /api/printers/{printerId:guid}/control-operations/current -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrinterControlOperationsController.CurrentAsync
+GET /api/printers/{printerId:guid}/control-operations/{operationId:guid} -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrinterControlOperationsController.GetAsync
 GET /api/printers/{printerId:guid}/fallback-groups -> Farm.Modules.Inventory::Farm.Modules.Inventory.Controllers.FilamentFallbackGroupsController.ListAsync
 GET /api/printers/{printerId:guid}/fallback-groups/available -> Farm.Modules.Inventory::Farm.Modules.Inventory.Controllers.FilamentFallbackGroupsController.GetAvailableFallbackAsync
 GET /api/printers/{printerId:guid}/fallback-groups/{groupId:guid} -> Farm.Modules.Inventory::Farm.Modules.Inventory.Controllers.FilamentFallbackGroupsController.GetAsync
@@ -709,6 +711,9 @@ POST /api/printers/{id:guid}/temps -> Farm.Modules.Printers::Farm.Modules.Printe
 POST /api/printers/{id:guid}/toolheads/ensure-mmu -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.EnsureMmuToolheadsAsync
 POST /api/printers/{id:guid}/z-offset -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.SaveZOffsetAsync
 POST /api/printers/{id}/location -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.AssignPrinterToLocationAsync
+POST /api/printers/{printerId:guid}/control-operations -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrinterControlOperationsController.SubmitAsync
+POST /api/printers/{printerId:guid}/control-operations/{operationId:guid}/recovery -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrinterControlOperationsController.RecoverAsync
+POST /api/printers/{printerId:guid}/control-operations/{operationId:guid}/recovery/complete -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrinterControlOperationsController.CompleteRecoveryAsync
 POST /api/printers/{printerId:guid}/fallback-groups -> Farm.Modules.Inventory::Farm.Modules.Inventory.Controllers.FilamentFallbackGroupsController.CreateAsync
 POST /api/project-templates -> Farm.Web.Api::Farm.Web.Api.Controllers.PrintProjectTemplatesController.CreateTemplateAsync
 POST /api/project-templates/{id:guid}/files -> Farm.Web.Api::Farm.Web.Api.Controllers.PrintProjectTemplatesController.AddFileToTemplateAsync

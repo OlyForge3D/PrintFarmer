@@ -185,9 +185,10 @@ non-Moonraker partial-axis controls retain their existing behavior. Calibration
 Z adjustments retain the explicitly selected bed-center X/Y target.
 
 Unknown outcomes require operator recovery. The motion panel explains required
-farm-administrator role, `queue:reconcile` permission, and printer Submit access
-(administrator permission bypass applies). Nonadmin queue reconcilers can view
-status but are not offered recovery actions. It also explains prior-sender
+`queue:reconcile` permission and printer Submit access
+(administrator permission bypass applies). Nonadmin queue reconcilers are offered
+recovery actions; the server verifies printer Submit access on each request.
+It also explains prior-sender
 isolation, controller-queue clearance, and physical
 stationarity. Recovery completion requires separate, initially unchecked
 attestations and written evidence, using the exact reviewed GET ETag. No stop,

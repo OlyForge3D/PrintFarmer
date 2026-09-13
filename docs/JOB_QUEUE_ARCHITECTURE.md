@@ -242,7 +242,7 @@ support and positioning bounds, not live homing facts. There is no separate
 
 Recovery is explicit, not a retry or automatic firmware reset:
 
-1. A farm administrator with `queue:reconcile` and printer-submit access posts
+1. An authenticated operator with `queue:reconcile` and printer-submit access posts
    `.../{operationId}/recovery` with the current quoted `If-Match`. It returns
    `202`, retains the barrier and enters `Recovering`.
 2. The owning worker cancels future sends, aborts/disposes its transport, and joins
@@ -262,6 +262,9 @@ Recovery is explicit, not a retry or automatic firmware reset:
 
 Missing preconditions return `428`, stale revisions `412`, and unmet recovery
 requirements `409`. No recovery endpoint sends movement or reset commands.
+Both recovery endpoints permit non-admin grant holders; the existing administrator
+permission/resource bypass remains unchanged. Missing reconcile permission returns
+`403`; missing printer Submit access returns `404` without changing the barrier.
 Attestation text is limited to 2000 characters per field and 8192 characters
 for the encoded evidence record; oversized evidence is rejected before storage.
 Printer deletion is fenced against unresolved operations, including racing

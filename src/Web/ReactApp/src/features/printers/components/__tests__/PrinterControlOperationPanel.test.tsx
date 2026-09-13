@@ -53,9 +53,9 @@ describe('operator recovery safeguards', () => {
     expect(recover).not.toHaveBeenCalled();
   });
 
-  it('offers no recovery actions without authorized recovery role/permission', () => {
+  it('offers no recovery actions without recovery permission', () => {
     render(<PrinterControlOperationPanel control={control({ canRecover: false })} />);
-    expect(screen.getByText(/Recovery requires a farm administrator with queue:reconcile permission and Submit access/)).toBeInTheDocument();
+    expect(screen.getByText(/Recovery requires queue:reconcile permission and Submit access/)).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('Recovering');
     expect(screen.getByRole('button', { name: /Recheck motion status/ })).toBeEnabled();
     expect(screen.queryByRole('button', { name: /Request recovery and sender isolation/ })).not.toBeInTheDocument();
@@ -104,6 +104,10 @@ describe('operator recovery safeguards', () => {
     attest();
     fireEvent.click(screen.getByRole('button', { name: /Record verified recovery/ }));
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+    if (statusCode === 403) {
+      expect(screen.getByRole('alert')).toHaveTextContent('Queue:reconcile permission and Submit access');
+      expect(screen.getByRole('alert')).not.toHaveTextContent('administrator');
+    }
     if (statusCode === 404) {
       expect(screen.getByRole('alert')).toHaveTextContent('unavailable or you do not have access');
       expect(screen.getByRole('alert')).toHaveTextContent('Recovery is not confirmed');

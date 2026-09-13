@@ -167,7 +167,7 @@ struct PrinterSetupControlsContent: View {
                     if let recoveryURL = viewModel.motionRecoveryURL {
                         Link("Open printer recovery on web", destination: recoveryURL)
                             .frame(minHeight: 44)
-                            .accessibilityHint("An administrator must verify isolation and inspect the physical machine before releasing recovery.")
+                            .accessibilityHint("An operator with queue:reconcile permission and printer Submit access must verify isolation and inspect the physical machine before releasing recovery.")
                             .accessibilityIdentifier("printer.controls.motion.recovery")
                     }
                 }

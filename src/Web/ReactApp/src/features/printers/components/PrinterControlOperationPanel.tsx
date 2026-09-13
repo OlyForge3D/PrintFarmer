@@ -31,7 +31,7 @@ export function PrinterControlOperationPanel({ control }: Props) {
       {control.canRetryAdmission && saved && <AdmissionRetry key={saved.operationId} control={control} />}
       {operation?.requiresRecovery && (
         canRecover ? <RecoveryForm key={`${operation.operationId}:${operation.rowVersion}`} control={control} />
-          : <p>Recovery requires a farm administrator with queue:reconcile permission and Submit access to this printer. Ask an authorized administrator.</p>
+          : <p>Recovery requires queue:reconcile permission and Submit access to this printer. Ask an authorized operator.</p>
       )}
       {canRecover && operation?.requiresRecovery && (uncertain || !etag) && <p>Recovery is unavailable until a fresh operation GET provides a valid revision and status.</p>}
     </section>
@@ -92,7 +92,7 @@ function RecoveryForm({ control }: Props) {
       toast.info(complete ? 'Recovery recorded. Recheck current motion before proceeding.' : 'Recovery requested. Sender isolation must be confirmed before completion.');
     } catch (failure) {
       const status = mutationErrorStatus(failure);
-      const message = status === 403 ? 'Recovery denied. A farm administrator with queue:reconcile permission and Submit access to this printer is required.'
+      const message = status === 403 ? 'Recovery denied. Queue:reconcile permission and Submit access to this printer are required.'
         : status === 404 ? 'The printer or operation is unavailable or you do not have access. Recovery is not confirmed; do not assume the barrier was cleared.'
           : status === 412 || status === 428 ? 'The reviewed revision is stale or missing. Recheck and review all attestations again.'
             : status === 409 ? 'Recovery prerequisites are not satisfied. Recheck the operation and sender isolation.'
@@ -105,7 +105,7 @@ function RecoveryForm({ control }: Props) {
   return (
     <div className="border-t border-pf-border pt-2 space-y-3">
       <h3 className="font-semibold">Operator recovery</h3>
-      <p>Requires a farm administrator with queue:reconcile permission and printer Submit access, verified by the server. This form sends no stop, reset, or hardware commands.</p>
+      <p>Requires queue:reconcile permission and printer Submit access, verified by the server. This form sends no stop, reset, or hardware commands.</p>
       <p>Prior sender isolation: {operation.senderIsolation}. {operation.senderIsolation === 'Pending' ? 'Wait for service confirmation; elapsed time is not evidence.' : ''}</p>
       {operation.state !== 'Recovering' && <Button size="sm" disabled={!fresh} onClick={() => void recover(false)}>Request recovery and sender isolation</Button>}
       {operation.state === 'Recovering' && (

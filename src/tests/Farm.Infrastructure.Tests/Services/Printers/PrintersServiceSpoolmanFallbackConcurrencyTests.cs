@@ -55,7 +55,7 @@ public sealed class PrintersServiceSpoolmanFallbackConcurrencyTests
 
         SpoolmanStatusCache statusCache = CreateStatusCache(spoolman.Object, TimeProvider.System);
         await using AppDbContext db = CreateDbContext();
-        PrintersService service = CreateService(db, printers, statusCache);
+        PrintersService service = await CreateServiceAsync(db, printers, statusCache);
 
         CompletePrinterDto[] first = await service.GetAllCompleteDtosAsync(CancellationToken.None);
         CompletePrinterDto[] second = await service.GetAllCompleteDtosAsync(CancellationToken.None);
@@ -103,7 +103,7 @@ public sealed class PrintersServiceSpoolmanFallbackConcurrencyTests
 
         SpoolmanStatusCache statusCache = CreateStatusCache(spoolman.Object, TimeProvider.System);
         await using AppDbContext db = CreateDbContext();
-        PrintersService service = CreateService(db, printers, statusCache);
+        PrintersService service = await CreateServiceAsync(db, printers, statusCache);
 
         var stopwatch = Stopwatch.StartNew();
         CompletePrinterDto[] dtos = await service.GetAllCompleteDtosAsync(CancellationToken.None);
@@ -171,7 +171,7 @@ public sealed class PrintersServiceSpoolmanFallbackConcurrencyTests
 
         SpoolmanStatusCache statusCache = CreateStatusCache(spoolman.Object, TimeProvider.System);
         await using AppDbContext db = CreateDbContext();
-        PrintersService service = CreateService(db, printers, statusCache);
+        PrintersService service = await CreateServiceAsync(db, printers, statusCache);
 
         var stopwatch = Stopwatch.StartNew();
         CompletePrinterDto[] dtos = await service.GetAllCompleteDtosAsync(CancellationToken.None);
@@ -239,8 +239,11 @@ public sealed class PrintersServiceSpoolmanFallbackConcurrencyTests
             provider.GetRequiredService<IServiceScopeFactory>());
     }
 
-    private static PrintersService CreateService(AppDbContext db, List<Printer> printers, ISpoolmanStatusCache statusCache)
+    private static async Task<PrintersService> CreateServiceAsync(AppDbContext db, List<Printer> printers, ISpoolmanStatusCache statusCache)
     {
+        db.Printers.AddRange(printers);
+        await db.SaveChangesAsync();
+
         var printersRepository = new Mock<IPrintersRepository>();
         _ = printersRepository
             .Setup(r => r.GetAllWithIncludesAsync(It.IsAny<CancellationToken>()))

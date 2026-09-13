@@ -122,7 +122,7 @@ export function usePrinterControlOperation(printer?: Pick<Printer, 'id' | 'backe
     ...snapshot, tracker, execute, isMoonraker,
     canRetryAdmission: !!tracker?.canRetryAdmission(),
     blocked: isMoonraker && (!tracker || tracker.isBlocked() || !supported?.length),
-    canRecover: !!auth?.isAuthenticated && auth.hasRole('farm_admin') && auth.hasPermission('queue', 'reconcile'),
+    canRecover: !!auth?.isAuthenticated && auth.hasPermission('queue', 'reconcile'),
   };
 }
 

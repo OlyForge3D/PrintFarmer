@@ -67,7 +67,6 @@ public sealed class PrinterControlOperationsController(
 
     [HttpPost("{operationId:guid}/recovery")]
     [ProducesResponseType(typeof(PrinterControlOperationDto), 202)]
-    [Authorize(Roles = PrintFarmerPermissions.FarmAdminRole)]
     [RequirePermission(PrintFarmerPermissions.Queue.Reconcile)]
     public Task<IActionResult> RecoverAsync(Guid printerId, Guid operationId, CancellationToken ct) =>
         ExecuteAsync(async () =>
@@ -81,7 +80,6 @@ public sealed class PrinterControlOperationsController(
 
     [HttpPost("{operationId:guid}/recovery/complete")]
     [ProducesResponseType(typeof(PrinterControlOperationDto), 200)]
-    [Authorize(Roles = PrintFarmerPermissions.FarmAdminRole)]
     [RequirePermission(PrintFarmerPermissions.Queue.Reconcile)]
     public Task<IActionResult> CompleteRecoveryAsync(Guid printerId, Guid operationId,
         [FromBody] PrinterControlRecoveryRequest request, CancellationToken ct) =>

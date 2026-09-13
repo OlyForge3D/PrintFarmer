@@ -3813,6 +3813,8 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         let (replacement, _) = try await fixture(service: replacementService)
         XCTAssertEqual(replacement.motionOperationID, sent.operationID)
         XCTAssertTrue(replacement.hasUnresolvedMotion)
+        XCTAssertTrue(replacement.motionBlockedReason?.contains("queue:reconcile permission and printer Submit access") == true)
+        XCTAssertNotNil(replacement.motionRecoveryURL)
         XCTAssertTrue(replacementService.controlOperationReadIDs.contains(sent.operationID))
         await replacement.homeAll()
         XCTAssertTrue(replacementService.submittedControlOperations.isEmpty)
@@ -3823,6 +3825,7 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         await replacement.refreshControlOperation()
         XCTAssertFalse(replacement.isExecuting, "Authoritative recovery also releases an old in-process owner's matching lease")
         XCTAssertTrue(replacement.motionStatusMessage?.contains("did not succeed") == true)
+        XCTAssertTrue(replacement.motionStatusMessage?.contains("authorized operator") == true)
         XCTAssertNil(replacement.lastError)
     }
 

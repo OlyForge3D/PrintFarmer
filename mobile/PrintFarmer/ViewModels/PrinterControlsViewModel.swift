@@ -1396,7 +1396,7 @@ final class PrinterControlsViewModel: ObservableObject {
             if controlOperation?.requiresRecovery == true || physicalControl?.requiresRecovery == true
                 || controlOperation?.state == .unknown || controlOperation?.state == .recovering
                 || physicalControl?.state == .unknown || physicalControl?.state == .recovering {
-                return "Motion outcome is uncertain or recovery is in progress. Controls remain locked. An administrator must verify sender isolation, clear queued backend work and inspect the machine using printer recovery on the web."
+                return "Motion outcome is uncertain or recovery is in progress. Controls remain locked. An operator with queue:reconcile permission and printer Submit access must verify sender isolation, clear queued backend work and inspect the machine using printer recovery on the web."
             }
             return "A durable motion operation is pending. Controls remain locked until the server confirms completion; leaving this screen does not cancel it."
         }
@@ -1415,7 +1415,7 @@ final class PrinterControlsViewModel: ObservableObject {
         guard let operation = controlOperation else { return nil }
         switch operation.state {
         case .succeeded: return "Motion queue completion confirmed by the server. Check the machine before further setup."
-        case .recovered: return "An administrator released the recovery barrier. The original motion did not succeed; review the machine before starting a new operation."
+        case .recovered: return "An authorized operator released the recovery barrier. The original motion did not succeed; review the machine before starting a new operation."
         case .failed: return operation.failure?.message ?? "The server reports that the motion operation failed."
         default: return "Motion status: \(operation.state.rawValue). Completion has not been confirmed."
         }

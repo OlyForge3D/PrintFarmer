@@ -81,11 +81,12 @@ afterEach(() => { client.clear(); vi.useRealTimers(); });
 
 describe('motion clients and invalidation lifecycle', () => {
   it.each([
-    { name: 'nonadmin queue reconciler', authenticated: true, admin: false, reconcile: true, expected: false },
+    { name: 'nonadmin queue reconciler', authenticated: true, admin: false, reconcile: true, expected: true },
     { name: 'ordinary operator', authenticated: true, admin: false, reconcile: false, expected: false },
     { name: 'administrator with permission bypass', authenticated: true, admin: true, reconcile: true, expected: true },
     { name: 'administrator without resolved reconcile permission', authenticated: true, admin: true, reconcile: false, expected: false },
     { name: 'signed-out administrator', authenticated: false, admin: true, reconcile: true, expected: false },
+    { name: 'signed-out queue reconciler', authenticated: false, admin: false, reconcile: true, expected: false },
   ])('gates recovery for $name', async ({ authenticated, admin, reconcile, expected }) => {
     auth = {
       ...auth, isAuthenticated: authenticated,

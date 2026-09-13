@@ -53,7 +53,8 @@ API. Legacy Moonraker motion endpoints reject requests with
 retain their existing motion endpoints.
 
 If communication is lost after a command may have been sent, the operation can
-require explicit administrator recovery. Do not retry motion or assume the
+require explicit operator recovery with `queue:reconcile` permission and printer
+Submit access (the existing administrator bypass applies). Do not retry motion or assume the
 printer is unlocked because it looks idle. Recovery requires evidence that the
 prior sender is isolated, pending controller work is cleared, and the printer is
 physically stationary. See [operation ownership and recovery](./docs/JOB_QUEUE_ARCHITECTURE.md).

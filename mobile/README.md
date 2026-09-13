@@ -123,8 +123,10 @@ Unknown/Recovering operations cannot use it. Web recovery cannot resolve a
 UUID that never reached the server.
 
 Unknown or recovering operations remain visibly locked, including while offline.
-Use **Open printer recovery on web** for an administrator to attest sender
-isolation, cleared queued backend work and physical inspection. A recovered
+Use **Open printer recovery on web** for an operator with `queue:reconcile`
+permission and printer Submit access to attest sender isolation, cleared queued
+backend work and physical inspection. Non-admin grant holders can recover; the
+web app and API enforce recovery authorization. A recovered
 operation is not a successful motion and never advances calibration. Calibration
 also requires fresh safety checks after server-confirmed success. Do not reset,
 re-home or retry known uncertain execution to try to clear its barrier.
