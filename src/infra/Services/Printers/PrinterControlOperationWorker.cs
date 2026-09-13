@@ -50,9 +50,12 @@ public sealed class PrinterControlOperationWorker(
                 {
                     break;
                 }
-                catch (Exception)
+                catch (Exception exception)
                 {
-                    logger.LogWarning("Motion control scan failed; persisted barriers remain held.");
+                    // Exception messages/objects can contain connection credentials or backend payloads.
+                    logger.LogWarning(
+                        "Motion control scan failed ({ExceptionType}); persisted barriers remain held.",
+                        exception.GetType().Name);
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
@@ -212,9 +215,12 @@ public sealed class PrinterControlOperationWorker(
         {
             failure = "sender_interrupted";
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             failure = "backend_outcome_unknown";
+            logger.LogWarning(
+                "Motion operation {OperationId} raised {ExceptionType}; persisting outcome without replay.",
+                id, exception.GetType().Name);
         }
         finally
         {
@@ -231,7 +237,8 @@ public sealed class PrinterControlOperationWorker(
 
     private async Task PersistResultAsync(Guid id, bool success, string? failure)
     {
-        for (int attempt = 0; attempt < 12; attempt++)
+        const int maxAttempts = 12;
+        for (int attempt = 0; attempt < maxAttempts; attempt++)
         {
             try
             {
@@ -249,9 +256,11 @@ public sealed class PrinterControlOperationWorker(
 
                 return;
             }
-            catch (Exception)
+            catch (Exception exception)
             {
-                logger.LogWarning("Could not persist motion outcome {OperationId}; retrying persistence only.", id);
+                logger.LogWarning(
+                    "Could not persist motion outcome {OperationId} on attempt {Attempt} of {MaxAttempts} ({ExceptionType}); retrying persistence only.",
+                    id, attempt + 1, maxAttempts, exception.GetType().Name);
                 await Task.Delay(TimeSpan.FromSeconds(1));
             }
         }

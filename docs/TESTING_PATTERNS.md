@@ -24,6 +24,11 @@ The production SQLite suite exercises upgrade/downgrade sender-evidence preserva
 `PrintersControllerControlGuardsTests.LegacyMotionAsync_Moonraker_*` asserts
 zero old-route sends for all five replaced motion routes.
 
+Worker diagnostic regressions cover scan failures, ambiguous transport outcomes,
+and persistence-only retries. Assert exception type, operation ID and retry attempt
+context without logging exception objects, messages or request data. Diagnostic
+changes must preserve held barriers, one physical send and quiet normal shutdown.
+
 `PrinterControlRecoveryAuthorizationTests` exercises real HTTP recovery with the
 motion worker disabled and real SQLite operation/barrier rows. Non-admin operators
 need `queue:reconcile` plus printer Submit access; administrator bypass is tested

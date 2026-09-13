@@ -19,6 +19,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Hosting;
 using Moq;
@@ -912,8 +913,8 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     {
         Guid id = Guid.NewGuid();
         await AdmitAsync(id);
-        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
-            NullLogger<PrinterControlOperationWorker>.Instance);
+        var logger = new WorkerLogger();
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(), logger);
         await worker.StartAsync(default);
         await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
         using var grace = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -922,6 +923,59 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         channel.Completion.SetResult();
         await shutdown;
         Assert.Equal(PrinterControlState.Succeeded, (await GetAsync(id)).State);
+        Assert.Equal(1, channel.SendCount);
+        Assert.Empty(logger.Entries);
+    }
+
+    [Fact]
+    public async Task WorkerAsync_ScanFailure_LogsOnlyExceptionTypeAndRetainsUnsentBarrier()
+    {
+        Guid id = Guid.NewGuid();
+        await AdmitAsync(id);
+        var scopes = new Mock<IServiceScopeFactory>();
+        scopes.Setup(factory => factory.CreateScope()).Throws(new InvalidOperationException(SensitiveFailureDetail));
+        var logger = new WorkerLogger();
+        using var worker = new PrinterControlOperationWorker(scopes.Object, logger);
+        await worker.StartAsync(default);
+        await logger.FirstWarning.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await worker.StopAsync(default);
+
+        WorkerLog warning = Assert.Single(logger.Entries);
+        Assert.Equal(nameof(InvalidOperationException), LogFields(warning)["ExceptionType"]);
+        Assert.Contains("persisted barriers remain held", warning.Message, StringComparison.Ordinal);
+        AssertSafeLogs(logger, SensitiveFailureDetail);
+        PrinterControlOperationDto operation = await GetAsync(id);
+        Assert.Equal(PrinterControlState.Queued, operation.State);
+        Assert.True(operation.BarrierHeld);
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task WorkerAsync_OutcomeWriteFailure_LogsRetryContextWithoutReplayingMotion()
+    {
+        Guid id = Guid.NewGuid();
+        await AdmitAsync(id);
+        var logger = new WorkerLogger();
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(), logger);
+        // Tick manually so only outcome persistence, not a concurrent scan, consumes the injected failure.
+        await worker.TickAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        commands.FailNextOperationUpdate = true;
+        channel.Completion.SetResult();
+        await logger.FirstWarning.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await WaitForStateAsync(id, PrinterControlState.Succeeded);
+        await worker.StopAsync(default);
+
+        WorkerLog warning = Assert.Single(logger.Entries);
+        Dictionary<string, object?> fields = LogFields(warning);
+        Assert.Equal(id, fields["OperationId"]);
+        Assert.Equal(nameof(DbUpdateException), fields["ExceptionType"]);
+        Assert.Equal(1, fields["Attempt"]);
+        Assert.Equal(12, fields["MaxAttempts"]);
+        AssertSafeLogs(logger, "Injected evidence persistence failure");
+        PrinterControlOperationDto operation = await GetAsync(id);
+        Assert.Equal(PrinterControlEvidence.MotionQueueDrained, operation.CompletionEvidence);
+        Assert.False(operation.BarrierHeld);
         Assert.Equal(1, channel.SendCount);
     }
 
@@ -979,13 +1033,21 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     {
         Guid id = Guid.NewGuid();
         await AdmitAsync(id);
-        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
-            NullLogger<PrinterControlOperationWorker>.Instance);
+        var logger = new WorkerLogger();
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(), logger);
         await worker.StartAsync(default);
         await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        channel.Completion.SetException(new IOException("Ambiguous transport loss"));
+        var transportFailure = new IOException(SensitiveFailureDetail, new InvalidOperationException(SensitiveFailureDetail));
+        transportFailure.Data["request"] = SensitiveFailureDetail;
+        channel.Completion.SetException(transportFailure);
         await WaitForStateAsync(id, PrinterControlState.Unknown);
         PrinterControlOperationDto unknown = await GetAsync(id);
+        Assert.True(unknown.BarrierHeld);
+        Assert.Equal("backend_outcome_unknown", unknown.Failure?.Code);
+        WorkerLog warning = Assert.Single(logger.Entries);
+        Assert.Equal(nameof(IOException), LogFields(warning)["ExceptionType"]);
+        Assert.Equal(id, LogFields(warning)["OperationId"]);
+        AssertSafeLogs(logger, SensitiveFailureDetail);
         await ChangeAsync(async (_, service) =>
             await service.BeginRecoveryAsync(printerId, id, Quote(unknown.RowVersion), userId.ToString(), default));
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -1401,6 +1463,46 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     }
 
     private static string Quote(string value) => $"\"{value}\"";
+    private const string SensitiveFailureDetail = "sensitive-test-detail: endpoint, credential and request payload";
+
+    private static Dictionary<string, object?> LogFields(WorkerLog entry) =>
+        Assert.IsAssignableFrom<IEnumerable<KeyValuePair<string, object?>>>(entry.State).ToDictionary();
+
+    private static void AssertSafeLogs(WorkerLogger logger, string sensitiveDetail)
+    {
+        Assert.NotEmpty(logger.Entries);
+        Assert.All(logger.Entries, entry =>
+        {
+            Assert.Equal(LogLevel.Warning, entry.Level);
+            Assert.Null(entry.Exception);
+            Assert.DoesNotContain(sensitiveDetail, entry.Message, StringComparison.Ordinal);
+            Assert.All(LogFields(entry).Values, value =>
+            {
+                Assert.False(value is Exception);
+                Assert.DoesNotContain(sensitiveDetail, value?.ToString() ?? string.Empty, StringComparison.Ordinal);
+            });
+        });
+    }
+
+    private sealed record WorkerLog(LogLevel Level, string Message, Exception? Exception, object? State);
+
+    private sealed class WorkerLogger : ILogger<PrinterControlOperationWorker>
+    {
+        public ConcurrentQueue<WorkerLog> Entries { get; } = new();
+        public TaskCompletionSource FirstWarning { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Entries.Enqueue(new(logLevel, formatter(state, exception), exception, state));
+            if (logLevel == LogLevel.Warning)
+            {
+                FirstWarning.TrySetResult();
+            }
+        }
+    }
+
     private static PrinterControlRecoveryRequest Evidence() => new("Inspected", "ExternallyVerified",
         "Original sender process stopped and network isolated", true, true, "Queue cleared independently; printer physically inspected stationary");
 
