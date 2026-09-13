@@ -738,6 +738,8 @@ final class ServerRegistryTests: XCTestCase {
 
         try registry.setActive(id: second.id)
         try await waitForBaseURL(second.baseURL, in: container)
+        // The client is published before startup preparation and SignalR connection finish.
+        await container.awaitActiveServerSettled()
 
         let currentBaseURL = await container.apiClient?.currentBaseURL()
         let currentAccessToken = await container.apiClient?.currentAccessToken()
