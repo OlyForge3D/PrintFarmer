@@ -207,9 +207,10 @@ final class PreheatSubgroupTests: XCTestCase {
     private func thermalModel(
         knownLimits: Bool = true, hotendOnly: Bool = false
     ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
-        var printer = try TestData.decodePrinter()
-        printer.backend = .octoPrint
-        printer.state = "ready"
+        let json = TestJSON.printer
+            .replacingOccurrences(of: "\"backend\": \"Moonraker\"", with: "\"backend\": \"OctoPrint\"")
+            .replacingOccurrences(of: "\"state\": \"printing\"", with: "\"state\": \"ready\"")
+        let printer = try TestData.decoder.decode(Printer.self, from: try XCTUnwrap(json.data(using: .utf8)))
         let service = MockPrinterService()
         service.capabilitiesToReturn = hotendOnly ? .hotendOnlyFixture : .allControlsFixture
         service.detailsToReturn = knownLimits ? .controlsLimitsFixture(for: printer) : nil
