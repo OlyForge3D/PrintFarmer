@@ -23,6 +23,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # All admission bodies match scripts/ci/release-rehearsal-admission.mjs;
+  # tests enforce byte identity without checking out code before admission.
   admission:
     name: Credential-free rehearsal admission
     runs-on: ubuntu-latest
@@ -30,6 +32,7 @@ jobs:
     permissions: {}
     steps:
       - name: Reject untrusted dispatches and reruns
+        id: admission
         shell: bash
         env:
           REHEARSAL_CHANNEL: ${{ inputs.channel }}
@@ -70,6 +73,31 @@ jobs:
     outputs:
       inventory_digest: ${{ steps.verify.outputs.inventory_digest }}
     steps:
+      - name: Reject untrusted dispatches and reruns
+        id: admission
+        shell: bash
+        env:
+          REHEARSAL_CHANNEL: ${{ inputs.channel }}
+        run: |
+          node --input-type=module <<'NODE'
+          const env = process.env;
+          const repository = 'OlyForge3D/PrintFarmer';
+          const workflow = '.github/workflows/release-protection-rehearsal.yml';
+          const branch = { insider: 'development', stable: 'main' }[env.REHEARSAL_CHANNEL];
+          const trusted = ['insider', 'stable'].includes(env.REHEARSAL_CHANNEL) &&
+            env.GITHUB_REPOSITORY === repository &&
+            env.GITHUB_EVENT_NAME === 'workflow_dispatch' &&
+            env.GITHUB_REF === `refs/heads/${branch}` &&
+            env.GITHUB_WORKFLOW_REF === `${repository}/${workflow}@refs/heads/${branch}` &&
+            /^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? '') &&
+            env.GITHUB_WORKFLOW_SHA === env.GITHUB_SHA &&
+            env.GITHUB_RUN_ATTEMPT === '1' &&
+            /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID ?? '');
+          if (!trusted) {
+            console.error('Untrusted rehearsal dispatch; protected jobs blocked');
+            process.exitCode = 1;
+          }
+          NODE
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ github.workflow_sha }}
@@ -102,7 +130,7 @@ jobs:
           RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
         run: node scripts/ci/release-rehearsal-control.mjs positive
       - name: Preserve secret-free positive evidence
-        if: always()
+        if: always() && steps.admission.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: release-rehearsal-positive-${{ github.run_id }}-${{ github.run_attempt }}
@@ -126,6 +154,31 @@ jobs:
       statuses: read
       pull-requests: read
     steps:
+      - name: Reject untrusted dispatches and reruns
+        id: admission
+        shell: bash
+        env:
+          REHEARSAL_CHANNEL: ${{ inputs.channel }}
+        run: |
+          node --input-type=module <<'NODE'
+          const env = process.env;
+          const repository = 'OlyForge3D/PrintFarmer';
+          const workflow = '.github/workflows/release-protection-rehearsal.yml';
+          const branch = { insider: 'development', stable: 'main' }[env.REHEARSAL_CHANNEL];
+          const trusted = ['insider', 'stable'].includes(env.REHEARSAL_CHANNEL) &&
+            env.GITHUB_REPOSITORY === repository &&
+            env.GITHUB_EVENT_NAME === 'workflow_dispatch' &&
+            env.GITHUB_REF === `refs/heads/${branch}` &&
+            env.GITHUB_WORKFLOW_REF === `${repository}/${workflow}@refs/heads/${branch}` &&
+            /^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? '') &&
+            env.GITHUB_WORKFLOW_SHA === env.GITHUB_SHA &&
+            env.GITHUB_RUN_ATTEMPT === '1' &&
+            /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID ?? '');
+          if (!trusted) {
+            console.error('Untrusted rehearsal dispatch; protected jobs blocked');
+            process.exitCode = 1;
+          }
+          NODE
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ github.workflow_sha }}
@@ -144,7 +197,7 @@ jobs:
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
         run: node scripts/ci/release-rehearsal-control.mjs probes
       - name: Preserve secret-free denial and zero-write evidence
-        if: always()
+        if: always() && steps.admission.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: release-rehearsal-probes-${{ github.run_id }}-${{ github.run_attempt }}

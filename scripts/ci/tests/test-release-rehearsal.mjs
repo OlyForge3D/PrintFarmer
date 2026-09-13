@@ -6,6 +6,7 @@ import { load } from 'js-yaml';
 import { canonicalAuthorizationFixture } from './fixtures/canonical-qualification.mjs';
 import { canonicalValidationChecks } from '../canonical-qualification.mjs';
 import { parseTag, releaseRequiredChecks, releaseReviewStatus, repository } from '../release-policy.mjs';
+import { rehearsalAdmissionSource } from '../release-rehearsal-admission.mjs';
 import {
   allPages, digest, packageNames, positiveRehearsal, readOnlyClient, rehearsalContext,
   rehearsalReadUrl, rehearsalWorkflow, snapshot, verifyUnchanged,
@@ -406,6 +407,81 @@ test('cleanup cannot target another host, package, version or upload completion'
 });
 
 const workflow = load(readFileSync('.github/workflows/release-protection-rehearsal.yml', 'utf8'));
+const admissionRun = `node --input-type=module <<'NODE'\n${rehearsalAdmissionSource}NODE\n`;
+const admissionJobs = ['admission', 'positive', 'probes'];
+const admittedEvidenceCondition = "always() && steps.admission.outcome == 'success'";
+
+function assertAdmissionOrdering(document) {
+  for (const key of ['env', 'defaults']) {
+    assert.equal(Object.hasOwn(document, key), false, `No inherited ${key} before admission`);
+  }
+  for (const jobName of admissionJobs) {
+    const job = document.jobs[jobName];
+    for (const key of ['env', 'defaults', 'container', 'services', 'uses', 'secrets', 'continue-on-error']) {
+      assert.equal(Object.hasOwn(job, key), false, `${jobName}: no pre-step ${key}`);
+    }
+    assert.equal(job['runs-on'], 'ubuntu-latest');
+    assert.deepEqual(job.steps[0], {
+      name: 'Reject untrusted dispatches and reruns',
+      id: 'admission',
+      shell: 'bash',
+      env: { REHEARSAL_CHANNEL: '${{ inputs.channel }}' },
+      run: admissionRun,
+    }, `${jobName}: unconditional, credential-free first step must match audited source`);
+    for (const [index, step] of job.steps.entries()) {
+      if (index === 0) continue;
+      assert.notEqual(step.id, 'admission', `${jobName}: no admission outcome replacement`);
+      if (step.uses?.startsWith('actions/upload-artifact@')) {
+        assert.equal(step.if, admittedEvidenceCondition, `${jobName}: upload cannot bypass admission`);
+      } else {
+        assert.equal(Object.hasOwn(step, 'if'), false, `${jobName}: later steps require implicit success()`);
+      }
+    }
+    const sensitiveSteps = job.steps.filter(step => step.uses ||
+      /GH_TOKEN|GITHUB_TOKEN|secrets\.|vars\.|github\.token|steps\..*token|environment|checkout|create-github-app-token/
+        .test(JSON.stringify(step)));
+    for (const step of sensitiveSteps) {
+      assert.ok(job.steps.indexOf(step) > 0, `${jobName}: actions and credential exposure follow admission`);
+    }
+  }
+}
+
+test('all embedded admission scripts are byte-identical to the audited source, with no shell prefix or suffix', () => {
+  for (const jobName of admissionJobs) {
+    assert.equal(workflow.jobs[jobName].steps[0].run, admissionRun, jobName);
+  }
+});
+
+test('parsed workflow guards every independently rerunnable job before any action or credential exposure', () => {
+  assertAdmissionOrdering(workflow);
+});
+
+test('ordering guard rejects credential injection, action reordering, source drift and failure-path bypasses', () => {
+  for (const jobName of ['positive', 'probes']) {
+    for (const mutate of [
+      job => job.steps.unshift({ uses: 'actions/checkout@untrusted' }),
+      job => job.steps.unshift({ run: 'echo skipped', env: { GH_TOKEN: '${{ github.token }}' } }),
+      job => { job.steps[0].env.PRIVATE_KEY = '${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}'; },
+      job => { job.steps[0].env.APP_ID = '${{ vars.RELEASE_PUBLISHER_APP_ID }}'; },
+      job => { job.steps[0].if = 'github.run_attempt == 1'; },
+      job => { job.steps[0]['continue-on-error'] = true; },
+      job => { job.steps[0].run = job.steps[0].run.replace("=== '1'", "=== '2'"); },
+      job => { job.steps[1].if = 'always()'; },
+      job => { job.steps.at(-1).if = 'always()'; },
+      job => { job.steps.at(-1).if = "always() || steps.admission.outcome == 'success'"; },
+      job => { job.env = { GH_TOKEN: '${{ github.token }}' }; },
+      job => { job.container = { image: 'untrusted', credentials: { password: '${{ secrets.KEY }}' } }; },
+      job => { job.services = { untrusted: { image: 'untrusted' } }; },
+    ]) {
+      const changed = structuredClone(workflow);
+      mutate(changed.jobs[jobName]);
+      assert.throws(() => assertAdmissionOrdering(changed), { name: 'AssertionError' });
+    }
+  }
+  const changed = structuredClone(workflow);
+  changed.env = { GH_TOKEN: '${{ github.token }}' };
+  assert.throws(() => assertAdmissionOrdering(changed), { name: 'AssertionError' });
+});
 
 test('admission is unconditional and credential-free, and gates both protected jobs', () => {
   const admission = workflow.jobs.admission;
@@ -429,8 +505,8 @@ test('admission is unconditional and credential-free, and gates both protected j
   assert.equal(workflow.jobs.probes.if, 'inputs.denial_probes');
 });
 
-function runAdmission(overrides = {}) {
-  const run = workflow.jobs.admission.steps[0].run;
+function runAdmission(overrides = {}, jobName = 'admission') {
+  const run = workflow.jobs[jobName].steps[0].run;
   const match = /^node --input-type=module <<'NODE'\n([\s\S]+)\nNODE\n?$/.exec(run);
   assert.ok(match, 'Execute the exact admission script; no untested shell suffix');
   const result = spawnSync(process.execPath, ['--input-type=module', '--eval', match[1]], {
@@ -442,11 +518,13 @@ function runAdmission(overrides = {}) {
 }
 
 test('exact workflow admission succeeds for first-attempt insider and stable dispatches without credentials', () => {
-  assert.equal(runAdmission().status, 0);
-  assert.equal(runAdmission({
-    REHEARSAL_CHANNEL: 'stable', GITHUB_REF: 'refs/heads/main',
-    GITHUB_WORKFLOW_REF: `${repository}/${rehearsalWorkflow}@refs/heads/main`,
-  }).status, 0);
+  for (const jobName of admissionJobs) {
+    assert.equal(runAdmission({}, jobName).status, 0);
+    assert.equal(runAdmission({
+      REHEARSAL_CHANNEL: 'stable', GITHUB_REF: 'refs/heads/main',
+      GITHUB_WORKFLOW_REF: `${repository}/${rehearsalWorkflow}@refs/heads/main`,
+    }, jobName).status, 0);
+  }
 });
 
 test('exact workflow admission fails invalid refs and reruns instead of leaving an all-skipped green run', () => {
@@ -464,10 +542,44 @@ test('exact workflow admission fails invalid refs and reruns instead of leaving 
     { GITHUB_SHA: 'bad', GITHUB_WORKFLOW_SHA: 'bad' },
     { GITHUB_SHA: '', GITHUB_WORKFLOW_SHA: '' }, { GITHUB_RUN_ID: '' },
   ]) {
-    const result = runAdmission(overrides);
-    assert.equal(result.status, 1, JSON.stringify(overrides));
-    assert.equal(result.stderr.trim(), 'Untrusted rehearsal dispatch; protected jobs blocked');
-    assert.equal(result.stdout, '');
+    for (const jobName of admissionJobs) {
+      const result = runAdmission(overrides, jobName);
+      assert.equal(result.status, 1, `${jobName}: ${JSON.stringify(overrides)}`);
+      assert.equal(result.stderr.trim(), 'Untrusted rehearsal dispatch; protected jobs blocked');
+      assert.equal(result.stdout, '');
+    }
+  }
+});
+
+function laterStepRuns(step, priorSuccess, admissionOutcome) {
+  if (!Object.hasOwn(step, 'if')) return priorSuccess;
+  assert.equal(step.if, admittedEvidenceCondition, 'Only the structurally audited failure-path predicate is supported');
+  return admissionOutcome === 'success';
+}
+
+test('single-job reruns reject before every later step even when standalone admission previously succeeded', () => {
+  assertAdmissionOrdering(workflow);
+  assert.equal(runAdmission().status, 0, 'Cached standalone admission succeeded on attempt 1');
+  for (const jobName of ['positive', 'probes']) {
+    for (const attempt of ['2', '3', '17']) {
+      // Execute only the selected job, without re-executing its successful dependencies.
+      const result = runAdmission({ GITHUB_RUN_ATTEMPT: attempt }, jobName);
+      assert.equal(result.status, 1, `${jobName}: attempt ${attempt}`);
+      const outcome = result.status === 0 ? 'success' : 'failure';
+      const laterSteps = workflow.jobs[jobName].steps.slice(1)
+        .filter(step => laterStepRuns(step, result.status === 0, outcome));
+      assert.deepEqual(laterSteps, [], `${jobName}: no checkout, token, secret, probe or upload execution`);
+    }
+  }
+});
+
+test('admitted jobs still preserve evidence after a later failure, but failed or cancelled admission never uploads', () => {
+  for (const jobName of ['positive', 'probes']) {
+    const upload = workflow.jobs[jobName].steps.at(-1);
+    assert.equal(laterStepRuns(upload, false, 'success'), true);
+    for (const outcome of ['failure', 'cancelled', 'skipped', undefined]) {
+      assert.equal(laterStepRuns(upload, false, outcome), false);
+    }
   }
 });
 

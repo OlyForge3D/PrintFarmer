@@ -791,6 +791,17 @@ dispatches fail the run rather than skipping every job and appearing green.
 Admission performs no checkout or API requests and has no token permissions or
 environment secrets. Both protected jobs depend on admission and use the existing
 canonical `release-<channel>` owner gate; never widen environment branch policies.
+Because GitHub can rerun either protected job without rerunning admission, each
+also repeats the credential-free check as its first step, before checkout,
+third-party actions, App token creation or step-level credential exposure.
+Environment approval still precedes job startup; no environment secrets or
+tokens are passed to the pre-check. Artifact uploads require that job's admission
+to succeed, even on failure paths. A single-job rerun therefore fails locally
+without executing later steps, regardless of an earlier admission success.
+The three embedded JavaScript bodies must match the `rehearsalAdmissionSource`
+constant in `scripts/ci/release-rehearsal-admission.mjs` byte-for-byte; regression
+tests enforce source parity and step ordering. The constant preserves LF line
+endings across checkouts. Embedding avoids fetching code before admission.
 The workflow shares the channel's publication concurrency group and refuses
 active/pending publishers on either channel. Keep production dispatches paused
 throughout the window; any observed
