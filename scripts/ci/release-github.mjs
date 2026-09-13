@@ -91,11 +91,36 @@ export function publicLedger(state) {
   return projectedState;
 }
 
+export function githubRequestUrl(endpoint, method) {
+  requireThat(typeof endpoint === 'string' && !/[\r\n]/.test(endpoint), 'Invalid release API endpoint');
+  const reads = [
+    /^git\/ref\/heads\/(?:main|development|release-ledger)$/,
+    /^git\/ref\/tags\/v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:insider|beta|rc)\.[0-9]+)?$/,
+    /^git\/(?:commits|blobs|tags)\/[a-f0-9]{40}$/,
+    /^git\/trees\/[a-f0-9]{40}(?:\?recursive=1)?$/,
+    /^compare\/[a-f0-9]{40}\.\.\.[a-f0-9]{40}$/,
+    /^contents\/VERSION\?ref=[a-f0-9]{40}$/,
+    /^commits\/[a-f0-9]{40}\/check-runs\?per_page=100$/,
+    /^rules\/branches\/(?:main|development)$/,
+    /^environments\/release-(?:stable|insider)(?:\/deployment-branch-policies)?$/,
+    /^rulesets(?:\/[1-9][0-9]*|\?per_page=100)$/,
+  ];
+  requireThat((method === 'GET' && reads.some(pattern => pattern.test(endpoint))) ||
+    (method === 'POST' && ['git/blobs', 'git/trees', 'git/commits', 'git/tags', 'git/refs'].includes(endpoint)) ||
+    (method === 'PATCH' && endpoint === 'git/refs/heads/release-ledger'),
+  'Release API route or method is not allowlisted');
+  if (endpoint.startsWith('git/ref/tags/')) parseTag(endpoint.slice('git/ref/tags/'.length));
+  const [path, query] = endpoint.split('?');
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  const search = query ? `?${new URLSearchParams(query)}` : '';
+  return `https://api.github.com/repos/${repository}/${encodedPath}${search}`;
+}
+
 export function githubClient(token = process.env.GH_TOKEN) {
   requireThat(token, 'Missing GitHub credential');
   return async (endpoint, method = 'GET', body) => {
-    const response = await fetch(`https://api.github.com/repos/${repository}/${endpoint}`, {
-      method, headers: {
+    const response = await fetch(githubRequestUrl(endpoint, method), {
+      method, redirect: 'error', headers: {
         Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
         ...(body ? { 'Content-Type': 'application/json' } : {}),
@@ -112,18 +137,23 @@ export function githubClient(token = process.env.GH_TOKEN) {
 }
 
 export async function branchHead(api, branch) {
-  return (await api(`git/ref/heads/${branch}`)).object.sha;
+  requireThat(['main', 'development', ledgerBranch].includes(branch), 'Invalid release branch');
+  const sha = (await api(`git/ref/heads/${branch}`)).object.sha;
+  requireString(sha, shaPattern, 'release branch head');
+  return sha;
 }
 
 export async function readVersion(api, sha) {
-  const file = await api(`contents/VERSION?ref=${sha}`);
+  requireString(sha, shaPattern, 'VERSION commit');
+  const file = await api(`contents/VERSION?ref=${encodeURIComponent(sha)}`);
   requireThat(file.encoding === 'base64', 'VERSION response is not a file');
   return Buffer.from(file.content, 'base64').toString('utf8');
 }
 
 export async function readTag(api, tag) {
+  parseTag(tag);
   let ref;
-  try { ref = await api(`git/ref/tags/${tag}`); }
+  try { ref = await api(`git/ref/tags/${encodeURIComponent(tag)}`); }
   catch (error) { if (error.status === 404) return undefined; throw error; }
   const object = ref.object.sha;
   let peeled = ref.object;
@@ -290,27 +320,27 @@ export async function ensureSourceTag(api, store, record, transact) {
   };
   // Reserve the annotated object in the ledger BEFORE creating its public ref.
   await transact(store, async state => {
-    preflight(state);
+    const authorized = preflight(state).record;
     const entry = state.reservations[record.allocationKey];
     if (entry.tagObject) return;
-    requireThat(!await readTag(api, record.sourceTag), 'Existing tag has no immutable authorization');
+    requireThat(!await readTag(api, authorized.sourceTag), 'Existing tag has no immutable authorization');
     const tag = await api('git/tags', 'POST', {
-      tag: record.sourceTag, object: record.sourceCommit, type: 'commit',
-      message: JSON.stringify(publicAuthorization(record)),
-      tagger: { name: 'PrintFarmer Release', email: 'release@users.noreply.github.com', date: record.created },
+      tag: authorized.sourceTag, object: authorized.sourceCommit, type: 'commit',
+      message: JSON.stringify(publicAuthorization(authorized)),
+      tagger: { name: 'PrintFarmer Release', email: 'release@users.noreply.github.com', date: authorized.created },
     });
     entry.tagObject = tag.sha;
   });
   const { state } = await store.read();
   const entry = preflight(state);
   const expected = entry.tagObject;
-  const actual = await readTag(api, record.sourceTag);
+  const actual = await readTag(api, entry.record.sourceTag);
   requireThat(!entry.tagPublished || actual,
     'Previously published tag was deleted; never recreate it');
   if (!actual) {
-    await api('git/refs', 'POST', { ref: `refs/tags/${record.sourceTag}`, sha: expected });
+    await api('git/refs', 'POST', { ref: `refs/tags/${entry.record.sourceTag}`, sha: expected });
   }
-  verifyTag(record, expected, await readTag(api, record.sourceTag));
+  verifyTag(record, expected, await readTag(api, entry.record.sourceTag));
   await transact(store, state => { state.reservations[record.allocationKey].tagPublished = true; });
 }
 

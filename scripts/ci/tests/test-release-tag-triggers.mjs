@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import test from 'node:test';
@@ -9,14 +9,14 @@ import {
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence, hotfixReasonDigest, ReleasePolicyError,
   validateRecord,
 } from '../release-policy.mjs';
-import { ensureSourceTag, githubClient, gitLedger, publicLedger, publicLedgerFields, readTag, verifyProtection,
+import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedger, publicLedgerFields, readTag, readVersion, verifyProtection,
   verifyStableQualification } from '../release-github.mjs';
 import { buildMetadata, emitBuildIdentity } from '../release-metadata.mjs';
 import { runContext, runReleaseControl, output } from '../release-control.mjs';
 import { inspectCompleteSet, publishImmutableTags } from '../release-set.mjs';
 import {
   authorizationPath, authorizationBundle, privateSetPath, publicAuthorization, verifyAuthorization,
-  writeAuthorization, writeAuthorizationSet, writePublicSet, emitPublicReleaseAssets,
+  writeAuthorization, writeAuthorizationSet, writePublicSet, emitPublicReleaseAssets, readPrivateJson,
 } from '../release-authorization.mjs';
 import { publicIdentity, publicIdentityFields } from '../../../src/Web/ReactApp/public-release-identity.mjs';
 
@@ -131,6 +131,142 @@ function memoryStore(initial = state()) {
   };
 }
 
+test('release API client permits only canonical repository routes and rejects redirects', async () => {
+  const prefix = 'https://api.github.com/repos/OlyForge3D/PrintFarmer/';
+  for (const [endpoint, method] of [
+    [`contents/VERSION?ref=${sha}`, 'GET'], [`git/ref/tags/v1.2.3-insider.1`, 'GET'],
+    [`git/trees/${sha}?recursive=1`, 'GET'], [`compare/${sha}...${newerSha}`, 'GET'],
+    ['rulesets/123', 'GET'], ['rulesets?per_page=100', 'GET'],
+    ['environments/release-stable/deployment-branch-policies', 'GET'],
+    ['git/refs', 'POST'], ['git/refs/heads/release-ledger', 'PATCH'],
+  ]) assert.equal(githubRequestUrl(endpoint, method), `${prefix}${endpoint}`);
+  const previous = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(undefined, { status: 204 });
+  };
+  try {
+    const api = githubClient('fixture-token');
+    for (const endpoint of [
+      'https://attacker.invalid/upload', '//attacker.invalid/upload', '../other/repo/git/refs',
+      'git/refs/../../releases', 'git/ref/tags/../../main', 'git/ref/tags/%2e%2e%2fmain',
+      'git/ref/tags/v01.2.3', 'git/ref/tags/ios/v1.0-beta.1', `git/commits/${sha}\n`,
+      `contents/VERSION?ref=${sha}&path=private`, `git/trees/${sha}?recursive=2`,
+      `git/commits/${sha}#fragment`, `git\\commits\\${sha}`, 'git/ref/heads/feature',
+      'rulesets/0', 'rulesets/01', 'rulesets?per_page=100&page=2', 'releases',
+    ]) await assert.rejects(api(endpoint), ReleasePolicyError, endpoint);
+    for (const method of ['DELETE', 'PUT', 'PATCH', 'POST', 'GET\r\n']) {
+      await assert.rejects(api(`git/commits/${sha}`, method), ReleasePolicyError);
+    }
+    for (const value of ['../main', `${sha}\n`, `${sha}?ref=main`, sha.slice(1)]) {
+      await assert.rejects(readVersion(api, value), ReleasePolicyError);
+    }
+    for (const value of ['../main', 'v1.2.3?ref=main', 'v1.2.3\n']) {
+      await assert.rejects(readTag(api, value), ReleasePolicyError);
+    }
+    assert.deepEqual(calls, [], 'Rejected input must not reach the network');
+    await api(`git/commits/${sha}`);
+    assert.equal(calls[0].url, `${prefix}git/commits/${sha}`);
+    assert.equal(calls[0].options.redirect, 'error', 'Never follow a response to an unapproved destination');
+  } finally {
+    globalThis.fetch = previous;
+  }
+});
+
+test('workflow outputs require a runner-owned regular command file and single-line framing', () => {
+  const root = resolve('.artifacts', `output-boundary-${process.pid}`);
+  const runner = resolve(root, 'runner');
+  const directory = resolve(runner, '_runner_file_commands');
+  const filename = 'set_output_00000000-0000-0000-0000-000000000000';
+  const target = resolve(directory, filename);
+  const sentinel = resolve(root, filename);
+  const previous = { output: process.env.GITHUB_OUTPUT, runner: process.env.RUNNER_TEMP };
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(target, '');
+  writeFileSync(sentinel, 'untouched');
+  process.env.RUNNER_TEMP = runner;
+  process.env.GITHUB_OUTPUT = target;
+  try {
+    output('source_sha', sha);
+    output('labels', 'one=two\\nthree=four');
+    assert.equal(readFileSync(target, 'utf8'), `source_sha=${sha}\nlabels=one=two\\nthree=four\n`);
+    for (const name of ['bad\nname', 'bad\rname', 'name=value', 'name<<EOF', '../name', '']) {
+      assert.throws(() => output(name, 'value'), ReleasePolicyError);
+    }
+    for (const value of ['line\ninjected=yes', 'line\rinjected=yes', '\r\n']) {
+      assert.throws(() => output('value', value), ReleasePolicyError);
+    }
+    const original = readFileSync(target, 'utf8');
+    for (const path of [sentinel, `relative-${filename}`, `${target}\n`, resolve(directory, 'arbitrary.txt'),
+      resolve(directory, 'set_output_------------------------------------'),
+      `${directory}\\..\\..\\${filename}`]) {
+      process.env.GITHUB_OUTPUT = path;
+      assert.throws(() => output('value', 'blocked'));
+    }
+    process.env.GITHUB_OUTPUT = target;
+    delete process.env.RUNNER_TEMP;
+    assert.throws(() => output('value', 'blocked'), ReleasePolicyError);
+    process.env.RUNNER_TEMP = runner;
+    assert.equal(readFileSync(target, 'utf8'), original);
+    rmSync(target);
+    linkSync(sentinel, target);
+    assert.throws(() => output('value', 'blocked'), /single-link/);
+    assert.equal(readFileSync(sentinel, 'utf8'), 'untouched');
+    rmSync(target);
+    rmSync(directory, { recursive: true });
+    symlinkSync(root, directory, process.platform === 'win32' ? 'junction' : 'dir');
+    assert.throws(() => output('value', 'blocked'), /destination/);
+    assert.equal(readFileSync(sentinel, 'utf8'), 'untouched');
+    delete process.env.GITHUB_OUTPUT;
+    assert.doesNotThrow(() => output('value', 'local execution'));
+  } finally {
+    if (previous.output === undefined) delete process.env.GITHUB_OUTPUT;
+    else process.env.GITHUB_OUTPUT = previous.output;
+    if (previous.runner === undefined) delete process.env.RUNNER_TEMP;
+    else process.env.RUNNER_TEMP = previous.runner;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('authorization artifacts reject traversal, linked directories and hardlinked destinations', () => {
+  const identity = record();
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `artifact-boundary-${process.pid}`);
+  const outside = resolve(root, 'outside');
+  const workspace = resolve(root, 'workspace');
+  mkdirSync(outside, { recursive: true });
+  mkdirSync(workspace);
+  const sentinel = resolve(outside, 'sentinel.json');
+  writeFileSync(sentinel, 'untouched');
+  process.chdir(workspace);
+  try {
+    for (const path of ['../outside/sentinel.json', sentinel, 'release-identity.json']) {
+      assert.throws(() => readPrivateJson(path), /Invalid authorization source/);
+    }
+    symlinkSync(outside, '.artifacts', process.platform === 'win32' ? 'junction' : 'dir');
+    assert.throws(() => writeAuthorization(identity), /directory must not be linked/);
+    assert.deepEqual(readdirSync(outside), ['sentinel.json']);
+    rmSync('.artifacts', { recursive: true });
+    mkdirSync('.artifacts');
+    symlinkSync(outside, '.artifacts/release-authorization', process.platform === 'win32' ? 'junction' : 'dir');
+    assert.throws(() => writeAuthorization(identity), /directory must not be linked/);
+    rmSync('.artifacts/release-authorization', { recursive: true });
+    mkdirSync('.artifacts/release-authorization');
+    linkSync(sentinel, authorizationPath);
+    assert.throws(() => writeAuthorization(identity), /single-link/);
+    assert.equal(readFileSync(sentinel, 'utf8'), 'untouched');
+    rmSync(authorizationPath);
+    writeAuthorization(identity);
+    assert.equal(readFileSync(authorizationPath, 'utf8'), JSON.stringify(identity));
+    writeAuthorization(identity);
+    assert.equal(readFileSync(authorizationPath, 'utf8'), JSON.stringify(identity), 'Retries preserve signed bytes');
+  } finally {
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('strict canonical grammar accepts beta/RC and rejects every malformed numeric form', () => {
   assert.equal(runContext({ RELEASE_STAGE: 'none' }).stage, undefined);
   assert.equal(runContext({ RELEASE_STAGE: 'rc' }).stage, 'rc');
@@ -143,6 +279,7 @@ test('strict canonical grammar accepts beta/RC and rejects every malformed numer
     assert.throws(() => parseTag(tag), tag);
   }
   assert.equal(parseVersionFile('v1.2.3\r\n'), '1.2.3');
+  assert.equal(parseVersionFile('v900719925474099300000.2.3\n'), '900719925474099300000.2.3');
   for (const text of [' v1.2.3\n', 'v1.2.3 \n', 'v1.2.3\n\n', 'v1.2.3-insider.1\n']) {
     assert.throws(() => parseVersionFile(text));
   }
@@ -785,13 +922,66 @@ test('workflow entry points have no direct tag/manual Docker bypass; iOS namespa
   }
 });
 
+function shellCommands(source) {
+  const commands = [];
+  let tokens = [];
+  let token = '';
+  let started = false;
+  let quote;
+  const flushToken = () => {
+    if (started) tokens.push(token);
+    token = '';
+    started = false;
+  };
+  const flushCommand = () => {
+    flushToken();
+    if (tokens.length) commands.push(tokens);
+    tokens = [];
+  };
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index];
+    if (char === '\n') {
+      quote = undefined;
+      flushCommand();
+    } else if (char === '\\' && quote !== "'" && index + 1 < source.length) {
+      token += source[++index];
+      started = true;
+    } else if (quote) {
+      if (char === quote) quote = undefined;
+      else token += char;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+      started = true;
+    } else if (';&|'.includes(char) || (char === '$' && source[index + 1] === '(')) {
+      flushCommand();
+      if (char === '$') index++;
+    } else if (/\s/.test(char)) {
+      flushToken();
+    } else {
+      token += char;
+      started = true;
+    }
+  }
+  flushCommand();
+  return commands;
+}
+
 function releaseWriteKinds(text) {
   const source = text.replace(/^\s*(?:#|\/\/).*$/gm, '').replace(/\\\r?\n\s*/g, ' ');
   const kinds = [];
-  if (/(?:^|[;&|]|\$\()\s*(?:if\s+)?git\s+(?:(?:-C|-c)\s+(?:"[^"]*"|'[^']*'|\S+)\s+)*push\b[^\n]*(?:--force\b|--force-with-lease\b|(?:^|\s)-f\b|\s["']?\+)/m.test(source)) {
+  const gitCommands = shellCommands(source).flatMap(tokens => {
+    let index = tokens[0] === 'if' ? 1 : 0;
+    if (tokens[index++] !== 'git') return [];
+    while (['-C', '-c'].includes(tokens[index]) && index + 1 < tokens.length) index += 2;
+    return [tokens.slice(index)];
+  });
+  if (gitCommands.some(([command, ...args]) => command === 'push' && args.some(arg =>
+    ['--force', '-f'].includes(arg) || arg.split('=')[0] === '--force-with-lease' || arg.startsWith('+')))) {
     kinds.push('force-push');
   }
-  if (/(?:^|[;&|]|\$\()\s*(?:if\s+)?git\s+(?:(?:-C|-c)\s+(?:"[^"]*"|'[^']*'|\S+)\s+)*tag\s+(?!-(?:l|d|v)\b|--(?:list|delete|verify|sort|contains|points-at)\b)[^\n]+/m.test(source) ||
+  if (gitCommands.some(([command, first]) => command === 'tag' && first !== undefined &&
+    !['-l', '-d', '-v', '--list', '--delete', '--verify', '--sort', '--contains', '--points-at']
+      .includes(first.split('=')[0])) ||
     /(?:execFile(?:Sync)?|spawn(?:Sync)?|command)\(\s*['"]git['"]\s*,\s*\[\s*['"]tag['"]\s*,\s*(?!['"](?:-l|-d|-v|--list|--delete|--verify|--sort)\b)/.test(source) ||
     /(?:createRef|createTag|create_git_ref|create_git_tag)\s*\(/.test(source) ||
     /['"`]git\/(?:refs|tags)['"`]\s*,\s*['"]POST['"]/.test(source)) {
@@ -818,6 +1008,8 @@ function releaseWriteKinds(text) {
 test('release-writer scanner detects literal, variable, multiline, force-ref and API bypass forms', () => {
   for (const source of [
     'git tag v1.2.3', 'git tag "$NEW_VERSION"', 'git -C "$ROOT" tag -a "$TAG" -m release',
+    'git -c "custom.value=;|&" -C "a b" tag "$TAG"', 'if git -C "" tag "$TAG"; then true; fi',
+    '$(git -C "$ROOT" tag "$TAG")', 'git -C a\\ b push origin --force',
     'git tag \\\n "$VERSION"', 'git tag -f "$MARKER"',
     'execFileSync("git", ["tag", version])',
     'git push origin main --force', 'git push --force-with-lease origin main',
@@ -841,6 +1033,15 @@ test('release-writer scanner detects literal, variable, multiline, force-ref and
     'curl -s "https://api.github.com/repos/$REPO/releases"\ncurl -X PUT "https://api.github.com/orgs/$OWNER/packages/container/$NAME/visibility"',
     '# git tag "$VERSION"\n// gh release create version',
   ]) assert.deepEqual(releaseWriteKinds(source), [], source);
+});
+
+test('release-writer scanner handles long option prefixes without backtracking', () => {
+  const prefix = `&git ${'-C "" -c \'a=b\' '.repeat(20_000)}`;
+  assert.deepEqual(releaseWriteKinds(`${prefix}status`), []);
+  assert.deepEqual(releaseWriteKinds(`${prefix}tag --list`), []);
+  assert.deepEqual(releaseWriteKinds(`${prefix}tag -a "$TAG" -m release`), ['tag-write']);
+  assert.deepEqual(releaseWriteKinds(`${prefix}push origin "+HEAD:main"`), ['force-push']);
+  assert.deepEqual(releaseWriteKinds(`${prefix}push --force-with-lease=main:abc origin main`), ['force-push']);
 });
 
 test('all executable scripts, actions and workflows have only the reviewed release writers and no force pushes', t => {
@@ -1493,7 +1694,7 @@ function protectionFixture(channel = 'insider') {
   const branch = channel === 'stable' ? 'main' : 'development';
   const names = ['release-canonical-tags', 'release-ledger-continuity', 'release-tag-creators', 'release-ledger-writer'];
   const rulesets = names.map((name, id) => ({
-    id, name, enforcement: 'active', privateMarker: 'raw-policy-sentinel',
+    id: id + 1, name, enforcement: 'active', privateMarker: 'raw-policy-sentinel',
     target: id % 2 === 0 ? 'tag' : 'branch',
     conditions: { ref_name: { include: [id % 2 === 0 ? 'refs/tags/v*' : 'refs/heads/release-ledger'], exclude: [] } },
     bypass_actors: id < 2 ? [] : [{ actor_type: 'Integration', actor_id: 123 }],
@@ -1514,7 +1715,7 @@ function protectionFixture(channel = 'insider') {
     if (endpoint === `environments/release-${channel}`) return environment;
     if (endpoint.endsWith('/deployment-branch-policies')) return { branch_policies: [{ name: branch, type: 'branch' }] };
     if (endpoint === 'rulesets?per_page=100') return rulesets;
-    if (endpoint.startsWith('rulesets/')) return rulesets[Number(endpoint.split('/')[1])];
+    if (endpoint.startsWith('rulesets/')) return rulesets.find(rule => rule.id === Number(endpoint.split('/')[1]));
     throw new Error(endpoint);
   };
   return { api, environment, rulesets };
@@ -2275,11 +2476,16 @@ test('actual control flow keeps github.token read-only and requires App verifica
   const originalFetch = globalThis.fetch;
   const cwd = process.cwd();
   const previousOutput = process.env.GITHUB_OUTPUT;
+  const previousRunner = process.env.RUNNER_TEMP;
   const root = resolve('.artifacts', `authorization-${process.pid}`);
   mkdirSync(root, { recursive: true });
   globalThis.fetch = fixture.fetch;
   process.chdir(root);
-  process.env.GITHUB_OUTPUT = resolve('workflow-output.txt');
+  process.env.RUNNER_TEMP = resolve('runner');
+  mkdirSync(resolve('runner', '_runner_file_commands'), { recursive: true });
+  process.env.GITHUB_OUTPUT = resolve('runner', '_runner_file_commands',
+    'set_output_00000000-0000-0000-0000-000000000000');
+  writeFileSync(process.env.GITHUB_OUTPUT, '');
   const verify = (file, args) => {
     assert.equal(file, 'cosign');
     assert.deepEqual(args, ['verify-blob', '--bundle', authorizationBundle,
@@ -2304,7 +2510,7 @@ test('actual control flow keeps github.token read-only and requires App verifica
     fixture.calls.length = 0;
     await runReleaseControl('authorize', fixture.env);
     const identity = JSON.parse(readFileSync(authorizationPath, 'utf8'));
-    verifyProtectionEvidence(identity.protection, 'insider', '123');
+    verifyProtectionEvidence(identity.protection, 'insider');
     const firstWrite = fixture.calls.findIndex(call => call.method !== 'GET');
     const adminCalls = fixture.calls.filter(call => call.admin);
     assert.ok(adminCalls.length >= 8 && adminCalls.every(call => call.publisher));
@@ -2351,6 +2557,8 @@ test('actual control flow keeps github.token read-only and requires App verifica
   } finally {
     if (previousOutput === undefined) delete process.env.GITHUB_OUTPUT;
     else process.env.GITHUB_OUTPUT = previousOutput;
+    if (previousRunner === undefined) delete process.env.RUNNER_TEMP;
+    else process.env.RUNNER_TEMP = previousRunner;
     process.chdir(cwd);
     globalThis.fetch = originalFetch;
     rmSync(root, { recursive: true, force: true });
@@ -2372,7 +2580,7 @@ test('missing, malformed and weakened signed protection evidence always fails cl
     mutate(invalid);
     assert.throws(() => verifyProtectionEvidence(invalid, 'insider'));
   }
-  assert.throws(() => verifyProtectionEvidence(undefined, 'insider', '123'), /Missing/);
+  assert.throws(() => verifyProtectionEvidence(undefined, 'insider'), /Missing/);
   const ledger = state();
   const identity = record(ledger);
   delete identity.protection;

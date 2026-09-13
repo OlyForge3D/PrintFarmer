@@ -1,4 +1,5 @@
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, closeSync, constants, fstatSync, lstatSync, openSync, realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   admit, advance, hash, requireThat, reserve, transact, verifyConsumer, verifyTag,
   identityLabels, parseTag, verifyProtectionEvidence, validateReservationAdmission,
@@ -27,8 +28,31 @@ export function runContext(env = process.env) {
 }
 
 export function output(name, value) {
-  requireThat(!/[\r\n]/.test(String(value)), 'Multiline workflow output rejected');
-  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
+  requireThat(typeof name === 'string' && /^[a-z][a-z0-9_]*$/.test(name) && !/[\r\n]/.test(name),
+    'Invalid workflow output name');
+  const text = String(value);
+  requireThat(!/[\r\n]/.test(text), 'Multiline workflow output rejected');
+  const path = process.env.GITHUB_OUTPUT;
+  if (!path) return;
+  const runner = process.env.RUNNER_TEMP;
+  requireThat(runner && isAbsolute(runner) && isAbsolute(path), 'Invalid runner output destination');
+  const directory = join(realpathSync(runner), '_runner_file_commands');
+  requireThat(dirname(resolve(path)) === directory && realpathSync(dirname(path)) === directory &&
+    /^set_output_[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(basename(path)) &&
+    path === resolve(path) && !/[\r\n]/.test(path),
+  'Invalid runner output destination');
+  const expected = lstatSync(path);
+  requireThat(expected.isFile() && !expected.isSymbolicLink() && expected.nlink === 1,
+    'Runner output must be an existing single-link regular file');
+  const descriptor = openSync(path, constants.O_WRONLY | constants.O_APPEND | constants.O_NOFOLLOW);
+  try {
+    const actual = fstatSync(descriptor);
+    requireThat(actual.isFile() && actual.nlink === 1 && actual.dev === expected.dev && actual.ino === expected.ino,
+      'Runner output file changed');
+    appendFileSync(descriptor, `${name}=${text}\n`);
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 export async function runReleaseControl(operation, env = process.env, verify = command) {
@@ -56,7 +80,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       requireThat(matching[0]?.conclusion === 'success', `Missing successful exact-SHA qualification: ${required}`);
     }
     requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift before authorization');
-    output('source_sha', selectedHead);
+    output('source_sha', context.eventSha);
     output('channel', admission.channel);
     if (operation === 'admit') return;
     const protection = await verifyProtection(api, admission.channel, env.RELEASE_PUBLISHER_APP_ID);
@@ -92,9 +116,10 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   verifyProtectionEvidence(record.protection, record.channel);
   requireThat(Date.parse(record.protection.verifiedAt) <= Date.parse(record.created),
     'Protection evidence postdates authorization');
-  verifyTag(record, entry.tagObject, await readTag(api, record.sourceTag));
+  // Consumer verification binds these public ledger references to the signed artifact.
+  verifyTag(record, entry.tagObject, await readTag(api, entry.record.sourceTag));
   requireThat(parseTag(record.sourceTag).baseVersion ===
-    (await readVersion(api, record.sourceCommit)).replace(/\r?\n$/, '').slice(1), 'Source VERSION changed');
+    (await readVersion(api, entry.record.sourceCommit)).replace(/\r?\n$/, '').slice(1), 'Source VERSION changed');
   if (operation === 'consume') {
     emitBuildIdentity(record);
     output('version', record.sourceTag);

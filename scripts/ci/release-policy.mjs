@@ -59,8 +59,9 @@ export function parseVersionFile(text) {
   // Permit the text-file final newline, not arbitrary whitespace normalization.
   requireThat(typeof text === 'string', 'Invalid VERSION content');
   const tag = text.replace(/\r?\n$/, '');
-  requireThat(!parseTag(tag).stage, 'VERSION must contain only vX.Y.Z');
-  return tag.slice(1);
+  const { major, minor, patch, stage } = parseTag(tag);
+  requireThat(!stage, 'VERSION must contain only vX.Y.Z');
+  return `${BigInt(major)}.${BigInt(minor)}.${BigInt(patch)}`;
 }
 
 export function compareVersions(left, right) {

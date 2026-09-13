@@ -1,5 +1,8 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import {
+  closeSync, constants, fchmodSync, fstatSync, ftruncateSync, lstatSync,
+  mkdirSync, openSync, readFileSync, writeFileSync,
+} from 'node:fs';
+import { join } from 'node:path';
 import {
   requireThat, validateCompleteSet, validateRecord, publicAuthorization, validatePublicAuthorization, writePublicSet,
 } from './release-policy.mjs';
@@ -10,6 +13,34 @@ export const authorizationPath = `${authorizationDirectory}/release-identity.jso
 export const authorizationBundle = `${authorizationDirectory}/release-identity.bundle.json`;
 export const privateSetPath = `${authorizationDirectory}/release-set.json`;
 
+function writeAuthorizationFile(path, content) {
+  requireThat([authorizationPath, privateSetPath, 'release-identity.json',
+    `${authorizationDirectory}/public-identity.json`].includes(path), 'Invalid authorization destination');
+  if (path !== 'release-identity.json') {
+    for (const directory of ['.artifacts', authorizationDirectory]) {
+      if (!lstatSync(directory, { throwIfNoEntry: false })) mkdirSync(directory, { mode: 0o700 });
+      const info = lstatSync(directory);
+      requireThat(info.isDirectory() && !info.isSymbolicLink(), 'Authorization directory must not be linked');
+    }
+  }
+  const previous = lstatSync(path, { throwIfNoEntry: false });
+  requireThat(!previous || (previous.isFile() && !previous.isSymbolicLink() && previous.nlink === 1),
+    'Authorization destination must be a single-link regular file');
+  const mode = path === 'release-identity.json' ? 0o644 : 0o600;
+  const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW, mode);
+  try {
+    const actual = fstatSync(descriptor);
+    requireThat(actual.isFile() && actual.nlink === 1 &&
+      (!previous || (actual.ino === previous.ino && actual.dev === previous.dev)),
+    'Authorization destination changed');
+    fchmodSync(descriptor, mode);
+    ftruncateSync(descriptor, 0);
+    writeFileSync(descriptor, content);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 export function validateAuthorizationRecord(record) {
   validateRecord(record);
 }
@@ -17,10 +48,9 @@ export function validateAuthorizationRecord(record) {
 export function writeAuthorization(record) {
   validateAuthorizationRecord(record);
   const projection = JSON.stringify(publicAuthorization(record));
-  mkdirSync(dirname(authorizationPath), { recursive: true, mode: 0o700 });
-  writeFileSync(authorizationPath, JSON.stringify(record), { mode: 0o600 });
-  writeFileSync('release-identity.json', projection);
-  writeFileSync(`${authorizationDirectory}/public-identity.json`, projection);
+  writeAuthorizationFile(authorizationPath, JSON.stringify(record));
+  writeAuthorizationFile('release-identity.json', projection);
+  writeAuthorizationFile(`${authorizationDirectory}/public-identity.json`, projection);
 }
 
 export function verifyAuthorization(env, run) {
@@ -51,6 +81,7 @@ export function readPrivateAuthorization() {
 }
 
 export function readPrivateJson(path) {
+  requireThat([authorizationPath, privateSetPath].includes(path), 'Invalid authorization source');
   try { return JSON.parse(readFileSync(path, 'utf8')); }
   catch { throw new Error('Private authorization unavailable or malformed'); }
 }
@@ -59,7 +90,7 @@ export function writeAuthorizationSet(record, set) {
   validateAuthorizationRecord(record);
   validateCompleteSet(record, set);
   const normalized = { ...writePublicSet(record, set), identity: record };
-  writeFileSync(privateSetPath, JSON.stringify(normalized), { mode: 0o600 });
+  writeAuthorizationFile(privateSetPath, JSON.stringify(normalized));
 }
 
 export function emitPublicReleaseAssets(record, set, root = '.') {

@@ -61,7 +61,8 @@ test('one emulator image retains four hardened instances and no live offline lis
   assert.match(emulator, /read_only: true/);
   assert.match(emulator, /cap_drop:\s*\n\s*- ALL/);
   assert.match(emulator, /target: moonraker-emulator-runtime/);
-  assert.doesNotMatch(emulator, /^\s+ports:|cap_add:|\/var\/run\/docker\.sock/m);
+  assert.doesNotMatch(emulator, /^\s+(?:ports|cap_add):/m);
+  assert.ok(!emulator.includes('/var/run/docker.sock'));
   assert.doesNotMatch(validation, /^\s{2}moonraker-offline:/m);
   assert.match(emulator, /MOONRAKER_EMULATOR_ENABLE_CONTROL_API:-false/);
 });

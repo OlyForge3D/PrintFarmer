@@ -126,6 +126,23 @@ it. Attempt-scoped artifacts and `.artifacts/release-authorization/` contain onl
 these public-readable records and bundles; the directory remains excluded from
 Git and Docker contexts.
 
+Artifact writers use fixed, allowlisted paths and reject linked directories,
+symlinks, hardlinks and non-regular output files before truncation. Workflow
+outputs are single-line, valid-name records appended only to the existing
+`set_output_<UUID>` command file under the trusted runner's
+`RUNNER_TEMP/_runner_file_commands` directory; local runs without `GITHUB_OUTPUT`
+do not emit a command file. Output destinations must not be supplied by release
+inputs or downloaded artifacts.
+
+GitHub requests use only allowlisted methods and repository-relative routes
+under `https://api.github.com/repos/OlyForge3D/PrintFarmer/`, encode path
+components, and reject redirects. Commit references require full lowercase
+SHA-1 values and tags require the canonical release grammar. After signature
+and consumer verification, outbound references come from the matching public
+ledger entry, not directly from the downloaded authorization JSON. VERSION
+components are parsed as arbitrary-precision integers before constructing the
+canonical version; the strict grammar still rejects leading zeros.
+
 Workflow inputs/outputs, release assets, ledger reservations, tag annotations
 and frontend metadata still use **only the public projection** and its
 `identitySha256`, not the attestation. Every consuming job downloads its own
