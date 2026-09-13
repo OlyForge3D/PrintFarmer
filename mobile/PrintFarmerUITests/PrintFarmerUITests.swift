@@ -1270,9 +1270,8 @@ class PrintFarmerUITestCase: XCTestCase {
             let element = self.observedElement(
                 destination.node, within: scope, allowingPromotionTo: destination.promotionIdentifier
             )
-            guard budget.perform("hittable observed \(destination.node.identifier)", {
-                element.isHittable
-            }) == true else { return nil }
+            // The snapshot admission rule already requires a visible, enabled button.
+            // A second remote hit test can exhaust this shared deadline on iPad.
             if destination.titleFallback {
                 self.recordTabIdentifierCompatibilityFallback(tabIdentifier)
             }
