@@ -27,6 +27,8 @@ import {
 import { formatFileSize } from '@/common/utils/stlFileUtils';
 import { apiClient } from '@/services/api';
 import { SystemServiceHealth, type SystemInfo } from '@/types/api';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+import { ServiceVersionsTable } from '@/features/system/components/ServiceVersionsTable';
 
 const EMPTY_VALUE = '—';
 const SYSTEM_INFO_QUERY_KEY = ['system-info'];
@@ -216,12 +218,19 @@ function renderServicesTable(systemInfo: SystemInfo) {
 }
 
 export function SystemStatusPage() {
+  const { hasPermission } = useAuth();
+  const canViewInventory = hasPermission('system_settings', 'admin');
   const { data, error, isFetching, isLoading, refetch, dataUpdatedAt } = useQuery({
     queryKey: SYSTEM_INFO_QUERY_KEY,
     queryFn: () => apiClient.getSystemInfo(),
+    enabled: canViewInventory,
     refetchInterval: SYSTEM_INFO_REFRESH_INTERVAL_MS,
     staleTime: SYSTEM_INFO_REFRESH_INTERVAL_MS,
   });
+
+  if (!canViewInventory) {
+    return <Alert type="warning" title="Access denied">System settings admin permission is required.</Alert>;
+  }
 
   if (isLoading) {
     return (
@@ -236,7 +245,7 @@ export function SystemStatusPage() {
 
   if (error || !data) {
     return (
-      <Alert variant="error" title="Failed to load system status">
+      <Alert type="error" title="Failed to load system status">
         {getErrorMessage(error)}
       </Alert>
     );
@@ -266,8 +275,10 @@ export function SystemStatusPage() {
       </div>
 
       <p className="sr-only" aria-live="polite">
-        {isFetching ? 'Refreshing system status.' : 'System status is current.'}
+        {isFetching ? 'Refreshing system status.' : 'System snapshot loaded; review individual observation times.'}
       </p>
+
+      {data.inventory ? <ServiceVersionsTable inventory={data.inventory} /> : <Alert type="warning" title="Inventory unknown">This server does not report detailed service observations.</Alert>}
 
       <div className="grid gap-4 xl:grid-cols-2">
         <StatusCard
@@ -333,7 +344,7 @@ export function SystemStatusPage() {
 
         <StatusCard
           title="Services"
-          description="Version inventory and health state for the running service surface."
+          description="Background monitor health. Monitoring does not establish application build identity."
           icon={<WrenchIcon className="h-5 w-5" />}
           className="xl:col-span-2"
         >
@@ -348,7 +359,8 @@ export function SystemStatusPage() {
         >
           <dl className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
             <StatItem label="Engine" value={data.database.engine || EMPTY_VALUE} />
-            <StatItem label="Version" value={data.database.version || EMPTY_VALUE} />
+            <StatItem label="Engine version" value={data.database.version || EMPTY_VALUE} />
+            <StatItem label="Application migration head" value={data.database.migrationHeads?.join(', ') || 'Unknown'} />
             <StatItem label="Printers" value={formatCount(data.database.printerCount)} />
             <StatItem label="Archives" value={formatCount(data.database.archiveCount)} />
           </dl>

@@ -42,6 +42,8 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -98,6 +100,42 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     // =========================================================================
     // Start paths
     // =========================================================================
+
+    [Fact]
+    public async Task EmergencyStopMigration_UpgradeAndDowngradeRetainUncertainSenderEvidence()
+    {
+        await using AppDbContext db = CreateContext();
+        IMigrator migrator = db.GetService<IMigrator>();
+        const string previous = "20260912193436_FenceMotionEmergencyStops";
+        await migrator.MigrateAsync(previous);
+        var printer = new Printer { Id = Guid.NewGuid(), Name = "Migration evidence", Backend = (int)PrinterBackend.Moonraker };
+        var operation = new PrinterControlOperation
+        {
+            Id = Guid.NewGuid(), PrinterId = printer.Id, Kind = PrinterControlKind.HomeAll,
+            State = PrinterControlState.Recovering, ActorSubject = "migration-test", NormalizedIntent = "legacy",
+            FailureCode = "emergency_stop_outcome_unknown", SenderIsolation = PrinterSenderIsolation.Confirmed,
+            CreatedAtUtc = DateTime.UtcNow, UpdatedAtUtc = DateTime.UtcNow,
+        };
+        db.Printers.Add(printer);
+        db.PrinterControlOperations.Add(operation);
+        await db.SaveChangesAsync();
+        await migrator.MigrateAsync();
+        db.ChangeTracker.Clear();
+        operation = await db.PrinterControlOperations.SingleAsync();
+        operation.EmergencyStopInFlight.Should().BeTrue();
+        operation.EmergencyStopInFlight = false;
+        operation.FailureCode = "emergency_stop_requested";
+        db.PrinterEmergencyStopAttempts.Add(new PrinterEmergencyStopAttempt
+        {
+            Id = Guid.NewGuid(), OperationId = operation.Id, PrinterId = printer.Id,
+            ActorSubject = "migration-test", ConfigurationIdentity = "test",
+            Delivery = PrinterEmergencyStopDelivery.Unknown, CreatedAtUtc = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        await migrator.MigrateAsync(previous);
+        db.ChangeTracker.Clear();
+        (await db.PrinterControlOperations.SingleAsync()).EmergencyStopInFlight.Should().BeTrue();
+    }
 
     [Fact]
     public void ActorIdentity_InvalidNameIdentifierFallsBackToGuidSubject()
@@ -4903,6 +4941,45 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         QueueDispatchOutbox recovered = await verify.QueueDispatchOutbox.SingleAsync();
         recovered.Status.Should().Be(QueueOutboxEventStatus.Pending);
         recovered.RetryAfterUtc.Should().BeOnOrBefore(DateTime.UtcNow);
+    }
+
+    [Fact]
+    public async Task OutboxPublisher_MotionInvalidation_RedeliversOnlyToAuthorizedPrinterGroup()
+    {
+        var hint = new PrinterControlInvalidation(Guid.NewGuid(), Guid.NewGuid(), "opaque-revision");
+        var row = new QueueDispatchOutbox
+        {
+            Id = Guid.NewGuid(),
+            AggregateId = hint.OperationId,
+            PrinterId = hint.PrinterId,
+            EventType = PrinterControlOperationService.EventType,
+            PayloadJson = JsonSerializer.Serialize(hint, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            Status = QueueOutboxEventStatus.Processing,
+            AttemptCount = 1,
+        };
+        var proxy = new Mock<IClientProxy>();
+        proxy.SetupSequence(client => client.SendCoreAsync(
+                "printercontroloperationupdated", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IOException("Transport disconnected after delivery"))
+            .Returns(Task.CompletedTask);
+        var clients = new Mock<IHubClients>(MockBehavior.Strict);
+        clients.Setup(client => client.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(hint.PrinterId)))
+            .Returns(proxy.Object);
+        var hub = new Mock<IHubContext<PrinterHub>>();
+        hub.Setup(context => context.Clients).Returns(clients.Object);
+        await using ServiceProvider provider = new ServiceCollection().BuildServiceProvider();
+        using var publisher = new QueueOutboxPublisherService(provider.GetRequiredService<IServiceScopeFactory>(),
+            hub.Object, NullLogger<QueueOutboxPublisherService>.Instance);
+        await publisher.ProcessSingleEventAsync(row, default);
+        row.Status.Should().Be(QueueOutboxEventStatus.Pending);
+        await publisher.ProcessSingleEventAsync(row, default);
+        row.Status.Should().Be(QueueOutboxEventStatus.Published);
+        proxy.Verify(client => client.SendCoreAsync("printercontroloperationupdated",
+            It.Is<object?[]>(arguments => arguments.Length == 1 && Equals(arguments[0], hint)),
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
+        clients.Verify(client => client.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(hint.PrinterId)), Times.Exactly(2));
+        clients.VerifyNoOtherCalls();
+        proxy.VerifyNoOtherCalls();
     }
 
     [Fact]

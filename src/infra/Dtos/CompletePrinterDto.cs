@@ -62,4 +62,5 @@ public record CompletePrinterDto(
     bool UseModelDispatchDefaults = true,
 
     // Concurrency token for list consumers to guard mutations.
-    string? RowVersion = null);
+    string? RowVersion = null,
+    PrinterPhysicalControlDto? PhysicalControl = null);

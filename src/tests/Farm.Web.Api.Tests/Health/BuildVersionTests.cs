@@ -20,6 +20,13 @@ public class BuildVersionTests
     }
 
     [Fact]
+    public void Parse_CanonicalShaMarker_PreservesFullCommit()
+    {
+        string commit = new('a', 40);
+        Assert.Equal(("1.2.3-insider.10", commit), BuildVersion.Parse($"1.2.3-insider.10+sha.{commit}"));
+    }
+
+    [Fact]
     public void Parse_VersionWithCommit_SplitsOnFirstPlus()
     {
         (string version, string? commit) = BuildVersion.Parse("0.2.2+de53651");

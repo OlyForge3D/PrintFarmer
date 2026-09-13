@@ -1,5 +1,4 @@
-/* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useEffect, useState, ReactNode, useCallback, useRef } from 'react';
+import React, { useEffect, useState, ReactNode, useCallback, useRef } from 'react';
 import { getCurrentUser, login as authLogin, register as authRegister, logout as authLogout } from '@/services/api/authApi';
 import { UserDto, LoginRequest, RegisterRequest } from '@/types/api';
 import { loginWithPasskey as passkeyLogin } from '@/services/passkeyService';
@@ -8,11 +7,12 @@ import { clearSensitiveUserQueries } from '@/common/auth/sensitiveQueryCache';
 import { resetAuthenticatedSignalRSession } from '@/common/auth/authenticatedSignalRSession';
 import { subscribeToAuthenticationExpiration } from '@/common/auth/authenticationExpiration';
 import { AUTH_SESSION_ESTABLISHED_EVENT } from '@/services/authEvents';
-import type { AuthContextType } from './AuthContextValue';
+import type { AuthContextType } from '@/contexts/AuthContextValue';
 
 // AuthContextType now in separate file (AuthContextValue.ts) for faster refresh friendliness
 
-export const AuthContext = createContext<AuthContextType | undefined>(undefined);
+import { AuthContext } from '@/common/contexts/auth-context';
+export { AuthContext } from '@/common/contexts/auth-context';
 
 
 interface AuthProviderProps {

@@ -18,6 +18,9 @@ public enum SystemServiceHealth
 /// </summary>
 public record SystemInfoDto
 {
+    /// <summary>Detailed admin-only service/replica observations; additive for older clients.</summary>
+    public ServiceInventoryDto? Inventory { get; init; }
+
     /// <summary>Application metadata for the running API process.</summary>
     public required SystemAppInfoDto App { get; init; }
 
@@ -114,6 +117,9 @@ public record SystemServiceInfoDto
 /// </summary>
 public record SystemDatabaseInfoDto
 {
+    /// <summary>Applied application-context migration heads, not database engine versions.</summary>
+    public IReadOnlyList<string> MigrationHeads { get; init; } = [];
+
     /// <summary>Normalized database engine name.</summary>
     public required string Engine { get; init; }
 

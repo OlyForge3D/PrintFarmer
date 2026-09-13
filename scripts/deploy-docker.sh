@@ -3160,6 +3160,8 @@ load_previous_config() {
         # Source the config file to load variables
         # shellcheck disable=SC1090
         source "$CONFIG_FILE"
+        validate_deployment_network || exit 1
+        apply_discovery_override
         enforce_supported_orcaslicer_release
 
         # Explicit overrides win over persisted values.
@@ -4097,8 +4099,26 @@ configure_database() {
     esac
 }
 
+validate_deployment_network() {
+    case "${NETWORK_MODE:-bridge}" in
+        bridge) NETWORK_MODE=bridge ;;
+        *)
+            print_error "Only bridge networking is supported. Set NETWORK_MODE to bridge in the environment and saved deployment configuration."
+            return 1
+            ;;
+    esac
+}
+
+apply_discovery_override() {
+    if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "true" ]; then
+        INCLUDE_DISCOVERY=true
+        ENABLE_DISCOVERY=true
+    fi
+}
+
 # Configure networking
 configure_networking() {
+    validate_deployment_network || return 1
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${NETWORK_MODE:-}" ]; then
         print_info "Using configured network mode: $NETWORK_MODE"
@@ -4114,7 +4134,7 @@ configure_networking() {
     print_header "🌐 Network Configuration"
     
     # All services run on the docker bridge network for service discovery by hostname
-    # Printer discovery runs on host network to enable local network scanning
+    # Printer discovery uses routed TCP/HTTP probes on the application bridge.
     print_success "All services on bridge network with service discovery"
     NETWORK_MODE="bridge"
     print_info "API will be accessible at http://api:5245 within the docker network"
@@ -4889,9 +4909,6 @@ EOF
     esac
 
     # Write unified default connection string key consumed by Program.cs
-    # If we're deploying in host network mode, rewrite any Docker service hostnames
-    # (e.g., 'database', 'postgres', 'sqlserver') to 'localhost' so the
-    # API running in host network mode connects to the host services correctly.
     # Use the configured connection string as-is (bridge networking expected)
     CONNECTION_STRING_TO_WRITE="$CONNECTION_STRING"
     # IMPORTANT: Do NOT quote the connection string in the .env file - Docker Compose
@@ -4943,7 +4960,6 @@ AUTO_ADMIN_PASSWORD=$AUTO_ADMIN_PASSWORD
 ALLOW_LOCAL_NETWORK=$ALLOW_LOCAL_NETWORK
 ALLOWED_NETWORK_RANGES=$NETWORK_RANGES
 NETWORK_MODE=${NETWORK_MODE:-bridge}
-DOCKER_HOST_NETWORK=false
 
 # CORS Configuration
 CORS__AllowedOrigins=$CORS_ORIGINS
@@ -7400,6 +7416,8 @@ redeploy_existing() {
     capture_config_overrides
     # shellcheck disable=SC1090
     source "$CONFIG_FILE"
+    validate_deployment_network || exit 1
+    apply_discovery_override
     enforce_supported_orcaslicer_release
     restore_config_overrides
     if ! normalize_worker_configuration; then
@@ -7577,6 +7595,9 @@ main() {
         show_help
         # Function exits, so we never reach here
     fi
+
+    validate_deployment_network || exit 1
+    apply_discovery_override
     
     # Handle redeploy mode
     if [ "${REDEPLOY:-false}" = "true" ]; then
@@ -7603,6 +7624,8 @@ main() {
         capture_config_overrides
         # shellcheck disable=SC1090
         source "$CONFIG_FILE" || { print_error "Failed to load config"; exit 1; }
+        validate_deployment_network || exit 1
+        apply_discovery_override
         enforce_supported_orcaslicer_release
         restore_config_overrides
         if ! normalize_worker_configuration; then
@@ -8031,6 +8054,10 @@ while [ $# -gt 0 ]; do
             CLI_INCLUDE_REGISTRY=true
             shift
             ;;
+        --include-discovery)
+            CLI_INCLUDE_DISCOVERY=true
+            shift
+            ;;
         --include-go2rtc)
             CLI_INCLUDE_GO2RTC=true
             DEPLOY_GO2RTC=yes
@@ -8280,7 +8307,7 @@ if [ "$VERIFY_DEPLOYMENT" = "true" ]; then
 
     # Basic compose file defaults when not set by config
     COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
-    # Select compose file based on architecture; host-network mode removed
+    # Select the canonical generated Compose file.
     if [ -f docker-compose.yml ]; then
         COMPOSE_FILE="docker-compose.yml"
     fi

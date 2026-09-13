@@ -2,6 +2,58 @@
 
 This document captures common patterns and best practices discovered during test development for PrintFarmer.
 
+## Durable motion-control testing
+
+`PrinterControlOperationTests` uses real shared-memory SQLite contexts and the
+production admission/claim/recovery service. Its fake command channel never
+contacts hardware. Cover unsent-claim takeover, irreversible send markers,
+unknown outcomes, late acknowledgements, authorization revocation, idempotency,
+recovery revisions, sender isolation and successor-barrier protection.
+Panel regressions also cover private-claim ETag stability, missing-plugin host DI,
+full-XYZ admission, coherent bulk projections, and real safety-guard rejection of
+stale/unhomed/out-of-envelope jogs (including multi-axis and nonzero-frame cases).
+Emergency-stop tests exercise the existing controller through real actuation
+fencing for Running/Unknown/Recovering operations, without releasing the owner.
+Queued/running false, cancellation and response-loss cases pass through the real
+`PrintersService` and retain uncertainty after WebSocket quiescence. Additional cases cover crash-before-write/new explicit
+attempts, concurrent accepted/ambiguous stops, admission/send-fence CAS races,
+configuration changes, legacy uncertainty, late callbacks after recovery, and truthful
+unknown-delivery responses when evidence persistence fails after invocation.
+View-only `/current` performs no writes; worker legacy import is tested separately.
+The production SQLite suite exercises upgrade/downgrade sender-evidence preservation.
+`PrintersControllerControlGuardsTests.LegacyMotionAsync_Moonraker_*` asserts
+zero old-route sends for all five replaced motion routes.
+
+Worker diagnostic regressions cover scan failures, ambiguous transport outcomes,
+and persistence-only retries. Assert exception type, operation ID and retry attempt
+context without logging exception objects, messages or request data. Diagnostic
+changes must preserve held barriers, one physical send and quiet normal shutdown.
+
+`PrinterControlRecoveryAuthorizationTests` exercises real HTTP recovery with the
+motion worker disabled and real SQLite operation/barrier rows. Non-admin operators
+need `queue:reconcile` plus printer Submit access; administrator bypass is tested
+without either explicit grant. Anonymous, missing-permission, View-only, unrelated
+group and stale/missing revision cases must leave operation, barrier, audit and
+outbox state unchanged. Successful recovery records actor/evidence and `Recovered`,
+never motion success. Update the route snapshot and exact migration lists for all
+three providers when adding durable-control routes or migrations.
+
+`MoonrakerMotionChannelTests` drives a fake WebSocket with exact JSON-RPC IDs,
+fragmented frames, unrelated notifications, partial-write errors and disposal.
+Its long-homing regression deliberately holds the response for **28 seconds**,
+beyond the previous ten-second backend deadline; do not replace it with a short
+delay that would let an execution timeout regression pass.
+Command-channel snapshots verify effective G92-aware frames and credential-free
+handshake URLs. A separate fake-HTTP test holds G-code pending while the dedicated
+Moonraker emergency-stop endpoint completes; a mere lifecycle allowlist cannot
+pass that out-of-band regression.
+
+Run the two test projects sequentially when they share build output directories.
+Capture console verbosity `normal` (or TRX) so failures retain their actual stack
+traces; quiet-only output loses useful diagnostics. No physical printer or
+deployment call is needed. Provider model changes require PostgreSQL, SQL Server
+and maintained SQLite migrations; verify all deployment model-drift gates.
+
 ## SignalR Hub Testing
 
 ### Required Mocks

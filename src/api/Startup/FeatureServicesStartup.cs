@@ -328,6 +328,18 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Services.Monitoring.IMonitoringHealthService, Farm.Infrastructure.Services.Monitoring.MonitoringHealthService>();
         services.AddScoped<Farm.Infrastructure.Services.SystemStatus.ISystemInfoService, Farm.Infrastructure.Services.SystemStatus.SystemInfoService>();
 
+        // Keep host build identity and deployment policy explicit when projecting from infrastructure.
+        services.AddScoped<Farm.Infrastructure.Services.SystemStatus.IServiceInventorySource>(sp =>
+            new Farm.Infrastructure.Services.SystemStatus.LocalServiceInventorySource(
+                sp.GetRequiredService<Farm.Infrastructure.Settings.ISettingsService>(),
+                typeof(Program).Assembly,
+                Farm.Modules.Calibration.Startup.CalibrationProfileResolutionStartup.IsSplitDeployment(
+                    sp.GetRequiredService<IConfiguration>())));
+        services.AddScoped<Farm.Infrastructure.Services.SystemStatus.IServiceInventorySource>(sp =>
+            new Farm.Slicer.Module.Services.SystemInfo.SlicerServiceInventorySource(
+                sp.GetService<Farm.Slicer.Module.Data.SlicerDbContext>(),
+                sp.GetRequiredService<ILogger<Farm.Slicer.Module.Services.SystemInfo.SlicerServiceInventorySource>>()));
+
         // Admin Control Center overview aggregation (issue #933) moved to
         // Farm.Modules.Administration's IApiModule registration (issue #2042).
 

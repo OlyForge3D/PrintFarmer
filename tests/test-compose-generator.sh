@@ -163,14 +163,20 @@ test_microservices_generation() {
 test_discovery_network_consistency() {
     start_test "discovery network consistency in microservices"
 
-    local outdir="$TEST_TEMP_DIR/compose-discovery"
+    local provider="${1:-postgres}"
+    local outdir="$TEST_TEMP_DIR/compose-discovery-$provider"
     mkdir -p "$outdir"
 
     # Generate microservices compose with discovery included
-    assert_command_success "$COMPOSE_GENERATOR --include-discovery --output-dir $outdir"
+    assert_command_success "$COMPOSE_GENERATOR --db-provider $provider --include-discovery --output-dir $outdir"
 
     local compose_file="$outdir/docker-compose.yml"
     assert_file_exists "$compose_file"
+
+    local test_python
+    test_python="$(resolve_test_python_cmd)"
+    assert_command_success "\"$test_python\" \"$SCRIPT_DIR/test-discovery-boundary.py\" --compose \"$compose_file\"" \
+        "Generated discovery must have no container-control transport or elevated privileges"
 
     local compose_content=$(cat "$compose_file")
 

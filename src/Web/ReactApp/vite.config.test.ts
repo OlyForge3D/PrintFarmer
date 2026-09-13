@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { frontendVersionMetadata, resolveGitHash } from './vite.config';
+import { identity as inventoryIdentity } from './src/test/features/system/serviceInventoryFixture';
 
 const originalViteGitSha = process.env.VITE_GIT_SHA;
 const originalGitSha = process.env.GIT_SHA;
@@ -23,6 +24,20 @@ function restoreEnvironment() {
 afterEach(restoreEnvironment);
 
 describe('canonical frontend release identity', () => {
+  it('retains the service inventory identity without deriving missing allocation evidence', () => {
+    expect(frontendVersionMetadata(inventoryIdentity.sourceCommit!, 'now', undefined, inventoryIdentity))
+      .toEqual({ service: 'frontend', commit: inventoryIdentity.sourceCommit, buildTime: 'now',
+        releaseIdentity: inventoryIdentity });
+    expect(frontendVersionMetadata(inventoryIdentity.sourceCommit!, 'now',
+      { sourceCommit: inventoryIdentity.sourceCommit, releaseId: inventoryIdentity.releaseId }, inventoryIdentity))
+      .toMatchObject({ releaseId: inventoryIdentity.releaseId, releaseIdentity: inventoryIdentity });
+  });
+  it.each(['releaseId', 'canonicalVersion', 'channel', 'sourceCommit'])(
+    'rejects disagreement between file and environment identity on %s', (field) => {
+      expect(() => frontendVersionMetadata(inventoryIdentity.sourceCommit!, 'now',
+        { sourceCommit: inventoryIdentity.sourceCommit, [field]: 'different' }, inventoryIdentity)).toThrow();
+    },
+  );
   it('embeds the public identity without package-version or API derivation', () => {
     const identity = { sourceCommit: 'a'.repeat(40), canonicalVersion: '1.2.3-rc.10',
       releaseId: 'insider:1.2.3-rc.10', channel: 'insider', buildId: '45',
@@ -39,7 +54,7 @@ describe('canonical frontend release identity', () => {
       sourceCommit: identity.sourceCommit, releaseId: identity.releaseId,
     });
   });
-  it('emits only approved identity in both built JSON assets even with a private input record', () => {
+  it.each([false, true])('emits only approved identity in built assets (inventory record: %s)', (includeInventory) => {
     const root = resolve('.artifacts', `public-metadata-${process.pid}`);
     const vite = resolve('node_modules/vite/bin/vite.js');
     const config = resolve('vite.config.ts');
@@ -51,6 +66,9 @@ describe('canonical frontend release identity', () => {
       workflowIdentity: 'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development',
       identitySha256: 'b'.repeat(64), buildTime: '2026-09-12T20:00:00Z',
     };
+    const inventory = { ...identity, allocationIdentity: 'allocation-45', promotionOrigin: null };
+    const expectedInventory = Object.fromEntries(Object.entries(inventory)
+      .filter(([key]) => key !== 'identitySha256' && key !== 'buildTime'));
     const input = JSON.stringify({ ...identity,
       protection: { rulesets: [{ id: 'private-ruleset-id' }],
         environment: { id: 'private-environment-id', reviewers: [{ id: 'private-reviewer-id' }] } },
@@ -65,13 +83,18 @@ describe('canonical frontend release identity', () => {
       writeFileSync(resolve(root, 'public/release-identity.json'), input);
       copyFileSync(config, resolve(root, 'vite.config.ts'));
       copyFileSync(resolve('public-release-identity.mjs'), resolve(root, 'public-release-identity.mjs'));
+      mkdirSync(resolve(root, 'src/common/utils'), { recursive: true });
+      copyFileSync(resolve('src/common/utils/releaseIdentity.ts'), resolve(root, 'src/common/utils/releaseIdentity.ts'));
       execFileSync(process.execPath, [vite, 'build', '--config', resolve(root, 'vite.config.ts')], {
         cwd: root, encoding: 'utf8', timeout: 60_000, stdio: 'pipe',
-        env: { ...process.env, VITE_GIT_SHA: identity.sourceCommit },
+        env: { ...process.env, VITE_GIT_SHA: identity.sourceCommit,
+          PRINTFARMER_RELEASE_IDENTITY: includeInventory
+            ? JSON.stringify({ ...inventory, privateField: 'private-value' }) : '' },
       });
       for (const file of ['version.json', 'release-identity.json']) {
         const emitted = readFileSync(resolve(root, 'dist', file), 'utf8');
-        expect(JSON.parse(emitted)).toEqual({ service: 'frontend', commit: identity.sourceCommit, ...identity });
+        expect(JSON.parse(emitted)).toEqual({ service: 'frontend', commit: identity.sourceCommit, ...identity,
+          ...(includeInventory ? { releaseIdentity: expectedInventory } : {}) });
         expect(emitted).not.toMatch(/protection|ruleset|environment|reviewer|futureAuthorization|private-/);
       }
       expect(readFileSync(resolve(root, 'public/release-identity.json'), 'utf8')).toBe(input);

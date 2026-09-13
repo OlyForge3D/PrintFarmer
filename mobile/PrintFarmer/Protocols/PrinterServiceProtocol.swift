@@ -52,6 +52,9 @@ protocol PrinterServiceProtocol: Sendable {
     func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities
 
     // Temperature & Motion Controls
+    func submitControlOperation(printerId: UUID, operationId: UUID, request: PrinterControlOperationRequest) async throws -> PrinterControlOperation
+    func getControlOperation(printerId: UUID, operationId: UUID) async throws -> PrinterControlOperation
+    func getCurrentControlOperation(printerId: UUID) async throws -> PrinterCurrentControlOperation
     func setTemperatures(printerId: UUID, hotend: Double?, bed: Double?) async throws
     func home(printerId: UUID, axes: [String]) async throws
     func homeXY(printerId: UUID) async throws
@@ -100,6 +103,18 @@ protocol PrinterServiceProtocol: Sendable {
 
 // Convenience overload
 extension PrinterServiceProtocol {
+    func submitControlOperation(printerId: UUID, operationId: UUID, request: PrinterControlOperationRequest) async throws -> PrinterControlOperation {
+        throw PrinterControlOperationError.updateRequired
+    }
+
+    func getControlOperation(printerId: UUID, operationId: UUID) async throws -> PrinterControlOperation {
+        throw PrinterControlOperationError.updateRequired
+    }
+
+    func getCurrentControlOperation(printerId: UUID) async throws -> PrinterCurrentControlOperation {
+        throw PrinterControlOperationError.updateRequired
+    }
+
     func list() async throws -> [Printer] {
         try await list(includeDisabled: false)
     }

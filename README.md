@@ -39,6 +39,26 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 ✅ **Multi-Database Support** - SQLite, PostgreSQL, and SQL Server
 ✅ **Production Ready** - Docker deployment, health checks, comprehensive monitoring
 
+### Moonraker motion controls
+
+Homing, jogging, and absolute movement use durable operations. Submitting a
+command is not the same as completing it: the backend tracks the operation
+independently of the client connection, and updated clients retrieve its result
+after reconnecting. A long homing operation is not failed merely because a
+status-poll timeout elapsed.
+
+**Client upgrade required:** update the React frontend and iOS app alongside the
+API. Legacy Moonraker motion endpoints reject requests with
+`409 async_control_required` without moving the printer. Other printer backends
+retain their existing motion endpoints.
+
+If communication is lost after a command may have been sent, the operation can
+require explicit operator recovery with `queue:reconcile` permission and printer
+Submit access (the existing administrator bypass applies). Do not retry motion or assume the
+printer is unlocked because it looks idle. Recovery requires evidence that the
+prior sender is isolated, pending controller work is cleared, and the printer is
+physically stationary. See [operation ownership and recovery](./docs/JOB_QUEUE_ARCHITECTURE.md).
+
 ## 🚀 Quick Start (2 minutes)
 
 ### Option 1: Docker Deployment (Recommended for Production)
@@ -225,6 +245,11 @@ npm run test:run
 ```
 
 ## 🐳 Deployment
+
+Deployment networking is bridge-only. Stale network-mode settings are rejected;
+`--include-discovery` explicitly enables discovery even when saved settings
+disable it. See the [deployment networking reference](./docs/DEPLOYMENT_QUICK_REFERENCE.md#-deployment-networking)
+for migration and the local-dev-only worker exception.
 
 ### Docker Deployment Modes
 

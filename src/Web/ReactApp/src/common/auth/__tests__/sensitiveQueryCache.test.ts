@@ -13,6 +13,7 @@ describe('clearSensitiveUserQueries', () => {
   });
 
   it('removes user-owned sensitive query cache entries', async () => {
+    queryClient.setQueryData(['system-info'], { inventory: { sourceCommit: 'admin-only' } });
     queryClient.setQueryData(['notifications'], [{ id: '1' }]);
     queryClient.setQueryData(['notifications', 'unread-count'], 3);
     queryClient.setQueryData(['notifications', 'preferences'], { email: true });
@@ -26,6 +27,7 @@ describe('clearSensitiveUserQueries', () => {
 
     await clearSensitiveUserQueries(queryClient);
 
+    expect(queryClient.getQueryData(['system-info'])).toBeUndefined();
     expect(queryClient.getQueryData(['notifications'])).toBeUndefined();
     expect(queryClient.getQueryData(['notifications', 'unread-count'])).toBeUndefined();
     expect(queryClient.getQueryData(['notifications', 'preferences'])).toBeUndefined();
@@ -75,6 +77,16 @@ describe('clearSensitiveUserQueries', () => {
 
     // The stale response must not have repopulated the cache.
     expect(queryClient.getQueryData(['notifications', 'preferences'])).toBeUndefined();
+  });
+
+  it('cancels delayed admin observations before another identity can receive them', async () => {
+    let finish: (value: string) => void = () => {};
+    const response = new Promise<string>(resolve => { finish = resolve; });
+    const pending = queryClient.fetchQuery({ queryKey: ['system-info'], queryFn: () => response });
+    await clearSensitiveUserQueries(queryClient);
+    finish('previous-admin-inventory');
+    await pending.catch(() => {});
+    expect(queryClient.getQueryData(['system-info'])).toBeUndefined();
   });
 
   it('bumps the shared auth epoch on every call', async () => {

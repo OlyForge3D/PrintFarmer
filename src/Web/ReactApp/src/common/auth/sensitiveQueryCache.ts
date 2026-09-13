@@ -32,6 +32,8 @@ import { bumpAuthEpoch } from './authEpoch';
  *   useSliceJobsRealtime.ts).
  */
 const SENSITIVE_QUERY_KEY_PREFIXES: QueryKey[] = [
+  // Admin-only host and release evidence must not survive an identity transition.
+  ['system-info'],
   ['notifications'],
   ['settings', 'user'],
   ['passkeys'],

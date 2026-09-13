@@ -194,6 +194,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IStoredGcodeIntegrityVerifier, Farm.Infrastructure.Services.Queue.StoredGcodeIntegrityVerifier>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService, Farm.Infrastructure.Services.Queue.QueueResourceAuthorizationService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService, Farm.Infrastructure.Services.Queue.PrinterPhysicalActuationService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Printers.PrinterControlOperationService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService, Farm.Infrastructure.Services.Queue.Dispatch.DispatchClaimService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IBedClearAcknowledgementService, Farm.Infrastructure.Services.Queue.BedClearAcknowledgementService>();
 
@@ -870,6 +871,7 @@ public static class ServiceCollectionExtensions
 
             // Durable attempt-fenced cancel/abort hardware command consumer.
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BackendControlCommandConsumerService>();
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Printers.PrinterControlOperationWorker>();
 
             // Queue reconciliation service for unknown dispatch outcomes (orphaned Starting jobs).
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueReconciliationService>();

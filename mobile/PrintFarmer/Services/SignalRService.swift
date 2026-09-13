@@ -109,6 +109,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private let jobQueueUpdateHub: SignalREventHub<JobQueueUpdate>
     private let attentionChangedHub: SignalREventHub<AttentionChangedEvent>
     private let taskInvalidationHub: SignalREventHub<ShiftTaskInvalidation>
+    private let controlOperationHub: SignalREventHub<PrinterControlOperationInvalidation>
     /// Lowercase `filamentcoveragechanged` invalidation hub (issue #778 /
     /// PR #732). Delivery is a refetch hint; consumers must call the
     /// canonical `/api/printers/*` coverage endpoints and never persist
@@ -400,6 +401,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         self.jobQueueUpdateHub = SignalREventHub<JobQueueUpdate>(coordinator: coordinator)
         self.attentionChangedHub = SignalREventHub<AttentionChangedEvent>(coordinator: coordinator)
         self.taskInvalidationHub = SignalREventHub<ShiftTaskInvalidation>(coordinator: coordinator)
+        self.controlOperationHub = SignalREventHub<PrinterControlOperationInvalidation>(coordinator: coordinator)
         self.filamentCoverageChangedHub = SignalREventHub<FilamentCoverageChangedEvent>(coordinator: coordinator)
 
         self.decoder = JSONDecoder()
@@ -751,6 +753,13 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     @discardableResult
     func onPrinterUpdated(_ handler: @escaping @Sendable (PrinterStatusUpdate) -> Void) -> SignalRSubscription {
         printerUpdateHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onPrinterControlOperationUpdated(
+        _ handler: @escaping @Sendable (PrinterControlOperationInvalidation) -> Void
+    ) -> SignalRSubscription {
+        controlOperationHub.subscribe(handler)
     }
 
     @discardableResult
@@ -1533,6 +1542,14 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     }
 
     private func handleInvocation(target rawTarget: String, firstArgument argData: Data?) {
+        if rawTarget == "printercontroloperationupdated" {
+            if let argData,
+               let hint = try? decoder.decode(PrinterControlOperationInvalidation.self, from: argData),
+               !hint.rowVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                controlOperationHub.deliver(hint)
+            }
+            return
+        }
         if ShiftTaskInvalidation.supportedTargets.contains(rawTarget) {
             taskInvalidationHub.deliver(ShiftTaskInvalidation(target: rawTarget))
             return

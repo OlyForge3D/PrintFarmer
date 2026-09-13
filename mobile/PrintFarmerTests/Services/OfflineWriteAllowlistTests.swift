@@ -133,7 +133,7 @@ final class OfflineWriteAllowlistTests: XCTestCase {
         XCTAssertEqual(reason(OfflineWriteReplayClassifier.outcome(for: .partsInventoryConflict(mappingRequiredConflict()))), .mappingRequired)
         XCTAssertEqual(reason(OfflineWriteReplayClassifier.outcome(for: .clientError(400, nil))), .validation)
         XCTAssertEqual(reason(OfflineWriteReplayClassifier.outcome(for: .clientError(422, nil))), .validation)
-        XCTAssertEqual(reason(OfflineWriteReplayClassifier.outcome(for: .conflict)), .businessConflict)
+        XCTAssertEqual(reason(OfflineWriteReplayClassifier.outcome(for: .conflict(nil))), .businessConflict)
         XCTAssertEqual(reason(OfflineWriteReplayClassifier.outcome(for: .notFound)), .businessConflict)
         XCTAssertEqual(reason(OfflineWriteReplayClassifier.outcome(for: .methodNotAllowed)), .businessConflict)
         XCTAssertEqual(reason(OfflineWriteReplayClassifier.outcome(for: .clientError(409, nil))), .businessConflict)
@@ -152,6 +152,21 @@ final class OfflineWriteAllowlistTests: XCTestCase {
     }
 
     // MARK: Review-and-retry-as-new (status VM)
+
+    func testConflictRetainsServerExplanationWithoutEnqueueing() {
+        let api = APIError(
+            title: "Conflict", status: 409, detail: "Another physical operation owns the printer barrier.",
+            errors: nil, message: nil, code: "FenceConflict"
+        )
+        let error = NetworkError.conflict(api)
+        guard case .conflict(let conflict) = OfflineWriteReplayClassifier.outcome(for: error) else {
+            return XCTFail("Expected terminal conflict")
+        }
+        XCTAssertEqual(conflict.reason, .businessConflict)
+        XCTAssertEqual(conflict.message, api.detail)
+        XCTAssertFalse(OfflineWriteReplayClassifier.isEnqueueableOfflineFailure(error))
+        XCTAssertFalse(OfflineWriteReplayClassifier.isEnqueueableOfflineFailure(NetworkError.conflict(nil)))
+    }
 
     func testReviewReadsCurrentStateAndMintsNewKeyOnlyOnConfirm() async {
         let serverID = UUID(); let userID = UUID()

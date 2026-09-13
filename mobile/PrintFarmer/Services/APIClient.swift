@@ -1,6 +1,35 @@
 import Foundation
 import Security
 
+/// Redirects can replay a mutating request or cross its registered-server
+/// boundary. Durable motion must return the redirect as a transport response.
+private final class ControlOperationTaskDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @Sendable (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        // The per-task redirect policy must not bypass the app's certificate
+        // trust/pinning policy when connecting to a private-network server.
+        if let trustDelegate = session.delegate as? PrivateNetworkSessionDelegate {
+            trustDelegate.urlSession(session, task: task, didReceive: challenge, completionHandler: completionHandler)
+        } else {
+            completionHandler(.performDefaultHandling, nil)
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
+    }
+}
+
 // MARK: - Optional Type Detection
 
 /// Protocol to detect Optional types at runtime.
@@ -856,6 +885,80 @@ actor APIClient {
 
     // MARK: - HTTP Methods
 
+    /// One transport attempt only. A lost POST response is resolved by a GET,
+    /// never a new nonce, an offline replay, or a legacy motion endpoint.
+    func controlOperation<T: Decodable & Sendable>(
+        _ path: String,
+        operationId: UUID? = nil,
+        body: PrinterControlOperationRequest? = nil
+    ) async throws -> T {
+        let requestSession = captureRequestSession()
+        try Task.checkCancellation()
+        try await checkTokenExpiry(session: requestSession)
+        try validateControlSession(requestSession)
+        let isSubmission = body != nil
+        guard isSubmission == (operationId != nil) else {
+            throw PrinterControlOperationError.invalidResponse
+        }
+        var request = try buildRequest(
+            session: requestSession, path: path, method: isSubmission ? "POST" : "GET"
+        )
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        if let body, let operationId {
+            request.httpBody = try encoder.encode(body)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue(operationId.uuidString, forHTTPHeaderField: "Idempotency-Key")
+        }
+        try Task.checkCancellation()
+        let (data, response) = try await performRequest(request, delegate: ControlOperationTaskDelegate())
+        try Task.checkCancellation()
+        try validateControlSession(requestSession)
+        guard let http = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        if [405, 501].contains(http.statusCode),
+           isSubmission || path.hasSuffix("/current") {
+            throw PrinterControlOperationError.updateRequired
+        }
+        if (400...499).contains(http.statusCode), ![401, 403].contains(http.statusCode) {
+            let problem = try? decoder.decode(APIError.self, from: data)
+            throw PrinterControlOperationError.problem(
+                statusCode: http.statusCode, code: problem?.code,
+                message: problem?.detail ?? problem?.message ?? problem?.title
+                    ?? (http.statusCode == 404
+                        ? "The printer or operation is unavailable, inaccessible, or unsupported by this server. Recheck access and server version; no legacy command was sent."
+                        : nil)
+            )
+        }
+        try validateResponse(response, data: data, authSessionToken: requestSession.authSessionToken)
+        guard http.statusCode == 200 || (isSubmission && http.statusCode == 202) else {
+            throw PrinterControlOperationError.invalidResponse
+        }
+        let value: T
+        do {
+            value = try decoder.decode(T.self, from: data)
+        } catch {
+            throw NetworkError.decodingFailed(ResponseDecodingFailure(error: error, targetType: T.self))
+        }
+        if isSubmission {
+            guard let operation = value as? PrinterControlOperation,
+                  operation.state.isTerminal == (http.statusCode == 200) else {
+                throw PrinterControlOperationError.invalidResponse
+            }
+        }
+        return value
+    }
+
+    private func validateControlSession(_ captured: RequestSession) throws {
+        try validateResponseGeneration(session: captured)
+        guard captured.baseURL == baseURL, captured.accessToken == accessToken,
+              captured.authSessionToken == authSessionToken,
+              captured.serverID == currentServerID else {
+            throw NetworkError.staleServerResponse
+        }
+    }
+
     func get<T: Decodable & Sendable>(_ path: String) async throws -> T {
         // A1: capture the immutable session snapshot (bearer + generation +
         // authSessionToken) atomically at PUBLIC API ENTRY, before any await, and
@@ -1188,6 +1291,7 @@ actor APIClient {
     private struct RequestSession {
         let baseURL: URL
         let accessToken: String?
+        let serverID: UUID?
         let generationAtCreation: Int?
         let authSessionToken: Int?
     }
@@ -1200,6 +1304,7 @@ actor APIClient {
         RequestSession(
             baseURL: baseURL,
             accessToken: accessToken,
+            serverID: currentServerID,
             generationAtCreation: generationAtCreation,
             authSessionToken: authSessionToken
         )
@@ -1315,7 +1420,10 @@ actor APIClient {
         }
     }
 
-    private func performRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {
+    private func performRequest(
+        _ request: URLRequest,
+        delegate: (any URLSessionTaskDelegate)? = nil
+    ) async throws -> (Data, URLResponse) {
         if let url = request.url,
            let scheme = url.scheme?.lowercased(),
            scheme == "http",
@@ -1326,7 +1434,7 @@ actor APIClient {
         let requestHost = request.url?.host
         TLSDiagnostics.beginRequest(host: requestHost)
         do {
-            let result = try await session.data(for: request)
+            let result = try await session.data(for: request, delegate: delegate)
             TLSDiagnostics.clear(host: requestHost)
             return result
         } catch let error as URLError {
@@ -1401,18 +1509,15 @@ actor APIClient {
             // `"partMappingRequired"` and extension fields the harvest UI
             // must read structurally (see PartsInventoryProblemDetails.cs).
             // Decode it when the `code` extension is recognised so callers
-            // get typed detail; every other 409 (e.g. plain `{message}`
-            // conflicts from job-state checks) keeps mapping to the
-            // existing bare `.conflict` case so current callers
-            // (PrinterControlsViewModel) are unaffected.
-            if !data.isEmpty,
-               let apiError = try? decoder.decode(APIError.self, from: data),
+            // get typed detail; other conflicts retain their API error text.
+            let apiError = try? decoder.decode(APIError.self, from: data)
+            if let apiError,
                apiError.code == PartsInventoryConflict.wrongBinCode
                 || apiError.code == PartsInventoryConflict.partMappingRequiredCode,
                let conflict = try? decoder.decode(PartsInventoryConflict.self, from: data) {
                 throw NetworkError.partsInventoryConflict(conflict)
             }
-            throw NetworkError.conflict
+            throw NetworkError.conflict(apiError)
         case 412:
             let apiError = try? decoder.decode(APIError.self, from: data)
             throw NetworkError.preconditionFailed(apiError)
@@ -1502,7 +1607,7 @@ enum NetworkError: LocalizedError, Sendable {
     /// treating the resource as genuinely missing. Introduced by #728.
     case featureDisabled(APIError)
     case methodNotAllowed
-    case conflict
+    case conflict(APIError?)
     /// A typed printed-parts harvest conflict (#714/#741): either a
     /// `wrongBin` mismatch (scanned destination bin does not match the
     /// expected bin for one or more SKUs) or `partMappingRequired`
@@ -1537,7 +1642,8 @@ enum NetworkError: LocalizedError, Sendable {
             return apiError.detail ?? apiError.title ?? "This feature is disabled on the server."
         case .methodNotAllowed:
             return "This action isn't supported by your PrintFarmer server (405). Update the server to the latest version."
-        case .conflict: return "Conflict — resource was modified"
+        case .conflict(let apiError):
+            return apiError?.displayMessage ?? "Conflict — resource was modified"
         case .partsInventoryConflict(let conflict): return conflict.detail ?? conflict.title ?? "Printed-parts conflict"
         case .preconditionFailed(let apiError):
             return apiError?.detail

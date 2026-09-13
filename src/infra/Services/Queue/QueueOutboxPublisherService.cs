@@ -182,6 +182,23 @@ public sealed class QueueOutboxPublisherService(
     {
         try
         {
+            if (evt.EventType == Farm.Infrastructure.Services.Printers.PrinterControlOperationService.EventType)
+            {
+                var hint = System.Text.Json.JsonSerializer.Deserialize<PrinterControlInvalidation>(
+                    evt.PayloadJson, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))
+                    ?? throw new InvalidOperationException("Invalid control invalidation.");
+                if (evt.PrinterId != hint.PrinterId || evt.AggregateId != hint.OperationId)
+                {
+                    throw new InvalidOperationException("Invalid control invalidation identity.");
+                }
+
+                await hub.Clients.Group(AuthorizedHubGroups.Printer(hint.PrinterId))
+                    .SendAsync("printercontroloperationupdated", hint, ct);
+                evt.Status = QueueOutboxEventStatus.Published;
+                evt.CompletedAtUtc = DateTime.UtcNow;
+                return;
+            }
+
             // Build an authenticated versioned envelope and publish to authorized groups only.
             // Never use Clients.All — events are scoped to job, printer, and farm groups.
             // Identity/time/sequence come from the PERSISTED row so a redelivery is identical

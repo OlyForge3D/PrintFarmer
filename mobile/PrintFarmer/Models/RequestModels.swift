@@ -110,4 +110,10 @@ struct APIError: Codable, Sendable {
     /// intentionally disabled feature and switch to the appropriate
     /// fallback UI.
     let code: String?
+
+    var displayMessage: String? {
+        [detail, message, title]
+            .compactMap { $0 }
+            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
 }

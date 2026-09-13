@@ -40,9 +40,10 @@ struct PrinterControlsAccessLifecycle: ViewModifier {
     @Environment(ServerRegistry.self) private var registry
     @Environment(ServiceContainer.self) private var services
     @Environment(AuthViewModel.self) private var auth
+    @Environment(\.scenePhase) private var scenePhase
 
     private var accessSignal: String {
-        "\(registry.activeServerID?.uuidString ?? "")|\(services.activeServerGeneration)|\(String(describing: services.printerControlsComposition?.identity))|\(registry.advancedPrinterControlsEnabled)|\(auth.isAuthenticated)|\(auth.snapshotActivationPending)|\(auth.currentUser?.id.uuidString ?? "")|\(auth.currentUser?.isActive ?? false)|\(auth.currentUser?.permissions ?? [])|\(auth.currentUser?.roles ?? [])"
+        "\(registry.activeServerID?.uuidString ?? "")|\(services.activeServerGeneration)|\(String(describing: services.printerControlsComposition?.identity))|\(services.authOperationEpoch.current)|\(registry.advancedPrinterControlsEnabled)|\(auth.isAuthenticated)|\(auth.snapshotActivationPending)|\(auth.currentUser?.id.uuidString ?? "")|\(auth.currentUser?.isActive ?? false)|\(auth.currentUser?.permissions ?? [])|\(auth.currentUser?.roles ?? [])"
     }
 
     func body(content: Content) -> some View {
@@ -50,6 +51,16 @@ struct PrinterControlsAccessLifecycle: ViewModifier {
             .onAppear { configure() }
             .onChange(of: viewModel.map(ObjectIdentifier.init)) { _, _ in configure() }
             .onChange(of: accessSignal) { _, _ in viewModel?.refreshAccess() }
+            .task(id: "\(accessSignal)|\(scenePhase)|\(viewModel.map(ObjectIdentifier.init).map(String.init(describing:)) ?? "")") {
+                guard scenePhase == .active, let viewModel else { return }
+                configure()
+                await viewModel.refreshControlOperation()
+                while !Task.isCancelled && viewModel.isActive {
+                    do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                    // Only status reads, never a retry of a physical request.
+                    await viewModel.refreshControlOperation()
+                }
+            }
             .onDisappear { viewModel?.deactivate() }
     }
 
@@ -57,7 +68,9 @@ struct PrinterControlsAccessLifecycle: ViewModifier {
         guard let viewModel else { return }
         let serverID = viewModel.registeredServerID
         let userID = auth.currentUser?.id
-        viewModel.configureAccess(serverID: serverID) { [weak viewModel, registry, services, auth] in
+        let authEpoch = services.authOperationEpoch.current
+        let serverURL = registry.activeServer?.id == serverID ? registry.activeServer?.baseURL : nil
+        viewModel.configureAccess(serverID: serverID, userID: userID, serverURL: serverURL) { [weak viewModel, registry, services, auth] in
             AdvancedPrinterControlsAccess.blockedReason(
                 enabled: registry.advancedPrinterControlsEnabled,
                 authenticated: auth.isAuthenticated,
@@ -70,8 +83,10 @@ struct PrinterControlsAccessLifecycle: ViewModifier {
                     )
                 } == true
                     && auth.currentUser?.id == userID
+                    && services.authOperationEpoch.current == authEpoch
             )
         }
+        viewModel.observeControlOperations(using: services.signalRService)
     }
 }
 

@@ -315,6 +315,11 @@ Every job consumes the same record. `release-control.mjs consume` emits:
   Protection evidence, ruleset/environment/reviewer IDs and any future private
   fields are not public assets. Generation and Vite share one typed allow-list;
   malformed known fields fail rather than being dropped or coerced.
+  The service-inventory build input `PRINTFARMER_RELEASE_IDENTITY` remains
+  separately validated and embedded in the bundle and nested `releaseIdentity`
+  metadata. If both inputs are supplied, their shared identity fields must agree
+  or the build fails. The public-file projection does not synthesize missing
+  allocation or promotion evidence for service inventory.
   The root `release-identity.json` is projected; the normalized authorization
   remains complete and unchanged under `.artifacts/release-authorization/`.
   `identitySha256`

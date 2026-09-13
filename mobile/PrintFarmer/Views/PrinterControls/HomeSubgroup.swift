@@ -116,7 +116,7 @@ struct HomeSubgroup: View {
                         ) {
                             Task { await viewModel.homeXY() }
                         }
-                        .disabled(isDisabled || (anyPending && !isXYPending))
+                        .disabled(isDisabled || (anyPending && (viewModel.usesDurableMotion || !isXYPending)))
                     }
 
                     if viewModel.capabilities?.supportsHomingZ == true {
@@ -132,7 +132,7 @@ struct HomeSubgroup: View {
                         ) {
                             Task { await viewModel.homeZ() }
                         }
-                        .disabled(isDisabled || (anyPending && !isZPending))
+                        .disabled(isDisabled || (anyPending && (viewModel.usesDurableMotion || !isZPending)))
                     }
                 }
 
@@ -161,7 +161,7 @@ struct HomeSubgroup: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(isAllPending ? Color.pfAssigned : Color.clear, lineWidth: 1.5)
         )
-        .disabled((isDisabled && !shouldRevealDisabledTooltipOnTap) || (anyPending && !isAllPending))
+        .disabled((isDisabled && !shouldRevealDisabledTooltipOnTap) || (anyPending && (viewModel.usesDurableMotion || !isAllPending)))
         .disabledControlStyle(isDisabled: isDisabled && !isAllPending)
         .errorBorderHighlight(isActive: isErrored(matching: ["X", "Y", "Z"]))
         .accessibilityLabel(
@@ -264,6 +264,7 @@ struct HomeSubgroup: View {
     // MARK: - Accessibility strings
 
     func accessibilityHint(hasError: Bool, idleHint: String) -> String {
+        if let reason = viewModel.motionBlockedReason { return reason }
         if hasError, let message = viewModel.lastError?.message {
             return String(localized: "Failed: \(message). Double tap to retry.", comment: "VoiceOver hint when last home command failed")
         }
