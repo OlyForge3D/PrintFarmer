@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
 import { load } from 'js-yaml';
 import { repository, releaseBuildChecks, releaseReviewStatus } from '../release-policy.mjs';
 import { confirmationBody, qualificationTitle, parseQualificationTitle, qualificationRequestUrl,
@@ -17,7 +18,18 @@ const now = Date.parse('2026-09-13T08:00:00Z');
 const url = id => `https://github.com/${repository}/actions/runs/${id}`;
 const read = path => readFileSync(fileURLToPath(new URL(`../../../${path}`, import.meta.url)), 'utf8');
 const root = fileURLToPath(new URL('../../../', import.meta.url));
-const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+const shell = resolveBash();
+const canonicalDispatch = "github.event_name == 'workflow_dispatch' && " +
+  "(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')";
+const forbiddenJobCapabilities = /secrets|\bpackages\b|id-token|create-github-app-token|download-artifact/;
+
+function resolveBash() {
+  if (process.env.BASH_PATH) return process.env.BASH_PATH;
+  if (process.platform !== 'win32') return 'bash';
+  const gitPaths = execFileSync('where.exe', ['git.exe'], { encoding: 'utf8' }).trim().split(/\r?\n/);
+  return gitPaths.flatMap(path => [join(dirname(path), 'bash.exe'), join(dirname(path), '..', 'bin', 'bash.exe')])
+    .find(path => existsSync(path)) ?? 'bash';
+}
 
 function scratch(t) {
   const directory = join(root, '.artifacts', `canonical-check-${randomUUID()}`);
@@ -174,6 +186,23 @@ for (const channel of ['stable', 'insider']) {
           assert.equal(f.posts.length, 0);
         });
       }
+    }
+    for (const name of [...releaseBuildChecks, ...canonicalValidationChecks, releaseReviewStatus]) {
+      test(`${channel}/${mode}: removing required policy ${name} blocks verification, writing and consumption`, async () => {
+        const f = fixture(channel, mode);
+        f.data.rules[0].parameters.required_status_checks =
+          f.data.rules[0].parameters.required_status_checks.filter(rule => rule.context !== name);
+        const error = /live policy must require canonical review, all release build checks and all canonical validation checks/;
+        await assert.rejects(verifyQualification(f.api, '20', mode, now), error);
+        await assert.rejects(verifyCanonicalReleaseEvidence(f.api, f.sha, channel, mode, now), error);
+        assert.equal(f.posts.length, 0, 'verification and consumption remain read-only');
+        f.data.runs[30].status = 'in_progress';
+        await assert.rejects(recordQualification(f.api, '20', f.env, now), error);
+        assert.deepEqual(f.posts, [{ endpoint: `statuses/${f.sha}`, body: {
+          context: releaseReviewStatus, state: 'failure', target_url: url(30),
+          description: `BLOCKED canonical qualification @ ${f.sha.slice(0, 12)}`,
+        } }], 'green jobs/checks cannot compensate for weakened live policy');
+      });
     }
     test(`${channel}/${mode}: head movement after reading canonical checks rejects`, async () => {
       const f = fixture(channel, mode);
@@ -457,9 +486,10 @@ test('manual CI executes equivalent required checks without shadowing PR check n
   assert.deepEqual(ci.permissions, { contents: 'read' });
   for (const [id, name, original, skippedName] of expected) {
     const job = ci.jobs[id];
-    assert.equal(job.if, "github.event_name == 'workflow_dispatch'");
-    assert.equal(job.name, `\${{ github.event_name == 'workflow_dispatch' && '${name}' || '${skippedName}' }}`);
+    assert.equal(job.if, canonicalDispatch);
+    assert.equal(job.name, `\${{ ${canonicalDispatch} && '${name}' || '${skippedName}' }}`);
     assert.equal(job['runs-on'], original['runs-on']);
+    assert.ok(Number.isInteger(job['timeout-minutes']) && job['timeout-minutes'] > 0 && job['timeout-minutes'] <= 45);
     assert.ok(ci.jobs.summary.needs.includes(id));
     assert.equal(job.permissions, undefined);
     assert.equal(job.environment, undefined);
@@ -471,7 +501,7 @@ test('manual CI executes equivalent required checks without shadowing PR check n
       assert.match(step.uses, /@[a-f0-9]{40}$/);
       if (step.uses.startsWith('actions/setup-node@')) assert.equal(step.with['package-manager-cache'], false);
     }
-    assert.doesNotMatch(JSON.stringify(job), /secrets|packages:|id-token|create-github-app-token|download-artifact/);
+    assert.doesNotMatch(JSON.stringify(job), forbiddenJobCapabilities);
     for (const step of original.steps.filter(step => step.run &&
       !['Report skip reason', 'Compute change set', 'Fail closed if the diff could not be computed'].includes(step.name))) {
       const equivalent = job.steps.find(candidate => candidate.name === step.name);
@@ -491,11 +521,43 @@ test('manual CI executes equivalent required checks without shadowing PR check n
   assert.deepEqual(iosBuild.defaults, ios.defaults);
   assert.ok(iosBuild.steps.every(step => !step.if && !step['continue-on-error']));
   const summary = ci.jobs.summary.steps.find(step => step.name === 'Require all manual canonical checks');
-  assert.equal(summary.if, "github.event_name == 'workflow_dispatch'");
+  assert.equal(summary.if, canonicalDispatch);
   for (const key of ['PATH_CASING_RESULT', 'CONTRACT_DRIFT_RESULT', 'IOS_BUILD_RESULT']) {
     assert.ok(summary.run.includes(`test "$${key}" = success`));
   }
 });
+
+test('canonical job privilege matcher detects package permissions in parsed YAML', () => {
+  for (const permission of ['read', 'write']) {
+    const job = load(`permissions:\n  packages: ${permission}\n`);
+    assert.match(JSON.stringify(job), forbiddenJobCapabilities);
+  }
+});
+
+for (const ref of [
+  'refs/heads/main', 'refs/heads/development', 'refs/heads/feature/pr-head',
+  'refs/heads/release/v1.2.3', 'refs/heads/main-feature', 'refs/heads/development/feature',
+  'refs/tags/main', 'refs/tags/development', 'refs/pull/2688/head', 'refs/pull/2688/merge',
+]) {
+  for (const event of ['workflow_dispatch', 'pull_request', 'push']) {
+    test(`${event} on ${ref} cannot shadow required PR contexts outside canonical dispatch`, () => {
+      const ci = load(read('.github/workflows/ci.yml'));
+      const selected = event === 'workflow_dispatch' && ['refs/heads/main', 'refs/heads/development'].includes(ref);
+      // These conditions use only JS-compatible equality/boolean operators.
+      const evaluate = expression => runInNewContext(expression.replace(/^\$\{\{\s*|\s*\}\}$/g, ''),
+        { github: { event_name: event, ref, sha: stableSha } });
+      for (const id of ['canonical-path-casing', 'canonical-contract-drift', 'canonical-ios-build']) {
+        const job = ci.jobs[id];
+        assert.equal(evaluate(job.if), selected, `${id}: execution guard`);
+        const name = evaluate(job.name);
+        assert.equal(canonicalValidationChecks.includes(name), selected, `${id}: emitted check name`);
+        if (!selected) assert.match(name, /^Canonical .+ \(not selected\)$/);
+      }
+      const summary = ci.jobs.summary.steps.find(step => step.name === 'Require all manual canonical checks');
+      assert.equal(evaluate(summary.if), selected, 'manual summary follows the same ref boundary');
+    });
+  }
+}
 
 test('manual summary executes fail-closed for failed, cancelled, missing or skipped canonical checks', t => {
   const cwd = scratch(t);

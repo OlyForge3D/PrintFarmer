@@ -166,8 +166,9 @@ async function verifyRequiredChecks(api, branch, sha, ci, jobs) {
   requireThat(required.every(rule => rule && typeof rule.context === 'string' &&
     rule.context.length > 0 && rule.context.length <= 100 && !/[\r\n]/.test(rule.context)),
   'Owner blocker: malformed required check context');
-  requireThat([...releaseBuildChecks, releaseReviewStatus].every(name => required.some(rule => rule.context === name)),
-    'Owner blocker: live policy must require canonical review and all release build checks');
+  requireThat([...releaseBuildChecks, ...canonicalValidationChecks, releaseReviewStatus]
+    .every(name => required.some(rule => rule.context === name)),
+  'Owner blocker: live policy must require canonical review, all release build checks and all canonical validation checks');
   const checks = list(await api(`commits/${sha}/check-runs?per_page=100`), 'check_runs');
   for (const rule of required) {
     requireThat(typeof rule.context === 'string' &&

@@ -22,12 +22,18 @@ permissions:
   contents: read
 
 jobs:
-  # Manual full-safe validation owns these checks in this run's check suite.
-  # Other events use distinct skipped names so they cannot shadow PR gates.
+  # Only exact canonical-branch manual validation owns these check names.
+  # Other refs/events use distinct skipped names so they cannot shadow PR gates.
   canonical-path-casing:
-    name: ${{ github.event_name == 'workflow_dispatch' && 'path-casing' || 'Canonical path casing (not selected)' }}
-    if: github.event_name == 'workflow_dispatch'
+    name: >-
+      ${{ github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') &&
+      'path-casing' || 'Canonical path casing (not selected)' }}
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -44,10 +50,14 @@ jobs:
 
   canonical-contract-drift:
     name: >-
-      ${{ github.event_name == 'workflow_dispatch' && 'Contract drift gate' ||
-      'Canonical contract drift (not selected)' }}
-    if: github.event_name == 'workflow_dispatch'
+      ${{ github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') &&
+      'Contract drift gate' || 'Canonical contract drift (not selected)' }}
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
@@ -91,8 +101,13 @@ jobs:
         run: node scripts/ci/check-contract-drift.mjs
 
   canonical-ios-build:
-    name: ${{ github.event_name == 'workflow_dispatch' && 'Build (iOS)' || 'Canonical iOS build (not selected)' }}
-    if: github.event_name == 'workflow_dispatch'
+    name: >-
+      ${{ github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') &&
+      'Build (iOS)' || 'Canonical iOS build (not selected)' }}
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
     runs-on: macos-latest
     timeout-minutes: 45
     defaults:
@@ -1253,7 +1268,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Require all manual canonical checks
-        if: github.event_name == 'workflow_dispatch'
+        if: >-
+          github.event_name == 'workflow_dispatch' &&
+          (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
         env:
           PATH_CASING_RESULT: ${{ needs.canonical-path-casing.result }}
           CONTRACT_DRIFT_RESULT: ${{ needs.canonical-contract-drift.result }}
