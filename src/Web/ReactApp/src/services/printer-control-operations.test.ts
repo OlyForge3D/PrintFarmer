@@ -118,6 +118,48 @@ describe('durable motion tracking', () => {
     expect(apiClient.createPrinterControlOperation).toHaveBeenCalledTimes(1);
   });
 
+  it.each([false, true])('keeps admission feedback until the current-generation read settles (failure: %s)', async failRead => {
+    await tracker.refresh();
+    let staleRead!: (value: PrinterControlCurrent) => void;
+    let currentRead!: (value: PrinterControlCurrent) => void;
+    let rejectCurrentRead!: (reason: Error) => void;
+    vi.mocked(apiClient.getCurrentPrinterControlOperation)
+      .mockReturnValueOnce(new Promise(resolve => { staleRead = resolve; }))
+      .mockReturnValueOnce(new Promise((resolve, reject) => {
+        currentRead = resolve;
+        rejectCurrentRead = reject;
+      }));
+    const background = tracker.refresh();
+    const controller = new AbortController();
+    const task = tracker.execute(intent, controller.signal).catch(error => error);
+    await vi.advanceTimersByTimeAsync(0);
+    staleRead(current());
+    await background;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(tracker.getSnapshot()).toMatchObject({
+      admitting: true, uncertain: true, operation: null,
+      saved: { operationId, admissionConfirmed: true },
+    });
+    expect(tracker.isBlocked()).toBe(true);
+
+    if (failRead) {
+      rejectCurrentRead(new Error('Connection lost'));
+      expect(await task).toBeInstanceOf(Error);
+      expect(tracker.getSnapshot()).toMatchObject({ admitting: false, uncertain: true });
+      expect(tracker.getSnapshot().error).toContain('uncertain');
+    } else {
+      currentRead(current(active));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(tracker.getSnapshot()).toMatchObject({
+        admitting: false, uncertain: false, operation: { operationId, state: 'Running' },
+      });
+      controller.abort();
+      await task;
+    }
+    expect(tracker.isBlocked()).toBe(true);
+    expect(apiClient.createPrinterControlOperation).toHaveBeenCalledTimes(1);
+  });
+
   it('observes completion within one second without a SignalR hint or another send', async () => {
     await tracker.refresh();
     const task = tracker.execute(intent, new AbortController().signal);

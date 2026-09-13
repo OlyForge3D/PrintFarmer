@@ -53,6 +53,7 @@ export class PrinterControlTracker {
   private completedOperation: PrinterControlOperation | null = null;
   private lastReadCompletedAt = Number.NEGATIVE_INFINITY;
   private reservationGeneration = 0;
+  private refreshGeneration = 0;
 
   private waitForChange(signal: AbortSignal): Promise<void> {
     return new Promise(resolve => {
@@ -194,8 +195,13 @@ export class PrinterControlTracker {
   refresh = (): Promise<PrinterControlOperation | null> => {
     if (this.refreshTask) {
       this.invalidated = true;
+      if (this.refreshGeneration !== this.reservationGeneration) {
+        // Admission must await the replacement read, not a discarded pre-reservation result.
+        return this.refreshTask.then(() => this.refreshTask ?? this.refresh());
+      }
       return this.refreshTask;
     }
+    this.refreshGeneration = this.reservationGeneration;
     this.refreshTask = this.read().finally(() => {
       this.refreshTask = null;
       if (this.invalidated && this.isSessionCurrent()) {
