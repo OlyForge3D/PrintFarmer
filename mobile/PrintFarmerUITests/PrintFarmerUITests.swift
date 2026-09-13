@@ -97,9 +97,6 @@ final class UIWaitBudget {
         while remaining > 0 {
             guard let observation = try perform("shell snapshot", observe) else { return nil }
             lastShellObservation = observation.diagnostic
-            if let result = perform("resolve observed shell", { resolve(observation) }) ?? nil {
-                return result
-            }
             if let alert = observation.blockingAlert {
                 if let previous = dismissedAlert {
                     guard alert.identifier == previous.identifier, alert.label == previous.label,
@@ -112,17 +109,22 @@ final class UIWaitBudget {
                         dismissInterruption(alert)
                     }) == true else { return nil }
                 }
-            } else if case .collapsed(let toggle) = observation.state {
-                if revealedAt == nil {
-                    if perform("reveal observed sidebar", { reveal(toggle) }) == true {
-                        revealedAt = now()
+            } else {
+                if let result = perform("resolve observed shell", { resolve(observation) }) ?? nil {
+                    return result
+                }
+                if case .collapsed(let toggle) = observation.state {
+                    if revealedAt == nil {
+                        if perform("reveal observed sidebar", { reveal(toggle) }) == true {
+                            revealedAt = now()
+                        }
+                    } else if toggle.label == "Show Sidebar",
+                              now() - (revealedAt ?? now()) >= 1, !usedLeadingEdge {
+                        // A second observation must still advertise Show Sidebar.
+                        // Never toggle a now-visible sidebar closed.
+                        usedLeadingEdge = true
+                        _ = perform("reveal observed sidebar from edge", { leadingEdge(toggle) })
                     }
-                } else if toggle.label == "Show Sidebar",
-                          now() - (revealedAt ?? now()) >= 1, !usedLeadingEdge {
-                    // A second observation must still advertise Show Sidebar.
-                    // Never toggle a now-visible sidebar closed.
-                    usedLeadingEdge = true
-                    _ = perform("reveal observed sidebar from edge", { leadingEdge(toggle) })
                 }
             }
             if remaining > 0 {
@@ -379,7 +381,7 @@ final class UIWaitBudgetTests: XCTestCase {
         var observations = [collapsed(), sidebar()]
         let result = budget.waitForShell(
             observe: {
-                try budget.observeShell(
+                budget.observeShell(
                     observeInterruption: {
                         operations.append("alert")
                         clock += 0.1
@@ -413,7 +415,7 @@ final class UIWaitBudgetTests: XCTestCase {
         let budget = UIWaitBudget(timeout: 5)
         let result: Bool? = budget.waitForShell(
             observe: {
-                try budget.observeShell(
+                budget.observeShell(
                     observeInterruption: { self.passwordAlert(title: "Allow access?") },
                     observeApplication: {
                         XCTFail("Do not inspect navigation behind an unknown alert")
@@ -432,21 +434,27 @@ final class UIWaitBudgetTests: XCTestCase {
 
     func testTerminalUnknownAlertFailsBeforeResolvingOrRevealingNavigation() {
         let budget = UIWaitBudget(timeout: 5)
+        var resolverCalls = 0
         let result: Bool? = budget.waitForShell(
             observe: {
-                try budget.observeShell(
+                budget.observeShell(
                     observeInterruption: { nil },
                     observeTerminalInterruption: { self.passwordAlert(title: "Allow access?") },
                     observeApplication: { self.sidebar() }
                 )
             },
-            resolve: { _ in XCTFail("Do not resolve navigation behind an unknown alert"); return true },
+            resolve: { _ in
+                resolverCalls += 1
+                XCTFail("Do not resolve navigation behind an unknown alert")
+                return true
+            },
             reveal: { _ in XCTFail("Do not reveal navigation behind an unknown alert"); return false },
             leadingEdge: { _ in XCTFail("Do not reveal navigation behind an unknown alert"); return false },
             dismissInterruption: { $0.dismissalButton(allowedTitles: ["Save Password?": "Not Now"]) != nil },
             pause: { XCTFail("Unknown interruptions fail closed") }
         )
         XCTAssertNil(result)
+        XCTAssertEqual(resolverCalls, 0)
     }
 
     func testTerminalAlertProbeSkipsNonActionableShells() {
@@ -457,9 +465,10 @@ final class UIWaitBudgetTests: XCTestCase {
             sidebar()
         ]
         var terminalProbes = 0
+        var resolverCalls = 0
         let result: Bool? = budget.waitForShell(
             observe: {
-                try budget.observeShell(
+                budget.observeShell(
                     observeInterruption: { nil },
                     observeTerminalInterruption: {
                         terminalProbes += 1
@@ -468,7 +477,10 @@ final class UIWaitBudgetTests: XCTestCase {
                     observeApplication: { applicationSnapshots.removeFirst() }
                 )
             },
-            resolve: { _ in XCTFail("Do not resolve navigation behind an unknown alert"); return true },
+            resolve: { _ in
+                resolverCalls += 1
+                return nil
+            },
             reveal: { _ in XCTFail("Do not reveal navigation behind an unknown alert"); return false },
             leadingEdge: { _ in XCTFail("Do not reveal navigation behind an unknown alert"); return false },
             dismissInterruption: { _ in false },
@@ -476,9 +488,10 @@ final class UIWaitBudgetTests: XCTestCase {
         )
         XCTAssertNil(result)
         XCTAssertEqual(terminalProbes, 1)
+        XCTAssertEqual(resolverCalls, 1)
     }
 
-    func testTerminalAlertProbeRunsOnlyOnceForNavigableShellWait() {
+    func testTerminalAlertProbeRunsOnlyOnceForNavigableShellWait() throws {
         var clock: TimeInterval = 0
         let budget = UIWaitBudget(timeout: 5, now: { clock })
         var observations = [sidebar(), sidebar()]
@@ -488,7 +501,7 @@ final class UIWaitBudgetTests: XCTestCase {
             terminalProbes += 1
             return nil
         }
-        let result: Bool? = budget.waitForShell(
+        let result: Bool? = try budget.waitForShell(
             observe: {
                 try budget.observeShell(
                     observeInterruption: { nil },
@@ -514,7 +527,7 @@ final class UIWaitBudgetTests: XCTestCase {
         alert.frame = .zero
         let result = budget.waitForShell(
             observe: {
-                try budget.observeShell(
+                budget.observeShell(
                     observeInterruption: { alert },
                     observeApplication: { self.sidebar() }
                 )
@@ -533,7 +546,7 @@ final class UIWaitBudgetTests: XCTestCase {
         alert.frame = .zero
         let result = budget.waitForShell(
             observe: {
-                try budget.observeShell(
+                budget.observeShell(
                     observeInterruption: { nil },
                     observeTerminalInterruption: { alert },
                     observeApplication: { self.sidebar() }
@@ -553,7 +566,7 @@ final class UIWaitBudgetTests: XCTestCase {
             let budget = UIWaitBudget(timeout: 1, now: { clock })
             let result: Bool? = budget.waitForShell(
                 observe: {
-                    try budget.observeShell(
+                    budget.observeShell(
                         observeInterruption: { clock = 1.1; return present ? self.passwordAlert() : nil },
                         observeApplication: { XCTFail("Expired deadline"); return self.sidebar() }
                     )
