@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { load } from 'js-yaml';
 import { canonicalAuthorizationFixture } from './fixtures/canonical-qualification.mjs';
 import { canonicalValidationChecks } from '../canonical-qualification.mjs';
 import { parseTag, releaseRequiredChecks, releaseReviewStatus, repository } from '../release-policy.mjs';
@@ -190,7 +192,9 @@ test('positive rehearsal executes real policy, ledger and qualification verifier
   const f = fixture();
   const receipt = await positiveRehearsal(readOnlyClient('app', f.fetcher),
     readOnlyClient('generic', f.fetcher), context, { appId: '123' });
-  assert.equal(receipt.statusesReadVerified, true);
+  assert.equal(receipt.commitStatusReadObserved, true);
+  assert.equal(receipt.commitStatusGrantEvidenceRequired, true);
+  assert.equal(Object.hasOwn(receipt, 'statusesReadVerified'), false);
   assert.equal(receipt.inventoryDigest, digest(receipt.after));
   assert.deepEqual(receipt.before, receipt.after);
   assert.ok(f.calls.every(call => call.method === 'GET'));
@@ -198,7 +202,7 @@ test('positive rehearsal executes real policy, ledger and qualification verifier
   assert.doesNotMatch(JSON.stringify(receipt), /DO-NOT-EMIT|TOKEN-SENTINEL|authorization|allocationKey/);
 });
 
-test('missing App statuses grant or weakened environment fails before any mutation', async () => {
+test('denied App status read or weakened environment fails before any mutation', async () => {
   for (const fault of ['statuses', 'environment']) {
     const f = fixture();
     if (fault === 'environment') f.values.get('environments/release-insider').can_admins_bypass = true;
@@ -270,7 +274,7 @@ test('all nine target denials pass with unchanged inventories and one explicit s
   const result = await runDenialProbes('generic', context, settings, f.fetcher);
   assert.equal(result.passed, true, JSON.stringify(result));
   assert.equal(result.denials.length, 9);
-  assert.equal(result.uploads.length, 6);
+  assert.equal(result.uploads.length, packageNames.length);
   assert.equal(result.attempts.length, 4);
   assert.deepEqual(result.before, result.after);
   assert.equal(result.fixtures.filter(entry => entry.kind === 'same-tree-ledger-child').length, 1);
@@ -399,6 +403,94 @@ test('cleanup cannot target another host, package, version or upload completion'
     'https://ghcr.io/v2/olyforge3d/printfarmer-api/blobs/uploads/123?digest=sha256:bad',
     'https://user:password@ghcr.io/v2/olyforge3d/printfarmer-api/blobs/uploads/123',
   ]) assert.throws(() => cleanupUrl(location, 'printfarmer-api'));
+});
+
+const workflow = load(readFileSync('.github/workflows/release-protection-rehearsal.yml', 'utf8'));
+
+test('admission is unconditional and credential-free, and gates both protected jobs', () => {
+  const admission = workflow.jobs.admission;
+  assert.ok(admission);
+  for (const key of ['if', 'needs', 'environment', 'uses', 'secrets', 'env']) {
+    assert.equal(Object.hasOwn(admission, key), false, `Admission must not declare ${key}`);
+  }
+  assert.deepEqual(admission.permissions, {});
+  assert.equal(admission['runs-on'], 'ubuntu-latest');
+  assert.equal(admission.steps.length, 1);
+  const [step] = admission.steps;
+  assert.equal(Object.hasOwn(step, 'if'), false);
+  assert.equal(Object.hasOwn(step, 'continue-on-error'), false);
+  assert.equal(Object.hasOwn(admission, 'continue-on-error'), false);
+  assert.equal(step.shell, 'bash');
+  assert.deepEqual(step.env, { REHEARSAL_CHANNEL: '${{ inputs.channel }}' });
+  assert.doesNotMatch(step.run, /secrets|github\.token|GH_TOKEN|fetch|https?:|checkout|\|\|\s*true/);
+  assert.equal(workflow.jobs.positive.needs, 'admission');
+  assert.equal(Object.hasOwn(workflow.jobs.positive, 'if'), false);
+  assert.deepEqual(workflow.jobs.probes.needs, ['admission', 'positive']);
+  assert.equal(workflow.jobs.probes.if, 'inputs.denial_probes');
+});
+
+function runAdmission(overrides = {}) {
+  const run = workflow.jobs.admission.steps[0].run;
+  const match = /^node --input-type=module <<'NODE'\n([\s\S]+)\nNODE\n?$/.exec(run);
+  assert.ok(match, 'Execute the exact admission script; no untested shell suffix');
+  const result = spawnSync(process.execPath, ['--input-type=module', '--eval', match[1]], {
+    env: { ...env, ...overrides }, encoding: 'utf8', timeout: 10_000,
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.signal, null);
+  return result;
+}
+
+test('exact workflow admission succeeds for first-attempt insider and stable dispatches without credentials', () => {
+  assert.equal(runAdmission().status, 0);
+  assert.equal(runAdmission({
+    REHEARSAL_CHANNEL: 'stable', GITHUB_REF: 'refs/heads/main',
+    GITHUB_WORKFLOW_REF: `${repository}/${rehearsalWorkflow}@refs/heads/main`,
+  }).status, 0);
+});
+
+test('exact workflow admission fails invalid refs and reruns instead of leaving an all-skipped green run', () => {
+  for (const overrides of [
+    { GITHUB_REPOSITORY: 'outsider/fork' },
+    { GITHUB_EVENT_NAME: 'pull_request' }, { GITHUB_EVENT_NAME: 'workflow_call' },
+    { GITHUB_REF: 'refs/heads/feature' }, { GITHUB_REF: 'refs/tags/v1.2.3' },
+    { GITHUB_REF: 'refs/heads/main' }, { REHEARSAL_CHANNEL: 'stable' },
+    { REHEARSAL_CHANNEL: 'unknown' }, { REHEARSAL_CHANNEL: '' },
+    { GITHUB_RUN_ATTEMPT: '2' }, { GITHUB_RUN_ATTEMPT: '0' }, { GITHUB_RUN_ATTEMPT: '' },
+    { GITHUB_WORKFLOW_REF: `${repository}/${rehearsalWorkflow}@refs/heads/feature` },
+    { GITHUB_WORKFLOW_REF: `${repository}/.github/workflows/consolidated-release.yml@refs/heads/development` },
+    { GITHUB_WORKFLOW_REF: `outsider/fork/${rehearsalWorkflow}@refs/heads/development` },
+    { GITHUB_WORKFLOW_SHA: head }, { GITHUB_WORKFLOW_SHA: '' },
+    { GITHUB_SHA: 'bad', GITHUB_WORKFLOW_SHA: 'bad' },
+    { GITHUB_SHA: '', GITHUB_WORKFLOW_SHA: '' }, { GITHUB_RUN_ID: '' },
+  ]) {
+    const result = runAdmission(overrides);
+    assert.equal(result.status, 1, JSON.stringify(overrides));
+    assert.equal(result.stderr.trim(), 'Untrusted rehearsal dispatch; protected jobs blocked');
+    assert.equal(result.stdout, '');
+  }
+});
+
+test('positive job and App token inputs forbid any write permission', () => {
+  assert.deepEqual(workflow.permissions, { contents: 'read' });
+  assert.deepEqual(workflow.jobs.positive.permissions, {
+    contents: 'read', packages: 'read', actions: 'read', checks: 'read',
+    statuses: 'read', 'pull-requests': 'read',
+  });
+  const appSteps = Object.values(workflow.jobs).flatMap(job => job.steps)
+    .filter(step => step.uses?.startsWith('actions/create-github-app-token@'));
+  assert.equal(appSteps.length, 1);
+  const permissions = Object.fromEntries(Object.entries(appSteps[0].with)
+    .filter(([name]) => name.startsWith('permission-')));
+  assert.deepEqual(permissions, {
+    'permission-contents': 'read', 'permission-checks': 'read', 'permission-statuses': 'read',
+    'permission-administration': 'read', 'permission-actions': 'read',
+  });
+});
+
+test('probe pass predicate explicitly requires one upload result for every production package', () => {
+  const source = readFileSync('scripts/ci/release-rehearsal-probes.mjs', 'utf8');
+  assert.match(source, /result\.uploads\.length === packageNames\.length && result\.uploads\.every/);
 });
 
 test('workflow separates App reads from generic writes without any publisher or signing entry point', () => {

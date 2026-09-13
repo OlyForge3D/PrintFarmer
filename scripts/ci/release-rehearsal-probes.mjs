@@ -208,7 +208,8 @@ export async function runDenialProbes(token, context, settings, fetcher = fetch)
     }
   }
   result.passed = result.passed && result.inventoriesComplete &&
-    result.denials.length === 3 + packageNames.length && result.uploads.every(upload =>
+    result.denials.length === 3 + packageNames.length &&
+    result.uploads.length === packageNames.length && result.uploads.every(upload =>
       upload.denied && !upload.started && !upload.unknown);
   return result;
 }

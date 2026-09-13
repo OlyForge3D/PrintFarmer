@@ -785,10 +785,15 @@ that run, not App-permission or denied-write proof.
 Merge the reviewed harness through the normal high-risk review gate, then obtain
 fresh canonical CI/review/qualification at the new HEAD. Run insider only from
 `development`; stable requires the harness merged and freshly qualified on
-`main`. Both jobs use the existing canonical `release-<channel>` owner gate;
-never widen environment branch policies. The workflow shares the channel's
-publication concurrency group and refuses active/pending publishers on either
-channel. Keep production dispatches paused throughout the window; any observed
+`main`. An unconditional, credential-free admission job checks the repository,
+dispatch event, selected branch, workflow ref/SHA and first run attempt. Invalid
+dispatches fail the run rather than skipping every job and appearing green.
+Admission performs no checkout or API requests and has no token permissions or
+environment secrets. Both protected jobs depend on admission and use the existing
+canonical `release-<channel>` owner gate; never widen environment branch policies.
+The workflow shares the channel's publication concurrency group and refuses
+active/pending publishers on either channel. Keep production dispatches paused
+throughout the window; any observed
 concurrent drift invalidates the evidence.
 
 The default `denial_probes=false` performs only reads. The protected App token
@@ -801,6 +806,18 @@ succeed. App settings alone, an administrative token, or ordinary admission
 are not equivalent evidence. Token creation/revocation and Actions/environment
 audit records are intended effects.
 
+The receipt's `commitStatusReadObserved` means only that an authenticated App
+request read commit statuses. This public repository's status endpoint can be
+read without a commit-status permission grant, so neither that observation nor
+`appReadsVerified` proves the installation grant. The receipt explicitly sets
+`commitStatusGrantEvidenceRequired: true`. Before accepting the rehearsal, the
+owner must separately retain secret-free evidence of the installation's accepted
+`statuses: read` permission (or stronger, downscoped to read for this token),
+paired with successful issuance using the workflow's explicit
+`permission-statuses: read` request. App settings alone are insufficient.
+The harness does not obtain extra credentials to read installation permissions.
+Never retain the private key or token response as evidence.
+
 Live denial probes additionally require explicit owner consent to bounded
 canary effects, `denial_probes=true`, and environment variable
 `RELEASE_REHEARSAL_APPROVED_SHA` equal to the exact reviewed workflow/source SHA.
@@ -808,7 +825,7 @@ This variable is not a release authorization. Clear it after the window.
 Before approving the first environment gate, the owner must separately provision
 one lightweight **inert** tag
 `refs/tags/v-rehearsal-2668-<run_id>-1-update` at the current ledger head.
-The run ID is available while the first job waits for approval. Provisioning
+The run ID is available while the positive job waits for approval. Provisioning
 requires separately authorized use of the designated creator App; the harness
 cannot create this fixture with its GET-only App token. Do not weaken rulesets
 or grant an update/deletion bypass. Record this intended fixture in the owner's
@@ -834,6 +851,12 @@ The nine target probes run serially, never retrying a write:
   update fixture and the ledger ref to that child, always `force:false`.
   The object is an explicit intended effect even when both updates are denied.
   No tree/blob, state, counter, allocation, qualification or pointer is authored.
+  If both updates are denied, no ref retains this child: GitHub may garbage-collect
+  the unreferenced object, and later SHA lookup is not guaranteed. The receipt's
+  `retain-never-reset` disposition prohibits harness deletion/reset; it is not
+  a durability guarantee. Preserve the secret-free receipt (child, parent and
+  tree SHAs and verified attempt outcomes) and run logs beyond the artifact's
+  30-day retention window. Do not add a ref or weaken protections to retain it.
 - For every production component in `release-policy.mjs`, authenticate the
   generic token, prove registry read access, then attempt one zero-body upload
   initiation. A scope request alone never counts as a write denial.
@@ -852,9 +875,11 @@ Receipts inventory all paginated historical tags (including `ios/`), canonical
 heads, ledger head/tree/state digest, releases and their assets, and all six
 package version/digest records. Inventories must match across the positive
 job, before every probe and after the final attempt, including failure paths.
-Incomplete pagination or mismatched package counts fail closed. Raw policy,
-reviewer data, API errors, release bodies, credentials and upload-state URLs
-are not emitted. Preserve both `release-rehearsal-*` artifacts and run logs.
+Incomplete pagination or mismatched package counts fail closed. Passing also
+requires exactly one denied upload result per production package; an empty or
+partial upload list cannot pass. Raw policy, reviewer data, API errors, release
+bodies, credentials and upload-state URLs are not emitted. Preserve both
+`release-rehearsal-*` artifacts and run logs.
 
 GHCR does not expose a global unfinished-upload listing API. Upload evidence
 therefore accounts for **every initiation attempted by this harness**, including
@@ -902,8 +927,9 @@ remain retryable; new stale reservations cannot reach publication.
 The same suite scans repository executable scripts, actions and workflows for
 tag creation, force pushes and direct release/API publication. Its explicit
 writer inventory permits only the guarded ledger adapter, authorized Docker
-consumer, bounded rehearsal probe module, and separate `ios/` TestFlight writers. This is a source regression
-check, not a substitute for repository protection or runtime authorization.
+consumer, bounded rehearsal probe module, and separate `ios/` TestFlight writers.
+This is a source regression check, not a substitute for repository protection
+or runtime authorization.
 Both retired server helpers execute against sentinel publication commands for
 normal, dry-run, help and force arguments; every call exits 2 without invoking
 those commands. Use Git Bash rather than WSL bash for these tests on Windows.

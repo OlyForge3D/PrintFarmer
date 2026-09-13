@@ -246,7 +246,7 @@ export async function positiveRehearsal(app, generic, context, settings) {
   const statuses = await app(`commits/${context.sha}/status?per_page=100`);
   requireThat(statuses.sha === context.sha && Array.isArray(statuses.statuses) &&
     statuses.total_count === statuses.statuses.length && statuses.total_count > 0 &&
-    statuses.total_count < 100, 'Missing positive App commit-status read proof');
+    statuses.total_count < 100, 'Missing positive App commit-status read observation');
   const ledger = await gitLedger(app, context.anchor).read();
   requireThat(ledger.revision === before.ledger.head && digest(ledger.state) === before.ledger.state,
     'App ledger proof differs from inventory');
@@ -255,5 +255,6 @@ export async function positiveRehearsal(app, generic, context, settings) {
   const after = await snapshot(generic, context);
   verifyUnchanged(before, after);
   return { kind: 'release-rehearsal-only', schema: 1, run: context.run, source: context.sha,
-    appReadsVerified: true, statusesReadVerified: true, before, after, inventoryDigest: digest(after) };
+    appReadsVerified: true, commitStatusReadObserved: true, commitStatusGrantEvidenceRequired: true,
+    before, after, inventoryDigest: digest(after) };
 }

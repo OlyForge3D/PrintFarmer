@@ -23,13 +23,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  admission:
+    name: Credential-free rehearsal admission
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Reject untrusted dispatches and reruns
+        shell: bash
+        env:
+          REHEARSAL_CHANNEL: ${{ inputs.channel }}
+        run: |
+          node --input-type=module <<'NODE'
+          const env = process.env;
+          const repository = 'OlyForge3D/PrintFarmer';
+          const workflow = '.github/workflows/release-protection-rehearsal.yml';
+          const branch = { insider: 'development', stable: 'main' }[env.REHEARSAL_CHANNEL];
+          const trusted = ['insider', 'stable'].includes(env.REHEARSAL_CHANNEL) &&
+            env.GITHUB_REPOSITORY === repository &&
+            env.GITHUB_EVENT_NAME === 'workflow_dispatch' &&
+            env.GITHUB_REF === `refs/heads/${branch}` &&
+            env.GITHUB_WORKFLOW_REF === `${repository}/${workflow}@refs/heads/${branch}` &&
+            /^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? '') &&
+            env.GITHUB_WORKFLOW_SHA === env.GITHUB_SHA &&
+            env.GITHUB_RUN_ATTEMPT === '1' &&
+            /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID ?? '');
+          if (!trusted) {
+            console.error('Untrusted rehearsal dispatch; protected jobs blocked');
+            process.exitCode = 1;
+          }
+          NODE
+
   positive:
     name: Protected GET-only App rehearsal
-    if: >-
-      github.repository == 'OlyForge3D/PrintFarmer' &&
-      github.event_name == 'workflow_dispatch' &&
-      github.ref == format('refs/heads/{0}', inputs.channel == 'stable' && 'main' || 'development') &&
-      github.run_attempt == 1
+    needs: admission
     environment: release-${{ inputs.channel }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -86,7 +113,7 @@ jobs:
 
   probes:
     name: Owner-approved generic-token denial probes
-    needs: positive
+    needs: [admission, positive]
     if: inputs.denial_probes
     environment: release-${{ inputs.channel }}
     runs-on: ubuntu-latest
