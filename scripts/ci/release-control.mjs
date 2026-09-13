@@ -9,6 +9,7 @@ import {
   verifyStableQualification, verifyReleaseChecks,
 } from './release-github.mjs';
 import { emitBuildIdentity } from './release-metadata.mjs';
+import { qualificationClient, verifyCanonicalReleaseEvidence } from './canonical-qualification.mjs';
 import {
   privateSetPath, publicAuthorization, readPrivateAuthorization, readPrivateJson, verifyAuthorization, writeAuthorization, writePublicSet,
 } from './release-authorization.mjs';
@@ -77,6 +78,8 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     const selectedHead = await branchHead(api, branch);
     const admission = admit(context, selectedHead, await readVersion(api, selectedHead));
     validateReservationAdmission(state, admission);
+    await verifyCanonicalReleaseEvidence(qualificationClient(env.GH_TOKEN),
+      selectedHead, admission.channel, env.RELEASE_APPROVAL_MODE);
     if (operation === 'admit') await verifyReleaseChecks(api, selectedHead);
     requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift before authorization');
     output('source_sha', context.eventSha);
@@ -89,6 +92,8 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, selectedHead);
     const record = await transact(store, async state => {
       const existing = validateReservationAdmission(state, admission);
+      await verifyCanonicalReleaseEvidence(qualificationClient(env.GH_TOKEN),
+        selectedHead, admission.channel, env.RELEASE_APPROVAL_MODE);
       requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during allocation retry');
       const qualification = await verifyStableQualification(api, state, admission);
       requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during qualification');

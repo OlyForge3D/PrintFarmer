@@ -184,7 +184,9 @@ jobs:
         run: node --test scripts/compliance/compliance.test.mjs
 
       - name: Test release tag-trigger policy
-        run: node --test scripts/ci/tests/test-release-tag-triggers.mjs
+        run: >-
+          node --test scripts/ci/tests/test-release-tag-triggers.mjs
+          scripts/ci/tests/test-canonical-qualification.mjs
 
       - name: Test daily development image-set policy
         run: node --test scripts/ci/tests/test-daily-development-images.mjs

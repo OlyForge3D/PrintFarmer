@@ -51,6 +51,7 @@ jobs:
       actions: read
       checks: read
       statuses: read
+      pull-requests: read
     outputs:
       source_sha: ${{ steps.admit.outputs.source_sha }}
       channel: ${{ steps.admit.outputs.channel }}
@@ -82,6 +83,10 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      actions: read
+      checks: read
+      statuses: read
+      pull-requests: read
     outputs:
       public_identity: ${{ steps.authorize.outputs.public_identity }}
     steps:

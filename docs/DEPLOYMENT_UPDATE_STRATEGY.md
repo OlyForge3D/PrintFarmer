@@ -83,6 +83,22 @@ live rulesets/environments/ledger/publisher setup. #2660 still owns signed
 managed eligibility, image aliases and generated installer references; no
 source-only release or unsigned candidate pointer is an update candidate.
 
+**Canonical qualification (#2686):** the
+[non-publishing qualification path](RELEASE_GUIDE.md#non-publishing-canonical-qualification)
+requires new full-safe manual CI on live `main`/`development` HEAD and a fresh
+commit/run-bound review confirmation. Default-branch verification and a separate
+bounded status writer establish a live, completed audit chain; no PR verdict is
+copied to a squash SHA and no tree-equality review inference is permitted.
+Single-maintainer confirmation is honestly owner-confirmed/self-attested.
+Separation-of-duties additionally requires eligible native code-owner/non-self
+approval on that exact canonical SHA; missing evidence remains blocked.
+Newer runs, reruns, mode drift, edited review, failed checks or HEAD movement
+invalidate qualification. Publication admission revalidates the chain before
+reservation and each CAS retry rather than trusting a green status alone.
+Qualification has no release credentials, environments, OIDC or ledger writes.
+It does not complete #2668 activation: ledger/package rehearsals and private
+owner publisher-credential provisioning remain separate.
+
 **Approval corrections (#2682, #2684):** activation under #2668 requires the
 explicit `RELEASE_APPROVAL_MODE` policy. `single-maintainer`
 requires manual approval by the owner or an explicitly owner-approved user,

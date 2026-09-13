@@ -34,6 +34,29 @@ agents keep the normal process-tracking requirement.
 
 ## Configuration Surface Area
 
+### Canonical release qualification
+
+Release-SHA review is separate from the PR-head Squad gate. The
+[release guide](../docs/RELEASE_GUIDE.md#non-publishing-canonical-qualification)
+defines the operator confirmation format and native-approval limitations.
+
+| Workflow | Source and authority |
+| --- | --- |
+| `ci.yml` | Manual dispatch on live `main` or `development`; fresh full-safe validation with read-only repository permission |
+| `qualify-canonical-release.yml` | Manual dispatch on the live default branch; validates canonical CI, branch-required checks and fresh SHA/run-bound review; no writes |
+| `record-canonical-qualification.yml` | Default-branch `workflow_run` consumer; independently rereads evidence and posts only the bounded canonical review status |
+| `consolidated-release.yml` | Separately revalidates the completed qualification chain at admission/each allocation retry; retains protected publisher approval and credentials |
+
+Never check out `workflow_run.head_sha` or execute a downloaded artifact with
+the status token. Both qualification jobs check out `github.workflow_sha` with
+credentials unpersisted, and compare against the live trusted default HEAD.
+Feature/manual ref selection, forged completion payloads and reruns cannot
+substitute for the actual API-verified runs. The writer's successful completion,
+fresh review/checks and unchanged canonical HEAD are all needed for release;
+status color alone is insufficient, including cancellation immediately after
+posting. CI reruns need fresh CI IDs and confirmations, never replayed evidence.
+No qualification workflow uses release secrets, ledger reservations or deployments.
+
 The coordinator reads these files to decide how to behave. If your workflow isn't encoded in one of these, it doesn't exist.
 
 | File | What It Controls | Read When |
