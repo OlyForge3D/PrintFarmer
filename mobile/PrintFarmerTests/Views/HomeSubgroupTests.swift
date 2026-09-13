@@ -176,8 +176,8 @@ final class HomeSubgroupTests: XCTestCase {
         XCTAssertEqual(hint, "Homes Z axis only.")
     }
 
-    func test_accessibilityHint_disabled_returnsSpec41Text() throws {
-        // Default printer is printing -> isDisabled = true
+    func test_accessibilityHint_activePrinting_returnsSpec41Text() throws {
+        // Default printer is actively printing -> isDisabled = true.
         let mock = MockPrinterService()
         mock.capabilitiesToReturn = Self.fullCaps
         let printer = try TestData.decodePrinter()
@@ -190,14 +190,37 @@ final class HomeSubgroupTests: XCTestCase {
     func test_accessibilityHint_moonrakerRecoveryBarrier_returnsRecoveryReason() async throws {
         let printer = try TestData.decodePrinter()
         let service = MockPrinterService()
+        let operationID = UUID()
+        let timestamp = Date()
+        let recoveringOperation = PrinterControlOperation(
+            operationId: operationID,
+            printerId: printer.id,
+            kind: .homeAll,
+            x: nil,
+            y: nil,
+            z: nil,
+            f: nil,
+            state: .recovering,
+            rowVersion: "test-recovery",
+            createdAtUtc: timestamp,
+            updatedAtUtc: timestamp,
+            startedAtUtc: timestamp,
+            completedAtUtc: nil,
+            barrierHeld: true,
+            requiresRecovery: true,
+            completionEvidence: .none,
+            failure: nil,
+            senderIsolation: .externalVerificationRequired
+        )
         service.currentControlOperationToReturn = .init(
             physicalControl: .init(
                 supportedOperations: [.homeAll, .homeXY, .homeZ, .jog, .moveTo],
                 barrierHeld: true,
+                operationId: operationID,
                 state: .recovering,
                 requiresRecovery: true
             ),
-            operation: nil
+            operation: recoveringOperation
         )
         let viewModel = PrinterControlsViewModel.configuredForTests(
             printerService: service, printer: printer

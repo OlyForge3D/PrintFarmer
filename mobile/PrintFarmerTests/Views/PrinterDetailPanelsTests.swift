@@ -51,6 +51,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.second.baseURL.host)
+        XCTAssertEqual(currentControlOperationRequests(fixture.api).count, 1)
         XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
         XCTAssertTrue(fixture.api.capturedRequests.allSatisfy {
             $0.value(forHTTPHeaderField: "Authorization") == "Bearer detail-host-test-token"
@@ -89,6 +90,7 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.first.baseURL.host)
+        XCTAssertEqual(currentControlOperationRequests(fixture.api).count, 1)
         XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
         XCTAssertTrue(fixture.api.capturedRequests.allSatisfy {
             $0.value(forHTTPHeaderField: "Authorization") == "Bearer detail-host-test-token"
@@ -218,6 +220,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     private func capabilityRequests(_ api: MockAPIClient) -> [URLRequest] {
         api.capturedRequests.filter { $0.url?.path.hasSuffix("/backend-capabilities") == true }
+    }
+
+    private func currentControlOperationRequests(_ api: MockAPIClient) -> [URLRequest] {
+        api.capturedRequests.filter { $0.url?.path.hasSuffix("/control-operations/current") == true }
     }
 
     private func selectControls<Content: View>(in controller: DetailHostingController<Content>) async throws {

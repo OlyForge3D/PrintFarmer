@@ -1380,6 +1380,18 @@ final class PrinterControlsViewModel: ObservableObject {
 
     var usesDurableMotion: Bool { durableMotionRequired }
 
+    var hasDurableMotionBarrier: Bool {
+        guard usesDurableMotion else { return false }
+        return physicalControl?.barrierHeld == true
+            || physicalControl?.requiresRecovery == true
+            || physicalControl?.state == .unknown
+            || physicalControl?.state == .recovering
+            || controlOperation?.barrierHeld == true
+            || controlOperation?.requiresRecovery == true
+            || controlOperation?.state == .unknown
+            || controlOperation?.state == .recovering
+    }
+
     var motionBlockedReason: String? {
         guard usesDurableMotion else { return nil }
         if validatingMotionAdmission { return nil }
