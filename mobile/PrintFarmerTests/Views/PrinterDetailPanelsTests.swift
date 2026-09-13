@@ -116,6 +116,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
         {"printerId":"\(printer.id)","backend":"Moonraker",
          "supportsHotendTemperature":true,"supportsBedTemperature":true}
         """.utf8)
+        let currentControlOperation = Data("""
+        {"physicalControl":{"supportedOperations":["HomeAll","HomeXY","HomeZ","Jog","MoveTo"],
+         "barrierHeld":false,"requiresRecovery":false,"operationId":null,"state":null},"operation":null}
+        """.utf8)
         let api = MockAPIClient()
         api.requestHandler = { request in
             let path = request.url?.path ?? ""
@@ -126,6 +130,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
                 data = capabilities
             } else if path.hasSuffix("/details") {
                 data = details
+            } else if path.hasSuffix("/control-operations/current") {
+                data = currentControlOperation
             } else {
                 return (TestData.httpResponse(url: request.url, statusCode: 404), Data())
             }
