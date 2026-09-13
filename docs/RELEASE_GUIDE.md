@@ -491,13 +491,131 @@ ruleset binding unset for `squad/pre-pr-verdict` and other status-only contexts.
 An unprovable integration binding fails closed rather than inventing status or
 check-suite fields. Paginated evidence at the 100-entry cap fails closed.
 
-**Activation prerequisite:** the current Squad producer posts to an open PR's
-head, not a later squash/merge commit. A PR-head verdict must never be copied to
-a different canonical release SHA. The inspected baseline had no status on its
-canonical SHA; release remains blocked until an owner-approved exact-canonical-SHA
-qualification path supplies genuine review evidence. #2668 owns that activation
-work; this change neither posts statuses nor changes the verdict producer or live
-configuration. Required checks alone do not manufacture missing review evidence.
+The PR producer still posts only to the reviewed PR head. Release admission
+additionally requires the canonical qualification below; an ordinary PR verdict,
+owner override or carried-across-sync status cannot substitute for it. The low-level
+check adapter understands both status vocabularies, but release admission and
+each allocation retry require the completed canonical workflow audit chain.
+
+### Non-publishing canonical qualification
+
+The qualification mechanism has three deliberately separate parts:
+
+1. Manually dispatch the existing **CI** workflow on the canonical branch:
+   `main` for stable, `development` for insider. This executes the full-safe
+   selector, tooling, frontend build/lint/tests, .NET build/tests, provider tests,
+   migration drift and dependency validation. Wait for successful completion.
+2. Review the **actual canonical SHA**, after CI completes, and post the fresh
+   confirmation described below as a comment on that commit. Do not copy a
+   PR-head verdict, infer review from tree equality, or name invented reviewers.
+3. Dispatch **Qualify canonical release** from the repository's **default
+   branch**, supplying the channel, CI run ID, commit-comment ID and native PR
+   number (`0` in single-maintainer mode). No SHA/ref input selects the target:
+   the verifier independently resolves the live canonical HEAD.
+
+For example, these commands only start validation and qualification; neither
+invokes the release publisher:
+
+```bash
+gh workflow run ci.yml --repo OlyForge3D/PrintFarmer --ref main
+# After CI finishes and the fresh canonical commit review is recorded:
+gh workflow run qualify-canonical-release.yml --repo OlyForge3D/PrintFarmer \
+  --ref development -f channel=stable -f validation_run=<ci-run-id> \
+  -f review_comment=<commit-comment-id> -f native_pr=0
+```
+
+The second command uses the current default (`development`), even for stable.
+If the default changes to `main`, select `main` there instead. Other default
+branches fail closed. Requalify after either the source or trusted default HEAD
+changes. Do not dispatch the verifier from a feature branch or an arbitrary SHA.
+
+The commit confirmation is an exact, unfenced six-line body, without extra text
+or a final newline. Replace the two placeholders with the full lowercase SHA
+and decimal CI run ID; the attempt is always `1`:
+
+```text
+Canonical-Qualification: v1
+Source-SHA: <full-canonical-sha>
+CI-Run: <ci-run-id>
+CI-Attempt: 1
+Approval-Mode: single-maintainer
+Review: owner-confirmed-self-attested
+```
+
+Use the commit page or `POST /repos/OlyForge3D/PrintFarmer/commits/{sha}/comments`
+under the reviewer's own authenticated account, then retain its comment ID.
+The owner must actually confirm the fresh Squad review of that canonical SHA;
+the declaration is **self-attested**, not native independence, separation of
+duties, or a four-eyes control. The initial implementation accepts `jpapiez`
+only, verified live as an administrator. Adding another owner-confirmation
+account requires a reviewed policy change, not a workflow input.
+
+In `separation-of-duties`, change the last two values to
+`separation-of-duties` and `native-code-owner-non-self`, and provide `native_pr`.
+The commenter must hold live write-or-better permission, be a canonical
+CODEOWNER, and have a fresh native `APPROVED` review on that PR's exact canonical
+head SHA after CI. They must differ from the PR author and both CI/qualification
+initiators. Later change requests or dismissal invalidate evidence.
+The PR must belong to this repository and target the selected canonical branch.
+The implemented ownership parser supports the repository's final user-only
+catch-all `* @login` rule (which overrides earlier rules). Team ownership or a
+pattern-only layout requires reviewed support; it never silently falls back.
+A squash predecessor is **not** the canonical SHA. If no appropriate exact-head
+native PR evidence exists, separation-of-duties stays blocked: obtain genuinely
+eligible native review through an owner-approved branch/merge process, never
+replay a pre-squash approval or switch modes merely to evade the requirement.
+
+Every CI job must succeed, including the required named jobs. Live applied
+branch rules must retain strict checks and the mandatory release contexts.
+Every additional configured check must also have executed in that CI run:
+job URL, check-suite ID, SHA and optional integration ID must agree. Checks from
+other workflows require a reviewed extension of the qualification execution
+plan; a coincidentally green status is insufficient.
+
+CI and review evidence expire 24 hours after CI creation. Only attempt 1 is
+accepted; **all reruns, including failed-jobs-only reruns, require new CI and a
+new confirmation**. Any newer CI run for the SHA or newer qualification for
+the channel supersedes the old evidence, including failed/cancelled runs.
+A CI run may be named by only one qualification run. Edited confirmations,
+missing/unknown modes, mode drift, unavailable permission reads, truncation,
+partial checks and stale HEADs fail closed. API lists are bounded below 100
+entries; qualification history is time-filtered from the selected CI creation,
+not an unbounded lifetime count. Exceeding a bound requires a reviewed pagination
+extension rather than deleting audit evidence.
+
+**Evidence writer:** `record-canonical-qualification.yml` runs from the trusted
+default branch after qualification completes. It revalidates the entire chain,
+then posts only `squad/pre-pr-verdict` on the resolved canonical SHA, with
+`QUALIFIED (self-attested)` or `QUALIFIED (native non-self)` and the actual writer
+run URL. That run links to the qualifying run, whose title identifies CI and
+review records. No reviewer identities or private raw policy are written to
+normalized output; the public audit links themselves are not private.
+Failed/cancelled qualification is reconciled to a bounded failure status when
+the trusted source can still be resolved. HEAD movement during posting retracts
+success. GitHub has no atomic HEAD/status/run-completion transaction: cancellation
+immediately after POST can leave a visually green raw status. **It is never
+release authority**: admission additionally requires the writer to have completed
+successfully and rereads live HEAD, runs, jobs, review, mode and status provenance.
+In-progress, cancelled, superseded or forged evidence is rejected before any
+reservation, including each CAS retry. Do not use the status color alone.
+
+The verifier is read-only. Only the separate evidence writer has `statuses: write`;
+neither has release environments, publisher App credentials, package/content
+writes, OIDC, deployments, ledger access or downloaded executable artifacts.
+Checkout is pinned to the trusted workflow SHA with credentials unpersisted.
+The API client allowlists reads and one fixed status context; it rejects redirects
+and all publish, tag, ref, dispatch and deployment writes. Candidate CI code
+executes only in the existing read-only CI workflow, never with the writer token.
+`push` and `repository_dispatch` cannot invoke qualification; `workflow_run`
+payloads are hints that must match live repository/workflow/run data.
+
+This path changes no release protection profile, signed identity schema/digest,
+ledger schema or publication policy. #2679/#2683/#2685 branch/environment/tag,
+publisher, ledger-continuity and package-isolation controls remain mandatory.
+After merge, #2668 still requires owner-approved ledger seed/anchor/continuity,
+package ACL verification and safe rehearsals. Publisher App/registry credential
+provisioning remains a **private, separate owner step**. No secret value is
+needed to qualify; never put credentials in commit comments, issues or artifacts.
 
 ### Environment approval and cutover
 

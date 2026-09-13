@@ -310,8 +310,10 @@ export async function verifyReleaseChecks(api, sourceCommit, required = releaseR
     // Commit statuses have no integration_id or check_suite. Never substitute a green workflow job.
     const statusPassed = latestStatus?.state === 'success' && policy.integration_id == null;
     const reviewed = typeof latestStatus?.description === 'string' &&
-      ['REVIEWED (self-attested)', 'REVIEWED (self-attested, carried across sync)', 'APPROVE (owner)']
-        .some(verdict => latestStatus.description.startsWith(`${verdict} @ ${sourceCommit.slice(0, 12)} by `));
+      (['REVIEWED (self-attested)', 'REVIEWED (self-attested, carried across sync)', 'APPROVE (owner)']
+        .some(verdict => latestStatus.description.startsWith(`${verdict} @ ${sourceCommit.slice(0, 12)} by `)) ||
+       ['QUALIFIED (self-attested)', 'QUALIFIED (native non-self)']
+         .some(verdict => latestStatus.description === `${verdict} @ ${sourceCommit.slice(0, 12)}`));
     const requiredPassed = context === releaseReviewStatus ? statusPassed && reviewed :
       releaseBuildChecks.includes(context) ? checkPassed :
         latestCheck || latestStatus;

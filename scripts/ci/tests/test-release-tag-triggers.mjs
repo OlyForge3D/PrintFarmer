@@ -3,6 +3,7 @@ import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, sym
 import { execFileSync, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import test from 'node:test';
+import { canonicalAuthorizationFixture } from './fixtures/canonical-qualification.mjs';
 import {
   admit, advance, allocationKey, compareVersions, components, hash, identityLabels,
   parseTag, parseVersionFile, reserve as reserveRelease, transact, validateCandidate, validateCompleteSet,
@@ -2097,7 +2098,7 @@ test('additional configured checks enforce latest exact run and integration bind
   } finally { globalThis.fetch = previous; }
 });
 
-test('review status accepts exact-head self-attestation, carried review and owner override without exposing identity', async () => {
+test('release admission rejects PR-head self-attestation, carried review and owner override as canonical evidence', async () => {
   const previous = globalThis.fetch;
   const previousOutput = process.env.GITHUB_OUTPUT;
   delete process.env.GITHUB_OUTPUT;
@@ -2107,7 +2108,7 @@ test('review status accepts exact-head self-attestation, carried review and owne
         status.statuses[0].description = `${verdict} @ ${sha.slice(0, 12)} by private-reviewer`;
       } });
       globalThis.fetch = fixture.fetch;
-      await runReleaseControl('admit', fixture.env);
+      await assert.rejects(runReleaseControl('admit', fixture.env), /qualification evidence/);
       assert.ok(fixture.calls.every(call => call.method === 'GET'));
     }
   } finally {
@@ -2384,18 +2385,20 @@ function authorizationFixture(initial = state(), settings = {}) {
     GITHUB_WORKFLOW_REF: selected.workflowIdentity, GITHUB_WORKFLOW_SHA: sourceCommit,
     GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '1', RELEASE_CHANNEL: channel,
   };
+  const canonical = canonicalAuthorizationFixture(sourceCommit, channel, env.RELEASE_APPROVAL_MODE);
   return {
     env, calls, ledgerWrites, environment, branchRules,
     deleteTag() { tag = undefined; },
     async fetch(url, options) {
-      const endpoint = url.split('/repos/OlyForge3D/PrintFarmer/')[1];
-      assert.ok(endpoint, `Unexpected API host/path: ${url}`);
+      const endpoint = url.replace(/^https:\/\/api\.github\.com\/repos\/OlyForge3D\/PrintFarmer\/?/, '');
+      assert.notEqual(endpoint, url, `Unexpected API host/path: ${url}`);
       const method = options.method;
       const publisher = options.headers.Authorization === `Bearer ${env.RELEASE_PUBLISHER_TOKEN}`;
-      const admin = /^(rules\/|rulesets|environments\/)/.test(endpoint);
+      const admin = /^(rulesets|environments\/)/.test(endpoint);
       calls.push({ endpoint, method, publisher, admin });
       const response = (body, status = 200) => new Response(JSON.stringify(body), { status });
       if ((admin || method !== 'GET') && !publisher) return response({}, 403);
+      if (endpoint.startsWith('rules/branches/')) return response(await policies(endpoint));
       if (admin) {
         if (settings.advanceBeforeAllocation && !advanced) {
           appendSnapshot(settings.advanceBeforeAllocation);
@@ -2404,7 +2407,11 @@ function authorizationFixture(initial = state(), settings = {}) {
         return response(await policies(endpoint));
       }
       if (endpoint === `git/ref/heads/${branch}`) return response({
-        object: { sha: settings.headDriftAfterTree && comparedTree ? 'f'.repeat(40) : sourceCommit },
+        ref: `refs/heads/${branch}`,
+        object: { type: 'commit', sha: settings.headDriftAfterTree && comparedTree ? 'f'.repeat(40) : sourceCommit },
+      });
+      if (endpoint === 'git/ref/heads/development') return response({
+        ref: 'refs/heads/development', object: { type: 'commit', sha: sourceCommit },
       });
       if (endpoint === 'git/ref/heads/release-ledger') return response({ object: { sha: head } });
       if (endpoint.startsWith('compare/')) return response({ status: 'ahead' });
@@ -2414,17 +2421,18 @@ function authorizationFixture(initial = state(), settings = {}) {
       if (endpoint.startsWith(`commits/${sourceCommit}/check-runs`)) {
         const checks = { total_count: 3, check_runs: releaseBuildChecks
           .map((name, id) => ({ name, id: id + 1, head_sha: sourceCommit, status: 'completed',
-            conclusion: 'success', app: { slug: 'github-actions' } })) };
+            conclusion: 'success', app: { slug: 'github-actions' }, check_suite: { id: 100 },
+            url: `https://api.github.com/repos/OlyForge3D/PrintFarmer/check-runs/${id + 1}` })) };
         settings.mutateChecks?.(checks);
         return response(checks);
       }
-      if (endpoint === `commits/${sourceCommit}/status?per_page=100`) {
+      if ([`commits/${sourceCommit}/status?per_page=100`, `commits/${sourceCommit}/statuses?per_page=100`].includes(endpoint)) {
         const statuses = { sha: sourceCommit, total_count: 1,
-          statuses: [{ id: 1, context: releaseReviewStatus, state: 'success',
-            description: `REVIEWED (self-attested) @ ${sourceCommit.slice(0, 12)} by fixture` }] };
+          statuses: [structuredClone(canonical.status)] };
         settings.mutateStatuses?.(statuses);
-        return response(statuses);
+        return response(endpoint.includes('/statuses?') ? statuses.statuses : statuses);
       }
+      if (canonical.values.has(endpoint)) return response(canonical.values.get(endpoint));
       if (endpoint.startsWith('git/ref/tags/')) {
         return tag ? response({ object: { sha: tag, type: 'tag' } }) : response({}, 404);
       }
@@ -2991,7 +2999,7 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     fixture.calls.length = 0;
     await assert.rejects(runReleaseControl('authorize', { ...fixture.env, RELEASE_APPROVAL_MODE: changedMode,
       RELEASE_ADMITTED_APPROVAL_MODE: changedMode }),
-      /Approval mode changed after reservation/);
+      /Qualification approval mode mismatch/);
     assert.ok(fixture.calls.every(call => call.method === 'GET'));
     fixture.environment.protection_rules = originalRules;
     fixture.branchRules[2].parameters = originalBranchPolicy;
