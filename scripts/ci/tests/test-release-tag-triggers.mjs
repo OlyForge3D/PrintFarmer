@@ -841,6 +841,133 @@ async function assertHistoryRejected(fixtureFactory, identity, expected, label) 
   }
 }
 
+test('every historical stable floor edge preserves exact presence and value before writes', async () => {
+  const seed = state();
+  const identity = record(seed);
+  for (const [name, floor, mutate] of [
+    ['delete floor', '1.2.2', next => { delete next.lastHistoricalStable; }],
+    ['lower floor', '1.2.2', next => { next.lastHistoricalStable = '1.2.1'; }],
+    ['replace floor', '1.2.2', next => { next.lastHistoricalStable = '1.2.3'; }],
+    ['introduce floor after seed', undefined, next => { next.lastHistoricalStable = '1.2.2'; }],
+  ]) {
+    const previous = publicLedger(seed);
+    if (floor !== undefined) previous.lastHistoricalStable = floor;
+    const changed = structuredClone(previous);
+    mutate(changed);
+    validateLedger(previous, anchor);
+    validateLedger(changed, anchor);
+    for (const [history, snapshots] of [
+      ['adjacent', [previous, changed]],
+      ['retained at head', [previous, changed, changed]],
+      ['restored at head', [previous, changed, previous]],
+    ]) {
+      await assertHistoryRejected(() => ledgerHistoryFixture(snapshots), identity,
+        /immutable historical stable floor/, `${name}, ${history}`);
+    }
+  }
+});
+
+test('every counter edge requires exactly one matching insider reservation and no unexplained additions', async () => {
+  const seed = state();
+  seed.counter = '10';
+  const identity = record(seed);
+  const previous = publicLedger(seed);
+  const addInsider = (next, sequence, buildId = '99', baseVersion = '1.2.3') => {
+    const isolated = state();
+    isolated.counter = (BigInt(sequence) - 1n).toString();
+    const admitted = admit(context({ buildId }), sha, `v${baseVersion}\n`, '1.2.2');
+    const added = reserve(isolated, admitted, created).record;
+    next.reservations[added.allocationKey] = publicLedger(isolated).reservations[added.allocationKey];
+    next.identities[added.canonicalVersion] = added.allocationKey;
+    if (!next.stages[baseVersion] || compareVersions(added.canonicalVersion, next.stages[baseVersion]) > 0) {
+      next.stages[baseVersion] = added.canonicalVersion;
+    }
+  };
+  const addStable = (next, baseVersion = '1.2.3') => {
+    next.qualifications[sha] = hotfixQualification();
+    const admitted = admit(context({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
+      workflowIdentity: context().workflowIdentity.replace('/development', '/main') }),
+    sha, `v${baseVersion}\n`, '1.2.2');
+    reserve(next, admitted, created, undefined, hotfixQualification());
+  };
+  for (const [name, mutate, structurallyValid = true] of [
+    ['unbound increment', next => { next.counter = '12'; }],
+    ['unbound jump', next => { next.counter = '13'; }],
+    ['unbound large jump', next => { next.counter = '9007199254740993'; }],
+    ['jump with skipped sequence', next => { next.counter = '13'; addInsider(next, '13'); }],
+    ['jump with two allocations', next => {
+      next.counter = '13'; addInsider(next, '12'); addInsider(next, '13', '100');
+    }],
+    ['increment with wrong sequence', next => { next.counter = '12'; addInsider(next, '5'); }],
+    ['unchanged counter with old sequence addition', next => { addInsider(next, '5'); }],
+    ['unchanged counter with two old sequence additions', next => {
+      addInsider(next, '5'); addInsider(next, '6', '100');
+    }],
+    ['increment with matching and unexplained allocation', next => {
+      next.counter = '12'; addInsider(next, '5'); addInsider(next, '12', '100');
+    }],
+    ['increment with only stable allocation', next => { next.counter = '12'; addStable(next); }],
+    ['increment with insider and stable allocations', next => {
+      next.counter = '12'; addInsider(next, '12'); addStable(next);
+    }],
+    ['unchanged counter with two stable allocations', next => { addStable(next); addStable(next, '1.2.4'); }],
+    ['duplicate global sequence on another base', next => { addInsider(next, '11', '99', '1.2.4'); }, false],
+    ['new sequence above unchanged counter', next => { addInsider(next, '12'); }, false],
+  ]) {
+    const changed = structuredClone(previous);
+    mutate(changed);
+    const persisted = structurallyValid ? publicLedger(changed) : changed;
+    for (const [history, snapshots] of [
+      ['adjacent', [previous, persisted]],
+      ['retained at head', [previous, persisted, persisted]],
+      ['restored at head', [previous, persisted, previous]],
+    ]) {
+      await assertHistoryRejected(() => ledgerHistoryFixture(snapshots), identity,
+        ReleasePolicyError, `${name}, ${history}`);
+    }
+  }
+});
+
+test('valid every-edge allocations preserve seed floors, stable semantics and non-allocation transactions', async () => {
+  for (const floor of [undefined, '1.2.2']) {
+    const ledger = state();
+    ledger.counter = '9007199254740993';
+    if (floor !== undefined) ledger.lastHistoricalStable = floor;
+    const snapshots = [publicLedger(ledger)];
+    const append = mutate => {
+      const result = mutate(ledger);
+      snapshots.push(publicLedger(ledger));
+      return result;
+    };
+    const insider = append(next => record(next));
+    assert.equal(insider.sequence, '9007199254740994');
+    append(next => record(next));
+    append(next => { next.reservations[insider.allocationKey].tagObject = 'd'.repeat(40); });
+    append(next => { next.reservations[insider.allocationKey].tagPublished = true; });
+    append(next => advance(next, insider, completeSet(insider), sha, ''));
+    append(next => { next.qualifications[sha] = hotfixQualification(); });
+    const stableAdmission = admission({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
+      workflowIdentity: context().workflowIdentity.replace('/development', '/main') });
+    const stable = append(next => reserve(next, stableAdmission, created, undefined, hotfixQualification()).record);
+    append(next => reserve(next, stableAdmission, created, undefined, hotfixQualification()));
+    append(next => advance(next, stable, completeSet(stable), sha, ''));
+    assert.equal(ledger.counter, insider.sequence, 'Stable allocations and pointer updates consume no sequence');
+    const rc = append(next => record(next, { buildAttempt: '2', stage: 'rc' }));
+    assert.equal(rc.sequence, '9007199254740995');
+    const betaAdmission = admit(context({ buildAttempt: '3', stage: 'beta' }), sha, 'v1.2.4\n', '1.2.2');
+    const beta = append(next => reserve(next, betaAdmission, created).record);
+    assert.equal(beta.sequence, '9007199254740996');
+    const fixture = ledgerHistoryFixture(snapshots);
+    assert.deepEqual((await fixture.store.read()).state, snapshots.at(-1));
+    assert.equal(fixture.calls.filter(call => call.endpoint.startsWith('git/commits/')).length, snapshots.length + 1);
+    assert.equal(fixture.calls.filter(call => call.method === 'POST' || call.method === 'PATCH').length, 0);
+    for (const snapshot of snapshots) {
+      assert.equal(Object.hasOwn(snapshot, 'lastHistoricalStable'), floor !== undefined);
+      assert.equal(snapshot.lastHistoricalStable, floor);
+    }
+  }
+});
+
 for (const mode of ['promotion', 'hotfix']) {
   for (const consumed of [false, true]) {
     test(`complete history preserves ${consumed ? 'consumed' : 'unconsumed'} ${mode} qualifications before every write`, async () => {
@@ -1446,6 +1573,43 @@ test('executed admission and authorization reject multi-commit evidence rewrites
       await assert.rejects(runReleaseControl(operation, fixture.env), /immutable qualification/);
       assert.equal(fixture.calls.filter(call => call.method === 'POST' || call.method === 'PATCH').length, 0);
       assert.equal(fixture.ledgerWrites.length, 0);
+    }
+  } finally {
+    globalThis.fetch = savedFetch;
+  }
+});
+
+test('executed admission and authorization reject historical floor and unbound counter changes before writes', async () => {
+  const seed = state();
+  record(seed, { buildId: '41' });
+  seed.lastHistoricalStable = '1.2.2';
+  const previous = publicLedger(seed);
+  const savedFetch = globalThis.fetch;
+  try {
+    for (const [name, mutate] of [
+      ['delete floor', next => { delete next.lastHistoricalStable; }],
+      ['lower floor', next => { next.lastHistoricalStable = '1.2.1'; }],
+      ['replace floor', next => { next.lastHistoricalStable = '1.2.3'; }],
+      ['unbound increment', next => { next.counter = '2'; }],
+      ['unbound jump', next => { next.counter = '3'; }],
+      ['unbound large jump', next => { next.counter = '9007199254740993'; }],
+    ]) {
+      const changed = structuredClone(previous);
+      mutate(changed);
+      validateLedger(changed, anchor);
+      for (const [historyName, history] of [
+        ['retained', [previous, changed, changed]],
+        ['restored', [previous, changed, previous]],
+      ]) {
+        for (const operation of ['admit', 'authorize']) {
+          const fixture = authorizationFixture(previous, { history });
+          globalThis.fetch = fixture.fetch;
+          await assert.rejects(runReleaseControl(operation, fixture.env), ReleasePolicyError,
+            `${name}, ${historyName}: ${operation}`);
+          assert.equal(fixture.calls.filter(call => call.method === 'POST' || call.method === 'PATCH').length, 0);
+          assert.equal(fixture.ledgerWrites.length, 0);
+        }
+      }
     }
   } finally {
     globalThis.fetch = savedFetch;

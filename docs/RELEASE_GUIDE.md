@@ -142,7 +142,16 @@ back to `RELEASE_LEDGER_ANCHOR`, loading and validating every snapshot and every
 parent-to-child transition before returning. Existing qualifications must remain
 byte-identical under `JSON.stringify`, including nested evidence and field order.
 Immutable reservations, admission/record identities, tag claims and complete sets,
-nonregressing counters, pointers and stages are checked at every edge. A
+nonregressing pointers and stages are checked at every edge. The seed's
+`lastHistoricalStable` presence and exact value are immutable: later commits
+cannot add, delete, lower or replace this historical floor. Each post-seed
+transaction may add at most one reservation. The counter delta must be zero or
+one; an increment requires exactly one new insider reservation whose sequence
+equals the new counter, with no other reservation additions. An unchanged
+counter permits no new insider sequence; a single qualified stable reservation
+or a non-allocation transaction leaves the counter unchanged. Gaps, jumps,
+duplicate sequences and unbound counter changes fail closed. These checks do not
+reinterpret the owner-approved seed's initial counter floor. A
 multi-commit fast-forward cannot hide an earlier deletion/replacement, even if a
 later commit restores the original state. Merge/octopus commits, cycles, missing
 objects, truncated trees and an unreachable checkpoint block reads, allocation

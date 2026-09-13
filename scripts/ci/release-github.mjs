@@ -153,7 +153,24 @@ export function gitLedger(api, anchor) {
     return { commit, state };
   }
   function validateContinuity(previous, state) {
-    requireThat(BigInt(state.counter) >= BigInt(previous.counter), 'Ledger counter rollback');
+    requireThat(Object.hasOwn(state, 'lastHistoricalStable') === Object.hasOwn(previous, 'lastHistoricalStable') &&
+      state.lastHistoricalStable === previous.lastHistoricalStable,
+    'Ledger lost or changed immutable historical stable floor');
+    const counterDelta = BigInt(state.counter) - BigInt(previous.counter);
+    requireThat(counterDelta >= 0n, 'Ledger counter rollback');
+    requireThat(counterDelta <= 1n, 'Ledger counter jumped by more than one');
+    const additions = Object.entries(state.reservations)
+      .filter(([key]) => !Object.hasOwn(previous.reservations, key))
+      .map(([, reservation]) => reservation);
+    requireThat(additions.length <= 1, 'Ledger transaction added multiple reservations');
+    if (counterDelta === 1n) {
+      requireThat(additions.length === 1 && additions[0].record.channel === 'insider' &&
+        additions[0].sequence === state.counter,
+      'Ledger counter increment requires one matching insider reservation');
+    } else {
+      requireThat(additions.every(reservation => reservation.record.channel === 'stable'),
+        'Ledger added insider reservation without advancing counter');
+    }
     for (const [sourceCommit, qualification] of Object.entries(previous.qualifications)) {
       requireThat(JSON.stringify(state.qualifications[sourceCommit]) === JSON.stringify(qualification),
         'Ledger lost or changed an immutable qualification');
