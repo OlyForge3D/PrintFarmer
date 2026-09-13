@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readReleaseIdentity } from './src/common/utils/releaseIdentity.ts';
 
 const fullCommitShaPattern = /^[0-9a-f]{40}$/i;
 
@@ -43,6 +44,7 @@ export function resolveGitHash(command: 'build' | 'serve') {
 // Emit dist/version.json at build time so the deployed frontend commit is queryable
 // (served by nginx at /version.json), mirroring the backend /api/system/version endpoints.
 function emitVersionJson(gitHash: string, buildTime: string) {
+  const releaseIdentity = readReleaseIdentity(process.env.PRINTFARMER_RELEASE_IDENTITY, gitHash);
   let outDir = 'dist';
   return {
     name: 'printfarmer-version-json',
@@ -50,11 +52,11 @@ function emitVersionJson(gitHash: string, buildTime: string) {
     configResolved(config: { build: { outDir: string } }) {
       outDir = config.build.outDir;
     },
-    closeBundle() {
+    writeBundle() {
       mkdirSync(outDir, { recursive: true });
       writeFileSync(
         resolve(outDir, 'version.json'),
-        JSON.stringify({ service: 'frontend', commit: gitHash, buildTime }, null, 2),
+        JSON.stringify({ service: 'frontend', commit: gitHash, buildTime, releaseIdentity }, null, 2),
       );
       const serviceWorkerPath = resolve(outDir, 'sw.js');
       const serviceWorker = readFileSync(serviceWorkerPath, 'utf8')
@@ -269,6 +271,7 @@ const createConfig = (gitHash: string, buildTime: string) => ({
   define: {
     __BUILD_TIME__: JSON.stringify(buildTime),
     __GIT_HASH__: JSON.stringify(gitHash),
+    __RELEASE_IDENTITY__: JSON.stringify(readReleaseIdentity(process.env.PRINTFARMER_RELEASE_IDENTITY, gitHash)),
   },
   test: {
     environment: 'jsdom',

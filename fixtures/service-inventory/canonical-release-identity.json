@@ -1,0 +1,15 @@
+{
+  "canonicalVersion": "1.2.3-insider.10",
+  "baseVersion": "1.2.3",
+  "channel": "insider",
+  "releaseId": "insider:1.2.3-insider.10",
+  "sourceTag": "v1.2.3-insider.10",
+  "sourceBranch": "development",
+  "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "authorizedBranchHead": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "buildId": "42",
+  "buildAttempt": "1",
+  "workflowIdentity": "release-workflow",
+  "allocationIdentity": "allocation-10",
+  "promotionOrigin": null
+}

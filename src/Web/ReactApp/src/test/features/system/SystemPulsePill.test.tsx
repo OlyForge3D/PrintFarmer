@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { SystemPulsePill } from '@/features/system/components/SystemPulsePill';
 import type { SystemInfo } from '@/types/api';
+import { inventory } from '@/test/features/system/serviceInventoryFixture';
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: vi.fn(),
@@ -97,6 +98,15 @@ describe('SystemPulsePill', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /close system pulse panel/i })).toHaveFocus();
     });
+  });
+
+  it('keeps canonical provenance and update channel details out of the pulse summary', () => {
+    useQueryMock.mockReturnValue({ data: { ...systemInfo, inventory: inventory({ selectedChannel: 'insider' }) }, error: null } as ReturnType<typeof useQuery>);
+    render(<SystemPulsePill />);
+    fireEvent.click(screen.getByRole('button', { name: /system/i }));
+    expect(screen.queryByText('Selected channel')).not.toBeInTheDocument();
+    expect(screen.queryByText('Running platform digest')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Insider updates may arrive/)).not.toBeInTheDocument();
   });
 
   it('closes on Escape and returns focus to the pill trigger', async () => {

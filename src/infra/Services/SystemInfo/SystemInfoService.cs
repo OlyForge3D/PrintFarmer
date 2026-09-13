@@ -12,6 +12,7 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.SystemStatus;
@@ -24,7 +25,9 @@ public class SystemInfoService(
     IStoragePathService storagePathService,
     IBackgroundServiceMonitor backgroundServiceMonitor,
     IMemoryCache cache,
-    ILogger<SystemInfoService> logger) : ISystemInfoService
+    ILogger<SystemInfoService> logger,
+    IEnumerable<IServiceInventorySource> inventorySources,
+    IConfiguration configuration) : ISystemInfoService
 {
     private static readonly TimeSpan CpuSampleDuration = TimeSpan.FromMilliseconds(150);
     private const string CacheKey = "SystemInfo:Snapshot";
@@ -70,8 +73,15 @@ public class SystemInfoService(
         int archiveCount = await _db.GcodeFiles.CountAsync(cancellationToken);
         (long diskUsedBytes, long diskTotalBytes) = GetDiskSnapshot(storageDirectory);
 
+        List<ServiceReplicaObservationDto> observations = [];
+        foreach (IServiceInventorySource source in inventorySources)
+        {
+            observations.AddRange(await source.ReadAsync(cancellationToken));
+        }
+
         return new SystemInfoDto
         {
+            Inventory = ServiceInventoryEvaluator.Evaluate(observations, configuration["Deployment:SelectedChannel"], DateTimeOffset.UtcNow),
             App = new SystemAppInfoDto
             {
                 Version = appVersion,
@@ -98,12 +108,27 @@ public class SystemInfoService(
             Services = GetServices(appVersion),
             Database = new SystemDatabaseInfoDto
             {
+                MigrationHeads = await GetMigrationHeadsAsync(cancellationToken),
                 Engine = NormalizeDatabaseEngine(_db.Database.ProviderName),
                 Version = databaseVersion,
                 PrinterCount = printerCount,
                 ArchiveCount = archiveCount,
             },
         };
+    }
+
+    private async Task<IReadOnlyList<string>> GetMigrationHeadsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            string? head = (await _db.Database.GetAppliedMigrationsAsync(cancellationToken)).LastOrDefault();
+            return head is null ? [] : [head];
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Unable to read application migration head");
+            return [];
+        }
     }
 
     // Reuses the existing informational version logic so the dashboard matches /api/system/version.
@@ -301,7 +326,7 @@ public class SystemInfoService(
         return totalBytes;
     }
 
-    // Returns the same API version for in-process background services because they ship from the same assembly.
+    // Monitoring a service is not build evidence; retain the legacy string shape without fabricating versions.
     private List<SystemServiceInfoDto> GetServices(string appVersion)
     {
         List<SystemServiceInfoDto> services =
@@ -323,7 +348,7 @@ public class SystemInfoService(
         services.AddRange(backgroundServices.Select(status => new SystemServiceInfoDto
         {
             Name = status.DisplayName,
-            Version = appVersion,
+            Version = "Unknown",
             Health = MapServiceHealth(status),
         }));
 

@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Farm.Slicer.Module.Contracts;
@@ -147,6 +148,8 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                     supportedFeatures = new[] { "multi-material", "variable-layer-height", "auto-arrange" },
                     capabilities = _capabilityProvider.GetCapabilities(),
                     engineVersion = _capabilityProvider.EngineVersion,
+                    applicationBuild = typeof(SlicerRegistrationClient).Assembly
+                        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
 
                     // Pinned build identity, so the API can decide whether this worker is the
                     // reproducible upstream image it advertises rather than trusting a version string.

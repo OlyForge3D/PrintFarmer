@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Reflection;
 using System.Text.Json;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Worker.Core;
@@ -101,6 +102,10 @@ public sealed class SlicerRegistrationClientTests
         _ = registration.RootElement.GetProperty("Version").GetString().Should().Be("2.4.2");
         string capabilitiesJson = registration.RootElement.GetProperty("CapabilitiesJson").GetString()!;
         using JsonDocument capabilities = JsonDocument.Parse(capabilitiesJson);
+        string? applicationBuild = capabilities.RootElement.GetProperty("applicationBuild").GetString();
+        applicationBuild.Should().Be(typeof(SlicerRegistrationClient).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion);
+        applicationBuild.Should().NotBe("2.4.2");
         string[] advertisedCapabilities = capabilities.RootElement
             .GetProperty("capabilities")
             .EnumerateArray()
