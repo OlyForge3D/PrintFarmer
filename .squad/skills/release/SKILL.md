@@ -1,84 +1,49 @@
 ---
 name: release
-description: Cut a new PrintFarmer release using the dual-history release script. Use when the user asks to cut, ship, or create a release (major, minor, or patch).
+description: Follow the canonical branch-bound PrintFarmer release workflow. Use when the user asks to cut, ship, or create a server release.
 confidence: high
 ---
 
-# PrintFarmer Release Skill
+## PrintFarmer release authority
 
-Use this skill whenever the user asks to cut a release, ship a version, or bump the version.
+Read [the release guide](../../../docs/RELEASE_GUIDE.md) before attempting
+publication. `.github/workflows/consolidated-release.yml` is the sole server
+release entry point: stable runs on `main`, insider on `development`.
+Branch pushes, direct tag pushes and stabilization branches do not publish.
+The reusable Docker workflow is an authorized consumer, not a second entry point.
 
 ## Prerequisites
 
-- **Clean working tree** — all changes must be committed and pushed before releasing.
-- **On `development` branch** — the release script merges `development` → `main`.
-- **Both remotes configured:**
-  - `origin` → `https://github.com/jpapiez/PrintFarmer.git` (private, full history)
-  - `release` → `https://github.com/OlyForge3D/PrintFarmer.git` (public, clean history)
+- Obtain explicit authorization to publish; implementation and review tasks do
+  not authorize a live release.
+- Review `VERSION` on the selected canonical branch. It contains `vX.Y.Z`;
+  do not calculate the release from local tags or a private/public remote pair.
+- Verify exact-source qualification, owner-approved protection and publisher
+  configuration, and pinned ledger continuity as described in the release guide.
+- New stable versions and insider bases must exceed the effective stable floor.
+  The ledger allocates insider sequence numbers, not the operator.
 
-## How to Release
+## Publication
 
-From the **repo root** (`/Users/jpapiez/s/PFarm1`):
+Dispatch `consolidated-release.yml` on the selected canonical branch with the
+matching channel. Leave `version` unset for normal allocation; it is only an
+assertion against the durable result. Stable selects no stage; insider defaults
+to `insider` and also supports the guide's beta/RC progression.
 
-```bash
-./scripts/release.sh patch    # v0.2.1 → v0.2.2
-./scripts/release.sh minor    # v0.2.2 → v0.3.0
-./scripts/release.sh major    # v0.3.0 → v1.0.0
-./scripts/release.sh v1.2.3   # explicit version
-```
+Follow that run through authorization, immutable source/tag/assets and complete
+image-set verification. A successful source-only release is not a managed-update
+candidate. Record the workflow run, source SHA and resulting canonical identity.
+TestFlight remains independent in the `ios/` namespace.
 
-### Options
+## Retired paths and recovery
 
-- `--clean-history` — One-time: force-push a fresh orphan to the release remote, erasing all prior history. Only affects release remote; origin is untouched.
+`scripts/release.sh` and `scripts/publish-to-public.sh` always exit 2, including
+dry-run/help invocations. Neither performs a version bump, branch merge, orphan
+snapshot, tag creation, force push, release creation or asset/container upload.
+Do not restore their former dual-history or `--clean-history` behavior.
 
-### What the Script Does (No Need to Read It)
-
-1. **Fetches** both remotes
-2. **Merges** `development` → `main` (fast-forward or merge commit)
-3. **Bumps** `VERSION` file on `main`, commits
-4. **Pushes** `main` to `origin` (full history, all files including `.squad/`)
-5. **Builds clean tree** for `release` remote — strips forbidden paths (`.squad/`, `.ai-team/`, `devnotes/`, `docs/proposals/`, etc.)
-6. **Tags** `v{X.Y.Z}` on both remotes
-7. **Back-merges** VERSION bump to `development` and pushes
-
-### Timing
-
-- Typical duration: **30-60 seconds** (depends on push size)
-- Set initial_wait to **60 seconds**
-
-### Post-Release State
-
-- Branch: back on `development`
-- VERSION file: updated to new version
-- Tags: `v{X.Y.Z}` on both `origin` and `release`
-- Working tree: clean
-
-## Verification
-
-After the script completes, verify:
-
-```bash
-cat VERSION                          # Should show new version
-git --no-pager log --oneline -3      # Should show VERSION bump commit
-git --no-pager tag -l 'v*' | tail -3 # Should include new tag
-git branch --show-current            # Should be 'development'
-git status --short                   # Should be empty
-```
-
-## Troubleshooting
-
-| Problem | Fix |
-|---------|-----|
-| "Working tree is dirty" | Commit or stash changes first |
-| "Remote 'release' not found" | `git remote add release https://github.com/OlyForge3D/PrintFarmer.git` |
-| Push to release fails | Check GitHub auth: `gh auth status` |
-| Merge conflict on main | Resolve manually, then re-run |
-| Wrong branch | `git checkout development` first |
-
-## Anti-Patterns
-
-- **NEVER** read `scripts/release.sh` before running — this skill has everything you need
-- **NEVER** manually edit VERSION — the script handles it
-- **NEVER** manually merge development → main — the script handles it
-- **NEVER** manually push tags — the script handles it
-- **NEVER** run from `src/` — must be repo root
+Never bypass a denial with manual canonical tags, GitHub release commands,
+history rewrites or counter resets. Exact existing reservations may retry
+without changing their identity; new attempts cannot reuse a reserved stable
+identity. Follow the release guide's owner-only continuity recovery procedure
+when evidence is missing or invalid.

@@ -11,6 +11,7 @@
 **/*.swp
 **/*.DS_Store
 **/TestResults/
+**/.artifacts/
 **/*.db-shm
 **/*.db-wal
 **/*.db-journal

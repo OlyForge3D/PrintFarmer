@@ -139,7 +139,7 @@ Record pass/fail here before proceeding:
 1. Confirm #723 is closed with no open P0/P1 defects.
 2. Confirm Jeff has explicitly requested release execution after reviewing
    this checklist and the epic's gate.
-3. Dispatch `testflight-beta.yml` (tag `v*-beta.N` push, or
+3. Dispatch `testflight-beta.yml` (tag `ios/v*-beta.N` push, or
    `workflow_dispatch` with `environment=internal` for the first beta ring).
 4. After upload succeeds, verify the TestFlight build appears in App Store
    Connect and the auto-created GitHub Release is `prerelease: true`.

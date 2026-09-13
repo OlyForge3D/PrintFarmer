@@ -1,508 +1,154 @@
 name: Consolidated Release
 
-# Unified release workflow for main PrintFarmer app (Docker containers)
-# AND iOS mobile app (TestFlight). Uses a single VERSION file and tag.
-#
-# Release channels and source branches:
-#   stable  → main only, version vX.Y.Z
-#   insider → development only, version vX.Y.Z-insider.N (beta/rc remain supported)
-#
-# Short-lived release/vX.Y.Z branches may validate a stable candidate, but stable
-# publication happens only after the candidate is merged to main. This keeps main
-# as the single stable source of truth and development as the insider source.
-#
-# This workflow orchestrates both release paths from a single trigger.
-
 on:
   workflow_dispatch:
     inputs:
       channel:
-        description: 'Release channel (stable defaults for end users; insider is opt-in)'
-        required: true
+        description: Release channel (not installation enrollment)
+        type: choice
+        options: [stable, insider]
         default: stable
-        type: choice
-        options:
-          - stable
-          - insider
-      version:
-        description: 'Stable: vX.Y.Z; insider: vX.Y.Z-insider.N (beta.N/rc.N also supported)'
         required: true
-      skip_mobile:
-        description: 'Skip iOS/TestFlight release'
-        required: false
-        default: 'false'
+      stage:
+        description: Insider stage; choose none for stable
         type: choice
-        options:
-          - 'false'
-          - 'true'
+        options: [none, insider, beta, rc]
+        default: none
+      version:
+        description: Optional exact tag assertion; N is allocated, never caller-selected
+        type: string
+  schedule:
+    - cron: '27 9 * * *'
 
 permissions:
-  actions: read
-  contents: write
-  packages: write
-  id-token: write
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.channel || 'insider' }}
+  cancel-in-progress: false
 
 jobs:
-  # ====================
-  # JOB 1: Validate and Tag
-  # ====================
-  validate-and-tag:
-    name: Validate & Tag
+  schedule-insider:
+    if: github.event_name == 'schedule' && github.repository == 'OlyForge3D/PrintFarmer'
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch the same authority on development
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run consolidated-release.yml --repo "$GITHUB_REPOSITORY" \
+            --ref development -f channel=insider -f stage=insider
+
+  admit:
+    if: github.event_name != 'schedule'
+    name: Read-only release admission
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      checks: read
     outputs:
-      version: ${{ steps.parse.outputs.version }}
-      channel: ${{ steps.parse.outputs.channel }}
-      is_prerelease: ${{ steps.parse.outputs.is_prerelease }}
-      is_beta: ${{ steps.parse.outputs.is_beta }}
-      base_version: ${{ steps.parse.outputs.base_version }}
+      source_sha: ${{ steps.admit.outputs.source_sha }}
+      channel: ${{ steps.admit.outputs.channel }}
     steps:
-      - name: Validate release channel, branch, and version
-        id: parse
-        env:
-          CHANNEL: ${{ github.event.inputs.channel }}
-          VERSION: ${{ github.event.inputs.version }}
-          SOURCE_REF: ${{ github.ref }}
-        run: |
-          set -euo pipefail
-
-          case "$CHANNEL" in
-            stable)
-              if [[ "$SOURCE_REF" != "refs/heads/main" ]]; then
-                echo "Stable releases must be dispatched from main; got $SOURCE_REF"
-                exit 1
-              fi
-              if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                echo "Stable versions must match vX.Y.Z; got $VERSION"
-                exit 1
-              fi
-              ;;
-            insider)
-              if [[ "$SOURCE_REF" != "refs/heads/development" ]]; then
-                echo "Insider releases must be dispatched from development; got $SOURCE_REF"
-                exit 1
-              fi
-              if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(insider|beta|rc)\.[0-9]+$ ]]; then
-                echo "Insider versions must match vX.Y.Z-insider.N, vX.Y.Z-beta.N, or vX.Y.Z-rc.N; got $VERSION"
-                exit 1
-              fi
-              ;;
-            *)
-              echo "Unsupported release channel: $CHANNEL"
-              exit 1
-              ;;
-          esac
-
-          BASE_VERSION="$(echo "$VERSION" | sed -E 's/^(v[0-9]+\.[0-9]+\.[0-9]+).*/\1/')"
-          IS_PRERELEASE="false"
-          IS_BETA="false"
-          if [[ "$CHANNEL" == "insider" ]]; then
-            IS_PRERELEASE="true"
-          fi
-          if [[ "$VERSION" == *"-beta."* ]]; then
-            IS_BETA="true"
-          fi
-
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
-          echo "is_prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
-          echo "is_beta=$IS_BETA" >> "$GITHUB_OUTPUT"
-          echo "base_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
-
-          echo "📦 Version: $VERSION"
-          echo "   Channel: $CHANNEL"
-          echo "   Source: $SOURCE_REF"
-          echo "   Base: $BASE_VERSION"
-
-      - name: Checkout selected source
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
-          ref: ${{ github.ref }}
-          fetch-depth: 0
-          token: ${{ secrets.REPO_PAT }}
-
-      - name: Verify repository version metadata
-        run: |
-          VERSION="${{ steps.parse.outputs.version }}"
-          BASE="${{ steps.parse.outputs.base_version }}"
-          FILE_VERSION="$(tr -d '[:space:]' < VERSION)"
-          if [[ "${FILE_VERSION#v}" != "${BASE#v}" ]]; then
-            echo "Requested release $VERSION does not match VERSION ($FILE_VERSION)"
-            exit 1
-          fi
-          bash scripts/sync-monorepo-version.sh --check
-
-      - name: Create and push tag
-        run: |
-          set -e
-          git config user.name 'github-actions'
-          git config user.email 'github-actions@github.com'
-          TAG="${{ steps.parse.outputs.version }}"
-
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists; aborting to avoid overwrite."
-            exit 1
-          fi
-          git tag -a "$TAG" -m "Release $TAG"
-          git push origin "$TAG"
-          echo "✅ Tag $TAG created and pushed"
-
-  # ====================
-  # JOB 2: iOS / TestFlight Release
-  # ====================
-  mobile-release:
-    name: iOS Release (TestFlight)
-    needs: validate-and-tag
-    if: |
-      github.event.inputs.skip_mobile != 'true' &&
-      (needs.validate-and-tag.outputs.is_prerelease == 'true')
-    runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: mobile
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
         with:
-          ref: ${{ needs.validate-and-tag.outputs.version }}
-          fetch-depth: 0
-
-      - name: Extract version
-        id: version
-        run: |
-          TAG="${{ needs.validate-and-tag.outputs.version }}"
-          VERSION=$(echo "$TAG" | sed -E 's/^v(.+)-.*/\1/')
-          BUILD_NUMBER=$(git rev-list --count HEAD)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
-          echo "tag_name=$TAG" >> $GITHUB_OUTPUT
-          echo "📦 Version: $VERSION | Build: $BUILD_NUMBER | Tag: $TAG"
-
-      - name: Select Xcode version
-        run: |
-          XCODE_PATH=$(ls -d /Applications/Xcode_26*.app /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
-          if [ -z "$XCODE_PATH" ]; then
-            XCODE_PATH="/Applications/Xcode.app"
-          fi
-          echo "Using Xcode at: $XCODE_PATH"
-          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
-          xcodebuild -version
-
-      - name: Install fastlane
-        run: sudo gem install fastlane -NV
-
-      - name: Setup Keychain
-        run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          CI_KEYCHAIN_PWD="ci-keychain-temp-password"
-          security create-keychain -p "$CI_KEYCHAIN_PWD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$CI_KEYCHAIN_PWD" "$KEYCHAIN_PATH"
-          security default-keychain -s "$KEYCHAIN_PATH"
-          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
-
-      - name: Setup code signing with fastlane match
+          node-version: 24
+      - name: Admit exact canonical branch HEAD
+        id: admit
         env:
-          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
-          MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
-          MATCH_GIT_BASIC_AUTHORIZATION: ${{ secrets.MATCH_GIT_BASIC_AUTHORIZATION }}
-        run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          fastlane match appstore \
-            --readonly \
-            --git_url "$MATCH_GIT_URL" \
-            --app_identifier "com.olyforge3d.printfarmer.ios,com.olyforge3d.printfarmer.ios.scan-widgets" \
-            --keychain_name "$KEYCHAIN_PATH" \
-            --keychain_password "$MATCH_PASSWORD"
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_STAGE: ${{ inputs.stage }}
+          RELEASE_TAG: ${{ inputs.version }}
+          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+        run: node scripts/ci/release-control.mjs admit
 
-      - name: Allow codesign keychain access
-        run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          CI_KEYCHAIN_PWD="ci-keychain-temp-password"
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$CI_KEYCHAIN_PWD" "$KEYCHAIN_PATH"
-
-      - name: Update build number
-        run: |
-          set -euo pipefail
-          agvtool new-version -all ${{ steps.version.outputs.build_number }}
-
-      - name: Resolve package dependencies
-        run: |
-          xcodebuild -project PrintFarmer.xcodeproj \
-            -scheme PrintFarmer \
-            -resolvePackageDependencies \
-            -clonedSourcePackagesDirPath build/SourcePackages
-
-      - name: Build for App Store
-        timeout-minutes: 30
-        run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          xcodebuild \
-            -project PrintFarmer.xcodeproj \
-            -scheme PrintFarmer \
-            -configuration Release \
-            -derivedDataPath build \
-            -clonedSourcePackagesDirPath build/SourcePackages \
-            -archivePath "build/PrintFarmer.xcarchive" \
-            CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="iPhone Distribution" \
-            DEVELOPMENT_TEAM=ZPKA84F3TY \
-            MARKETING_VERSION="${{ steps.version.outputs.version }}" \
-            SWIFT_STRICT_CONCURRENCY=minimal \
-            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
-            archive
-
-      - name: Verify archived marketing version
-        run: |
-          ./scripts/verify-marketing-version.sh resolved \
-            "${{ steps.version.outputs.version }}" \
-            build/PrintFarmer.xcarchive/Products/Applications/PrintFarmer.app/Info.plist
-
-      - name: Export IPA
-        run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          xcodebuild \
-            -exportArchive \
-            -archivePath "build/PrintFarmer.xcarchive" \
-            -exportOptionsPlist ExportOptions.plist \
-            -exportPath "build/IPA" \
-            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH"
-
-      - name: Upload to TestFlight
-        env:
-          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
-          APP_STORE_CONNECT_API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
-          TESTFLIGHT_EXTERNAL_GROUPS: ${{ secrets.TESTFLIGHT_EXTERNAL_GROUPS }}
-        run: |
-          API_KEY_JSON=$RUNNER_TEMP/api_key.json
-          export API_KEY_JSON_PATH="$API_KEY_JSON"
-          python3 -c "
-          import json, os, base64
-          content = os.environ['APP_STORE_CONNECT_API_KEY_CONTENT']
-          if not content.strip().startswith('-----BEGIN'):
-              content = base64.b64decode(content).decode('utf-8')
-          data = {
-              'key_id': os.environ['APP_STORE_CONNECT_API_KEY_ID'],
-              'issuer_id': os.environ['APP_STORE_CONNECT_API_ISSUER_ID'],
-              'key': content,
-              'in_house': False
-          }
-          with open(os.environ['API_KEY_JSON_PATH'], 'w') as f:
-              json.dump(data, f, indent=2)
-          "
-
-          PILOT_ARGS=(
-            --ipa "build/IPA/PrintFarmer.ipa"
-            --api_key_path "$API_KEY_JSON"
-            --changelog "Beta build from tag: ${{ steps.version.outputs.tag_name }}"
-          )
-
-          if [ -n "${TESTFLIGHT_EXTERNAL_GROUPS:-}" ]; then
-            PILOT_ARGS+=(--distribute_external true --groups "$TESTFLIGHT_EXTERNAL_GROUPS")
-          fi
-
-          fastlane pilot upload "${PILOT_ARGS[@]}"
-
-      - name: Cleanup keychain
-        if: always()
-        run: |
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          API_KEY_JSON=$RUNNER_TEMP/api_key.json
-          security delete-keychain "$KEYCHAIN_PATH" || true
-          rm -f "$API_KEY_JSON" || true
-
-  # ====================
-  # JOB 3: Create GitHub Release
-  # ====================
-  create-release:
-    name: Create GitHub Release
+  authorize:
+    name: Reserve and authorize immutable source
+    needs: admit
     runs-on: ubuntu-latest
-    needs: [validate-and-tag, mobile-release]
-    if: >-
-      always() &&
-      needs.validate-and-tag.result == 'success' &&
-      (needs.mobile-release.result == 'success' || needs.mobile-release.result == 'skipped')
+    environment: release-${{ needs.admit.outputs.channel }}
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      public_identity: ${{ steps.authorize.outputs.public_identity }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.admit.outputs.source_sha }}
           fetch-depth: 0
-          ref: ${{ needs.validate-and-tag.outputs.version }}
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
+          persist-credentials: false
+      - uses: actions/setup-node@v7
         with:
-          node-version: 24.x
-
-      - name: Wait for exact-tag Docker workflow
-        id: docker
+          node-version: 24
+      - name: Check sole authored version base
+        run: bash scripts/sync-monorepo-version.sh --check
+      - name: Require owner-provisioned registry authority before reservation
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ needs.validate-and-tag.outputs.version }}
-        run: |
-          set -euo pipefail
-          COMMIT="$(git rev-parse "${VERSION}^{commit}")"
-          RUN_ID=""
-          for attempt in $(seq 1 30); do
-            RUN_ID="$(gh run list \
-              --workflow docker-publish.yml \
-              --branch "$VERSION" \
-              --commit "$COMMIT" \
-              --event push \
-              --limit 1 \
-              --json databaseId \
-              --jq '.[0].databaseId // empty')"
-            [[ -n "$RUN_ID" ]] && break
-            sleep 10
-          done
-          if [[ -z "$RUN_ID" ]]; then
-            echo "Could not find the Docker workflow for $VERSION ($COMMIT)"
-            exit 1
-          fi
-          gh run watch "$RUN_ID" --exit-status
-          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
-
-      - name: Download Docker release artifacts
+          REGISTRY_USER: ${{ vars.RELEASE_REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.RELEASE_REGISTRY_TOKEN }}
+        run: test -n "$REGISTRY_USER" && test -n "$REGISTRY_TOKEN"
+      - name: Obtain protected publisher app token
+        id: publisher
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
+          permission-contents: write
+          permission-checks: read
+          permission-administration: read
+          permission-actions: read
+      - name: Reserve sequence before source tag
+        id: authorize
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh run download "${{ steps.docker.outputs.run_id }}" \
-            --pattern 'sbom-*' \
-            --dir artifacts
-          gh run download "${{ steps.docker.outputs.run_id }}" \
-            --pattern 'digest-*' \
-            --dir artifacts
-
-      - name: Require and revalidate all image artifacts
-        run: |
-          set -euo pipefail
-          IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)
-          for image in "${IMAGES[@]}"; do
-            digest_file="artifacts/digest-${image}/digest-${image}.txt"
-            if [[ ! -s "$digest_file" ]]; then
-              echo "Missing digest artifact for $image"
-              exit 1
-            fi
-            digest="$(tr -d '[:space:]' < "$digest_file")"
-            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "Invalid digest artifact for $image: $digest"
-              exit 1
-            fi
-            mapfile -d '' sboms < <(
-              find "artifacts/sbom-${image}" -maxdepth 1 -type f -name '*.spdx.json' -print0
-            )
-            if [[ "${#sboms[@]}" -ne 1 ]]; then
-              echo "Expected exactly one SPDX SBOM artifact for $image, found ${#sboms[@]}"
-              exit 1
-            fi
-            node scripts/compliance/validate-compliance.mjs \
-              --skip-dependencies \
-              --sbom "${sboms[0]}"
-          done
-
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
+          RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_STAGE: ${{ inputs.stage }}
+          RELEASE_TAG: ${{ inputs.version }}
+          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+        run: node scripts/ci/release-control.mjs authorize
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2
-
-      - name: Verify all image signatures and SPDX attestations
-        env:
-          VERSION: ${{ needs.validate-and-tag.outputs.version }}
-          OWNER: ${{ github.repository_owner }}
-          REPOSITORY: ${{ github.repository }}
+      - name: Sign immutable source and App-verified protection attestation
         run: |
           set -euo pipefail
-          OWNER_LC="$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')"
-          CERTIFICATE_IDENTITY="https://github.com/${REPOSITORY}/.github/workflows/docker-publish.yml@refs/tags/${VERSION}"
-          IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)
-          for image in "${IMAGES[@]}"; do
-            digest="$(tr -d '[:space:]' < "artifacts/digest-${image}/digest-${image}.txt")"
-            reference="ghcr.io/${OWNER_LC}/printfarmer-${image}@${digest}"
-            cosign verify "$reference" \
-              --certificate-identity "$CERTIFICATE_IDENTITY" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com
-            cosign verify-attestation "$reference" \
-              --type spdxjson \
-              --certificate-identity "$CERTIFICATE_IDENTITY" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com
-          done
-
-      - name: Generate changelog
-        id: cliff
-        uses: orhun/git-cliff-action@v4
+          umask 077
+          cosign sign-blob --yes \
+            --bundle .artifacts/release-authorization/release-identity.bundle.json \
+            .artifacts/release-authorization/release-identity.json
+          cosign sign-blob --yes \
+            --bundle .artifacts/release-authorization/public-identity.bundle.json \
+            .artifacts/release-authorization/public-identity.json
+      - uses: actions/upload-artifact@v7
         with:
-          config: cliff.toml
-          args: --current-tag ${{ needs.validate-and-tag.outputs.version }}
-        continue-on-error: true
+          name: release-authorization-${{ github.run_attempt }}
+          path: |
+            .artifacts/release-authorization/release-identity.json
+            .artifacts/release-authorization/release-identity.bundle.json
+            .artifacts/release-authorization/public-identity.json
+            .artifacts/release-authorization/public-identity.bundle.json
+          include-hidden-files: true
+          if-no-files-found: error
 
-      - name: Build release notes
-        env:
-          VERSION: ${{ needs.validate-and-tag.outputs.version }}
-          CHANNEL: ${{ needs.validate-and-tag.outputs.channel }}
-          IS_PRERELEASE: ${{ needs.validate-and-tag.outputs.is_prerelease }}
-          MOBILE_RESULT: ${{ needs.mobile-release.result }}
-          CHANGELOG: ${{ steps.cliff.outputs.changelog }}
-        run: |
-          {
-            echo "## Release $VERSION"
-            echo ""
-            echo "- **Channel:** $CHANNEL"
-            echo "- **Source branch:** ${{ github.ref_name }}"
-            echo ""
-            echo "### Release Components"
-            echo ""
-
-            echo "- ✅ **Server (Docker images)** — Validated, attested, signed, and published to GHCR"
-
-            if [[ "${{ github.event.inputs.skip_mobile }}" != "true" ]] && [[ "$IS_PRERELEASE" == "true" ]]; then
-              if [[ "$MOBILE_RESULT" == "success" ]]; then
-                echo "- ✅ **iOS App** — Uploaded to TestFlight"
-              else
-                echo "- ❌ **iOS App** — Build failed or skipped"
-              fi
-            elif [[ "$IS_PRERELEASE" != "true" ]]; then
-              echo "- ℹ️ **iOS App** — Stable releases require separate App Store submission"
-            else
-              echo "- ⏭️ **iOS App** — Skipped"
-            fi
-
-            echo ""
-            echo "### Changes"
-            echo ""
-
-            if [[ -n "${CHANGELOG:-}" ]]; then
-              echo "$CHANGELOG"
-            else
-              PREV=$(git describe --tags --abbrev=0 --match 'v*' --exclude "$VERSION" 2>/dev/null || true)
-              if [[ -n "$PREV" ]]; then
-                git log --pretty=format:'- %s (%h)' "$PREV"..HEAD
-              else
-                echo "Initial release."
-              fi
-            fi
-
-            echo ""
-            echo "### Docker Images"
-            echo ""
-            echo '```bash'
-            echo "docker pull ghcr.io/olyforge3d/printfarmer-api:${VERSION#v}"
-            echo "docker pull ghcr.io/olyforge3d/printfarmer-frontend:${VERSION#v}"
-            echo "docker pull ghcr.io/olyforge3d/printfarmer-printer-discovery:${VERSION#v}"
-            echo "docker pull ghcr.io/olyforge3d/printfarmer-orcaslicer-worker:${VERSION#v}"
-            echo "docker pull ghcr.io/olyforge3d/printfarmer-monolith:${VERSION#v}"
-            echo '```'
-            echo ""
-            echo "### License and Corresponding Source"
-            echo ""
-            echo "- License: GNU AGPL v3.0 only (AGPL-3.0-only)"
-            echo "- Exact source archive: PrintFarmer-${VERSION}-source.tar.gz"
-            echo "- Source manifest: PrintFarmer-${VERSION}-source.json"
-            echo "- Third-party notices: THIRD-PARTY-NOTICES.md"
-          } > RELEASE_NOTES.md
-
-      - name: Finalize GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          name: ${{ needs.validate-and-tag.outputs.version }}
-          tag_name: ${{ needs.validate-and-tag.outputs.version }}
-          body_path: RELEASE_NOTES.md
-          draft: false
-          prerelease: ${{ needs.validate-and-tag.outputs.is_prerelease == 'true' }}
+  publish:
+    needs: authorize
+    uses: ./.github/workflows/docker-publish.yml
+    permissions:
+      actions: write
+      contents: read
+      packages: read
+      id-token: write
+    with:
+      identity: ${{ needs.authorize.outputs.public_identity }}
+    secrets: inherit

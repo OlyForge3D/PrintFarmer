@@ -5,6 +5,20 @@ namespace Farm.Web.Api.Tests.Health;
 
 public class BuildVersionTests
 {
+    [Theory]
+    [InlineData("1.2.3")]
+    [InlineData("1.2.3-insider.9")]
+    [InlineData("1.2.3-beta.10")]
+    [InlineData("1.2.3-rc.11")]
+    public void Parse_CanonicalReleaseMetadata_ReturnsFullCommit(string canonicalVersion)
+    {
+        string expectedCommit = new('a', 40);
+        (string version, string? commit) = BuildVersion.Parse($"{canonicalVersion}+sha.{expectedCommit}");
+
+        Assert.Equal(canonicalVersion, version);
+        Assert.Equal(expectedCommit, commit);
+    }
+
     [Fact]
     public void Parse_CanonicalShaMarker_PreservesFullCommit()
     {

@@ -5,9 +5,8 @@ namespace Farm.Web.Api.Health;
 /// <summary>
 /// Parses the assembly <see cref="AssemblyInformationalVersionAttribute"/> into a
 /// semantic version and an optional git commit SHA. The informational version is
-/// formatted as <c>&lt;version&gt;+&lt;sha&gt;</c> (see the repository root
-/// <c>Directory.Build.props</c>), so anything after the first <c>+</c> is treated as
-/// the commit identifier.
+/// formatted as <c>&lt;version&gt;+sha.&lt;commit&gt;</c> for authorized releases.
+/// Legacy <c>&lt;version&gt;+&lt;commit&gt;</c> builds remain supported.
 /// </summary>
 internal static class BuildVersion
 {
@@ -35,7 +34,6 @@ internal static class BuildVersion
         string? commit = parts.Length > 1 && !string.IsNullOrWhiteSpace(parts[1])
             ? parts[1]
             : null;
-
         if (commit?.StartsWith("sha.", StringComparison.Ordinal) == true)
         {
             commit = commit[4..];

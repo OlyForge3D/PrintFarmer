@@ -32,6 +32,17 @@ public sealed class SlicerHostSerializerParityTests : IClassFixture<SlicerHostSe
 
     public SlicerHostSerializerParityTests(Factory factory) => _factory = factory;
 
+    [Fact]
+    public async Task VersionEndpoint_AssemblyCommit_DoesNotExposeShaPrefix()
+    {
+        using HttpClient client = _factory.CreateClient();
+        using HttpResponseMessage response = await client.GetAsync("/api/system/version");
+        response.EnsureSuccessStatusCode();
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        Assert.Matches("^[0-9a-f]{40}$", body.RootElement.GetProperty("commit").GetString()!);
+    }
+
     /// <summary>
     /// The slicer host's registered MVC <see cref="JsonSerializerOptions"/> (via
     /// <c>AddJsonOptions</c>) uses camelCase property names and the exact enum string token —

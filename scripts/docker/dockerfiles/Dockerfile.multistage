@@ -691,6 +691,11 @@ ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
 FROM --platform=${BUILDPLATFORM:-linux/amd64} node:${NODE_TAG} AS frontend-build
 WORKDIR /app
 
+# Only local, unversioned builds may omit release authorization.
+ARG BUILD_VERSION
+ARG PRINTFARMER_RELEASE_IDENTITY
+RUN if [ "$BUILD_VERSION" != "development" ]; then test -n "$PRINTFARMER_RELEASE_IDENTITY"; fi
+
 # Copy package files directly from ReactApp (no workspaces)
 COPY src/Web/ReactApp/package.json src/Web/ReactApp/package-lock.json ./
 

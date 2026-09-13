@@ -167,7 +167,7 @@ public sealed class Program
             WorkerCapabilityProvider capabilityProvider)
         {
             string? orcaVersion = await detector.GetVersionAsync();
-            var asm = System.Reflection.Assembly.GetEntryAssembly();
+            var asm = typeof(Program).Assembly;
             string? infoVersion = (asm is not null
                 ? Attribute.GetCustomAttribute(asm, typeof(System.Reflection.AssemblyInformationalVersionAttribute))
                     as System.Reflection.AssemblyInformationalVersionAttribute
@@ -179,6 +179,10 @@ public sealed class Program
                 string[] parts = infoVersion.Split('+', 2);
                 workerVersion = parts[0];
                 commit = parts.Length > 1 ? parts[1] : null;
+                if (commit?.StartsWith("sha.", StringComparison.Ordinal) == true)
+                {
+                    commit = commit[4..];
+                }
             }
 
             return Results.Ok(new

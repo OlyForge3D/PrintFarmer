@@ -4,7 +4,8 @@ import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { publicIdentity } from './public-release-identity.mjs';
 import { readReleaseIdentity } from './src/common/utils/releaseIdentity.ts';
 
 const fullCommitShaPattern = /^[0-9a-f]{40}$/i;
@@ -43,8 +44,31 @@ export function resolveGitHash(command: 'build' | 'serve') {
 
 // Emit dist/version.json at build time so the deployed frontend commit is queryable
 // (served by nginx at /version.json), mirroring the backend /api/system/version endpoints.
+export function frontendVersionMetadata(
+  gitHash: string,
+  buildTime: string,
+  releaseIdentity?: Record<string, unknown>,
+  inventoryIdentity: ReturnType<typeof readReleaseIdentity> = null,
+) {
+  if (releaseIdentity && releaseIdentity.sourceCommit !== gitHash) {
+    throw new Error('Frontend release identity does not match the build source SHA.');
+  }
+  const projection = releaseIdentity ? publicIdentity(releaseIdentity) : {};
+  if (inventoryIdentity) {
+    for (const [field, value] of Object.entries(projection)) {
+      if (field in inventoryIdentity && inventoryIdentity[field as keyof typeof inventoryIdentity] !== value) {
+        throw new Error(`Frontend release identity inputs disagree on ${field}.`);
+      }
+    }
+  }
+  return { service: 'frontend', commit: gitHash,
+    buildTime: typeof releaseIdentity?.buildTime === 'string' ? releaseIdentity.buildTime : buildTime,
+    ...projection,
+    ...(inventoryIdentity ? { releaseIdentity: inventoryIdentity } : {}) };
+}
+
 function emitVersionJson(gitHash: string, buildTime: string) {
-  const releaseIdentity = readReleaseIdentity(process.env.PRINTFARMER_RELEASE_IDENTITY, gitHash);
+  const inventoryIdentity = readReleaseIdentity(process.env.PRINTFARMER_RELEASE_IDENTITY, gitHash);
   let outDir = 'dist';
   return {
     name: 'printfarmer-version-json',
@@ -52,12 +76,18 @@ function emitVersionJson(gitHash: string, buildTime: string) {
     configResolved(config: { build: { outDir: string } }) {
       outDir = config.build.outDir;
     },
-    writeBundle() {
+    closeBundle() {
+      const identityPath = resolve('public', 'release-identity.json');
+      const releaseIdentity: Record<string, unknown> | undefined = existsSync(identityPath)
+        ? JSON.parse(readFileSync(identityPath, 'utf8')) as Record<string, unknown>
+        : undefined;
       mkdirSync(outDir, { recursive: true });
-      writeFileSync(
-        resolve(outDir, 'version.json'),
-        JSON.stringify({ service: 'frontend', commit: gitHash, buildTime, releaseIdentity }, null, 2),
-      );
+      const metadata = JSON.stringify(frontendVersionMetadata(gitHash, buildTime, releaseIdentity, inventoryIdentity), null, 2);
+      writeFileSync(resolve(outDir, 'version.json'), metadata);
+      if (releaseIdentity) {
+        // Vite copies public assets verbatim; sanitize that copy as well.
+        writeFileSync(resolve(outDir, 'release-identity.json'), metadata);
+      }
       const serviceWorkerPath = resolve(outDir, 'sw.js');
       const serviceWorker = readFileSync(serviceWorkerPath, 'utf8')
         .replaceAll('__PRINTFARMER_BUILD_TIME__', buildTime)

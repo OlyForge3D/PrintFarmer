@@ -37,9 +37,9 @@ name: TestFlight Beta Build
 on:
   push:
     tags:
-      - 'v*-alpha*'
-      - 'v*-beta*'
-      - 'v*-rc*'
+      - 'ios/v*-alpha*'
+      - 'ios/v*-beta*'
+      - 'ios/v*-rc*'
   workflow_dispatch:
     inputs:
       environment:
@@ -51,7 +51,7 @@ on:
           - internal
           - external
       marketing_version:
-        description: 'Optional marketing version override (for example, 1.0). Blank uses the latest v*-beta.N tag series.'
+        description: 'Optional marketing version override (for example, 1.0). Blank uses the latest ios/v*-beta.N tag series.'
         required: false
         type: string
       beta_number:
@@ -90,18 +90,18 @@ jobs:
 
           latest_beta_tag_for_version() {
             local version="$1"
-            git tag -l "v${version}-beta.[0-9]*" --sort=v:refname | tail -n 1
+            git tag -l "ios/v${version}-beta.[0-9]*" --sort=v:refname | tail -n 1
           }
 
           latest_beta_series_version() {
             local latest_tag
-            latest_tag="$(git tag -l 'v*-beta.[0-9]*' --sort=v:refname | tail -n 1)"
+            latest_tag="$(git tag -l 'ios/v*-beta.[0-9]*' --sort=v:refname | tail -n 1)"
             if [[ -z "$latest_tag" ]]; then
-              echo "No existing v*-beta.N tags found; provide marketing_version." >&2
+              echo "No existing ios/v*-beta.N tags found; provide marketing_version." >&2
               exit 1
             fi
 
-            if [[ "$latest_tag" =~ ^v([0-9]+\.[0-9]+(\.[0-9]+)?)-beta\.([0-9]+)$ ]]; then
+            if [[ "$latest_tag" =~ ^ios/v([0-9]+\.[0-9]+(\.[0-9]+)?)-beta\.([0-9]+)$ ]]; then
               echo "${BASH_REMATCH[1]}"
             else
               echo "Unsupported beta tag format found: $latest_tag" >&2
@@ -145,13 +145,13 @@ jobs:
                 echo "Invalid beta_number: $INPUT_BETA_NUMBER" >&2
                 exit 1
               fi
-              TAG_NAME="v${VERSION}-beta.${INPUT_BETA_NUMBER}"
+              TAG_NAME="ios/v${VERSION}-beta.${INPUT_BETA_NUMBER}"
               if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
                 echo "Tag already exists: $TAG_NAME" >&2
                 exit 1
               fi
             else
-              TAG_NAME="v${VERSION}-beta.$(next_beta_number_for_version "$VERSION")"
+              TAG_NAME="ios/v${VERSION}-beta.$(next_beta_number_for_version "$VERSION")"
             fi
 
             git config user.name "github-actions[bot]"
@@ -161,7 +161,7 @@ jobs:
             for attempt in 1 2 3; do
               if [[ "$attempt" -gt 1 && -z "${INPUT_BETA_NUMBER:-}" ]]; then
                 git fetch --tags --force
-                TAG_NAME="v${VERSION}-beta.$(next_beta_number_for_version "$VERSION")"
+                TAG_NAME="ios/v${VERSION}-beta.$(next_beta_number_for_version "$VERSION")"
               fi
 
               if git rev-parse -q --verify "refs/tags/$TAG_NAME" >/dev/null; then
@@ -191,11 +191,11 @@ jobs:
             fi
           else
             TAG_NAME="$REF_NAME"
-            if [[ "$TAG_NAME" =~ ^v([0-9]+\.[0-9]+(\.[0-9]+)?)(-(beta|rc)\.[0-9]+)?$ ]]; then
+            if [[ "$TAG_NAME" =~ ^ios/v([0-9]+\.[0-9]+(\.[0-9]+)?)-(alpha|beta|rc)\.[0-9]+$ ]]; then
               VERSION="${BASH_REMATCH[1]}"
             else
               echo "Unsupported tag format: $TAG_NAME" >&2
-              echo "Expected vX.Y.Z-beta.N, vX.Y.Z-rc.N, or vX.Y.Z" >&2
+              echo "Expected ios/vX.Y-beta.N, ios/vX.Y-alpha.N, or ios/vX.Y-rc.N" >&2
               exit 1
             fi
           fi

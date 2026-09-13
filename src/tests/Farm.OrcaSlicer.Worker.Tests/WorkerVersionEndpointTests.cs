@@ -49,6 +49,18 @@ public sealed class WorkerVersionEndpointTests : IDisposable
     }
 
     [Fact]
+    public async Task GetSystemVersion_AssemblyCommit_DoesNotExposeShaPrefix()
+    {
+        using HttpClient client = _factory.CreateClient();
+        using HttpResponseMessage response = await client.GetAsync("/api/system/version");
+        using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string? commit = body.RootElement.GetProperty("commit").GetString();
+        commit.Should().MatchRegex("^[0-9a-f]{40}$");
+    }
+
+    [Fact]
     public void VersionContracts_LatestWorkerAndCalibrationStayAligned()
     {
         WorkerConstants.SlicerVersion.Should().Be(OrcaSlicerVersionConstants.LatestSupported);

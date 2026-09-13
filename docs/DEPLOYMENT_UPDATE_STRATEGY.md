@@ -71,19 +71,31 @@ do not.
 
 ### Implemented branch/channel publication baseline
 
+**Revision status (2026-09-12, #2668):** the original audit descriptions below
+are historical baseline evidence, not the current branch implementation.
+The [release guide](RELEASE_GUIDE.md) now documents one consolidated authority,
+strict stable/insider/beta/RC grammar, protected Git-CAS reservations, signed
+exact-SHA authorization, shared assembly/frontend/OCI identity and complete-set
+candidate CAS. Direct tag publication, legacy release helpers and the daily
+registry publisher have been removed. Existing historical aliases are unchanged.
+The branch remains **activation-blocked** on explicit owner approval and missing
+live rulesets/environments/ledger/publisher setup. #2660 still owns signed
+managed eligibility, image aliases and generated installer references; no
+source-only release or unsigned candidate pointer is an update candidate.
+
 The local #2668 implementation establishes the following publication policy,
 as documented in the [release guide](RELEASE_GUIDE.md#release-channels-and-branches):
 
 - Stable dispatch uses `main` and `vX.Y.Z`. Consolidated release rejects
   branch/channel/version mismatches; the legacy release workflow is stable-only.
-- Insider dispatch uses `development` and `vX.Y.Z-insider.N`.
-  `vX.Y.Z-beta.N` and `vX.Y.Z-rc.N` remain supported insider-channel prereleases,
-  not rejected legacy-only identities. `VERSION` supplies the numeric base;
-  the prerelease suffix is supplied at dispatch, not allocated automatically.
-- Docker final promotion adds `stable`, `latest`, major and minor pointers
-  for stable tags; insider/beta/RC promotion adds only the `insider` channel
-  pointer alongside the exact prerelease tag. Both Docker metadata blocks
-  include `org.printfarmer.release-channel`.
+- Insider dispatch uses `development` and `vX.Y.Z-insider.N`. Mobile prerelease
+  tags use the separate `ios/vX.Y-beta.N`, `ios/vX.Y-alpha.N`, or
+  `ios/vX.Y-rc.N` namespace and cannot trigger container publication. `VERSION`
+  supplies the server numeric base; the insider suffix is supplied at dispatch.
+- Docker final promotion adds `stable`, `latest`, major and minor pointers for
+  stable tags; insider promotion adds only the `insider` channel pointer
+  alongside the exact prerelease tag. Both Docker metadata blocks include
+  `org.printfarmer.release-channel`.
 - No permanent extra release branch is needed. Optional short-lived
   `release/vX.Y.Z` branches receive full-safe CI, merge to `main` before stable
   publication, and merge stabilization fixes back to `development`.
@@ -94,22 +106,22 @@ every publishing entry point, verified complete signed sets, compatibility
 manifests, installed inventory, update checks, or an updater. The evidence and
 remaining publication-path gaps below delimit what can be claimed.
 
-**Issue reconciliation completed:** #2658, #2660, #2661 and #2668 now agree
-that beta/RC are valid insider-channel prereleases. An isolated mutable
-`insider` pointer is discovery convenience only, never canonical installed
-identity; canonical identity is the prerelease version plus immutable digests
-and provenance. Earlier beta/RC-rejection and exact-only-pointer claims are
-superseded. Complete exact-SHA/all-entry-point authorization, durable allocation
+**Issue reconciliation completed:** #2658, #2660, #2661 and #2668 now use a
+disjoint release namespace: server insiders use `vX.Y.Z-insider.N`, while
+TestFlight uses `ios/vX.Y-{alpha,beta,rc}.N`. An isolated mutable `insider`
+pointer is discovery convenience only, never canonical installed identity;
+canonical identity is the prerelease version plus immutable digests and
+provenance. Complete exact-SHA/all-entry-point authorization, durable allocation
 and publication-bypass closure, complete signed coordinated sets and end-to-end
 verification remain implementation gaps. #2668 remains a native epic child
 and blocks #2660. Graph PASS verifies relationships, not implementation closure.
 
 ### Canonical release identity and single version authority
 
-The baseline above is implemented locally. The following stronger coordinated
-identity contract remains future work feeding #2660 and its consumers, with
-remaining #2668 ownership/authorization criteria requiring implementation.
-It must preserve supported beta/RC insider stages and channel-pointer isolation.
+The following coordinated identity contract is normative. Its #2668 identity
+and authorization prerequisite is implemented on this revision branch, but
+owner acceptance, live activation and #2660 distribution remain blocked.
+It must preserve the disjoint server/mobile namespaces and channel-pointer isolation.
 Maintainer acceptance of counter/ownership choices gates this future work,
 not the already implemented stable/main or insider/development dispatch policy.
 
@@ -124,10 +136,13 @@ not the already implemented stable/main or insider/development dispatch policy.
    tag `vX.Y.Z`, and only publishes from a protected `main` commit. The
    requested tag must exactly match that commit's `VERSION`; mismatch fails
    before write credentials or publication. Insider is
-   `X.Y.Z-insider.N`, tag `vX.Y.Z-insider.N`, only from `development`;
-   supported beta/RC stages also belong to insider and need explicit sequence
-   and comparison semantics in the future shared identity contract.
-   `N` is one positive decimal integer, without leading zeros, reserved by a
+   `X.Y.Z-insider.N`, tag `vX.Y.Z-insider.N`, only from `development`.
+   Server `beta.N` and `rc.N` are also insider identities; all stages share N
+   and progress in SemVer order `beta < insider < rc`, without same-base stage
+   regression. Mobile
+   alpha/beta/RC identities remain independent under `ios/` and are excluded
+   from server release discovery. `N` is one positive decimal integer, without
+   leading zeros, reserved by a
    durable atomic insider allocator shared by all authorized entry points.
    It increases across base changes and workflow replacements; gaps are valid.
    The allocation key is trusted repository + workflow identity + run ID +
@@ -211,8 +226,8 @@ unknown; do not relabel it from the selected channel.
 
 For the remaining coordinated-identity work, the maintainer names the authoritative workflow,
 release-policy owners and allocator storage/transaction/continuity mechanism.
-The one-integer grammar and allocation semantics above are fixed; storage is
-not implemented or implicitly approved. Missing or rolled-back allocation
+The one-integer grammar and allocation semantics above are fixed; the proposed
+protected Git-CAS implementation is not implicitly owner-approved. Missing or rolled-back allocation
 state blocks publication until trusted continuity is restored, even after a
 base bump. Do not approximate N with concatenated counters, timestamps or a
 local tag scan. New attempts of older source commits cannot advance insider
@@ -222,7 +237,7 @@ and channel advancement, with durable compare-and-set high-water checks;
 workflow concurrency alone does not guarantee ordering.
 #2660 separately gates signing/trust and offline verification choices.
 
-### Branch topology decision and repository evidence
+### Branch topology decision and historical baseline evidence
 
 **Decision: no permanent per-track release branches.** `development` is the
 insider integration line; `main` is the stable line. The following follow-up
@@ -233,30 +248,30 @@ not changed, and are not evidence of deployed enforcement.
 | Exact source | Observed behavior and implication |
 | --- | --- |
 | `.github\workflows\ci.yml` (`on.push.branches`); `scripts\ci\select-dotnet-tests.sh`; `scripts\ci\tests\test-select-dotnet-tests.sh` | Local changes add `release/**` pushes and full-safe selection, including a `release/v1.2.3` fixture. This is candidate validation, not a reason for permanent release channels. |
-| `.github\workflows\consolidated-release.yml` (`validate-and-tag`) | Implemented channel input/guards bind stable dispatch to main and insider/beta/RC dispatch to development. Checkout still uses a moving branch ref; exact-SHA authorization remains future work. |
+| `.github\workflows\consolidated-release.yml` (`validate-and-tag`) | Implemented channel input/guards bind stable dispatch to main and insider dispatch to development. Mobile/TestFlight publication is separate. Dispatch captures `github.sha`, checks out that commit and creates the tag explicitly at it; stronger protected-branch authorization evidence remains future work. |
 | `.github\workflows\release.yml` (`tag-and-build`, exact-tag Docker wait) | Local stable dispatch checks main and VERSION; the downstream wait matches tag and commit. Preserve that matching but bind tag creation and every checkout to the selected main SHA. |
-| `.github\workflows\docker-publish.yml` (`on.push`, `Resolve source metadata`, `Resolve promotion tags`) | Still accepts bare `release` pushes, creates `release`/`release-sha-*` and manual tags, and derives channel from suffix. Tag publication lacks equivalent branch-origin validation. Remove these publication bypasses; they do not justify another permanent branch. |
-| `.github\workflows\docker-publish.yml` (both metadata-action blocks and `promote-images`) | Both blocks add `org.printfarmer.release-channel`. Final promotion isolates stable/latest/major/minor from insider/beta/RC and intentionally moves `insider`. Metadata-action patterns still enable major/minor for any v-tag; current source-text tests do not prove actual generated/pushed tags. |
+| `.github\workflows\docker-publish.yml` (`on.push`, `Resolve source metadata`, `Resolve promotion tags`) | Publication accepts only exact stable or insider tag pushes; release-branch and manual-dispatch publication paths are removed. Direct tag publication still needs stronger publisher and protected-branch authorization evidence. |
+| `.github\workflows\docker-publish.yml` (both metadata-action blocks and `promote-images`) | Both blocks add `org.printfarmer.release-channel`. Final promotion isolates stable/latest/major/minor from insider and intentionally moves `insider`. The `ios/` namespace cannot enter this workflow. Metadata-action patterns still need executable generated-tag coverage. |
 | `.github\workflows\daily-development-images.yml` (`source`, publication jobs) | Resolves/checks exact development HEAD; uses `development-<sha12>` build metadata and `sha-<sha>-run-<id>-attempt-<n>` tags with six-image `image-set.json`. Reuse exact-SHA handling, but migrate identities to canonical insider SemVer before managed discovery. |
-| `scripts\bump-version.sh`; `scripts\sync-monorepo-version.sh`; `VERSION` | Bump tool supports beta/rc and local tag-scan sequence, commits/pushes the current branch; sync checks only numeric base and web package version. Neither proves channel origin nor implements a durable insider allocator. VERSION currently contains `v0.2.3`. |
-| `docs\RELEASE_GUIDE.md`; `scripts\ci\tests\test-release-tag-triggers.mjs` | Guide records the baseline; tests cover stable/insider/beta/RC trigger agreement and assert branch guards, isolated promotion text, both OCI channel labels and stable-only legacy dispatch. Executable event/alias/commit-race coverage remains future work; these tests were inspected, not run in this reconciliation. |
+| `scripts\bump-version.sh`; `scripts\sync-monorepo-version.sh`; `VERSION` | Bump tool supports only the server `insider` prerelease suffix and a local tag-scan sequence, then commits/pushes the current branch; sync checks only numeric base and web package version. Neither proves channel origin nor implements a durable insider allocator. VERSION currently contains `v0.2.3`. |
+| `docs\RELEASE_GUIDE.md`; `scripts\ci\tests\test-release-tag-triggers.mjs` | Guide records the baseline; tests cover stable/insider container triggers, disjoint `ios/` TestFlight triggers, branch guards, isolated promotion text, OCI channel labels and stable-only legacy dispatch. Executable event/alias/commit-race coverage remains future work. |
 
 No inspected workflow requires simultaneous supported stable maintenance lines.
 Permanent branches would duplicate VERSION ownership, protection, backports
 and publication authorization without solving artifact identity. Narrow
 `release/**` to reviewed, optional `release/vX.Y.Z` candidate lifecycle and
-full-safe validation, never a third channel; reject all release refs for
-publication, including bare `release`. A future multi-version maintenance
+full-safe validation, never a third channel; all release branch refs are
+non-publishing. A future multi-version maintenance
 commitment requires a separate explicit support-policy decision.
 
-### Remaining tag validation and event authorization
+### Original tag-validation gaps (superseded by #2668 revision)
 
-Stable tags use `vX.Y.Z`; insider tags use `vX.Y.Z-insider.N`, with beta/RC
-stages also supported as `vX.Y.Z-beta.N` and `vX.Y.Z-rc.N`.
-Current dispatch regexes accept decimal numeric components, including zero
-and leading zeros; they do not implement stricter SemVer numeric validation
-or a positive monotonic allocator. Future validation must define canonical
-numeric forms and sequence semantics without silently removing beta/RC support.
+Stable tags use `vX.Y.Z`; insider tags use `vX.Y.Z-insider.N`. TestFlight tags
+use `ios/vX.Y-beta.N`, `ios/vX.Y-alpha.N`, or `ios/vX.Y-rc.N`. Current server
+baseline dispatch regexes accepted decimal numeric components, including zero
+and leading zeros. The revision's executable `release-policy.mjs` rejects these,
+and all supported server stages use protected durable allocation. Namespace
+isolation remains mandatory.
 Existing tags and daily artifacts retain their original identity; publication
 channel classification alone never proves managed eligibility or enrollment.
 
@@ -299,9 +314,9 @@ hotfix may advance its own minor alias but cannot regress global latest/stable
 or a major alias already pointing to a newer minor. No branch/manual/tag
 spelling shortcut may advance them.
 
-For insider/beta/RC, retain the exact prerelease image tag and isolated mutable
+For insider releases, retain the exact prerelease image tag and isolated mutable
 `insider` discovery pointer; never advance stable exact/minor/major/latest/stable
-aliases. A future signed insider **metadata channel pointer** advances last to
+aliases. Tags under `ios/` never publish container images. A future signed insider **metadata channel pointer** advances last to
 a complete manifest; it is distinct from the existing OCI image pointer.
 Neither mutable pointer is installed identity: managed installs must resolve
 and retain verified immutable manifest/image digests.
@@ -877,7 +892,7 @@ production validation runs are implied by this design document.
 ### I2 prerequisite — Branch and version policy (#2668)
 
 - **Implemented locally:** Main/stable and development/insider dispatch guards,
-  supported insider/beta/RC tags, isolated final Docker channel promotion,
+  supported insider tags, disjoint TestFlight tag namespaces, isolated final Docker channel promotion,
   OCI channel labels, optional release-candidate CI, release docs and tests.
   Exact evidence and residual paths are listed above; no claim of deployment.
 - **Remaining scope, not baseline capability:** Protected publication;
@@ -898,7 +913,7 @@ production validation runs are implied by this design document.
   `scripts\ci\select-dotnet-tests.sh` and its tests, and
   `scripts\ci\tests\test-release-tag-triggers.mjs` with canonical grammar,
   non-publishing stabilization lifecycle and executable event-validation tests.
-  Preserve `docs\RELEASE_GUIDE.md`'s supported beta/RC insider dispatch guidance.
+  Preserve `docs\RELEASE_GUIDE.md`'s disjoint container and TestFlight tag guidance.
   Gate cutover on historical tag inventory, allocator continuity, live
   protections and a credential-free negative-event rehearsal; legacy artifacts
   remain immutable and cannot become managed candidates through relabeling.
@@ -1053,7 +1068,7 @@ production validation runs are implied by this design document.
 | Stable tag on development/feature/fork, manual wrong ref, reusable caller spoof | Denied before publication credentials or artifacts; main ancestry and exact VERSION/tag match required. #2668 |
 | Insider request from main; malformed or stale VERSION; mismatched tag | Denied; only development plus the approved derivation publishes insider. #2668 |
 | Run retry, attempt change, old-run rerun, counter reset, concurrent pointer writes | Same allocation key reuses N; new attempt reserves greater N. No reuse/reset/overwrite; stale source or lower canonical version cannot advance a pointer. #2668/#2660 |
-| Supported insider/beta/RC versus malformed tags and numeric edge cases | Preserve insider-channel stages; define stricter numeric/allocator validation separately. Current regexes do not reject zero/leading zeros. #2668/#2660 |
+| Supported insider versus malformed or `ios/` tags and numeric edge cases | Preserve namespace isolation; define stricter numeric/allocator validation separately. Current regexes do not reject zero/leading zeros. #2668/#2660 |
 | Bare release, release/vX.Y.Z or arbitrary release refs | Candidate validation only; no signing/publication. Verify owner/expiry, main exact tag, reviewed merge-back, abandonment and deletion evidence. #2668 |
 | Main moves between admission/tag/build; tag is moved or recreated | Reject pre-authorization drift; after authorization build only recorded exact SHA and verify immutable tag. Ancestry alone is insufficient. #2668 |
 | Generated tags for prerelease, branch/manual run or stable older-line hotfix | Insider exact prerelease tags plus isolated insider pointer; zero stable aliases. Stable aliases require authorized main tag and scoped non-regression; test every metadata and promotion path. #2660 |
@@ -1173,8 +1188,9 @@ does not create issues or mutate graph relationships.
     by the existing migration-safe architecture.
 11. Name the authoritative version-derivation workflow and policy owners;
     approve storage, atomic allocation and continuity recovery for the specified
-    one-integer insider N for future coordinated identity, preserving supported
-    beta/RC stage semantics. Reconcile remaining #2668 closure scope separately.
+    one-integer insider N for future coordinated server identity while keeping
+    mobile alpha/beta/RC sequencing under `ios/`. Reconcile remaining #2668
+    closure scope separately.
     No allocator exists by implication.
     `VERSION` remains the sole authored base and tags remain checked outputs;
     no decision may reintroduce competing version sources. Record ruleset,
