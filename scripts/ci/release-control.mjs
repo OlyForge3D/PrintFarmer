@@ -6,7 +6,7 @@ import {
 } from './release-policy.mjs';
 import {
   branchHead, command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion, verifyProtection,
-  verifyStableQualification,
+  verifyStableQualification, verifyReleaseChecks,
 } from './release-github.mjs';
 import { emitBuildIdentity } from './release-metadata.mjs';
 import {
@@ -77,13 +77,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     const selectedHead = await branchHead(api, branch);
     const admission = admit(context, selectedHead, await readVersion(api, selectedHead));
     validateReservationAdmission(state, admission);
-    const checks = await api(`commits/${selectedHead}/check-runs?per_page=100`);
-    requireThat(checks.total_count <= 100, 'Check evidence truncated');
-    for (const required of ['CI tooling tests', '.NET build', 'Frontend build & tests']) {
-      const matching = checks.check_runs.filter(check => check.name === required &&
-        check.app?.slug === 'github-actions').sort((a, b) => b.id - a.id);
-      requireThat(matching[0]?.conclusion === 'success', `Missing successful exact-SHA qualification: ${required}`);
-    }
+    if (operation === 'admit') await verifyReleaseChecks(api, selectedHead);
     requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift before authorization');
     output('source_sha', context.eventSha);
     output('channel', admission.channel);
@@ -92,7 +86,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       return;
     }
     const protection = await verifyProtection(api, admission.channel, env.RELEASE_PUBLISHER_APP_ID,
-      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS);
+      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, selectedHead);
     const record = await transact(store, async state => {
       const existing = validateReservationAdmission(state, admission);
       requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during allocation retry');

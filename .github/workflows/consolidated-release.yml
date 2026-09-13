@@ -50,6 +50,7 @@ jobs:
       contents: read
       actions: read
       checks: read
+      statuses: read
     outputs:
       source_sha: ${{ steps.admit.outputs.source_sha }}
       channel: ${{ steps.admit.outputs.channel }}
@@ -107,6 +108,7 @@ jobs:
           private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
           permission-contents: write
           permission-checks: read
+          permission-statuses: read
           permission-administration: read
           permission-actions: read
       - name: Reserve sequence before source tag
