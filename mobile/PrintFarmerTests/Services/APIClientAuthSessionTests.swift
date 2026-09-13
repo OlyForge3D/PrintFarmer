@@ -9,6 +9,86 @@ import XCTest
 final class APIClientAuthSessionTests: XCTestCase {
     private static let testServerID = UUID()
 
+    func testControlSubmissionRejectsChangedRegistryIDEvenForSameURLAndBearer() async throws {
+        let transport = MockURLProtocol.makeSession()
+        let client = APIClient(baseURL: TestData.testBaseURL, session: transport.urlSession)
+        await client.setAuthenticatedSession(.init(accessToken: "shared-test-bearer", serverID: UUID()))
+        let barrier = AsyncBarrier()
+        defer { barrier.close() }
+        await client.setTokenExpiryChecker {
+            await barrier.arriveAndWait()
+            return false
+        }
+        let service = PrinterService(apiClient: client)
+        let submission = Task {
+            try await service.submitControlOperation(
+                printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+                request: .init(kind: .homeAll)
+            )
+        }
+        await barrier.waitUntilArrived()
+        await client.setAuthenticatedSession(.init(accessToken: "shared-test-bearer", serverID: UUID()))
+        barrier.release()
+        do {
+            _ = try await submission.value
+            XCTFail("Registry identity is part of the operation scope")
+        } catch NetworkError.staleServerResponse { }
+        XCTAssertTrue(transport.capturedRequests.isEmpty)
+    }
+
+    func testControlSubmissionNeverCrossesServerOrAuthSessionBoundary() async throws {
+        for switchServer in [false, true] {
+            for switchAfterSend in [false, true] {
+                let epoch = AuthOperationEpoch()
+                let gen = ActiveServerGeneration()
+                _ = gen.advance()
+                let transport = MockURLProtocol.makeSession()
+                let client = await makeClient(gen: gen, transport: transport)
+                let firstToken = epoch.advance()
+                _ = await client.applyAuthenticatedSessionIfCurrent(
+                    baseURL: URL(string: "https://a.example.com")!,
+                    identity: AuthenticatedIdentity(accessToken: "motion-T1", serverID: Self.testServerID),
+                    epoch: epoch, token: firstToken
+                )
+                let barrier = AsyncBarrier()
+                defer { barrier.close() }
+                if switchAfterSend {
+                    transport.asyncRequestHandler = { request in
+                        await barrier.arriveAndWait()
+                        return (TestData.httpResponse(url: request.url, statusCode: 202),
+                                Data(ControlOperationTestJSON.operation().utf8))
+                    }
+                } else {
+                    await client.setTokenExpiryChecker {
+                        await barrier.arriveAndWait()
+                        return false
+                    }
+                }
+                let service = PrinterService(apiClient: client)
+                let submission = Task {
+                    try await service.submitControlOperation(
+                        printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+                        request: .init(kind: .homeAll)
+                    )
+                }
+                await barrier.waitUntilArrived()
+                let secondToken = epoch.advance()
+                _ = await client.applyAuthenticatedSessionIfCurrent(
+                    baseURL: URL(string: switchServer ? "https://b.example.com" : "https://a.example.com")!,
+                    identity: AuthenticatedIdentity(accessToken: "motion-T2", serverID: Self.testServerID),
+                    epoch: epoch, token: secondToken
+                )
+                barrier.release()
+                do {
+                    _ = try await submission.value
+                    XCTFail("Old motion evidence must not enter the new server/auth context")
+                } catch NetworkError.staleServerResponse { }
+                XCTAssertEqual(transport.capturedRequests.count, switchAfterSend ? 1 : 0)
+                XCTAssertTrue(transport.capturedRequests.allSatisfy { $0.url?.host == "a.example.com" })
+            }
+        }
+    }
+
     // MARK: - Fixtures
 
     /// Captures every SessionExpired notification (payload only) for the lifetime

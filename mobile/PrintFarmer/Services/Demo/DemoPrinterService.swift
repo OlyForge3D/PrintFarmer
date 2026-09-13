@@ -1,5 +1,82 @@
 import Foundation
 
+/// Instance-scoped simulation: no timers, no hardware, no success at submission.
+/// Canonical reads deterministically advance queued → running → succeeded.
+private actor DemoControlOperationStore {
+    private var records: [UUID: PrinterControlOperation] = [:]
+    private var requests: [UUID: PrinterControlOperationRequest] = [:]
+    private var currentIDs: [UUID: UUID] = [:]
+
+    func submit(printerId: UUID, operationId: UUID, request: PrinterControlOperationRequest) throws -> PrinterControlOperation {
+        if let existing = records[operationId] {
+            guard existing.printerId == printerId, requests[operationId] == request else {
+                throw PrinterControlOperationError.problem(statusCode: 409, code: "idempotency_conflict", message: nil)
+            }
+            return existing
+        }
+        if snapshot(printerId: printerId).physicalControl.barrierHeld {
+            throw PrinterControlOperationError.problem(statusCode: 409, code: "physical_control_busy", message: nil)
+        }
+        let now = Date(timeIntervalSince1970: 1_789_200_000)
+        let operation = PrinterControlOperation(
+            operationId: operationId, printerId: printerId, kind: request.kind,
+            x: request.x, y: request.y, z: request.z, f: request.f,
+            state: .queued, rowVersion: "demo-1", createdAtUtc: now, updatedAtUtc: now,
+            barrierHeld: true, requiresRecovery: false,
+            completionEvidence: .none, senderIsolation: .notRequested
+        )
+        records[operationId] = operation
+        requests[operationId] = request
+        currentIDs[printerId] = operationId
+        return operation
+    }
+
+    func read(printerId: UUID, operationId: UUID) throws -> PrinterControlOperation {
+        guard let old = records[operationId], old.printerId == printerId else {
+            throw PrinterControlOperationError.problem(statusCode: 404, code: "operation_not_found", message: nil)
+        }
+        guard old.state == .queued || old.state == .running else { return old }
+        let complete = old.state == .running
+        let updated = old.updatedAtUtc.addingTimeInterval(1)
+        let operation = PrinterControlOperation(
+            operationId: old.operationId, printerId: printerId, kind: old.kind,
+            x: old.x, y: old.y, z: old.z, f: old.f,
+            state: complete ? .succeeded : .running,
+            rowVersion: complete ? "demo-3" : "demo-2",
+            createdAtUtc: old.createdAtUtc, updatedAtUtc: updated,
+            startedAtUtc: old.startedAtUtc ?? updated,
+            completedAtUtc: complete ? updated : nil,
+            barrierHeld: !complete, requiresRecovery: false,
+            completionEvidence: complete ? .motionQueueDrained : .none,
+            senderIsolation: .notRequested
+        )
+        records[operationId] = operation
+        return operation
+    }
+
+    func current(printerId: UUID) throws -> PrinterCurrentControlOperation {
+        if let id = currentIDs[printerId] {
+            _ = try read(printerId: printerId, operationId: id)
+        }
+        return snapshot(printerId: printerId)
+    }
+
+    func snapshot(printerId: UUID) -> PrinterCurrentControlOperation {
+        let operation = currentIDs[printerId].flatMap { records[$0] }.flatMap {
+            $0.barrierHeld ? $0 : nil
+        }
+        return PrinterCurrentControlOperation(
+            physicalControl: PrinterPhysicalControl(
+                supportedOperations: PrinterControlOperationKind.allCases,
+                barrierHeld: operation?.barrierHeld ?? false,
+                operationId: operation?.operationId, state: operation?.state,
+                requiresRecovery: operation?.requiresRecovery ?? false
+            ),
+            operation: operation
+        )
+    }
+}
+
 // MARK: - Demo Printer Service
 
 final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
@@ -9,6 +86,7 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     /// persists. Non-Farm demo behavior is unaffected.
     private let listError: Error?
     private let snapshots: [UUID: Data]
+    private let controlOperations = DemoControlOperationStore()
 
     /// Default demo constructor (all callers except UI-test bootstrap):
     /// exposes exactly the demo fleet from `DemoData.printers`.
@@ -43,14 +121,48 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func list(includeDisabled: Bool) async throws -> [Printer] {
         if let listError { throw listError }
-        return printers
+        var result: [Printer] = []
+        for var printer in printers {
+            if printer.backend == .moonraker {
+                printer.physicalControl = await controlOperations.snapshot(printerId: printer.id).physicalControl
+            }
+            result.append(printer)
+        }
+        return result
     }
 
     func get(id: UUID) async throws -> Printer {
-        guard let printer = printers.first(where: { $0.id == id }) else {
+        guard var printer = printers.first(where: { $0.id == id }) else {
             throw ServiceError.notImplemented("Printer not found in demo data")
         }
+        if printer.backend == .moonraker {
+            printer.physicalControl = await controlOperations.snapshot(printerId: id).physicalControl
+        }
         return printer
+    }
+
+    func submitControlOperation(printerId: UUID, operationId: UUID, request: PrinterControlOperationRequest) async throws -> PrinterControlOperation {
+        try Task.checkCancellation()
+        try requireDemoMotionPrinter(printerId)
+        return try await controlOperations.submit(printerId: printerId, operationId: operationId, request: request)
+    }
+
+    func getControlOperation(printerId: UUID, operationId: UUID) async throws -> PrinterControlOperation {
+        try Task.checkCancellation()
+        try requireDemoMotionPrinter(printerId)
+        return try await controlOperations.read(printerId: printerId, operationId: operationId)
+    }
+
+    func getCurrentControlOperation(printerId: UUID) async throws -> PrinterCurrentControlOperation {
+        try Task.checkCancellation()
+        try requireDemoMotionPrinter(printerId)
+        return try await controlOperations.current(printerId: printerId)
+    }
+
+    private func requireDemoMotionPrinter(_ id: UUID) throws {
+        guard printers.contains(where: { $0.id == id && $0.backend == .moonraker }) else {
+            throw PrinterControlOperationError.updateRequired
+        }
     }
 
     func getStatus(id: UUID) async throws -> PrinterStatusDetail {

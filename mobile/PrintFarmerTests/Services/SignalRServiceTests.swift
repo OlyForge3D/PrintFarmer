@@ -10,6 +10,77 @@ import XCTest
 /// header value, so a future change that masks the token before transmit fails
 /// here instead of silently 401ing against a real server.
 final class SignalRServiceTests: XCTestCase {
+    #if DEBUG
+    func testMockControlInvalidationSupportsCancellationAndInFlightCallbackSimulation() {
+        let service = MockSignalRService()
+        let recorder = ControlHintRecorder()
+        let subscription = service.onPrinterControlOperationUpdated { recorder.append($0) }
+        let hint = PrinterControlOperationInvalidation(
+            printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId, rowVersion: "r1"
+        )
+        XCTAssertEqual(service.controlOperationSubscriberCount, 1)
+        service.simulateControlOperationUpdated(hint)
+        XCTAssertEqual(recorder.snapshot, [hint])
+        subscription.cancel()
+        XCTAssertEqual(service.controlOperationSubscriberCount, 0)
+        service.simulateControlOperationUpdated(hint)
+        XCTAssertEqual(recorder.snapshot.count, 1)
+        service.simulateCapturedControlOperationUpdated(at: 0, event: hint)
+        XCTAssertEqual(recorder.snapshot.count, 2)
+    }
+
+    func testControlOperationInvalidationIsStrictScopedAndCancellable() throws {
+        let service = SignalRService(serverURL: TestData.testBaseURL, tokenProvider: { nil })
+        let otherServer = SignalRService(serverURL: URL(string: "https://other.example.com")!, tokenProvider: { nil })
+        let received = ControlHintRecorder()
+        let foreign = ControlHintRecorder()
+        let subscription = service.onPrinterControlOperationUpdated { received.append($0) }
+        let otherSubscription = otherServer.onPrinterControlOperationUpdated { foreign.append($0) }
+        defer {
+            subscription.cancel()
+            otherSubscription.cancel()
+        }
+        let payload = """
+        {"printerId":"\(TestData.testUUID)","operationId":"\(ControlOperationTestJSON.operationId)","rowVersion":"opaque-r2"}
+        """
+        func frame(_ target: String, _ body: String) -> Data {
+            Data("{\"type\":1,\"target\":\"\(target)\",\"arguments\":[\(body)]}\u{1E}".utf8)
+        }
+        service.processIncomingDataForTesting(frame("PrinterControlOperationUpdated", payload))
+        service.processIncomingDataForTesting(frame("printercontroloperationupdated", "{}"))
+        service.processIncomingDataForTesting(frame("printercontroloperationupdated", payload.replacingOccurrences(of: "opaque-r2", with: "")))
+        service.processIncomingDataForTesting(frame("printercontroloperationupdated", payload))
+        // Hints need no monotonic ordering: even an older version means refetch,
+        // never an authoritative state transition or a reason to release a lock.
+        service.processIncomingDataForTesting(frame("printercontroloperationupdated", payload.replacingOccurrences(of: "opaque-r2", with: "opaque-r1")))
+        service.drainHubCoordinatorForTesting()
+        otherServer.drainHubCoordinatorForTesting()
+        XCTAssertEqual(received.snapshot.map(\.rowVersion), ["opaque-r2", "opaque-r1"])
+        XCTAssertEqual(received.snapshot.first?.printerId, TestData.testUUID)
+        XCTAssertTrue(foreign.snapshot.isEmpty)
+        subscription.cancel()
+        service.processIncomingDataForTesting(frame("printercontroloperationupdated", payload))
+        service.drainHubCoordinatorForTesting()
+        XCTAssertEqual(received.snapshot.count, 2)
+    }
+
+    private final class ControlHintRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var hints: [PrinterControlOperationInvalidation] = []
+
+        func append(_ hint: PrinterControlOperationInvalidation) {
+            lock.lock()
+            defer { lock.unlock() }
+            hints.append(hint)
+        }
+
+        var snapshot: [PrinterControlOperationInvalidation] {
+            lock.lock()
+            defer { lock.unlock() }
+            return hints
+        }
+    }
+    #endif
 
     private var mockSession: MockURLProtocol.Session!
 

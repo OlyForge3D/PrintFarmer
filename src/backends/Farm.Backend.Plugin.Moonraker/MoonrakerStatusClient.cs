@@ -75,7 +75,17 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
                 BedTemp: status.BedTemp,
                 HotendTarget: status.HotendTarget,
                 BedTarget: status.BedTarget,
-                PrintTimeLeftSeconds: status.PrintTimeLeftSeconds);
+                PrintTimeLeftSeconds: status.PrintTimeLeftSeconds,
+                HomedAxes: status.HomedAxes,
+                SafetyTelemetry: PrinterSafetyTelemetryDto.Empty with
+                {
+                    HomedAxes = new SafetyAxesTelemetryFactDto(
+                        status.HomedAxes?.Where(char.IsAsciiLetter)
+                            .Select(axis => char.ToLowerInvariant(axis).ToString()).Distinct(StringComparer.Ordinal).ToArray(),
+                        status.HomedAxesObservedAtUtc,
+                        PrinterSafetyTelemetryDto.DefaultStaleAfterSeconds,
+                        "moonraker:toolhead.homed_axes"),
+                });
         }
         catch (OperationCanceledException)
         {

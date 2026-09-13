@@ -1,5 +1,8 @@
 ﻿using Farm.Web.Api.Startup;
 using Xunit;
+using Microsoft.AspNetCore.Cors.Infrastructure;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Tests.Startup;
 
@@ -16,6 +19,21 @@ public class CorsStartupTests
         "http://localhost:3000",
         "https://localhost:3000",
     ];
+
+    [Fact]
+    public async Task MotionAdmissionAndRecovery_AllowRequiredHeadersAndExposeStrongRevision()
+    {
+        var services = new ServiceCollection();
+        services.AddPrintFarmerCors();
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        CorsPolicy policy = Assert.IsType<CorsPolicy>(provider.GetRequiredService<IOptions<CorsOptions>>().Value.GetPolicy("Default"));
+        Assert.Contains("Idempotency-Key", policy.Headers);
+        Assert.Contains("If-Match", policy.Headers);
+        Assert.Contains("ETag", policy.ExposedHeaders);
+        Assert.Contains("Location", policy.ExposedHeaders);
+        Assert.False(policy.AllowAnyOrigin);
+        Assert.False(policy.AllowAnyHeader);
+    }
 
     [Fact]
     public void ConfiguredOrigin_IsAllowed_RegardlessOfLocalNetworkFlag()

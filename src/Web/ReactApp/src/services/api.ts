@@ -1,6 +1,15 @@
 /* eslint-disable local/pf-no-unguarded-console */
 // Get hash for a G-code file (returns string)
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
+import { isControlOperationResolved, matchesPrinterControlIntent, printerControlOperationSchema } from "@/types/api";
+import type {
+  PrinterControlCurrent,
+  PrinterControlIntent,
+  PrinterControlOperation,
+  PrinterControlOperationResponse,
+  PrinterControlRecovery,
+  PrinterStatus,
+} from "@/types/api";
 import {
   PrintJobStatusDto,
   BedType,
@@ -648,10 +657,13 @@ export class ApiClient {
 
   // ============ Printer API methods ============
 
-  async getPrinters(includeDisabled?: boolean): Promise<Printer[]> {
+  async getPrinters(includeDisabled?: boolean, refresh = false): Promise<Printer[]> {
     // Get lightweight list of all printers
     const params = includeDisabled ? { includeDisabled: true } : undefined;
-    const response = await this.client.get<PrinterFast[]>("/printers", { params });
+    const response = await this.client.get<PrinterFast[]>("/printers", {
+      params,
+      ...(refresh ? { headers: { "Cache-Control": "no-cache" } } : {}),
+    });
     // Cast to Printer[] for compatibility; fast objects are subset of Printer
     return response.data as unknown as Printer[];
   }
@@ -709,6 +721,13 @@ export class ApiClient {
 
   async getPrinter(id: string): Promise<Printer> {
     const response = await this.client.get<Printer>(`/printers/${id}`);
+    return response.data;
+  }
+
+  async getPrinterStatus(id: string): Promise<PrinterStatus> {
+    const response = await this.client.get<PrinterStatus>(`/printers/${id}/status`, {
+      headers: { "Cache-Control": "no-cache" },
+    });
     return response.data;
   }
 
@@ -988,6 +1007,50 @@ export class ApiClient {
   }
 
   // ============ Printer Control API methods ============
+
+  async createPrinterControlOperation(
+    printerId: string, operationId: string, intent: PrinterControlIntent
+  ): Promise<PrinterControlOperationResponse> {
+    const response = await this.client.post<PrinterControlOperation>(
+      `/printers/${printerId}/control-operations`, intent,
+      { headers: { "Idempotency-Key": operationId } }
+    );
+    const operation = printerControlOperationSchema.parse(response.data);
+    const unresolved = ["Queued", "Running", "Unknown", "Recovering"].includes(operation.state);
+    if (operation.operationId !== operationId || operation.printerId !== printerId || !matchesPrinterControlIntent(operation, intent) ||
+      !((response.status === 202 && unresolved) || (response.status === 200 && isControlOperationResolved(operation)))) {
+      throw new Error("Invalid durable motion admission receipt. Recheck the saved operation; do not assume admission or completion.");
+    }
+    return { operation, etag: response.headers.etag ?? null };
+  }
+
+  async getPrinterControlOperation(printerId: string, operationId: string): Promise<PrinterControlOperationResponse> {
+    const response = await this.client.get<PrinterControlOperation>(
+      `/printers/${printerId}/control-operations/${operationId}`,
+      { headers: { "Cache-Control": "no-cache" } }
+    );
+    return { operation: response.data, etag: response.headers.etag ?? null };
+  }
+
+  async getCurrentPrinterControlOperation(printerId: string): Promise<PrinterControlCurrent> {
+    const response = await this.client.get<PrinterControlCurrent>(
+      `/printers/${printerId}/control-operations/current`,
+      { headers: { "Cache-Control": "no-cache" } }
+    );
+    return response.data;
+  }
+
+  async recoverPrinterControlOperation(
+    printerId: string, operationId: string, etag: string, recovery?: PrinterControlRecovery
+  ): Promise<PrinterControlOperationResponse> {
+    if (!/^"[^"]+"$/.test(etag)) throw new Error("Refresh the operation to obtain its current ETag.");
+    const response = await this.client.post<PrinterControlOperation>(
+      `/printers/${printerId}/control-operations/${operationId}/recovery${recovery ? "/complete" : ""}`,
+      recovery ?? {},
+      { headers: { "If-Match": etag } }
+    );
+    return { operation: response.data, etag: response.headers.etag ?? null };
+  }
 
   async setTemperatures(
     printerId: string,

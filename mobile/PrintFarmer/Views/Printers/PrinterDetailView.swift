@@ -374,6 +374,7 @@ struct PrinterDetailView: View {
             existingOwnerPrinterID: controlsViewModel?.printer.id,
             printerID: printer.id,
             controlsAvailable: controlsAvailable(for: printer)
+                || (printer.backend == .moonraker && serverRegistry.advancedPrinterControlsEnabled)
         ) else { return }
         let vm = PrinterControlsViewModel(composition: composition, printer: printer)
         controlsViewModel = vm
@@ -455,6 +456,9 @@ struct PrinterDetailView: View {
 
     private func overviewPrimary(_ printer: Printer) -> some View {
         VStack(alignment: .leading, spacing: 20) {
+            if let controlsViewModel {
+                PrinterSetupControlsContent.PrinterMotionStatusBanner(viewModel: controlsViewModel)
+            }
             temperatureSection(printer)
             filamentSectionView(printer)
             currentJobBlock(printer)
@@ -491,6 +495,9 @@ struct PrinterDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if !controlsAvailable(for: printer) {
+                        if let controlsViewModel {
+                            PrinterSetupControlsContent.PrinterMotionStatusBanner(viewModel: controlsViewModel)
+                        }
                         controlsUnavailable(printer)
                     } else if let controlsViewModel {
                         PrinterSetupControlsContent(

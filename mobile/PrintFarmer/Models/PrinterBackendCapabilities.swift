@@ -1,5 +1,221 @@
 import Foundation
 
+// MARK: - Durable physical control contract
+
+// Unlike display-only enums, unrecognized motion values must fail decoding.
+enum PrinterControlOperationKind: String, Codable, CaseIterable, Sendable {
+    case homeAll = "HomeAll"
+    case homeXY = "HomeXY"
+    case homeZ = "HomeZ"
+    case jog = "Jog"
+    case moveTo = "MoveTo"
+}
+
+enum PrinterControlOperationState: String, Codable, Sendable {
+    case queued = "Queued"
+    case running = "Running"
+    case succeeded = "Succeeded"
+    case failed = "Failed"
+    case unknown = "Unknown"
+    case recovering = "Recovering"
+    case recovered = "Recovered"
+
+    var isTerminal: Bool {
+        self == .succeeded || self == .failed || self == .recovered
+    }
+}
+
+enum PrinterControlCompletionEvidence: String, Codable, Sendable {
+    case none = "None"
+    case notSent = "NotSent"
+    case backendRejected = "BackendRejected"
+    case motionQueueDrained = "MotionQueueDrained"
+    case operatorVerifiedRecovery = "OperatorVerifiedRecovery"
+}
+
+enum PrinterControlSenderIsolation: String, Codable, Sendable {
+    case notRequested = "NotRequested"
+    case pending = "Pending"
+    case confirmed = "Confirmed"
+    case externalVerificationRequired = "ExternalVerificationRequired"
+}
+
+struct PrinterControlOperationRequest: Codable, Equatable, Sendable {
+    let kind: PrinterControlOperationKind
+    let x: Double?
+    let y: Double?
+    let z: Double?
+    let f: Double?
+
+    init(kind: PrinterControlOperationKind, x: Double? = nil, y: Double? = nil,
+         z: Double? = nil, f: Double? = nil) {
+        self.kind = kind
+        self.x = x
+        self.y = y
+        self.z = z
+        self.f = f
+    }
+}
+
+struct PrinterControlOperationFailure: Codable, Equatable, Sendable {
+    let code: String
+    let message: String
+}
+
+struct PrinterControlOperation: Codable, Equatable, Sendable {
+    let operationId: UUID
+    let printerId: UUID
+    let kind: PrinterControlOperationKind
+    var x: Double?
+    var y: Double?
+    var z: Double?
+    var f: Double?
+    let state: PrinterControlOperationState
+    let rowVersion: String
+    let createdAtUtc: Date
+    let updatedAtUtc: Date
+    var startedAtUtc: Date?
+    var completedAtUtc: Date?
+    let barrierHeld: Bool
+    let requiresRecovery: Bool
+    let completionEvidence: PrinterControlCompletionEvidence
+    var failure: PrinterControlOperationFailure?
+    let senderIsolation: PrinterControlSenderIsolation
+
+    /// Only an authoritative read may release a caller's pending barrier.
+    /// Acceptance, transport errors and telemetry provide no such evidence.
+    var isSafelyComplete: Bool {
+        guard !barrierHeld, !requiresRecovery else { return false }
+        switch state {
+        case .succeeded: return completionEvidence == .motionQueueDrained
+        case .failed: return completionEvidence == .notSent || completionEvidence == .backendRejected
+        case .recovered: return completionEvidence == .operatorVerifiedRecovery
+        default: return false
+        }
+    }
+
+    func validate(printerId: UUID, operationId: UUID? = nil) throws {
+        guard self.printerId == printerId,
+              operationId == nil || self.operationId == operationId,
+              !rowVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              updatedAtUtc >= createdAtUtc,
+              barrierHeld || isSafelyComplete else {
+            throw PrinterControlOperationError.invalidResponse
+        }
+    }
+}
+
+struct PrinterPhysicalControl: Codable, Equatable, Sendable {
+    let supportedOperations: [PrinterControlOperationKind]
+    let barrierHeld: Bool
+    var operationId: UUID?
+    var state: PrinterControlOperationState?
+    let requiresRecovery: Bool
+
+    init(supportedOperations: [PrinterControlOperationKind], barrierHeld: Bool,
+         operationId: UUID? = nil, state: PrinterControlOperationState? = nil,
+         requiresRecovery: Bool) {
+        self.supportedOperations = supportedOperations
+        self.barrierHeld = barrierHeld
+        self.operationId = operationId
+        self.state = state
+        self.requiresRecovery = requiresRecovery
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case supportedOperations, barrierHeld, operationId, state, requiresRecovery
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            supportedOperations: try c.decode([PrinterControlOperationKind].self, forKey: .supportedOperations),
+            barrierHeld: try c.decode(Bool.self, forKey: .barrierHeld),
+            operationId: try c.decodeIfPresent(UUID.self, forKey: .operationId),
+            state: try c.decodeIfPresent(PrinterControlOperationState.self, forKey: .state),
+            requiresRecovery: try c.decode(Bool.self, forKey: .requiresRecovery)
+        )
+        let hasConsistentOwner = (operationId == nil) == (state == nil)
+        guard barrierHeld ? hasConsistentOwner : isExplicitlyUnlocked else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Inconsistent physical-control barrier evidence"
+            ))
+        }
+    }
+
+    var isExplicitlyUnlocked: Bool {
+        !barrierHeld && !requiresRecovery && state == nil && operationId == nil
+    }
+}
+
+struct PrinterCurrentControlOperation: Codable, Equatable, Sendable {
+    let physicalControl: PrinterPhysicalControl
+    /// Nil may coexist with a held barrier owned by an unrelated physical
+    /// command. Only the explicit projection can establish an unlocked state.
+    let operation: PrinterControlOperation?
+
+    init(physicalControl: PrinterPhysicalControl, operation: PrinterControlOperation?) {
+        self.physicalControl = physicalControl
+        self.operation = operation
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case physicalControl, operation
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        physicalControl = try c.decode(PrinterPhysicalControl.self, forKey: .physicalControl)
+        guard c.contains(.operation) else {
+            throw DecodingError.keyNotFound(CodingKeys.operation, .init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Current-operation evidence requires an explicit operation or null"
+            ))
+        }
+        operation = try c.decodeIfPresent(PrinterControlOperation.self, forKey: .operation)
+    }
+
+    func validate(printerId: UUID) throws {
+        if let operation {
+            try operation.validate(printerId: printerId)
+            guard operation.barrierHeld,
+                  physicalControl.operationId == operation.operationId,
+                  physicalControl.state == operation.state,
+                  physicalControl.barrierHeld == operation.barrierHeld,
+                  physicalControl.requiresRecovery == operation.requiresRecovery else {
+                throw PrinterControlOperationError.invalidResponse
+            }
+        } else if physicalControl.operationId != nil || physicalControl.state != nil
+                    || (!physicalControl.barrierHeld && !physicalControl.isExplicitlyUnlocked) {
+            throw PrinterControlOperationError.invalidResponse
+        }
+    }
+}
+
+struct PrinterControlOperationInvalidation: Codable, Equatable, Sendable {
+    let printerId: UUID
+    let operationId: UUID
+    let rowVersion: String
+}
+
+enum PrinterControlOperationError: LocalizedError, Sendable {
+    case updateRequired
+    case invalidResponse
+    case problem(statusCode: Int, code: String?, message: String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .updateRequired:
+            return "Update the PrintFarmer server to use durable motion controls. No legacy command was sent."
+        case .invalidResponse:
+            return "The server did not provide valid motion-operation evidence. Controls remain locked; refresh the operation."
+        case .problem(_, let code, let message):
+            return message ?? code ?? "The server rejected the motion-operation request."
+        }
+    }
+}
+
 /// Explicit server evidence for commands, NOT a hardware-presence inventory.
 /// False means unavailable or unknown; it does not prove that a heater/axis
 /// is physically absent. A backend name or a generic control flag is not proof.

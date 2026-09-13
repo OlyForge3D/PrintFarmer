@@ -15,6 +15,8 @@ import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type Pri
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
+import { usePrinterControlOperation } from '@/features/printers/hooks/use-printer-control-operation';
+import { PrinterControlOperationPanel } from '@/features/printers/components/PrinterControlOperationPanel';
 import {
   canCancel,
   canCooldown,
@@ -167,6 +169,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   // Only fetch if printer prop is not provided
   const shouldFetch = !printerProp && !!printerId;
   const { data: apiPrinter, isLoading, refetch } = usePrinter(shouldFetch ? printerId : '');
+  const motion = usePrinterControlOperation(printerProp ?? apiPrinter);
   const { data: autoDispatchStatus } = useAutoDispatchStatus(printerId ?? '');
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
@@ -220,7 +223,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const [showSpoolPicker, setShowSpoolPicker] = useState(false);
   const [controlActionPending, setControlActionPending] = useState(false);
   const [temperatureActionPending, setTemperatureActionPending] = useState(false);
-  const [movementActionPending, setMovementActionPending] = useState(false);
+  const [localMovementActionPending, setMovementActionPending] = useState(false);
+  const movementActionPending = localMovementActionPending || motion.blocked;
   const [filamentActionPending, setFilamentActionPending] = useState(false);
   const [spoolActionPending, setSpoolActionPending] = useState(false);
 
@@ -434,10 +438,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
-  const canDisableMotorsNow = canDisableMotors({ isOnline, isEnabled, isPrinting, support });
+  const canDisableMotorsNow = !motion.blocked && canDisableMotors({ isOnline, isEnabled, isPrinting, support });
   const canMoveNow = canMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
   const canSetStepNow = canSetStep({ isOnline, isShutdown, support });
   const canManualMoveNow = canUseManualMove({ isOnline, isEnabled, isPrinting, isShutdown, support });
+  const completePosition = [moveX, moveY, moveZ].every(value => value !== '' && Number.isFinite(value));
   const canSetTemperaturesNow = canSetTemperatures({ isOnline, isEnabled, support });
   const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support });
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
@@ -505,11 +510,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
     setMovementActionPending(true);
     try {
-      const result = await (axes === 'xy'
-        ? apiClient.homeXY(printer.id)
-        : axes === 'z'
-          ? apiClient.homeZ(printer.id)
-          : apiClient.homePrinter(printer.id));
+      const result = await motion.execute({ kind: axes === 'xy' ? 'HomeXY' : axes === 'z' ? 'HomeZ' : 'HomeAll' });
       if (!result.success) {
         console.error('Failed to home:', result.error);
         toast.error(result.error || 'Failed to home printer');
@@ -531,7 +532,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     try {
       const move: MoveRequest = {};
       move[axis.toLowerCase() as keyof MoveRequest] = distance;
-      const result = await apiClient.movePrinter(printer.id, move);
+      const result = await motion.execute({ kind: 'Jog', ...move });
       if (!result.success) {
         console.error(`Failed to move ${axis}:`, result.error);
         toast.error(result.error || `Failed to move ${axis}`);
@@ -539,6 +540,19 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     } catch (error) {
       console.error(`Error moving ${axis}:`, error);
       toast.error(mutationErrorMessage(error, `Failed to move ${axis}`));
+    } finally {
+      setMovementActionPending(false);
+    }
+  };
+
+  const handleMoveTo = async (position: MoveRequest) => {
+    if (movementActionPending || !canManualMoveNow || !completePosition) return;
+    setMovementActionPending(true);
+    try {
+      const result = await motion.execute({ kind: 'MoveTo', ...position });
+      if (!result.success) toast.error(result.error || 'Movement did not succeed');
+    } catch (error) {
+      toast.error(mutationErrorMessage(error, 'Movement status uncertain'));
     } finally {
       setMovementActionPending(false);
     }
@@ -1040,6 +1054,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               <ControlPadButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('Y', step)}
+                aria-label="Jog Y positive"
                 padSize="small"
               >
                 <ArrowUpIcon className="h-4 w-4" />
@@ -1057,6 +1072,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               <ControlPadButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('X', -step)}
+                aria-label="Jog X negative"
                 padSize="small"
               >
                 <ArrowLeftIcon className="h-4 w-4" />
@@ -1074,6 +1090,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               <ControlPadButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('X', step)}
+                aria-label="Jog X positive"
                 padSize="small"
               >
                 <ArrowRightIcon className="h-4 w-4" />
@@ -1084,6 +1101,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               <ControlPadButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('Y', -step)}
+                aria-label="Jog Y negative"
                 padSize="small"
               >
                 <ArrowDownIcon className="h-4 w-4" />
@@ -1096,6 +1114,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               <ControlPadButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('Z', step)}
+                aria-label="Jog Z positive"
                 padSize="small"
               >
                 Z+
@@ -1113,6 +1132,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               <ControlPadButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('Z', -step)}
+                aria-label="Jog Z negative"
                 padSize="small"
               >
                 Z-
@@ -1218,6 +1238,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide mb-1">Step Size</div>
             <MoveDistanceSlider value={step} onChange={setStep} disabled={!canSetStepNow} />
           </div>
+          <PrinterControlOperationPanel control={motion} />
           {/* Manual Movement Inputs */}
           <div className="mt-3">
             <div className="flex gap-1 items-end">
@@ -1228,7 +1249,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 value={moveX}
                 max={500}
                 onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
-                onKeyDown={(e) => e.key === 'Enter' && moveX !== '' && handleMove('X', Number(moveX))}
+                onKeyDown={(e) => e.key === 'Enter' && moveX !== '' && (motion.isMoonraker ? handleMoveTo({ x: Number(moveX), y: Number(moveY), z: Number(moveZ) }) : handleMove('X', Number(moveX)))}
                 className="w-24! min-w-0"
               />
               <MovementInput
@@ -1238,7 +1259,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 value={moveY}
                 max={500}
                 onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
-                onKeyDown={(e) => e.key === 'Enter' && moveY !== '' && handleMove('Y', Number(moveY))}
+                onKeyDown={(e) => e.key === 'Enter' && moveY !== '' && (motion.isMoonraker ? handleMoveTo({ x: Number(moveX), y: Number(moveY), z: Number(moveZ) }) : handleMove('Y', Number(moveY)))}
                 className="w-24! min-w-0"
               />
               <MovementInput
@@ -1248,13 +1269,19 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 value={moveZ}
                 max={500}
                 onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
-                onKeyDown={(e) => e.key === 'Enter' && moveZ !== '' && handleMove('Z', Number(moveZ))}
+                onKeyDown={(e) => e.key === 'Enter' && moveZ !== '' && (motion.isMoonraker ? handleMoveTo({ x: Number(moveX), y: Number(moveY), z: Number(moveZ) }) : handleMove('Z', Number(moveZ)))}
                 className="w-24! min-w-0"
               />
               <ControlPadButton
                 variant="success"
-                disabled={movementActionPending || !canManualMoveNow || (moveX === '' && moveY === '' && moveZ === '')}
+                disabled={movementActionPending || !canManualMoveNow || (motion.isMoonraker ? !completePosition : (moveX === '' && moveY === '' && moveZ === ''))}
                 onClick={async () => {
+                  if (motion.isMoonraker) {
+                    await handleMoveTo({
+                      x: Number(moveX), y: Number(moveY), z: Number(moveZ),
+                    });
+                    return;
+                  }
                   if (moveX !== '') await handleMove('X', Number(moveX));
                   if (moveY !== '') await handleMove('Y', Number(moveY));
                   if (moveZ !== '') await handleMove('Z', Number(moveZ));
@@ -1266,6 +1293,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 <span className="text-[10px] font-bold">GO</span>
               </ControlPadButton>
             </div>
+            {motion.isMoonraker && !completePosition && <p className="text-xs text-pf-text-secondary">Enter valid X, Y, and Z coordinates for absolute movement.</p>}
           </div>
         </CollapsibleSection>
 

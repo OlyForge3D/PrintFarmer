@@ -119,6 +119,11 @@ struct PrinterControlsUpdateSignal: Hashable {
     let hotendTarget: Double?
     let bedTarget: Double?
     let homedAxes: String?
+    let physicalControlBarrierHeld: Bool?
+    let physicalControlOperationID: UUID?
+    let physicalControlState: String?
+    let physicalControlRequiresRecovery: Bool?
+    let physicalControlSupportedOperations: [String]?
 
     init(printer: Printer) {
         self.id = printer.id
@@ -135,5 +140,10 @@ struct PrinterControlsUpdateSignal: Hashable {
         self.hotendTarget = printer.hotendTarget
         self.bedTarget = printer.bedTarget
         self.homedAxes = printer.homedAxes
+        self.physicalControlBarrierHeld = printer.physicalControl?.barrierHeld
+        self.physicalControlOperationID = printer.physicalControl?.operationId
+        self.physicalControlState = printer.physicalControl?.state?.rawValue
+        self.physicalControlRequiresRecovery = printer.physicalControl?.requiresRecovery
+        self.physicalControlSupportedOperations = printer.physicalControl?.supportedOperations.map(\.rawValue)
     }
 }

@@ -980,7 +980,11 @@ public class PrintersService(
             ct);
 
         // All returned DTOs should be non-null due to fallback, but filter just in case
-        return dtos.Where(d => d != null).Cast<PrinterDto>().ToArray();
+        Dictionary<Guid, PrinterPhysicalControlDto> controls =
+            await PrinterControlOperationService.ProjectAsync(_db, items.Select(p => p.Id).ToArray(), ct);
+        return dtos.Where(d => d != null).Cast<PrinterDto>()
+            .Where(dto => controls.ContainsKey(dto.Id))
+            .Select(dto => dto with { PhysicalControl = controls[dto.Id] }).ToArray();
     }
 
     /// <summary>
@@ -1039,6 +1043,8 @@ public class PrintersService(
     public async Task<PrinterStatusDto> GetStatusDtoAsync(Guid id, CancellationToken ct)
     {
         Printer? p = await _unitOfWork.Printers.FindByIdAsync(id, ct) ?? throw new KeyNotFoundException();
+        PrinterPhysicalControlDto control = (await PrinterControlOperationService.ProjectAsync(_db, [id], ct)).GetValueOrDefault(id)
+            ?? throw new KeyNotFoundException("Printer not found.");
 
         try
         {
@@ -1052,7 +1058,7 @@ public class PrintersService(
             return PrinterSafetyTelemetryNormalizer.Normalize(
                 result,
                 existing: null,
-                DateTime.UtcNow);
+                DateTime.UtcNow) with { PhysicalControl = control };
         }
         catch (ArgumentException ex)
         {
@@ -1063,7 +1069,8 @@ public class PrintersService(
                     Id: p.Id,
                     IsOnline: false,
                     State: "Unsupported",
-                    Progress: null),
+                    Progress: null,
+                    PhysicalControl: control),
                 existing: null,
                 DateTime.UtcNow);
         }
@@ -1075,7 +1082,8 @@ public class PrintersService(
                     Id: p.Id,
                     IsOnline: false,
                     State: "Offline",
-                    Progress: null),
+                    Progress: null,
+                    PhysicalControl: control),
                 existing: null,
                 DateTime.UtcNow);
         }
@@ -1096,6 +1104,8 @@ public class PrintersService(
     public async Task<PrinterDto> GetPrinterDtoAsync(Guid id, CancellationToken ct)
     {
         Printer? p = await _unitOfWork.Printers.FindByIdWithIncludesAsync(id, ct) ?? throw new KeyNotFoundException();
+        PrinterPhysicalControlDto control = (await PrinterControlOperationService.ProjectAsync(_db, [id], ct)).GetValueOrDefault(id)
+            ?? throw new KeyNotFoundException("Printer not found.");
 
         // Resolve camera URLs from Cameras table
         (string? camStream, string? camSnapshot) = await ResolveCameraUrlsFromTableAsync(id, ct);
@@ -1124,6 +1134,7 @@ public class PrintersService(
                     ? Convert.ToBase64String(p.RowVersion)
                     : null,
                 ConfigurationRevision = p.ConfigurationRevision,
+                PhysicalControl = control,
             };
             return ApplyCameraContract(dto);
         }
@@ -1132,7 +1143,7 @@ public class PrintersService(
             // Log and return an offline/fallback DTO so that write operations (assign/unassign)
             // don't surface transient backend errors as 500 to the client.
             _logger.LogWarning(ex, "Failed to retrieve status for printer {PId}", p.Id);
-            return CreateOfflinePrinterDto(p, camStream, camSnapshot);
+            return CreateOfflinePrinterDto(p, camStream, camSnapshot) with { PhysicalControl = control };
         }
     }
 
@@ -1975,7 +1986,10 @@ public class PrintersService(
             }
         }
 
-        return dtos.ToArray();
+        Dictionary<Guid, PrinterPhysicalControlDto> controls =
+            await PrinterControlOperationService.ProjectAsync(_db, items.Select(p => p.Id).ToArray(), ct);
+        return dtos.Where(dto => controls.ContainsKey(dto.Id))
+            .Select(dto => dto with { PhysicalControl = controls[dto.Id] }).ToArray();
     }
 
     /// <summary>
@@ -1998,10 +2012,14 @@ public class PrintersService(
             .ToListAsync(ct);
 
         IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses = _statusCache.GetAllStatuses();
+        Dictionary<Guid, PrinterPhysicalControlDto> controls =
+            await PrinterControlOperationService.ProjectAsync(_db, summaries.Select(p => p.Id).ToArray(), ct);
         return summaries
             .Select(summary => cachedStatuses.TryGetValue(summary.Id, out PrinterStatusDto? status)
                 ? summary with { IsOnline = status.IsOnline, State = status.State }
                 : summary)
+            .Where(summary => controls.ContainsKey(summary.Id))
+            .Select(summary => summary with { PhysicalControl = controls[summary.Id] })
             .ToArray();
     }
 
@@ -2161,7 +2179,10 @@ public class PrintersService(
             }
         }
 
-        return dtos.ToArray();
+        Dictionary<Guid, PrinterPhysicalControlDto> controls =
+            await PrinterControlOperationService.ProjectAsync(_db, items.Select(p => p.Id).ToArray(), ct);
+        return dtos.Where(dto => controls.ContainsKey(dto.Id))
+            .Select(dto => dto with { PhysicalControl = controls[dto.Id] }).ToArray();
     }
 
     /// <summary>
@@ -2374,13 +2395,16 @@ public class PrintersService(
     public async Task<PrinterWithCapabilitiesDto[]> GetPrintersWithCapabilitiesDtosAsync(Guid[]? ids, CancellationToken ct)
     {
         List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
+        Dictionary<Guid, PrinterPhysicalControlDto> controls =
+            await PrinterControlOperationService.ProjectAsync(_db, printers.Select(p => p.Id).ToArray(), ct);
 
-        PrinterWithCapabilitiesDto[] results = printers.Select(p =>
+        PrinterWithCapabilitiesDto[] results = printers.Where(p => controls.ContainsKey(p.Id)).Select(p =>
         {
             return new PrinterWithCapabilitiesDto
             {
                 // Identity (standard naming)
                 Id = p.Id,
+                PhysicalControl = controls[p.Id],
                 Name = p.Name,
                 Backend = MapBackendEnum(p.Backend),
 
@@ -3827,10 +3851,23 @@ public class PrintersService(
     /// Use only in emergencies when normal cancel is insufficient.
     /// May require firmware restart after use.
     /// </remarks>
-    public async Task<bool> EmergencyStopAsync(Guid id, CancellationToken ct)
+    public Task<bool> EmergencyStopAsync(Guid id, CancellationToken ct) =>
+        EmergencyStopCoreAsync(id, null, ct);
+
+    /// <inheritdoc />
+    public Task<bool> EmergencyStopAsync(Guid id, string expectedConfigurationIdentity, CancellationToken ct) =>
+        EmergencyStopCoreAsync(id, expectedConfigurationIdentity, ct);
+
+    private async Task<bool> EmergencyStopCoreAsync(Guid id, string? expectedConfigurationIdentity, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p == null)
+        {
+            return false;
+        }
+
+        if (expectedConfigurationIdentity is not null &&
+            PrinterControlIntent.ConfigurationIdentity(p) != expectedConfigurationIdentity)
         {
             return false;
         }
@@ -3840,7 +3877,15 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
             IBackendClient client = GetBackendClient(backend);
 
-            // Send M112 emergency stop via gcode execution capability
+            if (backend == PrinterBackend.Moonraker)
+            {
+                // Klipper's emergency endpoint bypasses the G-code mutex. M112 sent
+                // through printer.gcode.script would wait behind the motion being stopped.
+                return client is ISupportsEmergencyStop emergency &&
+                    await emergency.EmergencyStopAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
+            }
+
+            // Other adapters retain their existing emergency-stop behavior.
             if (client is ISupportsGcodeExecution gcodeClient)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import clsx from 'clsx';
@@ -7,7 +7,9 @@ import { Button, Card, Alert, ProgressBar } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
 import { queryKeys } from '@/common/hooks/useApi';
-import type { CommandResult, Printer, PrinterBackendString } from '@/types/api';
+import type { CommandResult, Printer, PrinterBackendString, PrinterControlIntent } from '@/types/api';
+import { usePrinterControlOperation } from '@/features/printers/hooks/use-printer-control-operation';
+import { PrinterControlOperationPanel } from '@/features/printers/components/PrinterControlOperationPanel';
 
 const WIZARD_STEPS = [
   'Introduction',
@@ -32,10 +34,15 @@ export interface ZOffsetCalibrationWizardProps {
 
 export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 220, bedSizeY = 220 }: ZOffsetCalibrationWizardProps) {
   const queryClient = useQueryClient();
+  const motion = usePrinterControlOperation(printer);
+  const { execute: executeMotion, isMoonraker, tracker } = motion;
+  const generation = useRef(0);
+  useEffect(() => () => { generation.current++; }, [isOpen, printer.id]);
   const [stepIndex, setStepIndex] = useState(0);
   const [zOffset, setZOffset] = useState(printer.zOffsetMm ?? 0);
   const [selectedIncrement, setSelectedIncrement] = useState<number>(0.05);
   const [isCommandRunning, setIsCommandRunning] = useState(false);
+  const controlsBlocked = isCommandRunning || motion.blocked;
 
   const currentStep = WIZARD_STEPS[stepIndex];
   const progressPercent = ((stepIndex + 1) / WIZARD_STEPS.length) * 100;
@@ -62,64 +69,99 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
   });
 
   const executeControlAndWait = useCallback(
-    async (command: () => Promise<CommandResult>): Promise<CommandResult> => {
+    async (intent: PrinterControlIntent): Promise<CommandResult> => {
+      if (controlsBlocked) return { success: false };
+      const startedGeneration = generation.current;
       setIsCommandRunning(true);
       try {
-        return await command();
+        const result = await executeMotion(intent);
+        if (generation.current !== startedGeneration) return { success: false };
+        if (!result.success) {
+          toast.error(result.error || 'Motion was not confirmed successful. Calibration has not advanced.');
+          return result;
+        }
+        if (isMoonraker) {
+          const completed = tracker?.getCompletedOperation();
+          const completedAt = Date.parse(completed?.completedAtUtc ?? '');
+          const printers = await apiClient.getPrinters(true, true);
+          const configuration = printers.find(candidate => candidate.id === printer.id);
+          const status = await apiClient.getPrinterStatus(printer.id);
+          await tracker?.refresh();
+          if (generation.current !== startedGeneration) return { success: false };
+          const homed = status.safetyTelemetry?.homedAxes;
+          const observedAt = Date.parse(homed?.observedAtUtc ?? '');
+          const now = Date.now();
+          const axes = Array.isArray(homed?.value) && homed.value.every(axis => typeof axis === 'string')
+            ? homed.value.map(axis => axis.toLowerCase()) : [];
+          if (completed?.state !== 'Succeeded' || completed.completionEvidence !== 'MotionQueueDrained' ||
+            !Number.isFinite(completedAt) || configuration?.isEnabled !== true || configuration.inMaintenance !== false ||
+            status.id !== printer.id || status.isOnline !== true ||
+            !['idle', 'ready', 'standby', 'operational'].includes(status.state?.toLowerCase() ?? '') ||
+            !homed || !Number.isFinite(homed.staleAfterSeconds) || homed.staleAfterSeconds <= 0 ||
+            !Number.isFinite(observedAt) || observedAt < completedAt || observedAt > now ||
+            now - observedAt > homed.staleAfterSeconds * 1000 ||
+            !['x', 'y', 'z'].every(axis => axes.includes(axis)) ||
+            !tracker || tracker.isBlocked()) {
+            throw new Error('Motion finished, but fresh printer safety checks are not satisfied. Calibration has not advanced.');
+          }
+        }
+        return result;
+      } catch (error) {
+        if (generation.current === startedGeneration) toast.error(mutationErrorMessage(error, 'Calibration motion is uncertain. Recheck before continuing.'));
+        return { success: false };
       } finally {
-        setIsCommandRunning(false);
+        if (generation.current === startedGeneration) setIsCommandRunning(false);
       }
     },
-    []
+    [controlsBlocked, executeMotion, isMoonraker, tracker, printer.id]
   );
 
   const handleHomeAxes = useCallback(async () => {
-    const result = await executeControlAndWait(() =>
-      apiClient.homePrinter(printer.id)
-    );
+    const result = await executeControlAndWait({ kind: 'HomeAll' });
     if (result.success) {
       toast.success('Axes homed successfully');
       setStepIndex(2);
     }
-  }, [executeControlAndWait, printer.id]);
+  }, [executeControlAndWait]);
 
   const handleMoveToCenter = useCallback(async () => {
     const centerX = bedSizeX / 2;
     const centerY = bedSizeY / 2;
-    const result = await executeControlAndWait(() =>
-      apiClient.movePrinterTo(printer.id, {
-        x: centerX,
-        y: centerY,
-        z: 10,
-        f: 3000,
-      })
-    );
+    const result = await executeControlAndWait({
+      kind: 'MoveTo',
+      x: centerX,
+      y: centerY,
+      z: 10,
+      f: 3000,
+    });
     if (result.success) {
       toast.success('Moved to bed center');
       setStepIndex(3);
     }
-  }, [executeControlAndWait, bedSizeX, bedSizeY, printer.id]);
+  }, [executeControlAndWait, bedSizeX, bedSizeY]);
 
   const handleZAdjust = useCallback(
     async (direction: 'up' | 'down') => {
       const delta = direction === 'down' ? -selectedIncrement : selectedIncrement;
       const newOffset = parseFloat((zOffset + delta).toFixed(3));
-      setZOffset(newOffset);
-      await executeControlAndWait(() =>
-        apiClient.movePrinterTo(printer.id, {
-          z: Math.max(0, 10 + newOffset),
-          f: 300,
-        })
-      );
+      const result = await executeControlAndWait({
+        kind: 'MoveTo',
+        ...(isMoonraker ? { x: bedSizeX / 2, y: bedSizeY / 2 } : {}),
+        z: Math.max(0, 10 + newOffset),
+        f: 300,
+      });
+      if (result.success) setZOffset(newOffset);
     },
-    [executeControlAndWait, printer.id, zOffset, selectedIncrement]
+    [executeControlAndWait, zOffset, selectedIncrement, isMoonraker, bedSizeX, bedSizeY]
   );
 
   const handleSave = useCallback(() => {
+    if (controlsBlocked) return;
     saveZOffsetMutation.mutate(zOffset);
-  }, [saveZOffsetMutation, zOffset]);
+  }, [saveZOffsetMutation, zOffset, controlsBlocked]);
 
   const handleClose = useCallback(() => {
+    generation.current++;
     setStepIndex(0);
     setZOffset(printer.zOffsetMm ?? 0);
     setSelectedIncrement(0.05);
@@ -132,12 +174,12 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
       case 'Introduction':
         return <IntroductionStep />;
       case 'Home Axes':
-        return <HomeAxesStep onHome={handleHomeAxes} isRunning={isCommandRunning} />;
+        return <HomeAxesStep onHome={handleHomeAxes} isRunning={controlsBlocked} />;
       case 'Move to Center':
         return (
           <MoveToCenterStep
             onMove={handleMoveToCenter}
-            isRunning={isCommandRunning}
+            isRunning={controlsBlocked}
             centerX={bedSizeX / 2}
             centerY={bedSizeY / 2}
           />
@@ -150,7 +192,7 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
             onIncrementChange={setSelectedIncrement}
             onAdjust={handleZAdjust}
             onContinue={() => setStepIndex(4)}
-            isRunning={isCommandRunning}
+            isRunning={controlsBlocked}
           />
         );
       case 'Save':
@@ -159,7 +201,7 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
             zOffset={zOffset}
             backend={printer.backend as unknown as PrinterBackendString}
             onSave={handleSave}
-            isSaving={saveZOffsetMutation.isPending}
+            isSaving={saveZOffsetMutation.isPending || controlsBlocked}
           />
         );
       case 'Done':
@@ -176,6 +218,7 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
     <div className="flex items-center justify-between w-full">
       <Button
         variant="ghost"
+        disabled={stepIndex > 0 && currentStep !== 'Done' && isCommandRunning}
         onClick={stepIndex > 0 && currentStep !== 'Done' ? () => setStepIndex(stepIndex - 1) : handleClose}
       >
         {stepIndex === 0 || currentStep === 'Done' ? 'Cancel' : 'Back'}
@@ -196,6 +239,7 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title="Z-Offset Calibration" size="lg" footer={footer}>
       <div className="space-y-4">
+        <PrinterControlOperationPanel control={motion} />
         <ProgressBar value={progressPercent} className="mb-2" />
         <div className="text-sm text-pf-text-secondary mb-4">
           Step {stepIndex + 1} of {WIZARD_STEPS.length}: {currentStep}
@@ -339,7 +383,7 @@ function AdjustZOffsetStep({
       <FirstLayerVisualGuide />
 
       <div className="flex justify-center">
-        <Button variant="primary" onClick={onContinue}>
+        <Button variant="primary" onClick={onContinue} disabled={isRunning}>
           Looks Good — Continue
         </Button>
       </div>

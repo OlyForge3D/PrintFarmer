@@ -76,6 +76,7 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
     {
         services.AddScoped<IPrinterCameraProbe, MoonrakerPrinterCameraProbe>();
         services.AddSingleton<IMoonrakerJsonRpcClient, MoonrakerJsonRpcClient>();
+        services.AddSingleton<IMoonrakerMotionChannelFactory, MoonrakerMotionChannelFactory>();
         services.AddSingleton<ISnapmakerU1CameraMonitorManager, SnapmakerU1CameraMonitorManager>();
 
         // Register the Moonraker client interface with its implementation
