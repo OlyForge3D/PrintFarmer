@@ -70,6 +70,8 @@ public sealed class GcodeCommandTests : IClassFixture<ReadyPrinterFactory>
 
         using HttpResponseMessage response = await client.PostAsync("/printer/emergency_stop", content: null);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument responseDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        responseDoc.RootElement.GetProperty("result").GetString().Should().Be("ok");
 
         using HttpResponseMessage info = await client.GetAsync("/printer/info");
         using JsonDocument infoDoc = JsonDocument.Parse(await info.Content.ReadAsStringAsync());
