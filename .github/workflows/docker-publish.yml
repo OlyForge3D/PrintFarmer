@@ -746,6 +746,11 @@ jobs:
             org.printfarmer.source-archive=${{ steps.source.outputs.source_archive_url }}
             org.printfarmer.sbom=${{ steps.source.outputs.sbom_url }}
 
+      - name: Require canonical monolith frontend identity
+        env:
+          PRINTFARMER_RELEASE_IDENTITY: ${{ steps.source.outputs.frontend_identity }}
+        run: test -n "$PRINTFARMER_RELEASE_IDENTITY"
+
       - name: Build and push immutable monolith digest
         id: build
         uses: docker/build-push-action@v7
@@ -768,6 +773,7 @@ jobs:
             UBUNTU_TAG=24.04
             GIT_SHA=${{ steps.gitsha.outputs.full }}
             VITE_GIT_SHA=${{ steps.gitsha.outputs.full }}
+            PRINTFARMER_RELEASE_IDENTITY=${{ steps.source.outputs.frontend_identity }}
             BUILD_VERSION=${{ fromJSON(inputs.identity).canonicalVersion }}
             VCS_REF=${{ fromJSON(inputs.identity).sourceCommit }}
             SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}

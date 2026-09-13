@@ -214,11 +214,13 @@ Historical authorization is retained without querying current branch heads or
 requiring an old stabilization branch to exist. Aliases such as `latest` remain
 secondary configured references, never installed versions.
 
-Frontend builds may consume the authority's JSON record through
-`PRINTFARMER_RELEASE_IDENTITY`. The allowlisted record is embedded identically in
+Published standalone and monolith frontend builds require the verified consumer's
+allow-listed output through `PRINTFARMER_RELEASE_IDENTITY` (a build argument for
+the monolith's frontend stage). The record is embedded identically in
 loaded assets and `version.json`, bound to the full frontend source commit; it is
 explicitly self-reported, not verified provenance. Without it, release association
-stays unknown. No per-service version allocation or publication algorithm is added.
+stays unknown in local `development` builds; versioned Docker builds reject its
+absence. No per-service version allocation or publication algorithm is added.
 The read-only contract never reports `Eligible`; verified compatibility alone
 cannot establish updater authorization, complete topology, or recovery readiness.
 

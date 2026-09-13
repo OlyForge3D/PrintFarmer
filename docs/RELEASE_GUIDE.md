@@ -317,7 +317,14 @@ Every job consumes the same record. `release-control.mjs consume` emits:
   malformed known fields fail rather than being dropped or coerced.
   For both stable and insider releases, the verified authorization consumer
   exports `frontend_identity`; the shared Docker workflow passes it to
-  `npm run build` as `PRINTFARMER_RELEASE_IDENTITY`. This allow-listed output
+  the native standalone `npm run build` and the monolith's
+  `Dockerfile.multistage` frontend stage as `PRINTFARMER_RELEASE_IDENTITY`.
+  Both publishing jobs reject empty output before building. The monolith passes
+  only that public output as a build argument (visible in build provenance),
+  never the full authorization record. Its frontend stage also rejects missing
+  identity whenever `BUILD_VERSION` is not the local `development` sentinel.
+  Vite validates the same inputs in both paths; the monolith copies the resulting
+  assets into `wwwroot`. This allow-listed output
   copies the identity fields above (excluding `identitySha256` and `buildTime`)
   and maps the canonical reservation's `allocationKey` to `allocationIdentity`.
   It never exports protection or qualification evidence, or synthesizes promotion

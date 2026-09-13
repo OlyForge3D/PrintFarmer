@@ -940,7 +940,7 @@ test('workflow entry points have no direct tag/manual Docker bypass; iOS namespa
   }
 });
 
-test('the production frontend build requires the verified consumer output for both release channels', () => {
+test('standalone and monolith production frontend builds require the verified consumer output for both channels', () => {
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
   const frontend = docker.split('  build-frontend:')[1].split('\n  ensure-orca-base:')[0];
   assert.match(frontend, /Consume canonical frontend identity\n\s+id: frontend_identity\n[\s\S]*?uses: \.\/\.github\/actions\/release-authorization/);
@@ -950,6 +950,61 @@ test('the production frontend build requires the verified consumer output for bo
   const action = readFileSync('.github/actions/release-authorization/action.yml', 'utf8');
   assert.match(action, /frontend_identity:\n\s+value: \$\{\{ steps\.consume\.outputs\.frontend_identity \}\}/);
   assert.match(action, /node scripts\/ci\/release-control\.mjs consume/);
+
+  const monolith = docker.split('\n  build-monolith:')[1].split(/\n  [\w-]+:/)[0];
+  assert.match(monolith, /id: source\n[\s\S]*?uses: \.\/\.github\/actions\/release-authorization/);
+  assert.match(monolith, /PRINTFARMER_RELEASE_IDENTITY: \$\{\{ steps\.source\.outputs\.frontend_identity \}\}\n\s+run: test -n "\$PRINTFARMER_RELEASE_IDENTITY"/);
+  assert.ok(monolith.indexOf('Require canonical monolith frontend identity') <
+    monolith.indexOf('uses: docker/build-push-action@'));
+  assert.match(monolith, /file: scripts\/docker\/dockerfiles\/Dockerfile\.multistage\n\s+target: monolith-runtime/);
+  assert.match(monolith, /PRINTFARMER_RELEASE_IDENTITY=\$\{\{ steps\.source\.outputs\.frontend_identity \}\}/);
+  assert.match(monolith, /BUILD_VERSION=\$\{\{ fromJSON\(inputs\.identity\)\.canonicalVersion \}\}/);
+  assert.doesNotMatch(monolith, /^\s+if:/m, 'Neither channel may skip monolith validation');
+
+  const multistage = readFileSync('scripts/docker/dockerfiles/Dockerfile.multistage', 'utf8').replace(/\r\n/g, '\n');
+  const stage = multistage.split(' AS frontend-build\n')[1].split('\nFROM ')[0];
+  assert.match(stage, /^ARG BUILD_VERSION$/m);
+  assert.match(stage, /^ARG PRINTFARMER_RELEASE_IDENTITY$/m);
+  assert.match(stage, /^RUN if \[ "\$BUILD_VERSION" != "development" \]; then test -n "\$PRINTFARMER_RELEASE_IDENTITY"; fi$/m);
+  assert.ok(stage.indexOf('test -n "$PRINTFARMER_RELEASE_IDENTITY"') < stage.indexOf('npm run build'));
+  assert.match(multistage.split(' AS monolith-runtime\n')[1], /COPY --from=frontend-build \/app\/dist \.\/wwwroot\//);
+  assert.match(stage, /if \[ "\$build_status" -ne 0 \]; then[\s\S]*?exit \$build_status/);
+  assert.equal((docker.match(/npm run build/g) || []).length, 1, 'New native frontend paths need identity coverage');
+  assert.equal((multistage.match(/npm run build/g) || []).length, 1, 'New Docker frontend paths need identity coverage');
+});
+
+test('actual native and Docker frontend guards reject missing identity before building published versions', () => {
+  const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
+  const native = docker.split('\n  build-frontend:')[1].split('\n  ensure-orca-base:')[0];
+  const nativeGuard = native.match(/test -n "\$PRINTFARMER_RELEASE_IDENTITY"/)?.[0];
+  const monolith = docker.split('\n  build-monolith:')[1].split(/\n  [\w-]+:/)[0];
+  const monolithGuard = monolith.match(/run: (test -n "\$PRINTFARMER_RELEASE_IDENTITY")/)?.[1];
+  const multistage = readFileSync('scripts/docker/dockerfiles/Dockerfile.multistage', 'utf8').replace(/\r\n/g, '\n');
+  const dockerGuard = multistage.split(' AS frontend-build\n')[1].match(/^RUN (if .*; fi)$/m)?.[1];
+  const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+  const stableLedger = state();
+  stableLedger.qualifications[sha] = hotfixQualification();
+  const stable = reserve(stableLedger, stableAdmission(), created, undefined, hotfixQualification()).record;
+  const insider = reserve(state(), admission(), created).record;
+  for (const guard of [nativeGuard, monolithGuard, dockerGuard]) {
+    assert.ok(guard);
+    for (const version of ['1.2.3', '1.2.3-insider.42', '']) {
+      for (const identity of ['', buildMetadata(
+        version.includes('insider') ? insider : stable,
+      ).frontendIdentity]) {
+        const result = spawnSync(shell, ['-ec', `${guard}\nprintf build-reached`], {
+          encoding: 'utf8',
+          env: { ...process.env, BUILD_VERSION: version, PRINTFARMER_RELEASE_IDENTITY: identity },
+        });
+        assert.equal(result.status, identity ? 0 : 1, result.stderr);
+        assert.equal(result.stdout, identity ? 'build-reached' : '');
+      }
+    }
+  }
+  const local = spawnSync(shell, ['-ec', dockerGuard], {
+    encoding: 'utf8', env: { ...process.env, BUILD_VERSION: 'development', PRINTFARMER_RELEASE_IDENTITY: '' },
+  });
+  assert.equal(local.status, 0, 'Unversioned local Docker builds remain supported');
 });
 
 function shellCommands(source) {
@@ -2661,7 +2716,10 @@ test('workflow wiring transports only public outputs and each consumer verifies 
   }
   assert.match(authority, /public_identity: \$\{\{ steps\.authorize\.outputs\.public_identity \}\}/);
   assert.match(authority, /identity: \$\{\{ needs\.authorize\.outputs\.public_identity \}\}/);
-  assert.doesNotMatch(authority + docker + action, /^\s*RELEASE_IDENTITY:|outputs\.identity\b/m);
+  for (const match of (authority + docker + action).matchAll(/\b([A-Z_]*RELEASE_IDENTITY)\s*[:=]/g)) {
+    assert.equal(match[1], 'PRINTFARMER_RELEASE_IDENTITY', 'Only the public frontend identity may be transported');
+  }
+  assert.doesNotMatch(authority + docker + action, /outputs\.identity\b/);
   assert.doesNotMatch(docker, /cp (?:release-identity|release-set|\.artifacts\/release-authorization\/release-identity)/);
   assert.match(docker, /cp \.artifacts\/release-authorization\/public-identity\.bundle\.json release-assets\/release-identity\.bundle\.json/);
   assert.match(authority, /--bundle \.artifacts\/release-authorization\/public-identity\.bundle\.json \\\n\s+\.artifacts\/release-authorization\/public-identity\.json/);
