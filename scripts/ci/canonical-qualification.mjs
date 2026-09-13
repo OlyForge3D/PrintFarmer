@@ -1,5 +1,6 @@
 import { repository, releaseBuildChecks, releaseReviewStatus, requireThat, requireString,
   validateApprovalMode } from './release-policy.mjs';
+import { evidenceCollection, evidenceBaseEndpoint, readEvidencePages } from './github-evidence-pages.mjs';
 
 export const qualificationWorkflow = '.github/workflows/qualify-canonical-release.yml';
 export const evidenceWorkflow = '.github/workflows/record-canonical-qualification.yml';
@@ -59,13 +60,13 @@ export function qualificationRequestUrl(endpoint, method = 'GET', allowStatus = 
     /^pulls\/[1-9][0-9]*(?:\/reviews\?per_page=100)?$/,
   ];
   requireThat(typeof endpoint === 'string' && !/[\r\n]/.test(endpoint) &&
-    ((method === 'GET' && reads.some(pattern => pattern.test(endpoint))) ||
+    ((method === 'GET' && reads.some(pattern => pattern.test(evidenceBaseEndpoint(endpoint)))) ||
      (allowStatus && method === 'POST' && /^statuses\/[a-f0-9]{40}$/.test(endpoint))),
   'Qualification API route or method is not allowlisted');
   return `https://api.github.com/repos/${repository}${endpoint ? `/${endpoint}` : ''}`;
 }
 
-export function qualificationClient(token = process.env.GH_TOKEN, allowStatus = false) {
+export function qualificationClient(token = process.env.GH_TOKEN, allowStatus = false, fetcher = fetch) {
   requireThat(token, 'Missing automatic workflow token');
   return async (endpoint, method = 'GET', body) => {
     if (method === 'POST') {
@@ -75,26 +76,34 @@ export function qualificationClient(token = process.env.GH_TOKEN, allowStatus = 
         new RegExp(`^https://github.com/${repository}/actions/runs/[1-9][0-9]*$`).test(body.target_url),
       'Unbounded qualification status');
     }
-    const response = await fetch(qualificationRequestUrl(endpoint, method, allowStatus), {
-      method, redirect: 'error',
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28', ...(body ? { 'Content-Type': 'application/json' } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    requireThat(response.ok, `Qualification API read/write denied: HTTP ${response.status}`);
-    return response.json();
+    const request = async path => {
+      const response = await fetcher(qualificationRequestUrl(path, method, allowStatus), {
+        method, redirect: 'error',
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      requireThat(response.ok && !response.redirected, `Qualification API read/write denied: HTTP ${response.status}`);
+      return { data: await response.json(), link: response.headers.get('link') };
+    };
+    if (method === 'GET' && evidenceCollection(endpoint) !== undefined) {
+      return readEvidencePages(endpoint, request);
+    }
+    const { data, link } = await request(endpoint);
+    requireThat(!link, 'Uncollected qualification pagination');
+    return data;
   };
 }
 
 function list(response, field) {
   requireThat(Number.isSafeInteger(response?.total_count) && response.total_count >= 0 &&
-    response.total_count < 100 && Array.isArray(response[field]) &&
+    Array.isArray(response[field]) &&
     response[field].length === response.total_count, 'Missing or truncated qualification evidence');
   return response[field];
 }
 
 function array(response) {
-  requireThat(Array.isArray(response) && response.length < 100, 'Missing or truncated review evidence');
+  requireThat(Array.isArray(response), 'Missing or truncated review evidence');
   return response;
 }
 
@@ -263,7 +272,8 @@ export async function verifyQualification(api, runId, mode, now = Date.now(), co
   const comments = array(await api(`commits/${sha}/comments?per_page=100`));
   const comment = comments.find(entry => String(entry.id) === binding.comment);
   requireThat(comment?.commit_id === sha && comment.user?.type === 'User' &&
-    comment.body === confirmationBody(sha, binding.validationRun, mode) &&
+    typeof comment.body === 'string' &&
+    comment.body.replace(/\r\n/g, '\n') === confirmationBody(sha, binding.validationRun, mode) &&
     comment.created_at === comment.updated_at && time(comment.created_at) >= time(ci.updated_at) &&
     time(comment.created_at) <= time(run.created_at), 'Missing, edited, stale or mismatched canonical review');
   const commenter = comment.user.login;

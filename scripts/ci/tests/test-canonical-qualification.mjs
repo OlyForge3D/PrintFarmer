@@ -10,7 +10,8 @@ import { load } from 'js-yaml';
 import { repository, releaseBuildChecks, releaseReviewStatus } from '../release-policy.mjs';
 import { confirmationBody, qualificationTitle, parseQualificationTitle, qualificationRequestUrl,
   qualificationWorkflow, evidenceWorkflow, canonicalValidationChecks, verifyQualification, recordQualification,
-  verifyCanonicalReleaseEvidence, qualificationDescription } from '../canonical-qualification.mjs';
+  verifyCanonicalReleaseEvidence, qualificationDescription, qualificationClient } from '../canonical-qualification.mjs';
+import { evidenceCollection } from '../github-evidence-pages.mjs';
 
 const stableSha = 'a'.repeat(40);
 const defaultSha = 'b'.repeat(40);
@@ -96,7 +97,7 @@ function fixture(channel = 'stable', mode = 'single-maintainer') {
   data.rules = [{ type: 'required_status_checks', parameters: { strict_required_status_checks_policy: true,
     required_status_checks: [...releaseBuildChecks, ...canonicalValidationChecks, releaseReviewStatus]
       .map(context => context === releaseReviewStatus ? { context } : { context, integration_id: 15368 }) } }];
-  data.checks = data.jobs[10].map(job => ({ name: job.name, head_sha: sha, status: 'completed',
+  data.checks = data.jobs[10].map(job => ({ id: job.id, name: job.name, head_sha: sha, status: 'completed',
     conclusion: 'success', app: { id: 15368, slug: 'github-actions' }, check_suite: { id: 100 }, url: job.check_run_url }));
   const calls = [];
   const posts = [];
@@ -132,6 +133,71 @@ function fixture(channel = 'stable', mode = 'single-maintainer') {
     GITHUB_WORKFLOW_SHA: defaultSha, GITHUB_WORKFLOW_REF: `${repository}/${evidenceWorkflow}@refs/heads/development`,
     RELEASE_APPROVAL_MODE: mode };
   return { data, api, calls, posts, env, sha, channel, mode };
+}
+
+function paginatedApi(f) {
+  return qualificationClient('test-only', false, async requested => {
+    const endpoint = requested.split(`/repos/${repository}/`)[1] ?? '';
+    const base = endpoint.replace(/&page=\d+$/, '');
+    const page = Number(new URL(requested).searchParams.get('page') ?? 1);
+    const data = await f.api(base);
+    const field = evidenceCollection(base);
+    if (field === undefined) return new Response(JSON.stringify(data));
+    const entries = field ? data[field] : data;
+    const slice = entries.slice((page - 1) * 100, page * 100);
+    const link = page * 100 < entries.length ?
+      `<https://api.github.com/repos/${repository}/${base}&page=${page + 1}>; rel="next"` : '';
+    return new Response(JSON.stringify(field ? { ...data, [field]: slice } : slice),
+      { headers: { link } });
+  });
+}
+
+for (const mode of ['single-maintainer', 'separation-of-duties']) {
+  for (const newline of ['\n', '\r\n']) {
+    test(`${mode}: exact comment accepts ${JSON.stringify(newline)} through GitHub boundary`, async () => {
+      const f = fixture('stable', mode);
+      f.data.comments[0].body = f.data.comments[0].body.replace(/\n/g, newline);
+      assert.equal((await verifyQualification(paginatedApi(f), '20', mode, now)).sourceCommit, f.sha);
+    });
+  }
+  for (const [name, body] of [
+    ['lone CR', text => text.replace('\n', '\r')],
+    ['CR before CRLF', text => text.replace('\n', '\r\r\n')],
+    ['final LF', text => `${text}\n`],
+    ['final CRLF', text => `${text.replace(/\n/g, '\r\n')}\r\n`],
+    ['final CR', text => `${text}\r`],
+    ['extra blank line', text => text.replace('\n', '\n\n')],
+    ['extra text', text => `${text}\nApproved`],
+    ['duplicate field', text => `${text}\nCI-Attempt: 1`],
+    ['altered attempt', text => text.replace('CI-Attempt: 1', 'CI-Attempt: 2')],
+    ['leading space', text => ` ${text}`],
+  ]) {
+    test(`${mode}: canonical body rejects ${name}`, async () => {
+      const f = fixture('stable', mode);
+      f.data.comments[0].body = body(f.data.comments[0].body);
+      await assert.rejects(verifyQualification(paginatedApi(f), '20', mode, now), /canonical review/);
+    });
+  }
+}
+
+for (const mutation of ['none', 'wrong SHA', 'wrong suite', 'wrong attempt', 'later change request', 'later failed status']) {
+  test(`139+ paginated checks, jobs, comments, statuses and native reviews: ${mutation}`, async () => {
+    const f = fixture('stable', 'separation-of-duties');
+    const padding = Array.from({ length: 139 }, (_, i) => i);
+    f.data.checks.unshift(...padding.map(i => ({ ...f.data.checks[0], id: 10000 + i, name: `extra-${i}` })));
+    f.data.jobs[10].unshift(...padding.map(i => ({ ...f.data.jobs[10][0], id: 10000 + i, name: `extra-${i}` })));
+    f.data.comments.unshift(...padding.map(i => ({ ...f.data.comments[0], id: 10000 + i, body: 'Not confirmation' })));
+    f.data.statuses.unshift(...padding.map(i => ({ ...f.data.statuses[0], id: 10000 + i, context: `extra-${i}` })));
+    f.data.reviews.unshift(...padding.map(i => ({ id: 10000 + i, state: 'COMMENTED' })));
+    if (mutation === 'wrong SHA') f.data.checks[139].head_sha = 'c'.repeat(40);
+    if (mutation === 'wrong suite') f.data.checks[139].check_suite = { id: 999 };
+    if (mutation === 'wrong attempt') f.data.jobs[10].at(-1).run_attempt = 2;
+    if (mutation === 'later change request') f.data.reviews.push({ ...f.data.reviews.at(-1), id: 20000, state: 'CHANGES_REQUESTED' });
+    if (mutation === 'later failed status') f.data.statuses.push({ ...f.data.statuses.at(-1), id: 20000, state: 'failure' });
+    const result = verifyCanonicalReleaseEvidence(paginatedApi(f), f.sha, f.channel, f.mode, now);
+    if (mutation === 'none') assert.equal((await result).sourceCommit, f.sha);
+    else await assert.rejects(result);
+  });
 }
 
 for (const channel of ['stable', 'insider']) {
@@ -471,6 +537,7 @@ test('workflow trust/permissions and release gates remain separate from publishi
   assert.equal((control.match(/await verifyCanonicalReleaseEvidence/g) ?? []).length, 2);
   assert.match(control, /qualificationClient\(env\.GH_TOKEN\)/);
   assert.match(read('.github/workflows/ci.yml'), /test-canonical-qualification\.mjs/);
+  assert.match(read('.github/workflows/ci.yml'), /test-github-evidence-pages\.mjs/);
 });
 
 test('manual CI executes equivalent required checks without shadowing PR check names', () => {
