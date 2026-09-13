@@ -152,6 +152,24 @@ function paginatedApi(f) {
   });
 }
 
+function malformedLineEndings(text, firstSeparator, remainingSeparator = '\n') {
+  const [firstLine, ...remainingLines] = text.split('\n');
+  return `${firstLine}${firstSeparator}${remainingLines.join(remainingSeparator)}`;
+}
+
+test('malformed newline fixtures preserve every separator after the first', () => {
+  const text = 'first\nsecond\nthird\nfourth';
+  for (const [first, remaining, expected] of [
+    ['\r\n', '\n', 'first\r\nsecond\nthird\nfourth'],
+    ['\n', '\r\n', 'first\nsecond\r\nthird\r\nfourth'],
+    ['\r', '\n', 'first\rsecond\nthird\nfourth'],
+    ['\r\r\n', '\n', 'first\r\r\nsecond\nthird\nfourth'],
+    ['\n\n', '\n', 'first\n\nsecond\nthird\nfourth'],
+  ]) {
+    assert.equal(malformedLineEndings(text, first, remaining), expected);
+  }
+});
+
 for (const mode of ['single-maintainer', 'separation-of-duties']) {
   for (const newline of ['\n', '\r\n']) {
     test(`${mode}: exact comment accepts ${JSON.stringify(newline)} through GitHub boundary`, async () => {
@@ -161,15 +179,15 @@ for (const mode of ['single-maintainer', 'separation-of-duties']) {
     });
   }
   for (const [name, body] of [
-    ['mixed LF and CRLF', text => text.replace('\n', '\r\n')],
-    ['mixed CRLF and LF', text => text.replace(/\n/g, '\r\n').replace('\r\n', '\n')],
+    ['mixed LF and CRLF', text => malformedLineEndings(text, '\r\n')],
+    ['mixed CRLF and LF', text => malformedLineEndings(text, '\n', '\r\n')],
     ['non-string', () => ({})],
-    ['lone CR', text => text.replace('\n', '\r')],
-    ['CR before CRLF', text => text.replace('\n', '\r\r\n')],
+    ['lone CR', text => malformedLineEndings(text, '\r')],
+    ['CR before CRLF', text => malformedLineEndings(text, '\r\r\n')],
     ['final LF', text => `${text}\n`],
     ['final CRLF', text => `${text.replace(/\n/g, '\r\n')}\r\n`],
     ['final CR', text => `${text}\r`],
-    ['extra blank line', text => text.replace('\n', '\n\n')],
+    ['extra blank line', text => malformedLineEndings(text, '\n\n')],
     ['extra text', text => `${text}\nApproved`],
     ['duplicate field', text => `${text}\nCI-Attempt: 1`],
     ['altered attempt', text => text.replace('CI-Attempt: 1', 'CI-Attempt: 2')],
