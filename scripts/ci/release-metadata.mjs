@@ -17,7 +17,14 @@ export function buildMetadata(record) {
   const projection = publicAuthorization(record);
   const fields = publicIdentityFields;
   requireThat(fields.every(field => typeof projection[field] === 'string'), 'Incomplete public build identity');
+  requireThat(typeof record.allocationKey === 'string' && record.allocationKey.length === 64 &&
+    /^[a-f0-9]{64}$/.test(record.allocationKey),
+    'Invalid frontend allocation identity');
   return {
+    frontendIdentity: JSON.stringify({
+      ...Object.fromEntries(fields.map(field => [field, projection[field]])),
+      allocationIdentity: record.allocationKey,
+    }),
     props: `<Project>
   <PropertyGroup>
     <Version>${record.canonicalVersion}</Version>
@@ -45,4 +52,5 @@ export function emitBuildIdentity(record, root = '.') {
   writeFileSync(join(root, 'src', 'Web', 'ReactApp', 'public', 'release-identity.json'), metadata.frontend);
   writeFileSync(join(root, 'release-identity.json'), JSON.stringify(publicAuthorization(record)));
   writeFileSync(join(root, 'release-labels.txt'), metadata.labels);
+  return metadata;
 }

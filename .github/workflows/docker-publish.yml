@@ -199,6 +199,7 @@ jobs:
           persist-credentials: false
 
       - name: Consume canonical frontend identity
+        id: frontend_identity
         env:
           GH_TOKEN: ${{ github.token }}
         uses: ./.github/actions/release-authorization
@@ -216,7 +217,11 @@ jobs:
 
       - name: Build React app
         working-directory: src/Web/ReactApp
-        run: npm run build
+        env:
+          PRINTFARMER_RELEASE_IDENTITY: ${{ steps.frontend_identity.outputs.frontend_identity }}
+        run: |
+          test -n "$PRINTFARMER_RELEASE_IDENTITY"
+          npm run build
 
       - name: Bundle production npm license texts
         run: node scripts/compliance/create-npm-notices.mjs

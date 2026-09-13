@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
+import { buildMetadata } from '../../../scripts/ci/release-metadata.mjs';
+import { allocationKey } from '../../../scripts/ci/release-policy.mjs';
 import { frontendVersionMetadata, resolveGitHash } from './vite.config';
 import { identity as inventoryIdentity } from './src/test/features/system/serviceInventoryFixture';
 
@@ -24,6 +27,64 @@ function restoreEnvironment() {
 afterEach(restoreEnvironment);
 
 describe('canonical frontend release identity', () => {
+  it.each(['stable', 'insider'])('embeds the production consumer output for %s releases', (channel) => {
+    const root = resolve('.artifacts', `production-identity-${channel}-${process.pid}`);
+    const branch = channel === 'stable' ? 'main' : 'development';
+    const version = channel === 'stable' ? '1.2.3' : '1.2.3-insider.10';
+    const record = {
+      repository: 'OlyForge3D/PrintFarmer', releaseId: `${channel}:${version}`,
+      channel, canonicalVersion: version, baseVersion: '1.2.3',
+      sourceBranch: branch, sourceTag: `v${version}`, sourceCommit: 'a'.repeat(40),
+      authorizedBranchHead: 'a'.repeat(40), buildId: '45', buildAttempt: '2',
+      workflowIdentity: `OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/${branch}`,
+      created: '2026-09-12T20:00:00.000Z',
+    };
+    const allocation = allocationKey(record);
+    const metadata = buildMetadata({ ...record, allocationKey: allocation,
+      protection: { reviewerId: 'private-reviewer' }, futurePrivate: 'private-value' });
+    const expectedIdentity = { ...JSON.parse(metadata.frontendIdentity), promotionOrigin: null };
+    const vite = resolve('node_modules/vite/bin/vite.js');
+    const build = () => execFileSync(process.execPath, [vite, 'build', '--config', resolve(root, 'vite.config.ts')], {
+      cwd: root, encoding: 'utf8', timeout: 60_000, stdio: 'pipe',
+      env: { ...process.env, VITE_GIT_SHA: record.sourceCommit,
+        PRINTFARMER_RELEASE_IDENTITY: metadata.frontendIdentity },
+    });
+    mkdirSync(resolve(root, 'public'), { recursive: true });
+    mkdirSync(resolve(root, 'src/common/utils'), { recursive: true });
+    try {
+      writeFileSync(resolve(root, 'index.html'),
+        '<!doctype html><title>Production identity</title><script type="module" src="/main.js"></script>');
+      writeFileSync(resolve(root, 'main.js'), 'globalThis.releaseIdentity = __RELEASE_IDENTITY__;');
+      writeFileSync(resolve(root, 'public/sw.js'), '// __PRINTFARMER_BUILD_TIME__ __PRINTFARMER_GIT_HASH__');
+      writeFileSync(resolve(root, 'public/release-identity.json'), metadata.frontend);
+      for (const file of ['vite.config.ts', 'public-release-identity.mjs', 'src/common/utils/releaseIdentity.ts']) {
+        copyFileSync(resolve(file), resolve(root, file));
+      }
+      build();
+      for (const file of ['version.json', 'release-identity.json']) {
+        const emitted = readFileSync(resolve(root, 'dist', file), 'utf8');
+        expect(JSON.parse(emitted).releaseIdentity).toEqual(expectedIdentity);
+        expect(emitted).not.toMatch(/protection|reviewerId|futurePrivate|private-/);
+      }
+      const bundle = readdirSync(resolve(root, 'dist/assets')).find(file => /^index-.*\.js$/.test(file))!;
+      const javascript = readFileSync(resolve(root, 'dist/assets', bundle), 'utf8');
+      const browser: { releaseIdentity?: unknown; document: unknown } = {
+        document: { createElement: () => ({ relList: { supports: () => true } }) },
+      };
+      runInNewContext(javascript, browser);
+      expect(browser.releaseIdentity).toEqual(expectedIdentity);
+      expect(browser.releaseIdentity).toMatchObject({
+        releaseId: record.releaseId, channel, sourceCommit: record.sourceCommit, allocationIdentity: allocation,
+      });
+      expect(javascript).not.toMatch(/protection|reviewerId|futurePrivate|private-/);
+
+      writeFileSync(resolve(root, 'public/release-identity.json'),
+        JSON.stringify({ ...JSON.parse(metadata.frontend), releaseId: 'different-release' }));
+      expect(build).toThrow(/Frontend release identity inputs disagree on releaseId/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 130_000);
   it('retains the service inventory identity without deriving missing allocation evidence', () => {
     expect(frontendVersionMetadata(inventoryIdentity.sourceCommit!, 'now', undefined, inventoryIdentity))
       .toEqual({ service: 'frontend', commit: inventoryIdentity.sourceCommit, buildTime: 'now',

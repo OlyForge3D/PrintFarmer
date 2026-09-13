@@ -574,6 +574,24 @@ test('every platform uses one identity in assemblies/frontend/OCI, including lar
   assert.ok(metadata.labels.includes(`org.opencontainers.image.version=${identity.canonicalVersion}`));
 });
 
+test('stable and insider frontend outputs copy only canonical public fields and allocation identity', () => {
+  const ledger = state();
+  ledger.qualifications[sha] = hotfixQualification();
+  const stable = reserve(ledger, stableAdmission(), created, undefined, hotfixQualification()).record;
+  for (const identity of [stable, record()]) {
+    const input = { ...identity, futurePrivate: { value: 'private-value' } };
+    const metadata = buildMetadata(input);
+    assert.deepEqual(JSON.parse(metadata.frontendIdentity), {
+      ...Object.fromEntries(publicIdentityFields.map(field => [field, identity[field]])),
+      allocationIdentity: identity.allocationKey,
+    });
+    assert.doesNotMatch(metadata.frontendIdentity, /protection|qualification|futurePrivate|private-value|identitySha256|buildTime/);
+    for (const allocationKey of [undefined, '', 'not-an-allocation', 'a'.repeat(64) + '\n']) {
+      assert.throws(() => buildMetadata({ ...identity, allocationKey }), /Invalid frontend allocation/);
+    }
+  }
+});
+
 test('immutable image publication checks all conflicts before any tag writes and never moves aliases', () => {
   const identity = record();
   const set = completeSet(identity);
@@ -920,6 +938,18 @@ test('workflow entry points have no direct tag/manual Docker bypass; iOS namespa
   for (const tag of ['ios/v1.0-beta.106', 'ios/v1.0-rc.1', 'v1.0-beta.106']) {
     assert.throws(() => parseTag(tag));
   }
+});
+
+test('the production frontend build requires the verified consumer output for both release channels', () => {
+  const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
+  const frontend = docker.split('  build-frontend:')[1].split('\n  ensure-orca-base:')[0];
+  assert.match(frontend, /Consume canonical frontend identity\n\s+id: frontend_identity\n[\s\S]*?uses: \.\/\.github\/actions\/release-authorization/);
+  assert.match(frontend, /PRINTFARMER_RELEASE_IDENTITY: \$\{\{ steps\.frontend_identity\.outputs\.frontend_identity \}\}/);
+  assert.match(frontend, /test -n "\$PRINTFARMER_RELEASE_IDENTITY"\n\s+npm run build/);
+  assert.doesNotMatch(frontend, /^\s+if:/m, 'Neither channel may skip the consumer or build input');
+  const action = readFileSync('.github/actions/release-authorization/action.yml', 'utf8');
+  assert.match(action, /frontend_identity:\n\s+value: \$\{\{ steps\.consume\.outputs\.frontend_identity \}\}/);
+  assert.match(action, /node scripts\/ci\/release-control\.mjs consume/);
 });
 
 function shellCommands(source) {
@@ -2522,6 +2552,9 @@ test('actual control flow keeps github.token read-only and requires App verifica
     const consumer = { ...fixture.env, RELEASE_PUBLISHER_TOKEN: undefined, RELEASE_PUBLISHER_APP_ID: undefined,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
     await runReleaseControl('consume', consumer, verify);
+    const frontendOutput = readFileSync(process.env.GITHUB_OUTPUT, 'utf8')
+      .split('\n').find(line => line.startsWith('frontend_identity='));
+    assert.equal(frontendOutput, `frontend_identity=${buildMetadata(identity).frontendIdentity}`);
     assert.ok(fixture.calls.every(call => !call.admin && !call.publisher && call.method === 'GET'));
     assert.match(readFileSync('src/ReleaseIdentity.props', 'utf8'), /1\.2\.3-insider\.1/);
     assert.equal(readFileSync(authorizationPath, 'utf8'), signedBytes,
@@ -2628,7 +2661,7 @@ test('workflow wiring transports only public outputs and each consumer verifies 
   }
   assert.match(authority, /public_identity: \$\{\{ steps\.authorize\.outputs\.public_identity \}\}/);
   assert.match(authority, /identity: \$\{\{ needs\.authorize\.outputs\.public_identity \}\}/);
-  assert.doesNotMatch(authority + docker + action, /RELEASE_IDENTITY:|outputs\.identity\b/);
+  assert.doesNotMatch(authority + docker + action, /^\s*RELEASE_IDENTITY:|outputs\.identity\b/m);
   assert.doesNotMatch(docker, /cp (?:release-identity|release-set|\.artifacts\/release-authorization\/release-identity)/);
   assert.match(docker, /cp \.artifacts\/release-authorization\/public-identity\.bundle\.json release-assets\/release-identity\.bundle\.json/);
   assert.match(authority, /--bundle \.artifacts\/release-authorization\/public-identity\.bundle\.json \\\n\s+\.artifacts\/release-authorization\/public-identity\.json/);
@@ -2637,7 +2670,7 @@ test('workflow wiring transports only public outputs and each consumer verifies 
     assert.ok([...publicIdentityFields, 'identitySha256', 'buildTime'].includes(match[1]), match[1]);
   }
   for (const match of (authority + docker + action).matchAll(/steps\.(?:authorize|consume)\.outputs\.(\w+)/g)) {
-    assert.ok(['public_identity', 'version', 'container_version', 'channel', 'identity_hash',
+    assert.ok(['public_identity', 'frontend_identity', 'version', 'container_version', 'channel', 'identity_hash',
       'source_archive_url', 'sbom_url'].includes(match[1]), match[1]);
   }
   assert.match(action, /name: release-authorization-\$\{\{ github.run_attempt \}\}/);

@@ -120,7 +120,8 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   requireThat(parseTag(record.sourceTag).baseVersion ===
     (await readVersion(api, entry.record.sourceCommit)).replace(/\r?\n$/, '').slice(1), 'Source VERSION changed');
   if (operation === 'consume') {
-    emitBuildIdentity(record);
+    const metadata = emitBuildIdentity(record);
+    output('frontend_identity', metadata.frontendIdentity);
     output('version', record.sourceTag);
     output('container_version', record.canonicalVersion);
     output('channel', record.channel);

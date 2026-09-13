@@ -1,6 +1,9 @@
 name: Consume normalized release authorization
 description: Verify this attempt's public-readable signed policy attestation before emitting public metadata
 outputs:
+  frontend_identity:
+    value: ${{ steps.consume.outputs.frontend_identity }}
+    description: Allow-listed Vite identity with the canonical allocation key
   version:
     value: ${{ steps.consume.outputs.version }}
     description: Canonical source tag
