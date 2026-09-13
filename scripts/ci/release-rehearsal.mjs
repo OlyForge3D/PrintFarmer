@@ -53,6 +53,7 @@ export function rehearsalReadUrl(endpoint) {
     return `https://api.github.com/orgs/OlyForge3D/packages/container/${match[1]}${match[2] ?? ''}`;
   }
   const reads = [
+    /^environments\/release-rehearsal-fixture-(?:stable|insider)(?:\/deployment-branch-policies)?$/,
     /^git\/matching-refs\/tags\?per_page=100&page=[1-9][0-9]*$/,
     /^git\/ref\/tags\/v-rehearsal-2668-[1-9][0-9]*-1-update$/,
     /^releases\?per_page=100&page=[1-9][0-9]*$/,

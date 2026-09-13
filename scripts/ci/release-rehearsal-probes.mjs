@@ -127,8 +127,8 @@ export async function runDenialProbes(token, context, settings, fetcher = fetch)
     const fixture = before.tags.find(ref => ref.ref === `refs/tags/${tag}`);
     requireThat(fixture?.type === 'commit' && fixture.sha === before.ledger.head &&
       !before.tags.some(ref => ref.ref === `refs/tags/${context.marker}`),
-    'Owner-provisioned unique update fixture missing, mismatched, or creation fixture already exists');
-    result.fixtures.push({ kind: 'pre-provisioned-inert-tag', ref: fixture.ref, sha: fixture.sha,
+    'App-provisioned unique update fixture missing, mismatched, or creation fixture already exists');
+    result.fixtures.push({ kind: 'app-provisioned-inert-tag', ref: fixture.ref, sha: fixture.sha,
       disposition: 'retain-no-deletion-bypass' });
     result.fixtures.push({ kind: 'inert-tag-creation-attempt', ref: `refs/tags/${context.marker}`,
       sha: context.sha, disposition: 'retain-if-unexpectedly-created-no-deletion-bypass' });

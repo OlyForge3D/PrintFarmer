@@ -803,8 +803,10 @@ fresh canonical CI/review/qualification at the new HEAD. Run insider only from
 dispatch event, selected branch, workflow ref/SHA and first run attempt. Invalid
 dispatches fail the run rather than skipping every job and appearing green.
 Admission performs no checkout or API requests and has no token permissions or
-environment secrets. Both protected jobs depend on admission and use the existing
-canonical `release-<channel>` owner gate; never widen environment branch policies.
+environment secrets. All protected jobs depend on admission. Positive verification
+and generic probes use the existing canonical `release-<channel>` owner gate;
+fixture creation uses the separate `release-rehearsal-fixture-<channel>` owner gate.
+Never widen environment branch policies.
 Because GitHub can rerun either protected job without rerunning admission, each
 also repeats the credential-free check as its first step, before checkout,
 third-party actions, App token creation or step-level credential exposure.
@@ -812,7 +814,7 @@ Environment approval still precedes job startup; no environment secrets or
 tokens are passed to the pre-check. Artifact uploads require that job's admission
 to succeed, even on failure paths. A single-job rerun therefore fails locally
 without executing later steps, regardless of an earlier admission success.
-The three embedded JavaScript bodies must match the `rehearsalAdmissionSource`
+The four embedded JavaScript bodies must match the `rehearsalAdmissionSource`
 constant in `scripts/ci/release-rehearsal-admission.mjs` byte-for-byte; regression
 tests enforce source parity and step ordering. The constant preserves LF line
 endings across checkouts. Embedding avoids fetching code before admission.
@@ -843,19 +845,44 @@ paired with successful issuance using the workflow's explicit
 The harness does not obtain extra credentials to read installation permissions.
 Never retain the private key or token response as evidence.
 
-Live denial probes additionally require explicit owner consent to bounded
-canary effects, `denial_probes=true`, and environment variable
-`RELEASE_REHEARSAL_APPROVED_SHA` equal to the exact reviewed workflow/source SHA.
-This variable is not a release authorization. Clear it after the window.
-Before approving the first environment gate, the owner must separately provision
-one lightweight **inert** tag
-`refs/tags/v-rehearsal-2668-<run_id>-1-update` at the current ledger head.
-The run ID is available while the positive job waits for approval. Provisioning
-requires separately authorized use of the designated creator App; the harness
-cannot create this fixture with its GET-only App token. Do not weaken rulesets
-or grant an update/deletion bypass. Record this intended fixture in the owner's
-window approval and retain it permanently. Without it the probe job fails
-before any mutation; a missing-ref or same-SHA update is not a valid denial test.
+For live denial probes, dispatch with `denial_probes=true`, review the exact
+qualified source SHA/run in Actions, and approve the protected environment jobs.
+There is no manually formatted approval record, pre-created tag, or
+`RELEASE_REHEARSAL_APPROVED_SHA` variable to maintain. The workflow binds consent
+to its exact workflow/source SHA, channel, run ID and first attempt.
+
+One-time owner configuration: create `release-rehearsal-fixture-insider` (and,
+before stable use, `release-rehearsal-fixture-stable`) with only `jpapiez` as
+required reviewer, administrator bypass disabled, and exactly the corresponding
+`development` or `main` branch policy. Set self-review prevention consistently
+with `RELEASE_APPROVAL_MODE`. Store the designated App **4927270** key only in
+that protected environment as `RELEASE_REHEARSAL_FIXTURE_PRIVATE_KEY`; retain
+the existing nonsecret App ID, ledger anchor and approval-mode configuration.
+This change does not configure live environments or grant a ruleset bypass.
+
+After the GET-only positive job, the separate fixture job rechecks qualification,
+live run identity, owner environment policy and the positive inventory digest.
+Only then does it mint a fresh App installation token, explicitly scoped to
+PrintFarmer repository ID `1044049720` and **contents: write** (plus GitHub's
+implicit metadata read). It validates the returned grant and holds the token
+only in memory, never an Actions output, file, artifact or log; revocation runs
+in `finally`. The generic token remains read-only in this job.
+
+The only resource mutation allowed is one POST creating the absent lightweight
+`refs/tags/v-rehearsal-2668-<run_id>-1-update` at that inventory's ledger head.
+The ledger may retain application files, so the job walks and hash-verifies all
+workflow blobs at both the ledger target and current default-branch head before
+minting. Parsed create/push/workflow-run triggers must be proven unable to start
+publication for this namespace; unknown triggers fail closed. The one existing
+unfiltered nonpublisher, **Sync Squad Labels**, is accepted only at its reviewed
+immutable blob hash; its label synchronization and Actions audit events may run,
+not publication. Changes to that consumer require review of this allowlist.
+The name fails canonical/server and `ios/` tag triggers; no publication is dispatched.
+The secret-free fixture receipt records its exact name, target, creator App,
+attempt outcome and **retain-no-deletion-bypass** lifecycle. Retain the tag
+permanently; never reuse, move or delete it, or weaken rulesets. A failed or
+ambiguous create stops the chain without retry; inspect its receipt and retain
+any observed tag. A new approved run uses a new run-specific name.
 
 The separate probe job receives only its generic `GITHUB_TOKEN`, requesting
 contents/package write and read-only verification permissions. Review its
@@ -898,12 +925,16 @@ requires owner recovery. Successful cleanup **does not turn failure into pass**.
 
 Receipts inventory all paginated historical tags (including `ios/`), canonical
 heads, ledger head/tree/state digest, releases and their assets, and all six
-package version/digest records. Inventories must match across the positive
-job, before every probe and after the final attempt, including failure paths.
+package version/digest records. The fixture job starts from the positive digest;
+its final inventory must differ by exactly the one intended tag with the exact
+target/type, with no other drift. Only that tag is subtracted for that comparison,
+never a namespace or prefix. The resulting digest becomes the probe baseline,
+which includes the fixture and must match before every probe and after the final
+attempt, including failure paths. Thus moving/deleting it is always drift.
 Incomplete pagination or mismatched package counts fail closed. Passing also
 requires exactly one denied upload result per production package; an empty or
 partial upload list cannot pass. Raw policy, reviewer data, API errors, release
-bodies, credentials and upload-state URLs are not emitted. Preserve both
+bodies, credentials and upload-state URLs are not emitted. Preserve all three
 `release-rehearsal-*` artifacts and run logs.
 
 GHCR does not expose a global unfinished-upload listing API. Upload evidence
@@ -952,7 +983,7 @@ remain retryable; new stale reservations cannot reach publication.
 The same suite scans repository executable scripts, actions and workflows for
 tag creation, force pushes and direct release/API publication. Its explicit
 writer inventory permits only the guarded ledger adapter, authorized Docker
-consumer, bounded rehearsal probe module, and separate `ios/` TestFlight writers.
+consumer, bounded rehearsal probe and App-only fixture modules, and separate `ios/` TestFlight writers.
 This is a source regression check, not a substitute for repository protection
 or runtime authorization.
 Both retired server helpers execute against sentinel publication commands for

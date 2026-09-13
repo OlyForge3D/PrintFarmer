@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { createHash, generateKeyPairSync, verify } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { load } from 'js-yaml';
@@ -7,6 +8,11 @@ import { canonicalAuthorizationFixture } from './fixtures/canonical-qualificatio
 import { canonicalValidationChecks } from '../canonical-qualification.mjs';
 import { parseTag, releaseRequiredChecks, releaseReviewStatus, repository } from '../release-policy.mjs';
 import { rehearsalAdmissionSource } from '../release-rehearsal-admission.mjs';
+import {
+  fixtureAppId, fixtureRequestUrl, intendedFixture, provisionFixture,
+  verifyFixtureEnvironment, verifyFixtureInventory, withFixtureToken,
+} from '../release-rehearsal-fixture.mjs';
+import { labelSyncBlob, verifyFixtureTarget, verifyFixtureWorkflow } from '../release-rehearsal-target.mjs';
 import {
   allPages, digest, packageNames, positiveRehearsal, readOnlyClient, rehearsalContext,
   rehearsalReadUrl, rehearsalWorkflow, snapshot, verifyUnchanged,
@@ -415,7 +421,7 @@ test('cleanup cannot target another host, package, version or upload completion'
 
 const workflow = load(readFileSync('.github/workflows/release-protection-rehearsal.yml', 'utf8'));
 const admissionRun = `node --input-type=module <<'NODE'\n${rehearsalAdmissionSource}NODE\n`;
-const admissionJobs = ['admission', 'positive', 'probes'];
+const admissionJobs = ['admission', 'positive', 'fixture', 'probes'];
 const admittedEvidenceCondition = "always() && steps.admission.outcome == 'success'";
 
 function assertAdmissionOrdering(document) {
@@ -464,7 +470,7 @@ test('parsed workflow guards every independently rerunnable job before any actio
 });
 
 test('ordering guard rejects credential injection, action reordering, source drift and failure-path bypasses', () => {
-  for (const jobName of ['positive', 'probes']) {
+  for (const jobName of ['positive', 'fixture', 'probes']) {
     for (const mutate of [
       job => job.steps.unshift({ uses: 'actions/checkout@untrusted' }),
       job => job.steps.unshift({ run: 'echo skipped', env: { GH_TOKEN: '${{ github.token }}' } }),
@@ -508,7 +514,9 @@ test('admission is unconditional and credential-free, and gates both protected j
   assert.doesNotMatch(step.run, /secrets|github\.token|GH_TOKEN|fetch|https?:|checkout|\|\|\s*true/);
   assert.equal(workflow.jobs.positive.needs, 'admission');
   assert.equal(Object.hasOwn(workflow.jobs.positive, 'if'), false);
-  assert.deepEqual(workflow.jobs.probes.needs, ['admission', 'positive']);
+  assert.deepEqual(workflow.jobs.fixture.needs, ['admission', 'positive']);
+  assert.equal(workflow.jobs.fixture.if, 'inputs.denial_probes');
+  assert.deepEqual(workflow.jobs.probes.needs, ['admission', 'positive', 'fixture']);
   assert.equal(workflow.jobs.probes.if, 'inputs.denial_probes');
 });
 
@@ -567,7 +575,7 @@ function laterStepRuns(step, priorSuccess, admissionOutcome) {
 test('single-job reruns reject before every later step even when standalone admission previously succeeded', () => {
   assertAdmissionOrdering(workflow);
   assert.equal(runAdmission().status, 0, 'Cached standalone admission succeeded on attempt 1');
-  for (const jobName of ['positive', 'probes']) {
+  for (const jobName of ['positive', 'fixture', 'probes']) {
     for (const attempt of ['2', '3', '17']) {
       // Execute only the selected job, without re-executing its successful dependencies.
       const result = runAdmission({ GITHUB_RUN_ATTEMPT: attempt }, jobName);
@@ -581,7 +589,7 @@ test('single-job reruns reject before every later step even when standalone admi
 });
 
 test('admitted jobs still preserve evidence after a later failure, but failed or cancelled admission never uploads', () => {
-  for (const jobName of ['positive', 'probes']) {
+  for (const jobName of ['positive', 'fixture', 'probes']) {
     const upload = workflow.jobs[jobName].steps.at(-1);
     assert.equal(laterStepRuns(upload, false, 'success'), true);
     for (const outcome of ['failure', 'cancelled', 'skipped', undefined]) {
@@ -626,12 +634,347 @@ test('workflow separates App reads from generic writes without any publisher or 
   assert.match(probes, /packages: write/);
   assert.match(probes, /RELEASE_REHEARSAL_APPROVED_SHA/);
   assert.match(workflow, /ref: \$\{\{ github.workflow_sha \}\}/);
-  assert.equal((workflow.match(/persist-credentials: false/g) ?? []).length, 2);
+  assert.equal((workflow.match(/persist-credentials: false/g) ?? []).length, 3);
   assert.doesNotMatch(probes, /secrets\.|create-github-app-token|REHEARSAL_APP_TOKEN/);
   assert.doesNotMatch(workflow, /id-token:|cosign|REGISTRY_TOKEN|REGISTRY_USER|workflow_call|schedule:|secrets: inherit|release-control\.mjs|docker-publish\.yml/);
   for (const source of ['release-rehearsal', 'release-rehearsal-probes', 'release-rehearsal-control']) {
     const text = readFileSync(`scripts/ci/${source}.mjs`, 'utf8');
     assert.doesNotMatch(text, /\b(?:reserve|ensureSourceTag|compareAndSet|advance|writeAuthorization|emitBuildIdentity)\s*\(/);
     assert.doesNotMatch(text, /from ['"].*release-control|execFile|spawnSync|sign-blob/);
+  }
+});
+
+const testKeys = generateKeyPairSync('rsa', { modulusLength: 2048 });
+const fixtureEnvironment = {
+  ...env, GH_TOKEN: 'generic', RELEASE_PUBLISHER_APP_ID: fixtureAppId,
+  REHEARSAL_DENIAL_PROBES: 'true',
+  RELEASE_REHEARSAL_FIXTURE_PRIVATE_KEY: testKeys.privateKey,
+};
+const tagInventoryPath = 'git/matching-refs/tags?per_page=100&page=1';
+const fixturePolicyPath = 'environments/release-rehearsal-fixture-insider';
+
+async function provisionScenario() {
+  const f = fixture();
+  f.values.set(tagInventoryPath, f.values.get(tagInventoryPath).filter(tag => !tag.ref.endsWith('-update')));
+  f.values.set(fixturePolicyPath, {
+    ...structuredClone(f.values.get('environments/release-insider')),
+    name: 'release-rehearsal-fixture-insider',
+    deployment_branch_policy: { custom_branch_policies: true, protected_branches: false },
+  });
+  f.values.set(`${fixturePolicyPath}/deployment-branch-policies`,
+    { branch_policies: [{ name: 'development', type: 'branch' }] });
+  f.values.set(`git/commits/${sha}`, { sha, tree: { sha: tree } });
+  const settings = { ...fixtureEnvironment,
+    REHEARSAL_POSITIVE_DIGEST: digest(await snapshot(readOnlyClient('generic', f.fetcher), context)) };
+  const calls = [];
+  const grant = {
+    token: 'APP_FIXTURE_TOKEN_SENTINEL', permissions: { contents: 'write', metadata: 'read' },
+    repository_selection: 'selected',
+    repositories: [{ id: 1044049720, full_name: repository }],
+    expires_at: new Date(Date.now() + 3600_000).toISOString(),
+  };
+  const fetcher = async (url, options) => {
+    calls.push({ url, ...options });
+    assert.equal(options.redirect, 'error');
+    assert.ok(options.signal instanceof AbortSignal);
+    if (url === `https://api.github.com/repos/${repository}/installation`) {
+      return response({ id: 17, app_id: Number(fixtureAppId), account: { login: 'OlyForge3D' },
+        target_type: 'Organization' });
+    }
+    if (url === 'https://api.github.com/app/installations/17/access_tokens') return response(grant, 201);
+    if (url === 'https://api.github.com/installation/token') return response(undefined, 204);
+    if (options.method === 'POST' && url.endsWith('/git/refs')) {
+      assert.equal(options.headers.Authorization, `Bearer ${grant.token}`);
+      const { ref, sha } = JSON.parse(options.body);
+      const created = { ref, object: { sha, type: 'commit' } };
+      f.values.get(tagInventoryPath).push(created);
+      f.values.set(`git/ref/tags/${context.marker}-update`, created);
+      return response(created, 201);
+    }
+    assert.equal(options.headers.Authorization, 'Bearer generic', 'All inventory reads remain generic');
+    return f.fetcher(url, options);
+  };
+  return { ...f, calls, grant, settings, fetcher, probeFetcher: f.fetcher };
+}
+
+test('fixture writer allows only one exact POST route/payload and never canonical refs or arbitrary targets', () => {
+  const before = { ledger: { head }, tags: [] };
+  const body = { ref: `refs/tags/${context.marker}-update`, sha: head };
+  assert.equal(fixtureRequestUrl('git/refs', 'POST', body, context, before),
+    `https://api.github.com/repos/${repository}/git/refs`);
+  for (const [path, method, data] of [
+    ['git/refs', 'PATCH', body], ['git/refs', 'DELETE', body], ['git/refs', 'PUT', body],
+    ['git/refs', 'GET', body], ['git/refs/', 'POST', body],
+    ['git/refs', 'POST', { ...body, force: false }], ['git/refs', 'POST', { ...body, sha }],
+    ['git/refs', 'POST', { ...body, ref: 'refs/tags/v1.2.3' }],
+    ['git/refs', 'POST', { ...body, ref: `refs/tags/${context.marker}` }],
+    ['git/refs', 'POST', { ...body, ref: `refs/tags/${context.marker}-update/other` }],
+    ...['git/commits', 'git/tags', 'git/blobs', 'git/trees', 'releases', 'statuses/' + sha,
+      'git/refs/heads/release-ledger', 'actions/workflows/docker-publish.yml/dispatches',
+      '../git/refs', 'https://evil.example/git/refs'].map(path => [path, 'POST', body]),
+  ]) assert.throws(() => fixtureRequestUrl(path, method, data, context, before));
+  assert.throws(() => intendedFixture({ ...context, run: '43' }, before));
+  for (const ref of [body.ref, `refs/tags/${context.marker}`]) {
+    assert.throws(() => intendedFixture(context, { ...before, tags: [{ ref, sha: head, type: 'commit' }] }));
+  }
+});
+
+test('fixture provisioning mints minimum repository-only App grant, creates once, revokes and accounts exactly', async () => {
+  const f = await provisionScenario();
+  const positive = await positiveRehearsal(readOnlyClient('app', f.probeFetcher),
+    readOnlyClient('generic', f.probeFetcher), context, { appId: '123' });
+  assert.equal(f.settings.REHEARSAL_POSITIVE_DIGEST, positive.inventoryDigest);
+  const result = await provisionFixture(f.settings, f.fetcher);
+  assert.equal(result.passed, true, JSON.stringify(result));
+  assert.equal(result.attempts.length, 1);
+  assert.equal(result.attempts[0].outcome, 'created-and-read-verified');
+  assert.equal(result.fixtures[0].sha, head, 'Target is ledger head, not qualified source');
+  assert.equal(result.inventoryDigest, digest(result.after));
+  assert.equal(result.after.tags.length, result.before.tags.length + 1);
+  const writes = f.calls.filter(call => call.method !== 'GET');
+  assert.deepEqual(writes.map(call => [new URL(call.url).pathname, call.method]), [
+    ['/app/installations/17/access_tokens', 'POST'], [`/repos/${repository}/git/refs`, 'POST'],
+    ['/installation/token', 'DELETE'],
+  ]);
+  assert.deepEqual(JSON.parse(writes[0].body), { repository_ids: [1044049720], permissions: { contents: 'write' } });
+  const jwt = writes[0].headers.Authorization.slice('Bearer '.length);
+  const [header, claims, signature] = jwt.split('.');
+  assert.equal(JSON.parse(Buffer.from(claims, 'base64url')).iss, fixtureAppId);
+  assert.equal(verify('RSA-SHA256', Buffer.from(`${header}.${claims}`),
+    testKeys.publicKey, Buffer.from(signature, 'base64url')), true);
+  assert.doesNotMatch(JSON.stringify(result), /SENTINEL|PRIVATE KEY|permissions|Authorization/);
+  const probes = await runDenialProbes('generic', context, {
+    approvedSha: sha, requested: true, actor: 'jpapiez', positiveDigest: result.inventoryDigest,
+  }, f.probeFetcher);
+  assert.equal(probes.passed, true, JSON.stringify(probes));
+  assert.deepEqual(probes.before, result.after);
+});
+
+test('fixture inventory exclusion is exact and cannot hide any additional write or missing fixture', () => {
+  const before = { ledger: { head }, tags: [{ ref: 'refs/tags/v0.2.2', sha, type: 'commit' }], releases: [] };
+  const intended = intendedFixture(context, before);
+  const after = { ...before, tags: [...before.tags, intended] };
+  verifyFixtureInventory(before, after, intended);
+  for (const change of [
+    value => value.tags.pop(),
+    value => { value.tags[1].sha = sha; }, value => { value.tags[1].type = 'tag'; },
+    value => value.tags.push(intended), value => value.tags.push({ ...intended, ref: intended.ref + '-other' }),
+    value => { value.tags[0].sha = head; }, value => { value.ledger.head = child; },
+    value => value.releases.push({ id: 1 }),
+  ]) {
+    const changed = structuredClone(after);
+    change(changed);
+    assert.throws(() => verifyFixtureInventory(before, changed, intended));
+  }
+});
+
+test('fixture preflight refuses reruns, context drift, missing approval, conflicts and executable target before mint', async () => {
+  for (const fault of ['rerun', 'workflow', 'channel', 'source', 'request', 'app', 'digest', 'existing',
+    'policy', 'branch', 'qualify', 'target', 'generic-app']) {
+    const f = await provisionScenario();
+    if (fault === 'rerun') f.settings.GITHUB_RUN_ATTEMPT = '2';
+    if (fault === 'workflow') f.settings.GITHUB_WORKFLOW_SHA = head;
+    if (fault === 'channel') f.settings.REHEARSAL_CHANNEL = 'stable';
+    if (fault === 'source') f.values.get('actions/runs/42').head_sha = head;
+    if (fault === 'request') f.settings.REHEARSAL_DENIAL_PROBES = 'false';
+    if (fault === 'app') f.settings.RELEASE_PUBLISHER_APP_ID = '123';
+    if (fault === 'digest') f.settings.REHEARSAL_POSITIVE_DIGEST = '0'.repeat(64);
+    if (fault === 'existing') {
+      f.values.get(tagInventoryPath).push({ ref: `refs/tags/${context.marker}-update`, object: { type: 'commit', sha: head } });
+      f.settings.REHEARSAL_POSITIVE_DIGEST = digest(await snapshot(readOnlyClient('generic', f.fetcher), context));
+    }
+    if (fault === 'policy') f.values.get(fixturePolicyPath).can_admins_bypass = true;
+    if (fault === 'branch') f.values.get(`${fixturePolicyPath}/deployment-branch-policies`).branch_policies.push({ name: '*' });
+    if (fault === 'qualify') f.values.set(`commits/${sha}/statuses?per_page=100`, []);
+    if (fault === 'target') f.values.get(`git/trees/${tree}`).tree.push({ path: '.github', type: 'tree', sha });
+    if (fault === 'generic-app') f.settings.REHEARSAL_APP_TOKEN = 'unapproved';
+    let result;
+    try { result = await provisionFixture(f.settings, f.fetcher); } catch { result = { passed: false }; }
+    assert.equal(result.passed, false, fault);
+    assert.equal(f.calls.some(call => call.url.includes('/installation')), false, fault);
+    assert.ok(f.calls.every(call => call.method === 'GET'), fault);
+  }
+});
+
+test('fixture environment rejects every alternate approver and branch/bypass misconfiguration', async () => {
+  for (const mutate of [
+    policy => { policy.name = 'release-insider'; },
+    policy => { policy.can_admins_bypass = undefined; },
+    policy => { policy.deployment_branch_policy.protected_branches = true; },
+    policy => { policy.protection_rules = []; },
+    policy => { policy.protection_rules[0].reviewers[0].reviewer.login = 'outsider'; },
+    policy => { policy.protection_rules[0].reviewers.push({ type: 'Team', reviewer: { id: 5 } }); },
+    policy => { policy.protection_rules[0].prevent_self_review = true; },
+  ]) {
+    const f = await provisionScenario();
+    mutate(f.values.get(fixturePolicyPath));
+    await assert.rejects(verifyFixtureEnvironment(readOnlyClient('generic', f.fetcher), context));
+  }
+});
+
+test('malformed, excessive, expired or wrong-repository App grants revoke without any fixture write', async () => {
+  for (const mutate of [
+    grant => { grant.permissions.packages = 'write'; }, grant => { grant.permissions.contents = 'read'; },
+    grant => { grant.permissions.actions = 'write'; }, grant => { grant.permissions.workflows = 'write'; },
+    grant => { grant.repository_selection = 'all'; }, grant => { grant.repositories = []; },
+    grant => { grant.repositories[0].id++; }, grant => { grant.repositories[0].full_name = 'outsider/fork'; },
+    grant => { grant.expires_at = 'invalid'; }, grant => { grant.expires_at = '2000-01-01T00:00:00Z'; },
+    grant => { grant.repositories.push({ id: 2, full_name: 'OlyForge3D/Other' }); },
+  ]) {
+    const f = await provisionScenario();
+    mutate(f.grant);
+    await assert.rejects(withFixtureToken(testKeys.privateKey, () => assert.fail('must not expose grant'), f.fetcher));
+    assert.equal(f.calls.filter(call => call.method === 'DELETE').length, 1);
+    assert.equal(f.calls.some(call => call.url.endsWith('/git/refs')), false);
+  }
+});
+
+test('fixture failures never retry or delete refs; unknown success, drift and failed revocation remain failed', async () => {
+  for (const fault of ['conflict', 'denial', 'auth', 'rate', 'redirect', 'network', 'malformed', 'unexpected-200', 'wrong-ref',
+    'wrong-sha', 'wrong-type', 'missing', 'drift', 'revoke']) {
+    const f = await provisionScenario();
+    const fetcher = async (url, options) => {
+      if (url.endsWith('/installation/token') && fault === 'revoke') return response({ message: 'SENTINEL' }, 500);
+      if (url.endsWith('/git/refs') && options.method === 'POST') {
+        if (fault === 'conflict') return response({ message: 'Reference already exists' }, 422);
+        if (fault === 'denial') return denied('create');
+        if (fault === 'auth') return response({ message: 'SENTINEL' }, 401);
+        if (fault === 'rate') return response({ message: 'SENTINEL' }, 429);
+        if (fault === 'redirect') return response({}, 307, { location: 'https://evil.example/SENTINEL' });
+        if (fault === 'network') throw new Error('SENTINEL-network');
+        if (fault === 'missing') return response({ ref: `refs/tags/${context.marker}-update`, object: { sha: head, type: 'commit' } }, 201);
+        const created = await f.fetcher(url, options);
+        if (fault === 'malformed') return new Response('SENTINEL', { status: 201 });
+        if (fault === 'unexpected-200') return response(await created.json(), 200);
+        if (fault === 'drift') f.values.get('releases?per_page=100&page=1')[0].body = 'changed';
+        if (fault.startsWith('wrong-')) {
+          const data = await created.json();
+          if (fault === 'wrong-ref') data.ref += '-other';
+          if (fault === 'wrong-sha') data.object.sha = sha;
+          if (fault === 'wrong-type') data.object.type = 'tag';
+          return response(data, 201);
+        }
+        return created;
+      }
+      return f.fetcher(url, options);
+    };
+    const result = await provisionFixture(f.settings, fetcher);
+    assert.equal(result.passed, false, fault);
+    assert.equal(result.attempts.length, 1, fault);
+    assert.equal(Object.hasOwn(result, 'inventoryDigest'), false);
+    assert.doesNotMatch(JSON.stringify(result), /SENTINEL|evil\.example/);
+    assert.ok(f.calls.filter(call => call.method === 'DELETE').every(call => call.url.endsWith('/installation/token')));
+  }
+});
+
+test('fixture workflow uses separate owner environment, no generic writes, no token outputs, and chains exact inventory', () => {
+  const job = workflow.jobs.fixture;
+  assert.equal(job.environment, 'release-rehearsal-fixture-${{ inputs.channel }}');
+  assert.deepEqual(job.permissions, workflow.jobs.positive.permissions);
+  assert.deepEqual(job.outputs, { inventory_digest: '${{ steps.verify.outputs.inventory_digest }}' });
+  const command = job.steps.find(step => step.id === 'verify');
+  assert.equal(command.run, 'node scripts/ci/release-rehearsal-control.mjs fixture');
+  assert.equal(command.env.RELEASE_REHEARSAL_FIXTURE_PRIVATE_KEY, '${{ secrets.RELEASE_REHEARSAL_FIXTURE_PRIVATE_KEY }}');
+  assert.equal(command.env.REHEARSAL_POSITIVE_DIGEST, '${{ needs.positive.outputs.inventory_digest }}');
+  assert.equal(job.steps.filter(step => JSON.stringify(step).includes('secrets.')).length, 1);
+  assert.doesNotMatch(JSON.stringify(job), /create-github-app-token|permission-.*write|outputs\.token|id-token|packages.*write/);
+  const probe = workflow.jobs.probes.steps.find(step => step.run?.endsWith('control.mjs probes'));
+  assert.equal(probe.env.REHEARSAL_POSITIVE_DIGEST, '${{ needs.fixture.outputs.inventory_digest }}');
+  assert.equal(probe.env.RELEASE_REHEARSAL_APPROVED_SHA, '${{ github.workflow_sha }}');
+  const source = readFileSync('scripts/ci/release-rehearsal-fixture.mjs', 'utf8');
+  assert.doesNotMatch(source, /console\.|writeFile|appendFile|GITHUB_OUTPUT|GITHUB_ENV|execFile|spawn|process\.stdout/);
+  assert.doesNotMatch(source, /release-control|ensureSourceTag|reserve\(|compareAndSet|sign-blob|ghcr\.io/);
+});
+
+test('inert fixture namespace has no tag-push or create-trigger publication workflow', () => {
+  const tagTriggers = {};
+  const unfiltered = [];
+  for (const file of readdirSync('.github/workflows').filter(file => /\.ya?ml$/.test(file))) {
+    const document = load(readFileSync(`.github/workflows/${file}`, 'utf8'));
+    const source = readFileSync(`.github/workflows/${file}`);
+    const blobSha = createHash('sha1').update(`blob ${source.length}\0`).update(source).digest('hex');
+    verifyFixtureWorkflow(source.toString('utf8'), blobSha);
+    const on = document.on;
+    assert.ok(!(typeof on === 'string' ? ['push', 'create'].includes(on) :
+      Array.isArray(on) ? on.some(event => ['push', 'create'].includes(event)) : Object.hasOwn(on ?? {}, 'create')), file);
+    if (on?.push) {
+      if (!on.push.branches && !on.push['branches-ignore'] && !on.push.tags) {
+        unfiltered.push(file);
+        assert.deepEqual(document.permissions, { issues: 'write', contents: 'read' });
+      }
+      if (on.push.tags) tagTriggers[file] = on.push.tags;
+    }
+  }
+  assert.deepEqual(tagTriggers, {
+    'devcontainer-multiarch.yml': ['v[0-9]+.[0-9]+.[0-9]+'],
+    'testflight-beta.yml': ['ios/v*-alpha*', 'ios/v*-beta*', 'ios/v*-rc*'],
+  });
+  assert.deepEqual(unfiltered, ['sync-squad-labels.yml'], 'No new unfiltered tag-push consumer');
+});
+
+test('workflow target rejects ambiguous YAML, arbitrary push/create/indirect events and ignores path filters for tags', () => {
+  for (const source of [
+    'on: push', 'on: [push]', 'on: {push: {}}', 'on: {create: {}}',
+    'on: {push: {paths: [docs/**]}}',
+    'on: {push: {tags: [v*]}}', 'on: {push: {tags-ignore: [ios/**], branches: [main]}}',
+    'on: {push: {tags: [v-rehearsal-2668-*]}}',
+    'on: {workflow_run: {workflows: [Sync Squad Labels]}}',
+    'on: {workflow_run: {workflows: ["*"]}}',
+    'on: {push: {branches: [main]}, push: {tags: ["*"]}}',
+    'on: !!invalid {}',
+  ]) assert.throws(() => verifyFixtureWorkflow(source, sha));
+  assert.throws(() => verifyFixtureWorkflow(readFileSync('.github/workflows/sync-squad-labels.yml', 'utf8'), sha));
+  const labelBytes = readFileSync('.github/workflows/sync-squad-labels.yml');
+  assert.equal(createHash('sha1').update(`blob ${labelBytes.length}\0`).update(labelBytes).digest('hex'), labelSyncBlob);
+});
+
+test('workflow tree walk verifies target blobs and fails truncated, missing or rewritten workflow data', async () => {
+  const source = Buffer.from('on: {push: {branches: [main]}}\njobs: {}\n');
+  const blobSha = createHash('sha1').update(`blob ${source.length}\0`).update(source).digest('hex');
+  function data() {
+    return new Map([
+      [`git/trees/${tree}`, { sha: tree, truncated: false, tree: [{ path: '.github', type: 'tree', sha }] }],
+      [`git/trees/${sha}`, { sha, truncated: false, tree: [{ path: 'workflows', type: 'tree', sha: head }] }],
+      [`git/trees/${head}`, { sha: head, truncated: false,
+        tree: [{ path: 'workflow.yml', type: 'blob', mode: '100644', sha: blobSha }] }],
+      [`git/blobs/${blobSha}`, { sha: blobSha, size: source.length, encoding: 'base64', content: source.toString('base64') }],
+    ]);
+  }
+  const values = data();
+  await verifyFixtureTarget(async path => values.get(path), tree);
+  for (const mutate of [
+    values => { values.get(`git/trees/${tree}`).truncated = true; },
+    values => { values.get(`git/trees/${sha}`).sha = head; },
+    values => { values.get(`git/trees/${head}`).tree[0].mode = '120000'; },
+    values => { values.get(`git/blobs/${blobSha}`).content = Buffer.from('on: push').toString('base64'); },
+    values => { values.get(`git/blobs/${blobSha}`).size++; },
+    values => { values.delete(`git/blobs/${blobSha}`); },
+  ]) {
+    const changed = data();
+    mutate(changed);
+    await assert.rejects(verifyFixtureTarget(async path => changed.get(path), tree));
+  }
+});
+
+test('App installation and issuance errors never reach resource creation or expose provider content', async () => {
+  for (const fault of ['wrong-app', 'wrong-owner', 'suspended', 'malformed', 'redirect', 'denied', 'mint-unknown']) {
+    const f = await provisionScenario();
+    const fetcher = async (url, options) => {
+      if (url.endsWith('/installation')) {
+        if (fault === 'malformed') return new Response('SENTINEL', { status: 200 });
+        if (fault === 'redirect') return response({}, 302, { location: 'https://evil.example/SENTINEL' });
+        if (fault === 'denied') return response({ message: 'SENTINEL' }, 403);
+        const data = { id: 17, app_id: Number(fixtureAppId), target_type: 'Organization', account: { login: 'OlyForge3D' } };
+        if (fault === 'wrong-app') data.app_id++;
+        if (fault === 'wrong-owner') data.account.login = 'outsider';
+        if (fault === 'suspended') data.suspended_at = '2026-01-01T00:00:00Z';
+        return response(data);
+      }
+      if (url.endsWith('/access_tokens') && fault === 'mint-unknown') throw new Error('SENTINEL-network');
+      return f.fetcher(url, options);
+    };
+    await assert.rejects(withFixtureToken(testKeys.privateKey, () => assert.fail('no resource writes'), fetcher),
+      error => !error.message.includes('SENTINEL'));
+    assert.equal(f.calls.some(call => call.url.endsWith('/git/refs')), false);
   }
 });
