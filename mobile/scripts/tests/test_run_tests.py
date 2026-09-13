@@ -169,7 +169,6 @@ class EventTests(unittest.TestCase):
                     else len(contents)
                 )
                 sources_by_suite[suite] = contents[declaration.start():next_declaration]
-        selected_methods_by_suite = {}
         for selectors in selectors_by_family.values():
             for selector in selectors:
                 selector_parts = selector.split("/")
@@ -177,31 +176,36 @@ class EventTests(unittest.TestCase):
                 with self.subTest(suite=suite):
                     self.assertIn(suite, declarations, "A stale class selector executes zero XCTest cases")
                 if len(selector_parts) == 3:
-                    selected_methods_by_suite.setdefault(suite, set()).add(selector_parts[2])
                     with self.subTest(selector=selector):
                         self.assertRegex(
                             sources_by_suite[suite],
                             rf"\bfunc\s+{selector_parts[2]}\s*\(",
                             "A stale method selector executes zero XCTest cases",
                         )
-        for suite, selected_methods in selected_methods_by_suite.items():
-            suite_selectors = [
-                selector
-                for selectors in selectors_by_family.values()
-                for selector in selectors
-                if selector.split("/")[1] == suite
-            ]
-            if all(len(selector.split("/")) == 3 for selector in suite_selectors):
-                source_methods = set(re.findall(
-                    r"\bfunc\s+(test\w+)\s*\(",
-                    sources_by_suite[suite],
-                ))
-                with self.subTest(suite=suite):
-                    self.assertEqual(
-                        selected_methods,
-                        source_methods,
-                        "Method-selected XCUI suites must select every source test method",
-                    )
+        for family, selectors in selectors_by_family.items():
+            selected_methods_by_suite = {}
+            suite_selectors_by_suite = {}
+            for selector in selectors:
+                selector_parts = selector.split("/")
+                suite = selector_parts[1]
+                suite_selectors_by_suite.setdefault(suite, []).append(selector)
+                if len(selector_parts) == 3:
+                    selected_methods_by_suite.setdefault(suite, set()).add(selector_parts[2])
+            for suite, selected_methods in selected_methods_by_suite.items():
+                if all(
+                    len(selector.split("/")) == 3
+                    for selector in suite_selectors_by_suite[suite]
+                ):
+                    source_methods = set(re.findall(
+                        r"\bfunc\s+(test\w+)\s*\(",
+                        sources_by_suite[suite],
+                    ))
+                    with self.subTest(family=family, suite=suite):
+                        self.assertEqual(
+                            selected_methods,
+                            source_methods,
+                            "Method-selected XCUI suites must select every source test method",
+                        )
         self.assertIn(
             "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
             (mobile / "PrintFarmerUITests/AttentionActionsUITests.swift").read_text(),
