@@ -1802,7 +1802,7 @@ final class PrinterControlsViewModel: ObservableObject {
             }
             let projection = current.physicalControl
             let unidentifiedBarrierReleased = physicalControl?.barrierHeld == true
-                && physicalControl?.operationId == nil
+                && physicalControl?.operationId == nil && physicalControl?.state == nil
                 && controlOperation == nil
                 && motionJournalKey.map { motionDefaults.data(forKey: $0) == nil } == true
             // A held projection without a matching operation is not unlock proof.
@@ -2072,7 +2072,7 @@ final class PrinterControlsViewModel: ObservableObject {
         return nil
     }
 
-    private var isPrintingOrPaused: Bool {
+    var isPrintingOrPaused: Bool {
         switch printer.state?.lowercased() {
         case "printing", "paused", "starting": return true
         default: return false

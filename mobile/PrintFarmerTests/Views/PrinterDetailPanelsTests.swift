@@ -52,6 +52,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.second.baseURL.host)
         XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
+        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy {
+            $0.value(forHTTPHeaderField: "Authorization") == "Bearer detail-host-test-token"
+        })
+        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.url?.host == fixture.second.baseURL.host })
 
         let field = try XCTUnwrap(heaterTarget(in: controller.view))
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
@@ -86,6 +90,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.first.baseURL.host)
         XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
+        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy {
+            $0.value(forHTTPHeaderField: "Authorization") == "Bearer detail-host-test-token"
+        })
+        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.url?.host == fixture.first.baseURL.host })
     }
 
     private func detailHostFixture() throws -> (
@@ -144,15 +152,24 @@ final class PrinterDetailPanelsTests: XCTestCase {
         // The real switch only reconnects SignalR for a registered authenticated
         // destination. This synthetic token never leaves the isolated mock session.
         credentials.save(ServerCredentials(accessToken: "detail-host-test-token", expiresAt: nil), serverId: second.id)
+        credentials.save(ServerCredentials(accessToken: "detail-host-test-token", expiresAt: nil), serverId: first.id)
         addTeardownBlock { credentials.delete(serverId: second.id) }
+        addTeardownBlock { credentials.delete(serverId: first.id) }
         let services = ServiceContainer(
             serverRegistry: registry,
             credentialsStore: credentials,
             userDefaultsBox: AuthServiceUserDefaultsBox(defaults),
             farmSnapshotRootURL: root,
             synchronizeOfflineQueueOnStartup: false,
-            apiClientFactory: { url, generation, _, _, _ in
-                APIClient(baseURL: url, session: api.urlSession, serverGeneration: generation)
+            apiClientFactory: { url, generation, accessToken, authSessionToken, serverID in
+                let identity = accessToken.flatMap { token in
+                    serverID.map { AuthenticatedIdentity(
+                        accessToken: token, serverID: $0, authSessionToken: authSessionToken
+                    ) }
+                }
+                return APIClient(
+                    baseURL: url, session: api.urlSession, serverGeneration: generation, authenticated: identity
+                )
             },
             signalRServiceFactory: { url, _ in
                 let signal = MockSignalRService()

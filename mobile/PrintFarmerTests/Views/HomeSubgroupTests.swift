@@ -187,6 +187,33 @@ final class HomeSubgroupTests: XCTestCase {
         XCTAssertEqual(hint, "Disabled while printing.")
     }
 
+    func test_accessibilityHint_moonrakerRecoveryBarrier_returnsRecoveryReason() async throws {
+        let printer = try TestData.decodePrinter()
+        let service = MockPrinterService()
+        service.currentControlOperationToReturn = .init(
+            physicalControl: .init(
+                supportedOperations: [.homeAll, .homeXY, .homeZ, .jog, .moveTo],
+                barrierHeld: true,
+                state: .recovering,
+                requiresRecovery: true
+            ),
+            operation: nil
+        )
+        let viewModel = PrinterControlsViewModel.configuredForTests(
+            printerService: service, printer: printer
+        )
+        await viewModel.loadCapabilities()
+
+        let hint = HomeSubgroup(viewModel: viewModel).accessibilityHint(
+            hasError: false, idleHint: "Homes X, Y, and Z."
+        )
+
+        XCTAssertEqual(
+            hint,
+            "Motion outcome is uncertain or recovery is in progress. Controls remain locked. An operator with queue:reconcile permission and printer Submit access must verify sender isolation, clear queued backend work and inspect the machine using printer recovery on the web."
+        )
+    }
+
     func test_accessibilityValue_pending_returnsPending() throws {
         let view = HomeSubgroup(viewModel: PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(), printer: try idlePrinter()))
