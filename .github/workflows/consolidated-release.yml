@@ -69,6 +69,7 @@ jobs:
           RELEASE_STAGE: ${{ inputs.stage }}
           RELEASE_TAG: ${{ inputs.version }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
         run: node scripts/ci/release-control.mjs admit
 
   authorize:
@@ -113,6 +114,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
           RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+          RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
           RELEASE_CHANNEL: ${{ inputs.channel }}
           RELEASE_STAGE: ${{ inputs.stage }}
           RELEASE_TAG: ${{ inputs.version }}

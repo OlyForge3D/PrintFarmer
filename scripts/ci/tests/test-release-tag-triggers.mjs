@@ -39,13 +39,14 @@ const hotfixQualification = () => ({
 });
 function fixtureProtection(channel) {
   const payload = {
-    schema: 2, repository: context().repository, channel, branch: channel === 'stable' ? 'main' : 'development',
-    verifiedAt: created, policyProfile: 'printfarmer-release-protection/v1',
-    claims: Object.fromEntries([
+    schema: 3, repository: context().repository, channel, branch: channel === 'stable' ? 'main' : 'development',
+    verifiedAt: created, policyProfile: 'printfarmer-release-protection/v2',
+    approvalMode: 'separation-of-duties', approvalAssurance: 'non-self-review-enforced',
+    claims: { ...Object.fromEntries([
       'branchDeletionBlocked', 'branchRewritesBlocked', 'codeOwnerApprovalRequired',
-      'requiredChecksEnforced', 'canonicalEnvironmentBranchOnly', 'nonSelfApprovalRequired',
+      'requiredChecksEnforced', 'canonicalEnvironmentBranchOnly', 'manualApprovalRequired',
       'canonicalTagsImmutable', 'ledgerContinuityProtected', 'exclusiveApprovedPublisher',
-    ].map(claim => [claim, true])),
+    ].map(claim => [claim, true])), nonSelfApprovalRequired: true },
   };
   return { ...payload, policyDigest: hash(payload) };
 }
@@ -897,7 +898,8 @@ test('missing live protections fail closed before a publisher operation', async 
   const calls = [];
   await assert.rejects(verifyProtection(async (endpoint, method = 'GET') => {
     calls.push({ endpoint, method }); return [];
-  }, 'insider'), /Owner blocker/);
+  }, 'insider', '123', 'separation-of-duties'), /Owner blocker/);
+  assert.ok(calls.length > 0);
   assert.ok(calls.every(call => call.method === 'GET'));
 });
 
@@ -948,7 +950,7 @@ test('standalone and monolith production frontend builds require the verified co
   assert.match(frontend, /test -n "\$PRINTFARMER_RELEASE_IDENTITY"\n\s+npm run build/);
   assert.doesNotMatch(frontend, /^\s+if:/m, 'Neither channel may skip the consumer or build input');
   const action = readFileSync('.github/actions/release-authorization/action.yml', 'utf8');
-  assert.match(action, /frontend_identity:\n\s+value: \$\{\{ steps\.consume\.outputs\.frontend_identity \}\}/);
+  assert.match(action, /frontend_identity:\r?\n\s+value: \$\{\{ steps\.consume\.outputs\.frontend_identity \}\}/);
   assert.match(action, /node scripts\/ci\/release-control\.mjs consume/);
 
   const monolith = docker.split('\n  build-monolith:')[1].split(/\n  [\w-]+:/)[0];
@@ -1775,7 +1777,7 @@ test('history traversal never trusts a truncated compare list or skips old edges
     /counter rollback/, 'rollback beyond the first 1000 snapshots');
 });
 
-function protectionFixture(channel = 'insider') {
+function protectionFixture(channel = 'insider', approvalMode = 'separation-of-duties') {
   const branch = channel === 'stable' ? 'main' : 'development';
   const names = ['release-canonical-tags', 'release-ledger-continuity', 'release-tag-creators', 'release-ledger-writer'];
   const rulesets = names.map((name, id) => ({
@@ -1789,7 +1791,11 @@ function protectionFixture(channel = 'insider') {
   const environment = { name: `release-${channel}`, privateMarker: 'raw-environment-sentinel',
     deployment_branch_policy: { custom_branch_policies: true },
     protection_rules: [{ type: 'required_reviewers', prevent_self_review: true,
-      reviewers: [{ id: 7, login: 'raw-reviewer-sentinel' }] }] };
+      reviewers: [{ type: 'User', reviewer: { id: 7, login: 'raw-reviewer-sentinel' } }] }] };
+  if (approvalMode === 'single-maintainer') {
+    environment.protection_rules[0].prevent_self_review = false;
+    environment.protection_rules[0].reviewers[0].reviewer.login = 'jpapiez';
+  }
   const api = async (endpoint, method = 'GET') => {
     assert.equal(method, 'GET');
     if (endpoint === `rules/branches/${branch}`) return [
@@ -1808,27 +1814,142 @@ function protectionFixture(channel = 'insider') {
 
 test('live protection adapter accepts only scoped reviewer-gated environments and exclusive publisher rules', async () => {
   const { api, environment, rulesets } = protectionFixture();
-  const evidence = await verifyProtection(api, 'insider', '123');
-  assert.equal(evidence.schema, 2);
+  const evidence = await verifyProtection(api, 'insider', '123', 'separation-of-duties');
+  assert.equal(evidence.schema, 3);
   verifyProtectionEvidence(evidence, 'insider');
   assert.equal(evidence.claims.nonSelfApprovalRequired, true);
   assert.doesNotMatch(JSON.stringify(evidence), /rulesets|environment"|reviewers|publisherAppId|actor_id/);
   assert.throws(() => verifyProtectionEvidence(evidence, 'stable'), /mismatched/);
-  await assert.rejects(verifyProtection(api, 'insider', '999'), /approved publisher app/);
+  await assert.rejects(verifyProtection(api, 'insider', '999', 'separation-of-duties'), /approved publisher app/);
   environment.protection_rules[0].prevent_self_review = false;
-  await assert.rejects(verifyProtection(api, 'insider', '123'), /non-self reviewer/);
+  await assert.rejects(verifyProtection(api, 'insider', '123', 'separation-of-duties'), /self-review setting/);
   environment.protection_rules[0].prevent_self_review = true;
   rulesets[0].bypass_actors.push({ actor_type: 'RepositoryRole', actor_id: 5 });
-  await assert.rejects(verifyProtection(api, 'insider', '123'), /continuity bypass/);
+  await assert.rejects(verifyProtection(api, 'insider', '123', 'separation-of-duties'), /continuity bypass/);
   rulesets[0].bypass_actors = [];
   const staleListing = async endpoint => endpoint === 'rulesets?per_page=100'
     ? rulesets.map(rule => ({ ...rule, enforcement: 'active' })) : api(endpoint);
   rulesets[0].enforcement = 'disabled';
-  await assert.rejects(verifyProtection(staleListing, 'insider', '123'), /active release-canonical-tags/);
+  await assert.rejects(verifyProtection(staleListing, 'insider', '123', 'separation-of-duties'), /active release-canonical-tags/);
+});
+
+for (const channel of ['stable', 'insider']) {
+  for (const mode of ['single-maintainer', 'separation-of-duties']) {
+    test(`${channel} ${mode} requires manual approval and binds honest public-safe claims`, async () => {
+      const fixture = protectionFixture(channel, mode);
+      const evidence = await verifyProtection(fixture.api, channel, '123', mode);
+      verifyProtectionEvidence(evidence, channel);
+      assert.equal(evidence.approvalMode, mode);
+      assert.equal(evidence.approvalAssurance,
+        mode === 'single-maintainer' ? 'owner-confirmed/self-attested' : 'non-self-review-enforced');
+      assert.equal(evidence.claims.manualApprovalRequired, true);
+      assert.equal(evidence.claims.nonSelfApprovalRequired, mode === 'separation-of-duties');
+      assert.doesNotMatch(JSON.stringify(evidence), /jpapiez|raw-reviewer|reviewers|publisherAppId|actor_id/);
+      const original = structuredClone(fixture.environment.protection_rules);
+      for (const rules of [undefined, [], [original[0], original[0]],
+        [{ ...original[0], reviewers: [] }], [{ ...original[0], reviewers: [{}] }],
+        [{ ...original[0], reviewers: [{ type: 'User', reviewer: { id: 0, login: 'jpapiez' } }] }],
+        [{ ...original[0], prevent_self_review: undefined }],
+        [{ ...original[0], prevent_self_review: mode === 'single-maintainer' }]]) {
+        fixture.environment.protection_rules = rules;
+        await assert.rejects(verifyProtection(fixture.api, channel, '123', mode), /Owner blocker/);
+      }
+      fixture.environment.protection_rules = original;
+      for (const mutate of [
+        item => { delete item.approvalMode; },
+        item => { item.approvalMode = 'unknown'; },
+        item => { item.approvalAssurance = 'independent-approval'; },
+        item => { item.claims.manualApprovalRequired = false; },
+        item => { item.claims.nonSelfApprovalRequired = !item.claims.nonSelfApprovalRequired; },
+        item => { item.schema = 2; item.policyProfile = 'printfarmer-release-protection/v1'; },
+        item => { item.reviewers = ['private-reviewer']; },
+      ]) {
+        const changed = structuredClone(evidence);
+        mutate(changed);
+        const { policyDigest: ignored, ...payload } = changed;
+        changed.policyDigest = hash(payload);
+        assert.throws(() => verifyProtectionEvidence(changed, channel), ReleasePolicyError);
+      }
+    });
+  }
+}
+
+test('single-maintainer accepts only owner-approved users and never fingerprints their identities', async () => {
+  const fixture = protectionFixture('insider', 'single-maintainer');
+  const rule = fixture.environment.protection_rules[0];
+  const first = await verifyProtection(fixture.api, 'insider', '123', 'single-maintainer');
+  const owner = structuredClone(rule.reviewers[0]);
+  const other = { type: 'User', reviewer: { id: 99, login: 'private-delegate' } };
+  for (const reviewers of [[other], [owner, other],
+    [{ type: 'Team', reviewer: { id: 8, slug: 'private-team' } }]]) {
+    rule.reviewers = reviewers;
+    await assert.rejects(verifyProtection(fixture.api, 'insider', '123', 'single-maintainer'),
+      /explicitly owner-approved/);
+  }
+  rule.reviewers = [other];
+  const second = await verifyProtection(fixture.api, 'insider', '123', 'single-maintainer', '["private-delegate"]');
+  const { policyDigest: ignoredFirst, verifiedAt: firstTime, ...a } = first;
+  const { policyDigest: ignoredSecond, verifiedAt: secondTime, ...b } = second;
+  assert.deepEqual(a, b);
+  assert.doesNotMatch(JSON.stringify(second), /private-delegate|jpapiez/);
+  rule.reviewers = [owner];
+  for (const invalid of ['private-delegate', '[]', '{}', 'null', '[""]', '[7]', '["bad\\nlogin"]']) {
+    await assert.rejects(verifyProtection(fixture.api, 'insider', '123', 'single-maintainer', invalid),
+      error => error.message === 'Owner blocker: invalid owner-approved reviewer configuration');
+  }
+});
+
+test('missing or unknown approval mode cannot read policy or admit or authorize a release', async () => {
+  const fixture = authorizationFixture();
+  const previous = globalThis.fetch;
+  globalThis.fetch = () => assert.fail('Invalid mode must fail before network access');
+  try {
+    for (const mode of [undefined, '', 'unknown', 'Single-maintainer', 'single-maintainer ', 'single-maintainer\n', true]) {
+      await assert.rejects(verifyProtection(() => assert.fail('No policy read'), 'insider', '123', mode),
+        /RELEASE_APPROVAL_MODE/);
+      for (const operation of ['admit', 'authorize']) {
+        await assert.rejects(runReleaseControl(operation, { ...fixture.env, RELEASE_APPROVAL_MODE: mode }),
+          /RELEASE_APPROVAL_MODE/);
+      }
+    }
+  } finally { globalThis.fetch = previous; }
+});
+
+test('release workflow explicitly wires approval mode and confines reviewer evidence to protected authorization', () => {
+  const text = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
+  const admissionJob = text.split('  admit:')[1].split('  authorize:')[0];
+  const authorizationJob = text.split('  authorize:')[1].split('  publish:')[0];
+  for (const job of [admissionJob, authorizationJob]) {
+    assert.match(job, /RELEASE_APPROVAL_MODE: \$\{\{ vars\.RELEASE_APPROVAL_MODE \}\}/);
+  }
+  assert.doesNotMatch(admissionJob, /RELEASE_OWNER_APPROVED_REVIEWERS/);
+  assert.match(authorizationJob, /environment: release-\$\{\{ needs\.admit\.outputs\.channel \}\}/);
+  assert.match(authorizationJob,
+    /RELEASE_OWNER_APPROVED_REVIEWERS: \$\{\{ secrets\.RELEASE_OWNER_APPROVED_REVIEWERS \}\}/);
+});
+
+test('single-maintainer authorization rejects unapproved, automatic and conflicting policies before writes', async () => {
+  const previous = globalThis.fetch;
+  try {
+    for (const mutateEnvironment of [
+      env => { env.protection_rules = []; },
+      env => { env.protection_rules[0].reviewers = []; },
+      env => { env.protection_rules[0].reviewers[0].reviewer.login = 'unapproved'; },
+      env => { env.protection_rules[0].prevent_self_review = true; },
+      env => { env.deployment_branch_policy.custom_branch_policies = false; },
+    ]) {
+      const fixture = authorizationFixture(state(), { approvalMode: 'single-maintainer', mutateEnvironment });
+      globalThis.fetch = fixture.fetch;
+      await assert.rejects(runReleaseControl('authorize', fixture.env), /Owner blocker/);
+      assert.ok(fixture.calls.length > 0);
+      assert.ok(fixture.calls.every(call => call.method === 'GET'));
+      assert.deepEqual(fixture.ledgerWrites, []);
+    }
+  } finally { globalThis.fetch = previous; }
 });
 
 async function authorizedRecord() {
-  const protection = await verifyProtection(protectionFixture().api, 'insider', '123');
+  const protection = await verifyProtection(protectionFixture().api, 'insider', '123', 'separation-of-duties');
   return { ...record(), created: protection.verifiedAt, protection };
 }
 
@@ -1926,7 +2047,7 @@ test('normalized attestation and artifact writers reject raw, unknown and weaken
 });
 
 test('stable artifact qualification retains pass claims but never owner free text or reviewer identities', async () => {
-  const protection = await verifyProtection(protectionFixture().api, 'insider', '123');
+  const protection = await verifyProtection(protectionFixture().api, 'insider', '123', 'separation-of-duties');
   const { policyDigest: ignored, ...payload } = {
     ...protection, channel: 'stable', branch: 'main',
   };
@@ -1960,13 +2081,15 @@ test('stable artifact qualification retains pass claims but never owner free tex
 
 test('raw policy identity changes do not affect normalized digests and API errors cannot disclose raw payloads', async () => {
   const fixture = protectionFixture();
-  const first = await verifyProtection(fixture.api, 'insider', '123');
-  fixture.environment.protection_rules[0].reviewers = [{ id: 999, login: 'another-private-reviewer' }];
+  const first = await verifyProtection(fixture.api, 'insider', '123', 'separation-of-duties');
+  fixture.environment.protection_rules[0].reviewers = [
+    { type: 'User', reviewer: { id: 999, login: 'another-private-reviewer' } },
+  ];
   for (const rule of fixture.rulesets) {
     rule.privateMarker = 'changed-private-rule';
     if (rule.bypass_actors.length) rule.bypass_actors[0].actor_id = 456;
   }
-  const second = await verifyProtection(fixture.api, 'insider', '456');
+  const second = await verifyProtection(fixture.api, 'insider', '456', 'separation-of-duties');
   const { policyDigest: ignoredFirst, verifiedAt: firstTime, ...a } = first;
   const { policyDigest: ignoredSecond, verifiedAt: secondTime, ...b } = second;
   assert.deepEqual(a, b, 'No raw policy data or identity fingerprint may survive normalization');
@@ -1976,7 +2099,7 @@ test('raw policy identity changes do not affect normalized digests and API error
     await assert.rejects(verifyProtection(async endpoint => {
       if (endpoint.startsWith(endpointPrefix)) throw new Error('raw-reviewer-sentinel private-value');
       return fixture.api(endpoint);
-    }, 'insider', '456'), error => error.message === 'Protection policy read failed');
+    }, 'insider', '456', 'separation-of-duties'), error => error.message === 'Protection policy read failed');
   }
 });
 
@@ -1987,7 +2110,8 @@ function authorizationFixture(initial = state(), settings = {}) {
   const selected = context({ channel, eventSha: sourceCommit, workflowSha: sourceCommit,
     ref: `refs/heads/${branch}`, workflowBranch: branch,
     workflowIdentity: context().workflowIdentity.replace('/development', `/${branch}`) });
-  const { api: policies } = protectionFixture(channel);
+  const { api: policies, environment } = protectionFixture(channel, settings.approvalMode);
+  settings.mutateEnvironment?.(environment);
   const trees = promotionApi(settings.treeOptions);
   let comparedTree = false;
   const objects = new Map();
@@ -2012,13 +2136,14 @@ function authorizationFixture(initial = state(), settings = {}) {
   const env = {
     GH_TOKEN: 'github-fixture', RELEASE_PUBLISHER_TOKEN: 'publisher-fixture',
     RELEASE_PUBLISHER_APP_ID: '123', RELEASE_LEDGER_ANCHOR: anchor,
+    RELEASE_APPROVAL_MODE: settings.approvalMode ?? 'separation-of-duties',
     GITHUB_REPOSITORY: selected.repository, GITHUB_EVENT_NAME: selected.event,
     GITHUB_REF: selected.ref, GITHUB_SHA: sourceCommit,
     GITHUB_WORKFLOW_REF: selected.workflowIdentity, GITHUB_WORKFLOW_SHA: sourceCommit,
     GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '1', RELEASE_CHANNEL: channel,
   };
   return {
-    env, calls, ledgerWrites,
+    env, calls, ledgerWrites, environment,
     deleteTag() { tag = undefined; },
     async fetch(url, options) {
       const endpoint = url.split('/repos/OlyForge3D/PrintFarmer/')[1];
@@ -2556,8 +2681,9 @@ test('public ledger schema rejects malformed maps and typed references; stable o
   assert.throws(() => publicLedger({ ...ledger, lastHistoricalStable: '1.2.3-insider.1' }), /stable floor/);
 });
 
-test('actual control flow keeps github.token read-only and requires App verification before any writes', async () => {
-  const fixture = authorizationFixture();
+for (const approvalMode of ['single-maintainer', 'separation-of-duties']) {
+test(`${approvalMode} control flow keeps github.token read-only and requires App verification before any writes`, async () => {
+  const fixture = authorizationFixture(state(), { approvalMode });
   const originalFetch = globalThis.fetch;
   const cwd = process.cwd();
   const previousOutput = process.env.GITHUB_OUTPUT;
@@ -2596,6 +2722,7 @@ test('actual control flow keeps github.token read-only and requires App verifica
     await runReleaseControl('authorize', fixture.env);
     const identity = JSON.parse(readFileSync(authorizationPath, 'utf8'));
     verifyProtectionEvidence(identity.protection, 'insider');
+    assert.equal(identity.protection.approvalMode, approvalMode);
     const firstWrite = fixture.calls.findIndex(call => call.method !== 'GET');
     const adminCalls = fixture.calls.filter(call => call.admin);
     assert.ok(adminCalls.length >= 8 && adminCalls.every(call => call.publisher));
@@ -2603,6 +2730,14 @@ test('actual control flow keeps github.token read-only and requires App verifica
     const signedBytes = readFileSync(authorizationPath, 'utf8');
     await runReleaseControl('authorize', fixture.env);
     assert.equal(readFileSync(authorizationPath, 'utf8'), signedBytes, 'Retry retains original evidence bytes');
+    const changedMode = approvalMode === 'single-maintainer' ? 'separation-of-duties' : 'single-maintainer';
+    const originalRules = structuredClone(fixture.environment.protection_rules);
+    fixture.environment.protection_rules = protectionFixture('insider', changedMode).environment.protection_rules;
+    fixture.calls.length = 0;
+    await assert.rejects(runReleaseControl('authorize', { ...fixture.env, RELEASE_APPROVAL_MODE: changedMode }),
+      /Approval mode changed after reservation/);
+    assert.ok(fixture.calls.every(call => call.method === 'GET'));
+    fixture.environment.protection_rules = originalRules;
     fixture.calls.length = 0;
     const consumer = { ...fixture.env, RELEASE_PUBLISHER_TOKEN: undefined, RELEASE_PUBLISHER_APP_ID: undefined,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
@@ -2652,9 +2787,10 @@ test('actual control flow keeps github.token read-only and requires App verifica
     rmSync(root, { recursive: true, force: true });
   }
 });
+}
 
 test('missing, malformed and weakened signed protection evidence always fails closed', async () => {
-  const evidence = await verifyProtection(protectionFixture().api, 'insider', '123');
+  const evidence = await verifyProtection(protectionFixture().api, 'insider', '123', 'separation-of-duties');
   for (const mutate of [
     item => { item.schema = 0; }, item => { item.repository = 'fork/repo'; },
     item => { item.verifiedAt = 'invalid'; }, item => { item.branchRules = []; },

@@ -2,7 +2,7 @@ import { appendFileSync, closeSync, constants, fstatSync, lstatSync, openSync, r
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   admit, advance, hash, requireThat, reserve, transact, verifyConsumer, verifyTag,
-  identityLabels, parseTag, verifyProtectionEvidence, validateReservationAdmission,
+  identityLabels, parseTag, verifyProtectionEvidence, validateReservationAdmission, validateApprovalMode,
 } from './release-policy.mjs';
 import {
   branchHead, command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion, verifyProtection,
@@ -65,6 +65,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   const context = runContext(env);
   const store = gitLedger(api, env.RELEASE_LEDGER_ANCHOR);
   if (['admit', 'authorize'].includes(operation)) {
+    validateApprovalMode(env.RELEASE_APPROVAL_MODE);
     const channel = context.event === 'schedule' ? 'insider' : context.channel;
     const branch = channel === 'stable' ? 'main' : 'development';
     const { state } = await store.read();
@@ -82,7 +83,8 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     output('source_sha', context.eventSha);
     output('channel', admission.channel);
     if (operation === 'admit') return;
-    const protection = await verifyProtection(api, admission.channel, env.RELEASE_PUBLISHER_APP_ID);
+    const protection = await verifyProtection(api, admission.channel, env.RELEASE_PUBLISHER_APP_ID,
+      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS);
     const record = await transact(store, async state => {
       const existing = validateReservationAdmission(state, admission);
       requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during allocation retry');
@@ -92,6 +94,8 @@ export async function runReleaseControl(operation, env = process.env, verify = c
         // A lost private artifact cannot be reconstructed from public ledger data.
         const saved = readPrivateAuthorization();
         requireThat(hash(saved) === existing.identitySha256, 'Original authorization unavailable; rerun with a new attempt');
+        requireThat(saved.protection.approvalMode === protection.approvalMode,
+          'Approval mode changed after reservation; rerun with a new attempt');
         return saved;
       }
       const reservation = reserve(state, admission, new Date().toISOString(), protection, qualification);

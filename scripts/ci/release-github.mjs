@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import {
   repository, ledgerBranch, requireThat, validateLedger, verifyTag, compareVersions, normalizeProtectionEvidence,
   hash, parseTag, publicLedgerQualification, publicRecord, validateRecord, requireKeys, requireString,
-  validatePromotionOrigin, parseVersionFile, requireObject, validateReservationAdmission,
+  validatePromotionOrigin, parseVersionFile, requireObject, validateReservationAdmission, validateApprovalMode,
 } from './release-policy.mjs';
 import { publicAuthorization, writePublicSet } from './release-authorization.mjs';
 
@@ -282,7 +282,8 @@ export function gitLedger(api, anchor) {
   };
 }
 
-export async function verifyProtection(api, channel, publisherAppId = process.env.RELEASE_PUBLISHER_APP_ID) {
+export async function verifyProtection(api, channel, publisherAppId, approvalMode, ownerApprovedReviewers) {
+  validateApprovalMode(approvalMode);
   const readPolicy = async endpoint => {
     try { return await api(endpoint); }
     catch (error) {
@@ -306,7 +307,7 @@ export async function verifyProtection(api, channel, publisherAppId = process.en
   }
   const evidence = { schema: 1, repository, channel, branch, publisherAppId,
     verifiedAt: new Date().toISOString(), branchRules, environment, branchPolicies, rulesets };
-  return normalizeProtectionEvidence(evidence, channel, publisherAppId);
+  return normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers);
 }
 
 export async function ensureSourceTag(api, store, record, transact) {
