@@ -1,0 +1,48 @@
+name: Record canonical qualification
+run-name: Canonical evidence for ${{ github.event.workflow_run.id }}
+
+on:
+  # Default workflow only; API-revalidated metadata, no source/artifacts from triggering run.
+  workflow_run:  # zizmor: ignore[dangerous-triggers]
+    workflows: [Qualify canonical release]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: canonical-qualification-evidence
+  cancel-in-progress: false
+
+jobs:
+  record:
+    name: Record canonical evidence
+    if: >-
+      github.repository == 'OlyForge3D/PrintFarmer' &&
+      github.event.workflow_run.event == 'workflow_dispatch' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+      github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      pull-requests: read
+      statuses: write
+    steps:
+      # Never check out workflow_run.head_sha or download/execute CI artifacts.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        with:
+          node-version: 24
+      - name: Revalidate and record bounded canonical evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+          QUALIFICATION_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: node scripts/ci/canonical-qualification-control.mjs record

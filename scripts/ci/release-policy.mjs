@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { publicIdentityFields } from '../../src/Web/ReactApp/public-release-identity.mjs';
 
 export const repository = 'OlyForge3D/PrintFarmer';
 export const workflow = '.github/workflows/consolidated-release.yml';
 export const ledgerBranch = 'release-ledger';
+export const releaseBuildChecks = ['CI tooling tests', '.NET build', 'Frontend build & tests'];
+export const releaseReviewStatus = 'squad/pre-pr-verdict';
+export const releaseRequiredChecks = [...releaseBuildChecks, releaseReviewStatus];
 const numeric = '(0|[1-9][0-9]*)';
 const basePattern = `${numeric}\\.${numeric}\\.${numeric}`;
 const tagPattern = new RegExp(`^v(${basePattern})(?:-(insider|beta|rc)\\.([1-9][0-9]*))?$`);
@@ -265,34 +269,110 @@ export function writePublicSet(record, set, identitySha256) {
   return { schema: 1, identity, managedEligible: false, images };
 }
 
-export function verifyRawProtectionEvidence(evidence, channel, publisherAppId) {
+export function validateApprovalMode(mode) {
+  requireThat(['single-maintainer', 'separation-of-duties'].includes(mode),
+    'Owner blocker: RELEASE_APPROVAL_MODE must be single-maintainer or separation-of-duties');
+  return mode;
+}
+
+function approvedReviewers(value) {
+  if (value === undefined || value === '') return ['jpapiez'];
+  let reviewers;
+  try { reviewers = JSON.parse(value); } catch {
+    throw new ReleasePolicyError('Owner blocker: invalid owner-approved reviewer configuration');
+  }
+  requireThat(Array.isArray(reviewers) && reviewers.length > 0 && reviewers.every(login =>
+    typeof login === 'string' && /^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i.test(login) && !/[\r\n]/.test(login)),
+  'Owner blocker: invalid owner-approved reviewer configuration');
+  return ['jpapiez', ...reviewers.map(login => login.toLowerCase())];
+}
+
+function eligibleReviewer(entry) {
+  return entry && ['User', 'Team'].includes(entry.type) &&
+    Number.isSafeInteger(entry.reviewer?.id) && entry.reviewer.id > 0 &&
+    typeof entry.reviewer[entry.type === 'User' ? 'login' : 'slug'] === 'string' &&
+    entry.reviewer[entry.type === 'User' ? 'login' : 'slug'].length > 0;
+}
+
+export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers) {
+  validateApprovalMode(approvalMode);
   const branch = channel === 'stable' ? 'main' : 'development';
   requireThat(evidence?.schema === 1 && evidence.repository === repository &&
     ['stable', 'insider'].includes(channel) && evidence.channel === channel && evidence.branch === branch &&
     /^[1-9][0-9]*$/.test(publisherAppId || '') && evidence.publisherAppId === publisherAppId &&
     Number.isFinite(Date.parse(evidence.verifiedAt)),
   'Missing or mismatched publisher protection evidence');
-  const { branchRules: rules, environment, branchPolicies: policies, rulesets } = evidence;
-  requireThat(Array.isArray(rules) && Array.isArray(rulesets) && rulesets.length === 4,
+  const { branchRules: rules, branchRulesets, environment, branchPolicies: policies, rulesets } = evidence;
+  requireThat(Array.isArray(rules) && rules.length > 0 && rules.length < 100 &&
+    rules.every(rule => rule && typeof rule.type === 'string' &&
+      Number.isSafeInteger(rule.ruleset_id) && rule.ruleset_id > 0) &&
+    Array.isArray(branchRulesets) && Array.isArray(rulesets) && rulesets.length === 4,
     'Incomplete protection evidence');
+  const branchRuleIds = [...new Set(rules.map(rule => rule.ruleset_id))];
+  requireThat(branchRulesets.length === branchRuleIds.length && branchRuleIds.every(id =>
+    branchRulesets.filter(rule => rule?.id === id).length === 1), 'Incomplete branch ruleset evidence');
+  for (const rule of branchRulesets) {
+    requireThat(rule.enforcement === 'active' && rule.target === 'branch' &&
+      Array.isArray(rule.bypass_actors) && rule.bypass_actors.length === 0 &&
+      Array.isArray(rule.conditions?.ref_name?.include) &&
+      (rule.conditions.ref_name.include.includes(`refs/heads/${branch}`) ||
+        rule.conditions.ref_name.include.includes('~ALL')) &&
+      Array.isArray(rule.conditions.ref_name.exclude) && rule.conditions.ref_name.exclude.length === 0 &&
+      Array.isArray(rule.rules) && rules.filter(item => item.ruleset_id === rule.id).every(item =>
+        rule.rules.some(detail => detail.type === item.type &&
+          isDeepStrictEqual(detail.parameters ?? {}, item.parameters ?? {}))),
+    'Owner blocker: branch policy permits bypass or changed during verification');
+  }
   for (const type of ['deletion', 'non_fast_forward', 'pull_request', 'required_status_checks']) {
     requireThat(rules.some(rule => rule.type === type), `Owner blocker: ${branch} lacks active ${type} rule`);
   }
-  requireThat(rules.some(rule => rule.type === 'pull_request' &&
-    rule.parameters?.require_code_owner_review && rule.parameters?.required_approving_review_count >= 1),
-  'Owner blocker: workflow/VERSION code-owner review not enforced');
-  requireThat(rules.some(rule => rule.type === 'required_status_checks' &&
-    rule.parameters?.required_status_checks?.length > 0),
-  'Owner blocker: no exact-SHA required checks');
+  const separation = approvalMode === 'separation-of-duties';
+  for (const { parameters: policy } of rules.filter(rule => rule.type === 'pull_request')) {
+    requireThat(policy && policy.require_code_owner_review === separation &&
+      Number.isSafeInteger(policy.required_approving_review_count) &&
+      (separation ? policy.required_approving_review_count >= 1 : policy.required_approving_review_count === 0) &&
+      policy.required_approving_review_count <= 6 &&
+      policy.required_review_thread_resolution === true &&
+      typeof policy.require_last_push_approval === 'boolean' &&
+      (!policy.require_last_push_approval || separation) &&
+      policy.dismiss_stale_reviews_on_push === true,
+    'Owner blocker: branch PR review policy conflicts with approval mode or lacks conversation resolution');
+  }
+  const requiredContexts = new Set();
+  for (const { parameters: policy } of rules.filter(rule => rule.type === 'required_status_checks')) {
+    requireThat(policy?.strict_required_status_checks_policy === true &&
+      Array.isArray(policy.required_status_checks) && policy.required_status_checks.length > 0 &&
+      policy.required_status_checks.every(check => check && typeof check.context === 'string' &&
+        check.context.trim() === check.context && check.context.length > 0 && !/[\r\n]/.test(check.context) &&
+        (check.integration_id == null || Number.isSafeInteger(check.integration_id) && check.integration_id > 0)),
+    'Owner blocker: malformed or non-strict exact-SHA required checks');
+    for (const check of policy.required_status_checks) requiredContexts.add(check.context);
+  }
+  requireThat(releaseRequiredChecks.every(context => requiredContexts.has(context)),
+    'Owner blocker: required release checks or squad/pre-pr-verdict status missing');
   requireThat(environment?.name === `release-${channel}` &&
     environment.deployment_branch_policy?.custom_branch_policies,
   'Owner blocker: publishing environment lacks branch restrictions');
+  requireThat(environment.can_admins_bypass === false,
+    'Owner blocker: publishing environment must explicitly disable administrator bypass');
   requireThat(policies?.branch_policies?.length === 1 &&
     policies.branch_policies[0].name === branch && policies.branch_policies[0].type === 'branch',
   'Owner blocker: publishing environment must allow only its canonical branch');
-  requireThat(environment.protection_rules?.some(rule => rule.type === 'required_reviewers' &&
-    rule.prevent_self_review === true && rule.reviewers?.length > 0),
-  'Owner blocker: publishing environment requires non-self reviewer approval');
+  const reviewerRules = Array.isArray(environment.protection_rules)
+    ? environment.protection_rules.filter(rule => rule.type === 'required_reviewers') : [];
+  requireThat(reviewerRules.length === 1 && Array.isArray(reviewerRules[0].reviewers) &&
+    reviewerRules[0].reviewers.length > 0 && reviewerRules[0].reviewers.every(eligibleReviewer),
+  'Owner blocker: publishing environment requires manual approval by eligible reviewers');
+  const reviewerRule = reviewerRules[0];
+  requireThat(reviewerRule.prevent_self_review === (approvalMode === 'separation-of-duties'),
+    'Owner blocker: publishing environment self-review setting conflicts with approval mode');
+  if (approvalMode === 'single-maintainer') {
+    const approved = approvedReviewers(ownerApprovedReviewers);
+    // GitHub accepts any one listed reviewer, so every possible approver must be owner-approved.
+    requireThat(reviewerRule.reviewers.every(entry => entry.type === 'User' &&
+      approved.includes(entry.reviewer.login.toLowerCase())),
+    'Owner blocker: publishing environment reviewers must be explicitly owner-approved users');
+  }
   for (const name of ['release-canonical-tags', 'release-ledger-continuity',
     'release-tag-creators', 'release-ledger-writer']) {
     const rule = rulesets.find(item => item.name === name && item.enforcement === 'active');
@@ -317,41 +397,60 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId) {
   }
 }
 
-const protectionProfile = 'printfarmer-release-protection/v1';
+const protectionProfile = 'printfarmer-release-protection/v4';
 const protectionClaims = [
-  'branchDeletionBlocked', 'branchRewritesBlocked', 'codeOwnerApprovalRequired',
-  'requiredChecksEnforced', 'canonicalEnvironmentBranchOnly', 'nonSelfApprovalRequired',
+  'branchDeletionBlocked', 'branchRewritesBlocked', 'pullRequestRequired',
+  'branchBypassBlocked', 'conversationResolutionRequired', 'selfAttestedReviewRequired',
+  'requiredChecksEnforced', 'canonicalEnvironmentBranchOnly', 'manualApprovalRequired',
+  'environmentAdminBypassBlocked',
   'canonicalTagsImmutable', 'ledgerContinuityProtected', 'exclusiveApprovedPublisher',
 ];
 
-export function normalizeProtectionEvidence(evidence, channel, publisherAppId) {
-  verifyRawProtectionEvidence(evidence, channel, publisherAppId);
+function approvalAssurance(mode) {
+  return mode === 'single-maintainer' ? 'owner-confirmed/self-attested' : 'non-self-review-enforced';
+}
+
+export function normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers) {
+  verifyRawProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers);
   // Digest only public claims, never low-entropy actor IDs or raw API payloads.
   const attestation = {
-    schema: 2, repository, channel, branch: evidence.branch,
+    schema: 5, repository, channel, branch: evidence.branch,
     verifiedAt: evidence.verifiedAt, policyProfile: protectionProfile,
-    claims: Object.fromEntries(protectionClaims.map(claim => [claim, true])),
+    approvalMode, approvalAssurance: approvalAssurance(approvalMode),
+    claims: { ...Object.fromEntries(protectionClaims.map(claim => [claim, true])),
+      codeOwnerApprovalRequired: approvalMode === 'separation-of-duties',
+      nonSelfApprovalRequired: approvalMode === 'separation-of-duties' },
   };
   return { ...attestation, policyDigest: hash(attestation) };
 }
 
 export function verifyProtectionEvidence(evidence, channel) {
-  const fields = ['schema', 'repository', 'channel', 'branch', 'verifiedAt', 'policyProfile', 'claims', 'policyDigest'];
+  const fields = ['schema', 'repository', 'channel', 'branch', 'verifiedAt', 'policyProfile',
+    'approvalMode', 'approvalAssurance', 'claims', 'policyDigest'];
   requireThat(evidence && Object.keys(evidence).sort().join() === fields.sort().join() &&
-    evidence.schema === 2 && evidence.repository === repository &&
+    evidence.schema === 5 && evidence.repository === repository &&
     ['stable', 'insider'].includes(channel) && evidence.channel === channel &&
     evidence.branch === (channel === 'stable' ? 'main' : 'development') &&
     evidence.policyProfile === protectionProfile &&
     typeof evidence.verifiedAt === 'string' && Number.isFinite(Date.parse(evidence.verifiedAt)) &&
     new Date(evidence.verifiedAt).toISOString() === evidence.verifiedAt,
   'Missing or mismatched normalized protection attestation');
-  requireThat(evidence.claims && Object.keys(evidence.claims).sort().join() === [...protectionClaims].sort().join() &&
-    protectionClaims.every(claim => evidence.claims[claim] === true),
+  validateApprovalMode(evidence.approvalMode);
+  requireThat(evidence.approvalAssurance === approvalAssurance(evidence.approvalMode),
+    'Invalid normalized approval assurance');
+  requireThat(evidence.claims && Object.keys(evidence.claims).sort().join() ===
+    [...protectionClaims, 'codeOwnerApprovalRequired', 'nonSelfApprovalRequired'].sort().join() &&
+    protectionClaims.every(claim => evidence.claims[claim] === true) &&
+    evidence.claims.codeOwnerApprovalRequired === (evidence.approvalMode === 'separation-of-duties') &&
+    evidence.claims.nonSelfApprovalRequired === (evidence.approvalMode === 'separation-of-duties'),
   'Required normalized protection claims missing or weakened');
   const canonical = {
     schema: evidence.schema, repository, channel, branch: evidence.branch,
     verifiedAt: evidence.verifiedAt, policyProfile: protectionProfile,
-    claims: Object.fromEntries(protectionClaims.map(claim => [claim, evidence.claims[claim]])),
+    approvalMode: evidence.approvalMode, approvalAssurance: evidence.approvalAssurance,
+    claims: { ...Object.fromEntries(protectionClaims.map(claim => [claim, evidence.claims[claim]])),
+      codeOwnerApprovalRequired: evidence.claims.codeOwnerApprovalRequired,
+      nonSelfApprovalRequired: evidence.claims.nonSelfApprovalRequired },
   };
   requireThat(evidence.policyDigest === hash(canonical), 'Normalized protection digest mismatch');
 }

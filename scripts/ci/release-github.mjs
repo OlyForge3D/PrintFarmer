@@ -2,9 +2,11 @@ import { execFileSync } from 'node:child_process';
 import {
   repository, ledgerBranch, requireThat, validateLedger, verifyTag, compareVersions, normalizeProtectionEvidence,
   hash, parseTag, publicLedgerQualification, publicRecord, validateRecord, requireKeys, requireString,
-  validatePromotionOrigin, parseVersionFile, requireObject, validateReservationAdmission,
+  validatePromotionOrigin, parseVersionFile, requireObject, validateReservationAdmission, validateApprovalMode,
+  releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks,
 } from './release-policy.mjs';
 import { publicAuthorization, writePublicSet } from './release-authorization.mjs';
+import { evidenceCollection, evidenceBaseEndpoint, readEvidencePages } from './github-evidence-pages.mjs';
 
 // Schema 1 contains only these public maps, immutable references and scalar claims.
 export const publicLedgerFields = [
@@ -101,11 +103,12 @@ export function githubRequestUrl(endpoint, method) {
     /^compare\/[a-f0-9]{40}\.\.\.[a-f0-9]{40}$/,
     /^contents\/VERSION\?ref=[a-f0-9]{40}$/,
     /^commits\/[a-f0-9]{40}\/check-runs\?per_page=100$/,
-    /^rules\/branches\/(?:main|development)$/,
+    /^commits\/[a-f0-9]{40}\/status\?per_page=100$/,
+    /^rules\/branches\/(?:main|development)\?per_page=100$/,
     /^environments\/release-(?:stable|insider)(?:\/deployment-branch-policies)?$/,
     /^rulesets(?:\/[1-9][0-9]*|\?per_page=100)$/,
   ];
-  requireThat((method === 'GET' && reads.some(pattern => pattern.test(endpoint))) ||
+  requireThat((method === 'GET' && reads.some(pattern => pattern.test(evidenceBaseEndpoint(endpoint)))) ||
     (method === 'POST' && ['git/blobs', 'git/trees', 'git/commits', 'git/tags', 'git/refs'].includes(endpoint)) ||
     (method === 'PATCH' && endpoint === 'git/refs/heads/release-ledger'),
   'Release API route or method is not allowlisted');
@@ -116,23 +119,31 @@ export function githubRequestUrl(endpoint, method) {
   return `https://api.github.com/repos/${repository}/${encodedPath}${search}`;
 }
 
-export function githubClient(token = process.env.GH_TOKEN) {
+export function githubClient(token = process.env.GH_TOKEN, fetcher = fetch) {
   requireThat(token, 'Missing GitHub credential');
   return async (endpoint, method = 'GET', body) => {
-    const response = await fetch(githubRequestUrl(endpoint, method), {
-      method, redirect: 'error', headers: {
-        Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
-      }, body: body ? JSON.stringify(body) : undefined,
-    });
-    if (!response.ok) {
-      const target = /^(rules\/|rulesets|environments\/)/.test(endpoint) ? 'protection policy' : endpoint;
-      const error = new Error(`GitHub ${method} ${target}: HTTP ${response.status}`);
-      error.status = response.status;
-      throw error;
+    const request = async path => {
+      const response = await fetcher(githubRequestUrl(path, method), {
+        method, redirect: 'error', headers: {
+          Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+        }, body: body ? JSON.stringify(body) : undefined,
+      });
+      if (!response.ok || response.redirected) {
+        const target = /^(rules\/|rulesets|environments\/)/.test(endpoint) ? 'protection policy' : endpoint;
+        const error = new Error(`GitHub ${method} ${target}: HTTP ${response.status}`);
+        error.status = response.status;
+        throw error;
+      }
+      return { data: response.status === 204 ? undefined : await response.json(), link: response.headers.get('link') };
+    };
+    if (method === 'GET' && evidenceCollection(endpoint) !== undefined) {
+      return readEvidencePages(endpoint, request);
     }
-    return response.status === 204 ? undefined : response.json();
+    const { data, link } = await request(endpoint);
+    requireThat(!link, 'Uncollected release pagination');
+    return data;
   };
 }
 
@@ -282,7 +293,46 @@ export function gitLedger(api, anchor) {
   };
 }
 
-export async function verifyProtection(api, channel, publisherAppId = process.env.RELEASE_PUBLISHER_APP_ID) {
+export async function verifyReleaseChecks(api, sourceCommit, required = releaseRequiredChecks.map(context => ({ context }))) {
+  requireString(sourceCommit, shaPattern, 'qualification source commit');
+  const checks = await api(`commits/${sourceCommit}/check-runs?per_page=100`);
+  const statuses = await api(`commits/${sourceCommit}/status?per_page=100`);
+  requireThat(Number.isSafeInteger(checks?.total_count) && checks.total_count >= 0 &&
+    Array.isArray(checks.check_runs) && checks.check_runs.length === checks.total_count,
+  'Check evidence malformed or truncated');
+  requireThat(statuses?.sha === sourceCommit && Number.isSafeInteger(statuses.total_count) &&
+    statuses.total_count >= 0 &&
+    Array.isArray(statuses.statuses) && statuses.statuses.length === statuses.total_count,
+  'Status evidence malformed, truncated or not bound to exact SHA');
+  for (const policy of required) {
+    const context = policy.context;
+    const matchingChecks = checks.check_runs.filter(check => check?.name === context &&
+      (!releaseBuildChecks.includes(context) || check.app?.slug === 'github-actions') &&
+      (policy.integration_id == null || check.app?.id === policy.integration_id));
+    const matchingStatuses = statuses.statuses.filter(status => status?.context === context);
+    const validIds = entries => entries.every(entry => Number.isSafeInteger(entry.id) && entry.id > 0);
+    requireThat(validIds(matchingChecks) && validIds(matchingStatuses), 'Malformed qualification evidence ID');
+    const latestCheck = matchingChecks.sort((a, b) => b.id - a.id)[0];
+    const latestStatus = matchingStatuses.sort((a, b) => b.id - a.id)[0];
+    const checkPassed = latestCheck?.head_sha === sourceCommit && latestCheck.status === 'completed' &&
+      latestCheck.conclusion === 'success';
+    // Commit statuses have no integration_id or check_suite. Never substitute a green workflow job.
+    const statusPassed = latestStatus?.state === 'success' && policy.integration_id == null;
+    const reviewed = typeof latestStatus?.description === 'string' &&
+      (['REVIEWED (self-attested)', 'REVIEWED (self-attested, carried across sync)', 'APPROVE (owner)']
+        .some(verdict => latestStatus.description.startsWith(`${verdict} @ ${sourceCommit.slice(0, 12)} by `)) ||
+       ['QUALIFIED (self-attested)', 'QUALIFIED (native non-self)']
+         .some(verdict => latestStatus.description === `${verdict} @ ${sourceCommit.slice(0, 12)}`));
+    const requiredPassed = context === releaseReviewStatus ? statusPassed && reviewed :
+      releaseBuildChecks.includes(context) ? checkPassed :
+        latestCheck || latestStatus;
+    requireThat(requiredPassed && (!latestCheck || checkPassed) && (!latestStatus || statusPassed),
+    'Missing successful exact-SHA required qualification');
+  }
+}
+
+export async function verifyProtection(api, channel, publisherAppId, approvalMode, ownerApprovedReviewers, sourceCommit) {
+  validateApprovalMode(approvalMode);
   const readPolicy = async endpoint => {
     try { return await api(endpoint); }
     catch (error) {
@@ -290,7 +340,16 @@ export async function verifyProtection(api, channel, publisherAppId = process.en
     }
   };
   const branch = channel === 'stable' ? 'main' : 'development';
-  const branchRules = await readPolicy(`rules/branches/${branch}`);
+  const branchRules = await readPolicy(`rules/branches/${branch}?per_page=100`);
+  requireThat(Array.isArray(branchRules) && branchRules.length > 0 && branchRules.length < 100 &&
+    branchRules.every(rule => Number.isSafeInteger(rule?.ruleset_id) && rule.ruleset_id > 0),
+  'Owner blocker: branch rules malformed, missing or truncated');
+  const branchRulesets = [];
+  for (const id of new Set(branchRules.map(rule => rule.ruleset_id))) {
+    const detail = await readPolicy(`rulesets/${id}`);
+    requireThat(detail?.id === id, 'Branch ruleset identity changed during verification');
+    branchRulesets.push(detail);
+  }
   const environment = await readPolicy(`environments/release-${channel}`);
   const branchPolicies = await readPolicy(`environments/release-${channel}/deployment-branch-policies`);
   const allRulesets = await readPolicy('rulesets?per_page=100');
@@ -305,8 +364,14 @@ export async function verifyProtection(api, channel, publisherAppId = process.en
     rulesets.push(detail);
   }
   const evidence = { schema: 1, repository, channel, branch, publisherAppId,
-    verifiedAt: new Date().toISOString(), branchRules, environment, branchPolicies, rulesets };
-  return normalizeProtectionEvidence(evidence, channel, publisherAppId);
+    verifiedAt: new Date().toISOString(), branchRules, branchRulesets, environment, branchPolicies, rulesets };
+  const normalized = normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers);
+  if (sourceCommit !== undefined) {
+    const required = branchRules.filter(rule => rule.type === 'required_status_checks')
+      .flatMap(rule => rule.parameters.required_status_checks);
+    await verifyReleaseChecks(api, sourceCommit, required);
+  }
+  return normalized;
 }
 
 export async function ensureSourceTag(api, store, record, transact) {

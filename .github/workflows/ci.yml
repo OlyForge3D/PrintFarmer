@@ -22,6 +22,143 @@ permissions:
   contents: read
 
 jobs:
+  # Only exact canonical-branch manual validation owns these check names.
+  # Other refs/events use distinct skipped names so they cannot shadow PR gates.
+  canonical-path-casing:
+    name: >-
+      ${{ github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') &&
+      'path-casing' || 'Canonical path casing (not selected)' }}
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Node setup
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Run path casing check
+        run: node ./scripts/check-path-casing.js
+
+  canonical-contract-drift:
+    name: >-
+      ${{ github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') &&
+      'Contract drift gate' || 'Canonical contract drift (not selected)' }}
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Install tooling dependencies
+        run: npm ci
+      - name: bash -n syntax check (reused compute-change-set.sh)
+        run: bash -n scripts/ci/compute-change-set.sh
+      - name: Compute change set
+        id: diff
+        # A manual event has no before SHA. Check the canonical commit's own
+        # first-parent delta, not an empty dispatch diff or a moving branch.
+        env:
+          EVENT_NAME: push
+          BEFORE_SHA: ${{ github.sha }}^1
+          AFTER_SHA: ${{ github.sha }}
+          OUT_FILE: ${{ runner.temp }}/canonical-contract-drift-changed.z
+        run: bash scripts/ci/compute-change-set.sh
+      - name: Fail closed if the diff could not be computed
+        if: steps.diff.outputs.force_full_safe != ''
+        env:
+          FORCE_FULL_SAFE: ${{ steps.diff.outputs.force_full_safe }}
+        run: |
+          echo "::error::Canonical diff unavailable (${FORCE_FULL_SAFE}); producer coupling is required." >&2
+          exit 1
+      - name: Test the drift-check script
+        run: node --test scripts/ci/tests/test-check-contract-drift.mjs
+      - name: Test this workflow's own structure
+        run: node --test scripts/ci/tests/test-contract-drift-workflow.mjs
+      - name: Run contract drift gate
+        env:
+          CONTRACT_DRIFT_CHANGED_FILE: ${{ steps.diff.outputs.changed_file }}
+        run: node scripts/ci/check-contract-drift.mjs
+
+  canonical-ios-build:
+    name: >-
+      ${{ github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') &&
+      'Build (iOS)' || 'Canonical iOS build (not selected)' }}
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
+    runs-on: macos-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      # Keep the actual archive steps equivalent to ios-pr-ci.yml. Manual
+      # validation never selects/skips these steps and needs no signing secrets.
+      - name: Verify marketing version consistency
+        run: ./scripts/verify-marketing-version.sh source 1.0
+      - name: Select Xcode
+        run: |
+          XCODE_PATH=$(ls -d /Applications/Xcode_16*.app /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            XCODE_PATH="/Applications/Xcode.app"
+          fi
+          echo "Using: $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
+      - name: Resolve package dependencies
+        run: |
+          xcodebuild -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -resolvePackageDependencies \
+            -clonedSourcePackagesDirPath build/SourcePackages
+      - name: Archive future marketing version
+        timeout-minutes: 20
+        run: |
+          xcodebuild \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath build \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -archivePath build/MarketingVersion.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION=1.1 \
+            SKIP_INSTALL=NO \
+            SWIFT_STRICT_CONCURRENCY=minimal \
+            archive
+      - name: Verify future archived marketing version
+        run: |
+          ./scripts/verify-marketing-version.sh resolved 1.1 \
+            build/MarketingVersion.xcarchive/Products/Applications/PrintFarmer.app/Info.plist
+
   # ---------------------------------------------------------------------------
   # select — compute which downstream jobs to run.
   # ---------------------------------------------------------------------------
@@ -184,7 +321,11 @@ jobs:
         run: node --test scripts/compliance/compliance.test.mjs
 
       - name: Test release tag-trigger policy
-        run: node --test scripts/ci/tests/test-release-tag-triggers.mjs
+        run: >-
+          node --test scripts/ci/tests/test-release-tag-triggers.mjs
+          scripts/ci/tests/test-canonical-qualification.mjs
+          scripts/ci/tests/test-release-rehearsal.mjs
+          scripts/ci/tests/test-github-evidence-pages.mjs
 
       - name: Test daily development image-set policy
         run: node --test scripts/ci/tests/test-daily-development-images.mjs
@@ -1113,10 +1254,42 @@ jobs:
   # ---------------------------------------------------------------------------
   summary:
     name: CI summary
-    needs: [select, ci-tools, dependency-compliance, frontend, dotnet-build, migration-drift, dotnet-test, dotnet-test-providers]
+    needs:
+      - select
+      - ci-tools
+      - dependency-compliance
+      - frontend
+      - dotnet-build
+      - migration-drift
+      - dotnet-test
+      - dotnet-test-providers
+      - canonical-path-casing
+      - canonical-contract-drift
+      - canonical-ios-build
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Require all manual canonical checks
+        if: >-
+          github.event_name == 'workflow_dispatch' &&
+          (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
+        env:
+          PATH_CASING_RESULT: ${{ needs.canonical-path-casing.result }}
+          CONTRACT_DRIFT_RESULT: ${{ needs.canonical-contract-drift.result }}
+          IOS_BUILD_RESULT: ${{ needs.canonical-ios-build.result }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Manual canonical checks"
+            printf -- '- path-casing (Linux): `%s`\n' "$PATH_CASING_RESULT"
+            printf -- '- Contract drift gate (Linux, first-parent delta): `%s`\n' "$CONTRACT_DRIFT_RESULT"
+            printf -- '- Build (iOS) (macOS, unsigned archive): `%s`\n' "$IOS_BUILD_RESULT"
+            echo '- Windows build and iOS simulator tests are not part of this graph.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "$PATH_CASING_RESULT" = success
+          test "$CONTRACT_DRIFT_RESULT" = success
+          test "$IOS_BUILD_RESULT" = success
+
       - name: Publish job results
         env:
           SELECT_RESULT: ${{ needs.select.result }}

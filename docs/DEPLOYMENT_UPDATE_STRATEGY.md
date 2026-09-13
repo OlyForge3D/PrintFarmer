@@ -83,6 +83,52 @@ live rulesets/environments/ledger/publisher setup. #2660 still owns signed
 managed eligibility, image aliases and generated installer references; no
 source-only release or unsigned candidate pointer is an update candidate.
 
+**Canonical qualification (#2686):** the
+[non-publishing qualification path](RELEASE_GUIDE.md#non-publishing-canonical-qualification)
+requires new full-safe manual CI on live `main`/`development` HEAD and a fresh
+commit/run-bound review confirmation. Default-branch verification and a separate
+bounded status writer establish a live, completed audit chain; no PR verdict is
+copied to a squash SHA and no tree-equality review inference is permitted.
+Manual CI includes the genuine `path-casing`, `Contract drift gate` and unsigned
+`Build (iOS)` archive executions in that same run/check suite (#2688).
+External same-name green checks cannot substitute. The archive runs on macOS;
+this graph makes no Windows-build or iOS-simulator-test claim. Evidence expires
+24 hours after CI creation, including queue time; a new graph requires new CI.
+Single-maintainer confirmation is honestly owner-confirmed/self-attested.
+Separation-of-duties additionally requires eligible native code-owner/non-self
+approval on that exact canonical SHA; missing evidence remains blocked.
+Newer runs, reruns, mode drift, edited review, failed checks or HEAD movement
+invalidate qualification. Publication admission revalidates the chain before
+reservation and each CAS retry rather than trusting a green status alone.
+Qualification has no release credentials, environments, OIDC or ledger writes.
+It does not complete #2668 activation: ledger/package rehearsals and private
+owner publisher-credential provisioning remain separate.
+
+**Approval corrections (#2682, #2684):** activation under #2668 requires the
+explicit `RELEASE_APPROVAL_MODE` policy. `single-maintainer`
+requires manual approval by the owner or an explicitly owner-approved user,
+with self-review prevention disabled; its assurance is honestly
+owner-confirmed/self-attested, never separation of duties. The alternative
+`separation-of-duties` mode requires self-review prevention and at least one
+eligible reviewer, plus native branch code-owner review and at least one
+non-self native PR approval. Single-maintainer instead requires zero native
+approvals and no code-owner/last-push approval requirement; its PR-only branch
+flow uses the exact-SHA `squad/pre-pr-verdict` status and build checks,
+conversation resolution and no bypass/force-push/deletion. Both modes retain
+these branch/check controls and require the live environment response to explicitly
+report `can_admins_bypass: false` before reservation; required reviewers alone
+are insufficient. Missing/unknown modes and admission/authorization mode drift
+fail closed. Mode-specific normalized schema 5/v4 claims distinguish
+`selfAttestedReviewRequired` from `codeOwnerApprovalRequired` and
+`nonSelfApprovalRequired`, include administrator bypass prevention, and expose
+no reviewer identities or raw policy evidence. Earlier evidence fails closed.
+The current review producer targets open PR heads, not subsequent squash commits:
+canonical-SHA review evidence remains an explicit #2668 activation prerequisite,
+never a status copied from another SHA or a fabricated independent approver.
+See [approval configuration](RELEASE_GUIDE.md#explicit-release-approval-configuration)
+for private delegation evidence and cutover. All other #2679 controls, including
+package ACL isolation and negative rehearsals, remain unchanged.
+
 The local #2668 implementation establishes the following publication policy,
 as documented in the [release guide](RELEASE_GUIDE.md#release-channels-and-branches):
 

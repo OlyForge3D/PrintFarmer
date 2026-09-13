@@ -50,9 +50,12 @@ jobs:
       contents: read
       actions: read
       checks: read
+      statuses: read
+      pull-requests: read
     outputs:
       source_sha: ${{ steps.admit.outputs.source_sha }}
       channel: ${{ steps.admit.outputs.channel }}
+      approval_mode: ${{ steps.admit.outputs.approval_mode }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -69,6 +72,7 @@ jobs:
           RELEASE_STAGE: ${{ inputs.stage }}
           RELEASE_TAG: ${{ inputs.version }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
         run: node scripts/ci/release-control.mjs admit
 
   authorize:
@@ -79,6 +83,10 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      actions: read
+      checks: read
+      statuses: read
+      pull-requests: read
     outputs:
       public_identity: ${{ steps.authorize.outputs.public_identity }}
     steps:
@@ -105,6 +113,7 @@ jobs:
           private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
           permission-contents: write
           permission-checks: read
+          permission-statuses: read
           permission-administration: read
           permission-actions: read
       - name: Reserve sequence before source tag
@@ -113,6 +122,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
           RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+          RELEASE_ADMITTED_APPROVAL_MODE: ${{ needs.admit.outputs.approval_mode }}
+          RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
           RELEASE_CHANNEL: ${{ inputs.channel }}
           RELEASE_STAGE: ${{ inputs.stage }}
           RELEASE_TAG: ${{ inputs.version }}

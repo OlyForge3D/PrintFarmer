@@ -104,14 +104,27 @@ the CLI never falls back to `github.token` for authorization or ledger writes.
 
 Raw policy responses stay **only in memory** during App-token verification:
 never in files, logs, outputs, bundles or uploads. The immutable record contains
-only a strict, normalized `protection` attestation (schema 2):
+only a strict, normalized `protection` attestation (schema 5):
 repository/channel/branch, ISO `verifiedAt`, the
-`printfarmer-release-protection/v1` profile, boolean policy claims and a SHA-256
+`printfarmer-release-protection/v4` profile, `approvalMode`, `approvalAssurance`,
+boolean policy claims and a SHA-256
 digest of those normalized fields. Claims assert branch deletion/rewrite
-prevention, required code-owner approval/checks, canonical environment branch
-restriction, non-self approval, immutable canonical tags, ledger continuity and
+prevention, PR-only flow without bypass, conversation resolution, the required
+self-attested review status and exact-SHA checks, canonical environment branch
+restriction, manual approval with administrator bypass blocked, immutable canonical tags, ledger continuity and
 exclusive writes by the owner-approved publisher. No actor/App IDs, reviewer
 identities, raw rules or hashes of private API responses survive normalization.
+`codeOwnerApprovalRequired` and `nonSelfApprovalRequired` are `false` in
+`single-maintainer` mode and `true` in `separation-of-duties` mode.
+`selfAttestedReviewRequired` means the existing Squad review gate (including its
+explicit owner override), not an independent approver. It and every other claim
+must remain `true`.
+The mode, assurance and claims are bound into the normalized digest and signed
+authorization. Earlier evidence, including schema 4/v3, missing modes, unknown fields and
+contradictory claims fail closed; there is no compatibility default. Existing
+public ledger projections remain unchanged and retain their original hashes.
+Retries require the original signed artifact and the same approval mode;
+a mode change needs a new attempt, never a rewritten reservation.
 Stable qualification retains exact-SHA pass assertions plus reproducible
 promotion tree evidence or a hotfix rationale digest. The same qualification
 is bound into the signed record; free-form owner text is not copied.
@@ -406,8 +419,312 @@ approve this Git-CAS storage and recovery design, and choose candidate expiry.
 CODEOWNERS currently names `jpapiez`; that is existing ownership, not approval
 of this new policy.
 The ledger is a data-only coordination ref, never an additional release source
-branch. Required non-self environment approval also needs an eligible reviewer;
-admin API access alone does not supply that reviewer or approve the new policy.
+branch. Manual environment approval always needs an eligible reviewer and an
+explicit approval mode; admin API access alone does not approve the new policy.
+Live activation under #2668 must wait until #2682 is merged.
+
+### Explicit release approval configuration
+
+Set repository variable `RELEASE_APPROVAL_MODE` to exactly one of the values
+below. There is **no default**: missing, misspelled, whitespace-padded and unknown
+values block admission and authorization before any API read or write.
+Admission emits its validated mode as a job output. The protected authorization
+job independently resolves the variable and requires exact equality with that
+output before any API access. Environment overrides must match the repository
+value; a mismatch or missing admission output blocks reservation. Align the
+configuration and rerun all jobs. The output is a consistency check, not a
+replacement for protected authorization policy. Never accept this policy from
+dispatch input or infer it from the number of maintainers.
+
+| Mode | Required native branch PR policy | Required environment policy | Normalized assurance |
+| --- | --- | --- | --- |
+| `single-maintainer` | Zero native approvals, code-owner review disabled, last-push approval disabled | Manual required-reviewer gate, `prevent_self_review: false`; every configured reviewer must be an owner-approved user | `owner-confirmed/self-attested` |
+| `separation-of-duties` | At least one native approval and native code-owner review; GitHub does not let PR authors approve their own PR | Manual required-reviewer gate, `prevent_self_review: true`; at least one configured eligible user/team reviewer | `non-self-review-enforced` |
+
+**Both modes require PR-only branch flow**, resolved review conversations,
+stale native approval dismissal on push, strict up-to-date required status checks,
+and deletion/force-push prevention on `main` and `development`. In the REST
+ruleset `pull_request` parameters, set `required_review_thread_resolution: true`
+and `dismiss_stale_reviews_on_push: true`; use actual booleans and an integer
+`required_approving_review_count` (0 in single-maintainer, 1–6 otherwise).
+Single-maintainer must explicitly set `require_code_owner_review: false` and
+`require_last_push_approval: false`; an unsatisfiable native review requirement
+is rejected, not described as a stronger assurance.
+
+Use active branch rulesets with explicit canonical ref includes (or `~ALL`),
+no exclusions, and **empty bypass lists**. The adapter reads effective rules
+and their referenced ruleset details, rejecting missing, truncated, conflicting
+or bypassable evidence. An owner merges through the PR/check/conversation gates,
+not a ruleset bypass. The existing gate's explicit `APPROVE (owner)` override
+can satisfy the review status, but is owner confirmation, not an independent
+authorization of an owner-authored PR. Owner administrative power to change
+configuration remains a trust boundary: stop publishers, privately record and
+review any emergency policy change, then restore and reverify protections.
+There is no normal force-push/delete or release-environment bypass.
+
+### Exact-SHA required-check contract
+
+Set `strict_required_status_checks_policy: true` and require these exact contexts
+in the effective branch rules:
+
+- `CI tooling tests`
+- `.NET build`
+- `Frontend build & tests`
+- `squad/pre-pr-verdict`
+
+The first three are GitHub Actions **check runs**, not check-suite conclusions.
+The last is a **commit status** produced by `squad-review-verdict.yml` using
+`repos.createCommitStatus` and `squad-verdict-gate.mjs`'s `verdictContext`.
+A green workflow job cannot substitute for that status. Read-only admission and
+protected authorization query the selected full SHA's check runs and combined
+commit status; authorization also checks every additional configured context.
+Latest required runs must be completed/successful at that SHA and the latest
+review status must be successful with an exact-head `REVIEWED (self-attested)`,
+`REVIEWED (self-attested, carried across sync)` or `APPROVE (owner)` description.
+`NOT_APPLICABLE` is not review evidence. The API response SHA, not the shortened
+description alone, establishes the full-SHA binding. Raw descriptions/identities
+are never emitted in normalized evidence or errors.
+
+For check-run integration bindings, the adapter verifies `check.app.id`;
+commit-status responses contain no integration ID, so leave that optional
+ruleset binding unset for `squad/pre-pr-verdict` and other status-only contexts.
+An unprovable integration binding fails closed rather than inventing status or
+check-suite fields. Check/status evidence is collected in pages of 100 with
+stable totals, unique IDs and exact-source pagination links. Missing pages,
+changed totals, duplicate IDs, redirects and foreign links fail closed.
+
+The PR producer still posts only to the reviewed PR head. Release admission
+additionally requires the canonical qualification below; an ordinary PR verdict,
+owner override or carried-across-sync status cannot substitute for it. The low-level
+check adapter understands both status vocabularies, but release admission and
+each allocation retry require the completed canonical workflow audit chain.
+
+### Non-publishing canonical qualification
+
+The qualification mechanism has three deliberately separate parts:
+
+1. Manually dispatch the existing **CI** workflow on the canonical branch:
+   `main` for stable, `development` for insider. This executes the full-safe
+   selector, tooling, frontend build/lint/tests, .NET build/tests, provider tests,
+   migration drift and dependency validation, plus `path-casing`,
+   `Contract drift gate` and `Build (iOS)` in the **same CI run/check suite**.
+   Wait for every job to finish successfully before reviewing.
+2. Review the **actual canonical SHA**, after CI completes, and post the fresh
+   confirmation described below as a comment on that commit. Do not copy a
+   PR-head verdict, infer review from tree equality, or name invented reviewers.
+3. Dispatch **Qualify canonical release** from the repository's **default
+   branch**, supplying the channel, CI run ID, commit-comment ID and native PR
+   number (`0` in single-maintainer mode). No SHA/ref input selects the target:
+   the verifier independently resolves the live canonical HEAD.
+
+For example, these commands only start validation and qualification; neither
+invokes the release publisher:
+
+```bash
+gh workflow run ci.yml --repo OlyForge3D/PrintFarmer --ref main
+# After CI finishes and the fresh canonical commit review is recorded:
+gh workflow run qualify-canonical-release.yml --repo OlyForge3D/PrintFarmer \
+  --ref development -f channel=stable -f validation_run=<ci-run-id> \
+  -f review_comment=<commit-comment-id> -f native_pr=0
+```
+
+The second command uses the current default (`development`), even for stable.
+If the default changes to `main`, select `main` there instead. Other default
+branches fail closed. Requalify after either the source or trusted default HEAD
+changes. Do not dispatch the verifier from a feature branch or an arbitrary SHA.
+
+The commit confirmation is an exact, unfenced six-line body, without extra text
+or a final newline. Only the canonical LF body or its fully CRLF-transformed
+equivalent is accepted; mixed LF/CRLF, lone CR, blank lines, duplicate fields
+and extra text remain invalid. Replace the two placeholders with the full lowercase SHA
+and decimal CI run ID; the attempt is always `1`:
+
+```text
+Canonical-Qualification: v1
+Source-SHA: <full-canonical-sha>
+CI-Run: <ci-run-id>
+CI-Attempt: 1
+Approval-Mode: single-maintainer
+Review: owner-confirmed-self-attested
+```
+
+Use the commit page or `POST /repos/OlyForge3D/PrintFarmer/commits/{sha}/comments`
+under the reviewer's own authenticated account, then retain its comment ID.
+The owner must actually confirm the fresh Squad review of that canonical SHA;
+the declaration is **self-attested**, not native independence, separation of
+duties, or a four-eyes control. The initial implementation accepts `jpapiez`
+only, verified live as an administrator. Adding another owner-confirmation
+account requires a reviewed policy change, not a workflow input.
+
+In `separation-of-duties`, change the last two values to
+`separation-of-duties` and `native-code-owner-non-self`, and provide `native_pr`.
+The commenter must hold live write-or-better permission, be a canonical
+CODEOWNER, and have a fresh native `APPROVED` review on that PR's exact canonical
+head SHA after CI. They must differ from the PR author and both CI/qualification
+initiators. All of these identities must have valid, non-empty GitHub logins;
+missing, deleted, or malformed identity evidence fails closed. Comparisons are
+case-insensitive. The PR author and CI/qualification initiators may share an
+account, but none may be the reviewer. Native review identities must also be
+valid before approval/change-request reconciliation.
+Later change requests or dismissal invalidate evidence.
+The PR must belong to this repository and target the selected canonical branch.
+The implemented ownership parser supports the repository's final user-only
+catch-all `* @login` rule (which overrides earlier rules). Team ownership or a
+pattern-only layout requires reviewed support; it never silently falls back.
+A squash predecessor is **not** the canonical SHA. If no appropriate exact-head
+native PR evidence exists, separation-of-duties stays blocked: obtain genuinely
+eligible native review through an owner-approved branch/merge process, never
+replay a pre-squash approval or switch modes merely to evade the requirement.
+
+Every CI job must succeed, including the required named jobs. Live applied
+branch rules must retain strict checks, all release build contexts,
+`squad/pre-pr-verdict`, `path-casing`, `Build (iOS)` and `Contract drift gate`,
+in both approval modes and on both channels. Removing any mandatory context
+blocks qualification and release consumption even if its CI job/check is green.
+Every additional configured check must also have executed in that CI run:
+exactly one job and one check in its suite must match; job URL, check-suite ID,
+SHA and optional integration ID must agree. Separate workflow runs are not
+accepted, even when they have green checks with identical names on the same SHA.
+No ruleset contexts are removed or status results copied.
+
+Manual CI executes the existing path-casing command on Linux and the existing
+contract-drift corpus/self-tests on Linux. Producer coupling examines the selected
+commit's first-parent delta (including a squash commit's complete change), rather
+than treating dispatch's absent event diff as an empty change. An unavailable
+parent/diff fails closed. This is not a review of all historical changes.
+The iOS job runs the same marketing-version checks and **real unsigned Release
+archive** as the PR build on macOS; there is no iOS selector or skip path for
+manual CI. It needs Xcode/package access, not signing or publishing credentials.
+Structural tests keep these execution steps equivalent to their PR workflows.
+
+Only `workflow_dispatch` with `github.ref` exactly `refs/heads/main` or
+`refs/heads/development` executes these canonical jobs and emits required names.
+Every other ref/event, including a feature-branch manual dispatch on a PR head
+SHA, gives these unselected jobs distinct `Canonical … (not selected)` names,
+so they cannot shadow the standalone PR required checks. The manual summary
+gate uses the same canonical-ref condition. Matching tag names are not branches.
+The existing iOS PR selector still may skip Xcode on unrelated PRs; such a green
+PR check is **not** canonical archive evidence. Manual CI does not run Windows
+builds, iOS simulator unit/XCUI tests or TestFlight packaging. Linux and macOS
+results must not be represented as Windows or simulator validation. A newly
+required context outside this graph blocks qualification until reviewed execution
+support is added; never substitute an unrelated run.
+
+CI and review evidence expire 24 hours after CI creation. Only attempt 1 is
+accepted; **all reruns, including failed-jobs-only reruns, require new CI and a
+new confirmation**. Any newer CI run for the SHA or newer qualification for
+the channel supersedes the old evidence, including failed/cancelled runs.
+A CI run may be named by only one qualification run. Edited confirmations,
+missing/unknown modes, mode drift, unavailable permission reads, truncation,
+partial checks and stale HEADs fail closed. CI runs/jobs, checks, statuses,
+commit comments and native reviews are collected in pages of 100, with a
+100-page budget per collection, including any empty terminal probe.
+Counted lists must agree on totals across pages;
+uncounted lists require a short terminal page (an exactly full final page needs
+an additional empty-page read). On that verified empty uncounted probe only,
+with no `next` link, `last` may point to the preceding page. Links accept only
+`/repos/OlyForge3D/PrintFarmer/` or `/repositories/1044049720/` on the GitHub API
+origin, with the same endpoint and query filters. Links are validated, never
+followed; every request is synthesized locally. Pagination cannot change the
+repository, source SHA, run, attempt or query filters. Qualification history
+remains time-filtered from the selected CI creation, not an unbounded lifetime count. Policy lists
+retain their existing single-page bounds. Exceeding a bound requires a reviewed
+extension rather than deleting audit evidence.
+The macOS archive must finish within that same 24-hour window; runner queue
+time does not extend evidence lifetime. Land this graph on each canonical branch
+before qualifying that channel. A previous 38-job rehearsal lacks the three
+executions and cannot be repaired with extra statuses: dispatch new CI and review
+the new exact HEAD. Local tests verify the graph and evidence rejection, not a
+live canonical CI/archive execution; the first post-merge rehearsal remains required.
+
+**Stable activation blocker (live read, 2026-09-13):** `main` currently requires
+the three release build contexts and `squad/pre-pr-verdict`, but lacks
+`path-casing`, `Build (iOS)` and `Contract drift gate`; `development` requires
+all three already. Stable qualification remains blocked until the graph is
+merged to `main` and the owner adds those three contexts to its live strict
+ruleset, retaining all existing requirements. Read back the applied policy,
+then run fresh canonical CI and review. This revision does not change live
+rulesets or authorize activation; do not weaken the verifier to accept the
+current stable policy.
+
+**Evidence writer:** `record-canonical-qualification.yml` runs from the trusted
+default branch after qualification completes. It revalidates the entire chain,
+then posts only `squad/pre-pr-verdict` on the resolved canonical SHA, with
+`QUALIFIED (self-attested)` or `QUALIFIED (native non-self)` and the actual writer
+run URL. That run links to the qualifying run, whose title identifies CI and
+review records. No reviewer identities or private raw policy are written to
+normalized output; the public audit links themselves are not private.
+Failed/cancelled qualification is reconciled to a bounded failure status when
+the trusted source can still be resolved. HEAD movement during posting retracts
+success. GitHub has no atomic HEAD/status/run-completion transaction: cancellation
+immediately after POST can leave a visually green raw status. **It is never
+release authority**: admission additionally requires the writer to have completed
+successfully and rereads live HEAD, runs, jobs, review, mode and status provenance.
+In-progress, cancelled, superseded or forged evidence is rejected before any
+reservation, including each CAS retry. Do not use the status color alone.
+
+The verifier is read-only. Only the separate evidence writer has `statuses: write`;
+neither has release environments, publisher App credentials, package/content
+writes, OIDC, deployments, ledger access or downloaded executable artifacts.
+Checkout is pinned to the trusted workflow SHA with credentials unpersisted.
+The API client allowlists reads and one fixed status context; it rejects redirects
+and all publish, tag, ref, dispatch and deployment writes. Candidate CI code
+executes only in the existing read-only CI workflow, never with the writer token.
+`push` and `repository_dispatch` cannot invoke qualification; `workflow_run`
+payloads are hints that must match live repository/workflow/run data.
+
+This path changes no release protection profile, signed identity schema/digest,
+ledger schema or publication policy. #2679/#2683/#2685 branch/environment/tag,
+publisher, ledger-continuity and package-isolation controls remain mandatory.
+After merge, #2668 still requires owner-approved ledger seed/anchor/continuity,
+package ACL verification and safe rehearsals. Publisher App/registry credential
+provisioning remains a **private, separate owner step**. No secret value is
+needed to qualify; never put credentials in commit comments, issues or artifacts.
+
+### Environment approval and cutover
+
+**Both modes require administrator bypass to be disabled.** In each release
+environment, deselect **Allow administrators to bypass configured protection
+rules**. Read back the environment using the publisher App: the REST
+`GET /repos/{owner}/{repo}/environments/{environment_name}` response must contain
+`can_admins_bypass: false` as a boolean. `true`, omission, null, string values
+and failed reads all block authorization before reservation or source-tag writes.
+Required reviewers alone do not prove that manual approval cannot be bypassed.
+
+This response field is supported by the REST API and its
+[environment SDK model](https://github.com/google/go-github/blob/master/github/repos_environments.go),
+although the rendered REST documentation omits it. GitHub documents the
+[administrator bypass control](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
+The verifier uses the live control, not an invented field or run-wide approval
+history that cannot bind approval to the current attempt. Normalization adds
+only `environmentAdminBypassBlocked: true`; raw environment data stays in memory.
+Disabling bypass is an activation requirement, not a claim of independent
+approval or proof that administrators cannot later change configuration.
+
+In single-maintainer mode, `jpapiez` is the approved owner reviewer. To delegate,
+the owner must explicitly approve the users in private activation evidence and
+provision the optional **environment secret** `RELEASE_OWNER_APPROVED_REVIEWERS`
+as a JSON array of GitHub user logins. The owner remains allowed; an unset/empty
+secret adds no delegates. Invalid JSON, empty arrays or malformed logins fail
+closed. Do not put identities in repository variables, workflow YAML, logs or
+public evidence. This secret is an owner-provisioned allowlist, not independent
+proof of who approved it; access to environment-secret administration is a
+trust boundary. Keep the owner's approval record private and review changes.
+
+GitHub accepts any one required reviewer, so **every** configured reviewer must
+be on that allowlist in single-maintainer mode; adding an unapproved user beside
+the owner is not sufficient. Teams are rejected in that mode because team
+membership does not establish explicit approval of each possible reviewer.
+In separation-of-duties mode, GitHub's configured user/team reviewer object
+provides eligibility evidence and the environment prevents the initiator from
+approving; an empty/malformed reviewer list never qualifies.
+
+Single-maintainer approval is **owner-confirmed/self-attested**, not separation
+of duties, four-eyes control or independent approval. The normalized evidence
+attests the checked environment policy, not the identity of a particular
+approver. Switching modes changes the branch and environment approval policy: exact SHA and
+branch restrictions, App isolation, immutable tags, ledger continuity, package
+ACL isolation and negative rehearsals remain mandatory.
 
 Before enabling:
 
@@ -428,16 +745,22 @@ Before enabling:
    evidence. A head equal to the checkpoint has no seed and is rejected.
    Every subsequent snapshot and edge back through the seed is mandatory.
    The workflow never auto-initializes.
-3. Enforce main/development code-owner review, non-force/non-delete rules and
-   exact-SHA status checks. Protect `release-stable`/`release-insider` with
-   non-self reviewer approval and only their respective branch allowed.
+3. Enforce the mode-specific main/development PR policy, non-force/non-delete
+   rules without bypass, conversation resolution and all exact-SHA checks above.
+   Do not enable native approval requirements in single-maintainer mode.
+   Protect `release-stable`/`release-insider` with
+   manual reviewer approval under the explicit mode above and only their
+   respective branch allowed. Configure the variable and any owner-approved
+   delegate secret; disable administrator bypass and read back each environment's
+   actual reviewer/self-review settings and boolean `can_admins_bypass: false`
+   before enabling publication.
 4. Activate `release-canonical-tags` (`v*`, no update/delete, **no bypass**) and
    `release-ledger-continuity` (ledger branch, no force/delete, **no bypass**).
    Separate `release-tag-creators` and `release-ledger-writer` rules restrict
    creation/update to one explicitly approved publisher App.
 5. Provision its scoped `RELEASE_PUBLISHER_APP_ID` and environment-only
    `RELEASE_PUBLISHER_PRIVATE_KEY`. It needs contents write plus check,
-   administration and Actions read permissions for verification.
+   commit-status, administration and Actions read permissions for verification.
    Do not reuse an unrestricted repository PAT.
    Application GHCR writes separately require `RELEASE_REGISTRY_USER` and an
    environment-only `RELEASE_REGISTRY_TOKEN` with package-write scope, not
@@ -460,12 +783,146 @@ high water without changing old reservations, and review a continuity checkpoint
 migration. Never reset N after a base/workflow change. An unprovable floor means
 publication remains disabled. No normal workflow has a reset/bypass operation.
 
+### Bounded protection rehearsal (#2668)
+
+`release-protection-rehearsal.yml` is a separate, manually dispatched verifier,
+**not** a mode of `consolidated-release.yml`. Its receipts have the distinct
+`release-rehearsal-only` kind and are never release identities, signatures,
+reservations or publication authorization. Do not approve a production
+`Reserve and authorize immutable source` job to obtain rehearsal evidence.
+Rejected production run
+[34760943915](https://github.com/OlyForge3D/PrintFarmer/actions/runs/34760943915)
+failed closed: admission succeeded, authorization failed with zero executed
+steps, and publication was skipped. That is zero-publication evidence for
+that run, not App-permission or denied-write proof.
+
+Merge the reviewed harness through the normal high-risk review gate, then obtain
+fresh canonical CI/review/qualification at the new HEAD. Run insider only from
+`development`; stable requires the harness merged and freshly qualified on
+`main`. An unconditional, credential-free admission job checks the repository,
+dispatch event, selected branch, workflow ref/SHA and first run attempt. Invalid
+dispatches fail the run rather than skipping every job and appearing green.
+Admission performs no checkout or API requests and has no token permissions or
+environment secrets. Both protected jobs depend on admission and use the existing
+canonical `release-<channel>` owner gate; never widen environment branch policies.
+Because GitHub can rerun either protected job without rerunning admission, each
+also repeats the credential-free check as its first step, before checkout,
+third-party actions, App token creation or step-level credential exposure.
+Environment approval still precedes job startup; no environment secrets or
+tokens are passed to the pre-check. Artifact uploads require that job's admission
+to succeed, even on failure paths. A single-job rerun therefore fails locally
+without executing later steps, regardless of an earlier admission success.
+The three embedded JavaScript bodies must match the `rehearsalAdmissionSource`
+constant in `scripts/ci/release-rehearsal-admission.mjs` byte-for-byte; regression
+tests enforce source parity and step ordering. The constant preserves LF line
+endings across checkouts. Embedding avoids fetching code before admission.
+The workflow shares the channel's publication concurrency group and refuses
+active/pending publishers on either channel. Keep production dispatches paused
+throughout the window; any observed
+concurrent drift invalidates the evidence.
+
+The default `denial_probes=false` performs only reads. The protected App token
+is explicitly repository-scoped and downscoped to contents, checks, commit
+statuses, administration and Actions **read**. Token issuance fails if the
+installation has not accepted those permissions. The adapter also enforces GET
+only, rejects redirects and limits requests. Real policy/check/status reads,
+the complete ledger ancestry, and independent canonical qualification must
+succeed. App settings alone, an administrative token, or ordinary admission
+are not equivalent evidence. Token creation/revocation and Actions/environment
+audit records are intended effects.
+
+The receipt's `commitStatusReadObserved` means only that an authenticated App
+request read commit statuses. This public repository's status endpoint can be
+read without a commit-status permission grant, so neither that observation nor
+`appReadsVerified` proves the installation grant. The receipt explicitly sets
+`commitStatusGrantEvidenceRequired: true`. Before accepting the rehearsal, the
+owner must separately retain secret-free evidence of the installation's accepted
+`statuses: read` permission (or stronger, downscoped to read for this token),
+paired with successful issuance using the workflow's explicit
+`permission-statuses: read` request. App settings alone are insufficient.
+The harness does not obtain extra credentials to read installation permissions.
+Never retain the private key or token response as evidence.
+
+Live denial probes additionally require explicit owner consent to bounded
+canary effects, `denial_probes=true`, and environment variable
+`RELEASE_REHEARSAL_APPROVED_SHA` equal to the exact reviewed workflow/source SHA.
+This variable is not a release authorization. Clear it after the window.
+Before approving the first environment gate, the owner must separately provision
+one lightweight **inert** tag
+`refs/tags/v-rehearsal-2668-<run_id>-1-update` at the current ledger head.
+The run ID is available while the positive job waits for approval. Provisioning
+requires separately authorized use of the designated creator App; the harness
+cannot create this fixture with its GET-only App token. Do not weaken rulesets
+or grant an update/deletion bypass. Record this intended fixture in the owner's
+window approval and retain it permanently. Without it the probe job fails
+before any mutation; a missing-ref or same-SHA update is not a valid denial test.
+
+The separate probe job receives only its generic `GITHUB_TOKEN`, requesting
+contents/package write and read-only verification permissions. Review its
+**Set up job → GITHUB_TOKEN Permissions** log for effective contents/package
+write before accepting results; preserve that Actions log with the receipts.
+The runner additionally verifies positive repository push capability, package
+metadata and registry read access. No publisher App token, registry secret,
+signing credential, release creation, manifest PUT, blob completion, package
+tag, alias update or production dispatch is available in this job.
+
+The nine target probes run serially, never retrying a write:
+
+- Create the absent `refs/tags/v-rehearsal-2668-<run_id>-1` at the reviewed
+  source SHA. Both fixture names match protected `v*` but fail canonical
+  SemVer parsing; they cannot trigger server publication.
+- Intentionally create one unreferenced Git commit with the ledger head's
+  **identical tree** and sole parent. Attempt real fast-forwards of the inert
+  update fixture and the ledger ref to that child, always `force:false`.
+  The object is an explicit intended effect even when both updates are denied.
+  No tree/blob, state, counter, allocation, qualification or pointer is authored.
+  If both updates are denied, no ref retains this child: GitHub may garbage-collect
+  the unreferenced object, and later SHA lookup is not guaranteed. The receipt's
+  `retain-never-reset` disposition prohibits harness deletion/reset; it is not
+  a durability guarantee. Preserve the secret-free receipt (child, parent and
+  tree SHAs and verified attempt outcomes) and run logs beyond the artifact's
+  30-day retention window. Do not add a ref or weaken protections to retain it.
+- For every production component in `release-policy.mjs`, authenticate the
+  generic token, prove registry read access, then attempt one zero-body upload
+  initiation. A scope request alone never counts as a write denial.
+
+Only operation-specific Git ruleset denials and authenticated registry
+write/scope denials count. Malformed responses, authentication failures,
+conflicts, non-fast-forwards, throttling, redirects, network errors and unknown
+outcomes fail closed. Any unexpected success stops all subsequent probes.
+Retain unexpectedly created refs or ledger edges: never reset history or delete
+immutable markers. The only automatic cleanup is cancellation of the exact new
+same-host/same-package upload session returned by an accepted upload start,
+followed by confirmation that the session is unknown. Failed/ambiguous cleanup
+requires owner recovery. Successful cleanup **does not turn failure into pass**.
+
+Receipts inventory all paginated historical tags (including `ios/`), canonical
+heads, ledger head/tree/state digest, releases and their assets, and all six
+package version/digest records. Inventories must match across the positive
+job, before every probe and after the final attempt, including failure paths.
+Incomplete pagination or mismatched package counts fail closed. Passing also
+requires exactly one denied upload result per production package; an empty or
+partial upload list cannot pass. Raw policy, reviewer data, API errors, release
+bodies, credentials and upload-state URLs are not emitted. Preserve both
+`release-rehearsal-*` artifacts and run logs.
+
+GHCR does not expose a global unfinished-upload listing API. Upload evidence
+therefore accounts for **every initiation attempted by this harness**, including
+unknown outcomes and confirmed cancellation, alongside full package-version
+inventories; it is not a claim to inventory unrelated clients' pending uploads.
+“Zero unintended writes” is an observed passing condition, not a guarantee
+that the controls under test cannot fail or that no external writer exists.
+Package-admin ACL attestation, effective token-permission logs and owner
+acceptance remain required. A passing rehearsal does not close #2668, qualify
+an unqualified stable branch, authorize publication, or unblock #2660.
+
 ## Validation
 
 Run from the repository root:
 
 ```text
 node --test scripts/ci/tests/test-release-tag-triggers.mjs scripts/ci/tests/test-daily-development-images.mjs
+node --test scripts/ci/tests/test-release-rehearsal.mjs
 ```
 
 Fixtures execute admission denials without writes, positive stable/insider/
@@ -477,6 +934,17 @@ intermediate merges and invalid snapshots, missing/truncated objects, explicit
 checkpoint semantics and a 1,005-snapshot chain. Read, allocation and source-tag
 paths assert zero POST/PATCH calls on rejection; executed admission/authorization
 also reject evidence rewrites before writes.
+Approval fixtures cover both modes on both channels, absent/invalid mode,
+missing/manual-reviewer gates, self-review contradictions, unapproved delegates,
+malformed owner configuration, mode-change retries and redaction. Both modes
+execute the real admission/authorization/consumer flow with fake API transport;
+single-maintainer policy denials prove no reservation/tag/ledger writes.
+Branch fixtures reject native-review mode mismatches, every missing required
+context, non-strict checks, malformed parameters and bypasses (including the
+owner and publisher App). Exact-SHA fixtures reject wrong/missing SHA, pending
+or failed latest statuses/runs, truncated responses, `NOT_APPLICABLE`, and
+green check-run/check-suite substitutes for the review status. Schema/profile
+downgrades and mode/claim contradictions fail even with recomputed digests.
 Stable-floor fixtures cover initial historical floors, current pointers,
 direct valid-schema history insertions, stable advancement between admission
 and allocation, and advancement during a losing CAS. Exact old reservations
@@ -484,8 +952,9 @@ remain retryable; new stale reservations cannot reach publication.
 The same suite scans repository executable scripts, actions and workflows for
 tag creation, force pushes and direct release/API publication. Its explicit
 writer inventory permits only the guarded ledger adapter, authorized Docker
-consumer, and separate `ios/` TestFlight writers. This is a source regression
-check, not a substitute for repository protection or runtime authorization.
+consumer, bounded rehearsal probe module, and separate `ios/` TestFlight writers.
+This is a source regression check, not a substitute for repository protection
+or runtime authorization.
 Both retired server helpers execute against sentinel publication commands for
 normal, dry-run, help and force arguments; every call exits 2 without invoking
 those commands. Use Git Bash rather than WSL bash for these tests on Windows.

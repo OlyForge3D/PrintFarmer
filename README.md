@@ -435,6 +435,21 @@ PrintFarmer builds on amazing open-source projects:
 Server releases use one [branch-bound release workflow](docs/RELEASE_GUIDE.md):
 stable from `main`, explicitly opted-in insider from `development`. Release
 activation requires owner-approved protections and allocator continuity.
+Set an explicit [release approval mode](docs/RELEASE_GUIDE.md#explicit-release-approval-configuration):
+single-maintainer (owner-confirmed/self-attested) or separation-of-duties;
+both require manual environment approval with administrator bypass disabled.
+Single-maintainer uses PR-only flow, exact-SHA self-attested review/build checks,
+resolved conversations and no branch bypass/force-push/deletion, without an
+unsatisfiable native approval count. Separation-of-duties additionally requires
+native code-owner and non-self approval. Owner confirmation is not independent
+authorization. Canonical release SHAs need their own genuine review evidence;
+PR-head statuses cannot be copied to later squash/merge commits.
+Use [non-publishing canonical qualification](docs/RELEASE_GUIDE.md#non-publishing-canonical-qualification):
+fresh manual CI on the live channel HEAD, a new SHA/run-bound review confirmation,
+and default-branch verification. Release admission checks the completed audit
+chain, not just a green status. Qualification needs no publisher secrets and
+never reserves versions, publishes artifacts or deploys.
+Missing configuration or admission/authorization mode drift blocks release.
 Source-only releases are not managed-update candidates without the complete
 signed manifest; historical image aliases remain unchanged during cutover.
 The retired `scripts/release.sh` and `scripts/publish-to-public.sh` helpers
