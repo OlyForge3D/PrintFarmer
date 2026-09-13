@@ -116,7 +116,13 @@ function fixture() {
     assert.ok(options.signal instanceof AbortSignal);
     const parsed = new URL(url);
     if (parsed.hostname === 'ghcr.io') {
-      if (parsed.pathname === '/token') return response({ token: 'REGISTRY-TOKEN-SENTINEL' });
+      if (parsed.pathname === '/token') {
+        assert.equal(parsed.searchParams.get('service'), 'ghcr.io');
+        assert.ok(packageNames.some(name =>
+          parsed.searchParams.get('scope') === `repository:olyforge3d/${name}:pull,push`));
+        assert.ok(parsed.search.includes('repository%3Aolyforge3d%2F'));
+        return response({ token: 'REGISTRY-TOKEN-SENTINEL' });
+      }
       if (parsed.pathname.endsWith('/tags/list')) {
         return response({ name: parsed.pathname.slice(4, -10), tags: ['historical'] });
       }
@@ -378,7 +384,7 @@ test('unexpected upload acceptance cancels only that session, verifies cancellat
   const url = `https://ghcr.io/v2/olyforge3d/${packageNames[0]}/blobs/uploads/session-42?_state=PRIVATE-STATE`;
   const methods = [];
   const fetcher = async (target, options) => {
-    if (target.startsWith('https://ghcr.io')) methods.push({ target, method: options.method });
+    if (new URL(target).origin === 'https://ghcr.io') methods.push({ target, method: options.method });
     if (target.endsWith('/blobs/uploads/') && options.method === 'POST') {
       return response({}, 202, { location: url, 'docker-upload-uuid': 'session-42' });
     }
@@ -399,6 +405,7 @@ test('unexpected upload acceptance cancels only that session, verifies cancellat
 test('cleanup cannot target another host, package, version or upload completion', () => {
   for (const location of [
     'https://evil.example/v2/olyforge3d/printfarmer-api/blobs/uploads/123',
+    'https://ghcr.io.evil.example/v2/olyforge3d/printfarmer-api/blobs/uploads/123',
     'https://ghcr.io/v2/olyforge3d/printfarmer-frontend/blobs/uploads/123',
     'https://ghcr.io/v2/olyforge3d/printfarmer-api/manifests/latest',
     'https://ghcr.io/v2/olyforge3d/printfarmer-api/blobs/uploads/123?digest=sha256:bad',

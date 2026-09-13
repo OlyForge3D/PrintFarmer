@@ -69,7 +69,7 @@ export function cleanupUrl(location, name) {
 async function uploadProbe(fetcher, genericToken, actor, name, evidence) {
   const path = `olyforge3d/${name}`;
   const auth = await boundedFetch(fetcher,
-    `https://ghcr.io/token?service=ghcr.io&scope=repository%3A${path.replace('/', '%2F')}%3Apull%2Cpush`,
+    `https://ghcr.io/token?service=ghcr.io&scope=repository%3A${encodeURIComponent(path)}%3Apull%2Cpush`,
     { method: 'GET', headers: {
       Authorization: `Basic ${Buffer.from(`${actor}:${genericToken}`).toString('base64')}`,
     } });
