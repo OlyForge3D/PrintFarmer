@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from '@/services/api';
 import { CONTROL_RECHECK_MS, PrinterControlTracker } from '@/services/printer-control-operations';
-import type { PrinterControlCurrent, PrinterControlOperation, PrinterControlRecovery } from '@/types/api';
+import type { PrinterControlCurrent, PrinterControlIntent, PrinterControlOperation, PrinterControlRecovery } from '@/types/api';
 
 vi.mock('@/services/api', () => ({
   apiClient: {
@@ -19,6 +19,10 @@ const storageKey = 'motion-test-server-subject-printer';
 const intent = { kind: 'HomeAll' as const };
 const moveIntent = { kind: 'MoveTo' as const, x: 10, y: 20, z: 30, f: 100 };
 const axes = ['x', 'y', 'z', 'f'] as const;
+const httpIntents: PrinterControlIntent[] = [
+  { kind: 'HomeAll' }, { kind: 'HomeXY' }, { kind: 'HomeZ' },
+  { kind: 'Jog', y: 10 }, { kind: 'MoveTo', x: 10, y: 20, z: 30 },
+];
 const operation = (overrides: Partial<PrinterControlOperation> = {}): PrinterControlOperation => ({
   printerId, operationId, kind: 'HomeAll', x: null, y: null, z: null, f: null,
   state: 'Running', rowVersion: 'opaque-v1', createdAtUtc: '2026-09-12T18:00:00Z', updatedAtUtc: '2026-09-12T18:00:00Z',
@@ -124,22 +128,21 @@ describe('durable motion tracking', () => {
     expect(apiClient.createPrinterControlOperation).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['HomeAll', 'HomeXY', 'HomeZ'] as const)('persists and completes %s without crypto.randomUUID', async kind => {
+  it.each(httpIntents)('persists and completes $kind without crypto.randomUUID', async motionIntent => {
     const getRandomValues = vi.fn(crypto.getRandomValues.bind(crypto));
     vi.stubGlobal('crypto', { getRandomValues });
-    const homeIntent = { kind };
     let generatedId: string | undefined;
     vi.mocked(apiClient.createPrinterControlOperation).mockImplementationOnce(async (id, savedId, savedIntent) => {
       generatedId = savedId;
       expect(id).toBe(printerId);
       expect(savedId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-      expect(savedIntent).toEqual(homeIntent);
-      expect(JSON.parse(localStorage.getItem(storageKey)!)).toEqual({ operationId: savedId, intent: homeIntent });
-      active = operation({ ...completed(), operationId: savedId, kind });
+      expect(savedIntent).toEqual(motionIntent);
+      expect(JSON.parse(localStorage.getItem(storageKey)!)).toEqual({ operationId: savedId, intent: motionIntent });
+      active = operation({ ...completed(), operationId: savedId, ...motionIntent });
       return { operation: active, etag: '"completed"' };
     });
     await tracker.refresh();
-    await expect(tracker.execute(homeIntent, new AbortController().signal)).resolves.toEqual({ success: true });
+    await expect(tracker.execute(motionIntent, new AbortController().signal)).resolves.toEqual({ success: true });
     expect(getRandomValues).toHaveBeenCalledTimes(1);
     expect(apiClient.createPrinterControlOperation).toHaveBeenCalledTimes(1);
     expect(apiClient.getPrinterControlOperation).toHaveBeenCalledWith(printerId, generatedId);
