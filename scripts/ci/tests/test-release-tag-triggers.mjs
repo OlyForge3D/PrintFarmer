@@ -39,12 +39,13 @@ const hotfixQualification = () => ({
 });
 function fixtureProtection(channel) {
   const payload = {
-    schema: 3, repository: context().repository, channel, branch: channel === 'stable' ? 'main' : 'development',
-    verifiedAt: created, policyProfile: 'printfarmer-release-protection/v2',
+    schema: 4, repository: context().repository, channel, branch: channel === 'stable' ? 'main' : 'development',
+    verifiedAt: created, policyProfile: 'printfarmer-release-protection/v3',
     approvalMode: 'separation-of-duties', approvalAssurance: 'non-self-review-enforced',
     claims: { ...Object.fromEntries([
       'branchDeletionBlocked', 'branchRewritesBlocked', 'codeOwnerApprovalRequired',
       'requiredChecksEnforced', 'canonicalEnvironmentBranchOnly', 'manualApprovalRequired',
+      'environmentAdminBypassBlocked',
       'canonicalTagsImmutable', 'ledgerContinuityProtected', 'exclusiveApprovedPublisher',
     ].map(claim => [claim, true])), nonSelfApprovalRequired: true },
   };
@@ -1789,6 +1790,7 @@ function protectionFixture(channel = 'insider', approvalMode = 'separation-of-du
       : id === 2 ? ['creation'] : ['update']).map(type => ({ type })),
   }));
   const environment = { name: `release-${channel}`, privateMarker: 'raw-environment-sentinel',
+    can_admins_bypass: false,
     deployment_branch_policy: { custom_branch_policies: true },
     protection_rules: [{ type: 'required_reviewers', prevent_self_review: true,
       reviewers: [{ type: 'User', reviewer: { id: 7, login: 'raw-reviewer-sentinel' } }] }] };
@@ -1815,7 +1817,7 @@ function protectionFixture(channel = 'insider', approvalMode = 'separation-of-du
 test('live protection adapter accepts only scoped reviewer-gated environments and exclusive publisher rules', async () => {
   const { api, environment, rulesets } = protectionFixture();
   const evidence = await verifyProtection(api, 'insider', '123', 'separation-of-duties');
-  assert.equal(evidence.schema, 3);
+  assert.equal(evidence.schema, 4);
   verifyProtectionEvidence(evidence, 'insider');
   assert.equal(evidence.claims.nonSelfApprovalRequired, true);
   assert.doesNotMatch(JSON.stringify(evidence), /rulesets|environment"|reviewers|publisherAppId|actor_id/);
@@ -1835,6 +1837,29 @@ test('live protection adapter accepts only scoped reviewer-gated environments an
 
 for (const channel of ['stable', 'insider']) {
   for (const mode of ['single-maintainer', 'separation-of-duties']) {
+    test(`${channel} ${mode} rejects administrator bypass or unproven bypass policy before reservation`, async () => {
+      const previous = globalThis.fetch;
+      try {
+        for (const bypass of [true, undefined, null, 'false', 0, {}, []]) {
+          const mutateEnvironment = environment => {
+            if (bypass === undefined) delete environment.can_admins_bypass;
+            else environment.can_admins_bypass = bypass;
+          };
+          const policy = protectionFixture(channel, mode);
+          mutateEnvironment(policy.environment);
+          await assert.rejects(verifyProtection(policy.api, channel, '123', mode),
+            /explicitly disable administrator bypass/);
+          const fixture = authorizationFixture(state(), { channel, approvalMode: mode, mutateEnvironment });
+          globalThis.fetch = fixture.fetch;
+          await assert.rejects(runReleaseControl('authorize', fixture.env),
+            /explicitly disable administrator bypass/);
+          assert.ok(fixture.calls.some(call => call.admin && call.publisher));
+          assert.ok(fixture.calls.every(call => call.method === 'GET'), 'No reservation or source-tag write');
+          assert.deepEqual(fixture.ledgerWrites, []);
+        }
+      } finally { globalThis.fetch = previous; }
+    });
+
     test(`${channel} ${mode} requires manual approval and binds honest public-safe claims`, async () => {
       const fixture = protectionFixture(channel, mode);
       const evidence = await verifyProtection(fixture.api, channel, '123', mode);
@@ -1843,6 +1868,7 @@ for (const channel of ['stable', 'insider']) {
       assert.equal(evidence.approvalAssurance,
         mode === 'single-maintainer' ? 'owner-confirmed/self-attested' : 'non-self-review-enforced');
       assert.equal(evidence.claims.manualApprovalRequired, true);
+      assert.equal(evidence.claims.environmentAdminBypassBlocked, true);
       assert.equal(evidence.claims.nonSelfApprovalRequired, mode === 'separation-of-duties');
       assert.doesNotMatch(JSON.stringify(evidence), /jpapiez|raw-reviewer|reviewers|publisherAppId|actor_id/);
       const original = structuredClone(fixture.environment.protection_rules);
@@ -1860,8 +1886,11 @@ for (const channel of ['stable', 'insider']) {
         item => { item.approvalMode = 'unknown'; },
         item => { item.approvalAssurance = 'independent-approval'; },
         item => { item.claims.manualApprovalRequired = false; },
+        item => { item.claims.environmentAdminBypassBlocked = false; },
+        item => { delete item.claims.environmentAdminBypassBlocked; },
         item => { item.claims.nonSelfApprovalRequired = !item.claims.nonSelfApprovalRequired; },
         item => { item.schema = 2; item.policyProfile = 'printfarmer-release-protection/v1'; },
+        item => { item.schema = 3; item.policyProfile = 'printfarmer-release-protection/v2'; },
         item => { item.reviewers = ['private-reviewer']; },
       ]) {
         const changed = structuredClone(evidence);
@@ -1923,9 +1952,29 @@ test('release workflow explicitly wires approval mode and confines reviewer evid
     assert.match(job, /RELEASE_APPROVAL_MODE: \$\{\{ vars\.RELEASE_APPROVAL_MODE \}\}/);
   }
   assert.doesNotMatch(admissionJob, /RELEASE_OWNER_APPROVED_REVIEWERS/);
+  assert.match(admissionJob, /approval_mode: \$\{\{ steps\.admit\.outputs\.approval_mode \}\}/);
+  assert.match(authorizationJob,
+    /RELEASE_ADMITTED_APPROVAL_MODE: \$\{\{ needs\.admit\.outputs\.approval_mode \}\}/);
   assert.match(authorizationJob, /environment: release-\$\{\{ needs\.admit\.outputs\.channel \}\}/);
   assert.match(authorizationJob,
     /RELEASE_OWNER_APPROVED_REVIEWERS: \$\{\{ secrets\.RELEASE_OWNER_APPROVED_REVIEWERS \}\}/);
+});
+
+test('authorization fails closed on missing, invalid or divergent admitted approval mode before API access', async () => {
+  const previous = globalThis.fetch;
+  globalThis.fetch = () => assert.fail('Approval-mode divergence must fail before network access');
+  try {
+    for (const mode of ['single-maintainer', 'separation-of-duties']) {
+      const fixture = authorizationFixture(state(), { approvalMode: mode });
+      for (const admittedMode of [undefined, '', 'unknown', `${mode} `,
+        mode === 'single-maintainer' ? 'separation-of-duties' : 'single-maintainer']) {
+        await assert.rejects(runReleaseControl('authorize', {
+          ...fixture.env, RELEASE_ADMITTED_APPROVAL_MODE: admittedMode,
+        }), /RELEASE_APPROVAL_MODE|Approval mode changed after admission/);
+        assert.deepEqual(fixture.ledgerWrites, []);
+      }
+    }
+  } finally { globalThis.fetch = previous; }
 });
 
 test('single-maintainer authorization rejects unapproved, automatic and conflicting policies before writes', async () => {
@@ -1953,7 +2002,7 @@ async function authorizedRecord() {
   return { ...record(), created: protection.verifiedAt, protection };
 }
 
-const privateFields = /"(?:branchRules|environment|branchPolicies|rulesets|reviewers|publisherAppId|actor_id|bypass_actors|rules|privateMarker|futurePrivate|reviewerId)"|raw-(?:policy|environment|reviewer)-sentinel|private-value/;
+const privateFields = /"(?:branchRules|environment|branchPolicies|rulesets|reviewers|publisherAppId|actor_id|bypass_actors|can_admins_bypass|rules|privateMarker|futurePrivate|reviewerId)"|raw-(?:policy|environment|reviewer)-sentinel|private-value/;
 
 function artifactUploads(workflow) {
   const text = readFileSync(workflow, 'utf8');
@@ -2137,6 +2186,7 @@ function authorizationFixture(initial = state(), settings = {}) {
     GH_TOKEN: 'github-fixture', RELEASE_PUBLISHER_TOKEN: 'publisher-fixture',
     RELEASE_PUBLISHER_APP_ID: '123', RELEASE_LEDGER_ANCHOR: anchor,
     RELEASE_APPROVAL_MODE: settings.approvalMode ?? 'separation-of-duties',
+    RELEASE_ADMITTED_APPROVAL_MODE: settings.approvalMode ?? 'separation-of-duties',
     GITHUB_REPOSITORY: selected.repository, GITHUB_EVENT_NAME: selected.event,
     GITHUB_REF: selected.ref, GITHUB_SHA: sourceCommit,
     GITHUB_WORKFLOW_REF: selected.workflowIdentity, GITHUB_WORKFLOW_SHA: sourceCommit,
@@ -2705,6 +2755,7 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
   };
   try {
     await runReleaseControl('admit', { ...fixture.env, RELEASE_PUBLISHER_TOKEN: undefined });
+    assert.match(readFileSync(process.env.GITHUB_OUTPUT, 'utf8'), new RegExp(`^approval_mode=${approvalMode}$`, 'm'));
     assert.ok(fixture.calls.length > 0);
     assert.ok(fixture.calls.every(call => !call.admin && !call.publisher && call.method === 'GET'));
     fixture.calls.length = 0;
@@ -2734,7 +2785,8 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     const originalRules = structuredClone(fixture.environment.protection_rules);
     fixture.environment.protection_rules = protectionFixture('insider', changedMode).environment.protection_rules;
     fixture.calls.length = 0;
-    await assert.rejects(runReleaseControl('authorize', { ...fixture.env, RELEASE_APPROVAL_MODE: changedMode }),
+    await assert.rejects(runReleaseControl('authorize', { ...fixture.env, RELEASE_APPROVAL_MODE: changedMode,
+      RELEASE_ADMITTED_APPROVAL_MODE: changedMode }),
       /Approval mode changed after reservation/);
     assert.ok(fixture.calls.every(call => call.method === 'GET'));
     fixture.environment.protection_rules = originalRules;

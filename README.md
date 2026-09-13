@@ -437,7 +437,8 @@ stable from `main`, explicitly opted-in insider from `development`. Release
 activation requires owner-approved protections and allocator continuity.
 Set an explicit [release approval mode](docs/RELEASE_GUIDE.md#explicit-release-approval-configuration):
 single-maintainer (owner-confirmed/self-attested) or separation-of-duties;
-both require manual environment approval, and missing configuration blocks release.
+both require manual environment approval with administrator bypass disabled.
+Missing configuration or admission/authorization mode drift blocks release.
 Source-only releases are not managed-update candidates without the complete
 signed manifest; historical image aliases remain unchanged during cutover.
 The retired `scripts/release.sh` and `scripts/publish-to-public.sh` helpers

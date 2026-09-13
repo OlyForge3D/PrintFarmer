@@ -104,19 +104,19 @@ the CLI never falls back to `github.token` for authorization or ledger writes.
 
 Raw policy responses stay **only in memory** during App-token verification:
 never in files, logs, outputs, bundles or uploads. The immutable record contains
-only a strict, normalized `protection` attestation (schema 3):
+only a strict, normalized `protection` attestation (schema 4):
 repository/channel/branch, ISO `verifiedAt`, the
-`printfarmer-release-protection/v2` profile, `approvalMode`, `approvalAssurance`,
+`printfarmer-release-protection/v3` profile, `approvalMode`, `approvalAssurance`,
 boolean policy claims and a SHA-256
 digest of those normalized fields. Claims assert branch deletion/rewrite
 prevention, required code-owner approval/checks, canonical environment branch
-restriction, manual approval, immutable canonical tags, ledger continuity and
+restriction, manual approval with administrator bypass blocked, immutable canonical tags, ledger continuity and
 exclusive writes by the owner-approved publisher. No actor/App IDs, reviewer
 identities, raw rules or hashes of private API responses survive normalization.
 `nonSelfApprovalRequired` is `false` only in `single-maintainer` mode and `true`
 in `separation-of-duties` mode; every other claim must remain `true`.
 The mode, assurance and claims are bound into the normalized digest and signed
-authorization. Schema 2/v1 evidence, missing modes, unknown fields and
+authorization. Schema 2/v1 and schema 3/v2 evidence, missing modes, unknown fields and
 contradictory claims fail closed; there is no compatibility default. Existing
 public ledger projections remain unchanged and retain their original hashes.
 Retries require the original signed artifact and the same approval mode;
@@ -424,14 +424,36 @@ Live activation under #2668 must wait until #2682 is merged.
 Set repository variable `RELEASE_APPROVAL_MODE` to exactly one of the values
 below. There is **no default**: missing, misspelled, whitespace-padded and unknown
 values block admission and authorization before any API read or write.
-The protected authorization job resolves the same variable (an environment
-override, if used, must be deliberately owner-approved). Never accept this
-policy from dispatch input or infer it from the number of maintainers.
+Admission emits its validated mode as a job output. The protected authorization
+job independently resolves the variable and requires exact equality with that
+output before any API access. Environment overrides must match the repository
+value; a mismatch or missing admission output blocks reservation. Align the
+configuration and rerun all jobs. The output is a consistency check, not a
+replacement for protected authorization policy. Never accept this policy from
+dispatch input or infer it from the number of maintainers.
 
 | Mode | Required environment policy | Normalized assurance |
 | --- | --- | --- |
 | `single-maintainer` | Manual required-reviewer gate, `prevent_self_review: false`; every configured reviewer must be an owner-approved user | `owner-confirmed/self-attested` |
 | `separation-of-duties` | Manual required-reviewer gate, `prevent_self_review: true`; at least one configured eligible user/team reviewer | `non-self-review-enforced` |
+
+**Both modes require administrator bypass to be disabled.** In each release
+environment, deselect **Allow administrators to bypass configured protection
+rules**. Read back the environment using the publisher App: the REST
+`GET /repos/{owner}/{repo}/environments/{environment_name}` response must contain
+`can_admins_bypass: false` as a boolean. `true`, omission, null, string values
+and failed reads all block authorization before reservation or source-tag writes.
+Required reviewers alone do not prove that manual approval cannot be bypassed.
+
+This response field is supported by the REST API and its
+[environment SDK model](https://github.com/google/go-github/blob/master/github/repos_environments.go),
+although the rendered REST documentation omits it. GitHub documents the
+[administrator bypass control](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
+The verifier uses the live control, not an invented field or run-wide approval
+history that cannot bind approval to the current attempt. Normalization adds
+only `environmentAdminBypassBlocked: true`; raw environment data stays in memory.
+Disabling bypass is an activation requirement, not a claim of independent
+approval or proof that administrators cannot later change configuration.
 
 In single-maintainer mode, `jpapiez` is the approved owner reviewer. To delegate,
 the owner must explicitly approve the users in private activation evidence and
@@ -481,8 +503,9 @@ Before enabling:
    exact-SHA status checks. Protect `release-stable`/`release-insider` with
    manual reviewer approval under the explicit mode above and only their
    respective branch allowed. Configure the variable and any owner-approved
-   delegate secret; read back each environment's actual reviewer/self-review
-   settings before enabling publication.
+   delegate secret; disable administrator bypass and read back each environment's
+   actual reviewer/self-review settings and boolean `can_admins_bypass: false`
+   before enabling publication.
 4. Activate `release-canonical-tags` (`v*`, no update/delete, **no bypass**) and
    `release-ledger-continuity` (ledger branch, no force/delete, **no bypass**).
    Separate `release-tag-creators` and `release-ledger-writer` rules restrict

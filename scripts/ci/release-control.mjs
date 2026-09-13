@@ -66,6 +66,11 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   const store = gitLedger(api, env.RELEASE_LEDGER_ANCHOR);
   if (['admit', 'authorize'].includes(operation)) {
     validateApprovalMode(env.RELEASE_APPROVAL_MODE);
+    if (operation === 'authorize') {
+      validateApprovalMode(env.RELEASE_ADMITTED_APPROVAL_MODE);
+      requireThat(env.RELEASE_ADMITTED_APPROVAL_MODE === env.RELEASE_APPROVAL_MODE,
+        'Approval mode changed after admission; align repository and environment policy and rerun all jobs');
+    }
     const channel = context.event === 'schedule' ? 'insider' : context.channel;
     const branch = channel === 'stable' ? 'main' : 'development';
     const { state } = await store.read();
@@ -82,7 +87,10 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift before authorization');
     output('source_sha', context.eventSha);
     output('channel', admission.channel);
-    if (operation === 'admit') return;
+    if (operation === 'admit') {
+      output('approval_mode', env.RELEASE_APPROVAL_MODE);
+      return;
+    }
     const protection = await verifyProtection(api, admission.channel, env.RELEASE_PUBLISHER_APP_ID,
       env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS);
     const record = await transact(store, async state => {

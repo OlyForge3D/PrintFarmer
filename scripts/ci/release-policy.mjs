@@ -313,6 +313,8 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
   requireThat(environment?.name === `release-${channel}` &&
     environment.deployment_branch_policy?.custom_branch_policies,
   'Owner blocker: publishing environment lacks branch restrictions');
+  requireThat(environment.can_admins_bypass === false,
+    'Owner blocker: publishing environment must explicitly disable administrator bypass');
   requireThat(policies?.branch_policies?.length === 1 &&
     policies.branch_policies[0].name === branch && policies.branch_policies[0].type === 'branch',
   'Owner blocker: publishing environment must allow only its canonical branch');
@@ -355,10 +357,11 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
   }
 }
 
-const protectionProfile = 'printfarmer-release-protection/v2';
+const protectionProfile = 'printfarmer-release-protection/v3';
 const protectionClaims = [
   'branchDeletionBlocked', 'branchRewritesBlocked', 'codeOwnerApprovalRequired',
   'requiredChecksEnforced', 'canonicalEnvironmentBranchOnly', 'manualApprovalRequired',
+  'environmentAdminBypassBlocked',
   'canonicalTagsImmutable', 'ledgerContinuityProtected', 'exclusiveApprovedPublisher',
 ];
 
@@ -370,7 +373,7 @@ export function normalizeProtectionEvidence(evidence, channel, publisherAppId, a
   verifyRawProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers);
   // Digest only public claims, never low-entropy actor IDs or raw API payloads.
   const attestation = {
-    schema: 3, repository, channel, branch: evidence.branch,
+    schema: 4, repository, channel, branch: evidence.branch,
     verifiedAt: evidence.verifiedAt, policyProfile: protectionProfile,
     approvalMode, approvalAssurance: approvalAssurance(approvalMode),
     claims: { ...Object.fromEntries(protectionClaims.map(claim => [claim, true])),
@@ -383,7 +386,7 @@ export function verifyProtectionEvidence(evidence, channel) {
   const fields = ['schema', 'repository', 'channel', 'branch', 'verifiedAt', 'policyProfile',
     'approvalMode', 'approvalAssurance', 'claims', 'policyDigest'];
   requireThat(evidence && Object.keys(evidence).sort().join() === fields.sort().join() &&
-    evidence.schema === 3 && evidence.repository === repository &&
+    evidence.schema === 4 && evidence.repository === repository &&
     ['stable', 'insider'].includes(channel) && evidence.channel === channel &&
     evidence.branch === (channel === 'stable' ? 'main' : 'development') &&
     evidence.policyProfile === protectionProfile &&

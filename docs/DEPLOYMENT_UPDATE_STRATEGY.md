@@ -89,8 +89,11 @@ requires manual approval by the owner or an explicitly owner-approved user,
 with self-review prevention disabled; its assurance is honestly
 owner-confirmed/self-attested, never separation of duties. The alternative
 `separation-of-duties` mode requires self-review prevention and at least one
-eligible reviewer. Missing/unknown modes fail closed. Mode-specific normalized
-schema 3/v2 claims expose no reviewer identities or raw policy evidence.
+eligible reviewer. Both require the live environment response to explicitly
+report `can_admins_bypass: false` before reservation; required reviewers alone
+are insufficient. Missing/unknown modes and admission/authorization mode drift
+fail closed. Mode-specific normalized schema 4/v3 claims include administrator
+bypass prevention and expose no reviewer identities or raw policy evidence.
 See [approval configuration](RELEASE_GUIDE.md#explicit-release-approval-configuration)
 for private delegation evidence and cutover. All other #2679 controls, including
 package ACL isolation and negative rehearsals, remain unchanged.
