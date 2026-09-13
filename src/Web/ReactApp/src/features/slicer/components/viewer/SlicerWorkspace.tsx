@@ -7,6 +7,7 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import * as THREE from 'three';
 import { STLExporter } from 'three/examples/jsm/exporters/STLExporter.js';
 import { toast } from 'sonner';
+import { generateUUID } from '@/utils/uuid';
 import { SlicerToolbar } from './SlicerToolbar';
 import { SlicerLeftTools, type ToolType } from './SlicerLeftTools';
 import { SlicerStatusBar } from './SlicerStatusBar';
@@ -1152,7 +1153,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       // TODO: Text model blob URLs are local-only and cannot be sent to the backend slicer.
       // A full fix requires uploading the STL blob to the server before slice job submission.
       const newModel: LoadedModel = {
-        id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id: generateUUID(),
         fileName: `[text]_${textToolConfig.text.slice(0, 16).replace(/\s+/g, '_')}.stl`,
         url: blobUrl,
         position: [point.x, point.y, point.z],
