@@ -33,7 +33,9 @@ public static class CorsStartup
                 // a private/loopback network address — it does not accept arbitrary origins.
                 _ = policy.SetIsOriginAllowed(origin => IsOriginAllowed(origin, configuredOrigins, allowLocalNetwork));
                 _ = policy.AllowCredentials();
-                _ = policy.WithHeaders("Content-Type", "Authorization", "x-correlation-id", "traceparent", "x-signalr-user-agent", "x-requested-with");
+                _ = policy.WithHeaders("Content-Type", "Authorization", "x-correlation-id", "traceparent", "x-signalr-user-agent", "x-requested-with",
+                    "Idempotency-Key", "If-Match");
+                _ = policy.WithExposedHeaders("ETag", "Location");
                 _ = policy.WithMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
             });
         });

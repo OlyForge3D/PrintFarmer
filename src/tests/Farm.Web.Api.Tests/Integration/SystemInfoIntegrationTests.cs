@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -7,8 +7,13 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Infrastructure.Services.SystemStatus;
+using Farm.Slicer.Module.Services.SystemInfo;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -49,6 +54,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
     public async Task InitializeAsync()
     {
         await _factory.ResetDataAsync();
+        _factory.Services.GetRequiredService<IMemoryCache>().Remove("SystemInfo:Snapshot");
         _adminClient = await _factory.CreateAdminClientAsync();
         _nonAdminClient = await _factory.CreateAuthenticatedClientAsync(
             username: "system-info-user",
@@ -62,6 +68,24 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         _adminClient?.Dispose();
         _nonAdminClient?.Dispose();
         return Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task InventorySources_HostDiResolvesModuleImplementationsAndPreservesApiBuild()
+    {
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        IServiceInventorySource[] sources = scope.ServiceProvider.GetServices<IServiceInventorySource>().ToArray();
+        sources.Should().HaveCount(2);
+        LocalServiceInventorySource local = sources.OfType<LocalServiceInventorySource>().Single();
+        SlicerServiceInventorySource slicer = sources.OfType<SlicerServiceInventorySource>().Single();
+        Assert.Same(typeof(ISystemInfoService).Assembly, local.GetType().Assembly);
+        Assert.Same(typeof(SlicerDbContext).Assembly, slicer.GetType().Assembly);
+
+        IReadOnlyList<ServiceReplicaObservationDto> rows = await local.ReadAsync(CancellationToken.None);
+        ServiceReplicaObservationDto api = rows.Single(row => row.Component == "api");
+        (string? version, string? commit) = ApplicationBuildObservation.FromAssembly(typeof(Program).Assembly);
+        api.ApplicationVersion.Should().Be(version);
+        api.SourceCommit.Should().Be(commit);
     }
 
     [Fact]
@@ -145,6 +169,93 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         dto.Should().NotBeNull();
         dto!.Services.Should().NotContain(service => service.Name == displayName);
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_ReportsUnknownProvenanceAndExplicitNullsWithoutChangingLegacyShape()
+    {
+        HttpResponseMessage response = await _adminClient!.GetAsync("/api/system/info");
+        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement inventory = json.RootElement.GetProperty("inventory");
+        inventory.GetProperty("selectedChannel").GetString().Should().Be("stable");
+        inventory.GetProperty("observedChannel").ValueKind.Should().Be(JsonValueKind.Null);
+        inventory.GetProperty("targetChannel").ValueKind.Should().Be(JsonValueKind.Null);
+        JsonElement api = inventory.GetProperty("services").EnumerateArray().Single(row => row.GetProperty("component").GetString() == "api");
+        api.GetProperty("applicationVersion").GetString().Should().NotBeNullOrWhiteSpace();
+        api.GetProperty("identity").ValueKind.Should().Be(JsonValueKind.Null);
+        api.GetProperty("platformDigest").ValueKind.Should().Be(JsonValueKind.Null);
+        api.GetProperty("indexDigest").ValueKind.Should().Be(JsonValueKind.Null);
+        api.GetProperty("manifestDigest").ValueKind.Should().Be(JsonValueKind.Null);
+        response.Headers.CacheControl!.NoStore.Should().BeTrue();
+        json.RootElement.GetProperty("services")[0].GetProperty("version").ValueKind.Should().Be(JsonValueKind.String);
+        json.RootElement.GetProperty("database").GetProperty("migrationHeads").ValueKind.Should().Be(JsonValueKind.Array);
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_ProjectsAllReplicasWithoutSecretsOrEngineAsBuild()
+    {
+        Guid first = Guid.NewGuid();
+        Guid second = Guid.NewGuid();
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+            db.SlicerServices.AddRange(
+                new SlicerService { Id = first, Name = "first", Version = "2.4.2", Host = "http://private-worker.invalid", ApiKey = "never-return-registry-key", Status = "Online", LastSeen = DateTime.UtcNow,
+                    CapabilitiesJson = "{\"applicationBuild\":\"1.2.3\",\"slicerContainerDigest\":\"not-attestation\"}" },
+                new SlicerService { Id = second, Name = "second", Version = "2.4.2", Host = "http://private-worker.invalid", Status = "Offline", LastSeen = DateTime.UtcNow.AddHours(-1) });
+            await db.SaveChangesAsync();
+        }
+
+        string json = await _adminClient!.GetStringAsync("/api/system/info");
+        SystemInfoDto dto = JsonSerializer.Deserialize<SystemInfoDto>(json, JsonOptions)!;
+        ServiceReplicaObservationDto[] workers = dto.Inventory!.Services.Where(row => row.Component == "slicer-worker").ToArray();
+        workers.Should().Contain(row => row.InstanceId == first.ToString() && row.ApplicationVersion == "1.2.3" && row.EngineVersion == "2.4.2");
+        workers.Should().Contain(row => row.InstanceId == second.ToString() && row.ApplicationVersion == null && row.ObservationState == InventoryObservationState.Unavailable);
+        workers.Should().OnlyContain(row => row.PlatformDigest == null && row.Identity == null);
+        json.Should().NotContain("private-worker").And.NotContain("never-return-registry-key").And.NotContain("not-attestation").And.NotContain("capabilitiesJson");
+    }
+
+    [Fact]
+    public async Task GetInfo_NonAdminAfterAdminCacheWarmup_StillDeniesInventory()
+    {
+        (await _adminClient!.GetAsync("/api/system/info")).StatusCode.Should().Be(HttpStatusCode.OK);
+        HttpResponseMessage denied = await _nonAdminClient!.GetAsync("/api/system/info");
+        denied.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await denied.Content.ReadAsStringAsync()).Should().NotContain("platformDigest").And.NotContain("sourceCommit");
+    }
+
+    [Fact]
+    public async Task GetInfo_CustomRoleWithExactAdminPermission_ReturnsInventory()
+    {
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            User user = await db.Users.SingleAsync(row => row.Username == "system-info-user");
+            Resource resource = await db.Resources.SingleAsync(row => row.Name == "system_settings");
+            UserAction action = await db.UserActions.SingleAsync(row => row.Name == "admin");
+            Role role = new() { Id = Guid.NewGuid(), Name = "inventory-reader", DisplayName = "Inventory reader", IsActive = true };
+            db.Roles.Add(role);
+            db.RolePermissions.Add(new RolePermission { Id = Guid.NewGuid(), RoleId = role.Id, ResourceId = resource.Id, ActionId = action.Id, Granted = true });
+            db.UserRoles.Add(new UserRole { Id = Guid.NewGuid(), UserId = user.Id, RoleId = role.Id, IsActive = true, AssignedAt = DateTime.UtcNow });
+            await db.SaveChangesAsync();
+        }
+
+        using HttpClient customAdmin = await _factory.CreateAuthenticatedClientAsync("system-info-user", "system-info-user@example.com");
+        HttpResponseMessage response = await customAdmin.GetAsync("/api/system/info");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("platformDigest");
+    }
+
+    [Fact]
+    public async Task GetInfo_ProductionSignalRSerializer_MatchesRestInventoryContract()
+    {
+        string rest = await _adminClient!.GetStringAsync("/api/system/info");
+        SystemInfoDto dto = JsonSerializer.Deserialize<SystemInfoDto>(rest, JsonOptions)!;
+        var options = _factory.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.SignalR.JsonHubProtocolOptions>>();
+        string signalR = JsonSerializer.Serialize(dto.Inventory, options.Value.PayloadSerializerOptions);
+        using JsonDocument restJson = JsonDocument.Parse(rest);
+        using JsonDocument signalRJson = JsonDocument.Parse(signalR);
+        JsonElement.DeepEquals(restJson.RootElement.GetProperty("inventory"), signalRJson.RootElement).Should().BeTrue();
     }
 
     private async Task SeedSystemInfoDataAsync()

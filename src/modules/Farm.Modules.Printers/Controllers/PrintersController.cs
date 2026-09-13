@@ -44,6 +44,7 @@ using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersi
 using MoonrakerEndpointResolution = Farm.Infrastructure.Services.Printers.MoonrakerEndpointResolution;
 using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.MoonrakerOnboardingResolver;
 using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerToolAttributionCapability;
+using PrinterControlException = Farm.Infrastructure.Services.Printers.PrinterControlException;
 using PrinterSafetyMoveRequest = Farm.Infrastructure.Services.Printers.PrinterSafetyMoveRequest;
 using PrinterSafetyOperation = Farm.Infrastructure.Services.Printers.PrinterSafetyOperation;
 using PrinterSafetyTelemetryNormalizer = Farm.Infrastructure.Services.Printers.PrinterSafetyTelemetryNormalizer;
@@ -83,7 +84,8 @@ public class PrintersController(
     Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService? physicalActuationService = null,
     AppDbContext? appDbContext = null,
     Farm.Infrastructure.Services.Printers.IPrinterCacheInvalidator? printerCacheInvalidator = null,
-    Farm.Infrastructure.Services.Printers.IPrinterSafetyGuard? printerSafetyGuard = null)
+    Farm.Infrastructure.Services.Printers.IPrinterSafetyGuard? printerSafetyGuard = null,
+    Farm.Infrastructure.Services.Printers.PrinterControlOperationService? motionControl = null)
     : ControllerBase
 {
     private const int MaxHistoryQueryEntries = 2000;
@@ -1042,6 +1044,7 @@ public class PrintersController(
     /// <response code="404">If the printer with the specified ID was not found.</response>
     /// <response code="500">If there was an error communicating with the printer.</response>
     [HttpGet("{id:guid}/status")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     [ProducesResponseType(typeof(PrinterStatusDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
@@ -2450,7 +2453,16 @@ public class PrintersController(
             return NotFound();
         }
 
-        await _printersService.RemoveAsync(p, ct);
+        try
+        {
+            await _printersService.RemoveAsync(p, ct);
+        }
+        catch (PrinterControlException exception)
+        {
+            return Problem(statusCode: exception.Status, title: exception.Code, detail: exception.Message,
+                extensions: new Dictionary<string, object?> { ["code"] = exception.Code });
+        }
+
         return NoContent();
     }
 
@@ -2638,6 +2650,12 @@ public class PrintersController(
         PrinterSafetyOperation? safetyOperation = null,
         PrinterSafetyMoveRequest? move = null)
     {
+        ActionResult? asyncRequired = await RejectLegacyMotionAsync(printerId, operation, ct);
+        if (asyncRequired is not null)
+        {
+            return asyncRequired;
+        }
+
         PrinterActuationResult begin = acquired ?? await BeginPhysicalControlAsync(
             printerId,
             operation,
@@ -2719,6 +2737,12 @@ public class PrintersController(
         PrinterSafetyOperation? safetyOperation = null,
         PrinterSafetyMoveRequest? move = null)
     {
+        ActionResult? asyncRequired = await RejectLegacyMotionAsync(printerId, operation, ct);
+        if (asyncRequired is not null)
+        {
+            return asyncRequired;
+        }
+
         PrinterActuationResult begin = await BeginPhysicalControlAsync(
             printerId,
             operation,
@@ -2921,6 +2945,32 @@ public class PrintersController(
                     false,
                     "The physical command outcome is unknown; reconciliation is required."));
         }
+    }
+
+    private async Task<ActionResult?> RejectLegacyMotionAsync(Guid printerId, string operation, CancellationToken ct)
+    {
+        if (operation is not ("home" or "home_xy" or "home_z" or "move" or "move_to"))
+        {
+            return null;
+        }
+
+        if (!await CanAccessPrinterAsync(printerId, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
+        AppDbContext? db = ResolveAppDbContext();
+        int? backend = db is null
+            ? (await _printersService.FindByIdAsync(printerId, ct))?.Backend
+            : await db.Printers.AsNoTracking().Where(p => p.Id == printerId).Select(p => (int?)p.Backend).SingleOrDefaultAsync(ct);
+        if (backend != (int)PrinterBackend.Moonraker)
+        {
+            return null;
+        }
+
+        return Problem(statusCode: 409, title: "Updated client required",
+            detail: "Use control-operations for Moonraker motion.",
+            extensions: new Dictionary<string, object?> { ["code"] = "async_control_required" });
     }
 
     private async Task<PrinterActuationResult> BeginPhysicalControlAsync(
@@ -3153,7 +3203,7 @@ public class PrintersController(
 
     private AppDbContext? ResolveAppDbContext() =>
         _appDbContext ??
-        HttpContext.RequestServices.GetService<AppDbContext>();
+        HttpContext.RequestServices?.GetService<AppDbContext>();
 
     private ObjectResult PrinterRevisionConflict() =>
         StatusCode(
@@ -3227,10 +3277,80 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> EmergencyStopAsync(Guid id, CancellationToken ct)
     {
-        PrinterActuationResult direct = await BeginPhysicalControlAsync(
-            id,
-            "emergencystop",
-            ct);
+        PrinterActuationResult direct = new(PrinterActuationResultCode.FenceConflict);
+        bool motionAttemptPrepared = false;
+        bool emergencyInvoked = false;
+        for (int admission = 0; admission < 4; admission++)
+        {
+            direct = await BeginPhysicalControlAsync(id, "emergencystop", ct);
+            if (direct.Code != PrinterActuationResultCode.FenceConflict || motionControl is null)
+            {
+                break;
+            }
+
+            try
+            {
+                var lease = await motionControl.PrepareEmergencyStopAsync(id, QueueActorIdentity.Resolve(User), ct);
+                if (lease is null)
+                {
+                    // A concurrently completed motion may have released the barrier.
+                    // Re-acquire the ordinary physical fence, never send without one.
+                    continue;
+                }
+
+                motionAttemptPrepared = true;
+                PrinterEmergencyStopDelivery delivery = PrinterEmergencyStopDelivery.NotSent;
+                try
+                {
+                    if (!await motionControl.CommitEmergencyStopSendAsync(id, lease, QueueActorIdentity.Resolve(User), ct))
+                    {
+                        continue;
+                    }
+
+                    ct.ThrowIfCancellationRequested();
+                    delivery = PrinterEmergencyStopDelivery.Unknown;
+                    try
+                    {
+                        emergencyInvoked = true;
+                        bool accepted = await _printersService.EmergencyStopAsync(id, lease.ConfigurationIdentity, ct);
+                        delivery = accepted ? PrinterEmergencyStopDelivery.Accepted : PrinterEmergencyStopDelivery.Unknown;
+                        return StatusCode(accepted ? 200 : 503, new CommandResult(
+                            accepted,
+                            accepted ? "Emergency stop accepted; recovery verification is still required." : "Emergency stop outcome unknown; barrier retained."));
+                    }
+                    catch (Exception)
+                    {
+                        return StatusCode(503, new CommandResult(false, "Emergency stop delivery is uncertain; isolate all senders before recovery."));
+                    }
+                }
+                finally
+                {
+                    await motionControl.FinishEmergencyStopAsync(id, lease, delivery, CancellationToken.None);
+                }
+            }
+            catch (PrinterControlException exception)
+            {
+                return Problem(statusCode: exception.Status, title: exception.Message,
+                    extensions: new Dictionary<string, object?> { ["code"] = exception.Code });
+            }
+            catch (DbUpdateException)
+            {
+                return Problem(
+                    statusCode: 503,
+                    title: emergencyInvoked ? "Emergency stop evidence is uncertain; barrier retained" : "Emergency stop fence unavailable",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["code"] = emergencyInvoked ? "emergency_stop_outcome_unknown" : "emergency_stop_not_sent",
+                    });
+            }
+        }
+
+        if (motionAttemptPrepared && direct.Code == PrinterActuationResultCode.FenceConflict)
+        {
+            return Problem(statusCode: 503, title: "Emergency stop was not sent; the physical fence kept changing",
+                extensions: new Dictionary<string, object?> { ["code"] = "emergency_stop_not_sent" });
+        }
+
         if (direct.Code == PrinterActuationResultCode.PrinterBusy)
         {
             return await QueueLifecycleControlAsync(

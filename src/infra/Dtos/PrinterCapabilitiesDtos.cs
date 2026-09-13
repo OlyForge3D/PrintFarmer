@@ -151,6 +151,8 @@ public class PrinterCapabilitiesExportDto
 /// </summary>
 public class PrinterWithCapabilitiesDto
 {
+    public PrinterPhysicalControlDto? PhysicalControl { get; set; }
+
     // Identity (standard naming for consistency across all printer DTOs)
     public Guid Id { get; set; }
 

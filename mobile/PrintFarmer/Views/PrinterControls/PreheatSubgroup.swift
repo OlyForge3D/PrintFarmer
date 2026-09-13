@@ -145,6 +145,7 @@ struct ControlActionButton: UIViewRepresentable {
     var minimumHeight: CGFloat = 45
     var matchesInputHeight = false
     var textOnly = false
+    var isPending = false
     let action: () -> Void
     @ScaledMetric(relativeTo: .body) private var fontScale: CGFloat = 16
     @Environment(\.isEnabled) private var isEnabled
@@ -161,6 +162,7 @@ struct ControlActionButton: UIViewRepresentable {
         var configuration = UIButton.Configuration.plain()
         configuration.title = title
         configuration.image = menu == nil ? systemImage.flatMap { UIImage(systemName: $0) } : nil
+        configuration.showsActivityIndicator = isPending
         configuration.preferredSymbolConfigurationForImage = .init(pointSize: fontScale, weight: .regular)
         configuration.imagePlacement = menu == nil ? .leading : .trailing
         configuration.imagePadding = menu == nil ? 0 : 8
@@ -277,6 +279,7 @@ struct PreheatSubgroup: View {
         VStack(alignment: .leading, spacing: 0) {
             EssentialControlHeading(title: "Heat")
                 .padding(.bottom, 14)
+            PrinterControlCommandFeedback(viewModel: viewModel, section: .heat)
 
             IndividualHeaterControls(viewModel: viewModel)
 

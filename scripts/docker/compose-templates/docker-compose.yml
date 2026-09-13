@@ -79,7 +79,6 @@ services:
       - DiscoveryAuth__SharedKey=${DISCOVERY_SHARED_API_KEY:-}
       - ALLOW_LOCAL_NETWORK=${ALLOW_LOCAL_NETWORK:-false}
       - ALLOWED_NETWORK_RANGES=${ALLOWED_NETWORK_RANGES:-192.168.0.0/16,10.0.0.0/8}
-      - DOCKER_HOST_NETWORK=${DOCKER_HOST_NETWORK:-false}
       - Logging__LogLevel__Default=Information
       - Logging__LogLevel__Microsoft.AspNetCore=Warning
       - SlicerOrchestrator__Workers__OrcaSlicer=${ORCA_WORKER_ENDPOINT:-http://orcaslicer-worker:8080}

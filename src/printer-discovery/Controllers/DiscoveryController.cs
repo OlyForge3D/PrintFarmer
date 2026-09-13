@@ -168,7 +168,8 @@ public class DiscoveryController(
         return Ok(new ServiceInfo
         {
             ServiceName = "Printer Discovery Service",
-            Version = "1.0.0",
+            Version = Farm.Infrastructure.Services.SystemStatus.ApplicationBuildObservation
+                .FromAssembly(typeof(DiscoveryController).Assembly).Version ?? "Unknown",
             ScanIntervalSeconds = config.GetValue("Discovery:ScanIntervalSeconds", 300),
             PeriodicDiscoveryEnabled = config.GetValue("Discovery:EnablePeriodicDiscovery", true),
             ApiBaseUrl = config["Discovery:ApiBaseUrl"] ?? "http://api:5245",

@@ -125,6 +125,21 @@ describe('PrinterSignalRService — canonical wire-contract corpus (#2240)', () 
     window.PrintFarmerDebug = undefined;
   });
 
+  it('registers the lowercase motion invalidation event and preserves opaque row versions without interpreting state', async () => {
+    const { printerSignalRService } = await import('@/services/printer-signalr');
+    await flushMicrotasks();
+    const received = vi.fn();
+    const unsubscribe = printerSignalRService.onControlOperationUpdated(received);
+    const hint = { printerId: 'printer-1', operationId: 'operation-1', rowVersion: 'opaque+/value=' };
+    signalRTestState.connectionHandlers.get('printercontroloperationupdated')?.(hint);
+    expect(received).toHaveBeenCalledWith(hint);
+    expect(signalRTestState.connectionHandlers.has('PrinterControlOperationUpdated')).toBe(false);
+    unsubscribe();
+    signalRTestState.connectionHandlers.get('printercontroloperationupdated')?.(hint);
+    expect(received).toHaveBeenCalledTimes(1);
+    printerSignalRService.dispose();
+  });
+
   it('delivers the corpus populated printerupdated fixture unchanged to onPrinterStatusUpdate subscribers', async () => {
     const fixture = loadWireContractFixture<PrinterStatusUpdate>(
       'api/printer-status/printerupdated.populated.json'

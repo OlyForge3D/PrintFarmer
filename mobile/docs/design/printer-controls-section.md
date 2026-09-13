@@ -67,6 +67,16 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   absolute-movement entry, calibration, and material controls.
   Capability changes must not remove groups or rearrange their controls.
   This does not relax authorization, offline access or physical-command gates.
+- Command feedback appears beneath the originating **Heat**, **Move & home**,
+  or **Filament tools** heading, not below the scrolling page. Pending commands
+  show visible progress and a local **Stop waiting for command** action; home
+  and jog buttons also show a spinner. Errors and dismissal stay in that card,
+  as do acceptance, telemetry confirmation and interrupted-observation notices.
+  Request acceptance never implies physical completion, and stopping observation
+  never claims to stop the printer.
+  Unresolved durable Moonraker motion does not offer **Stop waiting**. Its
+  status, explicit admission confirmation and web-recovery guidance remain
+  outside disabled/offline controls, while command feedback stays in its card.
 
 ### Native geometry and visual comparison
 

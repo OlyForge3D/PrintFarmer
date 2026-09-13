@@ -1,3 +1,5 @@
+import type { CanonicalReleaseIdentity } from '@/types/api';
+
 /**
  * Build metadata baked into the frontend bundle at build time.
  *
@@ -9,9 +11,12 @@
 export interface BuildInfo {
   commit: string;
   buildTime: string;
+  /** Shared #2668 record embedded in these assets; self-report, not signature verification. */
+  releaseIdentity?: CanonicalReleaseIdentity | null;
 }
 
 export const buildInfo: BuildInfo = {
+  releaseIdentity: typeof __RELEASE_IDENTITY__ !== 'undefined' ? __RELEASE_IDENTITY__ : null,
   commit: typeof __GIT_HASH__ !== 'undefined' ? __GIT_HASH__ : 'dev',
   buildTime: typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : new Date(0).toISOString(),
 };

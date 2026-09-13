@@ -22,7 +22,8 @@ public class PrintersServiceSnapmakerU1CameraTests
         Printer printer = CreatePrinter("Snapmaker", "Snapmaker U1");
         List<Camera> cameras = [];
         Mock<ISupportsConfiguredCameraDetection> detection = CreateDetectionClient((null, null));
-        PrintersService service = CreateService(printer, cameras, detection.Object);
+        await using AppDbContext db = CreateDbContext();
+        PrintersService service = await CreateServiceAsync(db, printer, cameras, detection.Object);
 
         PrinterDto? dto = await service.RefreshCameraUrlsAsync(printer.Id, CancellationToken.None);
 
@@ -44,7 +45,8 @@ public class PrintersServiceSnapmakerU1CameraTests
         string streamUrl = "http://voron.local/webcam/?action=stream";
         string snapshotUrl = "http://voron.local/webcam/?action=snapshot";
         Mock<ISupportsConfiguredCameraDetection> detection = CreateDetectionClient((streamUrl, snapshotUrl));
-        PrintersService service = CreateService(printer, cameras, detection.Object);
+        await using AppDbContext db = CreateDbContext();
+        PrintersService service = await CreateServiceAsync(db, printer, cameras, detection.Object);
 
         PrinterDto? dto = await service.RefreshCameraUrlsAsync(printer.Id, CancellationToken.None);
 
@@ -86,11 +88,15 @@ public class PrintersServiceSnapmakerU1CameraTests
         };
     }
 
-    private static PrintersService CreateService(
+    private static async Task<PrintersService> CreateServiceAsync(
+        AppDbContext db,
         Printer printer,
         List<Camera> cameras,
         ISupportsConfiguredCameraDetection detectionClient)
     {
+        db.Printers.Add(printer);
+        await db.SaveChangesAsync();
+
         var printersRepository = new Mock<IPrintersRepository>();
         printersRepository
             .Setup(r => r.FindByIdWithIncludesAsync(printer.Id, It.IsAny<CancellationToken>()))
@@ -128,7 +134,7 @@ public class PrintersServiceSnapmakerU1CameraTests
 
         return new PrintersService(
             unitOfWork.Object,
-            CreateDbContext(),
+            db,
             Mock.Of<IBackendClientFactory>(),
             capabilityFactory.Object,
             Mock.Of<Farm.Infrastructure.Services.Catalog.ICatalogService>(),

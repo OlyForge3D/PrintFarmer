@@ -2,6 +2,8 @@ import { apiClient } from '@/services/api';
 import type {
   BulkImportResponse,
   CommandResult,
+  PrinterControlIntent,
+  PrinterControlRecovery,
   CreatePrinterDto,
   DiscoveredPrinterDto,
   HistoryJob,
@@ -151,6 +153,22 @@ export const printerService = {
   },
 
   // ── Temperature & Movement ────────────────────────────────────────────
+
+  createControlOperation(printerId: string, operationId: string, intent: PrinterControlIntent) {
+    return apiClient.createPrinterControlOperation(printerId, operationId, intent);
+  },
+
+  getControlOperation(printerId: string, operationId: string) {
+    return apiClient.getPrinterControlOperation(printerId, operationId);
+  },
+
+  getCurrentControlOperation(printerId: string) {
+    return apiClient.getCurrentPrinterControlOperation(printerId);
+  },
+
+  recoverControlOperation(printerId: string, operationId: string, etag: string, recovery?: PrinterControlRecovery) {
+    return apiClient.recoverPrinterControlOperation(printerId, operationId, etag, recovery);
+  },
 
   async setTemperatures(printerId: string, targets: TempTargets): Promise<CommandResult> {
     return apiClient.setTemperatures(printerId, targets);

@@ -57,8 +57,9 @@ services:
       # Import network discovery configuration from deployment
       - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-192.168.0.0/16,10.0.0.0/8}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # Printer probes use routed TCP/HTTP, not Docker APIs or raw sockets.
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       api:
         condition: service_healthy
@@ -73,8 +74,6 @@ services:
       - /tmp:rw,noexec,nosuid,size=32m
     cap_drop:
       - ALL
-    cap_add:
-      - NET_RAW
     ulimits:
       nofile: 1024
     deploy:

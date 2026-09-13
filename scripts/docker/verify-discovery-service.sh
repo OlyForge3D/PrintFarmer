@@ -1,103 +1,67 @@
 #!/bin/bash
+# Read-only diagnostics of actual discovery isolation and bridge HTTP paths.
+# Usage: verify-discovery-service.sh [deployment-directory [env-file]]
+set -euo pipefail
 
-# Diagnostic script to verify PrinterDiscovery service connectivity
-# Usage: ./verify-discovery-service.sh
-# Can be run from any directory in the repository or deployment
-# 
-# Works on: Linux VM, cloud servers, bare metal, Raspberry Pi, Docker Desktop, etc.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../common-utils.sh"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+DEPLOYMENT_DIR="$(cd "${1:-$REPO_ROOT}" && pwd)"
+ENV_FILE="${2:-$DEPLOYMENT_DIR/.env}"
+cd "$REPO_ROOT"
+COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$DEPLOYMENT_DIR/docker-compose.yml")
 
-set -e
+fail() {
+    log_error "$1"
+    log_error "Check selected deployment, Docker DNS, routes and local service logs. Regenerate/recreate stale configuration; do not grant additional privileges. Redact credentials before sharing logs."
+    exit 1
+}
 
-echo "=== PrinterDiscovery Service Diagnostics ==="
-echo ""
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Find the repository root
-REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
-while [ "$REPO_ROOT" != "/" ] && [ ! -f "$REPO_ROOT/docker-compose.yml" ]; do
-    REPO_ROOT="$(dirname "$REPO_ROOT")"
+[[ -f "$DEPLOYMENT_DIR/docker-compose.yml" && -f "$ENV_FILE" ]] ||
+    fail "Generated Compose and the deployment environment file are required."
+discovery_id="$("${COMPOSE[@]}" ps -q printer-discovery)" || fail "Cannot query discovery."
+api_id="$("${COMPOSE[@]}" ps -q api)" || fail "Cannot query API."
+[[ -n "$discovery_id" && -n "$api_id" ]] || fail "API or discovery container is missing."
+for id in "$discovery_id" "$api_id"; do
+    [[ "$(docker inspect -f '{{.State.Running}}' "$id")" == true ]] ||
+        fail "API or discovery container is stopped."
 done
 
-if [ ! -f "$REPO_ROOT/docker-compose.yml" ]; then
-    echo -e "${RED}✗ Could not find repository root${NC}"
-    echo "Please run this script from within the PrintFarmer repository"
-    exit 1
-fi
+# Inspect only isolation fields, never the secret-bearing environment.
+isolation="$(docker inspect -f '{{.HostConfig.Privileged}}|{{.HostConfig.ReadonlyRootfs}}|{{len .HostConfig.CapAdd}}|{{len .HostConfig.Devices}}|{{range .Mounts}}{{if ne .Type "tmpfs"}}host-mount{{end}}{{end}}|{{.HostConfig.PidMode}}|{{.HostConfig.NetworkMode}}|{{.Config.User}}|{{.HostConfig.CapDrop}}|{{.HostConfig.SecurityOpt}}' "$discovery_id")" ||
+    fail "Cannot inspect discovery isolation."
+IFS='|' read -r privileged readonly_root added devices mounts pid_mode network_mode user dropped security <<< "$isolation"
+[[ "$privileged" == false && "$readonly_root" == true && "$added" == 0 &&
+   "$devices" == 0 && -z "$mounts" && -z "$pid_mode" &&
+   "$network_mode" != host && "$network_mode" != container:* &&
+   -n "$user" && "$user" != root && "$user" != root:* && "$user" != 0 && "$user" != 0:* &&
+   "$dropped" == "[ALL]" &&
+   ( "$security" == "[no-new-privileges:true]" || "$security" == "[no-new-privileges]" ) ]] ||
+    fail "Discovery isolation differs from the socket-free canonical deployment (privileged=$privileged, readonly=$readonly_root, added-capabilities=$added, devices=$devices, host-mounts=${mounts:-none}, pid=${pid_mode:-private}, network=$network_mode, user=$user, dropped=$dropped, security=$security)."
 
-echo "Repository: $REPO_ROOT"
-echo ""
-
-# Check if discovery service container exists
-echo "[*] Checking for printer-discovery container..."
-if docker ps -a --format '{{.Names}}' | grep -q printfarmer-printer-discovery; then
-    echo -e "${GREEN}✓ Container exists${NC}"
-    
-    # Check if it's running
-    if docker ps --format '{{.Names}}' | grep -q printfarmer-printer-discovery; then
-        echo -e "${GREEN}✓ Container is running${NC}"
-        
-        # Get container IP info
-        echo ""
-        echo "[*] Container network info:"
-        docker inspect printfarmer-printer-discovery -f '
-        Network Mode: {{index .HostConfig.NetworkMode}}
-        Status: {{.State.Status}}
-        Health: {{.State.Health.Status}}
-        '
-    else
-        echo -e "${RED}✗ Container is NOT running${NC}"
-        echo "Logs:"
-        docker logs printfarmer-printer-discovery --tail 20
-        exit 1
+discovery_networks="$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$discovery_id")" ||
+    fail "Cannot inspect discovery networks."
+api_networks="$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$api_id")" ||
+    fail "Cannot inspect API networks."
+shared_bridge=false
+while IFS= read -r network; do
+    [[ -n "$network" ]] || continue
+    if grep -Fxq "$network" <<< "$api_networks"; then
+        driver="$(docker network inspect -f '{{.Driver}}' "$network")" || fail "Cannot inspect shared network."
+        [[ "$driver" != bridge ]] || shared_bridge=true
     fi
-else
-    echo -e "${RED}✗ Container does not exist${NC}"
-    echo "Make sure you've run: docker-compose -f docker-compose.yml -f docker-compose.discovery.yml up -d"
-    exit 1
-fi
+done <<< "$discovery_networks"
+[[ "$shared_bridge" == true ]] || fail "API and discovery do not share a bridge network."
 
-echo ""
-echo "[*] Checking API connectivity from discovery service..."
-
-# Check if discovery service can reach API
-docker exec printfarmer-printer-discovery \
-    sh -c "wget -q -O- http://host.docker.internal:5245/health >/dev/null 2>&1" && \
-    echo -e "${GREEN}✓ Discovery service CAN reach API at http://host.docker.internal:5245${NC}" || \
-    echo -e "${RED}✗ Discovery service CANNOT reach API${NC}"
-
-echo ""
-echo "[*] Checking discovery service health endpoint..."
-curl -s http://localhost:5246/health | head -20 && echo "" || \
-    echo -e "${YELLOW}⚠ Warning: Could not reach http://localhost:5246/health${NC}"
-
-echo ""
-echo "[*] Checking API health endpoint..."
-curl -s http://localhost:5245/healthz && echo "" || \
-    echo -e "${YELLOW}⚠ Warning: Could not reach http://localhost:5245/healthz${NC}"
-
-echo ""
-echo "[*] Checking if NetworkDiscovery LastHeartbeat is being updated..."
-HEARTBEAT=$(curl -s http://localhost:5245/api/settings/NetworkDiscovery | grep -o '"lastHeartbeat":"[^"]*"' | head -1)
-if [ -n "$HEARTBEAT" ]; then
-    echo -e "${GREEN}✓ Last heartbeat: $HEARTBEAT${NC}"
-else
-    echo -e "${RED}✗ No heartbeat recorded${NC}"
-fi
-
-echo ""
-echo "[*] Discovery service logs (last 20 lines):"
-docker logs printfarmer-printer-discovery --tail 20
-
-echo ""
-echo "=== Diagnostics Complete ==="
-echo ""
-echo "If heartbeats are not updating, check:"
-echo "1. API container is running and healthy"
-echo "2. Discovery service can reach API via http://host.docker.internal:5245"
-echo "3. Discovery service logs for connection errors"
-echo "4. Firewall rules allow containers to communicate"
+probe() {
+    local service="$1" url="$2"
+    log_info "Checking $service -> $url"
+    "${COMPOSE[@]}" exec -T "$service" curl --fail --silent --show-error \
+        --connect-timeout 5 --max-time 15 --output /dev/null "$url" ||
+        fail "$service cannot reach $url (DNS, connection or HTTP health failure)."
+}
+probe printer-discovery http://localhost:5247/api/discovery/health
+probe printer-discovery http://api:5245/healthz
+probe api http://printer-discovery:5247/api/discovery/health
+log_success "Discovery isolation and bridge HTTP paths verified."
+log_info "Next: sign in as a farm administrator, verify a recent heartbeat, then scan a known reachable printer. HTTP health alone does not prove either."

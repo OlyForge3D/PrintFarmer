@@ -1083,11 +1083,10 @@ generate_compose() {
         return 1
     fi
 
-    "$PYTHON_CMD" - "$compose_file" "$HOST_IP" "${HTTPS_PORT-}" <<'PY'
+    "$PYTHON_CMD" - "$compose_file" "${HTTPS_PORT-}" <<'PY'
 import sys
 path = sys.argv[1]
-host_ip = sys.argv[2]
-https_port = sys.argv[3].strip()
+https_port = sys.argv[2].strip()
 txt = open(path,'r').read().splitlines()
 
 def find_block(lines, name):
@@ -1139,20 +1138,6 @@ if start is not None:
             line for line in block
             if not (line.lstrip().startswith('-') and ':443' in line)
         ]
-    # check if extra_hosts exists
-    if not any('extra_hosts:' in l for l in block):
-        # try to insert before volumes/ports/environment if present
-        inserted = False
-        for idx in range(1, len(block)):
-            if block[idx].lstrip().startswith('volumes:') or block[idx].lstrip().startswith('ports:') or block[idx].lstrip().startswith('environment:'):
-                block.insert(idx, '    extra_hosts:')
-                block.insert(idx+1, f'      - "host.docker.internal:{host_ip}"')
-                inserted = True
-                break
-        if not inserted:
-            # append at end of block (before next service)
-            block.append('    extra_hosts:')
-            block.append(f'      - "host.docker.internal:{host_ip}"')
     txt = txt[:start] + block + txt[end:]
 
 open(path,'w').write('\n'.join(txt) + '\n')
@@ -1281,6 +1266,10 @@ show_dry_run() {
 
 # Main execution
 main() {
+    if [[ "${NETWORK_MODE:-bridge}" != "bridge" ]]; then
+        log_error "Only bridge networking is supported. Set NETWORK_MODE to bridge before generating deployment files."
+        exit 1
+    fi
     parse_args "$@"
     log_info "Docker Compose Generator for PrintFarmer"
     log_info "Output directory: $OUTPUT_DIR"

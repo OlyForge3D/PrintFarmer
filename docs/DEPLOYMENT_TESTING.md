@@ -314,7 +314,7 @@ When reporting test failures, include:
 ## Related Documentation
 
 - `DEPLOYMENT_OVERVIEW.md` - General deployment architecture
-- `DEPLOY_HOST_NETWORK_SQLSERVER.md` - User scenario deployment guide
+- [Microservices deployment](MICROSERVICES_DEPLOYMENT_GUIDE.md) - Supported bridge deployment guide
 - `docker-compose.*.yml` - Individual template documentation
 - `scripts/docker/README.md` - Docker script reference
 
@@ -330,8 +330,8 @@ PostgreSQL and SQL Server providers.
 **Result**: ✅ All architectures now pass validation without duplicate volumes
 
 **Tests Added**:
-- Regression test: "host-network + sqlserver configuration (duplicate volumes regression)"
-- User scenario test: Complete host-network + sqlserver + orcaslicer + spoolman validation
+- Regression test: "microservices bridge + sqlserver configuration (duplicate volumes regression)"
+- User scenario test: Complete microservices bridge + sqlserver + orcaslicer + spoolman validation
 
 ## Quick Commands Reference
 

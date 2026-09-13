@@ -23,6 +23,7 @@ struct PrinterSetupControlsContent: View {
     }
 
     var body: some View {
+        PrinterMotionStatusBanner(viewModel: viewModel)
         if !PrinterControlsSection.isHidden(for: printer) {
             content
                 .task(id: scenePhase) {
@@ -117,21 +118,72 @@ struct PrinterSetupControlsContent: View {
                     }
                 }
 
-                if let notice = viewModel.commandNotice {
-                    Text(notice)
-                        .font(.footnote)
-                        .foregroundStyle(Color.pfTextSecondary)
-                        .padding(.top, 12)
-                }
-                if viewModel.pendingCommand != nil {
+            }
+        }
+    }
+
+    /// Kept outside disabled controls and offline branches so uncertainty is actionable.
+    struct PrinterMotionStatusBanner: View {
+        @ObservedObject var viewModel: PrinterControlsViewModel
+        @State private var showsAdmissionConfirmation = false
+        @State private var admissionOperationID: UUID?
+        @State private var admissionSummary = ""
+
+        var body: some View {
+            if let message = viewModel.motionStatusMessage {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Motion status", systemImage: viewModel.hasUnresolvedMotion ? "lock.fill" : "info.circle")
+                        .font(.headline)
+                    Text(message).font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let operationID = viewModel.motionOperationID {
+                        Text("Operation \(operationID.uuidString)")
+                            .font(.caption)
+                            .textSelection(.enabled)
+                    }
+                    if let error = viewModel.operationReadError {
+                        Text(error).font(.footnote)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     ControlActionButton(
-                        title: "Stop waiting for command", identifier: "printer.controls.stop-waiting",
-                        hint: "Does not stop the printer. Physical execution may continue."
-                    ) { viewModel.cancelPendingCommand() }
+                        title: "Refresh motion status", identifier: "printer.controls.motion.refresh",
+                        hint: "Reads the saved operation. Never sends or retries motion."
+                    ) { Task { await viewModel.refreshControlOperation() } }
+                    .disabled(viewModel.isRefreshingControlOperation || !viewModel.isActive)
+                    if let operationID = viewModel.motionAdmissionResubmissionID {
+                        ControlActionButton(
+                            title: "Review saved admission", identifier: "printer.controls.motion.review-admission",
+                            hint: "Requires confirmation. Resubmitting the same operation may start the original motion."
+                        ) {
+                            admissionOperationID = operationID
+                            admissionSummary = viewModel.savedMotionAdmissionSummary ?? ""
+                            showsAdmissionConfirmation = true
+                        }
+                    }
+                    if viewModel.isResubmittingMotionAdmission {
+                        Text("Checking and resubmitting only the confirmed saved admission…")
+                            .font(.footnote)
+                    }
+                    if let recoveryURL = viewModel.motionRecoveryURL {
+                        Link("Open printer recovery on web", destination: recoveryURL)
+                            .frame(minHeight: 44)
+                            .accessibilityHint("An operator with queue:reconcile permission and printer Submit access must verify isolation and inspect the physical machine before releasing recovery.")
+                            .accessibilityIdentifier("printer.controls.motion.recovery")
+                    }
                 }
-                if let error = viewModel.lastError {
-                    errorBanner(error)
-                        .padding(.top, 12)
+                .foregroundStyle(Color.pfTextPrimary)
+                .padding(12)
+                .background(Color.pfWarning.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("printer.controls.motion.status")
+                .alert("Resubmit saved motion?", isPresented: $showsAdmissionConfirmation) {
+                    Button("Resubmit same operation", role: .destructive) {
+                        guard let operationID = admissionOperationID else { return }
+                        Task { await viewModel.resubmitUnconfirmedMotionAdmission(operationID: operationID) }
+                    }
+                    Button("Keep blocked", role: .cancel) {}
+                } message: {
+                    Text("\(admissionSummary)\n\n\(PrinterControlsViewModel.motionAdmissionResubmissionWarning)")
                 }
             }
         }
@@ -164,6 +216,47 @@ struct PrinterSetupControlsContent: View {
         )
     }
 
+}
+
+/// The same command owner drives each card; only the originating card shows
+/// its feedback, including after HTTP/telemetry observation has ended.
+struct PrinterControlCommandFeedback: View {
+    @ObservedObject var viewModel: PrinterControlsViewModel
+    let section: ControlCommand.Section
+
+    var body: some View {
+        if viewModel.feedbackSection == section {
+            VStack(alignment: .leading, spacing: 8) {
+                if let error = viewModel.lastError {
+                    errorBanner(error)
+                } else {
+                    if viewModel.pendingCommand != nil {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("Command pending").font(.footnote.weight(.semibold))
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                    if let notice = viewModel.commandNotice {
+                        Label(notice, systemImage: "info.circle")
+                            .font(.footnote)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if viewModel.pendingCommand != nil && !viewModel.hasUnresolvedMotion {
+                    ControlActionButton(
+                        title: "Stop waiting for command", identifier: "printer.controls.stop-waiting",
+                        hint: "Does not stop the printer. Physical execution may continue."
+                    ) { viewModel.cancelPendingCommand() }
+                }
+            }
+            .foregroundStyle(Color.pfTextPrimary)
+            .padding(.bottom, viewModel.pendingCommand != nil || viewModel.commandNotice != nil || viewModel.lastError != nil ? 14 : 0)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("printer.controls.\(section.rawValue).feedback")
+        }
+    }
+
     private func errorBanner(_ error: ControlsError) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
@@ -173,17 +266,11 @@ struct PrinterSetupControlsContent: View {
                     .font(.footnote)
                     .foregroundStyle(Color.pfTextPrimary)
             }
-            Spacer()
-            Button {
-                viewModel.dismissError()
-            } label: {
-                Text("Dismiss")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Color.pfTextPrimary)
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
+            ControlActionButton(
+                title: "Dismiss", identifier: "printer.controls.dismiss-error",
+                compact: true, textSize: 13, textOnly: true
+            ) { viewModel.dismissError() }
+            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(12)
         .background(Color.pfError.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
@@ -211,6 +298,7 @@ struct PrinterMaterialControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             EssentialControlHeading(title: "Filament tools").padding(.bottom, 14)
+            PrinterControlCommandFeedback(viewModel: viewModel, section: .material)
             if let materialPresentation {
                 PrinterFilamentSection(
                     presentation: materialPresentation, actions: materialActions,
