@@ -38,6 +38,16 @@ export default tseslint.config([
       'local/pf-no-oversized-radius': ['error', { maxPx: 8, checkFullRound: true }],
     },
   },
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/utils/uuid.ts', 'src/test/**', '**/__tests__/**', '**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}'],
+    rules: {
+      'no-restricted-properties': ['error', {
+        property: 'randomUUID',
+        message: 'Use generateUUID from @/utils/uuid so ID generation works on HTTP LAN origins.',
+      }],
+    },
+  },
   // Exclude api.ts from apiClient rule (it defines apiClient)
   {
     files: ['src/services/api.ts'],

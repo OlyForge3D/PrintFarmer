@@ -1,3 +1,4 @@
+import { generateUUID } from '@/utils/uuid';
 import React, { useState, useCallback } from 'react';
 import { FileIcon, UploadIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { Button, FileUpload, ProgressBar } from '@/common/components/ui';
@@ -47,15 +48,19 @@ export const GcodeUploadModal: React.FC<GcodeUploadModalProps> = ({
       return;
     }
 
-    files.forEach(file => {
-      const id = `${file.name}-${Date.now()}-${Math.random()}`;
-      setUploadQueue(prev => [...prev, {
-        id,
-        file,
-        progress: 0,
-        status: 'queued'
-      }]);
-    });
+    try {
+      files.forEach(file => {
+        const id = generateUUID();
+        setUploadQueue(prev => [...prev, {
+          id,
+          file,
+          progress: 0,
+          status: 'queued'
+        }]);
+      });
+    } catch (error) {
+      toast.error(`Failed to queue files: ${error instanceof Error ? error.message : 'Unable to generate a secure ID'}`);
+    }
   }, []);
 
   const handleFileSelect = useCallback((files: FileList | null) => {
@@ -72,15 +77,19 @@ export const GcodeUploadModal: React.FC<GcodeUploadModalProps> = ({
       return;
     }
 
-    validFiles.forEach(file => {
-      const id = `${file.name}-${Date.now()}-${Math.random()}`;
-      setUploadQueue(prev => [...prev, {
-        id,
-        file,
-        progress: 0,
-        status: 'queued'
-      }]);
-    });
+    try {
+      validFiles.forEach(file => {
+        const id = generateUUID();
+        setUploadQueue(prev => [...prev, {
+          id,
+          file,
+          progress: 0,
+          status: 'queued'
+        }]);
+      });
+    } catch (error) {
+      toast.error(`Failed to queue files: ${error instanceof Error ? error.message : 'Unable to generate a secure ID'}`);
+    }
   }, []);
 
   const removeItem = (id: string) => {

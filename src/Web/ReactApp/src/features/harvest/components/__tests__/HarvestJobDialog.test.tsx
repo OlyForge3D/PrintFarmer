@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { HarvestJobDialog } from '../HarvestJobDialog';
+import { toast } from 'sonner';
+import { ErrorBoundary } from '@/common/components/ErrorBoundary';
 import { configurePartsHarvestClient } from '@/services/partsHarvest';
 
 interface StubClient {
@@ -48,6 +50,23 @@ describe('HarvestJobDialog', () => {
 
   afterEach(() => {
     configurePartsHarvestClient(null);
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('routes missing secure randomness to the existing render error boundary', () => {
+    vi.stubGlobal('crypto', {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    render(
+      <ErrorBoundary>
+        <HarvestJobDialog isOpen onClose={vi.fn()} job={baseJob} />
+      </ErrorBoundary>,
+    );
+
+    expect(screen.getByText('Something went wrong')).toBeInTheDocument();
+    expect(screen.getByText(/no cryptographically secure random source available/)).toBeInTheDocument();
+    expect(stub.post).not.toHaveBeenCalled();
   });
 
   it('is a labelled dialog when opened', async () => {
@@ -130,6 +149,7 @@ describe('HarvestJobDialog', () => {
   });
 
   it('renders the wrong-bin step with non-color-only warning and requires an override reason', async () => {
+    vi.stubGlobal('crypto', { getRandomValues: vi.fn(crypto.getRandomValues.bind(crypto)) });
     const user = userEvent.setup();
     stub.post.mockRejectedValueOnce(
       axiosError(409, {
@@ -183,10 +203,13 @@ describe('HarvestJobDialog', () => {
     const second = stub.post.mock.calls[1][1];
     expect(second.allowWrongBin).toBe(true);
     expect(second.overrideReason).toBe('Bin relabeled today');
+    expect(first.operationKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(crypto.getRandomValues).toHaveBeenCalled();
     expect(second.operationKey).toBe(first.operationKey);
   });
 
   it('switches to the manual outputs form on partMappingRequired and posts explicit outputs', async () => {
+    vi.stubGlobal('crypto', { getRandomValues: vi.fn(crypto.getRandomValues.bind(crypto)) });
     const user = userEvent.setup();
     stub.post.mockRejectedValueOnce(
       axiosError(409, {
@@ -208,6 +231,9 @@ describe('HarvestJobDialog', () => {
 
     const rows = screen.getAllByTestId('harvest-manual-row');
     expect(rows).toHaveLength(1);
+    const skuInput = within(rows[0]).getByLabelText(/SKU #1/i);
+    expect(skuInput.id.replace('harvest-sku-', '')).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(crypto.getRandomValues).toHaveBeenCalledTimes(2);
     // V1/V5: focus moves to the first SKU input after the transition.
     await waitFor(() =>
       expect(within(rows[0]).getByLabelText(/SKU #1/i)).toHaveFocus(),
@@ -242,6 +268,8 @@ describe('HarvestJobDialog', () => {
     const secondCall = stub.post.mock.calls[1][1];
     expect(secondCall.outputs).toEqual([{ sku: 'SKU-Z', quantity: 1 }]);
     expect(secondCall.overrideReason).toBe(manualReason);
+    expect(secondCall.operationKey).toBe(stub.post.mock.calls[0][1].operationKey);
+    expect(crypto.getRandomValues).toHaveBeenCalledTimes(2);
   });
 
   it('accepts a manual output quantity above 100 and posts it unchanged', async () => {
@@ -287,6 +315,7 @@ describe('HarvestJobDialog', () => {
   });
 
   it('supports adding and removing multiple SKU rows in manual mode', async () => {
+    vi.stubGlobal('crypto', { getRandomValues: vi.fn(crypto.getRandomValues.bind(crypto)) });
     const user = userEvent.setup();
     stub.post.mockRejectedValueOnce(
       axiosError(409, {
@@ -311,10 +340,117 @@ describe('HarvestJobDialog', () => {
     await user.type(within(rows[0]).getByLabelText(/SKU #1/i), 'A');
     await user.type(within(rows[1]).getByLabelText(/SKU #2/i), 'B');
 
+    const firstInput = within(rows[0]).getByLabelText(/SKU #1/i);
+    const secondInput = within(rows[1]).getByLabelText(/SKU #2/i);
+    expect(firstInput.id).not.toBe(secondInput.id);
+    expect(crypto.getRandomValues).toHaveBeenCalledTimes(3);
+
     // Remove row 2
     await user.click(within(rows[1]).getByRole('button', { name: /remove row 2/i }));
     rows = screen.getAllByTestId('harvest-manual-row');
     expect(rows).toHaveLength(1);
+    expect(within(rows[0]).getByLabelText(/SKU #1/i)).toBe(firstInput);
+    expect(firstInput).toHaveValue('A');
+    expect(crypto.getRandomValues).toHaveBeenCalledTimes(3);
+  });
+
+  describe('HTTP LAN row identities', () => {
+    beforeEach(() => {
+      vi.stubGlobal('crypto', { getRandomValues: vi.fn(crypto.getRandomValues.bind(crypto)) });
+      vi.spyOn(toast, 'error').mockReturnValue('test-error-toast');
+    });
+
+    function mappingError() {
+      return axiosError(409, { code: 'partMappingRequired', jobId: baseJob.id, guidance: 'Enter outputs manually.' });
+    }
+
+    it('preserves per-SKU bin row identities through edits/removal and omits IDs from outputBins', async () => {
+      const user = userEvent.setup();
+      stub.post.mockResolvedValueOnce({ data: { printJobId: baseJob.id, harvestedAt: '2026-01-01T00:00:00Z', alreadyHarvested: false, outputs: [], adjustments: [] } });
+      renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
+      await user.click(screen.getByLabelText('Assign bins per SKU'));
+      const first = screen.getByLabelText('SKU #1');
+      expect(first.id.replace('harvest-binrow-sku-', '')).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      await user.type(first, 'SKU-A');
+      await user.type(screen.getByLabelText('Bin #1'), 'BIN-A');
+      await user.click(screen.getByRole('button', { name: /add sku bin/i }));
+      const second = screen.getByLabelText('SKU #2');
+      expect(second.id).not.toBe(first.id);
+      await user.type(second, 'SKU-B');
+      await user.type(screen.getByLabelText('Bin #2'), 'BIN-B');
+      expect(screen.getByLabelText('SKU #1')).toBe(first);
+      expect(crypto.getRandomValues).toHaveBeenCalledTimes(3);
+
+      await user.click(screen.getByRole('button', { name: 'Remove bin assignment 1' }));
+      expect(screen.getByLabelText('SKU #1')).toBe(second);
+      expect(second).toHaveValue('SKU-B');
+      await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+      await waitFor(() => expect(screen.getByTestId('harvest-success')).toBeInTheDocument());
+      expect(stub.post.mock.calls[0][1].outputBins).toEqual([{ partSku: 'SKU-B', binCode: 'BIN-B' }]);
+      expect(crypto.getRandomValues).toHaveBeenCalledTimes(3);
+    });
+
+    it.each(['initial', 'additional'] as const)('reports failure creating an %s preview row without changing existing rows', async (mode) => {
+      const user = userEvent.setup();
+      renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
+      await waitFor(() => expect(stub.get).toHaveBeenCalled());
+      if (mode === 'additional') {
+        await user.click(screen.getByLabelText('Assign bins per SKU'));
+        await user.type(screen.getByLabelText('SKU #1'), 'Preserved SKU');
+      }
+      vi.stubGlobal('crypto', {});
+      await user.click(mode === 'initial'
+        ? screen.getByLabelText('Assign bins per SKU')
+        : screen.getByRole('button', { name: /add sku bin/i }));
+
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('no cryptographically secure random source available'));
+      expect(screen.queryAllByTestId('harvest-bin-row')).toHaveLength(mode === 'initial' ? 0 : 1);
+      if (mode === 'initial') expect(screen.getByLabelText('Assign bins per SKU')).not.toBeChecked();
+      else expect(screen.getByLabelText('SKU #1')).toHaveValue('Preserved SKU');
+      expect(stub.post).not.toHaveBeenCalled();
+    });
+
+    it('reports failure adding a manual row without replacing an existing row', async () => {
+      const user = userEvent.setup();
+      stub.post.mockRejectedValueOnce(mappingError());
+      renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
+      await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+      const first = await screen.findByLabelText('SKU #1');
+      await user.type(first, 'Preserved SKU');
+      const secureCrypto = crypto;
+      vi.stubGlobal('crypto', {});
+      await user.click(screen.getByRole('button', { name: /add another sku/i }));
+
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('no cryptographically secure random source available'));
+      expect(screen.getAllByTestId('harvest-manual-row')).toHaveLength(1);
+      expect(screen.getByLabelText('SKU #1')).toBe(first);
+      expect(first).toHaveValue('Preserved SKU');
+      vi.stubGlobal('crypto', secureCrypto);
+      await user.click(screen.getByRole('button', { name: /add another sku/i }));
+      expect(screen.getAllByTestId('harvest-manual-row')).toHaveLength(2);
+      expect(crypto.getRandomValues).toHaveBeenCalledTimes(3);
+      expect(stub.post).toHaveBeenCalledTimes(1);
+    });
+
+    it('handles first manual row generation failure inside the mutation error callback and allows recovery', async () => {
+      const user = userEvent.setup();
+      const secureCrypto = crypto;
+      stub.post.mockImplementationOnce(async () => {
+        vi.stubGlobal('crypto', {});
+        throw mappingError();
+      });
+      renderDialog({ isOpen: true, onClose: vi.fn(), job: baseJob });
+      await user.click(screen.getByRole('button', { name: /confirm harvest/i }));
+      await waitFor(() => expect(screen.getByTestId('harvest-mapping-required')).toBeInTheDocument());
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('no cryptographically secure random source available'));
+      expect(screen.queryAllByTestId('harvest-manual-row')).toHaveLength(0);
+
+      vi.stubGlobal('crypto', secureCrypto);
+      await user.click(screen.getByRole('button', { name: /add another sku/i }));
+      expect(screen.getAllByTestId('harvest-manual-row')).toHaveLength(1);
+      expect(crypto.getRandomValues).toHaveBeenCalledTimes(2);
+      expect(stub.post).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('shows feature-disabled empty state and offers only a close action', async () => {
@@ -336,7 +472,8 @@ describe('HarvestJobDialog', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('shows a generic error step for network failures and reuses the same operationKey on retry', async () => {
+  it('reuses the same HTTP LAN operationKey after a network failure', async () => {
+    vi.stubGlobal('crypto', { getRandomValues: vi.fn(crypto.getRandomValues.bind(crypto)) });
     const user = userEvent.setup();
     stub.post.mockRejectedValueOnce(
       Object.assign(new Error('Network Error'), { isAxiosError: true }),
@@ -362,10 +499,13 @@ describe('HarvestJobDialog', () => {
 
     const first = stub.post.mock.calls[0][1];
     const second = stub.post.mock.calls[1][1];
+    expect(first.operationKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(crypto.getRandomValues).toHaveBeenCalled();
     expect(second.operationKey).toBe(first.operationKey);
   });
 
-  it('regenerates operationKey when reopened', async () => {
+  it('regenerates the HTTP LAN operationKey only for a new dialog session', async () => {
+    vi.stubGlobal('crypto', { getRandomValues: vi.fn(crypto.getRandomValues.bind(crypto)) });
     const user = userEvent.setup();
     stub.post.mockResolvedValue({
       data: {

@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
+import { generateUUID } from '@/utils/uuid';
 import { Alert, Badge, Button, Input, Select } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { useAdjustPartStock } from '../hooks/usePartsInventory';
@@ -20,16 +21,6 @@ export interface AdjustStockModalProps {
   onClose: () => void;
   part: PartInventoryDto | null;
   bins: BinDto[];
-}
-
-/**
- * Generate an idempotency key, falling back to a time+random token on
- * browsers without WebCrypto (`crypto.randomUUID`).
- */
-function generateOperationKey(): string {
-  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `adjust-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 /**
@@ -97,25 +88,25 @@ function AdjustStockFormBody({ part, bins, onClose }: AdjustStockFormBodyProps) 
     // no bin and loses attribution.
     const effectiveBinCode = binCode.trim() === '' ? part.defaultBinCode ?? null : binCode.trim();
 
-    // One operationKey per logical adjustment: reuse the cached key when the
-    // payload is unchanged (a retry), mint a fresh one when the payload changed.
-    // JSON.stringify gives an unambiguous, canonical signature — bin codes and
-    // notes may contain the delimiter (`|`), so plain concatenation could make
-    // distinct payloads collide and wrongly reuse a stale operationKey.
-    const signature = JSON.stringify([deltaNum, reason, effectiveBinCode ?? null, notes.trim()]);
-    if (!opKeyRef.current || opKeyRef.current.signature !== signature) {
-      opKeyRef.current = { signature, key: generateOperationKey() };
-    }
-    const operationKey = opKeyRef.current.key;
-
-    const request: AdjustPartInventoryRequest = {
-      delta: deltaNum,
-      reason,
-      binCode: effectiveBinCode,
-      notes: notes.trim() || null,
-      operationKey,
-    };
     try {
+      // One operationKey per logical adjustment: reuse the cached key when the
+      // payload is unchanged (a retry), mint a fresh one when the payload changed.
+      // JSON.stringify gives an unambiguous, canonical signature — bin codes and
+      // notes may contain the delimiter (`|`), so plain concatenation could make
+      // distinct payloads collide and wrongly reuse a stale operationKey.
+      const signature = JSON.stringify([deltaNum, reason, effectiveBinCode ?? null, notes.trim()]);
+      if (!opKeyRef.current || opKeyRef.current.signature !== signature) {
+        opKeyRef.current = { signature, key: generateUUID() };
+      }
+      const operationKey = opKeyRef.current.key;
+
+      const request: AdjustPartInventoryRequest = {
+        delta: deltaNum,
+        reason,
+        binCode: effectiveBinCode,
+        notes: notes.trim() || null,
+        operationKey,
+      };
       await adjust.mutateAsync({ sku: part.sku, request });
       toast.success(`Recorded ${deltaNum > 0 ? '+' : ''}${deltaNum} to ${part.sku}`);
       onClose();
