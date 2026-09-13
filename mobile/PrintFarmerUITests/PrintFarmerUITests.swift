@@ -47,7 +47,7 @@ final class UIWaitBudget {
         guard let interruption = try perform("navigation interruption", observeInterruption) else {
             return ShellObservation(ShellNode(.application))
         }
-        if let interruption {
+        if let interruption, !interruption.frame.isEmpty {
             return ShellObservation(ShellNode(
                 .application, frame: interruption.frame, children: [interruption]
             ))
@@ -72,9 +72,6 @@ final class UIWaitBudget {
         while remaining > 0 {
             guard let observation = try perform("shell snapshot", observe) else { return nil }
             lastShellObservation = observation.diagnostic
-            if let result = perform("resolve observed shell", { resolve(observation) }) ?? nil {
-                return result
-            }
             if let alert = observation.blockingAlert {
                 if let previous = dismissedAlert {
                     guard alert.identifier == previous.identifier, alert.label == previous.label,
@@ -87,17 +84,22 @@ final class UIWaitBudget {
                         dismissInterruption(alert)
                     }) == true else { return nil }
                 }
-            } else if case .collapsed(let toggle) = observation.state {
-                if revealedAt == nil {
-                    if perform("reveal observed sidebar", { reveal(toggle) }) == true {
-                        revealedAt = now()
+            } else {
+                if let result = perform("resolve observed shell", { resolve(observation) }) ?? nil {
+                    return result
+                }
+                if case .collapsed(let toggle) = observation.state {
+                    if revealedAt == nil {
+                        if perform("reveal observed sidebar", { reveal(toggle) }) == true {
+                            revealedAt = now()
+                        }
+                    } else if toggle.label == "Show Sidebar",
+                              now() - (revealedAt ?? now()) >= 1, !usedLeadingEdge {
+                        // A second observation must still advertise Show Sidebar.
+                        // Never toggle a now-visible sidebar closed.
+                        usedLeadingEdge = true
+                        _ = perform("reveal observed sidebar from edge", { leadingEdge(toggle) })
                     }
-                } else if toggle.label == "Show Sidebar",
-                          now() - (revealedAt ?? now()) >= 1, !usedLeadingEdge {
-                    // A second observation must still advertise Show Sidebar.
-                    // Never toggle a now-visible sidebar closed.
-                    usedLeadingEdge = true
-                    _ = perform("reveal observed sidebar from edge", { leadingEdge(toggle) })
                 }
             }
             if remaining > 0 {
@@ -403,6 +405,25 @@ final class UIWaitBudgetTests: XCTestCase {
             pause: { XCTFail("Unknown interruptions fail closed") }
         )
         XCTAssertNil(result)
+    }
+
+    func testSeparateZeroFrameAlertDoesNotBlockReadyNavigation() {
+        let budget = UIWaitBudget(timeout: 5)
+        var alert = passwordAlert()
+        alert.frame = .zero
+        let result = budget.waitForShell(
+            observe: {
+                budget.observeShell(
+                    observeInterruption: { alert },
+                    observeApplication: { self.sidebar() }
+                )
+            },
+            resolve: { $0.isLaunchReady ? true : nil },
+            reveal: { _ in XCTFail("No navigation"); return false },
+            leadingEdge: { _ in XCTFail("No navigation"); return false },
+            pause: { XCTFail("Ready navigation should resolve") }
+        )
+        XCTAssertEqual(result, true)
     }
 
     func testSeparateAlertQueryOverrunNeverStartsShellWorkEvenWhenAlertIsAbsent() {
@@ -1151,11 +1172,16 @@ class PrintFarmerUITestCase: XCTestCase {
     ) -> T? {
         do {
             let observeInterruption: () throws -> ShellNode? = navigationAlertDismissals.isEmpty ? { nil } : {
-                let alert = self.app.alerts.firstMatch
-                guard budget.exists(alert, named: "navigation interruption") else { return nil }
-                return try budget.perform("observed alert snapshot") {
-                    ShellNode(try alert.snapshot())
+                for title in self.navigationAlertDismissals.keys.sorted() {
+                    let alert = self.app.alerts[title]
+                    guard budget.exists(alert, named: "navigation interruption: \(title)") else {
+                        continue
+                    }
+                    return try budget.perform("observed alert snapshot") {
+                        ShellNode(try alert.snapshot())
+                    }
                 }
+                return nil
             }
             return try budget.waitForShell(
                 observe: {
@@ -1244,9 +1270,8 @@ class PrintFarmerUITestCase: XCTestCase {
             let element = self.observedElement(
                 destination.node, within: scope, allowingPromotionTo: destination.promotionIdentifier
             )
-            guard budget.perform("hittable observed \(destination.node.identifier)", {
-                element.isHittable
-            }) == true else { return nil }
+            // The snapshot admission rule already requires a visible, enabled button.
+            // A second remote hit test can exhaust this shared deadline on iPad.
             if destination.titleFallback {
                 self.recordTabIdentifierCompatibilityFallback(tabIdentifier)
             }

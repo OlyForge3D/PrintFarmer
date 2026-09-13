@@ -5,11 +5,16 @@ final class PartsInventoryViewModelTests: XCTestCase {
     @MainActor
     func testLoadPartsPopulatesPartsAndClearsFeatureDisabled() async {
         let (viewModel, service) = makeSubject()
-        service.partsToReturn = [makePart(sku: "SKU-A"), makePart(sku: "SKU-B")]
+        service.partsToReturn = [
+            makePart(sku: "BRKT-01", name: "Mounting Bracket", needsReorder: true),
+            makePart(sku: "CLIP-02", name: "Cable Clip", needsReorder: false)
+        ]
 
         await viewModel.loadParts()
 
-        XCTAssertEqual(viewModel.parts.map(\.sku), ["SKU-A", "SKU-B"])
+        XCTAssertEqual(service.listPartsCalls, [false])
+        XCTAssertEqual(viewModel.parts.map(\.sku), ["BRKT-01", "CLIP-02"])
+        XCTAssertEqual(viewModel.parts.map(\.needsReorder), [true, false])
         XCTAssertFalse(viewModel.featureDisabled)
         XCTAssertNil(viewModel.errorMessage)
         XCTAssertFalse(viewModel.isLoading)
@@ -43,14 +48,14 @@ final class PartsInventoryViewModelTests: XCTestCase {
     func testFilteredPartsAppliesReorderToggle() async {
         let (viewModel, service) = makeSubject()
         service.partsToReturn = [
-            makePart(sku: "OK", needsReorder: false),
-            makePart(sku: "LOW", needsReorder: true)
+            makePart(sku: "BRKT-01", name: "Mounting Bracket", needsReorder: true),
+            makePart(sku: "CLIP-02", name: "Cable Clip", needsReorder: false)
         ]
         await viewModel.loadParts()
 
         viewModel.showOnlyNeedingReorder = true
 
-        XCTAssertEqual(viewModel.filteredParts.map(\.sku), ["LOW"])
+        XCTAssertEqual(viewModel.filteredParts.map(\.sku), ["BRKT-01"])
     }
 
     @MainActor

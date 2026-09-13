@@ -2379,6 +2379,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         // Start from a printer that reports no axes homed, so the
         // update we craft below actually moves `homedAxes`.
         let unhomedJSON = TestJSON.printer
+            .replacingOccurrences(of: "\"backend\": \"Moonraker\"", with: "\"backend\": \"OctoPrint\"")
             .replacingOccurrences(of: "\"state\": \"printing\"", with: "\"state\": \"ready\"")
             .replacingOccurrences(of: "\"homedAxes\": \"xyz\"", with: "\"homedAxes\": \"\"")
         let base = try TestData.decoder.decode(Printer.self, from: unhomedJSON.data(using: .utf8)!)
@@ -3676,7 +3677,12 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         let model = PrinterControlsViewModel(
             composition: composition, printer: printer, clock: clock, motionDefaults: defaults
         )
-        model.configureAccess(serverID: identity, userID: user ?? userID, access)
+        model.configureAccess(
+            serverID: identity,
+            userID: user ?? userID,
+            serverURL: URL(string: "https://printfarmer.test")!,
+            access
+        )
         await model.loadCapabilities()
         return (model, service)
     }

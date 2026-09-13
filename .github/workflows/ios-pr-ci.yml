@@ -209,25 +209,103 @@ jobs:
             mobile/build/TestResults.timing.json
           retention-days: 7
 
-  attention-xcui:
-    name: Attention XCUI (${{ matrix.family }}, accessibility XXXL)
+  xcui-shards:
+    name: XCUI (${{ matrix.family }}, shard ${{ matrix.shard }})
     runs-on: macos-latest
-    needs: select
-    # See the `test` job: skip only on an explicit `false`, never on a
-    # selector failure.
-    if: ${{ !cancelled() && needs.select.outputs.should_run != 'false' }}
+    needs: [select, test]
+    # Avoid allocating eight macOS runners until unit coverage passes; retain
+    # the selector's fail-safe behavior by skipping only explicit false.
+    if: ${{ !cancelled() && needs.test.result == 'success' && needs.select.outputs.should_run != 'false' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - key: iphone
+          - key: iphone-1
             family: iPhone
+            shard: 1
             prefix: iPhone
             device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
-          - key: ipad
+            selectors: >-
+              -only-testing:PrintFarmerUITests/LoginFlowUITests
+              -only-testing:PrintFarmerUITests/AttentionActionsUITests
+              -only-testing:PrintFarmerUITests/OperatorShellUITests
+              -only-testing:PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations
+          - key: iphone-2
+            family: iPhone
+            shard: 2
+            prefix: iPhone
+            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+            selectors: >-
+              -only-testing:PrintFarmerUITests/OperatorFeatureVisibilityUITests
+              -only-testing:PrintFarmerUITests/ScanStationUITests
+              -only-testing:PrintFarmerUITests/HarvestUITests
+          - key: iphone-3
+            family: iPhone
+            shard: 3
+            prefix: iPhone
+            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+            selectors: >-
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testReorderNeededPartExposesWarningInAccessibilityLabel
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testTappingPartRowOpensAdjustmentSheet
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testInventoryTabDefaultsToSpoolsSegment
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testReorderOnlyToggleFiltersList
+              -only-testing:PrintFarmerUITests/PrinterListUITests
+              -only-testing:PrintFarmerUITests/FilamentCoverageUITests
+          - key: iphone-4
+            family: iPhone
+            shard: 4
+            prefix: iPhone
+            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+            selectors: >-
+              -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
+              -only-testing:PrintFarmerUITests/TaskActionRoutingUITests
+              -only-testing:PrintFarmerUITests/ShiftTasksUITests
+              -only-testing:PrintFarmerUITests/UIWaitBudgetTests
+              -only-testing:PrintFarmerUITests/ShiftTasksGroupedUITests
+              -only-testing:PrintFarmerUITests/ShiftTasksFailedRefreshUITests
+          - key: ipad-1
             family: iPad
+            shard: 1
             prefix: iPad
             device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
+            selectors: >-
+              -only-testing:PrintFarmerUITests/LoginFlowUITests
+              -only-testing:PrintFarmerUITests/AttentionActionsUITests
+              -only-testing:PrintFarmerUITests/OperatorShellUITests
+              -only-testing:PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations
+          - key: ipad-2
+            family: iPad
+            shard: 2
+            prefix: iPad
+            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
+            selectors: >-
+              -only-testing:PrintFarmerUITests/OperatorFeatureVisibilityUITests
+              -only-testing:PrintFarmerUITests/ScanStationUITests
+              -only-testing:PrintFarmerUITests/HarvestUITests
+          - key: ipad-3
+            family: iPad
+            shard: 3
+            prefix: iPad
+            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
+            selectors: >-
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testReorderNeededPartExposesWarningInAccessibilityLabel
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testTappingPartRowOpensAdjustmentSheet
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testInventoryTabDefaultsToSpoolsSegment
+              -only-testing:PrintFarmerUITests/PartsInventoryUITests/testReorderOnlyToggleFiltersList
+              -only-testing:PrintFarmerUITests/PrinterListUITests
+              -only-testing:PrintFarmerUITests/FilamentCoverageUITests
+          - key: ipad-4
+            family: iPad
+            shard: 4
+            prefix: iPad
+            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
+            selectors: >-
+              -only-testing:PrintFarmerUITests/ColdOfflineShellUITests
+              -only-testing:PrintFarmerUITests/TaskActionRoutingUITests
+              -only-testing:PrintFarmerUITests/ShiftTasksUITests
+              -only-testing:PrintFarmerUITests/UIWaitBudgetTests
+              -only-testing:PrintFarmerUITests/ShiftTasksGroupedUITests
+              -only-testing:PrintFarmerUITests/JobDetailIPadNavigationUITests
     defaults:
       run:
         working-directory: mobile
@@ -245,7 +323,7 @@ jobs:
           xcodebuild -version
 
       - name: Test simulator resolver
-        if: matrix.key == 'iphone'
+        if: matrix.key == 'iphone-1'
         run: ../scripts/ci/test-resolve-ios-simulator.sh
 
       - name: Resolve package dependencies
@@ -265,13 +343,10 @@ jobs:
       - name: Boot ${{ matrix.family }} simulator
         run: ../scripts/ci/boot-ios-simulator.sh "$SIMULATOR_UDID"
 
-      - name: Run Attention actions XCUI at accessibility XXXL
-        timeout-minutes: 25
+      - name: Build XCUI shard for testing
+        timeout-minutes: 20
         run: |
-          set -o pipefail
-          grep -Fq 'UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge' \
-            PrintFarmerUITests/AttentionActionsUITests.swift
-          python3 scripts/run-tests.py -- test \
+          xcodebuild \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \
@@ -281,129 +356,70 @@ jobs:
             -clonedSourcePackagesDirPath "build-${{ matrix.key }}/SourcePackages" \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
-            -only-testing:PrintFarmerUITests/AttentionActionsUITests \
-            -parallel-testing-enabled NO \
-            -disable-concurrent-destination-testing \
-            -resultBundlePath "build-${{ matrix.key }}/AttentionActions.xcresult" \
-            2>&1 | tee "build-${{ matrix.key }}/AttentionActions.log"
+            SWIFT_STRICT_CONCURRENCY=minimal \
+            build-for-testing
 
-      - name: Upload Attention XCUI results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: ios-attention-xcui-${{ matrix.key }}
-          path: |
-            mobile/build-${{ matrix.key }}/AttentionActions.xcresult
-            mobile/build-${{ matrix.key }}/AttentionActions.log
-            mobile/build-${{ matrix.key }}/AttentionActions.events.jsonl
-            mobile/build-${{ matrix.key }}/AttentionActions.timing.json
-          retention-days: 7
-
-  xcui-suites:
-    name: XCUI (${{ matrix.family }}, ${{ matrix.suite }})
-    runs-on: macos-latest
-    needs: select
-    # See the `test` job: skip only on an explicit `false`, never on a
-    # selector failure.
-    if: ${{ !cancelled() && needs.select.outputs.should_run != 'false' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        family: [iPhone, iPad]
-        suite:
-          - LoginFlowUITests
-          - OperatorShellUITests
-          - OperatorFeatureVisibilityUITests
-          - ScanStationUITests
-          - HarvestUITests
-          - PartsInventoryUITests
-          - PrinterListUITests
-          - FilamentCoverageUITests
-          - ColdOfflineShellUITests
-          - JobDetailIPadNavigationUITests
-          - TaskActionRoutingUITests
-          - ShiftTasksUITests
-          - ShiftTasksGroupedUITests
-          - ShiftTasksFailedRefreshUITests
-        include:
-          - family: iPhone
-            key: iphone
-            prefix: iPhone
-            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
-          - family: iPad
-            key: ipad
-            prefix: iPad
-            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
-    defaults:
-      run:
-        working-directory: mobile
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Select Xcode
-        run: |
-          XCODE_PATH=$(ls -d /Applications/Xcode_16*.app /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
-          if [ -z "$XCODE_PATH" ]; then
-            XCODE_PATH="/Applications/Xcode.app"
-          fi
-          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
-          xcodebuild -version
-
-      - name: Resolve package dependencies
-        run: |
-          xcodebuild -project PrintFarmer.xcodeproj \
-            -scheme PrintFarmer \
-            -resolvePackageDependencies \
-            -clonedSourcePackagesDirPath "build-${{ matrix.key }}-${{ matrix.suite }}/SourcePackages"
-
-      - name: Resolve ${{ matrix.family }} simulator destination
-        env:
-          IOS_SIMULATOR_DEVICE_FAMILY: ${{ matrix.family }}
-          IOS_SIMULATOR_DEVICE_PREFIX: ${{ matrix.prefix }}
-          IOS_SIMULATOR_DEVICE_PREFERENCE: ${{ matrix.device_preference }}
-        run: ../scripts/ci/resolve-ios-simulator.sh
-
-      - name: Boot ${{ matrix.family }} simulator
-        run: ../scripts/ci/boot-ios-simulator.sh "$SIMULATOR_UDID"
-
-      - name: Run ${{ matrix.suite }} XCUI
+      - name: Run login XCUI
+        id: login-xcui
+        if: matrix.shard == 1
         timeout-minutes: 25
         run: |
           set -o pipefail
-          suite_tests=("-only-testing:PrintFarmerUITests/${{ matrix.suite }}")
-          if [[ "${{ matrix.suite }}" == "OperatorShellUITests" ]]; then
-            suite_tests+=(
-              "-only-testing:PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations"
-            )
-          fi
-          if [[ "${{ matrix.suite }}" == "ShiftTasksUITests" ]]; then
-            suite_tests+=("-only-testing:PrintFarmerUITests/UIWaitBudgetTests")
-          fi
-          python3 scripts/run-tests.py -- test \
+          python3 scripts/run-tests.py -- test-without-building \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \
             -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
             -destination-timeout 90 \
-            -derivedDataPath "build-${{ matrix.key }}-${{ matrix.suite }}" \
-            -clonedSourcePackagesDirPath "build-${{ matrix.key }}-${{ matrix.suite }}/SourcePackages" \
+            -derivedDataPath "build-${{ matrix.key }}" \
+            -clonedSourcePackagesDirPath "build-${{ matrix.key }}/SourcePackages" \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
-            "${suite_tests[@]}" \
+            -only-testing:PrintFarmerUITests/LoginFlowUITests \
             -parallel-testing-enabled NO \
             -disable-concurrent-destination-testing \
-            -resultBundlePath "build-${{ matrix.key }}-${{ matrix.suite }}/${{ matrix.suite }}.xcresult" \
-            2>&1 | tee "build-${{ matrix.key }}-${{ matrix.suite }}/${{ matrix.suite }}.log"
+            -resultBundlePath "build-${{ matrix.key }}/Login.xcresult" \
+            2>&1 | tee "build-${{ matrix.key }}/Login.log"
 
-      - name: Upload ${{ matrix.suite }} XCUI results
+      - name: Run XCUI shard
+        if: ${{ !cancelled() && (success() || steps.login-xcui.conclusion == 'failure') }}
+        timeout-minutes: 25
+        env:
+          SELECTORS: ${{ matrix.selectors }}
+        run: |
+          set -o pipefail
+          read -r -a selectors <<< "$SELECTORS"
+          if [[ "${{ matrix.shard }}" == "1" ]]; then
+            selectors=("${selectors[@]:1}")
+          fi
+          python3 scripts/run-tests.py -- test-without-building \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -destination-timeout 90 \
+            -derivedDataPath "build-${{ matrix.key }}" \
+            -clonedSourcePackagesDirPath "build-${{ matrix.key }}/SourcePackages" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            "${selectors[@]}" \
+            -parallel-testing-enabled NO \
+            -disable-concurrent-destination-testing \
+            -resultBundlePath "build-${{ matrix.key }}/XCUIShard.xcresult" \
+            2>&1 | tee "build-${{ matrix.key }}/XCUIShard.log"
+
+      - name: Upload XCUI shard results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ios-xcui-${{ matrix.key }}-${{ matrix.suite }}
+          name: ios-xcui-${{ matrix.key }}
           path: |
-            mobile/build-${{ matrix.key }}-${{ matrix.suite }}/${{ matrix.suite }}.xcresult
-            mobile/build-${{ matrix.key }}-${{ matrix.suite }}/${{ matrix.suite }}.log
-            mobile/build-${{ matrix.key }}-${{ matrix.suite }}/${{ matrix.suite }}.events.jsonl
-            mobile/build-${{ matrix.key }}-${{ matrix.suite }}/${{ matrix.suite }}.timing.json
+            mobile/build-${{ matrix.key }}/Login.xcresult
+            mobile/build-${{ matrix.key }}/Login.log
+            mobile/build-${{ matrix.key }}/Login.events.jsonl
+            mobile/build-${{ matrix.key }}/Login.timing.json
+            mobile/build-${{ matrix.key }}/XCUIShard.xcresult
+            mobile/build-${{ matrix.key }}/XCUIShard.log
+            mobile/build-${{ matrix.key }}/XCUIShard.events.jsonl
+            mobile/build-${{ matrix.key }}/XCUIShard.timing.json
           retention-days: 7

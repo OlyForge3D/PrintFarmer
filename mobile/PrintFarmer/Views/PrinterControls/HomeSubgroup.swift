@@ -264,13 +264,13 @@ struct HomeSubgroup: View {
     // MARK: - Accessibility strings
 
     func accessibilityHint(hasError: Bool, idleHint: String) -> String {
-        if let reason = viewModel.motionBlockedReason { return reason }
         if hasError, let message = viewModel.lastError?.message {
             return String(localized: "Failed: \(message). Double tap to retry.", comment: "VoiceOver hint when last home command failed")
         }
         if isDisabled {
             return String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1")
         }
+        if let reason = viewModel.motionBlockedReason { return reason }
         return idleHint
     }
 

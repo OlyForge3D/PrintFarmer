@@ -208,6 +208,7 @@ final class PreheatSubgroupTests: XCTestCase {
         knownLimits: Bool = true, hotendOnly: Bool = false
     ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
         var printer = try TestData.decodePrinter()
+        printer.backend = .octoPrint
         printer.state = "ready"
         let service = MockPrinterService()
         service.capabilitiesToReturn = hotendOnly ? .hotendOnlyFixture : .allControlsFixture

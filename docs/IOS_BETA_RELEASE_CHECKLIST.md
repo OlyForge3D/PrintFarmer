@@ -122,8 +122,8 @@ Record pass/fail here before proceeding:
 ## 5. CI coverage
 
 - [ ] `ios-pr-ci.yml` is green on the release-bound branch: Xcode build,
-  unit tests (`PrintFarmerTests`), and Attention XCUI accessibility-XXXL
-  matrix (iPhone + iPad).
+  unit tests (`PrintFarmerTests`), and the iPhone/iPad XCUI shard-one
+  accessibility-XXXL coverage.
 - [ ] `ci.yml` (backend `dotnet test` + React `npm run test:run`/lint) is
   green for the same commit range — this issue does not duplicate that
   suite, it confirms the existing gate covered the merged native-push and
