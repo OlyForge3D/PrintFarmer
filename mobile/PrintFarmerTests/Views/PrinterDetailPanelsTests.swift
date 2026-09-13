@@ -51,7 +51,13 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.second.baseURL.host)
+        XCTAssertFalse(currentControlOperationRequests(fixture.api).isEmpty,
+                       "Protected status must be fetched; lifecycle invalidations may refresh it")
         XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
+        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy {
+            $0.value(forHTTPHeaderField: "Authorization") == "Bearer detail-host-test-token"
+        })
+        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.url?.host == fixture.second.baseURL.host })
 
         let field = try XCTUnwrap(heaterTarget(in: controller.view))
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
@@ -85,7 +91,13 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.first.baseURL.host)
+        XCTAssertFalse(currentControlOperationRequests(fixture.api).isEmpty,
+                       "Protected status must be fetched; lifecycle invalidations may refresh it")
         XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
+        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy {
+            $0.value(forHTTPHeaderField: "Authorization") == "Bearer detail-host-test-token"
+        })
+        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.url?.host == fixture.first.baseURL.host })
     }
 
     private func detailHostFixture() throws -> (
@@ -116,6 +128,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
         {"printerId":"\(printer.id)","backend":"Moonraker",
          "supportsHotendTemperature":true,"supportsBedTemperature":true}
         """.utf8)
+        let currentControlOperation = Data("""
+        {"physicalControl":{"supportedOperations":["HomeAll","HomeXY","HomeZ","Jog","MoveTo"],
+         "barrierHeld":false,"requiresRecovery":false,"operationId":null,"state":null},"operation":null}
+        """.utf8)
         let api = MockAPIClient()
         api.requestHandler = { request in
             let path = request.url?.path ?? ""
@@ -126,6 +142,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
                 data = capabilities
             } else if path.hasSuffix("/details") {
                 data = details
+            } else if path.hasSuffix("/control-operations/current") {
+                data = currentControlOperation
             } else {
                 return (TestData.httpResponse(url: request.url, statusCode: 404), Data())
             }
@@ -138,15 +156,24 @@ final class PrinterDetailPanelsTests: XCTestCase {
         // The real switch only reconnects SignalR for a registered authenticated
         // destination. This synthetic token never leaves the isolated mock session.
         credentials.save(ServerCredentials(accessToken: "detail-host-test-token", expiresAt: nil), serverId: second.id)
+        credentials.save(ServerCredentials(accessToken: "detail-host-test-token", expiresAt: nil), serverId: first.id)
         addTeardownBlock { credentials.delete(serverId: second.id) }
+        addTeardownBlock { credentials.delete(serverId: first.id) }
         let services = ServiceContainer(
             serverRegistry: registry,
             credentialsStore: credentials,
             userDefaultsBox: AuthServiceUserDefaultsBox(defaults),
             farmSnapshotRootURL: root,
             synchronizeOfflineQueueOnStartup: false,
-            apiClientFactory: { url, generation, _, _, _ in
-                APIClient(baseURL: url, session: api.urlSession, serverGeneration: generation)
+            apiClientFactory: { url, generation, accessToken, authSessionToken, serverID in
+                let identity = accessToken.flatMap { token in
+                    serverID.map { AuthenticatedIdentity(
+                        accessToken: token, serverID: $0, authSessionToken: authSessionToken
+                    ) }
+                }
+                return APIClient(
+                    baseURL: url, session: api.urlSession, serverGeneration: generation, authenticated: identity
+                )
             },
             signalRServiceFactory: { url, _ in
                 let signal = MockSignalRService()
@@ -195,6 +222,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     private func capabilityRequests(_ api: MockAPIClient) -> [URLRequest] {
         api.capturedRequests.filter { $0.url?.path.hasSuffix("/backend-capabilities") == true }
+    }
+
+    private func currentControlOperationRequests(_ api: MockAPIClient) -> [URLRequest] {
+        api.capturedRequests.filter { $0.url?.path.hasSuffix("/control-operations/current") == true }
     }
 
     private func selectControls<Content: View>(in controller: DetailHostingController<Content>) async throws {

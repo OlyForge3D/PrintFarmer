@@ -62,6 +62,7 @@ final class HomeSubgroupTests: XCTestCase {
 
     private func idlePrinter() throws -> Printer {
         let json = TestJSON.printer
+            .replacingOccurrences(of: "\"backend\": \"Moonraker\"", with: "\"backend\": \"OctoPrint\"")
             .replacingOccurrences(of: "\"state\": \"printing\"", with: "\"state\": \"ready\"")
         return try TestData.decoder.decode(Printer.self, from: json.data(using: .utf8)!)
     }
@@ -175,8 +176,8 @@ final class HomeSubgroupTests: XCTestCase {
         XCTAssertEqual(hint, "Homes Z axis only.")
     }
 
-    func test_accessibilityHint_disabled_returnsSpec41Text() throws {
-        // Default printer is printing -> isDisabled = true
+    func test_accessibilityHint_activePrinting_returnsSpec41Text() throws {
+        // Default printer is actively printing -> isDisabled = true.
         let mock = MockPrinterService()
         mock.capabilitiesToReturn = Self.fullCaps
         let printer = try TestData.decodePrinter()
@@ -184,6 +185,56 @@ final class HomeSubgroupTests: XCTestCase {
         let view = HomeSubgroup(viewModel: vm)
         let hint = view.accessibilityHint(hasError: false, idleHint: "Homes X, Y, and Z.")
         XCTAssertEqual(hint, "Disabled while printing.")
+    }
+
+    func test_accessibilityHint_moonrakerRecoveryBarrier_returnsRecoveryReason() async throws {
+        let printer = try TestData.decodePrinter()
+        let service = MockPrinterService()
+        let operationID = UUID()
+        let timestamp = Date()
+        let recoveringOperation = PrinterControlOperation(
+            operationId: operationID,
+            printerId: printer.id,
+            kind: .homeAll,
+            x: nil,
+            y: nil,
+            z: nil,
+            f: nil,
+            state: .recovering,
+            rowVersion: "test-recovery",
+            createdAtUtc: timestamp,
+            updatedAtUtc: timestamp,
+            startedAtUtc: timestamp,
+            completedAtUtc: nil,
+            barrierHeld: true,
+            requiresRecovery: true,
+            completionEvidence: .none,
+            failure: nil,
+            senderIsolation: .externalVerificationRequired
+        )
+        service.currentControlOperationToReturn = .init(
+            physicalControl: .init(
+                supportedOperations: [.homeAll, .homeXY, .homeZ, .jog, .moveTo],
+                barrierHeld: true,
+                operationId: operationID,
+                state: .recovering,
+                requiresRecovery: true
+            ),
+            operation: recoveringOperation
+        )
+        let viewModel = PrinterControlsViewModel.configuredForTests(
+            printerService: service, printer: printer
+        )
+        await viewModel.loadCapabilities()
+
+        let hint = HomeSubgroup(viewModel: viewModel).accessibilityHint(
+            hasError: false, idleHint: "Homes X, Y, and Z."
+        )
+
+        XCTAssertEqual(
+            hint,
+            "Motion outcome is uncertain or recovery is in progress. Controls remain locked. An operator with queue:reconcile permission and printer Submit access must verify sender isolation, clear queued backend work and inspect the machine using printer recovery on the web."
+        )
     }
 
     func test_accessibilityValue_pending_returnsPending() throws {

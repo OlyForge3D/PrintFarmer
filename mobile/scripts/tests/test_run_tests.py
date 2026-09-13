@@ -10,6 +10,7 @@ import textwrap
 import time
 import unittest
 import uuid
+from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
 
@@ -58,15 +59,157 @@ class EventTests(unittest.TestCase):
     def test_ci_matrix_selectors_name_existing_xcui_classes(self):
         mobile = SCRIPT.parents[1]
         workflow = (mobile.parent / ".github/workflows/ios-pr-ci.yml").read_text()
-        matrix = workflow.split("        suite:\n", 1)[1].split("        include:", 1)[0]
-        suites = re.findall(r"^          - (\w+)$", matrix, re.MULTILINE)
+        matrix = workflow.split("  xcui-shards:\n", 1)[1].split("    defaults:", 1)[0]
+        self.assertIn("needs: [select, test]", matrix)
+        self.assertIn(
+            "if: ${{ !cancelled() && needs.test.result == 'success' && "
+            "needs.select.outputs.should_run != 'false' }}",
+            matrix,
+        )
+        self.assertNotIn("needs.select.result == 'success'", matrix)
+        shards = re.findall(
+            r"^          - key: (?P<key>\S+)\n"
+            r"            family: (?P<family>iPhone|iPad)\n"
+            r"(?:            .*\n)*?"
+            r"            selectors: >-\n"
+            r"(?P<selectors>(?:              -only-testing:PrintFarmerUITests/\S+\n)+)",
+            matrix,
+            re.MULTILINE,
+        )
+        self.assertEqual(len(shards), 8, "XCUI must run in four shards per device family")
+        self.assertEqual(
+            Counter(family for _, family, _ in shards),
+            {"iPhone": 4, "iPad": 4},
+        )
+        self.assertEqual(len({key for key, _, _ in shards}), 8)
+
+        selectors_by_family = {"iPhone": [], "iPad": []}
+        selectors_by_shard = {}
+        for key, family, selectors in shards:
+            self.assertRegex(key, rf"^{family.lower()}-[1-4]$")
+            shard_selectors = [
+                line.strip().removeprefix("-only-testing:")
+                for line in selectors.splitlines()
+            ]
+            selectors_by_shard[key] = shard_selectors
+            selectors_by_family[family].extend(shard_selectors)
+
+        shared = [
+            "PrintFarmerUITests/AttentionActionsUITests",
+            "PrintFarmerUITests/LoginFlowUITests",
+            "PrintFarmerUITests/OperatorShellUITests",
+            "PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations",
+            "PrintFarmerUITests/OperatorFeatureVisibilityUITests",
+            "PrintFarmerUITests/ScanStationUITests",
+            "PrintFarmerUITests/HarvestUITests",
+            "PrintFarmerUITests/PartsInventoryUITests/testReorderNeededPartExposesWarningInAccessibilityLabel",
+            "PrintFarmerUITests/PartsInventoryUITests/testTappingPartRowOpensAdjustmentSheet",
+            "PrintFarmerUITests/PartsInventoryUITests/testInventoryTabDefaultsToSpoolsSegment",
+            "PrintFarmerUITests/PartsInventoryUITests/testReorderOnlyToggleFiltersList",
+            "PrintFarmerUITests/PrinterListUITests",
+            "PrintFarmerUITests/FilamentCoverageUITests",
+            "PrintFarmerUITests/ColdOfflineShellUITests",
+            "PrintFarmerUITests/TaskActionRoutingUITests",
+            "PrintFarmerUITests/ShiftTasksUITests",
+            "PrintFarmerUITests/UIWaitBudgetTests",
+            "PrintFarmerUITests/ShiftTasksGroupedUITests",
+        ]
+        self.assertEqual(
+            Counter(selectors_by_family["iPhone"]),
+            Counter(shared + ["PrintFarmerUITests/ShiftTasksFailedRefreshUITests"]),
+        )
+        self.assertEqual(
+            Counter(selectors_by_family["iPad"]),
+            Counter(shared + ["PrintFarmerUITests/JobDetailIPadNavigationUITests"]),
+        )
+        login_step = workflow.split("      - name: Run login XCUI\n", 1)[1]
+        login_step = login_step.split("\n      - name:", 1)[0]
+        self.assertIn("if: matrix.shard == 1", login_step)
+        self.assertIn(
+            "-only-testing:PrintFarmerUITests/LoginFlowUITests",
+            login_step,
+        )
+        self.assertIn("test-without-building", login_step)
+        shard_step = workflow.split("      - name: Run XCUI shard\n", 1)[1]
+        shard_step = shard_step.split("\n      - name:", 1)[0]
+        self.assertIn(
+            "if: ${{ !cancelled() && (success() || steps.login-xcui.conclusion == 'failure') }}",
+            shard_step,
+        )
+        self.assertIn(
+            'selectors=("${selectors[@]:1}")',
+            shard_step,
+        )
+        for key in ("iphone-1", "ipad-1"):
+            with self.subTest(key=key):
+                self.assertEqual(
+                    selectors_by_shard[key][0],
+                    "PrintFarmerUITests/LoginFlowUITests",
+                )
+                self.assertEqual(
+                    selectors_by_shard[key][1:],
+                    [
+                        "PrintFarmerUITests/AttentionActionsUITests",
+                        "PrintFarmerUITests/OperatorShellUITests",
+                        "PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations",
+                    ],
+                )
+
         declarations = set()
+        sources_by_suite = {}
         for source in (mobile / "PrintFarmerUITests").glob("*.swift"):
-            declarations.update(re.findall(r"\bclass\s+(\w+)\s*:", source.read_text()))
-        self.assertTrue(suites, "The XCUI matrix must select real test classes")
-        for suite in suites:
-            with self.subTest(suite=suite):
-                self.assertIn(suite, declarations, "A stale class selector executes zero XCTest cases")
+            contents = source.read_text()
+            suite_declarations = list(re.finditer(r"\bclass\s+(\w+)\s*:", contents))
+            for index, declaration in enumerate(suite_declarations):
+                suite = declaration.group(1)
+                declarations.add(suite)
+                next_declaration = (
+                    suite_declarations[index + 1].start()
+                    if index + 1 < len(suite_declarations)
+                    else len(contents)
+                )
+                sources_by_suite[suite] = contents[declaration.start():next_declaration]
+        for selectors in selectors_by_family.values():
+            for selector in selectors:
+                selector_parts = selector.split("/")
+                suite = selector_parts[1]
+                with self.subTest(suite=suite):
+                    self.assertIn(suite, declarations, "A stale class selector executes zero XCTest cases")
+                if len(selector_parts) == 3:
+                    with self.subTest(selector=selector):
+                        self.assertRegex(
+                            sources_by_suite[suite],
+                            rf"\bfunc\s+{selector_parts[2]}\s*\(",
+                            "A stale method selector executes zero XCTest cases",
+                        )
+        for family, selectors in selectors_by_family.items():
+            selected_methods_by_suite = {}
+            suite_selectors_by_suite = {}
+            for selector in selectors:
+                selector_parts = selector.split("/")
+                suite = selector_parts[1]
+                suite_selectors_by_suite.setdefault(suite, []).append(selector)
+                if len(selector_parts) == 3:
+                    selected_methods_by_suite.setdefault(suite, set()).add(selector_parts[2])
+            for suite, selected_methods in selected_methods_by_suite.items():
+                if all(
+                    len(selector.split("/")) == 3
+                    for selector in suite_selectors_by_suite[suite]
+                ):
+                    source_methods = set(re.findall(
+                        r"\bfunc\s+(test\w+)\s*\(",
+                        sources_by_suite[suite],
+                    ))
+                    with self.subTest(family=family, suite=suite):
+                        self.assertEqual(
+                            selected_methods,
+                            source_methods,
+                            "Method-selected XCUI suites must select every source test method",
+                        )
+        self.assertIn(
+            "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
+            (mobile / "PrintFarmerUITests/AttentionActionsUITests.swift").read_text(),
+        )
 
 
 class RunnerTests(unittest.TestCase):
@@ -224,27 +367,60 @@ class RunnerTests(unittest.TestCase):
             mobile / "PrintFarmerUITests", target_is_directory=True,
         )
         cases = (
-            ("Run unit tests", None, "build/TestResults", "PrintFarmerTests", "success", 0),
-            ("Run Attention actions XCUI at accessibility XXXL", None,
-             "build-iphone/AttentionActions", "PrintFarmerUITests/AttentionActionsUITests",
-             "other-failure", 42),
-            ("Run ${{ matrix.suite }} XCUI", "ShiftTasksUITests",
-             "build-iphone-ShiftTasksUITests/ShiftTasksUITests",
-             "PrintFarmerUITests/ShiftTasksUITests", "success", 0),
-            ("Run ${{ matrix.suite }} XCUI", "OperatorShellUITests",
-             "build-iphone-OperatorShellUITests/OperatorShellUITests",
-             "PrintFarmerUITests/OperatorShellUITests", "failed", 65),
-            ("Run ${{ matrix.suite }} XCUI", "OperatorFeatureVisibilityUITests",
-             "build-iphone-OperatorFeatureVisibilityUITests/OperatorFeatureVisibilityUITests",
-             "PrintFarmerUITests/OperatorFeatureVisibilityUITests", "success", 0),
+            (
+                "Run unit tests",
+                None,
+                "build/TestResults",
+                "-only-testing:PrintFarmerTests",
+                "other-failure",
+                42,
+            ),
+            (
+                "Run login XCUI",
+                "iphone-1",
+                "build-iphone-1/Login",
+                "-only-testing:PrintFarmerUITests/LoginFlowUITests",
+                "success",
+                0,
+            ),
+            (
+                "Run XCUI shard",
+                "iphone-1",
+                "build-iphone-1/XCUIShard",
+                "-only-testing:PrintFarmerUITests/LoginFlowUITests "
+                "-only-testing:PrintFarmerUITests/AttentionActionsUITests "
+                "-only-testing:PrintFarmerUITests/OperatorShellUITests "
+                "-only-testing:PrintFarmerUITests/TwoModesOperatorShellUITests/testFloorModeShowsRequiredCompactDestinations",
+                "success",
+                0,
+            ),
+            (
+                "Run XCUI shard",
+                "iphone-4",
+                "build-iphone-4/XCUIShard",
+                "-only-testing:PrintFarmerUITests/ShiftTasksUITests "
+                "-only-testing:PrintFarmerUITests/UIWaitBudgetTests",
+                "success",
+                0,
+            ),
+            (
+                "Run XCUI shard",
+                "ipad-4",
+                "build-ipad-4/XCUIShard",
+                "-only-testing:PrintFarmerUITests/JobDetailIPadNavigationUITests",
+                "failed",
+                65,
+            ),
         )
-        for step, suite, stem, selector, mode, expected in cases:
-            with self.subTest(step=step, suite=suite):
+        for step, key, stem, selectors, mode, expected in cases:
+            with self.subTest(step=step, key=key):
                 block = workflow.split(f"      - name: {step}\n", 1)[1]
                 block = block.split("\n      - name:", 1)[0]
                 shell = textwrap.dedent(block.split("        run: |\n", 1)[1])
-                shell = shell.replace("${{ matrix.key }}", "iphone")
-                shell = shell.replace("${{ matrix.suite }}", suite or "")
+                if key is not None:
+                    shell = shell.replace("${{ matrix.key }}", key)
+                    shell = shell.replace("${{ matrix.shard }}", key.rsplit("-", 1)[1])
+                    shell = shell.replace("$SELECTORS", selectors)
                 (self.directory / stem).parent.mkdir(parents=True, exist_ok=True)
                 environment = {
                     **os.environ,
@@ -263,16 +439,23 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 bundle = self.directory / f"{stem}.xcresult"
                 args = json.loads((bundle / "arguments.json").read_text())
-                self.assertIn(f"-only-testing:{selector}", args)
-                self.assertEqual("-only-testing:PrintFarmerUITests/UIWaitBudgetTests" in args,
-                                 suite == "ShiftTasksUITests")
+                self.assertIn("test-without-building", args)
+                expected_selectors = selectors.split()
+                if key is not None and key.endswith("-1") and step == "Run XCUI shard":
+                    self.assertNotIn(
+                        "-only-testing:PrintFarmerUITests/LoginFlowUITests",
+                        args,
+                    )
+                    expected_selectors = expected_selectors[1:]
+                for selector in expected_selectors:
+                    self.assertIn(selector, args)
                 for suffix in (".log", ".events.jsonl", ".timing.json"):
                     self.assertTrue((self.directory / f"{stem}{suffix}").exists())
                 upload = workflow.split(f"      - name: {step}\n", 1)[1]
                 upload = upload.split("uses: actions/upload-artifact@v7", 1)[1]
                 upload = upload.split("retention-days:", 1)[0]
-                upload = upload.replace("${{ matrix.key }}", "iphone")
-                upload = upload.replace("${{ matrix.suite }}", suite or "")
+                if key is not None:
+                    upload = upload.replace("${{ matrix.key }}", key)
                 for suffix in (".xcresult", ".log", ".events.jsonl", ".timing.json"):
                     self.assertIn(f"mobile/{stem}{suffix}", upload)
 

@@ -98,6 +98,7 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
         XCTAssertTrue(loginButton.isEnabled)
         loginButton.tap()
 
+        waitForAuthenticatedShell()
         let attention = shellDestinationButton(
             tabIdentifier: "tab.attention",
             timeout: 10
