@@ -85,6 +85,51 @@ public sealed class SettingsControllerPrinterControlModeTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateUserSettings_ModeOnlyJson_PreservesAllOtherAccountSettings()
+    {
+        Guid userId = await CreateUserAsync();
+        var settings = new UserSettings
+        {
+            UserId = userId,
+            Theme = "dark",
+            Locale = "fr",
+            ItemsPerPage = 75,
+            DefaultSlicerPreset = "custom-quality-preset",
+            PrintablesUsername = "existing-printables-user",
+            PrintablesOAuthAccessToken = "test-access-token",
+            PrintablesOAuthRefreshToken = "test-refresh-token",
+            PrintablesOAuthTokenType = "Bearer",
+            PrintablesOAuthScope = "read",
+            PrintablesOAuthTokenExpiresAtUtc = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc),
+            PrintablesOAuthLinkedAtUtc = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc)
+        };
+        using (var db = new AppDbContext(_options))
+        {
+            db.UserSettings.Add(settings);
+            await db.SaveChangesAsync();
+        }
+
+        UserSettingsResponse initial = await GetAsync(userId);
+        // Match the frontend payload exactly: no unrelated settings keys, not even null values.
+        UpdateUserSettingsBody body = Deserialize(
+            $"{{\"printerControlMode\":\"Expert\",\"rowVersion\":\"{initial.RowVersion}\"}}");
+        UserSettingsResponse saved = Response(await PutAsync(userId, body));
+
+        Assert.NotEqual(initial.RowVersion, saved.RowVersion);
+        Assert.Equal(initial with { PrinterControlMode = "Expert", RowVersion = saved.RowVersion }, saved);
+        Assert.Equal(saved, await GetAsync(userId));
+        using var reloadedDb = new AppDbContext(_options);
+        UserSettings reloaded = await reloadedDb.UserSettings.SingleAsync(u => u.UserId == userId);
+        Assert.Equal(settings.Id, reloaded.Id);
+        Assert.Equal(settings.PrintablesOAuthAccessToken, reloaded.PrintablesOAuthAccessToken);
+        Assert.Equal(settings.PrintablesOAuthRefreshToken, reloaded.PrintablesOAuthRefreshToken);
+        Assert.Equal(settings.PrintablesOAuthTokenType, reloaded.PrintablesOAuthTokenType);
+        Assert.Equal(settings.PrintablesOAuthScope, reloaded.PrintablesOAuthScope);
+        Assert.Equal(settings.PrintablesOAuthTokenExpiresAtUtc, reloaded.PrintablesOAuthTokenExpiresAtUtc);
+        Assert.Equal(settings.PrintablesOAuthLinkedAtUtc, reloaded.PrintablesOAuthLinkedAtUtc);
+    }
+
+    [Fact]
     public async Task UpdateUserSettings_ExpertToGuided_PersistsExplicitChoice()
     {
         Guid userId = await CreateUserAsync();
