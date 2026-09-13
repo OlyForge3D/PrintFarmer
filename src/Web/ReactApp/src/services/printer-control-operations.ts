@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { apiClient } from '@/services/api';
 import { mutationErrorStatus } from '@/common/utils/mutationError';
+import { generateUUID } from '@/utils/uuid';
 import {
   isControlOperationResolved,
   matchesPrinterControlIntent,
@@ -290,7 +291,7 @@ export class PrinterControlTracker {
         this.update({ saved: savedSchema.parse(JSON.parse(existing)), uncertain: true });
         throw new Error('Another tab saved a motion operation. Recheck its outcome before proceeding.');
       }
-      const saved = savedSchema.parse({ operationId: crypto.randomUUID(), intent });
+      const saved = savedSchema.parse({ operationId: generateUUID(), intent });
       // Fail closed if persistence is unavailable. Never send before the receipt is durable locally.
       localStorage.setItem(this.storageKey, JSON.stringify(saved));
       this.update({ saved, submitting: true, uncertain: true, error: null });

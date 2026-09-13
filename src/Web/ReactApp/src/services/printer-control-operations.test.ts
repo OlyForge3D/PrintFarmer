@@ -58,9 +58,58 @@ beforeEach(() => {
   vi.mocked(apiClient.recoverPrinterControlOperation).mockImplementation(async () => ({ operation: active!, etag: '"opaque-v1"' }));
   tracker = new PrinterControlTracker(printerId, storageKey, () => sessionCurrent);
 });
-afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('durable motion tracking', () => {
+  it.each(['HomeAll', 'HomeXY', 'HomeZ'] as const)('persists and completes %s without crypto.randomUUID', async kind => {
+    const getRandomValues = vi.fn(crypto.getRandomValues.bind(crypto));
+    vi.stubGlobal('crypto', { getRandomValues });
+    const homeIntent = { kind };
+    let generatedId: string | undefined;
+    vi.mocked(apiClient.createPrinterControlOperation).mockImplementationOnce(async (id, savedId, savedIntent) => {
+      generatedId = savedId;
+      expect(id).toBe(printerId);
+      expect(savedId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      expect(savedIntent).toEqual(homeIntent);
+      expect(JSON.parse(localStorage.getItem(storageKey)!)).toEqual({ operationId: savedId, intent: homeIntent });
+      active = operation({ ...completed(), operationId: savedId, kind });
+      return { operation: active, etag: '"completed"' };
+    });
+    await tracker.refresh();
+    await expect(tracker.execute(homeIntent, new AbortController().signal)).resolves.toEqual({ success: true });
+    expect(getRandomValues).toHaveBeenCalledTimes(1);
+    expect(apiClient.createPrinterControlOperation).toHaveBeenCalledTimes(1);
+    expect(apiClient.getPrinterControlOperation).toHaveBeenCalledWith(printerId, generatedId);
+    expect(tracker.getCompletedOperation()?.operationId).toBe(generatedId);
+    expect(localStorage.getItem(storageKey)).toBeNull();
+    expect(tracker.isBlocked()).toBe(false);
+  });
+
+  it('retains the fallback UUID after a lost admission response without replaying motion', async () => {
+    const getRandomValues = vi.fn(crypto.getRandomValues.bind(crypto));
+    vi.stubGlobal('crypto', { getRandomValues });
+    vi.mocked(apiClient.createPrinterControlOperation).mockRejectedValueOnce(new Error('Response lost'));
+    vi.mocked(apiClient.getPrinterControlOperation).mockRejectedValue({ statusCode: 404 });
+    await tracker.refresh();
+    await expect(tracker.execute(intent, new AbortController().signal)).rejects.toThrow('retained');
+    const saved = tracker.getSnapshot().saved;
+    expect(saved?.operationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(JSON.parse(localStorage.getItem(storageKey)!)).toEqual(saved);
+    expect(apiClient.createPrinterControlOperation).toHaveBeenCalledExactlyOnceWith(printerId, saved?.operationId, intent);
+    await expect(tracker.refresh()).rejects.toEqual({ statusCode: 404 });
+    expect(getRandomValues).toHaveBeenCalledTimes(1);
+    expect(apiClient.createPrinterControlOperation).toHaveBeenCalledTimes(1);
+    expect(tracker.isBlocked()).toBe(true);
+  });
+
+  it('does not persist or send motion when no secure random source is available', async () => {
+    vi.stubGlobal('crypto', {});
+    await tracker.refresh();
+    await expect(tracker.execute(intent, new AbortController().signal)).rejects.toThrow('no cryptographically secure random source');
+    expect(localStorage.getItem(storageKey)).toBeNull();
+    expect(apiClient.createPrinterControlOperation).not.toHaveBeenCalled();
+  });
+
   function restoreMove() {
     localStorage.setItem(storageKey, JSON.stringify({ operationId, intent: moveIntent }));
     tracker = new PrinterControlTracker(printerId, storageKey, () => sessionCurrent);
