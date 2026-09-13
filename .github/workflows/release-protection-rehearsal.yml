@@ -265,7 +265,6 @@ jobs:
           REHEARSAL_CHANNEL: ${{ inputs.channel }}
           REHEARSAL_DENIAL_PROBES: ${{ inputs.denial_probes }}
           REHEARSAL_POSITIVE_DIGEST: ${{ needs.fixture.outputs.inventory_digest }}
-          RELEASE_REHEARSAL_APPROVED_SHA: ${{ github.workflow_sha }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
         run: node scripts/ci/release-rehearsal-control.mjs probes

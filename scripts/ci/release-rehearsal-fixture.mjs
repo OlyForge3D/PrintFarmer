@@ -48,6 +48,22 @@ export function fixtureRequestUrl(endpoint, method, body, context, before) {
   return `${root}/git/refs`;
 }
 
+export function fixtureWriter(token, context, before, fetcher = fetch) {
+  let used = false;
+  return async (endpoint, method, body) => {
+    const url = fixtureRequestUrl(endpoint, method, body, context, before);
+    requireThat(!used, 'Fixture writes are single-use and never retried');
+    used = true;
+    return appRequest(fetcher, url, method, token, body);
+  };
+}
+
+async function verifyFixtureDefaultBranch(api) {
+  const metadata = await api('');
+  requireThat(metadata.full_name === repository && metadata.default_branch === 'development',
+    'Fixture workflow audit requires development as the repository default branch');
+}
+
 export function verifyFixtureInventory(before, after, fixture) {
   requireThat(!before.tags.some(tag => tag.ref === fixture.ref) &&
     after.tags.filter(tag => tag.ref === fixture.ref).length === 1 &&
@@ -85,8 +101,9 @@ export async function withFixtureToken(privateKey, operation, fetcher = fetch) {
     requireThat(issued.status === 201, 'Fixture token issuance failed');
     const grant = await responseJson(issued);
     // Capture only for revocation, including when scope validation fails.
-    requireThat(typeof grant.token === 'string' && /^[A-Za-z0-9_]+$/.test(grant.token), 'Invalid fixture credential');
-    token = grant.token;
+    if (typeof grant?.token === 'string') token = grant.token;
+    requireThat(typeof token === 'string' && token.length > 0 && !/[^A-Za-z0-9_]/.test(token),
+      'Invalid fixture credential');
     requireThat(isDeepStrictEqual(grant.permissions, { contents: 'write', metadata: 'read' }) &&
       grant.repository_selection === 'selected' && grant.repositories?.length === 1 &&
       grant.repositories[0].id === repositoryId && grant.repositories[0].full_name === repository &&
@@ -97,7 +114,7 @@ export async function withFixtureToken(privateKey, operation, fetcher = fetch) {
   } catch {
     throw new Error('Fixture credential or operation failed closed');
   } finally {
-    if (token) {
+    if (token !== undefined) {
       const revoked = await appRequest(fetcher, 'https://api.github.com/installation/token', 'DELETE', token);
       token = undefined;
       requireThat(revoked.status === 204, 'Fixture credential revocation unconfirmed');
@@ -108,7 +125,8 @@ export async function withFixtureToken(privateKey, operation, fetcher = fetch) {
 export async function provisionFixture(env, fetcher = fetch) {
   const context = rehearsalContext(env);
   requireThat(env.REHEARSAL_DENIAL_PROBES === 'true' && env.RELEASE_PUBLISHER_APP_ID === fixtureAppId &&
-    !env.REHEARSAL_APP_TOKEN && !env.RELEASE_PUBLISHER_TOKEN && !env.RELEASE_REGISTRY_TOKEN,
+    !env.REHEARSAL_APP_TOKEN && !env.RELEASE_PUBLISHER_TOKEN && !env.RELEASE_REGISTRY_TOKEN &&
+    !env.RELEASE_PUBLISHER_PRIVATE_KEY && !env.RELEASE_OWNER_APPROVED_REVIEWERS,
   'Fixture requires its own App credential and explicit bounded-probe request');
   requireString(env.REHEARSAL_POSITIVE_DIGEST, /^[a-f0-9]{64}$/, 'positive inventory digest');
   const api = readOnlyClient(env.GH_TOKEN, fetcher);
@@ -128,22 +146,24 @@ export async function provisionFixture(env, fetcher = fetch) {
     fixture = intendedFixture(context, before);
     const { verifyFixtureTarget } = await import('./release-rehearsal-target.mjs');
     await verifyFixtureTarget(api, before.ledger.tree);
+    await verifyFixtureDefaultBranch(api);
     const defaultCommit = await api(`git/commits/${before.heads.development}`);
     requireThat(defaultCommit.sha === before.heads.development, 'Default workflow commit mismatch');
     await verifyFixtureTarget(api, defaultCommit.tree?.sha);
-    result.publicationTriggersVerified = true;
+    result.workflowTriggersVerified = true;
     result.fixtures.push({ kind: 'app-provisioned-inert-tag', ...fixture,
       appId: fixtureAppId, expectedAbsent: true, disposition: 'retain-no-deletion-bypass' });
     await withFixtureToken(env.RELEASE_REHEARSAL_FIXTURE_PRIVATE_KEY, async token => {
       requireThat(token !== env.GH_TOKEN, 'Generic workflow token cannot create fixture');
+      const write = fixtureWriter(token, context, before, fetcher);
       await verifyRuntime(api, context);
       await verifyFixtureEnvironment(api, context);
+      await verifyFixtureDefaultBranch(api);
       verifyUnchanged(before, await snapshot(api, context));
       const body = { ref: fixture.ref, sha: fixture.sha };
-      const url = fixtureRequestUrl('git/refs', 'POST', body, context, before);
       const attempt = { endpoint: 'git/refs', method: 'POST', outcome: 'unknown' };
       result.attempts.push(attempt);
-      const response = await appRequest(fetcher, url, 'POST', token, body);
+      const response = await write('git/refs', 'POST', body);
       attempt.status = response.status;
       attempt.outcome = response.status === 201 ? 'accepted-unverified' : 'failed';
       requireThat(response.status === 201, 'Fixture create failed; never retry');
@@ -166,6 +186,7 @@ export async function provisionFixture(env, fetcher = fetch) {
         if (fixture && result.attempts.length === 1) verifyFixtureInventory(before, result.after, fixture);
         else verifyUnchanged(before, result.after);
         await verifyRuntime(api, context);
+        await verifyFixtureDefaultBranch(api);
       } catch {
         result.passed = false;
         result.failure = 'Fixture inventory changed or incomplete; owner recovery required';

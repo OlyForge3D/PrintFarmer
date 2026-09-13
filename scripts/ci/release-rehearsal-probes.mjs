@@ -107,8 +107,7 @@ async function uploadProbe(fetcher, genericToken, actor, name, evidence) {
 
 export async function runDenialProbes(token, context, settings, fetcher = fetch) {
   requireThat(typeof token === 'string' && token.length > 0, 'Missing generic workflow token');
-  requireThat(settings.approvedSha === context.sha && settings.requested === true,
-    'Owner must approve this exact rehearsal SHA and its bounded fixture effects');
+  requireThat(settings.requested === true, 'Bounded denial probes must be explicitly requested');
   requireString(settings.actor, /^[a-zA-Z0-9][a-zA-Z0-9[\]-]{0,99}$/, 'workflow actor');
   requireString(settings.positiveDigest, /^[a-f0-9]{64}$/, 'positive inventory digest');
   const api = readOnlyClient(token, fetcher);

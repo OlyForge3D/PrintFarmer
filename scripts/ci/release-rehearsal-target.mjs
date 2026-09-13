@@ -4,10 +4,7 @@ import { load } from 'js-yaml';
 import { requireThat, requireString } from './release-policy.mjs';
 import { shaPattern } from './release-rehearsal.mjs';
 
-// This existing tag-push consumer only synchronizes issue labels, never publication.
-export const labelSyncBlob = 'beb3ab32471fe9569402b5fff4ee89ef6d820d7b';
-
-export function verifyFixtureWorkflow(source, blobSha) {
+export function verifyFixtureWorkflow(source) {
   const document = load(source);
   const events = document?.on;
   requireThat(events && typeof events === 'object' && !Array.isArray(events) &&
@@ -19,17 +16,23 @@ export function verifyFixtureWorkflow(source, blobSha) {
   if (!Object.hasOwn(events, 'push')) return;
   const push = events.push;
   requireThat(push && typeof push === 'object' && !Array.isArray(push), 'Unfiltered fixture push');
-  if (push.tags) {
+  requireThat(!(Object.hasOwn(push, 'tags') && Object.hasOwn(push, 'tags-ignore')),
+    'Conflicting fixture tag filters');
+  if (Object.hasOwn(push, 'tags')) {
     requireThat(isDeepStrictEqual(push.tags, ['v[0-9]+.[0-9]+.[0-9]+']) ||
       isDeepStrictEqual(push.tags, ['ios/v*-alpha*', 'ios/v*-beta*', 'ios/v*-rc*']),
     'Tag trigger is not proven disjoint from inert fixtures');
     return;
   }
-  if (Object.hasOwn(push, 'branches') || Object.hasOwn(push, 'branches-ignore')) {
-    requireThat(!Object.hasOwn(push, 'tags-ignore'), 'Unbounded ignored-tag consumer');
+  if (Object.hasOwn(push, 'tags-ignore')) {
+    requireThat(isDeepStrictEqual(push['tags-ignore'], ['v-rehearsal-2668-*']),
+      'Fixture namespace must be explicitly excluded');
     return;
   }
-  requireThat(blobSha === labelSyncBlob, 'Unreviewed unfiltered fixture consumer');
+  if (Object.hasOwn(push, 'branches') || Object.hasOwn(push, 'branches-ignore')) {
+    return;
+  }
+  requireThat(false, 'Unfiltered fixture workflow consumer');
 }
 
 export async function verifyFixtureTarget(api, treeSha) {
@@ -61,6 +64,6 @@ export async function verifyFixtureTarget(api, treeSha) {
     requireThat(bytes.length <= 1024 * 1024 && blob.size === bytes.length &&
       createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex') === entry.sha,
     'Fixture workflow blob mismatch');
-    verifyFixtureWorkflow(bytes.toString('utf8'), entry.sha);
+    verifyFixtureWorkflow(bytes.toString('utf8'));
   }
 }

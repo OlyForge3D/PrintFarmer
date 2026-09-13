@@ -2,6 +2,8 @@ name: Sync Squad Labels
 
 on:
   push:
+    tags-ignore:
+      - 'v-rehearsal-2668-*'
     paths:
       - '.squad/team.md'
       - '.github/workflows/sync-squad-labels.yml'

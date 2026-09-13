@@ -31,7 +31,6 @@ try {
       !env.RELEASE_REGISTRY_TOKEN && !env.RELEASE_REHEARSAL_FIXTURE_PRIVATE_KEY,
     'Probe job must not have publisher credentials');
     receipt = await runDenialProbes(env.GH_TOKEN, context, {
-      approvedSha: env.RELEASE_REHEARSAL_APPROVED_SHA,
       requested: env.REHEARSAL_DENIAL_PROBES === 'true',
       actor: env.GITHUB_ACTOR, positiveDigest: env.REHEARSAL_POSITIVE_DIGEST,
     });

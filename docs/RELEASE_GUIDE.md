@@ -847,9 +847,11 @@ Never retain the private key or token response as evidence.
 
 For live denial probes, dispatch with `denial_probes=true`, review the exact
 qualified source SHA/run in Actions, and approve the protected environment jobs.
-There is no manually formatted approval record, pre-created tag, or
-`RELEASE_REHEARSAL_APPROVED_SHA` variable to maintain. The workflow binds consent
-to its exact workflow/source SHA, channel, run ID and first attempt.
+Fixture authorization is the protected environment approval only: no additional
+owner-formatted record, pre-created tag, or approved-SHA setting is required.
+Admission binds execution to the workflow/source SHA, channel, run ID and first
+attempt; qualification verifies canonical evidence. These checks supplement the
+environment gate, not an independent second approval factor.
 
 One-time owner configuration: create `release-rehearsal-fixture-insider` (and,
 before stable use, `release-rehearsal-fixture-stable`) with only `jpapiez` as
@@ -859,25 +861,49 @@ with `RELEASE_APPROVAL_MODE`. Store the designated App **4927270** key only in
 that protected environment as `RELEASE_REHEARSAL_FIXTURE_PRIVATE_KEY`; retain
 the existing nonsecret App ID, ledger anchor and approval-mode configuration.
 This change does not configure live environments or grant a ruleset bypass.
+The publisher App private key has an installation permission ceiling broader than
+the token requested here; it is **not** a contents-only credential. GitHub enforces
+the issued token's repository and permission scope. Protected environment approval
+and branch restrictions guard access to the key that can mint those tokens.
+The fixture path rejects the production `RELEASE_PUBLISHER_PRIVATE_KEY` and
+`RELEASE_OWNER_APPROVED_REVIEWERS`, as well as unrelated App/publisher/registry tokens.
 
 After the GET-only positive job, the separate fixture job rechecks qualification,
 live run identity, owner environment policy and the positive inventory digest.
 Only then does it mint a fresh App installation token, explicitly scoped to
 PrintFarmer repository ID `1044049720` and **contents: write** (plus GitHub's
 implicit metadata read). It validates the returned grant and holds the token
-only in memory, never an Actions output, file, artifact or log; revocation runs
-in `finally`. The generic token remains read-only in this job.
+only in memory, never an Actions output, file, artifact or log; every returned
+string token is captured for revocation before format/scope validation. Revocation
+runs in `finally`, including malformed-string rejection. The generic token remains
+read-only in this job.
 
 The only resource mutation allowed is one POST creating the absent lightweight
 `refs/tags/v-rehearsal-2668-<run_id>-1-update` at that inventory's ledger head.
 The ledger may retain application files, so the job walks and hash-verifies all
 workflow blobs at both the ledger target and current default-branch head before
-minting. Parsed create/push/workflow-run triggers must be proven unable to start
-publication for this namespace; unknown triggers fail closed. The one existing
-unfiltered nonpublisher, **Sync Squad Labels**, is accepted only at its reviewed
-immutable blob hash; its label synchronization and Actions audit events may run,
-not publication. Changes to that consumer require review of this allowlist.
-The name fails canonical/server and `ios/` tag triggers; no publication is dispatched.
+minting. The repository default branch must be **development**, even for stable
+runs from `main`; repository metadata is verified before minting, immediately
+before the write, and after inventory verification. A different or changed default
+branch fails closed rather than auditing an assumed head.
+
+The namespace must match **zero push/create workflows**, regardless of write
+permissions or publication intent; unknown triggers fail closed. There is no
+workflow/blob exception. **Sync Squad Labels** explicitly ignores
+`v-rehearsal-2668-*` tags, preventing secondary issue/label writes (GitHub ignores
+path filters on tag pushes). The audit also covers the write-capable CodeQL,
+devcontainer, OrcaSlicer base-image, slicer-security and TestFlight push workflows:
+their branch-only or disjoint tag filters cannot consume fixture tags.
+Indirect workflow-run triggers are limited to canonical qualification.
+
+Both audited trees must contain these exclusions. An older ledger tree containing
+the unfiltered label workflow now correctly blocks fixture provisioning; merging
+the fix on development alone does not repair that historical tree. Stop for
+separately reviewed ledger recovery; do not weaken the guard, move the target,
+or mutate the ledger as part of this provisioner.
+The single-use writer enforces the exact route/payload internally and refuses a
+second write, including concurrent attempts and retries after unknown outcomes.
+No downstream workflow or publication is dispatched by the fixture tag.
 The secret-free fixture receipt records its exact name, target, creator App,
 attempt outcome and **retain-no-deletion-bypass** lifecycle. Retain the tag
 permanently; never reuse, move or delete it, or weaken rulesets. A failed or
