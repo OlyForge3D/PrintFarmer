@@ -25,6 +25,7 @@ public static class MoonrakerRestEndpoints
         app.MapGet("/printer/objects/query", GetObjectsQueryAsync);
 
         app.MapPost("/printer/gcode/script", PostGcodeScriptAsync);
+        app.MapPost("/printer/emergency_stop", PostEmergencyStopAsync);
         app.MapPost("/printer/print/start", PostPrintStartAsync);
         app.MapPost("/printer/print/pause", (HttpContext ctx) => PostPrintControlAsync(ctx, p => p.Pause()));
         app.MapPost("/printer/print/resume", (HttpContext ctx) => PostPrintControlAsync(ctx, p => p.Resume()));
@@ -205,6 +206,15 @@ public static class MoonrakerRestEndpoints
         {
             await MoonrakerJson.WriteWebRequestErrorAsync(ctx, StatusCodes.Status400BadRequest, ex.Message);
         }
+    }
+
+    private static async Task PostEmergencyStopAsync(HttpContext ctx)
+    {
+        PrinterAggregate p = Printer(ctx);
+        string previousKlippyState = p.KlippyState;
+        p.SendGcode("M112");
+        await MoonrakerJson.WriteResultAsync(ctx, "ok");
+        await BroadcastService.NotifyKlippyTransitionIfChangedAsync(p, previousKlippyState);
     }
 
     private sealed record PrintStartRequest(string? Filename);

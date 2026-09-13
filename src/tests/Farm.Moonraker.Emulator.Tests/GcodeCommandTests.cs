@@ -63,6 +63,29 @@ public sealed class GcodeCommandTests : IClassFixture<ReadyPrinterFactory>
         await client.PostAsync("/__emulator/printer/reset", content: null);
     }
 
+    [Fact]
+    public async Task EmergencyStopEndpoint_TransitionsKlippyToShutdownAndPrintStateToError()
+    {
+        using HttpClient client = await ClientWithScenarioAsync("Ready");
+
+        using HttpResponseMessage response = await client.PostAsync("/printer/emergency_stop", content: null);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument responseDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        responseDoc.RootElement.GetProperty("result").GetString().Should().Be("ok");
+
+        using HttpResponseMessage info = await client.GetAsync("/printer/info");
+        using JsonDocument infoDoc = JsonDocument.Parse(await info.Content.ReadAsStringAsync());
+        infoDoc.RootElement.GetProperty("result").GetProperty("state").GetString().Should().Be("shutdown");
+
+        using HttpResponseMessage query = await client.GetAsync("/printer/objects/query?print_stats");
+        query.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument queryDoc = JsonDocument.Parse(await query.Content.ReadAsStringAsync());
+        queryDoc.RootElement.GetProperty("result").GetProperty("status").GetProperty("print_stats")
+            .GetProperty("state").GetString().Should().Be("error");
+
+        await client.PostAsync("/__emulator/printer/reset", content: null);
+    }
+
     [Theory]
     [InlineData("FIRMWARE_RESTART")]
     [InlineData("RESTART")]
