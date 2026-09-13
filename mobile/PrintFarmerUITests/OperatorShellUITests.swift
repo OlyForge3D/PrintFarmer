@@ -547,6 +547,8 @@ final class OperatorFeatureVisibilityUITests: PrintFarmerUITestCase {
 
 @MainActor
 final class TwoModesOperatorShellUITests: PrintFarmerUITestCase {
+    override var waitsForNavigationReadiness: Bool { true }
+
     override var additionalLaunchArguments: [String] {
         ["--uitesting-two-modes"]
     }
