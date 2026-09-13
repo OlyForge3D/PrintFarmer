@@ -737,9 +737,7 @@ final class ServerRegistryTests: XCTestCase {
         )
 
         try registry.setActive(id: second.id)
-        try await waitForBaseURL(second.baseURL, in: container)
-        // The client is published before startup preparation and SignalR connection finish.
-        await container.awaitActiveServerSettled()
+        try await waitForSettledServer(second.baseURL, in: container)
 
         let currentBaseURL = await container.apiClient?.currentBaseURL()
         let currentAccessToken = await container.apiClient?.currentAccessToken()
@@ -770,10 +768,19 @@ final class ServerRegistryTests: XCTestCase {
             ServerCredentials(accessToken: "token-two", expiresAt: nil),
             serverId: second.id
         )
+        let connecting = AsyncBarrier()
+        defer { connecting.close() }
         let container = switchingTestContainer(
             registry: registry,
             credentialsStore: credentialsStore,
-            signalRRecorder: SignalRRecorder()
+            signalRRecorder: SignalRRecorder(),
+            signalRServiceFactory: { baseURL, _ in
+                let service = MockSignalRService()
+                if baseURL == second.baseURL {
+                    service.connectHook = { await connecting.arriveAndWait() }
+                }
+                return service
+            }
         )
         mockAPIClient.requestHandler = { request in
             if request.url?.path == "/api/auth/me" {
@@ -789,7 +796,18 @@ final class ServerRegistryTests: XCTestCase {
         }
 
         try registry.setActive(id: second.id)
+        await connecting.waitUntilArrived()
         try await waitForBaseURL(second.baseURL, in: container)
+        let unsettled = await container.currentUserForNavigation(
+            serverID: second.id,
+            generation: container.activeServerGeneration,
+            expectedEndpoint: second.normalizedURLString
+        )
+        XCTAssertEqual(unsettled, .notSettled, "Publishing the URL is not completion of the switch")
+        XCTAssertFalse(mockAPIClient.capturedRequests.contains { $0.url?.path == "/api/auth/me" })
+
+        connecting.close()
+        try await waitForSettledServer(second.baseURL, in: container)
         let resolution = await container.currentUserForNavigation(
             serverID: second.id,
             generation: container.activeServerGeneration,
@@ -957,18 +975,13 @@ final class ServerRegistryTests: XCTestCase {
         )
 
         initialSignalRService.resumeDisconnect()
-        try await waitForBaseURL(expectedServer.baseURL, in: container)
+        try await waitForSettledServer(expectedServer.baseURL, in: container)
 
-        var verified: NavigationIdentityResolution = .notSettled
-        for _ in 0..<40 {
-            verified = await container.currentUserForNavigation(
-                serverID: expectedServer.id,
-                generation: container.activeServerGeneration,
-                expectedEndpoint: expectedServer.normalizedURLString
-            )
-            if case .verified = verified { break }
-            try await Task.sleep(for: .milliseconds(25))
-        }
+        let verified = await container.currentUserForNavigation(
+            serverID: expectedServer.id,
+            generation: container.activeServerGeneration,
+            expectedEndpoint: expectedServer.normalizedURLString
+        )
 
         guard case .verified = verified else {
             return XCTFail("Expected the replacement endpoint to be verified, got \(verified)")
@@ -1011,7 +1024,7 @@ final class ServerRegistryTests: XCTestCase {
 
         try registry.setActive(id: third.id)
         initialSignalRService.resumeDisconnect()
-        try await waitForBaseURL(third.baseURL, in: container)
+        try await waitForSettledServer(third.baseURL, in: container)
 
         let currentBaseURL = await container.apiClient?.currentBaseURL()
         let currentAccessToken = await container.apiClient?.currentAccessToken()
@@ -1044,7 +1057,7 @@ final class ServerRegistryTests: XCTestCase {
         XCTAssertFalse(firstCapabilities.supportsMovement)
 
         try registry.setActive(id: second.id)
-        try await waitForBaseURL(second.baseURL, in: container)
+        try await waitForSettledServer(second.baseURL, in: container)
         let secondCapabilities = try await container.printerService.getBackendCapabilities(printerId: printerID)
 
         XCTAssertTrue(secondCapabilities.supportsMovement)
@@ -1188,6 +1201,16 @@ final class ServerRegistryTests: XCTestCase {
         }
     }
 
+    private func waitForSettledServer(_ expectedURL: URL, in container: ServiceContainer) async throws {
+        // Publication proves the registry-driven worker has started, but connection
+        // and identity assertions must wait for all of its asynchronous preparation.
+        try await waitForBaseURL(expectedURL, in: container)
+        await container.awaitActiveServerSettled()
+        let settledURL = await container.apiClient?.currentBaseURL()
+        XCTAssertEqual(settledURL, expectedURL)
+    }
+
+    // Kept separate for tests that deliberately observe or release an in-flight switch.
     private func waitForBaseURL(_ expectedURL: URL, in container: ServiceContainer) async throws {
         for _ in 0..<40 {
             if await container.apiClient?.currentBaseURL() == expectedURL {
