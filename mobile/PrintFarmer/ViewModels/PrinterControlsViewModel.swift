@@ -1802,7 +1802,7 @@ final class PrinterControlsViewModel: ObservableObject {
             }
             let projection = current.physicalControl
             let unidentifiedBarrierReleased = physicalControl?.barrierHeld == true
-                && physicalControl?.operationId == nil && physicalControl?.state == nil
+                && physicalControl?.operationId == nil
                 && controlOperation == nil
                 && motionJournalKey.map { motionDefaults.data(forKey: $0) == nil } == true
             // A held projection without a matching operation is not unlock proof.

@@ -3676,7 +3676,12 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         let model = PrinterControlsViewModel(
             composition: composition, printer: printer, clock: clock, motionDefaults: defaults
         )
-        model.configureAccess(serverID: identity, userID: user ?? userID, access)
+        model.configureAccess(
+            serverID: identity,
+            userID: user ?? userID,
+            serverURL: URL(string: "https://printfarmer.test")!,
+            access
+        )
         await model.loadCapabilities()
         return (model, service)
     }
