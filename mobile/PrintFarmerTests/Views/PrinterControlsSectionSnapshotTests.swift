@@ -64,16 +64,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     func test_durableMotionKeepsLocalFeedbackAndGlobalStatusWithoutStopWaiting() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.layoutCaps)
-        let suite = "DurableLocalFeedback-\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let serverID = UUID()
-        let model = PrinterControlsViewModel(
-            composition: .init(identity: .init(serverID: serverID, generation: 0, revision: 0),
-                               printerService: service),
-            printer: printer, motionDefaults: defaults
-        )
-        model.configureAccess(serverID: serverID, userID: UUID()) { nil }
+        let model = makeDurableMotionModel(printer: printer, service: service)
         await model.loadCapabilities()
         service.submitControlOperationHandler = { [service] printerID, operationID, request in
             let operation = PrinterControlOperation.controlsFixture(
@@ -83,6 +74,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             return operation
         }
         await model.homeAll()
+        XCTAssertEqual(service.submittedControlOperations.count, 1, "Motion admission failed: \(String(describing: model.lastError))")
         let (window, controller) = install(
             PrinterSetupControlsContent(printer: printer, viewModel: model, usesColumns: false)
         )
@@ -115,19 +107,11 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     func test_unconfirmedAdmissionReviewDisclosesActuationAndDeclineDoesNotSend() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.layoutCaps)
-        let suite = "MotionAdmissionView-\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let serverID = UUID()
-        let model = PrinterControlsViewModel(
-            composition: .init(identity: .init(serverID: serverID, generation: 0, revision: 0),
-                               printerService: service),
-            printer: printer, motionDefaults: defaults
-        )
-        model.configureAccess(serverID: serverID, userID: UUID()) { nil }
+        let model = makeDurableMotionModel(printer: printer, service: service)
         await model.loadCapabilities()
         service.submitControlOperationHandler = { _, _, _ in throw NetworkError.timeout }
         await model.homeAll()
+        XCTAssertEqual(service.submittedControlOperations.count, 1, "Motion admission failed: \(String(describing: model.lastError))")
         let operationID = try XCTUnwrap(model.motionAdmissionResubmissionID)
         let (window, controller) = install(PrinterSetupControlsContent(printer: printer, viewModel: model))
         defer { window.isHidden = true; model.deactivate() }
@@ -215,6 +199,28 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         svc.capabilitiesToReturn = caps
         svc.detailsToReturn = try? .controlsLimitsFixture(for: TestData.decodePrinter())
         return svc
+    }
+
+    private func makeDurableMotionModel(
+        printer: Printer, service: MockPrinterService
+    ) -> PrinterControlsViewModel {
+        let serverID = UUID()
+        let userID = UUID()
+        // Use the app's writable domain: new suite domains can become inaccessible
+        // during full simulator runs. UUID-scoped keys keep the real disk journal isolated.
+        let key = "printer-motion.v1.\(serverID.uuidString).\(userID.uuidString).\(printer.id.uuidString)"
+        let model = PrinterControlsViewModel(
+            composition: .init(identity: .init(serverID: serverID, generation: 0, revision: 0),
+                               printerService: service),
+            printer: printer
+        )
+        model.configureAccess(serverID: serverID, userID: userID) { nil }
+        addTeardownBlock { @MainActor in
+            model.deactivate()
+            UserDefaults.standard.removeObject(forKey: key)
+            XCTAssertNil(UserDefaults.standard.data(forKey: key))
+        }
+        return model
     }
 
     private func loadedSection(
