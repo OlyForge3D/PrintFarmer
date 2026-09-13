@@ -36,17 +36,6 @@ final class UIWaitBudget {
         perform("exists: \(identifier)") { element.exists } == true
     }
 
-    func firstTerminalInterruption(
-        _ observe: @escaping () throws -> ShellNode?
-    ) -> () throws -> ShellNode? {
-        var hasObserved = false
-        return {
-            guard !hasObserved else { return nil }
-            hasObserved = true
-            return try observe()
-        }
-    }
-
     private(set) var lastShellObservation = "not observed"
 
     func observeShell(
@@ -65,30 +54,6 @@ final class UIWaitBudget {
         }
         return try perform("application shell snapshot", observeApplication)
             ?? ShellObservation(ShellNode(.application))
-    }
-
-    func observeShell(
-        observeInterruption: () throws -> ShellNode?,
-        observeTerminalInterruption: () throws -> ShellNode?,
-        observeApplication: () throws -> ShellObservation
-    ) rethrows -> ShellObservation {
-        let application = try observeShell(
-            observeInterruption: observeInterruption,
-            observeApplication: observeApplication
-        )
-        if case .notReady = application.state {
-            return application
-        }
-        guard let interruption = try perform(
-            "terminal navigation interruption", observeTerminalInterruption
-        ),
-        let interruption,
-        !interruption.frame.isEmpty else {
-            return application
-        }
-        return ShellObservation(ShellNode(
-            .application, frame: interruption.frame, children: [interruption]
-        ))
     }
 
     func waitForShell<T>(
@@ -442,95 +407,6 @@ final class UIWaitBudgetTests: XCTestCase {
         XCTAssertNil(result)
     }
 
-    func testTerminalUnknownAlertFailsBeforeResolvingOrRevealingNavigation() {
-        let budget = UIWaitBudget(timeout: 5)
-        var resolverCalls = 0
-        let result: Bool? = budget.waitForShell(
-            observe: {
-                budget.observeShell(
-                    observeInterruption: { nil },
-                    observeTerminalInterruption: { self.passwordAlert(title: "Allow access?") },
-                    observeApplication: { self.sidebar() }
-                )
-            },
-            resolve: { _ in
-                resolverCalls += 1
-                XCTFail("Do not resolve navigation behind an unknown alert")
-                return true
-            },
-            reveal: { _ in XCTFail("Do not reveal navigation behind an unknown alert"); return false },
-            leadingEdge: { _ in XCTFail("Do not reveal navigation behind an unknown alert"); return false },
-            dismissInterruption: { $0.dismissalButton(allowedTitles: ["Save Password?": "Not Now"]) != nil },
-            pause: { XCTFail("Unknown interruptions fail closed") }
-        )
-        XCTAssertNil(result)
-        XCTAssertEqual(resolverCalls, 0)
-    }
-
-    func testTerminalAlertProbeSkipsNonActionableShells() {
-        var clock: TimeInterval = 0
-        let budget = UIWaitBudget(timeout: 5, now: { clock })
-        var applicationSnapshots = [
-            ShellObservation(ShellNode(.application)),
-            sidebar()
-        ]
-        var terminalProbes = 0
-        var resolverCalls = 0
-        let result: Bool? = budget.waitForShell(
-            observe: {
-                budget.observeShell(
-                    observeInterruption: { nil },
-                    observeTerminalInterruption: {
-                        terminalProbes += 1
-                        return self.passwordAlert(title: "Allow access?")
-                    },
-                    observeApplication: { applicationSnapshots.removeFirst() }
-                )
-            },
-            resolve: { _ in
-                resolverCalls += 1
-                return nil
-            },
-            reveal: { _ in XCTFail("Do not reveal navigation behind an unknown alert"); return false },
-            leadingEdge: { _ in XCTFail("Do not reveal navigation behind an unknown alert"); return false },
-            dismissInterruption: { _ in false },
-            pause: { clock += 0.2 }
-        )
-        XCTAssertNil(result)
-        XCTAssertEqual(terminalProbes, 1)
-        XCTAssertEqual(resolverCalls, 1)
-    }
-
-    func testTerminalAlertProbeRunsOnlyOnceForNavigableShellWait() throws {
-        var clock: TimeInterval = 0
-        let budget = UIWaitBudget(timeout: 5, now: { clock })
-        var observations = [sidebar(), sidebar()]
-        var terminalProbes = 0
-        var resolutions = 0
-        let observeTerminalInterruption = budget.firstTerminalInterruption {
-            terminalProbes += 1
-            return nil
-        }
-        let result: Bool? = try budget.waitForShell(
-            observe: {
-                try budget.observeShell(
-                    observeInterruption: { nil },
-                    observeTerminalInterruption: observeTerminalInterruption,
-                    observeApplication: { observations.removeFirst() }
-                )
-            },
-            resolve: { _ in
-                resolutions += 1
-                return resolutions == 2 ? true : nil
-            },
-            reveal: { _ in XCTFail("No navigation"); return false },
-            leadingEdge: { _ in XCTFail("No navigation"); return false },
-            pause: { clock += 0.2 }
-        )
-        XCTAssertEqual(result, true)
-        XCTAssertEqual(terminalProbes, 1)
-    }
-
     func testSeparateZeroFrameAlertDoesNotBlockReadyNavigation() {
         let budget = UIWaitBudget(timeout: 5)
         var alert = passwordAlert()
@@ -539,26 +415,6 @@ final class UIWaitBudgetTests: XCTestCase {
             observe: {
                 budget.observeShell(
                     observeInterruption: { alert },
-                    observeApplication: { self.sidebar() }
-                )
-            },
-            resolve: { $0.isLaunchReady ? true : nil },
-            reveal: { _ in XCTFail("No navigation"); return false },
-            leadingEdge: { _ in XCTFail("No navigation"); return false },
-            pause: { XCTFail("Ready navigation should resolve") }
-        )
-        XCTAssertEqual(result, true)
-    }
-
-    func testTerminalZeroFrameAlertDoesNotBlockReadyNavigation() {
-        let budget = UIWaitBudget(timeout: 5)
-        var alert = passwordAlert()
-        alert.frame = .zero
-        let result = budget.waitForShell(
-            observe: {
-                budget.observeShell(
-                    observeInterruption: { nil },
-                    observeTerminalInterruption: { alert },
                     observeApplication: { self.sidebar() }
                 )
             },
@@ -1327,18 +1183,10 @@ class PrintFarmerUITestCase: XCTestCase {
                 }
                 return nil
             }
-            let observeTerminalInterruption: () throws -> ShellNode? = navigationAlertDismissals.isEmpty ? { nil } : budget.firstTerminalInterruption {
-                let alert = self.app.alerts.firstMatch
-                guard budget.exists(alert, named: "terminal navigation interruption") else { return nil }
-                return try budget.perform("observed terminal alert snapshot") {
-                    ShellNode(try alert.snapshot())
-                }
-            }
             return try budget.waitForShell(
                 observe: {
                     try budget.observeShell(
                         observeInterruption: observeInterruption,
-                        observeTerminalInterruption: observeTerminalInterruption,
                         observeApplication: { ShellObservation(ShellNode(try self.app.snapshot())) }
                     )
                 },
