@@ -51,7 +51,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.second.baseURL.host)
-        XCTAssertEqual(currentControlOperationRequests(fixture.api).count, 1)
+        XCTAssertFalse(currentControlOperationRequests(fixture.api).isEmpty,
+                       "Protected status must be fetched; lifecycle invalidations may refresh it")
         XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
         XCTAssertTrue(fixture.api.capturedRequests.allSatisfy {
             $0.value(forHTTPHeaderField: "Authorization") == "Bearer detail-host-test-token"
@@ -90,7 +91,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.first.baseURL.host)
-        XCTAssertEqual(currentControlOperationRequests(fixture.api).count, 1)
+        XCTAssertFalse(currentControlOperationRequests(fixture.api).isEmpty,
+                       "Protected status must be fetched; lifecycle invalidations may refresh it")
         XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
         XCTAssertTrue(fixture.api.capturedRequests.allSatisfy {
             $0.value(forHTTPHeaderField: "Authorization") == "Bearer detail-host-test-token"

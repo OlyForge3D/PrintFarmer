@@ -4285,14 +4285,28 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         await model.homeAll()
         XCTAssertTrue(service.submittedControlOperations.isEmpty)
 
+        let telemetryRead = AsyncBarrier()
+        defer {
+            model.deactivate()
+            telemetryRead.close()
+        }
+        let held = service.currentControlOperationToReturn
+        service.currentControlOperationHandler = { _ in
+            await telemetryRead.arriveAndWait()
+            return held
+        }
         var telemetry = model.printer
         telemetry.physicalControl = .init(
             supportedOperations: PrinterControlOperationKind.allCases,
             barrierHeld: false, requiresRecovery: false
         )
         model.handlePrinterUpdate(telemetry)
+        await telemetryRead.waitUntilArrived()
         XCTAssertTrue(model.hasUnresolvedMotion)
 
+        // The telemetry-triggered read must start before the authoritative read,
+        // otherwise it can supersede the read this test awaits.
+        service.currentControlOperationHandler = nil
         service.currentControlOperationToReturn = .init(
             physicalControl: try XCTUnwrap(telemetry.physicalControl), operation: nil
         )
