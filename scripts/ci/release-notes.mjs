@@ -23,7 +23,7 @@ export function validateReleaseNotesMetadata(metadata, version) {
   return metadata;
 }
 
-export function releaseNotes({ version, sourceCommit, previousTag, pullRequests, changelog, metadata }) {
+export function releaseNotes({ version, sourceCommit, previousTag, pullRequests, changelog, metadata, repository = 'OlyForge3D/PrintFarmer' }) {
   validateReleaseNotesMetadata(metadata, version.replace(/-(?:insider|beta|rc)\.\d+$/, ''));
   requireThat(/^[a-f0-9]{40}$/.test(sourceCommit), 'Release notes require the exact source commit');
   requireThat(typeof previousTag === 'string' && /^v\d+\.\d+\.\d+/.test(previousTag),
@@ -35,7 +35,7 @@ export function releaseNotes({ version, sourceCommit, previousTag, pullRequests,
   const entries = pullRequests.map(pr => {
     requireThat(Number.isSafeInteger(pr.number) && pr.number > 0 && typeof pr.title === 'string' &&
       pr.title.trim().length > 0 && !/[\r\n[\]`]/.test(pr.title) && typeof pr.url === 'string' &&
-      /^https:\/\/github\.com\/OlyForge3D\/PrintFarmer\/pull\/[1-9][0-9]*$/.test(pr.url) &&
+      new RegExp(`^https://github\\.com/${repository.replace('/', '\\/')}/pull/[1-9][0-9]*$`).test(pr.url) &&
       !/[\r\n]/.test(pr.url),
     'Release notes contain malformed merged pull request data');
     return `- [#${pr.number}](${pr.url}): ${pr.title.trim()}`;
@@ -86,7 +86,8 @@ function main() {
   const baseVersion = version.replace(/-(?:insider|beta|rc)\.\d+$/, '');
   const metadata = JSON.parse(readFileSync(resolve('release-metadata', `${baseVersion}.json`), 'utf8'));
   const notes = releaseNotes({ version, sourceCommit, previousTag, pullRequests: [...pullRequests.values()].sort((a, b) => a.number - b.number),
-    changelog: changelogEntry(readFileSync('CHANGELOG.md', 'utf8'), baseVersion), metadata: validateReleaseNotesMetadata(metadata, baseVersion) });
+    changelog: changelogEntry(readFileSync('CHANGELOG.md', 'utf8'), baseVersion),
+    metadata: validateReleaseNotesMetadata(metadata, baseVersion), repository });
   writeFileSync(output, notes);
 }
 

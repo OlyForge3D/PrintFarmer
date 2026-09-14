@@ -85,23 +85,31 @@ jobs:
       - name: Check selected source version base
         working-directory: source
         run: bash scripts/sync-monorepo-version.sh --check
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
       - name: Recover immutable authorization bytes for an authorized rerun
         if: github.run_attempt > 1
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          artifact_name="$(
+          mapfile -t authorization_artifacts < <(
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
-              --jq '[.artifacts[] |
-                select(.expired == false and (.name | test("^release-authorization-[1-9][0-9]*$")))] |
-                sort_by(.created_at) | .[0].name // empty'
-          )"
-          if [ -n "$artifact_name" ]; then
-            gh run download "$GITHUB_RUN_ID" \
-              --name "$artifact_name" \
-              --dir .artifacts/release-authorization
-          fi
+              --jq '[.artifacts[] | select(.expired == false and .name == "release-authorization-1")] | .[].name'
+          ) || { echo "Authorization recovery artifact lookup failed"; exit 1; }
+          [[ "${#authorization_artifacts[@]}" -eq 1 ]] ||
+            { echo "Authorization recovery evidence is absent, ambiguous, or expired"; exit 1; }
+          gh run download "$GITHUB_RUN_ID" \
+            --name "${authorization_artifacts[0]}" \
+            --dir .artifacts/release-authorization
+          expected_authorization_assets="$(printf '%s\n' public-identity.bundle.json public-identity.json release-identity.bundle.json release-identity.json | sort)"
+          [[ "$(find .artifacts/release-authorization -maxdepth 1 -type f -printf '%f\n' | sort)" == "$expected_authorization_assets" ]] ||
+            { echo "Authorization recovery artifact is incomplete or contains unexpected files"; exit 1; }
+          for identity in release-identity public-identity; do
+            cosign verify-blob --bundle ".artifacts/release-authorization/${identity}.bundle.json" \
+              --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              ".artifacts/release-authorization/${identity}.json"
+          done
       - name: Obtain protected publisher App token
         id: publisher
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2
@@ -126,8 +134,8 @@ jobs:
           RELEASE_SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
         run: node scripts/ci/release-control.mjs authorize
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
       - name: Sign immutable authorization
+        if: github.run_attempt == 1
         run: |
           set -euo pipefail
           umask 077
@@ -138,6 +146,7 @@ jobs:
             --bundle .artifacts/release-authorization/public-identity.bundle.json \
             .artifacts/release-authorization/public-identity.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        if: github.run_attempt == 1
         with:
           name: release-authorization-${{ github.run_attempt }}
           path: |
