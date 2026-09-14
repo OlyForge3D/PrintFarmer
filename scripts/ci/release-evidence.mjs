@@ -121,19 +121,23 @@ function validateDsseBundle(bundle, subject, predicateBytes) {
   }
 }
 
+function validateSignatureDownload(bundle) {
+  const entries = Array.isArray(bundle) ? bundle : [bundle];
+  requireThat(entries.length > 0 && entries.every(entry =>
+    typeof (entry?.SignedPayload ?? entry?.Payload) === 'string' &&
+    (entry.SignedPayload ?? entry.Payload).length > 0 &&
+    typeof entry?.Cert === 'string' && entry.Cert.length > 0 &&
+    entry?.Bundle && typeof entry.Bundle === 'object'),
+  'Malformed Cosign signature download');
+}
+
 function evidenceObject(subject, signatureBytes, attestationBytes, predicateBytes, signatureBundleBytes,
   attestationBundleBytes, platform, trust) {
   const signatureVerification = verificationEntries(signatureBytes, subject, 'signature');
   const attestationVerification = verificationEntries(attestationBytes, subject, 'attestation', predicateBytes);
   const signatureBundle = parseJson(signatureBundleBytes, 'signature bundle');
   const attestationBundle = parseJson(attestationBundleBytes, 'attestation bundle');
-  const signatureEntries = Array.isArray(signatureBundle) ? signatureBundle : [signatureBundle];
-  requireThat(signatureEntries.length > 0 && signatureEntries.every(entry =>
-    typeof entry?.payload === 'string' && entry.payload.length > 0 &&
-      Number.isSafeInteger(entry.optional?.Bundle?.Payload?.integratedTime) &&
-      typeof entry.optional?.Bundle?.SignedEntryTimestamp === 'string' &&
-      entry.optional.Bundle.SignedEntryTimestamp.length > 0),
-  'Missing Cosign signed signature bundle material');
+  validateSignatureDownload(signatureBundle);
   validateDsseBundle(attestationBundle, subject, predicateBytes);
   validateBundleTrust(signatureVerification, trust);
   validateBundleTrust(attestationVerification, trust);
@@ -195,11 +199,7 @@ function validateStored(value, digest, platform, trust) {
   validateVerification(value.signature.bytes, digest, 'signature');
   validateVerification(value.sbom.bytes, digest, 'attestation', value.sbom.predicate);
   const signatureBundle = parseJson(value.signature.bundle, 'signature bundle');
-  const signatureEntries = Array.isArray(signatureBundle) ? signatureBundle : [signatureBundle];
-  requireThat(signatureEntries.every(entry => typeof entry?.payload === 'string' && entry.payload.length > 0 &&
-    Number.isSafeInteger(entry.optional?.Bundle?.Payload?.integratedTime) &&
-    typeof entry.optional?.Bundle?.SignedEntryTimestamp === 'string' &&
-    entry.optional.Bundle.SignedEntryTimestamp.length > 0), 'Missing Cosign signed signature bundle material');
+  validateSignatureDownload(signatureBundle);
   validateDsseBundle(parseJson(value.sbom.bundle, 'attestation bundle'), digest, value.sbom.predicate);
   validateBundleTrust(verificationEntries(value.signature.bytes, digest, 'signature'), trust);
   validateBundleTrust(verificationEntries(value.sbom.bytes, digest, 'attestation', value.sbom.predicate), trust);

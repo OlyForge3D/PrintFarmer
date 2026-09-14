@@ -749,8 +749,7 @@ jobs:
           [[ "$(jq -r .draft "$release_json")" == false ]] ||
             { echo "Release remained draft after activation"; exit 1; }
           mapfile -t public_assets < <(jq -r '.assets[] | [.name, .browser_download_url] | @tsv' "$release_json")
-          expected_inventory="$( (find source/release-assets -maxdepth 1 -type f -printf '%f\n'; printf '%s\n' \
-            release-manifest.json release-manifest.envelope.json release-manifest.envelope.bundle.json) | sort)"
+          expected_inventory="$(find source/release-assets -maxdepth 1 -type f -printf '%f\n' | sort -u)"
           [[ "$(printf '%s\n' "${public_assets[@]}" | cut -f1 | sort)" == "$expected_inventory" ]] ||
             { echo "Activated release asset inventory is incomplete or unexpected"; exit 1; }
           for asset in "${public_assets[@]}"; do

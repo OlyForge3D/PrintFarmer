@@ -51,10 +51,10 @@ const context = (overrides = {}) => ({
   channel: 'insider', ...overrides,
 });
 
-const releaseMetadataFixture = version => ({
-  ...loadReleaseMetadata('0.2.3'),
-  version,
-});
+const releaseMetadataFixture = version => {
+  const { trustPolicy, ...metadata } = loadReleaseMetadata('0.2.3');
+  return { ...metadata, version };
+};
 const cryptoEvidenceFixture = set => {
   const subject = digest => {
     const predicate = JSON.stringify({ SPDXID: 'SPDXRef-DOCUMENT' });
@@ -66,8 +66,8 @@ const cryptoEvidenceFixture = set => {
       signatureBytes,
       attestationBytes,
       predicateBytes: predicate,
-      signatureBundleBytes: JSON.stringify([{ payload: 'signed-payload', optional: {
-        Bundle: { Payload: { integratedTime: 1780000000 }, SignedEntryTimestamp: 'proof' } } }]),
+      signatureBundleBytes: JSON.stringify([{ SignedPayload: 'signed-payload', Cert: 'certificate',
+        Bundle: { Payload: { integratedTime: 1780000000 }, SignedEntryTimestamp: 'proof' } }]),
       attestationBundleBytes: JSON.stringify([{ payload: Buffer.from(JSON.stringify({
         subject: [{ digest: { sha256: digest.slice(7) } }], predicate: JSON.parse(predicate),
       })).toString('base64'), payloadType: 'application/vnd.in-toto+json',

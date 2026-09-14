@@ -47,9 +47,8 @@ function signed(subject = digest, predicateValue = predicate) {
     signatureBytes: JSON.stringify([{ critical: { image: { 'docker-manifest-digest': subject } }, ...verification }]),
     attestationBytes: JSON.stringify([{ payload: Buffer.from(JSON.stringify(statement)).toString('base64'), ...verification }]),
     predicateBytes: JSON.stringify(predicateValue),
-    signatureBundleBytes: JSON.stringify([{ payload: 'signed-payload', optional: { Subject: signer,
-      Issuer: 'https://token.actions.githubusercontent.com', certificate,
-      Bundle: { Payload: { integratedTime: 1789426200 }, SignedEntryTimestamp: 'proof' } } }]),
+    signatureBundleBytes: JSON.stringify([{ SignedPayload: 'signed-payload', Cert: certificate,
+      Bundle: { Payload: { integratedTime: 1789426200 }, SignedEntryTimestamp: 'proof' } }]),
     attestationBundleBytes: JSON.stringify([{ payload: Buffer.from(JSON.stringify(statement)).toString('base64'),
       payloadType: 'application/vnd.in-toto+json', signatures: [{ sig: 'dsse-signature' }] }]),
   };
