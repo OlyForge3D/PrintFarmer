@@ -558,8 +558,13 @@ test('legacy qualification evidence remains reachable and separate from transact
     }
   }
   const control = read('scripts/ci/release-control.mjs');
-  assert.equal((control.match(/await verifyCanonicalReleaseEvidence/g) ?? []).length, 2);
+  assert.equal((control.match(/await verifyCanonicalReleaseEvidence/g) ?? []).length, 1);
   assert.match(control, /qualificationClient\(env\.GH_TOKEN\)/);
+  assert.doesNotMatch(control, /if \(!transaction\)/);
+  assert.match(control,
+    /const transaction = operation === 'admit' \? undefined : transactionFromEnvironment\(env\)/);
+  assert.ok(control.indexOf('await verifyCanonicalReleaseEvidence') >
+    control.indexOf("if (operation === 'admit')"));
   assert.doesNotMatch(control, /sourceCommit: transaction\?\.sourceCommit \?\? env\.RELEASE_SOURCE_COMMIT/);
   assert.doesNotMatch(control, /if \(env\.RELEASE_TRANSACTION\) \{[\s\S]*?advance\(/);
   assert.match(read('.github/workflows/ci.yml'), /test-canonical-qualification\.mjs/);

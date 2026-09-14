@@ -68,8 +68,7 @@ export function output(name, value) {
 export async function runReleaseControl(operation, env = process.env, verify = command) {
   requireThat(['admit', 'authorize', 'consume', 'preflight', 'advance'].includes(operation), 'Unknown release operation');
   const consumer = ['consume', 'preflight', 'advance'].includes(operation);
-  const transaction = consumer ? transactionFromEnvironment(env) :
-    env.RELEASE_TRANSACTION ? transactionFromEnvironment(env) : undefined;
+  const transaction = operation === 'admit' ? undefined : transactionFromEnvironment(env);
   const privileged = ['authorize', 'preflight', 'advance'].includes(operation);
   if (privileged) {
     requireThat(env.RELEASE_PUBLISHER_TOKEN && env.RELEASE_PUBLISHER_TOKEN !== env.GH_TOKEN,
@@ -89,17 +88,19 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       validateApprovalMode(env.RELEASE_ADMITTED_APPROVAL_MODE);
       requireThat(env.RELEASE_ADMITTED_APPROVAL_MODE === env.RELEASE_APPROVAL_MODE,
         'Approval mode changed after admission; align repository and environment policy and rerun all jobs');
+      requireThat(transaction.approvalMode === env.RELEASE_APPROVAL_MODE,
+        'Approval mode changed after transaction selection; rerun all jobs');
     }
     const channel = context.event === 'schedule' ? 'insider' : context.channel;
     const branch = channel === 'stable' ? 'main' : 'development';
     const { state } = await store.read();
-    const selectedHead = transaction?.sourceCommit ?? await branchHead(api, branch);
+    const selectedHead = operation === 'authorize' ? transaction.sourceCommit : await branchHead(api, branch);
     const admission = admit(context, selectedHead, await readVersion(api, selectedHead));
     validateReservationAdmission(state, admission);
-    if (!transaction) {
+    if (operation === 'admit') {
       await verifyCanonicalReleaseEvidence(qualificationClient(env.GH_TOKEN),
         selectedHead, admission.channel, env.RELEASE_APPROVAL_MODE);
-      if (operation === 'admit') await verifyReleaseChecks(api, selectedHead);
+      await verifyReleaseChecks(api, selectedHead);
       requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift before authorization');
     }
     output('source_sha', context.eventSha);
@@ -108,26 +109,17 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       output('approval_mode', env.RELEASE_APPROVAL_MODE);
       return;
     }
-    if (transaction) {
-      readQualificationReceipt(transaction);
-      await verifyTransactionQualification(transaction, api);
-      await verifyCanonicalSource(api, branch, selectedHead);
-    }
+    readQualificationReceipt(transaction);
+    await verifyTransactionQualification(transaction, api);
+    await verifyCanonicalSource(api, branch, selectedHead);
     const protection = await verifyProtection(api, admission.channel, env.RELEASE_PUBLISHER_APP_ID,
       env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, selectedHead);
     const record = await transact(store, async state => {
       const existing = validateReservationAdmission(state, admission);
-      if (transaction) {
-        readQualificationReceipt(transaction);
-        await verifyTransactionQualification(transaction, api);
-      } else {
-        await verifyCanonicalReleaseEvidence(qualificationClient(env.GH_TOKEN),
-          selectedHead, admission.channel, env.RELEASE_APPROVAL_MODE);
-        requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during allocation retry');
-      }
+      readQualificationReceipt(transaction);
+      await verifyTransactionQualification(transaction, api);
       const qualification = await verifyStableQualification(api, state, admission);
-      if (!transaction) requireThat(await branchHead(api, branch) === selectedHead,
-        'HEAD drift during qualification');
+      await verifyCanonicalSource(api, branch, selectedHead);
       if (existing?.identitySha256) {
         // A lost private artifact cannot be reconstructed from public ledger data.
         const saved = readPrivateAuthorization();

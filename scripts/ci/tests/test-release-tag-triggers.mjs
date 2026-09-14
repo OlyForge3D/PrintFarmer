@@ -4,7 +4,7 @@ import {
   symlinkSync, writeFileSync,
 } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import test from 'node:test';
 import { canonicalAuthorizationFixture } from './fixtures/canonical-qualification.mjs';
 import { canonicalValidationChecks } from '../canonical-qualification.mjs';
@@ -23,6 +23,10 @@ import {
   authorizationPath, authorizationBundle, privateSetPath, publicAuthorization, verifyAuthorization,
   writeAuthorization, writeAuthorizationSet, writePublicSet, emitPublicReleaseAssets, readPrivateJson,
 } from '../release-authorization.mjs';
+import {
+  qualificationJobNamespace, qualificationLifetimeMs, qualificationPath,
+  validateQualificationReceipt,
+} from '../release-transaction.mjs';
 import { publicIdentity, publicIdentityFields } from '../../../src/Web/ReactApp/public-release-identity.mjs';
 
 const sha = 'a'.repeat(40);
@@ -37,14 +41,41 @@ const context = (overrides = {}) => ({
   channel: 'insider', ...overrides,
 });
 
-test('release consumers reject missing transactions before verification or network access', async () => {
-  for (const operation of ['advance', 'consume', 'preflight']) {
+test('transaction-bound release operations reject missing transactions before verification or network access', async () => {
+  for (const operation of ['authorize', 'advance', 'consume', 'preflight']) {
     let verified = false;
     await assert.rejects(runReleaseControl(operation, {
       GH_TOKEN: 'github-fixture',
       RELEASE_PUBLISHER_TOKEN: 'publisher-fixture',
     }, () => { verified = true; }), /Missing release transaction/);
     assert.equal(verified, false, operation);
+  }
+});
+
+test('authorization rejects blank, malformed and invalid transactions before API or artifact mutation', async () => {
+  const previous = globalThis.fetch;
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `invalid-authorization-transaction-${process.pid}`);
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  globalThis.fetch = () => assert.fail('Invalid transaction must fail before network access');
+  try {
+    for (const transaction of ['', '   ', '{', 'null', '{}', JSON.stringify({
+      kind: 'release-transaction',
+      schema: 2,
+    })]) {
+      await assert.rejects(runReleaseControl('authorize', {
+        GH_TOKEN: 'github-fixture',
+        RELEASE_PUBLISHER_TOKEN: 'publisher-fixture',
+        RELEASE_TRANSACTION: transaction,
+      }), /Missing release transaction|JSON|release transaction/);
+      assert.equal(existsSync(authorizationPath), false);
+      assert.equal(existsSync(qualificationPath), false);
+    }
+  } finally {
+    globalThis.fetch = previous;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 const state = () => ({ schema: 1, anchor, counter: '0', reservations: {}, identities: {}, pointers: {}, stages: {}, qualifications: {} });
@@ -109,6 +140,61 @@ const releaseTransaction = identity => ({
   runAttempt: '1',
   approvalMode: identity.protection.approvalMode,
 });
+const qualificationJobs = [
+  ...releaseRequiredChecks.filter(name => name !== releaseReviewStatus),
+  ...canonicalValidationChecks,
+];
+
+function writeQualificationFixture(transaction) {
+  const now = Date.now();
+  const checkedAt = new Date(now).toISOString();
+  const startedAt = new Date(now - 4 * 60_000).toISOString();
+  const completedAt = new Date(now - 2 * 60_000).toISOString();
+  const receipt = {
+    kind: 'release-qualification',
+    schema: 2,
+    transaction,
+    checkedAt,
+    expiresAt: new Date(now + qualificationLifetimeMs).toISOString(),
+    qualifiedBranchHead: transaction.observedBranchHead,
+    run: {
+      id: transaction.runId,
+      attempt: transaction.runAttempt,
+      checkSuiteId: '100',
+      url: `https://github.com/${transaction.repository}/actions/runs/${transaction.runId}`,
+      startedAt,
+      completedAt,
+    },
+    jobs: qualificationJobs.map(name => ({
+      name: `${qualificationJobNamespace} / ${name}`,
+      url: `https://github.com/${transaction.repository}/actions/runs/${transaction.runId}`,
+      startedAt,
+      completedAt,
+      checkCompletedAt: completedAt,
+    })),
+    sourceEvidence: {
+      sourceCommit: transaction.sourceCommit,
+      reviewUrl: `https://github.com/${transaction.repository}/actions/runs/30`,
+      collectedAt: checkedAt,
+      checks: releaseRequiredChecks.map(context => ({
+        context,
+        ...(context === releaseReviewStatus
+          ? { statusId: 1, createdAt: completedAt, updatedAt: completedAt }
+          : { checkId: 1, completedAt }),
+      })),
+    },
+  };
+  validateQualificationReceipt(receipt, transaction, now);
+  mkdirSync(dirname(qualificationPath), { recursive: true });
+  writeFileSync(qualificationPath, JSON.stringify(receipt));
+}
+
+async function runFixtureControl(operation, fixture, env = fixture.env, verify) {
+  if (operation === 'authorize') {
+    writeQualificationFixture(JSON.parse(env.RELEASE_TRANSACTION));
+  }
+  return runReleaseControl(operation, env, verify);
+}
 function promotionQualification(identity, set, sourceCommit = newerSha) {
   const tree = { schema: 1, originTree: 'd'.repeat(40), sourceTree: 'd'.repeat(40), metadataChanges: [] };
   return {
@@ -1874,7 +1960,7 @@ for (const channel of ['stable', 'insider']) {
             /explicitly disable administrator bypass/);
           const fixture = authorizationFixture(state(), { channel, approvalMode: mode, mutateEnvironment });
           globalThis.fetch = fixture.fetch;
-          await assert.rejects(runReleaseControl('authorize', fixture.env),
+          await assert.rejects(runFixtureControl('authorize', fixture),
             /explicitly disable administrator bypass/);
           assert.ok(fixture.calls.some(call => call.admin && call.publisher));
           assert.ok(fixture.calls.every(call => call.method === 'GET'), 'No reservation or source-tag write');
@@ -2001,7 +2087,8 @@ for (const channel of ['stable', 'insider']) {
         for (const mutatePolicy of mutations) {
           const fixture = authorizationFixture(state(), { channel, approvalMode: mode, mutatePolicy });
           globalThis.fetch = fixture.fetch;
-          await assert.rejects(runReleaseControl('authorize', fixture.env), /Owner blocker|Incomplete/);
+          await assert.rejects(runFixtureControl('authorize', fixture),
+            /Owner blocker|Incomplete|Missing successful exact-SHA required qualification/);
           assert.ok(fixture.calls.every(call => call.method === 'GET'));
           assert.deepEqual(fixture.ledgerWrites, []);
         }
@@ -2072,7 +2159,7 @@ test('exact-SHA status and check failures deny admission and authorization befor
         for (const mutation of mutations) {
           const fixture = authorizationFixture(state(), { approvalMode, ...mutation });
           globalThis.fetch = fixture.fetch;
-          await assert.rejects(runReleaseControl(operation, fixture.env), /Invalid|qualification|evidence|stale/);
+          await assert.rejects(runFixtureControl(operation, fixture), /Invalid|qualification|evidence|stale/);
           assert.ok(fixture.calls.every(call => call.method === 'GET'));
           assert.deepEqual(fixture.ledgerWrites, []);
         }
@@ -2107,7 +2194,7 @@ test('additional configured checks enforce latest exact run and integration bind
       fixture.branchRules[3].parameters.required_status_checks.push({ context: 'extra' });
     } });
     globalThis.fetch = fixture.fetch;
-    await assert.rejects(runReleaseControl('authorize', fixture.env), /qualification/);
+    await assert.rejects(runFixtureControl('authorize', fixture), /qualification/);
     assert.deepEqual(fixture.ledgerWrites, []);
   } finally { globalThis.fetch = previous; }
 });
@@ -2170,7 +2257,9 @@ test('missing or unknown approval mode cannot read policy or admit or authorize 
       await assert.rejects(verifyProtection(() => assert.fail('No policy read'), 'insider', '123', mode),
         /RELEASE_APPROVAL_MODE/);
       for (const operation of ['admit', 'authorize']) {
-        await assert.rejects(runReleaseControl(operation, { ...fixture.env, RELEASE_APPROVAL_MODE: mode }),
+        await assert.rejects(runFixtureControl(operation, fixture, {
+          ...fixture.env, RELEASE_APPROVAL_MODE: mode,
+        }),
           /RELEASE_APPROVAL_MODE/);
       }
     }
@@ -2200,7 +2289,7 @@ test('authorization fails closed on missing, invalid or divergent admitted appro
       const fixture = authorizationFixture(state(), { approvalMode: mode });
       for (const admittedMode of [undefined, '', 'unknown', `${mode} `,
         mode === 'single-maintainer' ? 'separation-of-duties' : 'single-maintainer']) {
-        await assert.rejects(runReleaseControl('authorize', {
+        await assert.rejects(runFixtureControl('authorize', fixture, {
           ...fixture.env, RELEASE_ADMITTED_APPROVAL_MODE: admittedMode,
         }), /RELEASE_APPROVAL_MODE|Approval mode changed after admission/);
         assert.deepEqual(fixture.ledgerWrites, []);
@@ -2221,7 +2310,7 @@ test('single-maintainer authorization rejects unapproved, automatic and conflict
     ]) {
       const fixture = authorizationFixture(state(), { approvalMode: 'single-maintainer', mutateEnvironment });
       globalThis.fetch = fixture.fetch;
-      await assert.rejects(runReleaseControl('authorize', fixture.env), /Owner blocker/);
+      await assert.rejects(runFixtureControl('authorize', fixture), /Owner blocker/);
       assert.ok(fixture.calls.length > 0);
       assert.ok(fixture.calls.every(call => call.method === 'GET'));
       assert.deepEqual(fixture.ledgerWrites, []);
@@ -2430,7 +2519,40 @@ function authorizationFixture(initial = state(), settings = {}) {
     GITHUB_WORKFLOW_REF: selected.workflowIdentity, GITHUB_WORKFLOW_SHA: sourceCommit,
     GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '1', RELEASE_CHANNEL: channel,
   };
+  const transaction = {
+    kind: 'release-transaction',
+    schema: 2,
+    repository: selected.repository,
+    channel,
+    sourceBranch: branch,
+    sourceCommit,
+    observedBranchHead: sourceCommit,
+    workflowIdentity: selected.workflowIdentity,
+    workflowCommit: sourceCommit,
+    runId: '42',
+    runAttempt: '1',
+    approvalMode: env.RELEASE_APPROVAL_MODE,
+  };
+  env.RELEASE_TRANSACTION = JSON.stringify(transaction);
+  env.RELEASE_SOURCE_COMMIT = sourceCommit;
   const canonical = canonicalAuthorizationFixture(sourceCommit, channel, env.RELEASE_APPROVAL_MODE);
+  const qualificationStartedAt = new Date(Date.now() - 4 * 60_000).toISOString();
+  const qualificationCompletedAt = new Date(Date.now() - 2 * 60_000).toISOString();
+  const qualificationRunUrl = `https://github.com/${selected.repository}/actions/runs/42`;
+  const transactionJobs = qualificationJobs.map((name, index) => ({
+    id: 1000 + index,
+    name: `${qualificationJobNamespace} / ${name}`,
+    run_id: 42,
+    run_attempt: 1,
+    head_sha: sourceCommit,
+    status: 'completed',
+    conclusion: 'success',
+    started_at: qualificationStartedAt,
+    completed_at: qualificationCompletedAt,
+    check_run_url:
+      `https://api.github.com/repos/${selected.repository}/check-runs/${1000 + index}`,
+    html_url: `${qualificationRunUrl}/job/${1000 + index}`,
+  }));
   return {
     env, calls, ledgerWrites, environment, branchRules,
     deleteTag() { tag = undefined; },
@@ -2466,13 +2588,54 @@ function authorizationFixture(initial = state(), settings = {}) {
       if (endpoint.startsWith('contents/VERSION?')) {
         return response({ encoding: 'base64', content: Buffer.from('v1.2.3\n').toString('base64') });
       }
+      if (endpoint === 'actions/workflows/consolidated-release.yml') {
+        return response({
+          id: 9,
+          path: '.github/workflows/consolidated-release.yml',
+          state: 'active',
+        });
+      }
+      if (endpoint === 'actions/runs/42') {
+        return response({
+          id: 42,
+          run_attempt: 1,
+          path: '.github/workflows/consolidated-release.yml',
+          workflow_id: 9,
+          repository: { full_name: selected.repository },
+          head_repository: { full_name: selected.repository },
+          head_branch: 'development',
+          head_sha: sourceCommit,
+          event: 'workflow_dispatch',
+          html_url: qualificationRunUrl,
+          status: 'in_progress',
+          conclusion: undefined,
+          check_suite_id: 100,
+          run_started_at: qualificationStartedAt,
+          updated_at: qualificationCompletedAt,
+        });
+      }
+      if (endpoint === 'actions/runs/42/attempts/1/jobs?per_page=100') {
+        return response({ total_count: transactionJobs.length, jobs: transactionJobs });
+      }
       if (endpoint.startsWith(`commits/${sourceCommit}/check-runs`)) {
         const names = [...releaseBuildChecks, ...canonicalValidationChecks];
-        const checks = { total_count: names.length, check_runs: names
+        const checkRuns = names
           .map((name, id) => ({ name, id: id + 1, head_sha: sourceCommit, status: 'completed',
             conclusion: 'success', app: { slug: 'github-actions' }, check_suite: { id: 100 },
             completed_at: new Date(Date.now() - 5 * 60_000).toISOString(),
-            url: `https://api.github.com/repos/OlyForge3D/PrintFarmer/check-runs/${id + 1}` })) };
+            url: `https://api.github.com/repos/OlyForge3D/PrintFarmer/check-runs/${id + 1}` }));
+        checkRuns.push(...transactionJobs.map(job => ({
+          id: job.id,
+          name: job.name,
+          head_sha: sourceCommit,
+          status: 'completed',
+          conclusion: 'success',
+          completed_at: qualificationCompletedAt,
+          app: { id: 15368, slug: 'github-actions' },
+          check_suite: { id: 100 },
+          url: job.check_run_url,
+        })));
+        const checks = { total_count: checkRuns.length, check_runs: checkRuns };
         settings.mutateChecks?.(checks);
         return response(checks);
       }
@@ -2539,7 +2702,7 @@ test('executed authority rejects initial and newly advanced stable floors before
         for (const operation of ['admit', 'authorize']) {
           const fixture = authorizationFixture(initial, { channel });
           globalThis.fetch = fixture.fetch;
-          await assert.rejects(runReleaseControl(operation, fixture.env), /effective stable floor/);
+          await assert.rejects(runFixtureControl(operation, fixture), /effective stable floor/);
           assert.ok(fixture.calls.every(call => call.method === 'GET'));
           assert.equal(fixture.ledgerWrites.length, 0);
           assert.equal(existsSync(authorizationPath), false);
@@ -2553,7 +2716,7 @@ test('executed authority rejects initial and newly advanced stable floors before
         advance(advanced, stable, completeSet(stable), sha, '');
         const fixture = authorizationFixture(publicLedger(initial), { channel, [timing]: publicLedger(advanced) });
         globalThis.fetch = fixture.fetch;
-        await assert.rejects(runReleaseControl('authorize', fixture.env), /effective stable floor/);
+        await assert.rejects(runFixtureControl('authorize', fixture), /effective stable floor/);
         const writes = fixture.calls.filter(call => call.method !== 'GET');
         if (timing === 'advanceBeforeAllocation') {
           assert.deepEqual(writes, []);
@@ -2598,7 +2761,7 @@ test('executed authority preserves existing exact reservations after stable adva
       const fixture = authorizationFixture(publicLedger(ledger), { channel: identity.channel });
       globalThis.fetch = fixture.fetch;
       await runReleaseControl('admit', fixture.env);
-      await runReleaseControl('authorize', fixture.env);
+      await runFixtureControl('authorize', fixture);
       assert.equal(readFileSync(authorizationPath, 'utf8'), original);
       for (const snapshot of fixture.ledgerWrites) {
         assert.equal(snapshot.counter, ledger.counter);
@@ -2626,7 +2789,7 @@ test('executed admission and authorization reject multi-commit evidence rewrites
     for (const operation of ['admit', 'authorize']) {
       const fixture = authorizationFixture(previous, { history: [previous, changed, changed] });
       globalThis.fetch = fixture.fetch;
-      await assert.rejects(runReleaseControl(operation, fixture.env), /immutable qualification/);
+      await assert.rejects(runFixtureControl(operation, fixture), /immutable qualification/);
       assert.equal(fixture.calls.filter(call => call.method === 'POST' || call.method === 'PATCH').length, 0);
       assert.equal(fixture.ledgerWrites.length, 0);
     }
@@ -2660,7 +2823,7 @@ test('executed admission and authorization reject historical floor and unbound c
         for (const operation of ['admit', 'authorize']) {
           const fixture = authorizationFixture(previous, { history });
           globalThis.fetch = fixture.fetch;
-          await assert.rejects(runReleaseControl(operation, fixture.env), ReleasePolicyError,
+          await assert.rejects(runFixtureControl(operation, fixture), ReleasePolicyError,
             `${name}, ${historyName}: ${operation}`);
           assert.equal(fixture.calls.filter(call => call.method === 'POST' || call.method === 'PATCH').length, 0);
           assert.equal(fixture.ledgerWrites.length, 0);
@@ -2691,11 +2854,11 @@ test('stable authority verifies tree evidence and rechecks main HEAD before any 
       const fixture = authorizationFixture(publicLedger(ledger), { channel: 'stable', sourceCommit: newerSha, ...options });
       globalThis.fetch = fixture.fetch;
       if (Object.keys(options).length) {
-        await assert.rejects(runReleaseControl('authorize', fixture.env), ReleasePolicyError);
+        await assert.rejects(runFixtureControl('authorize', fixture), ReleasePolicyError);
         assert.ok(fixture.calls.every(call => call.method === 'GET'));
         assert.equal(existsSync(authorizationPath), false);
       } else {
-        await runReleaseControl('authorize', fixture.env);
+        await runFixtureControl('authorize', fixture);
         const firstWrite = fixture.calls.findIndex(call => call.method !== 'GET');
         const preflight = fixture.calls.slice(0, firstWrite);
         assert.equal(preflight.filter(call => call.endpoint.includes('?recursive=1')).length, 2);
@@ -3022,7 +3185,7 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
       for (const token of [undefined, fixture.env.GH_TOKEN]) {
         const transaction = operation === 'advance' ?
           { RELEASE_TRANSACTION: JSON.stringify(releaseTransaction(record())) } : {};
-        await assert.rejects(runReleaseControl(operation, {
+        await assert.rejects(runFixtureControl(operation, fixture, {
           ...fixture.env, ...transaction, RELEASE_PUBLISHER_TOKEN: token,
         }),
           /Protected publisher App token required/);
@@ -3030,10 +3193,10 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     }
     assert.equal(fixture.calls.length, 0, 'Missing App credential must fail before API calls');
     const denied = { ...fixture.env, RELEASE_PUBLISHER_TOKEN: 'not-authorized-fixture' };
-    await assert.rejects(runReleaseControl('authorize', denied), /HTTP 403/);
+    await assert.rejects(runFixtureControl('authorize', fixture, denied), /HTTP 403/);
     assert.ok(fixture.calls.every(call => call.method === 'GET'), '403 must not allocate or tag');
     fixture.calls.length = 0;
-    await runReleaseControl('authorize', fixture.env);
+    await runFixtureControl('authorize', fixture);
     const identity = JSON.parse(readFileSync(authorizationPath, 'utf8'));
     verifyProtectionEvidence(identity.protection, 'insider');
     assert.equal(identity.protection.approvalMode, approvalMode);
@@ -3042,7 +3205,7 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     assert.ok(adminCalls.length >= 8 && adminCalls.every(call => call.publisher));
     assert.ok(fixture.calls.slice(firstWrite).every(call => !call.admin), 'Protection must precede allocation');
     const signedBytes = readFileSync(authorizationPath, 'utf8');
-    await runReleaseControl('authorize', fixture.env);
+    await runFixtureControl('authorize', fixture);
     assert.equal(readFileSync(authorizationPath, 'utf8'), signedBytes, 'Retry retains original evidence bytes');
     const changedMode = approvalMode === 'single-maintainer' ? 'separation-of-duties' : 'single-maintainer';
     const originalRules = structuredClone(fixture.environment.protection_rules);
@@ -3050,9 +3213,12 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     fixture.environment.protection_rules = protectionFixture('insider', changedMode).environment.protection_rules;
     fixture.branchRules[2].parameters = protectionFixture('insider', changedMode).branchRules[2].parameters;
     fixture.calls.length = 0;
-    await assert.rejects(runReleaseControl('authorize', { ...fixture.env, RELEASE_APPROVAL_MODE: changedMode,
-      RELEASE_ADMITTED_APPROVAL_MODE: changedMode }),
-      /Qualification approval mode mismatch/);
+    await assert.rejects(runFixtureControl('authorize', fixture, {
+      ...fixture.env,
+      RELEASE_APPROVAL_MODE: changedMode,
+      RELEASE_ADMITTED_APPROVAL_MODE: changedMode,
+    }),
+      /Approval mode changed after transaction selection/);
     assert.ok(fixture.calls.every(call => call.method === 'GET'));
     fixture.environment.protection_rules = originalRules;
     fixture.branchRules[2].parameters = originalBranchPolicy;
@@ -3146,7 +3312,7 @@ test('publication preflight accepts canonical ancestry and rejects branch drift 
   writeFileSync(process.env.GITHUB_OUTPUT, '');
   globalThis.fetch = fixture.fetch;
   try {
-    await runReleaseControl('authorize', fixture.env);
+    await runFixtureControl('authorize', fixture);
     const identity = JSON.parse(readFileSync(authorizationPath, 'utf8'));
     writeFileSync(privateSetPath, JSON.stringify(completeSet(identity)));
     const env = {
