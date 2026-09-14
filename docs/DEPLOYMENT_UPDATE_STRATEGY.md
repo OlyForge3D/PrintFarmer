@@ -84,7 +84,7 @@ managed eligibility, image aliases and generated installer references; no
 source-only release or unsigned candidate pointer is an update candidate.
 
 **Canonical qualification (#2686):** the
-[non-publishing qualification path](RELEASE_GUIDE.md#non-publishing-canonical-qualification)
+[non-publishing qualification path](RELEASE_GUIDE.md#retired-manual-canonical-qualification-history)
 requires new full-safe manual CI on live `main`/`development` HEAD and a fresh
 commit/run-bound review confirmation. Default-branch verification and a separate
 bounded status writer establish a live, completed audit chain; no PR verdict is

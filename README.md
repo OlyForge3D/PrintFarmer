@@ -444,7 +444,7 @@ unsatisfiable native approval count. Separation-of-duties additionally requires
 native code-owner and non-self approval. Owner confirmation is not independent
 authorization. Canonical release SHAs need their own genuine review evidence;
 PR-head statuses cannot be copied to later squash/merge commits.
-Use [non-publishing canonical qualification](docs/RELEASE_GUIDE.md#non-publishing-canonical-qualification):
+Use [non-publishing canonical qualification](docs/RELEASE_GUIDE.md#retired-manual-canonical-qualification-history):
 fresh manual CI on the live channel HEAD, a new SHA/run-bound review confirmation,
 and default-branch verification. Release admission checks the completed audit
 chain, not just a green status. Qualification needs no publisher secrets and
