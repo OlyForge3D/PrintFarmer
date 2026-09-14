@@ -102,3 +102,14 @@ test('rehearsal branch has no production credential or publisher path', () => {
   assert.match(rehearsal, /release-transaction\.mjs rehearse/);
   assert.equal(workflow.jobs.publish.if, "inputs.mode == 'release'");
 });
+
+test('publisher jobs use credential-only environments after the single transaction approval', () => {
+  const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
+  const environments = Object.values(publisher.jobs)
+    .filter(job => job.environment)
+    .map(job => job.environment);
+  assert.ok(environments.length > 0);
+  assert.ok(environments.every(environment =>
+    environment === 'release-publisher-${{ fromJSON(inputs.identity).channel }}'));
+  assert.ok(environments.every(environment => !/^release-\$\{\{/.test(environment)));
+});
