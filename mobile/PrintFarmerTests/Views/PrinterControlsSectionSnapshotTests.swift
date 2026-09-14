@@ -191,6 +191,71 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         }
     }
 
+    func test_absoluteGOAfterFailedOrRecoveredMotion_usesNewOperationFeedback() async throws {
+        for previous in [PrinterControlOperationState.failed, .recovered] {
+            let printer = try makePrinter(backend: .moonraker)
+            let service = makeService(caps: Self.essentialLayoutCaps)
+            service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
+            let model = makeDurableMotionModel(printer: printer, service: service)
+            await model.loadCapabilities()
+            service.submitControlOperationHandler = { [service] printerID, operationID, request in
+                let operation = PrinterControlOperation.controlsFixture(
+                    printerID: printerID, operationID: operationID, request: request,
+                    state: previous, evidence: previous == .failed ? .notSent : .operatorVerifiedRecovery,
+                    held: false
+                )
+                service.controlOperationToReturn = operation
+                service.currentControlOperationToReturn = .controlsFixture(operation)
+                return operation
+            }
+            await model.homeAll()
+            XCTAssertFalse(model.hasUnresolvedMotion)
+            XCTAssertEqual(model.controlOperation?.state, previous)
+            XCTAssertTrue(model.motionStatusNeedsAttention)
+            let previousMessage = model.motionStatusMessage
+            let previousID = model.motionOperationID
+            let barrier = AsyncBarrier()
+            addTeardownBlock { barrier.close() }
+            service.submitControlOperationHandler = { _, _, _ in
+                await barrier.arriveAndWait()
+                throw NetworkError.timeout
+            }
+            let (window, controller) = install(JogSubgroup.AbsolutePositionControls(viewModel: model))
+            defer { window.isHidden = true; model.deactivate() }
+            try await settle(controller)
+            for (axis, value) in [("x", "20"), ("y", "30"), ("z", "10")] {
+                let field = try XCTUnwrap(nativeControls(in: controller.view).first {
+                    $0.accessibilityIdentifier == "printer.controls.absolute.\(axis)"
+                } as? UITextField)
+                field.text = value
+                field.sendActions(for: .editingChanged)
+            }
+            try await settle(controller)
+            let go = try XCTUnwrap(nativeControls(in: controller.view).first {
+                $0.accessibilityIdentifier == "printer.controls.absolute.move"
+            } as? UIButton)
+            XCTAssertTrue(go.isEnabled)
+            go.sendActions(for: .touchUpInside)
+            await barrier.waitUntilArrived()
+            try await settle(controller)
+            XCTAssertEqual(go.configuration?.showsActivityIndicator, true)
+            XCTAssertEqual(go.accessibilityValue, "Pending")
+            XCTAssertFalse(model.motionStatusNeedsAttention, "Old terminal failure must not style the new submission")
+            XCTAssertNotEqual(model.motionOperationID, previousID)
+            XCTAssertNotEqual(model.motionStatusMessage, previousMessage, "Diagnostics must match the displayed operation ID")
+            XCTAssertEqual(model.motionStatusSummary, "Submitting motion. Controls locked until completion.")
+            barrier.release()
+            try await settle(controller)
+            XCTAssertTrue(model.hasUnresolvedMotion, "A lost response cannot unlock motion")
+            XCTAssertTrue(model.motionStatusNeedsAttention)
+            XCTAssertNotNil(model.motionAdmissionResubmissionID)
+            XCTAssertEqual(go.configuration?.showsActivityIndicator, false, "Unconfirmed admission uses recovery feedback, not endless progress")
+            XCTAssertNil(go.accessibilityValue)
+            XCTAssertFalse(go.isEnabled)
+            XCTAssertEqual(service.submittedControlOperations.count, 2)
+        }
+    }
+
     private func captureMotionEvidence(
         _ window: UIWindow, _ controller: UIHostingController<AnyView>, width: CGFloat, name: String
     ) async throws {
