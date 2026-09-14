@@ -481,6 +481,12 @@ jobs:
           expected_complete_inventory="$(
             printf '%s\n' "${expected_source_assets[@]}" "${expected_manifest_assets[@]}" | sort
           )"
+          validate_preexisting_source_inventory() {
+            remote_inventory="$(gh release view "$VERSION" --json assets --jq '.assets[].name' | sort)"
+            [[ "$remote_inventory" == "$expected_source_inventory" ||
+               "$remote_inventory" == "$expected_complete_inventory" ]] ||
+              { echo "Draft release asset inventory is incomplete or contains unexpected files"; exit 1; }
+          }
           for asset_name in "${expected_source_assets[@]}"; do
             test -s "release-assets/$asset_name"
           done
@@ -494,6 +500,7 @@ jobs:
 
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "Release $VERSION already exists; verifying immutable assets"
+            validate_preexisting_source_inventory
           else
             create_args=(release create "$VERSION" --draft --verify-tag --title "$VERSION" --notes-file release-assets/release-notes.md)
             [[ "$VERSION" == *-* ]] && create_args+=(--prerelease)

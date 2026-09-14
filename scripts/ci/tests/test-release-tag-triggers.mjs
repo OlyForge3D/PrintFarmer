@@ -50,6 +50,12 @@ const context = (overrides = {}) => ({
   channel: 'insider', ...overrides,
 });
 
+test('changelog release entry parser handles final, multiple, and literal z content', () => {
+  const entry = heading => `### Features\n\n${heading}\n\n### Fixes\n\nNone.\n\n### Breaking changes\n\nN/A`;
+  assert.equal(changelogEntry(`## [1.2.3]\n\n${entry('z')}`, '1.2.3'), entry('z'));
+  assert.equal(changelogEntry(`## [1.2.3]\n\n${entry('z')}\n\n## [1.2.4]\n\n${entry('later')}`, '1.2.3'), entry('z'));
+});
+
 test('release notes derive bounded merged PRs and mandatory version-controlled operational metadata', () => {
   const metadata = {
     schema: 1, version: '1.2.3', compatibility: 'API 1.x is required.', migration: 'Run provider migration.',
@@ -62,11 +68,6 @@ test('release notes derive bounded merged PRs and mandatory version-controlled o
     metadata,
   });
 
-  test('changelog release entry parser handles final, multiple, and literal z content', () => {
-    const entry = heading => `### Features\n\n${heading}\n\n### Fixes\n\nNone.\n\n### Breaking changes\n\nN/A`;
-    assert.equal(changelogEntry(`## [1.2.3]\n\n${entry('z')}`, '1.2.3'), entry('z'));
-    assert.equal(changelogEntry(`## [1.2.3]\n\n${entry('z')}\n\n## [1.2.4]\n\n${entry('later')}`, '1.2.3'), entry('z'));
-  });
   assert.match(notes, /Release range: v1\.2\.2\.\.\./);
   assert.match(notes, /#42/);
   assert.match(notes, /Run provider migration/);
@@ -3673,7 +3674,7 @@ test('workflow wiring keeps authorization and every publisher consumer in one pr
   assert.match(readFileSync('.gitignore', 'utf8'), /^\.artifacts\/$/m);
 });
 
-test('source publication retries accept only exact source or complete signed inventories', () => {
+test('source publication validates existing inventory before uploads and permits only valid retries', () => {
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8').replace(/\r\n/g, '\n');
   const sourcePublication = docker.split('      - name: Publish and verify public corresponding-source assets\n')[1]
     .split('      - name: Promote validated immutable image tags')[0];
@@ -3682,21 +3683,39 @@ test('source publication retries accept only exact source or complete signed inv
   assert.match(sourcePublication,
     /\[\[ "\$remote_inventory" == "\$expected_source_inventory" \|\|\n             "\$remote_inventory" == "\$expected_complete_inventory" \]\]/);
 
+  const guard = sourcePublication.match(/          validate_preexisting_source_inventory\(\) \{\n([\s\S]*?)\n          \}/)?.[0]
+    .replace(/^          /gm, '');
+  assert.ok(guard, 'Expected the production pre-upload inventory guard');
+  const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
   const source = ['source.tar.gz', 'source.json'];
   const manifest = ['release-manifest.json', 'release-manifest.envelope.json', 'release-manifest.envelope.bundle.json'];
   const exactInventory = assets => [...assets].sort().join('\n');
-  const expectedSource = exactInventory(source);
-  const expectedComplete = exactInventory([...source, ...manifest]);
-  const accepted = assets => {
-    const inventory = exactInventory(assets);
-    return inventory === expectedSource || inventory === expectedComplete;
+  const executeGuard = inventory => {
+    const script = `${guard}
+expected_source_inventory='source.json
+source.tar.gz'
+expected_complete_inventory='release-manifest.envelope.bundle.json
+release-manifest.envelope.json
+release-manifest.json
+source.json
+source.tar.gz'
+gh() { printf '%s\n' "$REMOTE_INVENTORY"; }
+validate_preexisting_source_inventory`;
+    return spawnSync(shell, ['-c', script], {
+      encoding: 'utf8',
+      env: { ...process.env, VERSION: 'v1.2.3', REMOTE_INVENTORY: exactInventory(inventory) },
+    });
   };
-  assert.ok(accepted(source), 'Initial draft release contains only source assets');
-  assert.ok(accepted([...source, ...manifest]),
+  assert.equal(executeGuard(source).status, 0, 'Existing source-only release is valid');
+  assert.equal(executeGuard([...source, ...manifest]).status, 0,
     'Retry after manifest upload proceeds to manifest verification and pointer advancement');
-  assert.ok(!accepted(source.slice(1)), 'Missing source assets are rejected');
-  assert.ok(!accepted([...source, 'unexpected.txt']), 'Unexpected source assets are rejected');
-  assert.ok(!accepted([...source, manifest[0]]), 'Partial manifest inventories are rejected');
+  assert.notEqual(executeGuard(source.slice(1)).status, 0, 'Missing source assets are rejected');
+  assert.notEqual(executeGuard([...source, 'unexpected.txt']).status, 0, 'Unexpected source assets are rejected');
+  assert.notEqual(executeGuard([...source, manifest[0]]).status, 0, 'Partial manifest inventories are rejected');
+  const releaseExists = sourcePublication.indexOf('if gh release view "$VERSION" >/dev/null 2>&1; then');
+  const guardInvocation = sourcePublication.indexOf('validate_preexisting_source_inventory', releaseExists);
+  assert.ok(guardInvocation > releaseExists && guardInvocation < sourcePublication.indexOf('gh release upload'),
+    'Existing inventory is validated before any source asset upload');
   assert.ok(docker.indexOf('Publish and verify signed manifest before mutable aliases') <
     docker.indexOf('Advance the complete channel pointer last'));
 });
