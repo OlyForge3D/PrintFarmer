@@ -14,6 +14,11 @@ function requireText(value, field) {
 export function validateReleaseNotesMetadata(metadata, version) {
   requireThat(metadata && typeof metadata === 'object' && !Array.isArray(metadata),
     'Release metadata is malformed');
+  if (metadata.schema === 2) {
+    requireThat(metadata.version === version && metadata.notes && typeof metadata.notes === 'object',
+      'Release metadata version does not match the release');
+    return validateReleaseNotesMetadata({ schema: 1, version, ...metadata.notes }, version);
+  }
   const fields = ['schema', 'version', 'compatibility', 'migration', 'downtime', 'backup', 'recovery'];
   requireThat(Object.keys(metadata).length === fields.length && fields.every(field => Object.hasOwn(metadata, field)),
     'Release metadata has unknown or missing fields');
@@ -40,9 +45,10 @@ export function releaseNotes({ version, sourceCommit, previousTag, pullRequests,
     'Release notes contain malformed merged pull request data');
     return `- [#${pr.number}](${pr.url}): ${pr.title.trim()}`;
   });
+  const operational = metadata.schema === 2 ? metadata.notes : metadata;
   return `## PrintFarmer ${version}\n\nSource commit: ${sourceCommit}\nRelease range: ${previousTag}...${sourceCommit}\n\n` +
-    `### Merged pull requests\n\n${entries.join('\n')}\n\n${changelog.trim()}\n\n### Compatibility\n\n${metadata.compatibility}\n\n` +
-    `### Migration\n\n${metadata.migration}\n\n### Downtime\n\n${metadata.downtime}\n\n### Backup\n\n${metadata.backup}\n\n### Recovery\n\n${metadata.recovery}\n`;
+    `### Merged pull requests\n\n${entries.join('\n')}\n\n${changelog.trim()}\n\n### Compatibility\n\n${operational.compatibility}\n\n` +
+    `### Migration\n\n${operational.migration}\n\n### Downtime\n\n${operational.downtime}\n\n### Backup\n\n${operational.backup}\n\n### Recovery\n\n${operational.recovery}\n`;
 }
 
 export function changelogEntry(changelog, version) {

@@ -13,7 +13,7 @@ import {
   parseTag, parseVersionFile, reserve as reserveRelease, transact, validateCandidate, validateCompleteSet,
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence, hotfixReasonDigest, ReleasePolicyError,
   validateRecord, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks, publisherWorkflowIdentity,
-  releaseManifest, releaseManifestEnvelope, validateReleaseManifest, validateReleaseManifestBytes, validateReleaseManifestEnvelope,
+  loadReleaseMetadata, releaseManifest, releaseManifestEnvelope, validateReleaseManifest, validateReleaseManifestBytes, validateReleaseManifestEnvelope,
 } from '../release-policy.mjs';
 import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedger, publicLedgerFields, readTag, readVersion, verifyProtection,
   parseGithubTimestamp, verifyStableQualification, verifyReleaseChecks } from '../release-github.mjs';
@@ -66,6 +66,41 @@ test('release notes derive bounded merged PRs and mandatory version-controlled o
     pullRequests: [{ number: 42, title: 'Release-safe change', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/42' }],
     changelog: '### Features\n\n- New capability.\n\n### Fixes\n\n- Fixed behavior.\n\n### Breaking changes\n\n- None.',
     metadata,
+  });
+
+  test('closed release metadata is canonical, complete, and digest-bound into the manifest', () => {
+    const metadata = loadReleaseMetadata('1.2.3');
+    const identity = record();
+    const manifest = releaseManifest(identity, completeSet(identity), undefined, releaseNotesHash);
+    assert.equal(manifest.evidence.releaseMetadata.sha256, hash(metadata));
+    assert.equal(manifest.compatibility.releaseMetadata.version, identity.baseVersion);
+    for (const mutate of [
+      value => { value.migrations.postgresql.AppDbContext = 'current-head'; },
+      value => { value.operations.ordered = ['pull', 'verify']; },
+      value => { value.rollback.class = 'supported'; },
+    ]) {
+      const changed = structuredClone(metadata);
+      mutate(changed);
+      const path = resolve('.artifacts', `invalid-release-metadata-${process.pid}.json`);
+      writeFileSync(path, JSON.stringify(changed));
+      assert.throws(() => loadReleaseMetadata('1.2.3', path), ReleasePolicyError);
+      rmSync(path, { force: true });
+    }
+  });
+
+  test('release manifest bytes and envelope reject canonicality and binding substitutions', () => {
+    const identity = record();
+    const manifest = releaseManifest(identity, completeSet(identity), undefined, releaseNotesHash);
+    const envelope = releaseManifestEnvelope(manifest);
+    const serialized = JSON.stringify(manifest);
+    assert.deepEqual(validateReleaseManifestBytes(serialized, envelope), manifest);
+    assert.throws(() => validateReleaseManifestBytes(`${serialized}\n`, envelope), ReleasePolicyError);
+    assert.throws(() => validateReleaseManifestBytes(JSON.stringify({
+      ...manifest, lifecycle: { ...manifest.lifecycle, releaseId: 'insider:9.9.9-insider.1' },
+    }), envelope), ReleasePolicyError);
+    assert.throws(() => validateReleaseManifestEnvelope({
+      ...envelope, manifestSha256: 'f'.repeat(64),
+    }, manifest), ReleasePolicyError);
   });
 
   assert.match(notes, /Release range: v1\.2\.2\.\.\./);
@@ -3921,6 +3956,10 @@ test('executed signing commands preserve signed subjects and never let verificat
   mkdirSync(root, { recursive: true });
   symlinkSync(resolve(cwd, 'scripts'), resolve(root, 'scripts'), 'junction');
   copyFileSync(resolve(cwd, 'release-trust-policy.json'), resolve(root, 'release-trust-policy.json'));
+  mkdirSync(resolve(root, 'release-metadata'));
+  const fixtureMetadata = readFileSync(resolve(cwd, 'release-metadata', '0.2.3.json'), 'utf8')
+    .replaceAll('0.2.3', '1.2.3');
+  writeFileSync(resolve(root, 'release-metadata', '1.2.3.json'), fixtureMetadata);
   process.chdir(root);
   try {
     const identity = await authorizedRecord();

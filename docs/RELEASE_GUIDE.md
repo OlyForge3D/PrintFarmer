@@ -98,6 +98,17 @@ strictly publication-only: it cannot enable host outbound update checks,
 select a host channel, approve a host update plan, or enroll any installation
 in Auto-update.
 
+The publisher loads one canonical `release-metadata/<base-version>.json` from
+the qualified source. Its signed digest binds explicit source-release/channel
+paths, minimum updater, frontend/mobile/backend/worker requirements, schema
+read/write ranges and hashes, PostgreSQL/SQL Server AppDbContext and
+SlicerDbContext migration heads, ordered backup/pull/verify/migrate/restart
+inputs, and the rollback class. Missing, placeholder, malformed, or
+non-canonical metadata blocks publication. This is a **producer contract**:
+#2666 must enforce it when constructing the one immutable host update plan for
+Manual Update Now and administrator-opt-in Auto-update. #2660 neither checks,
+enrolls, nor updates a host.
+
 Canonical authenticated release notes are an asset in that same set. The
 single-dispatch pipeline generates them from the bounded previous-release-tag
 to selected-source range, associated merged PRs, the matching `CHANGELOG.md`

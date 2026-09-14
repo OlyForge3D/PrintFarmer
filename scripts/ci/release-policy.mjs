@@ -70,6 +70,64 @@ export function loadReleaseTrustPolicy(path = 'release-trust-policy.json') {
   return policy;
 }
 
+const metadataComponentKeys = ['frontend', 'mobile', 'backend', 'workerApplication',
+  'workerEngine', 'workerDistribution', 'workerCapability', 'artifacts'];
+const metadataSchemaKeys = ['configuration', 'storage', 'templates'];
+
+export function loadReleaseMetadata(version, path = `release-metadata/${version}.json`) {
+  let metadata;
+  try { metadata = JSON.parse(readFileSync(path, 'utf8')); } catch {
+    throw new ReleasePolicyError('Release metadata is unavailable or malformed');
+  }
+  requireKeys(metadata, ['schema', 'version', 'releasePaths', 'minimumUpdater', 'components',
+    'schemas', 'migrations', 'operations', 'rollback', 'notes'], [], 'release metadata');
+  requireThat(metadata.schema === 2 && metadata.version === version &&
+    JSON.stringify(metadata) === readFileSync(path, 'utf8').trim(), 'Release metadata is not canonical');
+  requireString(metadata.minimumUpdater, /^\d+\.\d+\.\d+$/, 'release minimum updater');
+  requireKeys(metadata.releasePaths, ['sourceReleaseIds', 'upgradeHops', 'allowedChannelPaths'], [], 'release paths');
+  requireThat(Array.isArray(metadata.releasePaths.sourceReleaseIds) && metadata.releasePaths.sourceReleaseIds.length > 0 &&
+    metadata.releasePaths.sourceReleaseIds.every(value => typeof value === 'string' && /^(stable|insider):\d+\.\d+\.\d+(?:-(?:insider|beta|rc)\.[1-9]\d*)?$/.test(value)) &&
+    Array.isArray(metadata.releasePaths.upgradeHops) && metadata.releasePaths.upgradeHops.length > 0 &&
+    metadata.releasePaths.upgradeHops.every(hop => Array.isArray(hop) && hop.length === 2 &&
+      hop.every(value => metadata.releasePaths.sourceReleaseIds.includes(value) || value === `stable:${version}`)) &&
+    Array.isArray(metadata.releasePaths.allowedChannelPaths) && metadata.releasePaths.allowedChannelPaths.length > 0 &&
+    metadata.releasePaths.allowedChannelPaths.every(path => Array.isArray(path) && path.length === 2 &&
+      path.every(channel => channel === 'stable' || channel === 'insider')), 'Invalid release paths');
+  requireKeys(metadata.components, metadataComponentKeys, [], 'release components');
+  for (const [name, component] of Object.entries(metadata.components)) {
+    requireKeys(component, (name.startsWith('worker') && name !== 'workerApplication') || name === 'artifacts'
+      ? [name === 'workerEngine' ? 'orcaslicer' : name === 'workerDistribution' ? 'source' : name === 'workerCapability' ? 'profiles' : 'format', 'platforms']
+      : ['application', 'platforms'], [], 'release component');
+    requireThat(Object.values(component).every(value => Array.isArray(value)
+      ? value.length > 0 && value.every(platform => /^((linux|ios)\/(amd64|arm64))$/.test(platform))
+      : typeof value === 'string' && value.length > 0 && !/^(supported|compatible|current-head|ensure-created)$/i.test(value)),
+    'Invalid release component requirement');
+  }
+  requireKeys(metadata.schemas, metadataSchemaKeys, [], 'release schema requirements');
+  for (const schema of Object.values(metadata.schemas)) {
+    requireKeys(schema, ['sha256', 'read', 'write'], [], 'release schema requirement');
+    requireString(schema.sha256, hashPattern, 'release schema hash');
+    requireThat(Array.isArray(schema.read) && schema.read.length > 0 &&
+      schema.read.every(value => typeof value === 'string' && /^[1-9]\d*$/.test(value)) &&
+      typeof schema.write === 'string' && /^[1-9]\d*$/.test(schema.write), 'Invalid release schema range');
+  }
+  requireKeys(metadata.migrations, ['postgresql', 'sqlserver'], [], 'release migrations');
+  for (const provider of Object.values(metadata.migrations)) {
+    requireKeys(provider, ['AppDbContext', 'SlicerDbContext'], [], 'release provider migrations');
+    for (const head of Object.values(provider)) requireString(head, /^\d{14}_[A-Za-z][A-Za-z0-9]*$/, 'release migration head');
+  }
+  requireKeys(metadata.operations, ['ordered', 'backup', 'pull', 'verify', 'migrate', 'restart'], [], 'release operations');
+  requireThat(isDeepStrictEqual(metadata.operations.ordered, ['backup', 'pull', 'verify', 'migrate', 'restart']) &&
+    Object.entries(metadata.operations).filter(([key]) => key !== 'ordered').every(([, value]) =>
+      typeof value === 'string' && value.length > 0), 'Invalid release operation inputs');
+  requireKeys(metadata.rollback, ['class', 'evidence'], [], 'release rollback');
+  requireThat(['ImagesOnly', 'RestoreRequired', 'ForwardOnly'].includes(metadata.rollback.class) &&
+    typeof metadata.rollback.evidence === 'string' && metadata.rollback.evidence.length > 0, 'Invalid release rollback');
+  requireKeys(metadata.notes, ['compatibility', 'migration', 'downtime', 'backup', 'recovery'], [], 'release notes metadata');
+  for (const value of Object.values(metadata.notes)) requireThat(typeof value === 'string' && value.trim().length > 0, 'Invalid release notes metadata');
+  return metadata;
+}
+
 export function requireString(value, pattern, description) {
   requireThat(typeof value === 'string' && !/[\r\n]/.test(value) && pattern.test(value), `Invalid ${description}`);
 }
@@ -310,7 +368,7 @@ export function writePublicSet(record, set, identitySha256) {
   return { schema: 1, identity, managedEligible: false, images };
 }
 
-export function releaseManifest(record, set, identitySha256, releaseNotesSha256) {
+export function releaseManifest(record, set, identitySha256, releaseNotesSha256, metadata) {
   requireString(releaseNotesSha256, hashPattern, 'release notes hash');
   const completeSet = writePublicSet(record, set, identitySha256);
   const maximumExclusive = `${BigInt(completeSet.identity.baseVersion.split('.')[0]) + 1n}.0.0`;
@@ -319,6 +377,9 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256)
     ? publicLedgerQualification(record.qualification, record.sourceCommit)
     : undefined;
   const trustPolicy = loadReleaseTrustPolicy();
+  metadata ??= loadReleaseMetadata(record.baseVersion);
+  const releaseMetadata = loadReleaseMetadata(record.baseVersion);
+  requireThat(hash(metadata) === hash(releaseMetadata), 'Release metadata differs from qualified source metadata');
   const artifactEvidence = Object.fromEntries(Object.entries(completeSet.images).map(([service, image]) => [
     service, {
       index: {
@@ -362,14 +423,19 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256)
     evidence: {
       schema: 2, trust: { signer: publisherWorkflowIdentity, issuer: trustPolicy.issuer,
         policyDigest: record.protection.policyDigest, trustPolicySha256: hash(trustPolicy) },
+      releaseMetadata: { schema: metadata.schema, version: metadata.version, sha256: hash(metadata) },
       services: artifactEvidence,
     },
     compatibility: {
-      schema: 2, managedEligible: true, api: { minimum: completeSet.identity.baseVersion, maximumExclusive },
-      services: Object.fromEntries(Object.keys(components).map(service => [service, { required: true, platforms: components[service] }])),
-      storage: { sqlite: 'supported', postgresql: 'supported', sqlserver: 'supported' },
-      configuration: { format: 'versioned', templates: 'compatible' },
-      updater: { strategy: 'digest-pinned', fixedSteps: ['backup', 'pull', 'verify', 'migrate', 'restart'] },
+      schema: 3, managedEligible: metadata.releasePaths.allowedChannelPaths.some(path =>
+        path[1] === completeSet.identity.channel), releaseMetadata: metadata,
+      api: { minimum: completeSet.identity.baseVersion, maximumExclusive },
+      services: Object.fromEntries(Object.keys(components).map(service => [service, {
+        required: true, platforms: components[service],
+      }])),
+      storage: metadata.schemas.storage,
+      configuration: { configuration: metadata.schemas.configuration, templates: metadata.schemas.templates },
+      updater: { minimum: metadata.minimumUpdater, strategy: 'digest-pinned', fixedSteps: metadata.operations.ordered },
     },
     consumption: {
       schema: 1,
@@ -382,12 +448,9 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256)
       },
       publisherApproval: 'publication-only',
     },
-    migration: {
-      schema: 2, managedEligible: true,
-      providers: { postgresql: 'current-head', sqlserver: 'current-head', sqlite: 'ensure-created' },
-      downtime: 'rolling-service-restart', backup: 'required-before-migration',
-      rollback: { supported: true, strategy: 'restore-backup-and-digest-pin' },
-    },
+    migration: { schema: 3, managedEligible: metadata.releasePaths.allowedChannelPaths.some(path =>
+      path[1] === completeSet.identity.channel), providers: metadata.migrations,
+      operations: metadata.operations, rollback: metadata.rollback },
   };
 }
 
@@ -451,7 +514,7 @@ export function validateReleaseManifest(manifest) {
     requireThat(identity.channel === 'stable', 'Direct hotfix must be stable');
     requireString(provenance.reasonSha256, hashPattern, 'direct hotfix reason');
   }
-  requireKeys(evidence, ['schema', 'trust', 'services'], [], 'release evidence');
+  requireKeys(evidence, ['schema', 'trust', 'releaseMetadata', 'services'], [], 'release evidence');
   requireThat(evidence.schema === 2, 'Invalid release evidence schema');
   requireKeys(evidence.trust, ['signer', 'issuer', 'policyDigest', 'trustPolicySha256'], [], 'release trust evidence');
   requireThat(evidence.trust.signer === publisherWorkflowIdentity &&
@@ -459,6 +522,11 @@ export function validateReleaseManifest(manifest) {
   requireString(evidence.trust.policyDigest, hashPattern, 'release trust policyDigest');
   requireThat(evidence.trust.trustPolicySha256 === hash(loadReleaseTrustPolicy()),
     'Release trust policy hash mismatch');
+  requireKeys(evidence.releaseMetadata, ['schema', 'version', 'sha256'], [], 'release metadata evidence');
+  const metadata = compatibility.releaseMetadata;
+  requireThat(evidence.releaseMetadata.schema === 2 && evidence.releaseMetadata.version === identity.baseVersion &&
+    evidence.releaseMetadata.sha256 === hash(metadata) && hash(loadReleaseMetadata(identity.baseVersion)) === hash(metadata),
+  'Release metadata hash mismatch');
   requireKeys(evidence.services, Object.keys(components), [], 'release service evidence');
   for (const [service, image] of Object.entries(manifest.completeSet.images)) {
     const serviceEvidence = evidence.services[service];
@@ -480,8 +548,9 @@ export function validateReleaseManifest(manifest) {
       }
     }
   }
-  requireKeys(compatibility, ['schema', 'managedEligible', 'api', 'services', 'storage', 'configuration', 'updater'], [], 'release compatibility');
-  requireThat(compatibility.schema === 2 && compatibility.managedEligible === true, 'Release compatibility is not eligible');
+  requireKeys(compatibility, ['schema', 'managedEligible', 'releaseMetadata', 'api', 'services', 'storage', 'configuration', 'updater'], [], 'release compatibility');
+  requireThat(compatibility.schema === 3 && compatibility.managedEligible ===
+    metadata.releasePaths.allowedChannelPaths.some(path => path[1] === identity.channel), 'Release compatibility is not eligible');
   requireKeys(compatibility.api, ['minimum', 'maximumExclusive'], [], 'release API compatibility');
   parseTag(`v${compatibility.api.minimum}`); parseTag(`v${compatibility.api.maximumExclusive}`);
   requireThat(compatibility.api.minimum === identity.baseVersion &&
@@ -493,14 +562,13 @@ export function validateReleaseManifest(manifest) {
     requireThat(compatibility.services[service].required === true &&
       isDeepStrictEqual(compatibility.services[service].platforms, components[service]), 'Invalid release service platforms');
   }
-  requireKeys(compatibility.storage, ['sqlite', 'postgresql', 'sqlserver'], [], 'release storage compatibility');
-  requireKeys(compatibility.configuration, ['format', 'templates'], [], 'release configuration compatibility');
-  requireThat(compatibility.storage.sqlite === 'supported' && compatibility.storage.postgresql === 'supported' &&
-    compatibility.storage.sqlserver === 'supported' && compatibility.configuration.format === 'versioned' &&
-    compatibility.configuration.templates === 'compatible', 'Invalid release storage or configuration compatibility');
-  requireKeys(compatibility.updater, ['strategy', 'fixedSteps'], [], 'release updater compatibility');
-  requireThat(compatibility.updater.strategy === 'digest-pinned' &&
-    isDeepStrictEqual(compatibility.updater.fixedSteps, ['backup', 'pull', 'verify', 'migrate', 'restart']), 'Invalid release updater');
+  requireThat(hash(compatibility.storage) === hash(metadata.schemas.storage), 'Release storage compatibility mismatch');
+  requireKeys(compatibility.configuration, ['configuration', 'templates'], [], 'release configuration compatibility');
+  requireThat(hash(compatibility.configuration.configuration) === hash(metadata.schemas.configuration) &&
+    hash(compatibility.configuration.templates) === hash(metadata.schemas.templates), 'Release configuration compatibility mismatch');
+  requireKeys(compatibility.updater, ['minimum', 'strategy', 'fixedSteps'], [], 'release updater compatibility');
+  requireThat(compatibility.updater.minimum === metadata.minimumUpdater && compatibility.updater.strategy === 'digest-pinned' &&
+    isDeepStrictEqual(compatibility.updater.fixedSteps, metadata.operations.ordered), 'Invalid release updater');
   requireKeys(manifest.consumption, ['schema', 'immutableReleaseSet', 'manualUpdate', 'autoUpdate', 'publisherApproval'],
     [], 'release consumption');
   const { consumption } = manifest;
@@ -513,15 +581,10 @@ export function validateReleaseManifest(manifest) {
   requireThat(consumption.autoUpdate.releaseSet === consumption.immutableReleaseSet &&
     consumption.autoUpdate.hostAuthorization === 'bounded-administrator-standing-permission' &&
     consumption.autoUpdate.hostPolicy === 'issue-2665-2666', 'Invalid auto-update consumption');
-  requireKeys(migration, ['schema', 'managedEligible', 'providers', 'downtime', 'backup', 'rollback'], [], 'release migration');
-  requireThat(migration.schema === 2 && migration.managedEligible === true && migration.downtime === 'rolling-service-restart' &&
-    migration.backup === 'required-before-migration', 'Release migration is not eligible');
-  requireKeys(migration.providers, ['postgresql', 'sqlserver', 'sqlite'], [], 'release migration providers');
-  requireThat(migration.providers.postgresql === 'current-head' && migration.providers.sqlserver === 'current-head' &&
-    migration.providers.sqlite === 'ensure-created', 'Invalid release migration providers');
-  requireKeys(migration.rollback, ['supported', 'strategy'], [], 'release rollback');
-  requireThat(migration.rollback.supported === true && migration.rollback.strategy === 'restore-backup-and-digest-pin',
-    'Invalid release rollback');
+  requireKeys(migration, ['schema', 'managedEligible', 'providers', 'operations', 'rollback'], [], 'release migration');
+  requireThat(migration.schema === 3 && migration.managedEligible === compatibility.managedEligible &&
+    hash(migration.providers) === hash(metadata.migrations) && hash(migration.operations) === hash(metadata.operations) &&
+    hash(migration.rollback) === hash(metadata.rollback), 'Release migration metadata binding mismatch');
   return manifest;
 }
 
