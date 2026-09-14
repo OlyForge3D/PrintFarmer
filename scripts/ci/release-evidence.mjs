@@ -58,20 +58,29 @@ function validateVerification(bytes, expectedDigest, type, expectedPredicate) {
   }
 }
 
-function evidenceObject(subject, signatureBytes, attestationBytes, predicateBytes, platform) {
+function evidenceObject(subject, signatureBytes, attestationBytes, predicateBytes, signatureBundleBytes,
+  attestationBundleBytes, platform) {
   validateVerification(signatureBytes, subject, 'signature');
   validateVerification(attestationBytes, subject, 'attestation', predicateBytes);
+  const signatureBundle = parseJson(signatureBundleBytes, 'signature bundle');
+  const attestationBundle = parseJson(attestationBundleBytes, 'attestation bundle');
+  requireThat((Array.isArray(signatureBundle) ? signatureBundle : [signatureBundle]).length > 0 &&
+    (Array.isArray(attestationBundle) ? attestationBundle : [attestationBundle]).length > 0,
+  'Missing Cosign bundle material');
   return {
     subject, ...(platform === undefined ? {} : { platform }),
-    signature: { sha256: sha256(signatureBytes), bytes: signatureBytes },
+    signature: { sha256: sha256(signatureBytes), bytes: signatureBytes,
+      bundleSha256: sha256(signatureBundleBytes), bundle: signatureBundleBytes },
     sbom: { sha256: sha256(attestationBytes), predicateSha256: sha256(predicateBytes), predicate: predicateBytes,
-      bytes: attestationBytes },
+      bytes: attestationBytes, bundleSha256: sha256(attestationBundleBytes), bundle: attestationBundleBytes },
   };
 }
 
-export function normalizeEvidence({ subject, signatureBytes, attestationBytes, predicateBytes, platform }) {
+export function normalizeEvidence({ subject, signatureBytes, attestationBytes, predicateBytes,
+  signatureBundleBytes, attestationBundleBytes, platform }) {
   requireThat(platform === undefined || /^linux\/(?:amd64|arm64)$/.test(platform), 'Invalid evidence platform');
-  return evidenceObject(subject, signatureBytes, attestationBytes, predicateBytes, platform);
+  return evidenceObject(subject, signatureBytes, attestationBytes, predicateBytes, signatureBundleBytes,
+    attestationBundleBytes, platform);
 }
 
 export function validateEvidenceSet(set, completeSet) {
@@ -99,18 +108,20 @@ function validateStored(value, digest, platform) {
     Object.keys(value).sort().join() === expectedKeys.sort().join(), 'Invalid evidence entry');
   requireThat(value?.subject === digest && value?.platform === platform, 'Evidence subject/platform mismatch');
   requireThat(value.signature && typeof value.signature === 'object' &&
-    Object.keys(value.signature).sort().join() === 'bytes,sha256' &&
+    Object.keys(value.signature).sort().join() === 'bundle,bundleSha256,bytes,sha256' &&
     typeof value.signature.bytes === 'string' && digestPattern.test(`sha256:${value.signature.sha256}`),
   'Invalid signature bundle evidence');
   requireThat(value.sbom && typeof value.sbom === 'object' &&
-    Object.keys(value.sbom).sort().join() === 'bytes,predicate,predicateSha256,sha256' &&
+    Object.keys(value.sbom).sort().join() === 'bundle,bundleSha256,bytes,predicate,predicateSha256,sha256' &&
     typeof value.sbom.bytes === 'string' && typeof value.sbom.predicate === 'string' &&
     digestPattern.test(`sha256:${value.sbom.sha256}`) &&
     digestPattern.test(`sha256:${value.sbom.predicateSha256}`),
   'Invalid SPDX evidence');
   requireThat(value.signature?.sha256 === sha256(value.signature.bytes) &&
     value.sbom?.sha256 === sha256(value.sbom.bytes) &&
-    value.sbom?.predicateSha256 === sha256(value.sbom.predicate), 'Evidence bytes digest mismatch');
+    value.sbom?.predicateSha256 === sha256(value.sbom.predicate) &&
+    value.signature.bundleSha256 === sha256(value.signature.bundle) &&
+    value.sbom.bundleSha256 === sha256(value.sbom.bundle), 'Evidence bytes digest mismatch');
   validateVerification(value.signature.bytes, digest, 'signature');
   validateVerification(value.sbom.bytes, digest, 'attestation', value.sbom.predicate);
 }
@@ -149,6 +160,8 @@ export function stageEvidenceFromFiles(evidencePath, completeSet, root) {
     signatureBytes: readEvidenceFile(join(root, service, scope, 'signature.json')),
     attestationBytes: readEvidenceFile(join(root, service, scope, 'attestation.json')),
     predicateBytes: readEvidenceFile(join(root, service, scope, 'predicate.json')),
+    signatureBundleBytes: readEvidenceFile(join(root, service, scope, 'signature.bundle.json')),
+    attestationBundleBytes: readEvidenceFile(join(root, service, scope, 'attestation.bundle.json')),
   });
   const collected = Object.fromEntries(Object.entries(completeSet.images).map(([service, image]) => [
     service,

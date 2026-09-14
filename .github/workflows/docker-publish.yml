@@ -360,6 +360,8 @@ jobs:
               --type spdxjson \
               --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$index_evidence/attestation.json"
+            cosign download signature "$reference" > "$index_evidence/signature.bundle.json"
+            cosign download attestation "$reference" > "$index_evidence/attestation.bundle.json"
             cp "artifacts/sbom-${image}/printfarmer-${image}-${{ steps.consume.outputs.version }}.spdx.json" \
               "$index_evidence/predicate.json"
             platform_digests="$(
@@ -383,6 +385,8 @@ jobs:
                 --type spdxjson \
                 --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$platform_evidence/attestation.json"
+              cosign download signature "$platform_reference" > "$platform_evidence/signature.bundle.json"
+              cosign download attestation "$platform_reference" > "$platform_evidence/attestation.bundle.json"
               cp "source/release-artifacts/printfarmer-${image}-${platform_suffix}.spdx.json" \
                 "$platform_evidence/predicate.json"
             done <<< "$platform_digests"

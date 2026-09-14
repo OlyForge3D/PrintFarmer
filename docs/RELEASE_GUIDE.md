@@ -128,6 +128,14 @@ unknown, replayed, downgraded, or rotation-invalid release sets; and preserve
 durable per-channel high-water state. Those are consumer obligations, not a
 publisher capability or authority to contact, enroll, or update hosts.
 
+Before manifest signing, the publisher captures and verifies Cosign signature
+and SPDX attestation results plus their downloaded signature/DSSE bundle
+materials for every index and platform digest. The signed manifest binds the
+exact raw verification, bundle, and predicate byte digests; formatted predicate
+JSON is compared semantically, while its original bytes remain tamper-bound.
+Retries and the final pre-alias verification must reproduce those exact
+subject/platform-bound artifacts or publication fails closed.
+
 Canonical authenticated release notes are an asset in that same set. The
 single-dispatch pipeline generates them from the bounded previous-release-tag
 to selected-source range, associated merged PRs, the matching `CHANGELOG.md`
