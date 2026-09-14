@@ -52,5 +52,10 @@ export function formatPrinterModelSubtitle(
     return manufacturerName!.trim();
   }
 
-  return `${manufacturerName!.trim()} ${modelName!.trim()}`;
+  const manufacturer = manufacturerName!.trim();
+  const model = modelName!.trim();
+
+  return model.toLowerCase().startsWith(manufacturer.toLowerCase())
+    ? model
+    : `${manufacturer} ${model}`;
 }
