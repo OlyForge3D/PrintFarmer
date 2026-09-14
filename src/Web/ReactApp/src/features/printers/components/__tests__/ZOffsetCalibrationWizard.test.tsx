@@ -255,10 +255,11 @@ describe('ZOffsetCalibrationWizard', () => {
         fireEvent.click(screen.getByRole('button', { name: /home all axes/i }));
         await act(async () => { await vi.advanceTimersByTimeAsync(27_110); });
         expect(screen.getByRole('button', { name: /Please wait/i })).toBeDisabled();
-        expect(screen.getByRole('status')).toHaveTextContent('HomeAll: Running');
+        expect(screen.getByRole('status')).toHaveTextContent('Home all axes: in progress');
         expect(screen.queryByText(/move the nozzle to the center/i)).not.toBeInTheDocument();
         expect(mockCreateOperation).toHaveBeenCalledTimes(1);
         completedOperation = { ...completedOperation!, state: 'Succeeded', barrierHeld: false, completionEvidence: 'MotionQueueDrained', completedAtUtc: new Date().toISOString() };
+        fireEvent.click(screen.getByText('Motion technical details'));
         fireEvent.click(screen.getByRole('button', { name: /Recheck motion status/i }));
         await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
         expect(screen.getByText(/move the nozzle to the center/i)).toBeInTheDocument();
