@@ -169,7 +169,7 @@ function main() {
       }
     }, (tag, digest) => command('docker', ['buildx', 'imagetools', 'create', '--tag', tag,
       `${tag.slice(0, tag.lastIndexOf(':'))}@${digest}`]));
-  } else throw new Error('Expected inspect or tag');
+  } else throw new Error('Expected inspect, tag, or alias');
 }
 
 if (process.argv[1]?.endsWith('release-set.mjs')) {

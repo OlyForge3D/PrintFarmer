@@ -3673,6 +3673,34 @@ test('workflow wiring keeps authorization and every publisher consumer in one pr
   assert.match(readFileSync('.gitignore', 'utf8'), /^\.artifacts\/$/m);
 });
 
+test('source publication retries accept only exact source or complete signed inventories', () => {
+  const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8').replace(/\r\n/g, '\n');
+  const sourcePublication = docker.split('      - name: Publish and verify public corresponding-source assets\n')[1]
+    .split('      - name: Promote validated immutable image tags')[0];
+  assert.match(sourcePublication, /expected_source_assets=\(/);
+  assert.match(sourcePublication, /expected_manifest_assets=\(\n            release-manifest\.json\n            release-manifest\.envelope\.json\n            release-manifest\.envelope\.bundle\.json/);
+  assert.match(sourcePublication,
+    /\[\[ "\$remote_inventory" == "\$expected_source_inventory" \|\|\n             "\$remote_inventory" == "\$expected_complete_inventory" \]\]/);
+
+  const source = ['source.tar.gz', 'source.json'];
+  const manifest = ['release-manifest.json', 'release-manifest.envelope.json', 'release-manifest.envelope.bundle.json'];
+  const exactInventory = assets => [...assets].sort().join('\n');
+  const expectedSource = exactInventory(source);
+  const expectedComplete = exactInventory([...source, ...manifest]);
+  const accepted = assets => {
+    const inventory = exactInventory(assets);
+    return inventory === expectedSource || inventory === expectedComplete;
+  };
+  assert.ok(accepted(source), 'Initial draft release contains only source assets');
+  assert.ok(accepted([...source, ...manifest]),
+    'Retry after manifest upload proceeds to manifest verification and pointer advancement');
+  assert.ok(!accepted(source.slice(1)), 'Missing source assets are rejected');
+  assert.ok(!accepted([...source, 'unexpected.txt']), 'Unexpected source assets are rejected');
+  assert.ok(!accepted([...source, manifest[0]]), 'Partial manifest inventories are rejected');
+  assert.ok(docker.indexOf('Publish and verify signed manifest before mutable aliases') <
+    docker.indexOf('Advance the complete channel pointer last'));
+});
+
 test('signed-artifact verification fails closed without logging payloads or accepting full JSON transport', async () => {
   const root = resolve('.artifacts', `signature-gate-${process.pid}`);
   const cwd = process.cwd();
@@ -3862,6 +3890,9 @@ test('executed signing commands preserve signed subjects and never let verificat
     docker.indexOf('Publish channel-isolated verified image aliases'));
   assert.ok(docker.indexOf('Publish channel-isolated verified image aliases') <
     docker.indexOf('Advance the complete channel pointer last'));
+  assert.match(docker, /const apiTransportBody = releasedBody\.replace\(\/\\r\\n\/g, "\\n"\)/);
+  assert.match(docker, /gh release view "\$VERSION" --json body > "\$recovered\/release-body\.json"/);
+  assert.match(readFileSync('scripts/ci/release-set.mjs', 'utf8'), /Expected inspect, tag, or alias/);
   const canonicalNotes = docker.split('      - name: Generate canonical release notes before signing\n')[1]
     .split('      - name: Validate complete immutable set')[0];
   assert.match(canonicalNotes, /node \.\.\/scripts\/ci\/release-notes\.mjs/);

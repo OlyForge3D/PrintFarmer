@@ -450,7 +450,7 @@ jobs:
           cp ../.artifacts/release-authorization/release-notes.md release-assets/release-notes.md
           cp release-artifacts/*.spdx.json release-artifacts/digest-*.txt release-assets/
 
-          expected_assets=(
+          expected_source_assets=(
             "PrintFarmer-${VERSION}-source.tar.gz"
             "PrintFarmer-${VERSION}-source.json"
             LICENSE
@@ -472,7 +472,16 @@ jobs:
             digest-orcaslicer-worker.txt
             digest-monolith.txt
           )
-          for asset_name in "${expected_assets[@]}"; do
+          expected_manifest_assets=(
+            release-manifest.json
+            release-manifest.envelope.json
+            release-manifest.envelope.bundle.json
+          )
+          expected_source_inventory="$(printf '%s\n' "${expected_source_assets[@]}" | sort)"
+          expected_complete_inventory="$(
+            printf '%s\n' "${expected_source_assets[@]}" "${expected_manifest_assets[@]}" | sort
+          )"
+          for asset_name in "${expected_source_assets[@]}"; do
             test -s "release-assets/$asset_name"
           done
           [[ "$(sha256sum release-assets/release-notes.md | cut -d ' ' -f1)" == "$RELEASE_NOTES_SHA256" ]]
@@ -512,14 +521,16 @@ jobs:
           fi
           remote_assets="$RUNNER_TEMP/release-source-assets"
           mkdir -p "$remote_assets"
-          [[ "$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)" == "$(printf '%s\n' "${expected_assets[@]}" | sort)" ]] ||
+          [[ "$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)" == "$expected_source_inventory" ]] ||
             { echo "Validated source asset inventory is incomplete or contains unexpected files"; exit 1; }
-          for asset_name in "${expected_assets[@]}"; do
+          for asset_name in "${expected_source_assets[@]}"; do
             gh release download "$VERSION" --pattern "$asset_name" --dir "$remote_assets"
             cmp -s "release-assets/$asset_name" "$remote_assets/$asset_name" ||
               { echo "Published release asset differs from the validated build: $asset_name"; exit 1; }
           done
-          [[ "$(gh release view "$VERSION" --json assets --jq '.assets[].name' | sort)" == "$(printf '%s\n' "${expected_assets[@]}" | sort)" ]] ||
+          remote_inventory="$(gh release view "$VERSION" --json assets --jq '.assets[].name' | sort)"
+          [[ "$remote_inventory" == "$expected_source_inventory" ||
+             "$remote_inventory" == "$expected_complete_inventory" ]] ||
             { echo "Draft release asset inventory is incomplete or contains unexpected files"; exit 1; }
 
       - name: Promote validated immutable image tags
@@ -574,9 +585,16 @@ jobs:
           [[ "$VERSION" == *-* ]] && expected_prerelease=true
           gh release edit "$VERSION" --notes-file release-assets/release-notes.md \
             --draft=false --prerelease="$expected_prerelease"
-          gh release view "$VERSION" --json body --jq .body > "$recovered/release-body.md"
-          cmp -s release-assets/release-notes.md "$recovered/release-body.md" ||
-            { echo "Published release body differs from canonical signed notes"; exit 1; }
+          gh release view "$VERSION" --json body > "$recovered/release-body.json"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const canonicalNotes = readFileSync(process.argv[1], "utf8");
+            const releasedBody = JSON.parse(readFileSync(process.argv[2], "utf8")).body;
+            const apiTransportBody = releasedBody.replace(/\r\n/g, "\n");
+            if (apiTransportBody !== canonicalNotes) {
+              throw new Error("Published release body differs from canonical signed notes");
+            }
+          ' release-assets/release-notes.md "$recovered/release-body.json"
           release_state="$(
             gh release view "$VERSION" --json isDraft,isPrerelease \
               --jq '[.isDraft, .isPrerelease] | @tsv'
