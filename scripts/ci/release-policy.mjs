@@ -936,6 +936,8 @@ export function validateLedger(state, anchor) {
       'Ledger identity continuity violation');
   }
   const sequences = new Set();
+  const stableSequences = new Set();
+  let pendingStableReservations = 0;
   let highestInsiderSequence = 0n;
   for (const [key, reservation] of Object.entries(state.reservations)) {
     requireString(key, hashPattern, 'ledger allocation key');
@@ -978,6 +980,17 @@ export function validateLedger(state, anchor) {
       'Ledger stage continuity violation');
     }
     if (reservation.record.channel === 'stable') {
+      requireThat(!stableSequences.has(reservation.stableSequence),
+        'Stable sequence replay, regression, or cross-channel substitution');
+      stableSequences.add(reservation.stableSequence);
+      if (reservation.set === undefined) {
+        pendingStableReservations++;
+        requireThat(reservation.stableSequence === (BigInt(state.channelSequences.stable) + 1n).toString(),
+          'Pending stable reservation is not the next durable stable sequence');
+      } else {
+        requireThat(BigInt(reservation.stableSequence) <= BigInt(state.channelSequences.stable),
+          'Stable sequence exceeds durable high-water mark');
+      }
       const qualification = state.qualifications[reservation.record.sourceCommit];
       publicLedgerQualification(qualification, reservation.record.sourceCommit);
       if (qualification.mode === 'promotion') requireThat(
@@ -997,6 +1010,8 @@ export function validateLedger(state, anchor) {
   requireThat(BigInt(state.counter) >= highestInsiderSequence &&
     BigInt(state.channelSequences.insider) >= highestInsiderSequence,
   'Ledger sequence continuity violation');
+  requireThat(pendingStableReservations <= 1,
+    'Overlapping unadvanced stable reservations are not allowed');
   for (const [channel, pointer] of Object.entries(state.pointers)) {
     requireKeys(pointer, ['releaseId', 'canonicalVersion', 'channel', 'sourceCommit', 'allocationKey',
       'identitySha256', 'stableSequence', 'manifestSha256', 'envelopeSha256', 'manifestEnvelopeSha256'],
@@ -1043,17 +1058,20 @@ export function migrateLegacyLedger(legacy, anchor) {
   const stableReservations = Object.values(migrated.reservations)
     .filter(reservation => reservation?.record?.channel === 'stable')
     .sort((left, right) => compareVersions(left.record.canonicalVersion, right.record.canonicalVersion));
+  requireThat(stableReservations.length <= 1,
+    'Overlapping legacy stable reservations require owner recovery');
   for (const [index, reservation] of stableReservations.entries()) {
     const stableSequence = (BigInt(index) + 1n).toString();
-    requireThat(!Object.hasOwn(reservation, 'identitySha256') && !Object.hasOwn(reservation, 'set'),
+    requireThat(!Object.hasOwn(reservation, 'identitySha256') && !Object.hasOwn(reservation, 'set') &&
+      !Object.hasOwn(reservation, 'tagObject') && !Object.hasOwn(reservation, 'tagPublished'),
       'Legacy signed reservation requires owner recovery; migration cannot replace signed identities');
     reservation.stableSequence = stableSequence;
     reservation.record.stableSequence = stableSequence;
   }
   for (const reservation of Object.values(migrated.reservations)) {
     if (reservation.record.channel !== 'insider') continue;
-    reservation.stableSequence = stableReservations.length.toString();
-    reservation.record.stableSequence = stableReservations.length.toString();
+    reservation.stableSequence = '0';
+    reservation.record.stableSequence = '0';
   }
   migrated.channelSequences = {
     insider: migrated.counter,
@@ -1167,6 +1185,11 @@ export function reserve(state, admission, created, protection, verifiedQualifica
   validateLedger(state, state.anchor);
   const existing = validateReservationAdmission(state, admission);
   if (existing) return existing;
+  if (admission.channel === 'stable') {
+    requireThat(!Object.values(state.reservations).some(reservation =>
+      reservation.record.channel === 'stable' && !reservation.set),
+    'Unadvanced stable reservation blocks a new stable allocation');
+  }
   const key = allocationKey(admission);
   const sequence = admission.channel === 'insider'
     ? ((BigInt(state.counter) > BigInt(state.channelSequences.insider)

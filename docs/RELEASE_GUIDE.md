@@ -167,10 +167,14 @@ serialization measure, not the allocator.
 `state.json` is a closed schema. A ledger snapshot that predates
 `channelSequences` or the signed manifest/envelope pointer fields is **not**
 silently defaulted, reset, or accepted as current state. Recovery requires an
-owner-reviewed migration commit on the protected ledger branch which preserves
+owner-reviewed release-control transaction on the protected ledger branch which preserves
 the pinned anchor, every immutable reservation/identity/tag reference, and the
 historical stable floor, then initializes channel sequences from those retained
-records. The migration must be validated as a single-parent ledger transition
+records. `release-control` recognizes only the pre-sequence closed schema at
+ledger read time, validates and normalizes it in memory, and persists that
+single-parent transition through the normal compare-and-set on the next protected
+transaction; it has no standalone reset command. The migration must be validated
+as a single-parent ledger transition
 before any new reservation, pointer, alias, or public-release write. If that
 proof is unavailable, publication remains blocked and the owner must recover
 the ledger from its protected history; creating a fresh ledger is not recovery.

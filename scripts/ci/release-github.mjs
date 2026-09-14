@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import {
-  repository, ledgerBranch, requireThat, validateLedger, verifyTag, compareVersions, normalizeProtectionEvidence,
+  repository, ledgerBranch, requireThat, validateLedger, migrateLegacyLedger, verifyTag, compareVersions, normalizeProtectionEvidence,
   hash, parseTag, publicLedgerQualification, publicRecord, validateRecord, requireKeys, requireString,
   validatePromotionOrigin, parseVersionFile, requireObject, validateReservationAdmission, validateApprovalMode,
   releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks,
@@ -218,7 +218,8 @@ export function gitLedger(api, anchor) {
     requireThat(entry, 'Ledger state is missing; owner recovery required');
     const blob = await api(`git/blobs/${entry.sha}`);
     requireThat(blob.encoding === 'base64', 'Unsupported ledger blob encoding');
-    const state = JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8'));
+    let state = JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8'));
+    if (!Object.hasOwn(state, 'channelSequences')) state = migrateLegacyLedger(state, anchor);
     requireKeys(state, publicLedgerFields.filter(field => field !== 'lastHistoricalStable'),
       ['lastHistoricalStable'], 'persisted public ledger');
     validateLedger(state, anchor);

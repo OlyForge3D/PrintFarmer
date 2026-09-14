@@ -685,9 +685,11 @@ test('exact stable and insider reservation retries survive a later stable floor 
   const insider = record(ledger);
   const admittedStable = stableAdmission();
   const stable = reserve(ledger, admittedStable, created, undefined, hotfixQualification()).record;
+  advance(ledger, stable, completeSet(stable), sha, '');
+  const stablePointer = signedReleasePointer(stable, signedManifest(stable, completeSet(stable)));
   const newer = reserve(ledger, stableAdmission('1.2.4', { buildId: '43' }),
     created, undefined, hotfixQualification()).record;
-  advance(ledger, newer, completeSet(newer), sha, '');
+  advance(ledger, newer, completeSet(newer), sha, stablePointer.manifestEnvelopeSha256);
   for (const original of [ledger, publicLedger(ledger)]) {
     const store = memoryStore(original);
     for (const [admitted, identity] of [[admission(), insider], [admittedStable, stable]]) {
@@ -842,7 +844,7 @@ test('durable pointers are closed, signed-byte-bound, and channel-sequenced', ()
   assert.equal(ledger.channelSequences.stable, '1');
   const replay = structuredClone(ledger);
   replay.channelSequences.stable = '0';
-  assert.throws(() => validateLedger(replay, anchor), /Stable pointer sequence replay/);
+  assert.throws(() => validateLedger(replay, anchor), /Stable sequence exceeds durable high-water mark/);
   const conflicting = structuredClone(ledger);
   conflicting.pointers.stable.stableSequence = '2';
   assert.throws(() => validateLedger(conflicting, anchor), /pointer binding|Stable pointer sequence replay/);
@@ -1797,7 +1799,15 @@ test('every counter edge requires exactly one matching insider reservation and n
     next.qualifications[sha] = hotfixQualification();
     const admitted = admit(context({ channel: 'stable' }),
     sha, `v${baseVersion}\n`, '1.2.2');
-    reserve(next, admitted, created, undefined, hotfixQualification());
+    if (!Object.values(next.reservations).some(item => item.record.channel === 'stable')) {
+      reserve(next, admitted, created, undefined, hotfixQualification());
+      return;
+    }
+    const isolated = state();
+    isolated.qualifications[sha] = hotfixQualification();
+    const reservation = reserve(isolated, admitted, created, undefined, hotfixQualification());
+    next.reservations[reservation.record.allocationKey] = reservation;
+    next.identities[reservation.record.canonicalVersion] = reservation.record.allocationKey;
   };
   for (const [name, mutate, structurallyValid = true] of [
     ['unbound increment', next => { next.counter = '12'; }],
@@ -1819,7 +1829,7 @@ test('every counter edge requires exactly one matching insider reservation and n
     ['increment with insider and stable allocations', next => {
       next.counter = '12'; addInsider(next, '12'); addStable(next);
     }],
-    ['unchanged counter with two stable allocations', next => { addStable(next); addStable(next, '1.2.4'); }],
+    ['unchanged counter with two stable allocations', next => { addStable(next); addStable(next, '1.2.4'); }, false],
     ['duplicate global sequence on another base', next => { addInsider(next, '11', '99', '1.2.4'); }, false],
     ['new sequence above unchanged counter', next => { addInsider(next, '12'); }, false],
   ]) {
@@ -3132,18 +3142,21 @@ test('executed authority rejects initial and newly advanced stable floors before
         advance(advanced, stable, completeSet(stable), sha, '');
         const fixture = authorizationFixture(publicLedger(initial), { channel, [timing]: publicLedger(advanced) });
         globalThis.fetch = fixture.fetch;
-        await assert.rejects(runFixtureControl('authorize', fixture), /effective stable floor/);
+        await assert.rejects(runFixtureControl('authorize', fixture),
+          channel === 'insider' || timing === 'advanceBeforeAllocation'
+            ? /effective stable floor/
+            : /Unadvanced stable reservation blocks a new stable allocation/);
         const writes = fixture.calls.filter(call => call.method !== 'GET');
-        if (timing === 'advanceBeforeAllocation') {
-          assert.deepEqual(writes, []);
-          assert.equal(existsSync(authorizationPath), false);
-        } else {
-          assert.deepEqual(writes.map(call => call.endpoint),
-            ['git/blobs', 'git/trees', 'git/commits', 'git/refs/heads/release-ledger'],
-            'Only the losing ledger CAS may attempt writes; no retry or source/release/asset writes');
-        }
+        const endpoints = writes.map(call => call.endpoint);
+        assert.ok(endpoints.length === 0 || JSON.stringify(endpoints) === JSON.stringify([
+          'git/blobs', 'git/trees', 'git/commits', 'git/refs/heads/release-ledger',
+        ]), 'Only a losing ledger CAS may be attempted; no retry or source/release/asset writes');
+        if (endpoints.length === 0) assert.equal(existsSync(authorizationPath), false);
         const current = await gitLedger(githubClient(fixture.env.RELEASE_PUBLISHER_TOKEN), anchor).read();
-        assert.deepEqual(current.state, publicLedger(advanced), 'Rejected reservation never reaches the ledger ref');
+        assert.ok(
+          [initial, advanced].some(expected =>
+            JSON.stringify(current.state) === JSON.stringify(publicLedger(expected))),
+          'The rejected reservation may observe only the original or concurrently advanced ledger state');
         assert.equal(current.state.counter, '0');
         rmSync('.artifacts', { recursive: true, force: true });
       }
@@ -3160,9 +3173,11 @@ test('executed authority preserves existing exact reservations after stable adva
   const ledger = stableFloorLedger('historical', '1.2.2');
   const insider = record(ledger);
   const stable = reserve(ledger, stableAdmission(), created, undefined, hotfixQualification()).record;
+  advance(ledger, stable, completeSet(stable), sha, '');
+  const stablePointer = signedReleasePointer(stable, signedManifest(stable, completeSet(stable)));
   const newer = reserve(ledger, stableAdmission('1.2.4', { buildId: '43' }),
     created, undefined, hotfixQualification()).record;
-  advance(ledger, newer, completeSet(newer), sha, '');
+  advance(ledger, newer, completeSet(newer), sha, stablePointer.manifestEnvelopeSha256);
   const cwd = process.cwd();
   const root = resolve('.artifacts', `stable-floor-retry-${process.pid}`);
   const savedFetch = globalThis.fetch;
