@@ -26,11 +26,12 @@ export function runContext(env = process.env) {
   return {
     repository: env.GITHUB_REPOSITORY, event: env.GITHUB_EVENT_NAME,
     ref, eventSha: transaction?.sourceCommit ?? env.GITHUB_SHA,
+    sourceCommit: transaction?.sourceCommit ?? env.RELEASE_SOURCE_COMMIT ?? env.GITHUB_SHA,
     workflowIdentity: transaction?.workflowIdentity ?? env.GITHUB_WORKFLOW_REF,
     workflowSha: transaction?.workflowCommit ?? env.GITHUB_WORKFLOW_SHA,
     workflowBranch: ref?.replace('refs/heads/', ''),
     observedBranchHead: transaction?.observedBranchHead,
-    buildId: env.GITHUB_RUN_ID, buildAttempt: env.GITHUB_RUN_ATTEMPT,
+    buildId: env.GITHUB_RUN_ID, buildAttempt: transaction?.runAttempt ?? env.GITHUB_RUN_ATTEMPT,
     channel: transaction?.channel ?? env.RELEASE_CHANNEL,
     stage: env.RELEASE_STAGE && env.RELEASE_STAGE !== 'none' ? env.RELEASE_STAGE : undefined,
     requestedTag: env.RELEASE_TAG || undefined,
@@ -73,14 +74,20 @@ export function validateTransactionOperation(operation, transaction) {
 }
 
 export async function runReleaseControl(operation, env = process.env, verify = command) {
-  requireThat(['admit', 'authorize', 'consume', 'advance'].includes(operation), 'Unknown release operation');
-  const writes = ['authorize', 'advance'].includes(operation);
-  if (writes) {
+  requireThat(['admit', 'authorize', 'consume', 'preflight', 'advance'].includes(operation), 'Unknown release operation');
+  const privileged = ['authorize', 'preflight', 'advance'].includes(operation);
+  if (privileged) {
     requireThat(env.RELEASE_PUBLISHER_TOKEN && env.RELEASE_PUBLISHER_TOKEN !== env.GH_TOKEN,
       'Protected publisher App token required; github.token cannot verify Administration or publish');
   }
-  const api = githubClient(writes ? env.RELEASE_PUBLISHER_TOKEN : env.GH_TOKEN);
+  const api = githubClient(privileged ? env.RELEASE_PUBLISHER_TOKEN : env.GH_TOKEN);
   const context = runContext(env);
+  if (['consume', 'preflight', 'advance'].includes(operation)) {
+    const transaction = transactionFromEnvironment(env);
+    requireThat(env.RELEASE_SOURCE_COMMIT === transaction.sourceCommit &&
+      context.sourceCommit === transaction.sourceCommit,
+    'Consumer source identity does not match the pinned release transaction');
+  }
   const store = gitLedger(api, env.RELEASE_LEDGER_ANCHOR);
   if (['admit', 'authorize'].includes(operation)) {
     const transaction = env.RELEASE_TRANSACTION ? transactionFromEnvironment(env) : undefined;
@@ -176,20 +183,38 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     requireThat(!component || ['api', 'frontend', 'printer-discovery', 'slicer-host', 'orcaslicer-worker'].includes(component),
       'Unknown release component');
     output('sbom_url', `https://github.com/${record.repository}/releases/download/${record.sourceTag}/printfarmer-${component ? `${component}-` : ''}${record.sourceTag}.spdx.json`);
-  } else if (operation === 'advance') {
+  } else if (operation === 'preflight') {
+    const transaction = transactionFromEnvironment(env);
+    requireThat(transaction.mode === 'release' && transaction.sourceCommit === record.sourceCommit,
+      'Publication preflight transaction binding mismatch');
+    const currentBranchHead = await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
+    await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
+      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
     const set = readPrivateJson(privateSetPath);
     const expectedPointer = state.pointers[record.channel]?.setHash || '';
+    advance(structuredClone(state), record, set, currentBranchHead, expectedPointer);
+    output('verified_branch_head', currentBranchHead);
+    output('expected_pointer', expectedPointer);
+  } else if (operation === 'advance') {
+    const set = readPrivateJson(privateSetPath);
+    const expectedPointer = env.RELEASE_EXPECTED_POINTER ?? '';
+    requireThat((state.pointers[record.channel]?.setHash || '') === expectedPointer,
+      'Channel pointer changed after publication preflight');
     if (env.RELEASE_TRANSACTION) {
       const transaction = transactionFromEnvironment(env);
       requireThat(transaction.mode === 'release' && transaction.sourceCommit === record.sourceCommit,
         'Pointer transaction binding mismatch');
       const currentBranchHead = await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
-      requireThat(currentBranchHead === env.RELEASE_VERIFIED_BRANCH_HEAD,
-        'Pointer branch head changed after publication verification');
-    }
-    await transact(store, async latest => advance(latest, record, set,
-      env.RELEASE_TRANSACTION ? env.RELEASE_VERIFIED_BRANCH_HEAD :
+      await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
+        env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
+      requireThat(/^[a-f0-9]{40}$/.test(env.RELEASE_VERIFIED_BRANCH_HEAD || ''),
+        'Missing publication preflight branch evidence');
+      await transact(store, async latest => advance(latest, record, set,
+        await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit), expectedPointer));
+    } else {
+      await transact(store, async latest => advance(latest, record, set,
         await branchHead(api, record.sourceBranch), expectedPointer));
+    }
     output('set_hash', hash(writePublicSet(record, set)));
   } else {
     throw new Error(`Unknown operation: ${operation}`);

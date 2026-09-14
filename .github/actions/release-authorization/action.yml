@@ -25,15 +25,26 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: actions/download-artifact@v8
-      with:
-        name: release-authorization-${{ github.run_attempt }}
-        path: .artifacts/release-authorization
-    - uses: sigstore/cosign-installer@v4.1.2
+    - name: Recover the earliest immutable authorization for this run
+      shell: bash
+      run: |
+        set -euo pipefail
+        artifact_name="$(
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+            --jq '[.artifacts[] |
+              select(.expired == false and (.name | test("^release-authorization-[1-9][0-9]*$")))] |
+              sort_by(.created_at) | .[0].name // empty'
+        )"
+        [[ "$artifact_name" =~ ^release-authorization-[1-9][0-9]*$ ]]
+        rm -rf .artifacts/release-authorization
+        gh run download "$GITHUB_RUN_ID" \
+          --name "$artifact_name" \
+          --dir .artifacts/release-authorization
+    - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
     - id: consume
       shell: bash
       run: |
         set -euo pipefail
         chmod 700 .artifacts/release-authorization
         chmod 600 .artifacts/release-authorization/*
-        node scripts/ci/release-control.mjs consume
+        node .release-control/scripts/ci/release-control.mjs consume

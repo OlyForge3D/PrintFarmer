@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import test from 'node:test';
 import { load } from 'js-yaml';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import {
   qualificationJobNamespace, qualificationLifetimeMs, selectTransaction,
-  validateQualificationReceipt, validateTransaction, verifyTransactionQualification,
+  transactionPath, validateQualificationReceipt, validateTransaction, verifyTransactionQualification,
   writeRehearsalReceipt,
 } from '../release-transaction.mjs';
 import { admit } from '../release-policy.mjs';
@@ -48,6 +48,8 @@ function apiFixture(channel = 'insider', head = sourceSha) {
     head_sha: workflowSha,
     status: 'completed',
     conclusion: 'success',
+    started_at: '2026-09-13T19:40:00.000Z',
+    completed_at: '2026-09-13T19:50:00.000Z',
     check_run_url: `https://api.github.com/repos/OlyForge3D/PrintFarmer/check-runs/${100 + index}`,
     html_url: `${runUrl}/job/${100 + index}`,
   }));
@@ -57,6 +59,7 @@ function apiFixture(channel = 'insider', head = sourceSha) {
     head_sha: workflowSha,
     status: 'completed',
     conclusion: 'success',
+    completed_at: '2026-09-13T19:50:00.000Z',
     app: { id: 15368, slug: 'github-actions' },
     check_suite: { id: 77 },
     url: job.check_run_url,
@@ -67,6 +70,7 @@ function apiFixture(channel = 'insider', head = sourceSha) {
     head_sha: sourceSha,
     status: 'completed',
     conclusion: 'success',
+    completed_at: '2026-09-13T19:30:00.000Z',
     app: { id: 15368, slug: 'github-actions' },
     check_suite: { id: 66 },
   }));
@@ -82,13 +86,15 @@ function apiFixture(channel = 'insider', head = sourceSha) {
       workflow_id: 9,
       repository: { full_name: 'OlyForge3D/PrintFarmer' },
       head_repository: { full_name: 'OlyForge3D/PrintFarmer' },
-      head_branch: branch,
+      head_branch: 'development',
       head_sha: workflowSha,
       event: 'workflow_dispatch',
       html_url: runUrl,
       status: 'in_progress',
       conclusion: null,
       check_suite_id: 77,
+      run_started_at: '2026-09-13T19:35:00.000Z',
+      updated_at: '2026-09-13T19:55:00.000Z',
     }],
     ['actions/runs/42/attempts/1/jobs?per_page=100',
       { total_count: jobs.length, jobs }],
@@ -112,6 +118,8 @@ function apiFixture(channel = 'insider', head = sourceSha) {
         state: 'success',
         description: `REVIEWED (self-attested) @ ${sourceSha.slice(0, 12)} by bishop`,
         target_url: 'https://github.com/OlyForge3D/PrintFarmer/actions/runs/31',
+        created_at: '2026-09-13T19:31:00.000Z',
+        updated_at: '2026-09-13T19:31:00.000Z',
       }],
     }],
   ]);
@@ -130,9 +138,9 @@ async function transaction(channel = 'insider', requested = '') {
       ...base,
       RELEASE_CHANNEL: channel,
       RELEASE_SOURCE_SHA: requested,
-      GITHUB_REF: `refs/heads/${branch}`,
+      GITHUB_REF: 'refs/heads/development',
       GITHUB_WORKFLOW_REF:
-        `OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/${branch}`,
+        'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development',
     }, f.api),
     fixture: f,
   };
@@ -160,16 +168,45 @@ test('explicit source may be a trusted ancestor but not an unrelated commit', as
     /trusted canonical branch history/);
 });
 
-test('selection rejects foreign refs, malformed sources, reruns, and workflow substitution', async () => {
+test('selection rejects foreign refs, malformed sources, and workflow substitution', async () => {
   for (const overrides of [
     { GITHUB_REF: 'refs/heads/main' },
     { RELEASE_SOURCE_SHA: 'bad' },
-    { GITHUB_RUN_ATTEMPT: '2' },
     { RELEASE_MODE: 'dry-run' },
     { GITHUB_WORKFLOW_SHA: sourceSha },
   ]) {
     await assert.rejects(selectTransaction({ ...base, ...overrides }, apiFixture().api));
   }
+});
+
+test('same-run rerun recovers immutable attempt-one transaction and revalidates ancestry', async t => {
+  const first = await transaction('stable', sourceSha);
+  const cwd = process.cwd();
+  const scratch = resolve('.artifacts', `transaction-recovery-${randomUUID()}`);
+  mkdirSync(resolve(scratch, '.artifacts/release-transaction'), { recursive: true });
+  process.chdir(scratch);
+  t.after(() => {
+    process.chdir(cwd);
+    rmSync(scratch, { recursive: true, force: true });
+  });
+  writeFileSync(transactionPath, `${JSON.stringify(first.value)}\n`);
+  const recovered = await selectTransaction({
+    ...base,
+    GITHUB_RUN_ATTEMPT: '2',
+    RELEASE_CHANNEL: 'stable',
+    RELEASE_SOURCE_SHA: sourceSha,
+  }, first.fixture.api);
+  assert.deepEqual(recovered, first.value);
+  first.fixture.values.set(`compare/${sourceSha}...${sourceSha}`,
+    { status: 'diverged', merge_base_commit: { sha: workflowSha } });
+  first.fixture.values.set('git/ref/heads/main', { object: { sha: movedHead } });
+  first.fixture.values.set(`compare/${sourceSha}...${movedHead}`,
+    { status: 'diverged', merge_base_commit: { sha: workflowSha } });
+  await assert.rejects(selectTransaction({
+    ...base,
+    GITHUB_RUN_ATTEMPT: '2',
+    RELEASE_CHANNEL: 'stable',
+  }, first.fixture.api), /trusted canonical branch history/);
 });
 
 test('rehearsal transaction passes real admission before authorization is considered', async () => {
@@ -229,6 +266,27 @@ test('qualification receipt freshness rejects expiry, future, malformed lifetime
   /invalid lifetime/);
 });
 
+test('underlying qualification evidence rejects missing, stale, future and post-collection timestamps', async () => {
+  for (const mutate of [
+    f => { delete f.sourceChecks[0].completed_at; },
+    f => { f.sourceChecks[0].completed_at = '2026-09-12T19:59:59.999Z'; },
+    f => { f.sourceChecks[0].completed_at = '2026-09-13T20:00:00.001Z'; },
+    f => {
+      const statuses = f.values.get(`commits/${sourceSha}/status?per_page=100`);
+      statuses.statuses[0].created_at = '2026-09-13T20:00:00.001Z';
+      statuses.statuses[0].updated_at = '2026-09-13T20:00:00.001Z';
+    },
+    f => { f.jobs[0].completed_at = '2026-09-13T20:00:00.001Z'; },
+  ]) {
+    const isolated = await transaction();
+    mutate(isolated.fixture);
+    await assert.rejects(
+      verifyTransactionQualification(isolated.value, isolated.fixture.api, now),
+      /missing|stale|future|post-collection|timestamps/,
+    );
+  }
+});
+
 test('qualification and rehearsal receipts are closed transaction-bound variants', async t => {
   const { value, fixture } = await transaction();
   value.mode = 'rehearsal';
@@ -260,8 +318,8 @@ test('single authority has direct dependencies, one approval, isolated rehearsal
   assert.equal(workflow.jobs.rehearsal.environment, 'release-rehearsal-${{ needs.admit.outputs.channel }}');
   assert.notEqual(workflow.jobs.authorize.environment, workflow.jobs.rehearsal.environment);
   assert.equal(workflow.jobs.publish.with.transaction, '${{ needs.admit.outputs.transaction }}');
-  assert.equal(workflow.jobs.publish.with.verified_branch_head,
-    '${{ needs.authorize.outputs.verified_branch_head }}');
+  assert.equal(workflow.jobs.publish.with.verified_branch_head, undefined);
+  assert.match(JSON.stringify(workflow.jobs['schedule-insider']), /--ref development/);
   const diagnostics = JSON.stringify(workflow.jobs.diagnostics);
   assert.match(diagnostics, /public_identity|qualification|evidence|publication|source/i);
 });
@@ -286,11 +344,23 @@ test('publisher admission validates transaction and credential jobs use publishe
 });
 
 test('privileged workflow actions are pinned to full commit SHAs with version comments', () => {
-  for (const file of ['.github/workflows/consolidated-release.yml', '.github/workflows/docker-publish.yml']) {
+  const pending = [
+    '.github/workflows/consolidated-release.yml',
+    '.github/workflows/docker-publish.yml',
+    '.github/actions/release-authorization/action.yml',
+  ];
+  const visited = new Set();
+  while (pending.length > 0) {
+    const file = pending.pop();
+    if (visited.has(file)) continue;
+    visited.add(file);
     const text = readFileSync(file, 'utf8');
     for (const line of text.split(/\r?\n/).filter(line =>
       /^\s*(?:-\s+)?uses:\s+(?!\.\/)[^@]+@/.test(line))) {
       assert.match(line, /@[0-9a-f]{40}\s+#\s+v[0-9]/, `${file}: ${line.trim()}`);
+    }
+    for (const match of text.matchAll(/uses:\s+\.\/(\.github\/actions\/[^\s]+)/g)) {
+      pending.push(`${match[1]}/action.yml`);
     }
   }
 });

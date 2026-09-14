@@ -13,11 +13,11 @@ post_date: "2026-09-12"
 
 ## Release channels and branches
 
-`consolidated-release.yml` is the sole server release entry point. Dispatch
-stable on `main`, insider on `development`; the schedule explicitly dispatches
-the same workflow on development (independent of the default branch), selecting ordinary
-insider on the repository's `development` default branch. It fails closed if
-the default changes. Branch pushes and direct tag pushes do not publish.
+`consolidated-release.yml` is the sole server release entry point and its trusted
+workflow definition always runs from `development`. Stable selects build source
+from `main`; insider selects build source from `development`. The operator cannot
+select a different control ref. The schedule dispatches the same trusted workflow
+for ordinary insider releases. Branch pushes and direct tag pushes do not publish.
 The reusable Docker workflow requires the signed record from this exact
 workflow/run/attempt; arbitrary reusable callers cannot authorize a release.
 
@@ -36,7 +36,7 @@ The supported administrator journey is:
    a full lowercase 40-character SHA that is either that HEAD or its trusted
    ancestor. The workflow definition remains pinned independently.
 3. Select `release` or the explicitly non-publishing `rehearsal` mode.
-4. Click **Run workflow** on the matching canonical branch and approve the one
+4. Click **Run workflow** on `development` and approve the one
    pending `release-stable` or `release-insider` transaction environment.
 5. Follow the generated Actions summary. Qualification, evidence collection,
    allocation, ledger/tag work, publication, pointer advancement and bounded
@@ -50,12 +50,14 @@ consolidated journey, and do not author formatted commit comments or statuses.
 An explicit source outside the selected canonical branch's ancestry is rejected;
 once admitted, later branch movement does not retarget the source commit.
 
-Qualification is bound to the current release run ID, attempt, GitHub Actions
-App, check suite, workflow commit, and namespaced reusable-workflow jobs. The
+Qualification is bound to the current release run ID, immutable attempt-one
+transaction, GitHub Actions App, check suite, workflow commit, and namespaced
+reusable-workflow jobs. The
 same authorization step re-reads that API evidence, exact-source required
-checks, review status, and live strict branch policy after environment approval.
-Receipts last 30 minutes; delayed approval beyond that window requires a new
-dispatch rather than accepting stale evidence.
+checks, review status, evidence timestamps, and live strict branch policy after
+environment approval. Receipts last 30 minutes and underlying evidence must
+predate collection, remain within its own freshness window, and not be future
+dated. Delayed approval beyond the receipt window requires a new dispatch.
 
 `rehearsal` uses the same source selection and qualification path in the
 distinct `release-rehearsal-<channel>` environment, but that job contains no
@@ -65,8 +67,8 @@ Its `release-rehearsal-only` receipt has `publicationAuthorized: false` and is
 not accepted as release qualification or authorization.
 
 Each `release-publisher-<channel>` environment must be provisioned before use
-with administrator bypass disabled, exactly one branch policy for the channel's
-canonical branch, and zero required reviewers. The separate
+with administrator bypass disabled, exactly one branch policy for the immutable
+`development` control branch, and zero required reviewers. The separate
 `release-<channel>` environment is the single human approval boundary. Missing
 or auto-created publisher environments fail verification before credentials,
 registry writes, release assets, or pointer advancement.
@@ -101,15 +103,15 @@ serialization measure, not the allocator.
 
 One global decimal counter covers beta, insider and RC, across bases.
 Workflow migration requires an owner-reviewed code/policy change; arbitrary
-replacement workflow identities are rejected. Allocation keys include repository, workflow ref,
-run ID, attempt, full source SHA and base. Same-key retries reuse the entire
-record; new attempts reserve a larger N. Failed reservations remain consumed.
-Re-run all jobs for a new insider attempt: build, authorization, SBOM and digest
-artifact names are attempt-scoped, and consumers never reuse another attempt's
-outputs. A failed-job-only rerun cannot inherit an older authorization.
-Stable has no N: a new run/attempt cannot rebuild an already reserved stable
-identity. Resume byte-identical transfer within its original attempt, or qualify
-a reviewed new base; never replace a stable identity with new build bytes.
+replacement workflow identities are rejected. Allocation keys include repository,
+workflow ref, run ID, channel, stage, full source SHA and base. Same-run reruns
+recover the immutable attempt-one transaction, reservation and evidence, bind
+the current attempt, and revalidate every retained byte. They do not skip
+qualification or approval and cannot allocate a conflicting identity. Missing
+or mismatched recovery artifacts fail closed. Failed reservations remain consumed.
+Stable has no N: a new run cannot rebuild an already reserved stable identity.
+Resume byte-identical transfer in the same run, or qualify a reviewed new base;
+never replace a stable identity with new build bytes.
 Big integers are compared numerically, not lexically or through floating point.
 No timestamp, run-number concatenation or local tag scan allocates identities.
 
@@ -129,9 +131,12 @@ must follow that order; after RC, bump the reviewed base before returning to
 ordinary insider. All stages share the durable counter, so switching stages
 never recycles N. Failed RC reservations also establish the stage high water.
 
-Admission verifies trusted repository/event/workflow, exact canonical branch
-HEAD, VERSION and required exact-SHA checks. HEAD drift before authorization
-fails; afterward all builds use the authorized SHA, not moving HEAD. An
+Admission verifies trusted repository/event/workflow, pins the selected canonical
+source and checks VERSION plus required exact-SHA checks. Later ordinary forward
+branch movement neither fails nor retargets the release. Authorization and
+pre-publication checks instead require the pinned source to remain an ancestor
+of the current canonical head and reject trust revocation, pointer regression
+or version regression. All builds use the pinned source SHA. An
 annotated tag object is stored durably before its public ref is created.
 Consumers check both object ID and peeled commit. Missing, moved or recreated
 tags fail. No tag force-update/delete API is used. Continuous tag protection
@@ -342,8 +347,8 @@ claims are rejected, not auto-approved or migrated. Owners must review legacy
 qualification inputs and public-set hash semantics before enabling publication.
 Existing immutable live evidence must not be rewritten to pass the new schema:
 use the owner-approved continuity recovery process if such evidence exists.
-Same-attempt retries require the retained original authorization file; if it is lost,
-fail closed and rerun all jobs with a new attempt rather than recreating evidence.
+Same-run retries require the retained original transaction, qualification and
+authorization files; if any are lost, fail closed rather than recreating evidence.
 Artifact retention therefore bounds attestation recovery.
 
 This is evidence of policy **at authorization**, not a claim that downstream
@@ -405,10 +410,14 @@ notices, SBOMs, identity and digest records are publicly verified first; uploads
 never clobber differing bytes. Existing version tags must resolve to the exact
 candidate digest or publication fails before any version-tag write.
 
-The final ledger transaction compares the expected channel pointer and stores
-the entire validated set atomically. It rejects stale source even if an old
-attempt somehow has a higher N, version regression, and same identity/different
-bytes. A failed build/qualification/set check leaves the previous pointer intact.
+Before public assets, tags or version tags are written, publication preflight
+revalidates ancestry, trust protections, version order, complete-set bytes and
+the expected pointer snapshot. The final ledger transaction compares that
+snapshot against the actual current verified branch head and stores the entire
+validated set atomically. Ordinary forward movement is allowed; source ancestry
+loss, trust revocation, pointer/version regression and same identity/different
+bytes are rejected. A failed build/qualification/set check leaves the previous
+pointer intact.
 The ledger's candidate pointer is **not** authenticated update discovery.
 
 **#2660 owns signed managed eligibility and publication aliases.** These outputs
@@ -857,10 +866,11 @@ steps, and publication was skipped. That is zero-publication evidence for
 that run, not App-permission or denied-write proof.
 
 Merge the reviewed harness through the normal high-risk review gate, then obtain
-fresh canonical CI/review/qualification at the new HEAD. Run insider only from
-`development`; stable requires the harness merged and freshly qualified on
-`main`. An unconditional, credential-free admission job checks the repository,
-dispatch event, selected branch, workflow ref/SHA and first run attempt. Invalid
+fresh canonical CI/review/qualification. Run the trusted workflow only from
+`development`; stable selects a pinned `main` source and insider selects a pinned
+`development` source. An unconditional, credential-free admission job checks the
+repository, dispatch event, fixed workflow ref/SHA and recoverable transaction.
+Invalid
 dispatches fail the run rather than skipping every job and appearing green.
 Admission performs no checkout or API requests and has no token permissions or
 environment secrets. All protected jobs depend on admission. Positive verification
@@ -868,12 +878,13 @@ and generic probes use the existing canonical `release-<channel>` owner gate;
 fixture creation uses the separate `release-rehearsal-fixture-<channel>` owner gate.
 Never widen environment branch policies.
 Because GitHub can rerun either protected job without rerunning admission, each
-also repeats the credential-free check as its first step, before checkout,
-third-party actions, App token creation or step-level credential exposure.
+also repeats the credential-free check as its first step and recovers the
+immutable attempt-one transaction before checkout, third-party actions, App
+token creation or step-level credential exposure.
 Environment approval still precedes job startup; no environment secrets or
-tokens are passed to the pre-check. Artifact uploads require that job's admission
-to succeed, even on failure paths. A single-job rerun therefore fails locally
-without executing later steps, regardless of an earlier admission success.
+tokens are passed to the pre-check. Artifact uploads require that job's admission to succeed, even on failure paths.
+A partial-job rerun reuses only exact retained run-scoped evidence and otherwise
+fails locally without executing later steps.
 The four embedded JavaScript bodies must match the `rehearsalAdmissionSource`
 constant in `scripts/ci/release-rehearsal-admission.mjs` byte-for-byte; regression
 tests enforce source parity and step ordering. The constant preserves LF line

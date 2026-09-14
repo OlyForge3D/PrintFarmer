@@ -308,8 +308,16 @@ export function gitLedger(api, anchor) {
   };
 }
 
-export async function verifyReleaseChecks(api, sourceCommit, required = releaseRequiredChecks.map(context => ({ context }))) {
+export async function verifyReleaseChecks(
+  api,
+  sourceCommit,
+  required = releaseRequiredChecks.map(context => ({ context })),
+  collectedAt = Date.now(),
+  maximumAgeMs = 24 * 60 * 60 * 1000,
+) {
   requireString(sourceCommit, shaPattern, 'qualification source commit');
+  requireThat(Number.isFinite(collectedAt) && Number.isSafeInteger(maximumAgeMs) && maximumAgeMs > 0,
+    'Invalid evidence collection window');
   const checks = await api(`commits/${sourceCommit}/check-runs?per_page=100`);
   const statuses = await api(`commits/${sourceCommit}/status?per_page=100`);
   requireThat(Number.isSafeInteger(checks?.total_count) && checks.total_count >= 0 &&
@@ -319,6 +327,15 @@ export async function verifyReleaseChecks(api, sourceCommit, required = releaseR
     statuses.total_count >= 0 &&
     Array.isArray(statuses.statuses) && statuses.statuses.length === statuses.total_count,
   'Status evidence malformed, truncated or not bound to exact SHA');
+  const evidenceTimestamp = (value, description) => {
+    const parsed = Date.parse(value);
+    requireThat(typeof value === 'string' && Number.isFinite(parsed) &&
+      new Date(parsed).toISOString() === value &&
+      parsed <= collectedAt && collectedAt - parsed <= maximumAgeMs,
+    `${description} is missing, stale, future-dated, or post-collection`);
+    return parsed;
+  };
+  const evidence = [];
   for (const policy of required) {
     const context = policy.context;
     const matchingChecks = checks.check_runs.filter(check => check?.name === context &&
@@ -329,6 +346,15 @@ export async function verifyReleaseChecks(api, sourceCommit, required = releaseR
     requireThat(validIds(matchingChecks) && validIds(matchingStatuses), 'Malformed qualification evidence ID');
     const latestCheck = matchingChecks.sort((a, b) => b.id - a.id)[0];
     const latestStatus = matchingStatuses.sort((a, b) => b.id - a.id)[0];
+    const checkCompletedAt = latestCheck?.completed_at;
+    const statusCreatedAt = latestStatus?.created_at;
+    const statusUpdatedAt = latestStatus?.updated_at;
+    if (latestCheck) evidenceTimestamp(checkCompletedAt, `${context} check completion`);
+    if (latestStatus) {
+      const created = evidenceTimestamp(statusCreatedAt, `${context} status creation`);
+      const updated = evidenceTimestamp(statusUpdatedAt, `${context} status update`);
+      requireThat(updated >= created, `${context} status timestamps are reversed`);
+    }
     const checkPassed = latestCheck?.head_sha === sourceCommit && latestCheck.status === 'completed' &&
       latestCheck.conclusion === 'success';
     // Commit statuses have no integration_id or check_suite. Never substitute a green workflow job.
@@ -343,6 +369,15 @@ export async function verifyReleaseChecks(api, sourceCommit, required = releaseR
         latestCheck || latestStatus;
     requireThat(requiredPassed && (!latestCheck || checkPassed) && (!latestStatus || statusPassed),
     'Missing successful exact-SHA required qualification');
+    evidence.push({
+      context,
+      ...(latestCheck ? { checkId: latestCheck.id, completedAt: checkCompletedAt } : {}),
+      ...(latestStatus ? {
+        statusId: latestStatus.id,
+        createdAt: statusCreatedAt,
+        updatedAt: statusUpdatedAt,
+      } : {}),
+    });
   }
   const review = statuses.statuses
     .filter(status => status?.context === releaseReviewStatus)
@@ -350,7 +385,8 @@ export async function verifyReleaseChecks(api, sourceCommit, required = releaseR
   return {
     sourceCommit,
     reviewUrl: review?.target_url,
-    checks: required.map(policy => policy.context),
+    collectedAt: new Date(collectedAt).toISOString(),
+    checks: evidence,
   };
 }
 

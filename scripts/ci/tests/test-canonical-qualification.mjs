@@ -574,8 +574,12 @@ test('reusable release CI executes equivalent required checks without shadowing 
   assert.deepEqual(ci.permissions, { contents: 'read' });
   for (const [id, name, original, skippedName] of expected) {
     const job = ci.jobs[id];
-    assert.equal(job.if, canonicalDispatch);
-    assert.equal(job.name, `\${{ ${canonicalDispatch} && '${name}' || '${skippedName}' }}`);
+    const producer = `${canonicalDispatch} || github.event_name == 'workflow_dispatch'`;
+    assert.equal(job.if, producer);
+    assert.ok(job.name.includes(canonicalDispatch));
+    assert.ok(job.name.includes("github.event_name == 'workflow_dispatch'"));
+    assert.ok(job.name.includes(`'${name}'`));
+    assert.ok(job.name.includes(`'${skippedName}'`));
     assert.equal(job['runs-on'], original['runs-on']);
     assert.ok(Number.isInteger(job['timeout-minutes']) && job['timeout-minutes'] > 0 && job['timeout-minutes'] <= 45);
     assert.ok(ci.jobs.summary.needs.includes(id));
@@ -626,7 +630,7 @@ for (const selected of [false, true]) {
   test(`release qualification=${selected} exclusively controls canonical check contexts`, () => {
       const ci = load(read('.github/workflows/ci.yml'));
       const evaluate = expression => runInNewContext(expression.replace(/^\$\{\{\s*|\s*\}\}$/g, ''),
-        { inputs: { release_qualification: selected } });
+        { inputs: { release_qualification: selected }, github: { event_name: 'push' } });
       for (const id of ['canonical-path-casing', 'canonical-contract-drift', 'canonical-ios-build']) {
         const job = ci.jobs[id];
         assert.equal(evaluate(job.if), selected, `${id}: execution guard`);
@@ -638,6 +642,16 @@ for (const selected of [false, true]) {
       assert.equal(evaluate(summary.if), selected, 'summary follows the reusable qualification boundary');
   });
 }
+
+test('manual canonical CI genuinely produces qualification contexts', () => {
+  const ci = load(read('.github/workflows/ci.yml'));
+  const evaluate = expression => runInNewContext(expression.replace(/^\$\{\{\s*|\s*\}\}$/g, ''),
+    { inputs: { release_qualification: false }, github: { event_name: 'workflow_dispatch' } });
+  for (const id of ['canonical-path-casing', 'canonical-contract-drift', 'canonical-ios-build']) {
+    assert.equal(evaluate(ci.jobs[id].if), true);
+    assert.ok(canonicalValidationChecks.includes(evaluate(ci.jobs[id].name)));
+  }
+});
 
 test('release qualification summary fails closed for failed, cancelled, missing or skipped checks', t => {
   const cwd = scratch(t);

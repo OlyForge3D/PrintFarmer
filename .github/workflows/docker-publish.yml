@@ -22,10 +22,6 @@ on:
         description: Immutable same-run release transaction binding
         type: string
         required: true
-      verified_branch_head:
-        description: Current canonical branch head verified immediately before publication
-        type: string
-        required: true
     outputs:
       published_set_digest:
         description: SHA-256 digest of the verified complete release set
@@ -43,6 +39,8 @@ env:
   ORCA_VERSION: '2.4.2'
   ORCA_SHA256: d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
   RELEASE_PUBLIC_IDENTITY: ${{ inputs.identity }}
+  RELEASE_TRANSACTION: ${{ inputs.transaction }}
+  RELEASE_SOURCE_COMMIT: ${{ fromJSON(inputs.identity).sourceCommit }}
   RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
 
 permissions:
@@ -60,13 +58,13 @@ jobs:
           test "$GITHUB_REPOSITORY" = OlyForge3D/PrintFarmer
           case "$GITHUB_EVENT_NAME" in workflow_dispatch|schedule) ;; *) exit 1 ;; esac
           case "$GITHUB_WORKFLOW_REF" in
-            OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main) ;;
             OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development) ;;
             *) exit 1 ;;
           esac
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ fromJSON(inputs.transaction).workflowCommit }}
+          path: .release-control
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
@@ -74,11 +72,11 @@ jobs:
       - name: Require validated non-empty release transaction
         env:
           RELEASE_TRANSACTION: ${{ inputs.transaction }}
-        run: node scripts/ci/release-transaction.mjs validate
+        run: node .release-control/scripts/ci/release-transaction.mjs validate
       - name: Verify signed branch-at-authorization evidence
         env:
           GH_TOKEN: ${{ github.token }}
-        uses: ./.github/actions/release-authorization
+        uses: ./.release-control/.github/actions/release-authorization
 
   # ====================
   # JOB 1: Build .NET projects natively
@@ -91,6 +89,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ fromJSON(inputs.identity).sourceCommit }}
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ fromJSON(inputs.transaction).workflowCommit }}
+          path: .release-control
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ fromJSON(inputs.transaction).workflowCommit }}
+          path: .release-control
           persist-credentials: false
 
       - name: Setup .NET
@@ -107,7 +115,7 @@ jobs:
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
-        uses: ./.github/actions/release-authorization
+        uses: ./.release-control/.github/actions/release-authorization
 
       - name: Verify repository version metadata
         env:
@@ -171,35 +179,40 @@ jobs:
       - name: Upload Slicer Host artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: slicer-host-publish-${{ github.run_attempt }}
+          name: slicer-host-publish-${{ github.run_id }}
+          overwrite: true
           path: ./publish/slicer-host
           retention-days: 1
 
       - name: Upload API artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: api-publish-${{ github.run_attempt }}
+          name: api-publish-${{ github.run_id }}
+          overwrite: true
           path: ./publish/api
           retention-days: 1
 
       - name: Upload OrcaSlicer Worker artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: orcaslicer-worker-publish-${{ github.run_attempt }}
+          name: orcaslicer-worker-publish-${{ github.run_id }}
+          overwrite: true
           path: ./publish/orcaslicer-worker
           retention-days: 1
 
       - name: Upload Printer Discovery artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: printer-discovery-publish-${{ github.run_attempt }}
+          name: printer-discovery-publish-${{ github.run_id }}
+          overwrite: true
           path: ./publish/printer-discovery
           retention-days: 1
 
       - name: Upload reviewed license inventory
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: license-inventory-${{ github.run_attempt }}
+          name: license-inventory-${{ github.run_id }}
+          overwrite: true
           path: ./publish/compliance/license-inventory.json
           if-no-files-found: error
           retention-days: 1
@@ -216,12 +229,17 @@ jobs:
         with:
           ref: ${{ fromJSON(inputs.identity).sourceCommit }}
           persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ fromJSON(inputs.transaction).workflowCommit }}
+          path: .release-control
+          persist-credentials: false
 
       - name: Consume canonical frontend identity
         id: frontend_identity
         env:
           GH_TOKEN: ${{ github.token }}
-        uses: ./.github/actions/release-authorization
+        uses: ./.release-control/.github/actions/release-authorization
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
@@ -248,7 +266,8 @@ jobs:
       - name: Upload frontend artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: frontend-build-${{ github.run_attempt }}
+          name: frontend-build-${{ github.run_id }}
+          overwrite: true
           path: src/Web/ReactApp/dist
           retention-days: 1
 
@@ -409,18 +428,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_COMPONENT: ${{ matrix.image }}
-        uses: ./.github/actions/release-authorization
+        uses: ./.release-control/.github/actions/release-authorization
 
       - name: Download artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
-          name: ${{ matrix.artifact }}-${{ github.run_attempt }}
+          name: ${{ matrix.artifact }}-${{ github.run_id }}
           path: ./artifact
 
       - name: Download reviewed license inventory
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
-          name: license-inventory-${{ github.run_attempt }}
+          name: license-inventory-${{ github.run_id }}
           path: ./compliance-artifacts
 
       - name: Set up QEMU
@@ -671,7 +690,8 @@ jobs:
       - name: Upload image SPDX SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: sbom-${{ matrix.image }}-attempt-${{ github.run_attempt }}
+          name: sbom-${{ matrix.image }}-run-${{ github.run_id }}
+          overwrite: true
           path: release-artifacts/*.spdx.json
           if-no-files-found: error
           retention-days: 30
@@ -679,7 +699,8 @@ jobs:
       - name: Upload image digest
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: digest-${{ matrix.image }}-attempt-${{ github.run_attempt }}
+          name: digest-${{ matrix.image }}-run-${{ github.run_id }}
+          overwrite: true
           path: release-artifacts/digest-*.txt
           if-no-files-found: error
           retention-days: 30
@@ -703,6 +724,11 @@ jobs:
         with:
           ref: ${{ fromJSON(inputs.identity).sourceCommit }}
           persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ fromJSON(inputs.transaction).workflowCommit }}
+          path: .release-control
+          persist-credentials: false
 
       - name: Compute full SHA
         id: gitsha
@@ -711,14 +737,14 @@ jobs:
       - name: Download reviewed license inventory
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
-          name: license-inventory-${{ github.run_attempt }}
+          name: license-inventory-${{ github.run_id }}
           path: ./compliance-artifacts
 
       - name: Resolve source metadata
         id: source
         env:
           GH_TOKEN: ${{ github.token }}
-        uses: ./.github/actions/release-authorization
+        uses: ./.release-control/.github/actions/release-authorization
 
       - name: Set up QEMU for multi-arch builds
         uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4
@@ -837,7 +863,8 @@ jobs:
       - name: Upload canonical SPDX SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: sbom-monolith-attempt-${{ github.run_attempt }}
+          name: sbom-monolith-run-${{ github.run_id }}
+          overwrite: true
           path: release-artifacts/*.spdx.json
           if-no-files-found: error
           retention-days: 30
@@ -845,7 +872,8 @@ jobs:
       - name: Upload monolith image digest
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: digest-monolith-attempt-${{ github.run_attempt }}
+          name: digest-monolith-run-${{ github.run_id }}
+          overwrite: true
           path: release-artifacts/digest-monolith.txt
           if-no-files-found: error
           retention-days: 30
@@ -871,11 +899,16 @@ jobs:
         with:
           ref: ${{ fromJSON(inputs.identity).sourceCommit }}
           persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ fromJSON(inputs.transaction).workflowCommit }}
+          path: .release-control
+          persist-credentials: false
 
       - name: Revalidate immutable source tag before publication
         env:
           GH_TOKEN: ${{ github.token }}
-        uses: ./.github/actions/release-authorization
+        uses: ./.release-control/.github/actions/release-authorization
 
       - name: Obtain protected publisher app token
         id: publisher
@@ -885,6 +918,8 @@ jobs:
           private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
           permission-contents: write
           permission-checks: read
+          permission-statuses: read
+          permission-administration: read
           permission-actions: read
 
       - name: Setup Node.js
@@ -895,20 +930,20 @@ jobs:
       - name: Download image digests
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
-          pattern: digest-*-attempt-${{ github.run_attempt }}
+          pattern: digest-*-run-${{ github.run_id }}
           path: artifacts
 
       - name: Download image SPDX SBOMs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
-          pattern: sbom-*-attempt-${{ github.run_attempt }}
+          pattern: sbom-*-run-${{ github.run_id }}
           path: artifacts
 
       - name: Normalize only this attempt's verified artifact paths
         run: |
           shopt -s nullglob
-          for directory in artifacts/*-attempt-"$GITHUB_RUN_ATTEMPT"; do
-            target="${directory%-attempt-$GITHUB_RUN_ATTEMPT}"
+          for directory in artifacts/*-run-"$GITHUB_RUN_ID"; do
+            target="${directory%-run-$GITHUB_RUN_ID}"
             test ! -e "$target"
             mv "$directory" "$target"
           done
@@ -959,6 +994,20 @@ jobs:
               --certificate-identity "$CERTIFICATE_IDENTITY" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com
           done
+
+      - name: Validate complete set and all revocable controls before publication
+        id: preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
+          RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+          RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
+          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+        run: |
+          set -euo pipefail
+          node .release-control/scripts/ci/release-set.mjs inspect
+          node .release-control/scripts/ci/release-control.mjs preflight
 
       - name: Resolve promotion tags
         id: tags
@@ -1022,7 +1071,6 @@ jobs:
           VERSION: ${{ fromJSON(inputs.identity).sourceTag }}
         run: |
           set -euo pipefail
-          node scripts/ci/release-set.mjs inspect
           mkdir -p release-assets
           node scripts/compliance/create-source-bundle.mjs \
             --revision "${{ fromJSON(inputs.identity).sourceCommit }}" \
@@ -1161,7 +1209,7 @@ jobs:
           done
 
       - name: Promote validated digests
-        run: node scripts/ci/release-set.mjs tag
+        run: node .release-control/scripts/ci/release-set.mjs tag
 
       - name: Compare-and-set complete channel candidate last
         id: advance
@@ -1169,13 +1217,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
           RELEASE_TRANSACTION: ${{ inputs.transaction }}
-          RELEASE_VERIFIED_BRANCH_HEAD: ${{ inputs.verified_branch_head }}
-        run: node scripts/ci/release-control.mjs advance
+          RELEASE_VERIFIED_BRANCH_HEAD: ${{ steps.preflight.outputs.verified_branch_head }}
+          RELEASE_EXPECTED_POINTER: ${{ steps.preflight.outputs.expected_pointer }}
+          RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+          RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
+        run: node .release-control/scripts/ci/release-control.mjs advance
 
       - name: Export identity prerequisite for signed-manifest consumer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: release-identity-and-complete-set-${{ github.run_attempt }}
+          name: release-identity-and-complete-set-${{ github.run_id }}
+          overwrite: true
           path: |
             .artifacts/release-authorization/release-identity.json
             .artifacts/release-authorization/release-identity.bundle.json

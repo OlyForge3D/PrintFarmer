@@ -30,7 +30,8 @@ export function canonicalAuthorizationFixture(sha, channel, mode) {
   const reviewer = mode === 'single-maintainer' ? 'jpapiez' : 'native-reviewer';
   const stamp = at(22);
   const status = { id: 1, context: releaseReviewStatus, state: 'success',
-    creator: { login: 'github-actions[bot]' }, target_url: runs[2].html_url, created_at: at(8),
+    creator: { login: 'github-actions[bot]' }, target_url: runs[2].html_url,
+    created_at: at(8), updated_at: at(8),
     description: qualificationDescription({ approvalMode: mode, sourceCommit: sha }) };
   const values = new Map([
     ['', { full_name: repository, default_branch: 'development' }],

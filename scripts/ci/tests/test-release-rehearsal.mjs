@@ -45,11 +45,13 @@ const denied = operation => response({ message: `Repository rule violations foun
 function fixture() {
   const calls = [];
   const { values, status } = canonicalAuthorizationFixture(sha, 'insider', 'single-maintainer');
+  const completedAt = new Date(Date.now() - 8 * 60_000).toISOString();
   values.set('', { full_name: repository, default_branch: 'development', permissions: { push: true } });
   const checks = [...releaseRequiredChecks, ...canonicalValidationChecks].filter(name => name !== releaseReviewStatus);
   values.set(`commits/${sha}/check-runs?per_page=100`, {
     total_count: checks.length, check_runs: checks.map((name, index) => ({
       id: index + 1, name, head_sha: sha, status: 'completed', conclusion: 'success',
+      started_at: completedAt, completed_at: completedAt,
       check_suite: { id: 100 }, app: { slug: 'github-actions', id: 99 },
       url: `https://api.github.com/repos/${repository}/check-runs/${index + 1}`,
     })),

@@ -9,7 +9,9 @@ import {
 
 export const qualificationPath = '.artifacts/release-transaction/qualification.json';
 export const rehearsalReceiptPath = '.artifacts/release-transaction/rehearsal-receipt.json';
+export const transactionPath = '.artifacts/release-transaction/transaction.json';
 export const qualificationLifetimeMs = 30 * 60 * 1000;
+export const evidenceLifetimeMs = 24 * 60 * 60 * 1000;
 export const qualificationJobNamespace = 'Automatic exact-source qualification';
 const controlWorkflow = '.github/workflows/consolidated-release.yml';
 const shaPattern = /^[a-f0-9]{40}$/;
@@ -30,6 +32,12 @@ function timestamp(value, description) {
   return Date.parse(value);
 }
 
+function freshEvidenceTimestamp(value, description, now, notBefore = now - evidenceLifetimeMs) {
+  const parsed = timestamp(value, description);
+  requireThat(parsed >= notBefore && parsed <= now, `${description} is stale, future-dated, or post-collection`);
+  return parsed;
+}
+
 function completeList(value, field, description) {
   requireThat(Number.isSafeInteger(value?.total_count) && value.total_count >= 0 &&
     Array.isArray(value[field]) && value[field].length === value.total_count,
@@ -39,18 +47,33 @@ function completeList(value, field, description) {
 
 export async function selectTransaction(env = process.env, api = githubClient(env.GH_TOKEN)) {
   requireThat(env.GITHUB_REPOSITORY === repository &&
-    env.GITHUB_EVENT_NAME === 'workflow_dispatch' &&
-    env.GITHUB_RUN_ATTEMPT === '1', 'Untrusted release dispatch or rerun');
+    env.GITHUB_EVENT_NAME === 'workflow_dispatch', 'Untrusted release dispatch');
+  requireString(env.GITHUB_RUN_ATTEMPT, positivePattern, 'run attempt');
   const channel = env.RELEASE_CHANNEL;
   const branch = channelBranch(channel);
   const mode = env.RELEASE_MODE;
   requireThat(['release', 'rehearsal'].includes(mode), 'Invalid release mode');
   requireString(env.GITHUB_SHA, shaPattern, 'workflow commit');
   requireString(env.GITHUB_WORKFLOW_SHA, shaPattern, 'workflow definition commit');
-  requireThat(env.GITHUB_REF === `refs/heads/${branch}` &&
-    env.GITHUB_WORKFLOW_REF === `${repository}/${controlWorkflow}@refs/heads/${branch}` &&
+  requireThat(env.GITHUB_REF === 'refs/heads/development' &&
+    env.GITHUB_WORKFLOW_REF === `${repository}/${controlWorkflow}@refs/heads/development` &&
     env.GITHUB_WORKFLOW_SHA === env.GITHUB_SHA,
-  'Dispatch must use the trusted release-control workflow on development');
+  'Dispatch must use the immutable release-control workflow on development');
+  if (env.GITHUB_RUN_ATTEMPT !== '1') {
+    let recovered;
+    try {
+      recovered = validateTransaction(JSON.parse(readFileSync(transactionPath, 'utf8')));
+    } catch {
+      throw new Error('Rerun recovery transaction is missing or malformed');
+    }
+    requireThat(recovered.runId === env.GITHUB_RUN_ID && recovered.runAttempt === '1' &&
+      recovered.channel === channel && recovered.mode === mode &&
+      recovered.workflowCommit === env.GITHUB_WORKFLOW_SHA &&
+      recovered.approvalMode === env.RELEASE_APPROVAL_MODE,
+    'Rerun recovery transaction does not match the immutable original dispatch');
+    await verifyCanonicalSource(api, recovered.sourceBranch, recovered.sourceCommit);
+    return recovered;
+  }
   const observedBranchHead = await branchHead(api, branch);
   const requested = env.RELEASE_SOURCE_SHA?.trim();
   let sourceCommit = observedBranchHead;
@@ -65,7 +88,7 @@ export async function selectTransaction(env = process.env, api = githubClient(en
     sourceCommit = requested;
   }
   validateApprovalMode(env.RELEASE_APPROVAL_MODE);
-  return {
+  const transaction = {
     kind: 'release-transaction',
     schema: 2,
     repository,
@@ -74,12 +97,13 @@ export async function selectTransaction(env = process.env, api = githubClient(en
     sourceBranch: branch,
     sourceCommit,
     observedBranchHead,
-    workflowIdentity: `${repository}/${controlWorkflow}@refs/heads/${branch}`,
+    workflowIdentity: `${repository}/${controlWorkflow}@refs/heads/development`,
     workflowCommit: env.GITHUB_WORKFLOW_SHA,
     runId: env.GITHUB_RUN_ID,
     runAttempt: env.GITHUB_RUN_ATTEMPT,
     approvalMode: env.RELEASE_APPROVAL_MODE,
   };
+  return transaction;
 }
 
 export function validateTransaction(value) {
@@ -93,7 +117,8 @@ export function validateTransaction(value) {
   'Invalid release transaction identity');
   const branch = channelBranch(value.channel);
   requireThat(value.sourceBranch === branch &&
-    value.workflowIdentity === `${repository}/${controlWorkflow}@refs/heads/${branch}`,
+    value.workflowIdentity === `${repository}/${controlWorkflow}@refs/heads/development` &&
+    value.runAttempt === '1',
   'Invalid release transaction branch binding');
   for (const field of ['sourceCommit', 'observedBranchHead', 'workflowCommit']) {
     requireString(value[field], shaPattern, `transaction ${field}`);
@@ -115,17 +140,17 @@ async function requiredCheckPolicy(api, transaction) {
     Array.isArray(rule.parameters.required_status_checks)),
   'Owner blocker: canonical branch required checks are not strict');
   const required = policies.flatMap(rule => rule.parameters.required_status_checks);
-  requireThat([...releaseRequiredChecks, ...canonicalValidationChecks].every(name =>
+  requireThat(releaseRequiredChecks.every(name =>
     required.some(rule => rule?.context === name)),
-  'Owner blocker: live canonical branch policy is missing release qualification checks');
-  return required;
+  'Owner blocker: live canonical branch policy is missing genuine source-commit checks');
+  return required.filter(rule => releaseRequiredChecks.includes(rule.context));
 }
 
-function matchingJob(jobs, name, transaction) {
+function matchingJob(jobs, name, transaction, executionAttempt) {
   const matches = jobs.filter(job =>
     (job.name === name || job.name === `${qualificationJobNamespace} / ${name}`) &&
     String(job.run_id) === transaction.runId &&
-    String(job.run_attempt) === transaction.runAttempt &&
+    String(job.run_attempt) === executionAttempt &&
     job.status === 'completed' && job.conclusion === 'success');
   requireThat(matches.length === 1, `Required qualification job missing or ambiguous: ${name}`);
   return matches[0];
@@ -135,28 +160,40 @@ export async function verifyTransactionQualification(
   transaction,
   api = githubClient(process.env.GH_TOKEN),
   now = Date.now(),
+  executionAttempt = process.env.GITHUB_RUN_ATTEMPT || transaction.runAttempt,
 ) {
   validateTransaction(transaction);
+  requireString(executionAttempt, positivePattern, 'qualification execution attempt');
   const currentHead = await verifyCanonicalSource(api, transaction.sourceBranch, transaction.sourceCommit);
   const run = await api(`actions/runs/${transaction.runId}`);
   const definition = await api('actions/workflows/consolidated-release.yml');
   requireThat(String(run.id) === transaction.runId &&
-    String(run.run_attempt) === transaction.runAttempt &&
+    String(run.run_attempt) === executionAttempt &&
     run.path === controlWorkflow && run.workflow_id === definition.id &&
     definition.path === controlWorkflow && definition.state === 'active' &&
     run.repository?.full_name === repository && run.head_repository?.full_name === repository &&
-    run.head_branch === transaction.sourceBranch && run.head_sha === transaction.workflowCommit &&
+    run.head_branch === 'development' && run.head_sha === transaction.workflowCommit &&
     run.event === 'workflow_dispatch' && run.html_url ===
       `https://github.com/${repository}/actions/runs/${transaction.runId}` &&
     ['in_progress', 'completed'].includes(run.status) &&
     (run.status !== 'completed' || run.conclusion === 'success'),
   'Untrusted, moved, failed, or rerun release transaction');
+  const runStartedAt = freshEvidenceTimestamp(run.run_started_at, 'qualification run start', now);
+  const runCompletedAt = timestamp(run.updated_at, 'qualification run update');
+  requireThat(runCompletedAt >= runStartedAt && runCompletedAt <= now,
+    'Qualification run timestamps are reversed or post-collection');
   const jobs = completeList(
-    await api(`actions/runs/${transaction.runId}/attempts/${transaction.runAttempt}/jobs?per_page=100`),
+    await api(`actions/runs/${transaction.runId}/attempts/${executionAttempt}/jobs?per_page=100`),
     'jobs',
     'Release transaction jobs',
   );
-  const selectedJobs = requiredQualificationJobs.map(name => matchingJob(jobs, name, transaction));
+  const selectedJobs = requiredQualificationJobs.map(name => matchingJob(jobs, name, transaction, executionAttempt));
+  for (const job of selectedJobs) {
+    const started = freshEvidenceTimestamp(job.started_at, `${job.name} start`, now, runStartedAt);
+    const completed = timestamp(job.completed_at, `${job.name} completion`);
+    requireThat(completed >= started && completed <= now,
+      `Qualification job timestamps are reversed or post-collection: ${job.name}`);
+  }
   const checks = completeList(
     await api(`commits/${transaction.workflowCommit}/check-runs?per_page=100`),
     'check_runs',
@@ -170,12 +207,19 @@ export async function verifyTransactionQualification(
       check.name === job.name && check.head_sha === transaction.workflowCommit &&
       check.check_suite?.id === run.check_suite_id && check.app?.slug === 'github-actions' &&
       check.status === 'completed' && check.conclusion === 'success' &&
-      check.url === job.check_run_url);
+      check.url === job.check_run_url &&
+      freshEvidenceTimestamp(check.completed_at, `${job.name} check completion`, now, runStartedAt) <= now);
     requireThat(matching.length === 1, `Qualification check-suite binding failed: ${job.name}`);
-    return { name: job.name, url: job.html_url ?? run.html_url };
+    return {
+      name: job.name,
+      url: job.html_url ?? run.html_url,
+      startedAt: job.started_at,
+      completedAt: job.completed_at,
+      checkCompletedAt: matching[0].completed_at,
+    };
   });
   const required = await requiredCheckPolicy(api, transaction);
-  const sourceEvidence = await verifyReleaseChecks(api, transaction.sourceCommit, required);
+  const sourceEvidence = await verifyReleaseChecks(api, transaction.sourceCommit, required, now, evidenceLifetimeMs);
   const checkedAt = new Date(now).toISOString();
   return {
     kind: 'release-qualification',
@@ -186,9 +230,11 @@ export async function verifyTransactionQualification(
     qualifiedBranchHead: currentHead,
     run: {
       id: transaction.runId,
-      attempt: transaction.runAttempt,
+      attempt: executionAttempt,
       checkSuiteId: String(run.check_suite_id),
       url: run.html_url,
+      startedAt: run.run_started_at,
+      completedAt: run.updated_at,
     },
     jobs: jobLinks,
     sourceEvidence,
@@ -214,15 +260,29 @@ export function validateQualificationReceipt(value, transaction, requiredMode, n
   'Qualification receipt is expired, future-dated, or has an invalid lifetime');
   requireString(value.qualifiedBranchHead, shaPattern, 'qualified branch HEAD');
   requireThat(value.run?.id === transaction.runId &&
-    value.run.attempt === transaction.runAttempt &&
+    typeof value.run.attempt === 'string' && positivePattern.test(value.run.attempt) &&
     value.run.checkSuiteId && value.run.url ===
       `https://github.com/${repository}/actions/runs/${transaction.runId}`,
   'Qualification run binding mismatch');
+  requireThat(timestamp(value.run.startedAt, 'qualification receipt run start') <=
+    timestamp(value.run.completedAt, 'qualification receipt run completion') &&
+    timestamp(value.run.completedAt, 'qualification receipt run completion') <= checkedAt,
+  'Qualification receipt run timestamps are reversed or post-collection');
   requireThat(Array.isArray(value.jobs) && value.jobs.length === requiredQualificationJobs.length &&
-    value.jobs.every(job => typeof job?.name === 'string' && typeof job?.url === 'string'),
+    value.jobs.every(job => typeof job?.name === 'string' && typeof job?.url === 'string' &&
+      timestamp(job.startedAt, `${job.name} receipt start`) <=
+        timestamp(job.completedAt, `${job.name} receipt completion`) &&
+      timestamp(job.checkCompletedAt, `${job.name} receipt check completion`) <= checkedAt),
   'Incomplete qualification job evidence');
   requireThat(value.sourceEvidence?.sourceCommit === transaction.sourceCommit &&
-    Array.isArray(value.sourceEvidence.checks),
+    timestamp(value.sourceEvidence.collectedAt, 'source evidence collection') === checkedAt &&
+    Array.isArray(value.sourceEvidence.checks) &&
+    value.sourceEvidence.checks.length === releaseRequiredChecks.length &&
+    value.sourceEvidence.checks.every(item =>
+      releaseRequiredChecks.includes(item?.context) &&
+      (!item.completedAt || timestamp(item.completedAt, `${item.context} completion`) <= checkedAt) &&
+      (!item.createdAt || timestamp(item.createdAt, `${item.context} creation`) <= checkedAt) &&
+      (!item.updatedAt || timestamp(item.updatedAt, `${item.context} update`) <= checkedAt)),
   'Qualification source evidence mismatch');
   return value;
 }
@@ -270,6 +330,8 @@ async function main() {
   requireThat(['select', 'validate', 'qualify', 'rehearse'].includes(operation), 'Unknown release transaction operation');
   if (operation === 'select') {
     const transaction = await selectTransaction();
+    mkdirSync('.artifacts/release-transaction', { recursive: true });
+    writeFileSync(transactionPath, `${JSON.stringify(transaction, undefined, 2)}\n`, { mode: 0o600 });
     process.stdout.write(`${JSON.stringify(transaction)}\n`);
     return;
   }

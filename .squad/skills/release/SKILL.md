@@ -8,7 +8,10 @@ confidence: high
 
 Read [the release guide](../../../docs/RELEASE_GUIDE.md) before attempting
 publication. `.github/workflows/consolidated-release.yml` is the sole server
-release entry point: stable runs on `main`, insider on `development`.
+release entry point. Stable selects source from `main`; insider selects source
+from `development`.
+The workflow itself is always dispatched from `development`; the selected
+channel determines whether build source is pinned from `main` or `development`.
 Branch pushes, direct tag pushes and stabilization branches do not publish.
 The reusable Docker workflow is an authorized consumer, not a second entry point.
 
@@ -25,8 +28,8 @@ The reusable Docker workflow is an authorized consumer, not a second entry point
 
 ## Publication
 
-Dispatch `consolidated-release.yml` on the selected canonical branch with the
-matching channel. Leave `source_sha` blank to pin the branch HEAD once or enter
+Dispatch `consolidated-release.yml` only from `development` and select the
+matching channel. Leave `source_sha` blank to pin that channel branch HEAD once or enter
 that full SHA or a trusted ancestor. The workflow definition commit remains a
 separate binding. Select `release`; do not provide a version,
 tag, allocator value, CI run ID, comment ID or formatted attestation. Approve
@@ -34,11 +37,12 @@ the single `release-<channel>` transaction environment. The workflow starts
 canonical qualification, collects evidence, allocates identity and publishes
 automatically.
 
-Qualification receipts are bound to the dispatch run/attempt, workflow commit,
-GitHub Actions check suite, namespaced jobs, exact source checks and live branch
-policy. They expire after 30 minutes and are reverified after approval.
+Qualification receipts are bound to the dispatch run, immutable attempt-one
+transaction, workflow commit, GitHub Actions check suite, namespaced jobs,
+exact source checks, evidence timestamps and live branch policy. They expire
+after 30 minutes and are reverified after approval.
 `release-publisher-<channel>` must already exist with no reviewers, no
-administrator bypass, and only the channel's canonical branch.
+administrator bypass, and only the immutable `development` control branch.
 
 Follow that run through authorization, immutable source/tag/assets and complete
 image-set verification. A successful source-only release is not a managed-update
@@ -60,7 +64,8 @@ snapshot, tag creation, force push, release creation or asset/container upload.
 Do not restore their former dual-history or `--clean-history` behavior.
 
 Never bypass a denial with manual canonical tags, GitHub release commands,
-history rewrites or counter resets. Exact existing reservations may retry
-without changing their identity; new attempts cannot reuse a reserved stable
-identity. Follow the release guide's owner-only continuity recovery procedure
-when evidence is missing or invalid.
+history rewrites or counter resets. Same-run reruns recover the immutable
+attempt-one transaction and exact existing reservation bytes. Missing or
+mismatched recovery artifacts fail closed; reruns never allocate a second
+identity or skip qualification/approval. Follow the release guide's owner-only
+continuity recovery procedure when evidence is missing or invalid.

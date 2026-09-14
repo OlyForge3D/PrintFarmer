@@ -91,7 +91,7 @@ export function admit(context, selectedHead, versionText, lastStable) {
   requireObject(context, 'release admission context');
   requireThat(context.repository === repository, 'Untrusted repository');
   requireThat(['workflow_dispatch', 'schedule'].includes(context.event), 'Event cannot authorize publication');
-  requireThat(context.workflowIdentity === `${repository}/${workflow}@refs/heads/${context.workflowBranch}`,
+  requireThat(context.workflowIdentity === `${repository}/${workflow}@refs/heads/development`,
     'Untrusted workflow/caller identity');
   requireString(context.workflowSha, shaPattern, 'workflow commit');
   if (context.observedBranchHead === undefined) {
@@ -100,8 +100,8 @@ export function admit(context, selectedHead, versionText, lastStable) {
   const channel = context.event === 'schedule' ? 'insider' : context.channel;
   const sourceBranch = channel === 'stable' ? 'main' : 'development';
   requireThat(['stable', 'insider'].includes(channel), 'Invalid channel');
-  requireThat(context.ref === `refs/heads/${sourceBranch}`, 'Branch/channel mismatch');
-  requireThat(context.workflowBranch === sourceBranch, 'Workflow/source branch mismatch');
+  requireThat(context.ref === 'refs/heads/development', 'Release control must run from development');
+  requireThat(context.workflowBranch === 'development', 'Workflow definition must remain on development');
   requireThat(shaPattern.test(selectedHead) && context.eventSha === selectedHead,
     'Source transaction does not match the pinned canonical HEAD selection at admission');
   const authorizedBranchHead = context.observedBranchHead ?? selectedHead;
@@ -132,7 +132,7 @@ export function admit(context, selectedHead, versionText, lastStable) {
 
 export function allocationKey(admission) {
   return hash([admission.repository, admission.workflowIdentity, admission.buildId,
-    admission.buildAttempt, admission.sourceCommit, admission.baseVersion]);
+    admission.channel, admission.stage ?? '', admission.sourceCommit, admission.baseVersion]);
 }
 
 const admissionFields = [
@@ -151,7 +151,7 @@ export function validateAdmission(admission) {
   requireThat(parseTag(`v${admission.baseVersion}`).channel === 'stable', 'Invalid ledger admission base version');
   const branch = admission.channel === 'stable' ? 'main' : 'development';
   requireThat(admission.sourceBranch === branch &&
-    admission.workflowIdentity === `${repository}/${workflow}@refs/heads/${branch}`,
+    admission.workflowIdentity === `${repository}/${workflow}@refs/heads/development`,
   'Invalid ledger admission workflow/branch');
   for (const field of ['sourceCommit', 'authorizedBranchHead', 'workflowCommit']) {
     requireString(admission[field], shaPattern, `ledger admission ${field}`);
@@ -212,7 +212,7 @@ export function validatePublicAuthorization(identity) {
   'Invalid public authorization canonical identity');
   const branch = identity.channel === 'stable' ? 'main' : 'development';
   requireThat(identity.sourceBranch === branch &&
-    identity.workflowIdentity === `${repository}/${workflow}@refs/heads/${branch}`,
+    identity.workflowIdentity === `${repository}/${workflow}@refs/heads/development`,
   'Invalid public authorization workflow/branch');
   for (const field of ['sourceCommit', 'authorizedBranchHead']) {
     requireString(identity[field], shaPattern, `public authorization ${field}`);
@@ -368,8 +368,8 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
   requireThat(environment.can_admins_bypass === false,
     'Owner blocker: publishing environment must explicitly disable administrator bypass');
   requireThat(policies?.branch_policies?.length === 1 &&
-    policies.branch_policies[0].name === branch && policies.branch_policies[0].type === 'branch',
-  'Owner blocker: publishing environment must allow only its canonical branch');
+    policies.branch_policies[0].name === 'development' && policies.branch_policies[0].type === 'branch',
+  'Owner blocker: publishing environment must allow only the immutable release-control branch');
   const reviewerRules = Array.isArray(environment.protection_rules)
     ? environment.protection_rules.filter(rule => rule.type === 'required_reviewers') : [];
   requireThat(reviewerRules.length === 1 && Array.isArray(reviewerRules[0].reviewers) &&
@@ -393,9 +393,9 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
     publisherEnvironment.protection_rules.length === 0,
   'Owner blocker: publisher environment must be pre-created, branch-restricted, non-bypassable, and reviewer-free');
   requireThat(publisherBranchPolicies?.branch_policies?.length === 1 &&
-    publisherBranchPolicies.branch_policies[0].name === branch &&
+    publisherBranchPolicies.branch_policies[0].name === 'development' &&
     publisherBranchPolicies.branch_policies[0].type === 'branch',
-  'Owner blocker: publisher environment must allow only its canonical branch');
+  'Owner blocker: publisher environment must allow only the immutable release-control branch');
   for (const name of ['release-canonical-tags', 'release-ledger-continuity',
     'release-tag-creators', 'release-ledger-writer']) {
     const rule = rulesets.find(item => item.name === name && item.enforcement === 'active');
@@ -642,7 +642,10 @@ export function validateReservationAdmission(state, admission) {
   validateAdmission(admission);
   const existing = state.reservations[allocationKey(admission)];
   if (existing) {
-    requireThat(hash(existing.admission) === hash(admission), 'Same allocation key changed its admission');
+    const retryIdentity = value => Object.fromEntries(
+      Object.entries(value).filter(([key]) => key !== 'buildAttempt'));
+    requireThat(hash(retryIdentity(existing.admission)) === hash(retryIdentity(admission)),
+      'Same allocation key changed its admission');
     return existing;
   }
   const stableFloor = state.pointers.stable?.canonicalVersion ?? state.lastHistoricalStable;
@@ -703,17 +706,17 @@ export function verifyConsumer(record, stored, context, identitySha256 = hash(st
     record.releaseId === `${tag.channel}:${tag.canonicalVersion}` &&
     record.allocationKey === allocationKey(record) &&
     shaPattern.test(record.sourceCommit) && shaPattern.test(record.workflowCommit) &&
-    record.workflowIdentity === `${repository}/${workflow}@refs/heads/${record.sourceBranch}`,
+    record.workflowIdentity === `${repository}/${workflow}@refs/heads/development`,
   'Invalid canonical record identity');
   requireThat(context.repository === repository &&
     context.workflowIdentity === record.workflowIdentity &&
     context.workflowSha === record.workflowCommit &&
     context.eventSha === record.sourceCommit &&
-    context.ref === `refs/heads/${record.sourceBranch}` &&
+    context.ref === 'refs/heads/development' &&
     shaPattern.test(record.authorizedBranchHead) &&
     record.sourceBranch === (record.channel === 'stable' ? 'main' : 'development') &&
     ['stable', 'insider'].includes(record.channel) &&
-    context.buildId === record.buildId && context.buildAttempt === record.buildAttempt &&
+    context.buildId === record.buildId &&
     ['workflow_dispatch', 'schedule'].includes(context.event),
   'Unauthorized consumer/caller/run/attempt');
 }
@@ -747,7 +750,7 @@ export function advance(state, record, set, currentHead, expectedPointer) {
   validateLedger(state, state.anchor);
   validateRecord(record);
   validateCompleteSet(record, set);
-  requireThat(record.sourceCommit === currentHead, 'Stale source cannot advance channel, regardless of N');
+  requireString(currentHead, shaPattern, 'verified canonical branch HEAD');
   const reservation = state.reservations[record.allocationKey];
   requireThat(reservation && (reservation.identitySha256 || hash(reservation.record)) === hash(record), 'Unknown authorization');
   const pointer = state.pointers[record.channel];

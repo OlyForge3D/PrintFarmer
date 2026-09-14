@@ -10,7 +10,7 @@ on:
         default: stable
         required: true
       source_sha:
-        description: Optional full canonical-branch HEAD SHA; blank pins the selected branch HEAD once
+        description: Optional full selected-channel ancestor SHA; blank pins that branch HEAD once
         type: string
         required: false
       mode:
@@ -37,7 +37,7 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: Dispatch the same authority on development
+      - name: Dispatch the fixed release authority on development
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -67,6 +67,14 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
+      - name: Recover immutable original transaction for a same-run rerun
+        if: github.run_attempt > 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh run download "$GITHUB_RUN_ID"
+          --name "release-transaction-${GITHUB_RUN_ID}-1"
+          --dir .artifacts/release-transaction
       - name: Resolve and bind canonical source once
         id: select
         env:
@@ -87,6 +95,13 @@ jobs:
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
         run: node scripts/ci/release-control.mjs admit
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: release-transaction-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/release-transaction/transaction.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
 
   qualification:
     name: Automatic exact-source qualification
@@ -115,7 +130,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ fromJSON(needs.admit.outputs.transaction).workflowCommit }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
@@ -134,7 +149,8 @@ jobs:
           echo "expires_at=$(jq -r '.expiresAt' .artifacts/release-transaction/qualification.json)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: release-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          name: release-qualification-${{ github.run_id }}
+          overwrite: true
           path: .artifacts/release-transaction/qualification.json
           include-hidden-files: true
           if-no-files-found: error
@@ -159,18 +175,41 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ fromJSON(needs.admit.outputs.transaction).workflowCommit }}
           fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ needs.admit.outputs.source_sha }}
+          path: source
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
-          name: release-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          name: release-qualification-${{ github.run_id }}
           path: .artifacts/release-transaction
-      - name: Check sole authored version base
+      - name: Check selected source version base
+        working-directory: source
         run: bash scripts/sync-monorepo-version.sh --check
+      - name: Recover immutable authorization bytes when an earlier attempt reserved identity
+        if: github.run_attempt > 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          artifact_name="$(
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+              --jq '[.artifacts[] |
+                select(.expired == false and (.name | startswith("release-authorization-")))] |
+                sort_by(.created_at) | .[0].name // empty'
+          )"
+          if [ -n "$artifact_name" ]; then
+            gh run download "$GITHUB_RUN_ID" \
+              --name "$artifact_name" \
+              --dir .artifacts/release-authorization
+          fi
       - name: Obtain protected publisher app token
         id: publisher
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2
@@ -192,6 +231,7 @@ jobs:
           RELEASE_ADMITTED_APPROVAL_MODE: ${{ needs.admit.outputs.approval_mode }}
           RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
           RELEASE_TRANSACTION: ${{ needs.admit.outputs.transaction }}
+          RELEASE_SOURCE_COMMIT: ${{ needs.admit.outputs.source_sha }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
         run: node scripts/ci/release-control.mjs authorize
       - name: Install Cosign
@@ -228,24 +268,24 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ fromJSON(needs.admit.outputs.transaction).workflowCommit }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
-          name: release-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          name: release-qualification-${{ github.run_id }}
           path: .artifacts/release-transaction
-      - name: Create typed non-release receipt
-        env:
-          RELEASE_TRANSACTION: ${{ needs.admit.outputs.transaction }}
-        run: node scripts/ci/release-transaction.mjs rehearse
       - name: Exercise bounded non-publishing controls
         run: >-
           node --test
           scripts/ci/tests/test-release-transaction.mjs
           scripts/ci/tests/test-release-rehearsal.mjs
+      - name: Create typed non-release receipt after bounded controls pass
+        env:
+          RELEASE_TRANSACTION: ${{ needs.admit.outputs.transaction }}
+        run: node scripts/ci/release-transaction.mjs rehearse
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: release-rehearsal-${{ github.run_id }}-${{ github.run_attempt }}
@@ -266,7 +306,6 @@ jobs:
     with:
       identity: ${{ needs.authorize.outputs.public_identity }}
       transaction: ${{ needs.admit.outputs.transaction }}
-      verified_branch_head: ${{ needs.authorize.outputs.verified_branch_head }}
     secrets: inherit
 
   diagnostics:

@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   workflow_call:
     inputs:
       release_qualification:
@@ -44,8 +45,9 @@ jobs:
   canonical-path-casing:
     name: >-
       ${{ inputs.release_qualification &&
+      'path-casing' || github.event_name == 'workflow_dispatch' &&
       'path-casing' || 'Canonical path casing (not selected)' }}
-    if: inputs.release_qualification
+    if: inputs.release_qualification || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -65,8 +67,9 @@ jobs:
   canonical-contract-drift:
     name: >-
       ${{ inputs.release_qualification &&
+      'Contract drift gate' || github.event_name == 'workflow_dispatch' &&
       'Contract drift gate' || 'Canonical contract drift (not selected)' }}
-    if: inputs.release_qualification
+    if: inputs.release_qualification || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -114,8 +117,9 @@ jobs:
   canonical-ios-build:
     name: >-
       ${{ inputs.release_qualification &&
+      'Build (iOS)' || github.event_name == 'workflow_dispatch' &&
       'Build (iOS)' || 'Canonical iOS build (not selected)' }}
-    if: inputs.release_qualification
+    if: inputs.release_qualification || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 45
     defaults:
