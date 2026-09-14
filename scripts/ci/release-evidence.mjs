@@ -13,7 +13,13 @@ function sha256(bytes) {
 }
 
 function parseJson(bytes, label) {
-  try { return JSON.parse(bytes); } catch { throw new Error(`Malformed ${label}`); }
+  try { return JSON.parse(bytes); } catch {
+    try {
+      const entries = bytes.trim().split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+      requireThat(entries.length > 0, `Malformed ${label}`);
+      return entries;
+    } catch { throw new Error(`Malformed ${label}`); }
+  }
 }
 
 function canonicalJson(value) {
@@ -64,9 +70,16 @@ function evidenceObject(subject, signatureBytes, attestationBytes, predicateByte
   validateVerification(attestationBytes, subject, 'attestation', predicateBytes);
   const signatureBundle = parseJson(signatureBundleBytes, 'signature bundle');
   const attestationBundle = parseJson(attestationBundleBytes, 'attestation bundle');
-  requireThat((Array.isArray(signatureBundle) ? signatureBundle : [signatureBundle]).length > 0 &&
-    (Array.isArray(attestationBundle) ? attestationBundle : [attestationBundle]).length > 0,
-  'Missing Cosign bundle material');
+  for (const bundle of [signatureBundle, attestationBundle]) {
+    const entries = Array.isArray(bundle) ? bundle : [bundle];
+    requireThat(entries.length > 0 && entries.every(entry =>
+      typeof entry?.payload === 'string' && entry.payload.length > 0 &&
+      entry.optional?.Bundle?.Payload?.integratedTime &&
+      Number.isSafeInteger(entry.optional.Bundle.Payload.integratedTime) &&
+      typeof entry.optional.Bundle.SignedEntryTimestamp === 'string' &&
+      entry.optional.Bundle.SignedEntryTimestamp.length > 0),
+    'Missing Cosign certificate or transparency bundle material');
+  }
   return {
     subject, ...(platform === undefined ? {} : { platform }),
     signature: { sha256: sha256(signatureBytes), bytes: signatureBytes,

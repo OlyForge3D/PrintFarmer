@@ -15,8 +15,8 @@ function signed(subject = digest, predicateValue = predicate) {
       subject: [{ digest: { sha256: subject.slice(7) } }], predicate: predicateValue,
     })).toString('base64') }]),
     predicateBytes: JSON.stringify(predicateValue),
-    signatureBundleBytes: JSON.stringify([{ payload: 'signed-payload', optional: { Bundle: { Payload: { integratedTime: 1780000000 } } } }]),
-    attestationBundleBytes: JSON.stringify([{ payload: 'dsse-payload', optional: { Bundle: { Payload: { integratedTime: 1780000000 } } } }]),
+    signatureBundleBytes: JSON.stringify([{ payload: 'signed-payload', optional: { Bundle: { Payload: { integratedTime: 1780000000 }, SignedEntryTimestamp: 'proof' } } }]),
+    attestationBundleBytes: JSON.stringify([{ payload: 'dsse-payload', optional: { Bundle: { Payload: { integratedTime: 1780000000 }, SignedEntryTimestamp: 'proof' } } }]),
   };
 }
 test('stages validated index and platform crypto evidence', () => {
