@@ -297,12 +297,10 @@ export function releaseManifest(record, set, identitySha256) {
       index: {
         subject: image.digest, signature: { subject: image.digest, signer: publisherWorkflowIdentity },
         sbom: { subject: image.digest, type: 'spdxjson', signer: publisherWorkflowIdentity },
-        provenance: { subject: image.digest, type: 'buildkit', signer: publisherWorkflowIdentity },
       },
       platforms: Object.fromEntries(Object.entries(image.platforms).map(([platform, value]) => [platform, {
         subject: value.digest, signature: { subject: value.digest, signer: publisherWorkflowIdentity },
         sbom: { subject: value.digest, type: 'spdxjson', signer: publisherWorkflowIdentity },
-        provenance: { subject: value.digest, type: 'buildkit', signer: publisherWorkflowIdentity },
       }])),
     },
   ]));
@@ -422,21 +420,19 @@ export function validateReleaseManifest(manifest) {
   for (const [service, image] of Object.entries(manifest.completeSet.images)) {
     const serviceEvidence = evidence.services[service];
     requireKeys(serviceEvidence, ['index', 'platforms'], [], 'release service evidence');
-    requireKeys(serviceEvidence.index, ['subject', 'signature', 'sbom', 'provenance'], [], 'release image evidence');
+    requireKeys(serviceEvidence.index, ['subject', 'signature', 'sbom'], [], 'release image evidence');
     requireThat(serviceEvidence.index.subject === image.digest, 'Release index subject mismatch');
     requireKeys(serviceEvidence.platforms, Object.keys(image.platforms), [], 'release platform evidence');
     for (const [platform, imagePlatform] of Object.entries(image.platforms)) {
       const platformEvidence = serviceEvidence.platforms[platform];
-      requireKeys(platformEvidence, ['subject', 'signature', 'sbom', 'provenance'], [], 'release platform evidence');
+      requireKeys(platformEvidence, ['subject', 'signature', 'sbom'], [], 'release platform evidence');
       requireThat(platformEvidence.subject === imagePlatform.digest, 'Release platform subject mismatch');
       for (const item of [serviceEvidence.index, platformEvidence]) {
         requireKeys(item.signature, ['subject', 'signer'], [], 'release signature evidence');
         requireKeys(item.sbom, ['subject', 'type', 'signer'], [], 'release SBOM evidence');
-        requireKeys(item.provenance, ['subject', 'type', 'signer'], [], 'release provenance evidence');
         requireThat(item.signature.subject === item.subject && item.signature.signer === publisherWorkflowIdentity &&
-          item.sbom.subject === item.subject && item.provenance.subject === item.subject &&
-          item.sbom.type === 'spdxjson' && item.provenance.type === 'buildkit' &&
-          item.sbom.signer === publisherWorkflowIdentity && item.provenance.signer === publisherWorkflowIdentity,
+          item.sbom.subject === item.subject && item.sbom.type === 'spdxjson' &&
+          item.sbom.signer === publisherWorkflowIdentity,
         'Release evidence subject mismatch');
       }
     }

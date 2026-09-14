@@ -410,6 +410,17 @@ jobs:
             --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             "$manifest_dir/release-manifest.envelope.json"
+      - name: Persist signed manifest triplet before public upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: release-manifest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/release-authorization/release-manifest.json
+            .artifacts/release-authorization/release-manifest.envelope.json
+            .artifacts/release-authorization/release-manifest.envelope.bundle.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
       - name: Publish and verify public corresponding-source assets
         working-directory: source
         env:

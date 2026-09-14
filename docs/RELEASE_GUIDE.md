@@ -410,7 +410,7 @@ separately signed `release-manifest.envelope.json` with its Cosign bundle. The
 versioned manifest binds the authorization projection, canonical lifecycle
 (publication, expiry, cadence, release-notes and signing identity), source-tag
 and workflow/build provenance, every immutable image/index and platform digest,
-signature/SBOM/provenance subject and verified trust-policy digest, identity labels, complete
+signature and SPDX SBOM subject and verified trust-policy digest, identity labels, complete
 service/platform compatibility, storage/configuration/template/updater steps,
 provider migration heads, downtime/backup requirements, and rollback strategy.
 The envelope carries the manifest SHA-256 outside the manifest itself, together

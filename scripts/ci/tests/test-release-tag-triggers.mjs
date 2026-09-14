@@ -2429,6 +2429,9 @@ test('every release artifact upload path is explicitly inventoried, including bo
       '.artifacts/release-authorization/public-identity.bundle.json',
     ],
     [
+      manifestPath, manifestEnvelopePath, manifestEnvelopeBundle,
+    ],
+    [
       authorizationPath, authorizationBundle, privateSetPath,
       manifestPath, manifestEnvelopePath, manifestEnvelopeBundle,
     ],
@@ -3771,7 +3774,7 @@ test('executed signing commands preserve signed subjects and never let verificat
     .split('      - uses: actions/upload-artifact')[0].split('        run: |\n')[1]
     .split('\n').map(line => line.replace(/^          /, '')).join('\n');
   const signing = docker.split('      - name: Sign externally-digested complete release manifest\n')[1]
-    .split('      - name: Publish and verify public corresponding-source assets')[0].split('        run: |\n')[1]
+    .split('      - name: Persist signed manifest triplet before public upload')[0].split('        run: |\n')[1]
     .split('\n').map(line => line.replace(/^          /, '')).join('\n');
   const publication = docker.split('\n').filter(line =>
     /^\s+cp \.\.\/\.artifacts\/release-authorization\/public-identity/.test(line))
