@@ -18,6 +18,7 @@ import { NumberStepper } from '@/common/components/ui/NumberStepper';
 import { Textarea } from '@/common/components/ui/Textarea';
 import { Checkbox } from '@/common/components/ui/Checkbox';
 import { toast } from 'sonner';
+import { generateUUID } from '@/utils/uuid';
 import type {
   HarvestJobResponse,
   HarvestOutputRequestItem,
@@ -78,8 +79,13 @@ interface PreviewBinRow {
   binCode: string;
 }
 
-function newRowId(): string {
-  return `row-${Math.random().toString(36).slice(2, 10)}`;
+function newRowId(): string | undefined {
+  try {
+    return generateUUID();
+  } catch (error) {
+    toast.error(`Failed to add harvest row: ${error instanceof Error ? error.message : 'Unable to generate a secure ID'}`);
+    return undefined;
+  }
 }
 
 export function HarvestJobDialog({
@@ -156,7 +162,8 @@ function HarvestJobDialogInner({
   const [partsLoadError, setPartsLoadError] = useState<string | null>(null);
   // One operationKey per dialog open — replay of the same key is idempotent
   // server-side so retries from wrong-bin / mapping fallback do not double-count.
-  const operationKeyRef = useRef<string>(generateHarvestOperationKey());
+  // Lazy initialization avoids minting discarded keys on row edits or retries.
+  const [operationKey] = useState(generateHarvestOperationKey);
   const lastRequestRef = useRef<HarvestJobRequest | null>(null);
   // True once any harvest in this dialog session has succeeded; drives the
   // deferred parent refresh on close (#722 H5).
@@ -217,7 +224,7 @@ function HarvestJobDialogInner({
     (request: HarvestJobRequest) => {
       const augmented: HarvestJobRequest = {
         ...request,
-        operationKey: request.operationKey ?? operationKeyRef.current,
+        operationKey: request.operationKey ?? operationKey,
       };
       lastRequestRef.current = augmented;
       mutation.mutate(
@@ -244,7 +251,8 @@ function HarvestJobDialogInner({
                   message: info.message,
                 });
                 if (manualRows.length === 0) {
-                  setManualRows([{ id: newRowId(), sku: '', quantity: 1, binCode: '' }]);
+                  const id = newRowId();
+                  if (id) setManualRows([{ id, sku: '', quantity: 1, binCode: '' }]);
                 }
                 break;
               case 'featureDisabled':
@@ -257,7 +265,7 @@ function HarvestJobDialogInner({
         },
       );
     },
-    [job.id, manualRows.length, mutation, onHarvested],
+    [job.id, manualRows.length, mutation, onHarvested, operationKey],
   );
 
   const submitPreview = useCallback(() => {
@@ -474,10 +482,12 @@ function HarvestJobDialogInner({
           checked={assignPerSkuBins}
           onChange={(e) => {
             const on = e.target.checked;
-            setAssignPerSkuBins(on);
             if (on && previewBinRows.length === 0) {
-              setPreviewBinRows([{ id: newRowId(), sku: '', binCode: '' }]);
+              const id = newRowId();
+              if (!id) return;
+              setPreviewBinRows([{ id, sku: '', binCode: '' }]);
             }
+            setAssignPerSkuBins(on);
           }}
           label="Assign bins per SKU"
           id="harvest-assign-bins-toggle"
@@ -535,9 +545,11 @@ function HarvestJobDialogInner({
             ))}
             <Button
               variant="secondary"
-              onClick={() =>
-                setPreviewBinRows((rows) => [...rows, { id: newRowId(), sku: '', binCode: '' }])
-              }
+              onClick={() => {
+                const id = newRowId();
+                if (!id) return;
+                setPreviewBinRows((rows) => [...rows, { id, sku: '', binCode: '' }]);
+              }}
             >
               + Add SKU bin
             </Button>
@@ -615,8 +627,11 @@ function HarvestJobDialogInner({
 
   const renderMappingRequired = () => {
     if (step.kind !== 'partMappingRequired') return null;
-    const addRow = () =>
-      setManualRows((rows) => [...rows, { id: newRowId(), sku: '', quantity: 1, binCode: '' }]);
+    const addRow = () => {
+      const id = newRowId();
+      if (!id) return;
+      setManualRows((rows) => [...rows, { id, sku: '', quantity: 1, binCode: '' }]);
+    };
     const removeRow = (id: string) =>
       setManualRows((rows) => rows.filter((r) => r.id !== id));
     const updateRow = (id: string, patch: Partial<ManualOutputRow>) =>

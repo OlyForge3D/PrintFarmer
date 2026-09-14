@@ -22,7 +22,11 @@ describe('formatPrinterModelSubtitle', () => {
     expect(formatPrinterModelSubtitle('  ', '   ')).toBe('Unknown model');
   });
 
-  it('renders both fields together when real manufacturer/model metadata is present', () => {
+  it('does not duplicate a manufacturer already at the beginning of the model', () => {
+    expect(formatPrinterModelSubtitle('Bambu Lab', 'Bambu Lab X1 Carbon')).toBe('Bambu Lab X1 Carbon');
+  });
+
+  it('renders a single manufacturer before a model that does not include it', () => {
     expect(formatPrinterModelSubtitle('Prusa', 'MK4')).toBe('Prusa MK4');
   });
 

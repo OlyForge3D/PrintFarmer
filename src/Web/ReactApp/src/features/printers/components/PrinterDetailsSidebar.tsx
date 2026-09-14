@@ -1,3 +1,6 @@
+import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
+import { PrinterControlsMode, PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
+import { MotionControlButton } from '@/features/printers/components/MotionControlButton';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys, usePrintJobObjects, usePrinter, usePrinterDetails } from '@/common/hooks/useApi';
@@ -49,7 +52,7 @@ import { getStatusHeaderClassName, getStatusIndicatorColor, isPrinterStateShutdo
 // Move, Temperature, Materials/MMU, Spool. DetailedPrinterCard mirrors this
 // order for its shared sections (#1698).
 import { renderUnknown } from '@/common/utils/renderUnknown';
-import { Button, MovementInput, MoveDistanceSlider, CollapsibleSection, LoadedFilamentCard } from '@/common/components/ui';
+import { Button, MoveDistanceSlider, CollapsibleSection, LoadedFilamentCard } from '@/common/components/ui';
 import { ControlPadButton } from '@/common/components/ui/ControlPadButton';
 import {
   DisableMotorsIcon,
@@ -1034,14 +1037,15 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           onToggle={setIsMoveExpanded}
           hideExpandedTitle
         >
-          <div className="flex gap-4 items-start">
+          <PrinterControlsMode />
+          <div className="flex flex-wrap gap-4 items-start">
             {/* XY + Z Pad */}
             <div className="flex flex-col gap-1">
               <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide">Move</div>
               <div className="flex gap-2 items-start">
             <div className="grid grid-cols-3 grid-rows-3 gap-1 w-fit">
               {/* Top row */}
-              <ControlPadButton
+              <MotionControlButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleHome('all')}
                 title="Home all axes"
@@ -1050,15 +1054,15 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 style={getHomeButtonStyle(isHomedStateKnown, isAllHomed).style}
               >
                 <HomeIcon className="h-4 w-4" />
-              </ControlPadButton>
-              <ControlPadButton
+              </MotionControlButton>
+              <MotionControlButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('Y', step)}
                 aria-label="Jog Y positive"
                 padSize="small"
               >
                 <ArrowUpIcon className="h-4 w-4" />
-              </ControlPadButton>
+              </MotionControlButton>
               <ControlPadButton
                 disabled={controlActionPending || !canDisableMotorsNow}
                 onClick={() => handleControlAction('disable-motors')}
@@ -1069,15 +1073,15 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               </ControlPadButton>
 
               {/* Middle row */}
-              <ControlPadButton
+              <MotionControlButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('X', -step)}
                 aria-label="Jog X negative"
                 padSize="small"
               >
                 <ArrowLeftIcon className="h-4 w-4" />
-              </ControlPadButton>
-              <ControlPadButton
+              </MotionControlButton>
+              <MotionControlButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleHome('xy')}
                 title="Home X/Y"
@@ -1086,40 +1090,40 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 style={getHomeButtonStyle(isHomedStateKnown, isXYHomed).style}
               >
                 <HomeIcon className="h-4 w-4" />
-              </ControlPadButton>
-              <ControlPadButton
+              </MotionControlButton>
+              <MotionControlButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('X', step)}
                 aria-label="Jog X positive"
                 padSize="small"
               >
                 <ArrowRightIcon className="h-4 w-4" />
-              </ControlPadButton>
+              </MotionControlButton>
 
               {/* Bottom row */}
               <div></div>
-              <ControlPadButton
+              <MotionControlButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('Y', -step)}
                 aria-label="Jog Y negative"
                 padSize="small"
               >
                 <ArrowDownIcon className="h-4 w-4" />
-              </ControlPadButton>
+              </MotionControlButton>
               <div></div>
             </div>
 
             {/* Z Pad */}
             <div className="grid grid-cols-1 grid-rows-3 gap-1 w-fit">
-              <ControlPadButton
+              <MotionControlButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('Z', step)}
                 aria-label="Jog Z positive"
                 padSize="small"
               >
                 Z+
-              </ControlPadButton>
-              <ControlPadButton
+              </MotionControlButton>
+              <MotionControlButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleHome('z')}
                 title="Home Z"
@@ -1128,15 +1132,15 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 style={getHomeButtonStyle(isHomedStateKnown, isZHomed).style}
               >
                 <HomeIcon className="h-4 w-4" />
-              </ControlPadButton>
-              <ControlPadButton
+              </MotionControlButton>
+              <MotionControlButton
                 disabled={movementActionPending || !canMoveNow}
                 onClick={() => handleMove('Z', -step)}
                 aria-label="Jog Z negative"
                 padSize="small"
               >
                 Z-
-              </ControlPadButton>
+              </MotionControlButton>
             </div>
 
             {/* Extrude Pad - vertical sliders flanking E+/E- buttons */}
@@ -1239,62 +1243,17 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             <MoveDistanceSlider value={step} onChange={setStep} disabled={!canSetStepNow} />
           </div>
           <PrinterControlOperationPanel control={motion} />
-          {/* Manual Movement Inputs */}
-          <div className="mt-3">
-            <div className="flex gap-1 items-end">
-              <MovementInput
-                axis="X"
-                currentPosition={lastKnownX}
-                disabled={movementActionPending || !canManualMoveNow}
-                value={moveX}
-                max={500}
-                onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
-                onKeyDown={(e) => e.key === 'Enter' && moveX !== '' && (motion.isMoonraker ? handleMoveTo({ x: Number(moveX), y: Number(moveY), z: Number(moveZ) }) : handleMove('X', Number(moveX)))}
-                className="w-24! min-w-0"
-              />
-              <MovementInput
-                axis="Y"
-                currentPosition={lastKnownY}
-                disabled={movementActionPending || !canManualMoveNow}
-                value={moveY}
-                max={500}
-                onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
-                onKeyDown={(e) => e.key === 'Enter' && moveY !== '' && (motion.isMoonraker ? handleMoveTo({ x: Number(moveX), y: Number(moveY), z: Number(moveZ) }) : handleMove('Y', Number(moveY)))}
-                className="w-24! min-w-0"
-              />
-              <MovementInput
-                axis="Z"
-                currentPosition={lastKnownZ}
-                disabled={movementActionPending || !canManualMoveNow}
-                value={moveZ}
-                max={500}
-                onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
-                onKeyDown={(e) => e.key === 'Enter' && moveZ !== '' && (motion.isMoonraker ? handleMoveTo({ x: Number(moveX), y: Number(moveY), z: Number(moveZ) }) : handleMove('Z', Number(moveZ)))}
-                className="w-24! min-w-0"
-              />
-              <ControlPadButton
-                variant="success"
-                disabled={movementActionPending || !canManualMoveNow || (motion.isMoonraker ? !completePosition : (moveX === '' && moveY === '' && moveZ === ''))}
-                onClick={async () => {
-                  if (motion.isMoonraker) {
-                    await handleMoveTo({
-                      x: Number(moveX), y: Number(moveY), z: Number(moveZ),
-                    });
-                    return;
-                  }
-                  if (moveX !== '') await handleMove('X', Number(moveX));
-                  if (moveY !== '') await handleMove('Y', Number(moveY));
-                  if (moveZ !== '') await handleMove('Z', Number(moveZ));
-                }}
-                title="Move to entered coordinates"
-                padSize="small"
-                className="enabled:hover:scale-105 enabled:hover:shadow-md"
-              >
-                <span className="text-[10px] font-bold">GO</span>
-              </ControlPadButton>
-            </div>
-            {motion.isMoonraker && !completePosition && <p className="text-xs text-pf-text-secondary">Enter valid X, Y, and Z coordinates for absolute movement.</p>}
-          </div>
+          <PrinterCoordinateRow
+            values={{ X: moveX, Y: moveY, Z: moveZ }}
+            positions={{ X: lastKnownX, Y: lastKnownY, Z: lastKnownZ }}
+            onChange={(axis, value) => ({ X: setMoveX, Y: setMoveY, Z: setMoveZ })[axis](value)}
+            disabled={movementActionPending || !canManualMoveNow}
+            onMove={handleMove}
+            onMoveTo={motion.isMoonraker ? handleMoveTo : undefined}
+            perAxisEnter
+            goTitle="Move to entered coordinates"
+          />
+          <PrinterMotionHelp absolute={motion.isMoonraker} />
         </CollapsibleSection>
 
         {/* Temperatures Section */}

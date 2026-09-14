@@ -556,7 +556,7 @@ public sealed class PrinterControlOperationService(
         operation.State = success ? PrinterControlState.Succeeded : notSent ? PrinterControlState.Failed : PrinterControlState.Unknown;
         operation.CompletionEvidence = success ? PrinterControlEvidence.MotionQueueDrained : notSent ? PrinterControlEvidence.NotSent : PrinterControlEvidence.None;
         operation.FailureCode = failure;
-        operation.FailureMessage = failure is null ? null : notSent ? "The operation was not sent." : "Physical outcome is unknown; explicit recovery is required.";
+        operation.FailureMessage = DescribeFailure(failure, notSent);
         operation.CompletedAtUtc = operation.Settled ? DateTime.UtcNow : null;
         barrier.PhysicalControlRequiresReconciliation = !operation.Settled;
         if (operation.Settled)
@@ -565,6 +565,41 @@ public sealed class PrinterControlOperationService(
         }
 
         await PersistAsync(operation, barrier, operation.ActorSubject, success ? "succeeded" : notSent ? "not_sent" : "unknown", ct);
+    }
+
+    // Only server-owned copy may reach receipts/audits. Never forward exception messages,
+    // backend responses, capability sources, credentials or command payloads to an operator.
+    private static string? DescribeFailure(string? code, bool notSent)
+    {
+        if (code is null)
+        {
+            return null;
+        }
+
+        if (!notSent)
+        {
+            return code == "printer_firmware_rejected"
+                ? "Printer firmware rejected the command. Motion may have partially executed; inspect the printer and use explicit recovery. Do not repeat the move."
+                : "Physical outcome is unknown; explicit recovery is required.";
+        }
+
+        return code switch
+        {
+            "printer_axes_not_homed" => "Move not sent: home all axes, then request the move again.",
+            "printer_move_out_of_bounds" => "Move not sent: current or target coordinates are outside the configured travel bounds or are not known. Check position and request an in-bounds target.",
+            "printer_telemetry_stale" => "Move not sent: position, homing or coordinate-frame evidence expired. Check the printer connection and wait for fresh status before requesting a move.",
+            "printer_telemetry_missing" => "Move not sent: live position, homing or coordinate-frame evidence is missing. Check the printer connection and homing status.",
+            "printer_safety_evidence_unknown" => "Move not sent: movement support, position or travel-frame evidence could not be verified. Check the printer connection, homing status and configured travel limits.",
+            "printer_clearance_not_met" => "Move not sent: the target is below the required workflow clearance. Choose a target that meets the verified clearance.",
+            "printer_operation_unsupported" or "unsupported" => "Operation not sent: this printer or its installed backend plugin does not support the operation.",
+            "printer_busy" => "Operation not sent: the printer is not ready and idle. Wait for its current work to finish and check its status.",
+            "printer_configuration_changed" => "Operation not sent: printer configuration changed after admission. Refresh printer details before requesting another operation.",
+            "printer_unavailable" => "Operation not sent: the printer is disabled or in maintenance. Check its availability before requesting another operation.",
+            "forbidden" or "not_found" => "Operation not sent: printer access is no longer available. Refresh printer details and check your permissions.",
+            "physical_control_barrier" => "Operation not sent: another physical operation owns the printer. Inspect current control status before requesting another operation.",
+            "printer_firmware_rejected" => "Operation not sent: printer firmware rejected the readiness or motion-state check. Inspect the printer status before requesting another operation.",
+            _ => "Operation not sent: the pre-send check could not complete. Check the printer connection and current control status.",
+        };
     }
 
     public async Task MaintainOwnerAsync(Guid id, Guid owner, bool isolated, CancellationToken ct)

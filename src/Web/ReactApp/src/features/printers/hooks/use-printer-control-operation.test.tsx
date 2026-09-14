@@ -6,6 +6,7 @@ import { AuthContext } from '@/common/contexts/auth-context';
 import type { AuthContextType } from '@/contexts/AuthContextValue';
 import { usePrinterControlOperation } from '@/features/printers/hooks/use-printer-control-operation';
 import { apiClient } from '@/services/api';
+import { CONTROL_RECHECK_MS } from '@/services/printer-control-operations';
 import { PrinterBackend, type PrinterControlIntent, type PrinterControlOperation } from '@/types/api';
 
 const events = vi.hoisted(() => ({
@@ -135,7 +136,7 @@ describe('motion clients and invalidation lifecycle', () => {
     await act(async () => { task = first.result.current.execute(intents[0]); await vi.advanceTimersByTimeAsync(0); });
     const initialReads = vi.mocked(apiClient.getPrinterControlOperation).mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
-    expect(apiClient.getPrinterControlOperation).toHaveBeenCalledTimes(initialReads + 5);
+    expect(apiClient.getPrinterControlOperation).toHaveBeenCalledTimes(initialReads + 10_000 / CONTROL_RECHECK_MS);
     expect(first.result.current.blocked).toBe(true);
     expect(apiClient.createPrinterControlOperation).toHaveBeenCalledTimes(1);
     op = { ...op!, state: 'Succeeded', completionEvidence: 'MotionQueueDrained', barrierHeld: false };
@@ -158,12 +159,12 @@ describe('motion clients and invalidation lifecycle', () => {
     await act(async () => { await expect(view.result.current.execute(intents[0])).rejects.toThrow('retained'); });
     const reads = vi.mocked(apiClient.getPrinterControlOperation).mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
-    expect(apiClient.getPrinterControlOperation).toHaveBeenCalledTimes(reads + 3);
+    expect(apiClient.getPrinterControlOperation).toHaveBeenCalledTimes(reads + 6_000 / CONTROL_RECHECK_MS);
     expect(view.result.current.blocked).toBe(true);
     expect(apiClient.createPrinterControlOperation).toHaveBeenCalledTimes(1);
     view.unmount();
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
-    expect(apiClient.getPrinterControlOperation).toHaveBeenCalledTimes(reads + 3);
+    expect(apiClient.getPrinterControlOperation).toHaveBeenCalledTimes(reads + 6_000 / CONTROL_RECHECK_MS);
   });
 
   it('rechecks REST on reconnect, foreground, navigation and stale/duplicate hints without replay', async () => {

@@ -8201,6 +8201,13 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<string>("PrinterControlMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("Guided");
+
                     b.Property<long>("Revision")
                         .IsConcurrencyToken()
                         .HasColumnType("bigint")

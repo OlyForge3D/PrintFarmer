@@ -271,8 +271,10 @@ public sealed class MoonrakerMotionChannel : IMoonrakerMotionChannel
 
                 if (root.TryGetProperty("error", out JsonElement error) && error.ValueKind != JsonValueKind.Null)
                 {
-                    // Do not expose arbitrary firmware/macro error text or call partial motion a rejection.
-                    completion.TrySetException(new InvalidOperationException("Moonraker returned a command error."));
+                    // A correlated error does not prove that earlier script commands did nothing.
+                    // Preserve Unknown after send; never expose arbitrary firmware/macro error text.
+                    completion.TrySetException(new PrinterControlException(
+                        502, "printer_firmware_rejected", "Printer firmware rejected the command."));
                 }
                 else if (root.TryGetProperty("result", out JsonElement result))
                 {

@@ -30,6 +30,66 @@ function attest() {
 }
 beforeEach(() => { vi.clearAllMocks(); recover.mockResolvedValue(undefined); refresh.mockResolvedValue(null); retryAdmission.mockResolvedValue(undefined); });
 
+describe('compact motion feedback', () => {
+  it.each(['Queued', 'Running'] as const)('shows ordinary %s without recovery warnings or exposed IDs', state => {
+    const ordinary = control();
+    ordinary.operation = { ...ordinary.operation!, kind: 'Jog', state, requiresRecovery: false };
+    render(<PrinterControlOperationPanel control={ordinary} />);
+    expect(screen.getByRole('status')).toHaveTextContent(state === 'Queued' ? 'Jog: waiting to start' : 'Jog: in progress');
+    expect(screen.queryByText(/Do not repeat/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.getByText('Operation: op-1')).not.toBeVisible();
+    fireEvent.click(screen.getByText('Motion technical details'));
+    expect(screen.getByText('Operation: op-1')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Recheck motion status' })).toBeVisible();
+  });
+
+  it('does not mistake an ordinary new reservation for uncertainty or show its predecessor', () => {
+    const reserving = control({
+      submitting: true, admitting: true, uncertain: true,
+      saved: { operationId: 'new-op', intent: { kind: 'Jog', y: 10 } },
+    });
+    reserving.operation = {
+      ...reserving.operation!, state: 'Failed', requiresRecovery: false,
+      failure: { code: 'old-failure', message: 'Previous failure' },
+    };
+    render(<PrinterControlOperationPanel control={reserving} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Jog: sending request');
+    expect(screen.queryByText(/Do not repeat|Previous failure|Operation: op-1/)).not.toBeInTheDocument();
+    expect(screen.getByText('Operation: new-op')).not.toBeVisible();
+  });
+
+  it('keeps initial availability checking free of uncertain-motion warnings', () => {
+    render(<PrinterControlOperationPanel control={control({
+      operation: null, current: null, checking: true, uncertain: true,
+    })} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Checking motion availability');
+    expect(screen.queryByText(/Do not repeat/)).not.toBeInTheDocument();
+  });
+
+  it('shows actual lost confirmation prominently, not in technical details', () => {
+    render(<PrinterControlOperationPanel control={control({
+      operation: null, uncertain: true, saved: { operationId: 'saved-op', intent: { kind: 'Jog', y: 10 } },
+      error: 'Cannot contact the printer server.',
+    })} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Cannot contact the printer server.');
+    expect(screen.getByText(/Do not repeat this movement/)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Recheck motion status' })).toBeVisible();
+  });
+
+  it('shows actionable failures while keeping diagnostic codes in the disclosure', () => {
+    const failed = control();
+    failed.operation = {
+      ...failed.operation!, state: 'Failed', requiresRecovery: false, completionEvidence: 'NotSent',
+      failure: { code: 'printer_not_homed', message: 'Home the requested axes before moving.' },
+    };
+    render(<PrinterControlOperationPanel control={failed} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Home the requested axes before moving.');
+    expect(screen.queryByText(/Do not repeat/)).not.toBeInTheDocument();
+    expect(screen.getByText('Diagnostic code: printer_not_homed')).not.toBeVisible();
+  });
+});
+
 describe('operator recovery safeguards', () => {
   it('makes admission retry deliberate and explains it can start previously unadmitted motion', () => {
     render(<PrinterControlOperationPanel control={control({
@@ -56,7 +116,7 @@ describe('operator recovery safeguards', () => {
   it('offers no recovery actions without recovery permission', () => {
     render(<PrinterControlOperationPanel control={control({ canRecover: false })} />);
     expect(screen.getByText(/Recovery requires queue:reconcile permission and Submit access/)).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('Recovering');
+    expect(screen.getByRole('status')).toHaveTextContent('recovery in progress');
     expect(screen.getByRole('button', { name: /Recheck motion status/ })).toBeEnabled();
     expect(screen.queryByRole('button', { name: /Request recovery and sender isolation/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Record verified recovery/ })).not.toBeInTheDocument();

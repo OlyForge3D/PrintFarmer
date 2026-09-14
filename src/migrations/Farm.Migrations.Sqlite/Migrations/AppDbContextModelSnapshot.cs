@@ -8172,6 +8172,13 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PrinterControlMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Guided");
+
                     b.Property<long>("Revision")
                         .IsConcurrencyToken()
                         .HasColumnType("INTEGER")

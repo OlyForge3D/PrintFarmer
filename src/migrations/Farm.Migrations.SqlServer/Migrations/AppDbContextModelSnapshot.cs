@@ -8225,6 +8225,13 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<string>("PrinterControlMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)")
+                        .HasDefaultValue("Guided");
+
                     b.Property<long>("Revision")
                         .IsConcurrencyToken()
                         .HasColumnType("bigint")

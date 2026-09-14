@@ -23,6 +23,288 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     // Synthetic capability evidence for layout/lifecycle tests, not backend profiles.
     private static let layoutCaps = PrinterBackendCapabilities.allControlsFixture
 
+    func test_durableAbsoluteEditorRejectsPartialXYZUntilCompleteTargetEntered() async throws {
+        for width: CGFloat in [390, 768] {
+            for textSize in [DynamicTypeSize.large, .accessibility3] {
+                let printer = try makePrinter(backend: .moonraker)
+                let service = makeService(caps: Self.essentialLayoutCaps)
+                service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
+                let model = makeDurableMotionModel(printer: printer, service: service)
+                await model.loadCapabilities()
+                let (window, controller) = install(
+                    JogSubgroup.AbsolutePositionControls(viewModel: model)
+                        .padding(16).environment(\.dynamicTypeSize, textSize)
+                        .frame(width: width).fixedSize(horizontal: false, vertical: true)
+                )
+                defer { window.isHidden = true; model.deactivate() }
+                try await settle(controller)
+                func control(_ id: String) throws -> UIControl {
+                    try XCTUnwrap(nativeControls(in: controller.view).first {
+                        $0.accessibilityIdentifier == "printer.controls.absolute.\(id)"
+                    })
+                }
+                let move = try XCTUnwrap(try control("move") as? UIButton)
+                let help = try control("help")
+                XCTAssertFalse(move.isEnabled, "Pristine fields cannot submit")
+                XCTAssertEqual(help.accessibilityValue, "Collapsed")
+                try await captureMotionEvidence(window, controller, width: width, name: "xyz-pristine-\(textSize)")
+                help.sendActions(for: .touchUpInside)
+                try await settle(controller)
+                XCTAssertEqual(help.accessibilityValue, "Expanded")
+                XCTAssertTrue(help.isEnabled)
+                XCTAssertGreaterThanOrEqual(help.bounds.height, 44)
+                try await captureMotionEvidence(window, controller, width: width, name: "xyz-help-\(textSize)")
+                help.sendActions(for: .touchUpInside)
+                for (index, axis) in ["x", "y", "z"].enumerated() {
+                    let field = try XCTUnwrap(try control(axis) as? UITextField)
+                    field.text = ["20", "30", "10"][index]
+                    field.sendActions(for: .editingChanged)
+                    try await settle(controller)
+                    XCTAssertEqual(move.isEnabled, index == 2, "All XYZ must be explicitly entered")
+                    try await captureMotionEvidence(window, controller, width: width, name: "xyz-\(axis)-\(textSize)")
+                }
+                let x = try XCTUnwrap(try control("x") as? UITextField)
+                for invalid in ["NaN", "1.2345", "99999"] {
+                    x.text = invalid
+                    x.sendActions(for: .editingChanged)
+                    try await settle(controller)
+                    XCTAssertFalse(move.isEnabled, "Reject nonfinite, overprecision and out-of-envelope input")
+                    try await captureMotionEvidence(window, controller, width: width, name: "xyz-invalid-\(invalid)-\(textSize)")
+                }
+                x.text = "20"
+                x.sendActions(for: .editingChanged)
+                try await settle(controller)
+                XCTAssertTrue(move.isEnabled, "Corrected input clears validation")
+                XCTAssertTrue(service.submittedControlOperations.isEmpty)
+                XCTAssertNil(service.moveToCalledWith, "Telemetry never supplies omitted coordinates")
+            }
+        }
+    }
+
+    func test_absoluteGOPendingAndMotionStatus_authoritativeLifecycleGeometry() async throws {
+        for width: CGFloat in [390, 768] {
+            for textSize in [DynamicTypeSize.large, .accessibility3] {
+                for outcome in [PrinterControlOperationState.succeeded, .failed, .unknown] {
+                    let printer = try makePrinter(backend: .moonraker)
+                    let service = makeService(caps: Self.essentialLayoutCaps)
+                    service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
+                    let model = makeDurableMotionModel(printer: printer, service: service)
+                    await model.loadCapabilities()
+                    let barrier = AsyncBarrier()
+                    addTeardownBlock { barrier.close() }
+                    service.submitControlOperationHandler = { [service] printerID, operationID, request in
+                        await barrier.arriveAndWait()
+                        let operation = PrinterControlOperation.controlsFixture(
+                            printerID: printerID, operationID: operationID, request: request, state: .queued
+                        )
+                        service.currentControlOperationToReturn = .controlsFixture(operation)
+                        return operation
+                    }
+                    let (window, controller) = install(
+                        VStack(alignment: .leading, spacing: 12) {
+                            PrinterSetupControlsContent.PrinterMotionStatusBanner(viewModel: model)
+                            PrinterControlCommandFeedback(viewModel: model, section: .motion)
+                            JogSubgroup.AbsolutePositionControls(viewModel: model)
+                        }
+                        .padding(16).environment(\.dynamicTypeSize, textSize)
+                        .frame(width: width).fixedSize(horizontal: false, vertical: true)
+                    )
+                    defer { window.isHidden = true; model.deactivate() }
+                    try await settle(controller)
+                    func button(_ id: String) throws -> UIButton {
+                        try XCTUnwrap(nativeControls(in: controller.view).first {
+                            $0.accessibilityIdentifier == "printer.controls.\(id)"
+                        } as? UIButton)
+                    }
+                    for (axis, value) in [("x", "20"), ("y", "30"), ("z", "10")] {
+                        let field = try XCTUnwrap(nativeControls(in: controller.view).first {
+                            $0.accessibilityIdentifier == "printer.controls.absolute.\(axis)"
+                        } as? UITextField)
+                        field.text = value
+                        field.sendActions(for: .editingChanged)
+                    }
+                    try await captureMotionEvidence(window, controller, width: width, name: "go-ready-\(textSize)-\(outcome)")
+                    let go = try button("absolute.move")
+                    XCTAssertTrue(go.isEnabled)
+                    let idleSize = go.bounds.size
+                    go.sendActions(for: .touchUpInside)
+                    await barrier.waitUntilArrived()
+                    try await settle(controller)
+                    XCTAssertEqual(go.configuration?.showsActivityIndicator, true)
+                    XCTAssertEqual(go.accessibilityValue, "Pending")
+                    XCTAssertFalse(go.isEnabled)
+                    XCTAssertTrue(try button("absolute.help").isEnabled, "Contextual help stays available while locked")
+                    await model.moveTo(x: 20, y: 30, z: 10, feedrateMmMin: nil)
+                    XCTAssertEqual(service.submittedControlOperations.count, 1, "Repeated motion is not admitted")
+                    try await captureMotionEvidence(window, controller, width: width, name: "go-submitting-\(textSize)-\(outcome)")
+                    XCTAssertEqual(go.bounds.width, idleSize.width, accuracy: 1)
+                    XCTAssertEqual(go.bounds.height, idleSize.height, accuracy: 1)
+                    XCTAssertGreaterThanOrEqual(go.bounds.width, 44)
+                    XCTAssertGreaterThanOrEqual(go.bounds.height, 44)
+                    barrier.release()
+                    try await settle(controller)
+                    let submitted = try XCTUnwrap(service.submittedControlOperations.first)
+                    for state in [PrinterControlOperationState.queued, .running, outcome] {
+                        let terminal = state == .succeeded || state == .failed
+                        let operation = PrinterControlOperation.controlsFixture(
+                            printerID: printer.id, operationID: submitted.operationID, request: submitted.request,
+                            state: state, evidence: state == .succeeded ? .motionQueueDrained : state == .failed ? .notSent : .none,
+                            held: !terminal, recovery: state == .unknown
+                        )
+                        service.controlOperationToReturn = operation
+                        service.currentControlOperationToReturn = .controlsFixture(operation)
+                        await model.refreshControlOperation()
+                        try await settle(controller)
+                        XCTAssertEqual(model.controlOperation?.state, state)
+                        XCTAssertEqual(model.hasUnresolvedMotion, !terminal)
+                        XCTAssertEqual(go.configuration?.showsActivityIndicator, !terminal && state != .unknown)
+                        XCTAssertEqual(go.isEnabled, terminal)
+                        XCTAssertEqual(model.motionStatusNeedsAttention, state == .failed || state == .unknown)
+                        XCTAssertFalse(model.motionStatusSummary?.contains(submitted.operationID.uuidString) == true)
+                        XCTAssertFalse(nativeControls(in: controller.view).contains {
+                            $0.accessibilityIdentifier == "printer.controls.stop-waiting"
+                        })
+                        let details = try button("motion.details")
+                        if state == .queued {
+                            XCTAssertEqual(details.accessibilityValue, "Collapsed")
+                            details.sendActions(for: .touchUpInside)
+                            try await settle(controller)
+                            XCTAssertEqual(details.accessibilityValue, "Expanded")
+                        }
+                        if state == .succeeded {
+                            XCTAssertEqual(details.accessibilityValue, "Collapsed", "Success dismisses open diagnostics")
+                            XCTAssertFalse(nativeControls(in: controller.view).contains {
+                                $0.accessibilityIdentifier == "printer.controls.motion.refresh"
+                            })
+                        } else {
+                            XCTAssertTrue(try button("motion.refresh").isEnabled)
+                        }
+                        try await captureMotionEvidence(window, controller, width: width, name: "motion-\(state)-\(textSize)-\(outcome)")
+                    }
+                    model.deactivate()
+                    try await settle(controller)
+                    XCTAssertEqual(go.configuration?.showsActivityIndicator, false, "Navigation clears local progress")
+                    XCTAssertFalse(go.isEnabled)
+                    XCTAssertEqual(service.submittedControlOperations.count, 1)
+                }
+            }
+        }
+    }
+
+    func test_absoluteGOAfterFailedOrRecoveredMotion_usesNewOperationFeedback() async throws {
+        for previous in [PrinterControlOperationState.failed, .recovered] {
+            let printer = try makePrinter(backend: .moonraker)
+            let service = makeService(caps: Self.essentialLayoutCaps)
+            service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
+            let model = makeDurableMotionModel(printer: printer, service: service)
+            await model.loadCapabilities()
+            service.submitControlOperationHandler = { [service] printerID, operationID, request in
+                let operation = PrinterControlOperation.controlsFixture(
+                    printerID: printerID, operationID: operationID, request: request,
+                    state: previous, evidence: previous == .failed ? .notSent : .operatorVerifiedRecovery,
+                    held: false
+                )
+                service.controlOperationToReturn = operation
+                service.currentControlOperationToReturn = .controlsFixture(operation)
+                return operation
+            }
+            await model.homeAll()
+            XCTAssertFalse(model.hasUnresolvedMotion)
+            XCTAssertEqual(model.controlOperation?.state, previous)
+            XCTAssertTrue(model.motionStatusNeedsAttention)
+            let previousMessage = model.motionStatusMessage
+            let previousID = model.motionOperationID
+            let barrier = AsyncBarrier()
+            addTeardownBlock { barrier.close() }
+            service.submitControlOperationHandler = { _, _, _ in
+                await barrier.arriveAndWait()
+                throw NetworkError.timeout
+            }
+            let (window, controller) = install(JogSubgroup.AbsolutePositionControls(viewModel: model))
+            defer { window.isHidden = true; model.deactivate() }
+            try await settle(controller)
+            for (axis, value) in [("x", "20"), ("y", "30"), ("z", "10")] {
+                let field = try XCTUnwrap(nativeControls(in: controller.view).first {
+                    $0.accessibilityIdentifier == "printer.controls.absolute.\(axis)"
+                } as? UITextField)
+                field.text = value
+                field.sendActions(for: .editingChanged)
+            }
+            try await settle(controller)
+            let go = try XCTUnwrap(nativeControls(in: controller.view).first {
+                $0.accessibilityIdentifier == "printer.controls.absolute.move"
+            } as? UIButton)
+            XCTAssertTrue(go.isEnabled)
+            go.sendActions(for: .touchUpInside)
+            await barrier.waitUntilArrived()
+            try await settle(controller)
+            XCTAssertEqual(go.configuration?.showsActivityIndicator, true)
+            XCTAssertEqual(go.accessibilityValue, "Pending")
+            XCTAssertFalse(model.motionStatusNeedsAttention, "Old terminal failure must not style the new submission")
+            XCTAssertNotEqual(model.motionOperationID, previousID)
+            XCTAssertNotEqual(model.motionStatusMessage, previousMessage, "Diagnostics must match the displayed operation ID")
+            XCTAssertEqual(model.motionStatusSummary, "Submitting motion. Controls locked until completion.")
+            barrier.release()
+            try await settle(controller)
+            XCTAssertTrue(model.hasUnresolvedMotion, "A lost response cannot unlock motion")
+            XCTAssertTrue(model.motionStatusNeedsAttention)
+            XCTAssertNotNil(model.motionAdmissionResubmissionID)
+            XCTAssertEqual(go.configuration?.showsActivityIndicator, false, "Unconfirmed admission uses recovery feedback, not endless progress")
+            XCTAssertNil(go.accessibilityValue)
+            XCTAssertFalse(go.isEnabled)
+            XCTAssertEqual(service.submittedControlOperations.count, 2)
+        }
+    }
+
+    func test_motionLocalRejectionRemainsVisibleWithUnrelatedRecoveryLock() async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        let service = makeService(caps: Self.essentialLayoutCaps)
+        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
+        let model = makeDurableMotionModel(printer: printer, service: service)
+        await model.loadCapabilities()
+        await model.moveTo(x: 20, y: nil, z: nil, feedrateMmMin: nil)
+        XCTAssertNotNil(model.lastError)
+        XCTAssertTrue(service.submittedControlOperations.isEmpty, "The incomplete target is rejected locally")
+        let operation = PrinterControlOperation.controlsFixture(printerID: printer.id, state: .unknown, recovery: true)
+        service.currentControlOperationToReturn = .controlsFixture(operation)
+        await model.refreshControlOperation()
+        XCTAssertTrue(model.hasUnresolvedMotion)
+        XCTAssertTrue(model.motionStatusNeedsAttention)
+        XCTAssertEqual(model.motionStatusSummary, "Motion outcome uncertain. Controls locked. Inspect the printer and use recovery.")
+        let (window, controller) = install(
+            VStack {
+                PrinterSetupControlsContent.PrinterMotionStatusBanner(viewModel: model)
+                PrinterControlCommandFeedback(viewModel: model, section: .motion)
+            }
+        )
+        defer { window.isHidden = true; model.deactivate() }
+        try await settle(controller)
+        let dismiss = try XCTUnwrap(nativeControls(in: controller.view).first {
+            $0.accessibilityIdentifier == "printer.controls.dismiss-error"
+        })
+        XCTAssertTrue(dismiss.isEnabled, "Local rejection cannot disappear behind the diagnostics disclosure")
+        dismiss.sendActions(for: .touchUpInside)
+        XCTAssertNil(model.lastError)
+        XCTAssertTrue(model.hasUnresolvedMotion, "Dismissing presentation never releases the safety lock")
+        XCTAssertTrue(service.submittedControlOperations.isEmpty)
+    }
+
+    private func captureMotionEvidence(
+        _ window: UIWindow, _ controller: UIHostingController<AnyView>, width: CGFloat, name: String
+    ) async throws {
+        try await settle(controller)
+        window.frame.size = controller.sizeThatFits(in: CGSize(width: width, height: 10000))
+        controller.view.frame = window.bounds
+        try await settle(controller)
+        let image = UIGraphicsImageRenderer(bounds: controller.view.bounds).image { _ in
+            XCTAssertTrue(controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true))
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "\(name)-\(Int(width))-\(snapshotName ?? "iPhone")"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
     func test_durableUnknownRemainsVisibleOfflineWithReadOnlyRecoveryActions() async throws {
         let printer = try makePrinter(backend: .moonraker, isOnline: false)
         let service = makeService(caps: Self.layoutCaps)
@@ -877,6 +1159,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                         supportedIdentifiers = visibleIdentifiers
                     } else {
                         let expectedIdentifiers = supportedIdentifiers.subtracting([
+                            "printer.controls.absolute.help",
                             "printer.controls.absolute.x",
                             "printer.controls.absolute.y",
                             "printer.controls.absolute.z",
@@ -1348,41 +1631,6 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             } as? UITextField)
         }
 
-        func test_durableAbsoluteEditorRejectsPartialXYZUntilCompleteTargetEntered() async throws {
-            let printer = try makePrinter(backend: .moonraker)
-            var caps = Self.layoutCaps
-            caps.supportsAbsoluteMovement = true
-            caps.verifiedSafety = VerifiedSafetyFixtures.discovery()
-            let service = makeService(caps: caps)
-            service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
-            let suite = "CompleteDurableTarget-\(UUID())"
-            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-            defer { defaults.removePersistentDomain(forName: suite) }
-            let serverID = UUID()
-            let model = PrinterControlsViewModel(
-                composition: .init(identity: .init(serverID: serverID, generation: 0, revision: 0),
-                                   printerService: service),
-                printer: printer, motionDefaults: defaults
-            )
-            model.configureAccess(serverID: serverID, userID: UUID()) { nil }
-            await model.loadCapabilities()
-            let (window, controller) = install(JogSubgroup.AbsolutePositionControls(viewModel: model))
-            defer { window.isHidden = true; model.deactivate() }
-            try await settle(controller)
-            let controls = nativeControls(in: controller.view)
-            let move = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.move" })
-            for (index, axis) in ["x", "y", "z"].enumerated() {
-                let field = try XCTUnwrap(controls.first {
-                    $0.accessibilityIdentifier == "printer.controls.absolute.\(axis)"
-                } as? UITextField)
-                field.text = ["20", "30", "10"][index]
-                field.sendActions(for: .editingChanged)
-                try await settle(controller)
-                XCTAssertEqual(move.isEnabled, index == 2, "Moonraker requires all XYZ, not a partial destination")
-            }
-            XCTAssertTrue(service.submittedControlOperations.isEmpty)
-            XCTAssertNil(service.moveToCalledWith)
-        }
         let move = try XCTUnwrap(controls.first { $0.accessibilityIdentifier == "printer.controls.absolute.move" })
         XCTAssertFalse(move.isEnabled)
         // With optional coordinates allowed, move is enabled when 1, 2, or 3 coordinates are supplied.

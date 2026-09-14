@@ -1,3 +1,7 @@
+vi.mock('@/features/printers/hooks/use-printer-controls-mode', () => ({
+  usePrinterControlsMode: () => ({ mode: 'guided', canSave: true, setMode: vi.fn(), reload: vi.fn() }),
+}));
+
 import '@testing-library/jest-dom';
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';

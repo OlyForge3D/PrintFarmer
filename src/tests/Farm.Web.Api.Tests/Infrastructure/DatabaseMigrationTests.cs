@@ -69,10 +69,60 @@ public sealed class DatabaseMigrationTests
             "20260903210517_AllowSharedGcodeFilePromotionCheckpoints",
             "20260912181957_AddDurablePrinterControlOperations",
             "20260912193436_FenceMotionEmergencyStops",
-            "20260912202053_TrackEmergencyStopSenders");
+            "20260912202053_TrackEmergencyStopSenders",
+            "20260914014156_AddUserPrinterControlMode");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CoreMigration_BackfillsGuidedPrinterControlModeAndPreservesAccountSettings()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.Database.GetService<IMigrator>();
+        await migrator.MigrateAsync("20260912202053_TrackEmergencyStopSenders");
+
+        Guid userId = Guid.NewGuid();
+        Guid settingsId = Guid.NewGuid();
+        context.Users.Add(new User
+        {
+            Id = userId,
+            Username = "existing-preference-user",
+            Email = "existing-preference@test.com",
+            PasswordHash = "test-hash"
+        });
+        await context.SaveChangesAsync();
+        // The pre-upgrade schema has no PrinterControlMode column; insert through its old contract.
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "UserSettings"
+                ("Id", "UserId", "Theme", "Locale", "ItemsPerPage", "DefaultSlicerPreset",
+                 "PrintablesUsername", "UpdatedAt", "Revision")
+            VALUES ({settingsId}, {userId}, 'dark', 'fr', 75, 'custom-preset',
+                    'existing-printables-user', {DateTime.UtcNow}, 7);
+            """);
+
+        await ProviderAwareMigrationRunner.MigrateAsync(
+            context, DatabaseMigrationTarget.Core, NullLogger.Instance);
+
+        UserSettings settings = await context.UserSettings.SingleAsync(u => u.UserId == userId);
+        settings.Id.Should().Be(settingsId);
+        settings.PrinterControlMode.Should().Be("Guided");
+        settings.Theme.Should().Be("dark");
+        settings.Locale.Should().Be("fr");
+        settings.ItemsPerPage.Should().Be(75);
+        settings.DefaultSlicerPreset.Should().Be("custom-preset");
+        settings.PrintablesUsername.Should().Be("existing-printables-user");
+        settings.Revision.Should().Be(7);
+
+        settings.PrinterControlMode = "Expert";
+        await context.SaveChangesAsync();
+        await using AppDbContext reloaded = CreateCoreContext(connection);
+        UserSettings persisted = await reloaded.UserSettings.SingleAsync(u => u.UserId == userId);
+        persisted.PrinterControlMode.Should().Be("Expert");
+        persisted.Revision.Should().Be(8);
+        context.Database.HasPendingModelChanges().Should().BeFalse();
     }
 
     [Fact]
@@ -667,7 +717,8 @@ public sealed class DatabaseMigrationTests
             "20260903210517_AllowSharedGcodeFilePromotionCheckpoints",
             "20260912181957_AddDurablePrinterControlOperations",
             "20260912193436_FenceMotionEmergencyStops",
-            "20260912202053_TrackEmergencyStopSenders");
+            "20260912202053_TrackEmergencyStopSenders",
+            "20260914014156_AddUserPrinterControlMode");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1170,6 +1221,7 @@ public sealed class DatabaseMigrationTests
 
         using AppDbContext core = new(coreOptions.Options);
         using SlicerDbContext slicer = new(slicerOptions.Options);
+        core.Database.HasPendingModelChanges().Should().BeFalse();
         string[] coreMigrations = [.. core.Database.GetMigrations()];
         string[] slicerMigrations = [.. slicer.Database.GetMigrations()];
 
@@ -1214,6 +1266,7 @@ public sealed class DatabaseMigrationTests
                 "20260912181931_AddDurablePrinterControlOperations",
                 "20260912193408_FenceMotionEmergencyStops",
                 "20260912202024_TrackEmergencyStopSenders",
+                "20260913232205_AddUserPrinterControlMode",
             ]
             :
             [
@@ -1248,6 +1301,7 @@ public sealed class DatabaseMigrationTests
                 "20260912181944_AddDurablePrinterControlOperations",
                 "20260912193422_FenceMotionEmergencyStops",
                 "20260912202039_TrackEmergencyStopSenders",
+                "20260913232205_AddUserPrinterControlMode",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");

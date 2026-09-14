@@ -47,6 +47,28 @@ independently of the client connection, and updated clients retrieve its result
 after reconnecting. A long homing operation is not failed merely because a
 status-poll timeout elapsed.
 
+Web controls offer **Guided** (the default) and **Expert** presentation. The
+selection is saved to your user account on the backend and follows you across
+devices, including the printer detail card and sidebar. Guided adds inline
+input hints and precautions; Expert keeps those in keyboard- and touch-accessible
+help. Neither mode changes permissions, valid-request requirements, firmware
+protections, duplicate prevention, or emergency-stop access.
+
+The initiating control shows activity immediately. Normal waiting and progress
+stay compact; operation IDs and diagnostic codes are under **Motion technical
+details**. Actual failures and unconfirmed outcomes remain visible in both modes.
+Result checks use server events plus a coalesced one-second polling fallback
+while an operation remains unresolved; polling never resends a movement.
+Absolute GO requires explicit, finite X, Y, and Z targets in millimeters.
+Empty, untouched fields are not errors, and current-position labels do not fill
+in omitted targets.
+
+Manual Jog/MoveTo does not require an automated workflow's minimum-clearance
+value, which Moonraker cannot authoritatively discover. Fresh XYZ homing,
+position/frame and travel-envelope checks still apply, as do Klipper's configured
+rules. Automated clearance-protected workflows retain their stricter policy.
+This does not enable unhomed-axis movement or out-of-envelope recovery moves.
+
 **Client upgrade required:** update the React frontend and iOS app alongside the
 API. Legacy Moonraker motion endpoints reject requests with
 `409 async_control_required` without moving the printer. Other printer backends

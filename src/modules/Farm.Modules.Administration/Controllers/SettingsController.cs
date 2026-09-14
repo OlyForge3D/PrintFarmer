@@ -154,6 +154,11 @@ public class SettingsController(
     public async Task<IActionResult> UpdateUserSettingsAsync(
         [FromBody] UpdateUserSettingsBody body, CancellationToken ct)
     {
+        if (body.PrinterControlMode is not null and not ("Guided" or "Expert"))
+        {
+            return BadRequest("printerControlMode must be 'Guided' or 'Expert'.");
+        }
+
         if (body.ItemsPerPage is < 1 or > 200)
         {
             return BadRequest("itemsPerPage must be between 1 and 200.");
@@ -204,6 +209,12 @@ public class SettingsController(
         if (body.Theme is not null)
         {
             entity.Theme = body.Theme;
+        }
+
+        // Older clients omit this presentation-only preference during unrelated settings saves.
+        if (body.PrinterControlMode is not null)
+        {
+            entity.PrinterControlMode = body.PrinterControlMode;
         }
 
         if (body.Locale is not null)
@@ -261,7 +272,8 @@ public class SettingsController(
             ItemsPerPage: entity?.ItemsPerPage ?? 25,
             DefaultSlicerPreset: entity?.DefaultSlicerPreset,
             RowVersion: entity?.RowVersion is { Length: > 0 } rv ? Convert.ToBase64String(rv) : null,
-            PrintablesUsername: entity?.PrintablesUsername);
+            PrintablesUsername: entity?.PrintablesUsername,
+            PrinterControlMode: entity?.PrinterControlMode ?? "Guided");
 
     private IActionResult? TryGetValidatedConcurrencyToken(
         string? bodyRowVersion,
@@ -323,13 +335,20 @@ public record UserSettingsResponse(
     int ItemsPerPage,
     string? DefaultSlicerPreset,
     string? RowVersion,
-    string? PrintablesUsername = null);
+    string? PrintablesUsername = null,
+    string PrinterControlMode = "Guided");
 
 /// <summary>Request body for PUT /api/settings/user. All fields optional (partial update).</summary>
+/// <remarks>
+/// PrinterControlMode is optional.
+/// Presentation only: exactly "Guided" or "Expert". Omitted or null preserves the account preference;
+/// a new settings row defaults to "Guided". Does not alter motion protections or permissions.
+/// </remarks>
 public record UpdateUserSettingsBody(
     string? Theme,
     string? Locale,
     int? ItemsPerPage,
     string? DefaultSlicerPreset,
     string? RowVersion = null,
-    string? PrintablesUsername = null);
+    string? PrintablesUsername = null,
+    string? PrinterControlMode = null);

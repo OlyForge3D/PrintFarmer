@@ -118,6 +118,27 @@ Dynamic custom-property names assembled across template expressions and class
 names with no literal `pf-` segment are not inferred; keep a literal token
 segment or document the runtime bridge in the scanner allowlist.
 
+### Random IDs and HTTP LAN deployments
+
+All application-generated random IDs share `generateUUID` from `@/utils/uuid`,
+including upload queue entries, temporary aliases, harvest rows, slicer text
+models, correlation IDs, and idempotency/operation keys. See the [shared UUID policy](./eslint-rules/README.md#shared-uuid-generation)
+for the HTTP LAN compatibility convention and lint guard.
+
+The helper throws if neither secure random source exists. Keep generation inside
+the caller's existing mutation, submit error handling, or render error boundary;
+never silently substitute a timestamp/`Math.random()` ID.
+
+Generate at the existing logical-operation boundary, not on each retry. Preserve
+saved keys verbatim, including older non-UUID keys; do not migrate or regenerate
+them. Harvest retries reuse the dialog's key, unchanged stock-adjustment retries
+reuse the cached payload key, and bed-clear retries reuse the key stored for the
+reviewed job/ETags. Correlation IDs remain fresh per HTTP request (including
+streaming export requests), independently of operation idempotency keys. UI row
+and temporary IDs remain local and are omitted from request payloads as before.
+Color selection and retry jitter are non-ID randomness and still use
+`Math.random()`; deterministic identifiers and React `useId()` are unchanged.
+
 ### Code Style
 
 - **TypeScript**: Strict mode enabled with comprehensive type checking

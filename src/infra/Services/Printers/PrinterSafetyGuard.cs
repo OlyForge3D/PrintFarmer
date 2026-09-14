@@ -3,7 +3,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <summary>Safety-sensitive operations governed by verified printer evidence.</summary>
 public enum PrinterSafetyOperation
 {
-    /// <summary>Absolute movement in the backend coordinate frame.</summary>
+    /// <summary>Clearance-protected movement in the backend coordinate frame; not ordinary manual motion.</summary>
     AbsoluteMovement,
 
     /// <summary>Persistent firmware Z-offset save.</summary>
@@ -70,8 +70,12 @@ public interface IPrinterSafetyGuard
         PrinterSafetyMoveRequest? move,
         CancellationToken ct);
 
-    /// <summary>Validates target and current position against fresh command-channel facts, never cached position.</summary>
-    Task<PrinterSafetyValidationResult> ValidateObservedMoveAsync(
+    /// <summary>
+    /// Validates operator-directed manual motion against fresh command-channel position, homing,
+    /// frame and firmware travel bounds. This is not an automated collision-clearance guarantee.
+    /// Omitted target axes retain their observed coordinates; cached position is never substituted.
+    /// </summary>
+    Task<PrinterSafetyValidationResult> ValidateObservedManualMoveAsync(
         Guid printerId, PrinterSafetyMoveRequest target, PrinterStatusDto observedStatus, CancellationToken ct);
 }
 
@@ -96,19 +100,24 @@ public sealed class PrinterSafetyGuard(
         Guid printerId,
         PrinterSafetyOperation operation,
         PrinterSafetyMoveRequest? move,
-        CancellationToken ct) => ValidateCoreAsync(printerId, operation, move, null, ct);
+        CancellationToken ct) => ValidateCoreAsync(printerId, operation, move, null, requireClearance: true, ct);
 
     /// <inheritdoc />
-    public Task<PrinterSafetyValidationResult> ValidateObservedMoveAsync(
+    public Task<PrinterSafetyValidationResult> ValidateObservedManualMoveAsync(
         Guid printerId, PrinterSafetyMoveRequest target, PrinterStatusDto observedStatus, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(observedStatus);
-        return ValidateCoreAsync(printerId, PrinterSafetyOperation.AbsoluteMovement, target, observedStatus, ct);
+
+        // Manual positioning can intentionally approach the bed. Workflow clearance is not a
+        // firmware travel limit and Moonraker does not supply authoritative collision clearance.
+        var resolvedTarget = new PrinterSafetyMoveRequest(
+            target.X ?? observedStatus.X, target.Y ?? observedStatus.Y, target.Z ?? observedStatus.Z);
+        return ValidateCoreAsync(printerId, PrinterSafetyOperation.AbsoluteMovement, resolvedTarget, observedStatus, requireClearance: false, ct);
     }
 
     private async Task<PrinterSafetyValidationResult> ValidateCoreAsync(
         Guid printerId, PrinterSafetyOperation operation, PrinterSafetyMoveRequest? move,
-        PrinterStatusDto? observedStatus, CancellationToken ct)
+        PrinterStatusDto? observedStatus, bool requireClearance, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         _capabilitiesService.InvalidateVerifiedSafety(printerId);
@@ -147,7 +156,8 @@ public sealed class PrinterSafetyGuard(
                     safety,
                     observedStatus ?? _statusCache.GetStatus(printerId),
                     move,
-                    _timeProvider.GetUtcNow().UtcDateTime),
+                    _timeProvider.GetUtcNow().UtcDateTime,
+                    requireClearance),
             PrinterSafetyOperation.MmuChangeTool or
             PrinterSafetyOperation.MmuLoad or
             PrinterSafetyOperation.MmuEject =>
@@ -270,22 +280,36 @@ public sealed class PrinterSafetyGuard(
         PrinterVerifiedSafetyDto safety,
         PrinterStatusDto? status,
         PrinterSafetyMoveRequest? move,
-        DateTime utcNow)
+        DateTime utcNow,
+        bool requireClearance)
     {
         if (safety.Positioning.CoordinateOriginMm is not
                 { State: VerifiedSafetyFactState.Verified, Value: { } origin } ||
             !IsFinite(origin) ||
             safety.Positioning.TravelEnvelopeMm is not
                 { State: VerifiedSafetyFactState.Verified, Value: { } envelope } ||
-            !IsValidEnvelope(envelope) ||
-            safety.Positioning.MinimumClearanceZMm is not
-                { State: VerifiedSafetyFactState.Verified, Value: double clearance } ||
-            !double.IsFinite(clearance))
+            !IsValidEnvelope(envelope))
         {
             return PrinterSafetyValidationResult.Reject(
                 503,
                 "printer_safety_evidence_unknown",
-                "Verified coordinate origin, travel bounds, and clearance are required.");
+                "Verified coordinate origin and travel bounds are required.");
+        }
+
+        double? clearance = null;
+        if (requireClearance)
+        {
+            if (safety.Positioning.MinimumClearanceZMm is not
+                    { State: VerifiedSafetyFactState.Verified, Value: double verifiedClearance } ||
+                !double.IsFinite(verifiedClearance))
+            {
+                return PrinterSafetyValidationResult.Reject(
+                    503,
+                    "printer_safety_evidence_unknown",
+                    "Verified minimum Z clearance is required for clearance-protected movement.");
+            }
+
+            clearance = verifiedClearance;
         }
 
         if (status?.IsOnline != true)
@@ -353,7 +377,7 @@ public sealed class PrinterSafetyGuard(
                 "The requested move is outside the verified travel envelope.");
         }
 
-        return effective.Z < clearance
+        return clearance is double minimumClearance && effective.Z < minimumClearance
             ? PrinterSafetyValidationResult.Reject(
                 409,
                 "printer_clearance_not_met",

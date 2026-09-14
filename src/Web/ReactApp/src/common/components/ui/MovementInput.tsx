@@ -4,6 +4,8 @@ import { Input, InputProps } from './Input';
 export interface MovementInputProps extends Omit<InputProps, 'type'> {
   /** Axis label: X, Y, or Z */
   axis: 'X' | 'Y' | 'Z';
+  /** Absolute target or relative movement amount; telemetry is display-only. */
+  coordinateMode?: 'absolute' | 'relative';
   /** Current movement value */
   value: number | string;
   /** Callback when value changes */
@@ -29,6 +31,7 @@ export function MovementInput({
   disabled = false,
   className,
   currentPosition,
+  coordinateMode = 'relative',
   ...props
 }: MovementInputProps) {
   const positionLabel = currentPosition != null ? `[ ${(currentPosition ?? 0).toFixed(1)} ]` : '[ --- ]';
@@ -44,11 +47,11 @@ export function MovementInput({
       <Input
         type="number"
         step={step}
-        value={value}
+        value={typeof value === 'number' && !Number.isFinite(value) ? '' : value}
         onChange={onChange}
         disabled={disabled}
-        aria-label={`${axis} movement amount`}
-        className={`w-full min-w-[5.75rem] h-8 pl-6 pr-2 text-xs text-right [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0 ${className ?? ''}`}
+        aria-label={`${axis} ${coordinateMode === 'absolute' ? 'absolute target' : 'movement amount'}`}
+        className={`w-full min-w-0 h-8 pl-6 pr-2 text-xs text-right [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&]:m-0 ${className ?? ''}`}
         {...props}
       />
     </div>

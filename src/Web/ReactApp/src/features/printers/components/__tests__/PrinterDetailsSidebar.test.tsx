@@ -1,3 +1,7 @@
+vi.mock('@/features/printers/hooks/use-printer-controls-mode', () => ({
+  usePrinterControlsMode: () => ({ mode: 'guided', canSave: true, setMode: vi.fn(), reload: vi.fn() }),
+}));
+
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
@@ -233,18 +237,18 @@ describe('PrinterDetailsSidebar', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Jog Y positive' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Jog Y positive' }));
     await waitFor(() => expect(mockCreateOperation).toHaveBeenLastCalledWith(moonraker.id, expect.any(String), { kind: 'Jog', y: 10 }));
-    await waitFor(() => expect(screen.getByLabelText('X movement amount')).toBeEnabled());
-    fireEvent.change(screen.getByLabelText('X movement amount'), { target: { value: '110' } });
-    fireEvent.change(screen.getByLabelText('Y movement amount'), { target: { value: '120' } });
+    await waitFor(() => expect(screen.getByLabelText('X absolute target')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('X absolute target'), { target: { value: '110' } });
+    fireEvent.change(screen.getByLabelText('Y absolute target'), { target: { value: '120' } });
     expect(screen.getByTitle('Move to entered coordinates')).toBeDisabled();
-    fireEvent.keyDown(screen.getByLabelText('X movement amount'), { key: 'Enter' });
+    fireEvent.keyDown(screen.getByLabelText('X absolute target'), { key: 'Enter' });
     expect(mockCreateOperation).toHaveBeenCalledTimes(4);
-    fireEvent.change(screen.getByLabelText('Z movement amount'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('Z absolute target'), { target: { value: '10' } });
     fireEvent.click(screen.getByTitle('Move to entered coordinates'));
     await waitFor(() => expect(mockCreateOperation).toHaveBeenLastCalledWith(moonraker.id, expect.any(String), { kind: 'MoveTo', x: 110, y: 120, z: 10 }));
-    await waitFor(() => expect(screen.getByLabelText('Z movement amount')).toBeEnabled());
-    fireEvent.change(screen.getByLabelText('Z movement amount'), { target: { value: '15' } });
-    fireEvent.keyDown(screen.getByLabelText('Z movement amount'), { key: 'Enter' });
+    await waitFor(() => expect(screen.getByLabelText('Z absolute target')).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('Z absolute target'), { target: { value: '15' } });
+    fireEvent.keyDown(screen.getByLabelText('Z absolute target'), { key: 'Enter' });
     await waitFor(() => expect(mockCreateOperation).toHaveBeenLastCalledWith(moonraker.id, expect.any(String), { kind: 'MoveTo', x: 110, y: 120, z: 15 }));
     expect(mockCreateOperation).toHaveBeenCalledTimes(6);
     expect(mockHomePrinter).not.toHaveBeenCalled();

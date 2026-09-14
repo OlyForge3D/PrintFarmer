@@ -1,3 +1,7 @@
+vi.mock('@/features/printers/hooks/use-printer-controls-mode', () => ({
+  usePrinterControlsMode: () => ({ mode: 'guided', canSave: true, setMode: vi.fn(), reload: vi.fn() }),
+}));
+
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
@@ -13,13 +17,14 @@ function props(): ComponentProps<typeof MovementControlSection> {
   };
 }
 describe('detailed-card movement entry points', () => {
-  it('submits one absolute intent for Moonraker GO rather than three relative jogs', () => {
+  it('submits one absolute intent for Moonraker GO rather than three relative jogs', async () => {
     const callbacks = props();
     const absolute = vi.fn();
     render(<MovementControlSection {...callbacks} onMoveTo={absolute} />);
     fireEvent.click(screen.getByTitle('Go to position'));
     expect(absolute).toHaveBeenCalledExactlyOnceWith({ x: 100, y: 110, z: 10 });
     expect(callbacks.onMove).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTitle('Go to position')).not.toHaveAttribute('aria-busy', 'true'));
   });
   it('preserves existing non-Moonraker GO behavior when no durable absolute handler is supplied', async () => {
     const callbacks = props();
@@ -39,7 +44,8 @@ describe('detailed-card movement entry points', () => {
     expect(screen.getByTitle('Go to position')).toBeDisabled();
     fireEvent.click(screen.getByTitle('Go to position'));
     expect(absolute).not.toHaveBeenCalled();
-    expect(screen.getByText(/Enter valid X, Y, and Z/)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByText(/Enter X, Y, and Z targets/)).toBeInTheDocument();
   });
   it('preserves partial-axis GO for non-Moonraker printers', async () => {
     const callbacks = props();

@@ -46,7 +46,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         authorization.Setup(a => a.CanActorAccessPrinterAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
         authorization.Setup(a => a.CanAccessPrinterAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
         authentication.Setup(a => a.HasPermissionAsync(userId, "queue", "start")).ReturnsAsync(true);
-        safety.Setup(guard => guard.ValidateObservedMoveAsync(printerId,
+        safety.Setup(guard => guard.ValidateObservedManualMoveAsync(printerId,
             It.IsAny<PrinterSafetyMoveRequest>(), It.IsAny<PrinterStatusDto>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(PrinterSafetyValidationResult.Allowed);
         authentication.Setup(a => a.HasPermissionAsync(userId, "queue", "cancel")).ReturnsAsync(true);
@@ -151,28 +151,44 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     [InlineData(null, 2d, 3d)]
     [InlineData(1d, null, 3d)]
     [InlineData(1d, 2d, null)]
-    public async Task ControllerAsync_PartialMoveTo_Returns400WithoutAdmission(double? x, double? y, double? z)
+    public async Task ControllerAsync_PartialMoveTo_AdmitsSparseIntent(double? x, double? y, double? z)
     {
         await using AsyncServiceScope scope = provider.CreateAsyncScope();
         PrinterControlOperationsController controller = CreateMotionController(scope.ServiceProvider);
-        var result = Assert.IsType<ObjectResult>(await controller.SubmitAsync(printerId,
+        var result = Assert.IsType<AcceptedResult>(await controller.SubmitAsync(printerId,
             new(PrinterControlKind.MoveTo, x, y, z), Guid.NewGuid().ToString(), default));
-        Assert.Equal(400, result.StatusCode);
-        Assert.Equal(0, await scope.ServiceProvider.GetRequiredService<AppDbContext>().PrinterControlOperations.CountAsync());
+        Assert.Equal(202, result.StatusCode);
+        PrinterControlOperation operation = await scope.ServiceProvider.GetRequiredService<AppDbContext>().PrinterControlOperations.SingleAsync();
+        Assert.Equal(x, operation.X);
+        Assert.Equal(y, operation.Y);
+        Assert.Equal(z, operation.Z);
         Assert.Equal(0, channel.SendCount);
     }
 
     [Theory]
-    [InlineData("oversized", false)]
-    [InlineData("outside", false)]
-    [InlineData("unhomed", false)]
-    [InlineData("stale", false)]
-    [InlineData("stale_frame", false)]
-    [InlineData("offset_target", false)]
-    [InlineData("missing_position", false)]
-    [InlineData("outside_current", false)]
-    [InlineData("multi_axis", true)]
-    public async Task ControllerAndWorkerAsync_Jog_ValidatesFreshObservedTargetBeforeAnySend(string scenario, bool allowed)
+    [InlineData("oversized", false, PrinterControlKind.Jog)]
+    [InlineData("oversized", false, PrinterControlKind.MoveTo)]
+    [InlineData("outside", false, PrinterControlKind.Jog)]
+    [InlineData("outside", false, PrinterControlKind.MoveTo)]
+    [InlineData("unhomed", false, PrinterControlKind.Jog)]
+    [InlineData("unhomed", false, PrinterControlKind.MoveTo)]
+    [InlineData("stale", false, PrinterControlKind.Jog)]
+    [InlineData("stale", false, PrinterControlKind.MoveTo)]
+    [InlineData("stale_frame", false, PrinterControlKind.Jog)]
+    [InlineData("stale_frame", false, PrinterControlKind.MoveTo)]
+    [InlineData("offset_target", false, PrinterControlKind.Jog)]
+    [InlineData("offset_target", false, PrinterControlKind.MoveTo)]
+    [InlineData("missing_position", false, PrinterControlKind.Jog)]
+    [InlineData("missing_position", false, PrinterControlKind.MoveTo)]
+    [InlineData("outside_current", false, PrinterControlKind.Jog)]
+    [InlineData("outside_current", false, PrinterControlKind.MoveTo)]
+    [InlineData("single_axis", true, PrinterControlKind.Jog)]
+    [InlineData("single_axis", true, PrinterControlKind.MoveTo)]
+    [InlineData("z_only", true, PrinterControlKind.Jog)]
+    [InlineData("z_only", true, PrinterControlKind.MoveTo)]
+    [InlineData("multi_axis", true, PrinterControlKind.Jog)]
+    [InlineData("multi_axis", true, PrinterControlKind.MoveTo)]
+    public async Task ControllerAndWorkerAsync_ManualMotion_ValidatesFreshObservedTargetBeforeAnySend(string scenario, bool allowed, PrinterControlKind kind)
     {
         DateTime now = DateTime.UtcNow;
         PrinterStatusDto observed = await channel.ReadMotionStateAsync(printerId, default);
@@ -194,23 +210,29 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             Positioning = new(
                 new(VerifiedSafetyFactState.Verified, new(0, 0, 0), "test", now),
                 new(VerifiedSafetyFactState.Verified, new(new(0, 0, 0), new(200, 200, 200)), "test", now),
-                new(VerifiedSafetyFactState.Verified, 5, "test", now)),
+                new(VerifiedSafetyFactState.Unknown, null, "moonraker:no authoritative clearance source", now)),
         };
         var capabilities = new Mock<IPrinterBackendCapabilitiesService>();
         capabilities.Setup(service => service.GetByPrinterIdAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrinterBackendCapabilitiesDto(printerId, "test", PrinterBackend.Moonraker) { VerifiedSafety = verified });
         var cache = new Mock<IPrinterStatusCacheReader>(MockBehavior.Strict);
         var guard = new PrinterSafetyGuard(capabilities.Object, cache.Object, TimeProvider.System);
-        safety.Setup(service => service.ValidateObservedMoveAsync(printerId, It.IsAny<PrinterSafetyMoveRequest>(),
+        safety.Setup(service => service.ValidateObservedManualMoveAsync(printerId, It.IsAny<PrinterSafetyMoveRequest>(),
             It.IsAny<PrinterStatusDto>(), It.IsAny<CancellationToken>()))
             .Returns((Guid printer, PrinterSafetyMoveRequest target, PrinterStatusDto snapshot, CancellationToken token) =>
-                guard.ValidateObservedMoveAsync(printer, target, snapshot, token));
-        double delta = scenario switch { "oversized" => double.MaxValue, "outside" => 151, "outside_current" => -double.MaxValue, _ => 1 };
+                guard.ValidateObservedManualMoveAsync(printer, target, snapshot, token));
+        double x = scenario switch
+        {
+            "oversized" => double.MaxValue,
+            "outside" => kind == PrinterControlKind.Jog ? 151 : 201,
+            "outside_current" => kind == PrinterControlKind.Jog ? -double.MaxValue : 50,
+            _ => kind == PrinterControlKind.Jog ? 1 : 51,
+        };
         Guid id = Guid.NewGuid();
         await using (AsyncServiceScope scope = provider.CreateAsyncScope())
         {
             Assert.IsType<AcceptedResult>(await CreateMotionController(scope.ServiceProvider).SubmitAsync(printerId,
-                new(PrinterControlKind.Jog, delta, scenario == "multi_axis" ? 2 : null, scenario == "multi_axis" ? 3 : null),
+                new(kind, scenario == "z_only" ? null : x, scenario == "multi_axis" ? 2 : null, scenario is "multi_axis" or "z_only" ? 3 : null),
                 id.ToString(), default));
         }
 
@@ -219,7 +241,13 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         if (allowed)
         {
             await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            Assert.Contains("G1 X1 Y2 Z3", channel.Script, StringComparison.Ordinal);
+            string command = scenario switch
+            {
+                "z_only" => "G1 Z3",
+                "single_axis" => kind == PrinterControlKind.Jog ? "G1 X1" : "G1 X51",
+                _ => kind == PrinterControlKind.Jog ? "G1 X1 Y2 Z3" : "G1 X51 Y2 Z3",
+            };
+            Assert.Contains($"\n{command}\n", channel.Script, StringComparison.Ordinal);
             channel.Completion.SetResult();
         }
 
@@ -999,7 +1027,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         await WaitForStateAsync(id, PrinterControlState.Succeeded);
         await worker.StopAsync(default);
         Assert.Equal(1, channel.SendCount);
-        safety.Verify(guard => guard.ValidateObservedMoveAsync(printerId,
+        safety.Verify(guard => guard.ValidateObservedManualMoveAsync(printerId,
             It.IsAny<PrinterSafetyMoveRequest>(), It.IsAny<PrinterStatusDto>(), It.IsAny<CancellationToken>()),
             kind is PrinterControlKind.MoveTo or PrinterControlKind.Jog ? Times.Once() : Times.Never());
     }
@@ -1011,9 +1039,9 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     {
         Guid id = Guid.NewGuid();
         channel.Idle = !busy;
-        safety.Setup(guard => guard.ValidateObservedMoveAsync(printerId,
+        safety.Setup(guard => guard.ValidateObservedManualMoveAsync(printerId,
             It.IsAny<PrinterSafetyMoveRequest>(), It.IsAny<PrinterStatusDto>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(PrinterSafetyValidationResult.Reject(409, "axes_not_homed", "Axes are not homed."));
+            .ReturnsAsync(PrinterSafetyValidationResult.Reject(409, "printer_axes_not_homed", SensitiveFailureDetail));
         await ChangeAsync(async (_, service) => await service.AdmitAsync(printerId, id, userId.ToString(),
             new(PrinterControlKind.MoveTo, X: 1, Y: 2, Z: 10), default));
         using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
@@ -1024,8 +1052,61 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         PrinterControlOperationDto result = await GetAsync(id);
         Assert.False(result.BarrierHeld);
         Assert.Equal(PrinterControlEvidence.NotSent, result.CompletionEvidence);
-        Assert.Equal(busy ? "printer_busy" : "axes_not_homed", result.Failure?.Code);
+        Assert.Equal(busy ? "printer_busy" : "printer_axes_not_homed", result.Failure?.Code);
+        Assert.Contains(busy ? "ready and idle" : "home all axes", result.Failure!.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(SensitiveFailureDetail, result.Failure.Message, StringComparison.Ordinal);
         Assert.Equal(0, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData("printer_telemetry_missing", "evidence is missing")]
+    [InlineData("printer_telemetry_stale", "evidence expired")]
+    [InlineData("printer_safety_evidence_unknown", "could not be verified")]
+    [InlineData("printer_move_out_of_bounds", "configured travel bounds")]
+    [InlineData("printer_configuration_changed", "configuration changed")]
+    [InlineData("printer_operation_unsupported", "does not support")]
+    [InlineData("unrecognized_diagnostic", "pre-send check could not complete")]
+    public async Task SetOutcomeAsync_PreSendDenial_PreservesCodeAndActionableMessage(string code, string expected)
+    {
+        Guid id = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (_, service) =>
+        {
+            Guid owner = Guid.NewGuid();
+            Assert.NotNull(await service.ClaimAsync(id, owner, default));
+            await service.SetOutcomeAsync(id, owner, false, code, default);
+        });
+        PrinterControlOperationDto result = await GetAsync(id);
+        Assert.Equal(PrinterControlState.Failed, result.State);
+        Assert.Equal(PrinterControlEvidence.NotSent, result.CompletionEvidence);
+        Assert.Equal(code, result.Failure!.Code);
+        Assert.Contains(expected, result.Failure.Message, StringComparison.Ordinal);
+        Assert.False(result.BarrierHeld);
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task WorkerAsync_FirmwareRejectsAfterSend_PreservesUnknownWithoutReplay()
+    {
+        Guid id = Guid.NewGuid();
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance);
+        await worker.StartAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        channel.Completion.SetException(new PrinterControlException(502, "printer_firmware_rejected", SensitiveFailureDetail));
+        await WaitForStateAsync(id, PrinterControlState.Unknown);
+        await worker.StopAsync(default);
+        PrinterControlOperationDto result = await GetAsync(id);
+        Assert.True(result.BarrierHeld);
+        Assert.Equal(PrinterControlEvidence.None, result.CompletionEvidence);
+        Assert.Equal("printer_firmware_rejected", result.Failure!.Code);
+        Assert.Contains("Motion may have partially executed", result.Failure.Message, StringComparison.Ordinal);
+        Assert.Contains("explicit recovery", result.Failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(SensitiveFailureDetail, result.Failure.Message, StringComparison.Ordinal);
+        Assert.Equal(result, await AdmitAsync(id));
+        await worker.TickAsync(default);
+        Assert.Equal(1, channel.SendCount);
     }
 
     [Fact]

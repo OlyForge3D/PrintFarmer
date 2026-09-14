@@ -1,5 +1,6 @@
 /* eslint-disable local/pf-no-unguarded-console */
 // Get hash for a G-code file (returns string)
+import { generateUUID } from "@/utils/uuid";
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
 import { isControlOperationResolved, matchesPrinterControlIntent, printerControlOperationSchema } from "@/types/api";
 import type {
@@ -331,19 +332,7 @@ export interface ObjectTagsDto {
 export class ApiClient {
   // Utility to generate a correlation ID (UUID v4)
   private static generateCorrelationId(): string {
-    // Use crypto API if available, fallback to random
-    if (typeof crypto !== "undefined" && crypto.randomUUID) {
-      return crypto.randomUUID();
-    }
-    // Fallback: simple random string
-    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
-      /[xy]/g,
-      function (c) {
-        const r = (Math.random() * 16) | 0,
-          v = c === "x" ? r : (r & 0x3) | 0x8;
-        return v.toString(16);
-      }
-    );
+    return generateUUID();
   }
 
   private static normalizePrintablesUsername(username: string): string {

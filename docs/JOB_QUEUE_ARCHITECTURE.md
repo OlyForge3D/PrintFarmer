@@ -124,9 +124,11 @@ Moonraker `HomeAll`, `HomeXY`, `HomeZ`, relative `Jog`, and absolute `MoveTo`
 use `POST /api/printers/{printerId}/control-operations`. The caller supplies
 `Idempotency-Key: <UUID>` and `{kind,x?,y?,z?,f?}`. Distances are millimeters;
 feedrate is positive millimeters/minute. Homes reject movement fields.
-`MoveTo` requires all three finite X/Y/Z coordinates at admission; partial targets
-return `400 invalid`. Jog accepts one or several finite relative axes, but its
-distance is bounded by the verified travel envelope, not an arbitrary UI-only step limit.
+`MoveTo` and Jog accept one or several finite axes; omitted absolute axes retain
+coordinates from the fresh command-channel observation, while omitted jog axes
+have zero delta. Empty movement intents remain `400 invalid`. Their destinations
+are bounded by the verified travel envelope, not an arbitrary UI-only step limit.
+The optional-axis wire shape is unchanged for web and iOS clients.
 Admission requires `queue:start` and printer-submit access and atomically stores
 the operation, shared dispatch barrier, audit, and invalidation outbox entry.
 HTTP returns `202` with the operation and `Location`; disconnecting does not
@@ -157,13 +159,40 @@ admission returns `422 printer_operation_unsupported`; previously queued unsent
 work settles `Failed/NotSent`, never as a silent success.
 The worker rechecks authorization,
 configuration identity, backend readiness/idle state, the dispatch barrier, and
-absolute-movement safety evidence before committing an irreversible send marker.
+manual-movement safety evidence before committing an irreversible send marker.
 For both Jog and MoveTo, one command-channel query reads current G-code position,
 homed axes, and origin offset. Jog's resulting absolute target and the current
-position must be inside the verified envelope; homing/frame facts must be fresh,
-and the target must meet verified clearance. Multi-axis jog is supported. Missing,
-stale, unhomed, nonfinite or out-of-envelope evidence causes a zero-send failure.
+position must be inside the verified envelope; all XYZ axes must be homed and
+homing/frame facts must be fresh. Multi-axis and sparse single-axis motion are
+supported. Missing, stale, unhomed, nonfinite or out-of-envelope evidence causes
+a zero-send failure.
 Cached coordinates never stand in for this pre-send observation.
+
+**Manual versus clearance-protected motion:** `ValidateObservedManualMoveAsync`
+is only for operator-directed durable Jog/MoveTo. It does not require a minimum
+workflow Z clearance: approaching the bed is legitimate manual positioning, and
+Moonraker discovery correctly reports `MinimumClearanceZMm` as Unknown/null (no
+authoritative collision-clearance source). Neither UI presentation modes nor a
+fabricated zero clearance may change these facts. Firmware-configured travel
+bounds, including a configured negative Z minimum, are retained; firmware still
+enforces its native kinematic and movement constraints when executing the unchanged
+bounded script. Manual admission is not proof of an obstacle-free path.
+
+The general `ValidateAsync(AbsoluteMovement, ...)` path retains its verified finite
+minimum-clearance requirement and full target validation. Its legacy non-durable
+controller caller is unchanged; Moonraker legacy routes still reject with
+`async_control_required`. No automated/attempt-bound lifecycle path is routed to
+the manual guard, and lifecycle/recovery safeguards are unchanged. PrintFarmer
+still requires all XYZ axes homed, a known fresh frame and current coordinates
+inside the envelope even for a single-axis manual request; native axis-only or
+out-of-envelope recovery motion is intentionally not enabled by this fix.
+
+Discovery is invalidated/requeried at validation, not optimized by reusing stale
+safety evidence. The worker's nominal one-second scan remains: wake-on-admission
+could reduce idle latency, but is not required to fix admission and would need a
+separate durable-ownership/fencing assessment; a wake signal must never authorize
+a send or replace scanning.
+
 The effective G-code offset is `gcode_move.position - gcode_move.gcode_position`
 from that same response; `homing_origin` alone would incorrectly omit G92 offsets.
 It then sends once over a dedicated persistent WebSocket with exact JSON-RPC
@@ -179,7 +208,13 @@ restore move before draining. Matching success proves `MotionQueueDrained` for
 the current controller queue, not future delayed macros or other external clients.
 Errors after send, partial writes, connection loss and sender failure become
 `Unknown`, retaining the barrier. A crash between marker and actual send is also
-conservatively unknown. Never replay a send-committed operation. Only unsent
+conservatively unknown. A correlated firmware error retains the diagnostic code
+`printer_firmware_rejected` and explicitly warns that motion may have partially
+executed and recovery is required. Raw firmware messages, command payloads,
+endpoints and credentials are never copied into the receipt. Pre-send failures
+retain diagnostic codes and use fixed, actionable messages (home axes, obtain
+fresh evidence, check configured bounds, or wait for ready/idle status).
+Never replay a send-committed operation. Only unsent
 claims are reclaimable. A late exact response can settle an unknown operation
 only while the same operation still owns the barrier and recovery has not begun.
 

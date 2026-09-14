@@ -11,6 +11,7 @@ public class UserSettingsConfiguration : IEntityTypeConfiguration<UserSettings>
         _ = builder.HasKey(u => u.Id);
         _ = builder.HasIndex(u => u.UserId).IsUnique();
         _ = builder.Property(u => u.Theme).IsRequired().HasMaxLength(32);
+        _ = builder.Property(u => u.PrinterControlMode).IsRequired().HasMaxLength(16).HasDefaultValue("Guided");
         _ = builder.Property(u => u.Locale).IsRequired().HasMaxLength(16);
         _ = builder.Property(u => u.ItemsPerPage).IsRequired();
         _ = builder.Property(u => u.DefaultSlicerPreset).HasMaxLength(256);

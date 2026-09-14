@@ -1,3 +1,4 @@
+import { generateUUID } from '@/utils/uuid';
 import React, { useState, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CubeIcon, UploadIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
@@ -82,15 +83,19 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
       return;
     }
 
-    files.forEach(file => {
-      const id = `${file.name}-${Date.now()}-${Math.random()}`;
-      setUploadQueue(prev => [...prev, {
-        id,
-        file,
-        progress: 0,
-        status: 'queued'
-      }]);
-    });
+    try {
+      files.forEach(file => {
+        const id = generateUUID();
+        setUploadQueue(prev => [...prev, {
+          id,
+          file,
+          progress: 0,
+          status: 'queued'
+        }]);
+      });
+    } catch (error) {
+      toast.error(`Failed to queue files: ${error instanceof Error ? error.message : 'Unable to generate a secure ID'}`);
+    }
   }, []);
 
   const handleFileSelect = useCallback((files: FileList | null) => {
@@ -103,15 +108,19 @@ export const ModelUploadModal: React.FC<ModelUploadModalProps> = ({
       return;
     }
 
-    validFiles.forEach(file => {
-      const id = `${file.name}-${Date.now()}-${Math.random()}`;
-      setUploadQueue(prev => [...prev, {
-        id,
-        file,
-        progress: 0,
-        status: 'queued'
-      }]);
-    });
+    try {
+      validFiles.forEach(file => {
+        const id = generateUUID();
+        setUploadQueue(prev => [...prev, {
+          id,
+          file,
+          progress: 0,
+          status: 'queued'
+        }]);
+      });
+    } catch (error) {
+      toast.error(`Failed to queue files: ${error instanceof Error ? error.message : 'Unable to generate a secure ID'}`);
+    }
   }, []);
 
   const uploadFiles = async () => {

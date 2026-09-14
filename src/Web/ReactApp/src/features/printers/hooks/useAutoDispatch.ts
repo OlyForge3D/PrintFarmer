@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { QueryClient, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { generateUUID } from '@/utils/uuid';
 import {
   getAutoDispatchStatus,
   setAutoDispatchEnabled,
@@ -163,10 +164,7 @@ function stableBedClearIdempotencyKey(status: AutoDispatchStatus): string {
   const storageKey = `printfarmer:bed-clear:${jobId}:${jobEtag}:${dispatchEtag}`;
   const existing = localStorage.getItem(storageKey);
   if (existing) return existing;
-  const created =
-    typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const created = generateUUID();
   localStorage.setItem(storageKey, created);
   return created;
 }

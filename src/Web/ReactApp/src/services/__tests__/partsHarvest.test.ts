@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   harvestJob,
   listParts,
@@ -271,6 +271,28 @@ describe('partsHarvest service', () => {
   });
 
   describe('generateHarvestOperationKey', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    });
+
+    it('uses secure random bytes on HTTP LAN when randomUUID is absent', () => {
+      const getRandomValues = vi.fn(crypto.getRandomValues.bind(crypto));
+      vi.stubGlobal('crypto', { getRandomValues });
+      const random = vi.spyOn(Math, 'random');
+
+      const key = generateHarvestOperationKey();
+
+      expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      expect(getRandomValues).toHaveBeenCalledTimes(1);
+      expect(random).not.toHaveBeenCalled();
+    });
+
+    it('propagates failure when no secure random source exists', () => {
+      vi.stubGlobal('crypto', {});
+      expect(() => generateHarvestOperationKey()).toThrow('no cryptographically secure random source available');
+    });
+
     it('returns a UUID-like string', () => {
       const key = generateHarvestOperationKey();
       expect(key).toMatch(/^[0-9a-f-]{8,}$/i);
