@@ -6,7 +6,13 @@ using System.Text.Json;
 using System.Threading.Channels;
 using Farm.Backend.Plugin.Moonraker;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Security;
+using Farm.Infrastructure.Settings;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace Farm.Backend.Plugins.Tests.Backends;
@@ -14,6 +20,45 @@ namespace Farm.Backend.Plugins.Tests.Backends;
 [SuppressMessage("Usage", "VSTHRD003:Avoid awaiting foreign Tasks", Justification = "Test-owned TCS signals coordinate the fake transport and have no UI synchronization context.")]
 public sealed class MoonrakerMotionChannelTests
 {
+    [Fact]
+    public async Task ConnectAsync_DeniedConfiguredBackend_NeverUsesFrontendOrOpensTransport()
+    {
+        var printer = new Printer { ServerUrl = "http://test.invalid", BackendPort = 7125, FrontendPort = 80 };
+        var egress = new Mock<IEgressGuard>(MockBehavior.Strict);
+        egress.Setup(guard => guard.CheckAsync("http://test.invalid:7125", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(EgressCheckResult.Deny("test"));
+        var factory = new MoonrakerMotionChannelFactory(egress.Object, Mock.Of<ISensitiveDataProtector>());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => factory.ConnectAsync(printer, default));
+        egress.VerifyAll();
+    }
+
+    [Fact]
+    public async Task DurableCapability_InjectedFactory_AdvertisesKindsAndForwardsPrinterWithoutHttp()
+    {
+        using var http = new HttpClient();
+        var factory = new Mock<IMoonrakerMotionChannelFactory>();
+        var channel = new Mock<IPrinterMotionChannel>();
+        var printer = new Printer { ServerUrl = "http://test.invalid", BackendPort = 7125, FrontendPort = 80 };
+        factory.Setup(f => f.ConnectAsync(printer, It.IsAny<CancellationToken>())).ReturnsAsync(channel.Object);
+        MoonrakerClient capability = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings(), motionChannels: factory.Object);
+        Assert.Equal(Enum.GetValues<PrinterControlKind>(), capability.SupportedMotionKinds);
+        Assert.Same(channel.Object, await capability.ConnectAsync(printer, default));
+        factory.Verify(f => f.ConnectAsync(printer, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DurableCapability_MissingTransport_AdvertisesNothingAndFailsExplicitly()
+    {
+        using var http = new HttpClient();
+        MoonrakerClient capability = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+        Assert.Empty(capability.SupportedMotionKinds);
+        PrinterControlException error = await Assert.ThrowsAsync<PrinterControlException>(() =>
+            capability.ConnectAsync(new Printer(), default));
+        Assert.Equal("printer_operation_unsupported", error.Code);
+    }
+
     [Fact]
     public void HandshakeUri_RemovesQueryCredentialsAndUserInfo()
     {
@@ -69,7 +114,7 @@ public sealed class MoonrakerMotionChannelTests
     [Fact]
     public void BuildScript_MoveTo_RestoresCoordinateAndFeedStateWithoutRestoreMovement()
     {
-        string script = PrinterControlIntent.BuildScript(new(PrinterControlKind.MoveTo, 10, 20, 30, 1200));
+        string script = MoonrakerMotionScript.BuildScript(new(PrinterControlKind.MoveTo, 10, 20, 30, 1200));
         Assert.Equal("SAVE_GCODE_STATE NAME=printfarmer_motion\nG90\nG1 X10 Y20 Z30 F1200\nRESTORE_GCODE_STATE NAME=printfarmer_motion MOVE=0\nM400", script);
         Assert.True(PrinterControlIntent.IsValid(new(PrinterControlKind.MoveTo, 10)));
     }
@@ -81,7 +126,7 @@ public sealed class MoonrakerMotionChannelTests
     [InlineData(10d, 20d, null, "G1 X10 Y20")]
     public void BuildScript_SparseMoveTo_PreservesOmittedAxes(double? x, double? y, double? z, string command)
     {
-        string script = PrinterControlIntent.BuildScript(new(PrinterControlKind.MoveTo, x, y, z));
+        string script = MoonrakerMotionScript.BuildScript(new(PrinterControlKind.MoveTo, x, y, z));
         Assert.Equal($"SAVE_GCODE_STATE NAME=printfarmer_motion\nG90\n{command}\nRESTORE_GCODE_STATE NAME=printfarmer_motion MOVE=0\nM400", script);
     }
 
@@ -91,7 +136,7 @@ public sealed class MoonrakerMotionChannelTests
         var socket = new FakeSocket();
         await using var channel = new MoonrakerMotionChannel(socket);
         Guid id = Guid.NewGuid();
-        Task operation = channel.ExecuteAsync(id, "G28\nM400", default);
+        Task operation = channel.ExecuteAsync(id, new(PrinterControlKind.HomeAll), default);
         await socket.Sent.Task;
         using JsonDocument request = JsonDocument.Parse(socket.LastSend);
         Assert.Equal("printer.gcode.script", request.RootElement.GetProperty("method").GetString());
@@ -115,7 +160,7 @@ public sealed class MoonrakerMotionChannelTests
         var socket = new FakeSocket();
         await using var channel = new MoonrakerMotionChannel(socket);
         Guid id = Guid.NewGuid();
-        Task operation = channel.ExecuteAsync(id, "G28\nM400", default);
+        Task operation = channel.ExecuteAsync(id, new(PrinterControlKind.HomeAll), default);
         await socket.Sent.Task;
         socket.Enqueue($"{{\"id\":\"{id}\",\"error\":{{\"code\":400,\"message\":\"private macro detail\"}}}}");
         PrinterControlException error = await Assert.ThrowsAsync<PrinterControlException>(() => operation);
@@ -129,7 +174,7 @@ public sealed class MoonrakerMotionChannelTests
     {
         var socket = new FakeSocket { FailWrite = true };
         await using var channel = new MoonrakerMotionChannel(socket);
-        await Assert.ThrowsAsync<WebSocketException>(() => channel.ExecuteAsync(Guid.NewGuid(), "G28\nM400", default));
+        await Assert.ThrowsAsync<WebSocketException>(() => channel.ExecuteAsync(Guid.NewGuid(), new(PrinterControlKind.HomeAll), default));
         Assert.Equal(1, socket.SendCount);
     }
 
@@ -138,7 +183,7 @@ public sealed class MoonrakerMotionChannelTests
     {
         var socket = new FakeSocket();
         var channel = new MoonrakerMotionChannel(socket);
-        Task operation = channel.ExecuteAsync(Guid.NewGuid(), "G28\nM400", default);
+        Task operation = channel.ExecuteAsync(Guid.NewGuid(), new(PrinterControlKind.HomeAll), default);
         await socket.Sent.Task;
         await channel.DisposeAsync();
         await Assert.ThrowsAnyAsync<Exception>(() => operation);
@@ -151,7 +196,7 @@ public sealed class MoonrakerMotionChannelTests
     [InlineData(PrinterControlKind.HomeXY, "G28 X Y\nM400")]
     [InlineData(PrinterControlKind.HomeZ, "G28 Z\nM400")]
     public void BuildScript_Homes_EndsWithQueueDrain(PrinterControlKind kind, string expected) =>
-        Assert.Equal(expected, PrinterControlIntent.BuildScript(new(kind)));
+        Assert.Equal(expected, MoonrakerMotionScript.BuildScript(new(kind)));
 
     [Fact]
     public void BuildScript_Jog_RestoresModeBeforeDrainAndUsesInvariantNumbers()
@@ -160,7 +205,7 @@ public sealed class MoonrakerMotionChannelTests
         try
         {
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
-            string script = PrinterControlIntent.BuildScript(new(PrinterControlKind.Jog, X: -1.25, F: 600));
+            string script = MoonrakerMotionScript.BuildScript(new(PrinterControlKind.Jog, X: -1.25, F: 600));
             Assert.Contains("G91\nG1 X-1.25 F600", script);
             Assert.EndsWith("RESTORE_GCODE_STATE NAME=printfarmer_motion MOVE=0\nM400", script, StringComparison.Ordinal);
         }
@@ -187,7 +232,7 @@ public sealed class MoonrakerMotionChannelTests
     [Fact]
     public void BuildScript_SmallFiniteAxis_IsNotRoundedToZeroOrWrittenAsExponent()
     {
-        string script = PrinterControlIntent.BuildScript(new(PrinterControlKind.Jog, X: 1e-20));
+        string script = MoonrakerMotionScript.BuildScript(new(PrinterControlKind.Jog, X: 1e-20));
         Assert.Contains("X0.00000000000000000001", script);
         Assert.DoesNotContain("E-", script);
     }

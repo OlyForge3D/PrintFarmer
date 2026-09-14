@@ -161,6 +161,10 @@ Database: SQLite / PostgreSQL / SQL Server
 - Refit (type-safe HTTP clients)
 - xUnit (testing framework)
 
+Printer controls delegate protocol commands and support declarations to backend
+plugins; shared services retain authorization and operation lifecycle policy.
+See [printer control ownership](./docs/ARCHITECTURE.md#printer-control-ownership).
+
 **Frontend:**
 - React 19+ with TypeScript
 - Vite (build tool)

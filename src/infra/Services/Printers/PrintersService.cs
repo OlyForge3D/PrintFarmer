@@ -981,7 +981,7 @@ public class PrintersService(
 
         // All returned DTOs should be non-null due to fallback, but filter just in case
         Dictionary<Guid, PrinterPhysicalControlDto> controls =
-            await PrinterControlOperationService.ProjectAsync(_db, items.Select(p => p.Id).ToArray(), ct);
+            await PrinterControlOperationService.ProjectAsync(_db, items.Select(p => p.Id).ToArray(), _backendFactory, ct);
         return dtos.Where(d => d != null).Cast<PrinterDto>()
             .Where(dto => controls.ContainsKey(dto.Id))
             .Select(dto => dto with { PhysicalControl = controls[dto.Id] }).ToArray();
@@ -1043,7 +1043,7 @@ public class PrintersService(
     public async Task<PrinterStatusDto> GetStatusDtoAsync(Guid id, CancellationToken ct)
     {
         Printer? p = await _unitOfWork.Printers.FindByIdAsync(id, ct) ?? throw new KeyNotFoundException();
-        PrinterPhysicalControlDto control = (await PrinterControlOperationService.ProjectAsync(_db, [id], ct)).GetValueOrDefault(id)
+        PrinterPhysicalControlDto control = (await PrinterControlOperationService.ProjectAsync(_db, [id], _backendFactory, ct)).GetValueOrDefault(id)
             ?? throw new KeyNotFoundException("Printer not found.");
 
         try
@@ -1104,7 +1104,7 @@ public class PrintersService(
     public async Task<PrinterDto> GetPrinterDtoAsync(Guid id, CancellationToken ct)
     {
         Printer? p = await _unitOfWork.Printers.FindByIdWithIncludesAsync(id, ct) ?? throw new KeyNotFoundException();
-        PrinterPhysicalControlDto control = (await PrinterControlOperationService.ProjectAsync(_db, [id], ct)).GetValueOrDefault(id)
+        PrinterPhysicalControlDto control = (await PrinterControlOperationService.ProjectAsync(_db, [id], _backendFactory, ct)).GetValueOrDefault(id)
             ?? throw new KeyNotFoundException("Printer not found.");
 
         // Resolve camera URLs from Cameras table
@@ -1987,7 +1987,7 @@ public class PrintersService(
         }
 
         Dictionary<Guid, PrinterPhysicalControlDto> controls =
-            await PrinterControlOperationService.ProjectAsync(_db, items.Select(p => p.Id).ToArray(), ct);
+            await PrinterControlOperationService.ProjectAsync(_db, items.Select(p => p.Id).ToArray(), _backendFactory, ct);
         return dtos.Where(dto => controls.ContainsKey(dto.Id))
             .Select(dto => dto with { PhysicalControl = controls[dto.Id] }).ToArray();
     }
@@ -2013,7 +2013,7 @@ public class PrintersService(
 
         IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses = _statusCache.GetAllStatuses();
         Dictionary<Guid, PrinterPhysicalControlDto> controls =
-            await PrinterControlOperationService.ProjectAsync(_db, summaries.Select(p => p.Id).ToArray(), ct);
+            await PrinterControlOperationService.ProjectAsync(_db, summaries.Select(p => p.Id).ToArray(), _backendFactory, ct);
         return summaries
             .Select(summary => cachedStatuses.TryGetValue(summary.Id, out PrinterStatusDto? status)
                 ? summary with { IsOnline = status.IsOnline, State = status.State }
@@ -2180,7 +2180,7 @@ public class PrintersService(
         }
 
         Dictionary<Guid, PrinterPhysicalControlDto> controls =
-            await PrinterControlOperationService.ProjectAsync(_db, items.Select(p => p.Id).ToArray(), ct);
+            await PrinterControlOperationService.ProjectAsync(_db, items.Select(p => p.Id).ToArray(), _backendFactory, ct);
         return dtos.Where(dto => controls.ContainsKey(dto.Id))
             .Select(dto => dto with { PhysicalControl = controls[dto.Id] }).ToArray();
     }
@@ -2396,7 +2396,7 @@ public class PrintersService(
     {
         List<Printer> printers = await GetPrintersForExportAsync(ids, ct);
         Dictionary<Guid, PrinterPhysicalControlDto> controls =
-            await PrinterControlOperationService.ProjectAsync(_db, printers.Select(p => p.Id).ToArray(), ct);
+            await PrinterControlOperationService.ProjectAsync(_db, printers.Select(p => p.Id).ToArray(), _backendFactory, ct);
 
         PrinterWithCapabilitiesDto[] results = printers.Where(p => controls.ContainsKey(p.Id)).Select(p =>
         {
@@ -3286,22 +3286,14 @@ public class PrintersService(
                 var backendEnum = (PrinterBackend)p.Backend;
                 if (_capabilityFactory.TryGetCameraClientTyped(backendEnum, out ISupportsCamera? cameraClient) && cameraClient != null)
                 {
-                    string snapUrl = backendEnum == PrinterBackend.Moonraker
-                        ? BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort)
-                        : p.BackendUrl;
-
-                    snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(snapUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
+                    snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(p.BackendUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
                 }
             }
 
-            if (IsSnapmakerU1Printer(p) &&
-                (string.IsNullOrWhiteSpace(snapshotUrl) || CameraContractClassifier.IsSnapmakerU1MonitorSnapshotUrl(snapshotUrl)))
+            byte[]? image = await TryGetTriggeredCameraSnapshotAsync(p, snapshotUrl, ct).ConfigureAwait(false);
+            if (image is { Length: > 0 })
             {
-                byte[]? u1Snapshot = await TryGetSnapmakerU1CameraSnapshotAsync(p, ct).ConfigureAwait(false);
-                if (u1Snapshot is { Length: > 0 })
-                {
-                    return u1Snapshot;
-                }
+                return image;
             }
 
             if (!string.IsNullOrWhiteSpace(snapshotUrl))
@@ -3316,6 +3308,26 @@ public class PrintersService(
             _logger.LogDebug("Failed to get camera snapshot for printer {Id}: {Message}", id, ex.Message);
             return null;
         }
+    }
+
+    private async Task<byte[]?> TryGetTriggeredCameraSnapshotAsync(Printer printer, string? snapshotUrl, CancellationToken ct)
+    {
+        try
+        {
+            IBackendClient client = GetBackendClient((PrinterBackend)printer.Backend);
+            if (client is ISupportsPrinterCameraProfile profile &&
+                profile.ShouldTriggerSnapshot(printer, snapshotUrl) &&
+                client is ISupportsTriggeredCameraSnapshot triggeredSnapshot)
+            {
+                return await triggeredSnapshot.GetTriggeredCameraSnapshotAsync(printer.BackendUrl, printer.Credential, ct).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Backend-triggered camera snapshot unavailable for printer {PrinterId}", printer.Id);
+        }
+
+        return null;
     }
 
     private async Task<byte[]?> FetchBytesFromUrlAsync(string url, string? apiKey, CancellationToken ct)
@@ -3383,14 +3395,7 @@ public class PrintersService(
                 return false;
             }
 
-            // Use capability interface for movement
-            if (backend == PrinterBackend.OctoPrint || backend == PrinterBackend.PrusaLink)
-            {
-                return await movement.HomeAsync(p.BackendUrl, p.Credential).ConfigureAwait(false);
-            }
-
-            string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-            return await movement.SendHomeAsync(moonrakerUrl, ct).ConfigureAwait(false);
+            return await movement.HomeAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -3429,15 +3434,7 @@ public class PrintersService(
                 return false;
             }
 
-            // PrusaLink and OctoPrint need credentials via apiKey parameter
-            if (backend == PrinterBackend.OctoPrint || backend == PrinterBackend.PrusaLink)
-            {
-                return await movement.HomeXYAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
-            }
-
-            // Moonraker doesn't need credentials
-            string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-            return await movement.HomeXYAsync(moonrakerUrl, null, ct).ConfigureAwait(false);
+            return await movement.HomeXYAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -3473,8 +3470,7 @@ public class PrintersService(
 
             if (client is ISupportsMovement movement)
             {
-                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.HomeZAsync(moonrakerUrl, p.Credential, ct).ConfigureAwait(false);
+                return await movement.HomeZAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
             }
 
             return false;
@@ -3514,38 +3510,9 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
             IBackendClient client = GetBackendClient(backend);
 
-            if (backend == PrinterBackend.OctoPrint)
-            {
-                // OctoPrint: Use backend-specific temperature API
-                if (client is ISupportsOctoPrintTemperature octoPrintTemp)
-                {
-                    bool success = true;
-
-                    if (bed.HasValue)
-                    {
-                        bool bedSuccess = await octoPrintTemp.SetBedTempAsync(p.BackendUrl, p.ApiKey ?? string.Empty, bed.Value, ct).ConfigureAwait(false);
-#pragma warning disable S2589 // Boolean expression always evaluates to true
-                        success = success && bedSuccess;
-#pragma warning restore S2589
-                    }
-
-                    if (hotend.HasValue)
-                    {
-                        bool hotendSuccess = await octoPrintTemp.SetHotendTempAsync(p.BackendUrl, p.ApiKey ?? string.Empty, hotend.Value, "tool0", ct).ConfigureAwait(false);
-                        success = success && hotendSuccess;
-                    }
-
-                    return success ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
-                }
-
-                return PrinterControlOutcome.BackendUnsupported;
-            }
-
-            // Moonraker, PrusaLink, SDCP: use generic temperature control
             if (client is ISupportsTemperatureControl tempControl)
             {
-                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                bool ok = await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, p.Credential, ct).ConfigureAwait(false);
+                bool ok = await tempControl.SetTemperaturesAsync(p.BackendUrl, hotend, bed, p.Credential, ct).ConfigureAwait(false);
                 return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
@@ -3594,8 +3561,7 @@ public class PrintersService(
 
             if (client is ISupportsMovement movement)
             {
-                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                bool ok = await movement.MoveAsync(moonrakerUrl, x, y, z, f, ct: ct).ConfigureAwait(false);
+                bool ok = await movement.MoveAsync(p.BackendUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
                 return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
@@ -3645,8 +3611,7 @@ public class PrintersService(
 
             if (client is ISupportsMovement movement)
             {
-                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                bool ok = await movement.MoveToAsync(moonrakerUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
+                bool ok = await movement.MoveToAsync(p.BackendUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
                 return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
@@ -3841,13 +3806,13 @@ public class PrintersService(
     }
 
     /// <summary>
-    /// Immediately stops the printer using emergency stop (M112).
+    /// Immediately stops the printer through its backend's emergency capability.
     /// </summary>
     /// <param name="id">Unique printer identifier (GUID)</param>
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>True if emergency stop succeeded, false if printer not found or backend unavailable</returns>
     /// <remarks>
-    /// This is more aggressive than CancelPrintAsync - sends M112 emergency stop command.
+    /// This is more aggressive than CancelPrintAsync.
     /// Use only in emergencies when normal cancel is insufficient.
     /// May require firmware restart after use.
     /// </remarks>
@@ -3877,22 +3842,8 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
             IBackendClient client = GetBackendClient(backend);
 
-            if (backend == PrinterBackend.Moonraker)
-            {
-                // Klipper's emergency endpoint bypasses the G-code mutex. M112 sent
-                // through printer.gcode.script would wait behind the motion being stopped.
-                return client is ISupportsEmergencyStop emergency &&
-                    await emergency.EmergencyStopAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
-            }
-
-            // Other adapters retain their existing emergency-stop behavior.
-            if (client is ISupportsGcodeExecution gcodeClient)
-            {
-                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await gcodeClient.SendGcodeAsync(moonrakerUrl, "M112", ct).ConfigureAwait(false);
-            }
-
-            return false;
+            return client is ISupportsEmergencyStop emergency &&
+                await emergency.EmergencyStopAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -3929,8 +3880,7 @@ public class PrintersService(
 
             if (client is ISupportsControlRestart controlRestart)
             {
-                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await controlRestart.FirmwareRestartAsync(moonrakerUrl, ct).ConfigureAwait(false);
+                return await controlRestart.FirmwareRestartAsync(p.BackendUrl, ct).ConfigureAwait(false);
             }
 
             return false;
@@ -3949,10 +3899,10 @@ public class PrintersService(
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>True if disable command succeeded, false if printer not found or backend unavailable</returns>
     /// <remarks>
-    /// Sends M84 gcode command to disable all stepper motors.
+    /// Delegates motor control to the backend's semantic capability.
     /// Useful for manual bed leveling, nozzle cleaning, or manual adjustment when print is complete.
     /// Motors will be re-engaged with next movement command.
-    /// Requires backend to support gcode execution capability.
+    /// Requires backend to support motor control.
     /// </remarks>
     public async Task<bool> DisableMotorsAsync(Guid id, CancellationToken ct)
     {
@@ -3967,10 +3917,9 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
             IBackendClient client = GetBackendClient(backend);
 
-            if (client is ISupportsGcodeExecution gcodeClient)
+            if (client is ISupportsMotorControl motors)
             {
-                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await gcodeClient.SendGcodeAsync(moonrakerUrl, "M84", ct).ConfigureAwait(false);
+                return await motors.DisableMotorsAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
             }
 
             return false;
@@ -3978,6 +3927,57 @@ public class PrintersService(
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to disable motors on printer {Id}", id);
+            return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<bool> ExtrudeFilamentAsync(Guid id, double distanceMm, int feedrateMmPerMinute, CancellationToken ct) =>
+        ExecuteBackendControlAsync<ISupportsExtrusionControl>(
+            id,
+            (client, printer, token) => client.ExtrudeAsync(printer.BackendUrl, distanceMm, feedrateMmPerMinute, printer.Credential, token),
+            ct);
+
+    /// <inheritdoc />
+    public Task<bool> SaveZOffsetToFirmwareAsync(Guid id, decimal offsetMm, CancellationToken ct) =>
+        ExecuteBackendControlAsync<ISupportsZOffsetCalibration>(
+            id,
+            (client, printer, token) => client.SaveZOffsetAsync(printer.BackendUrl, offsetMm, printer.Credential, token),
+            ct);
+
+    /// <inheritdoc />
+    public Task<bool> ExecuteMmuAsync(Guid id, MmuControlRequest request, CancellationToken ct) =>
+        ExecuteBackendControlAsync<ISupportsMmuControl>(
+            id,
+            (client, printer, token) => client.ExecuteMmuAsync(printer.BackendUrl, request, printer.Credential, token),
+            ct);
+
+    private async Task<bool> ExecuteBackendControlAsync<TCapability>(
+        Guid id,
+        Func<TCapability, Printer, CancellationToken, Task<bool>> execute,
+        CancellationToken ct)
+        where TCapability : class
+    {
+        Printer? printer = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (printer is null)
+        {
+            _logger.LogWarning("Cannot execute printer control: printer {PrinterId} was not found", id);
+            return false;
+        }
+
+        try
+        {
+            if (GetBackendClient((PrinterBackend)printer.Backend) is not TCapability capability)
+            {
+                _logger.LogWarning("Printer {PrinterId} backend does not implement {Capability}", id, typeof(TCapability).Name);
+                return false;
+            }
+
+            return await execute(capability, printer, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Backend control {Capability} failed for printer {PrinterId}", typeof(TCapability).Name, id);
             return false;
         }
     }
@@ -4009,8 +4009,7 @@ public class PrintersService(
 
             if (client is ISupportsGcodeExecution gcodeClient)
             {
-                string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await gcodeClient.SendGcodeAsync(moonrakerUrl, gcode, ct).ConfigureAwait(false);
+                return await gcodeClient.SendGcodeAsync(p.BackendUrl, gcode, ct).ConfigureAwait(false);
             }
 
             return false;
@@ -4038,11 +4037,7 @@ public class PrintersService(
             return new PrintJobObjectListDto(id, null, Array.Empty<PrintJobObjectDto>());
         }
 
-        string url = backend == PrinterBackend.Moonraker
-            ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
-            : printer.BackendUrl;
-
-        PrintJobObjectListDto? objects = await objectExclusionClient.GetCurrentJobObjectsAsync(url, printer.Credential, ct).ConfigureAwait(false);
+        PrintJobObjectListDto? objects = await objectExclusionClient.GetCurrentJobObjectsAsync(printer.BackendUrl, printer.Credential, ct).ConfigureAwait(false);
         return objects is null
             ? new PrintJobObjectListDto(id, null, Array.Empty<PrintJobObjectDto>())
             : objects with { PrinterId = id };
@@ -4071,9 +4066,7 @@ public class PrintersService(
                 return new CommandResult(false, $"Backend '{backend}' does not support object exclusion");
             }
 
-            string url = backend == PrinterBackend.Moonraker
-                ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
-                : printer.BackendUrl;
+            string url = printer.BackendUrl;
 
             PrintJobObjectListDto? currentObjects = await objectExclusionClient.GetCurrentJobObjectsAsync(url, printer.Credential, ct).ConfigureAwait(false);
             if (currentObjects is null || string.IsNullOrWhiteSpace(currentObjects.JobName))
@@ -4127,8 +4120,7 @@ public class PrintersService(
                 return new CommandResult(false, $"Backend '{backend}' does not support filament control");
             }
 
-            string url = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-            bool result = await filamentClient.LoadFilamentAsync(url, ct).ConfigureAwait(false);
+            bool result = await filamentClient.LoadFilamentAsync(p.BackendUrl, ct).ConfigureAwait(false);
             return result
                 ? new CommandResult(true, "Filament load initiated")
                 : new CommandResult(false, "Printer rejected the filament load command");
@@ -4265,8 +4257,7 @@ public class PrintersService(
                     residualWeightG);
             }
 
-            string url = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-            bool result = await filamentClient.UnloadFilamentAsync(url, ct).ConfigureAwait(false);
+            bool result = await filamentClient.UnloadFilamentAsync(p.BackendUrl, ct).ConfigureAwait(false);
             return new FilamentUnloadResult(
                 result,
                 result ? "Filament unload initiated" : "Printer rejected the filament unload command",
@@ -4310,8 +4301,7 @@ public class PrintersService(
                 return new CommandResult(false, $"Backend '{backend}' does not support filament control");
             }
 
-            string url = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-            bool result = await filamentClient.ChangeFilamentAsync(url, ct).ConfigureAwait(false);
+            bool result = await filamentClient.ChangeFilamentAsync(p.BackendUrl, ct).ConfigureAwait(false);
             return result
                 ? new CommandResult(true, "Filament change initiated")
                 : new CommandResult(false, "Printer rejected the filament change command");
@@ -5450,9 +5440,7 @@ public class PrintersService(
                 return Array.Empty<PrinterFileDto>();
             }
 
-            string baseUrl = backend == PrinterBackend.Moonraker
-                ? BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort)
-                : p.BackendUrl;
+            string baseUrl = p.BackendUrl;
 
             // Get file list with standardized PrinterFileInfo objects
             // Backend clients are responsible for retrieving thumbnails and converting timestamps to Unix format
@@ -5516,9 +5504,7 @@ public class PrintersService(
                 return null;
             }
 
-            string baseUrl = backend == PrinterBackend.Moonraker
-                ? BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort)
-                : p.BackendUrl;
+            string baseUrl = p.BackendUrl;
 
             // Download the file
             byte[]? fileContent = await downloadClient.DownloadFileAsync(baseUrl, filename, ct).ConfigureAwait(false);
@@ -5864,9 +5850,7 @@ public class PrintersService(
                 return null;
             }
 
-            string url = backend == PrinterBackend.Moonraker
-                ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
-                : printer.BackendUrl;
+            string url = printer.BackendUrl;
 
             PrinterJob? job = await jobClient.GetJobAsync(url, printer.Credential, ct).ConfigureAwait(false);
 
@@ -6154,16 +6138,6 @@ public class PrintersService(
     }
 
     /// <summary>
-    /// Builds the correct Moonraker API URL using the FrontendPort.
-    /// For Moonraker/Klipper printers, ALL API requests go to the FrontendPort,
-    /// and Moonraker automatically routes them to port 7125 internally.
-    /// </summary>
-    private static string BuildMoonrakerUrl(string serverUrl, int? frontendPort)
-        => PrinterBackendEndpointResolver.ResolveMoonrakerDispatchUrl(
-            serverUrl,
-            frontendPort);
-
-    /// <summary>
     /// Calculates aggregate statistics from OctoPrint history jobs.
     /// </summary>
     private static HistoryTotals CalculateOctoPrintHistoryTotals(HistoryJob[] jobs)
@@ -6216,7 +6190,6 @@ public class PrintersService(
         var backend = (PrinterBackend)printer.Backend;
         string? streamUrl = null;
         string? snapshotUrl = null;
-        bool isSnapmakerU1 = IsSnapmakerU1Printer(printer);
 
         try
         {
@@ -6225,10 +6198,7 @@ public class PrintersService(
             {
                 _logger.LogInformation("RefreshCameraUrlsAsync: Using configured camera detection for backend {Backend}", backend);
 
-                // For Moonraker, use the frontend URL (not backend port 7125)
-                string baseUrlForCamera = backend == PrinterBackend.Moonraker
-                    ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
-                    : printer.BackendUrl;
+                string baseUrlForCamera = printer.BackendUrl;
 
                 _logger.LogInformation("RefreshCameraUrlsAsync: Using baseUrlForCamera={BaseUrlForCamera}", baseUrlForCamera);
 
@@ -6241,10 +6211,11 @@ public class PrintersService(
 
                 _logger.LogInformation("RefreshCameraUrlsAsync: Got URLs from detection - stream={StreamUrl}, snapshot={SnapshotUrl}", streamUrl, snapshotUrl);
 
-                if (isSnapmakerU1 && string.IsNullOrWhiteSpace(streamUrl) && string.IsNullOrWhiteSpace(snapshotUrl))
+                if (string.IsNullOrWhiteSpace(streamUrl) && string.IsNullOrWhiteSpace(snapshotUrl) &&
+                    GetBackendClient(backend) is ISupportsPrinterCameraProfile profile)
                 {
-                    (streamUrl, snapshotUrl) = GetSnapmakerU1CameraUrls(printer);
-                    _logger.LogInformation("RefreshCameraUrlsAsync: Using Snapmaker U1 snapshot-only camera strategy - snapshot={SnapshotUrl}", snapshotUrl);
+                    (streamUrl, snapshotUrl) = profile.GetDefaultCameraUrls(printer);
+                    _logger.LogInformation("RefreshCameraUrlsAsync: Applied backend camera defaults for printer {PrinterId}", printer.Id);
                 }
             }
             else
@@ -6255,9 +6226,7 @@ public class PrintersService(
                 bool gotCameraClient = _capabilityFactory.TryGetCameraClientTyped(backend, out ISupportsCamera? cameraClient);
                 if (gotCameraClient && cameraClient != null)
                 {
-                    string baseUrlForCamera = backend == PrinterBackend.Moonraker
-                        ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
-                        : printer.BackendUrl;
+                    string baseUrlForCamera = printer.BackendUrl;
 
                     streamUrl = await cameraClient.GetCameraStreamUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.Credential, ct).ConfigureAwait(false);
                     snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(baseUrlForCamera, printer.FrontendPort, printer.Credential, ct).ConfigureAwait(false);
@@ -6346,50 +6315,6 @@ public class PrintersService(
         PrinterBackend.FlashForge => CameraSource.FlashForge,
         _ => CameraSource.Standalone,
     };
-
-    private async Task<byte[]?> TryGetSnapmakerU1CameraSnapshotAsync(Printer printer, CancellationToken ct)
-    {
-        try
-        {
-            IBackendClient client = _backendFactory.GetClient(PrinterBackend.Moonraker);
-            if (client is not ISupportsTriggeredCameraSnapshot triggeredSnapshotClient)
-            {
-                return null;
-            }
-
-            string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
-            return await triggeredSnapshotClient.GetTriggeredCameraSnapshotAsync(moonrakerUrl, printer.Credential, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug("Snapmaker U1 camera snapshot failed for printer {PrinterId}: {Message}", printer.Id, ex.Message);
-            return null;
-        }
-    }
-
-    private static (string? StreamUrl, string? SnapshotUrl) GetSnapmakerU1CameraUrls(Printer printer)
-    {
-        string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
-        Uri baseUri = new(moonrakerUrl);
-        UriBuilder builder = new(baseUri)
-        {
-            Path = "server/files/camera/monitor.jpg",
-            Query = string.Empty
-        };
-
-        return (null, builder.Uri.ToString());
-    }
-
-    private static bool IsSnapmakerU1Printer(Printer printer)
-    {
-        if ((PrinterBackend)printer.Backend != PrinterBackend.Moonraker)
-        {
-            return false;
-        }
-
-        return printer.Manufacturer?.Name.Equals(MoonrakerOnboardingResolver.SnapmakerManufacturerName, StringComparison.OrdinalIgnoreCase) == true &&
-               printer.Model?.Name.Equals(MoonrakerOnboardingResolver.SnapmakerU1ModelName, StringComparison.OrdinalIgnoreCase) == true;
-    }
 
     /// <inheritdoc/>
     public async Task SyncBuddyCameraAsync(Printer printer, string buddyCameraIp, CancellationToken ct)

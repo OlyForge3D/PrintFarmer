@@ -15,7 +15,7 @@ namespace Farm.Backend.Plugin.Moonraker;
 /// <summary>Creates a command-only connection pinned to the vetted destination, with normal TLS verification.</summary>
 public sealed class MoonrakerMotionChannelFactory(IEgressGuard egress, ISensitiveDataProtector protector) : IMoonrakerMotionChannelFactory
 {
-    public async Task<IMoonrakerMotionChannel> ConnectAsync(Printer printer, CancellationToken ct)
+    public async Task<IPrinterMotionChannel> ConnectAsync(Printer printer, CancellationToken ct)
     {
         using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         connectTimeout.CancelAfter(TimeSpan.FromSeconds(15));
@@ -95,7 +95,7 @@ public sealed class MoonrakerMotionChannelFactory(IEgressGuard egress, ISensitiv
 /// One persistent receive loop routes exact JSON-RPC IDs. Command silence is not failure:
 /// only write/connect deadlines and actual WebSocket PING/PONG liveness are bounded.
 /// </summary>
-public sealed class MoonrakerMotionChannel : IMoonrakerMotionChannel
+public sealed class MoonrakerMotionChannel : IPrinterMotionChannel
 {
     private const int MaxMessageBytes = 1024 * 1024;
     private readonly WebSocket socket;
@@ -194,8 +194,9 @@ public sealed class MoonrakerMotionChannel : IMoonrakerMotionChannel
             print.TryGetProperty("state", out JsonElement state) &&
             state.GetString() is "standby" or "complete" or "cancelled" or "error";
 
-    public async Task ExecuteAsync(Guid correlationId, string script, CancellationToken ct)
+    public async Task ExecuteAsync(Guid correlationId, PrinterControlRequest request, CancellationToken ct)
     {
+        string script = MoonrakerMotionScript.BuildScript(request);
         _ = await CallAsync(correlationId, "printer.gcode.script", new { script }, ct);
     }
 

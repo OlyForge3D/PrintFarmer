@@ -54,6 +54,29 @@ Entity Framework Core (ORM)
 Database (SQLite/PostgreSQL/SQL Server)
 ```
 
+### Printer control ownership
+
+Backend plugins are the authority for translating semantic printer actions into
+their backend protocol. Shared services pass the configured `Printer.BackendUrl`
+and credentials through capability interfaces; they must not select Moonraker
+ports, build firmware commands, or infer supported controls from backend names.
+The redundant `PrinterBackendEndpointResolver` is removed.
+
+`PrintersService` coordinates lookup and application results. The control service
+and worker retain authorization, durable ownership, dispatch fencing, fresh safety
+validation, recovery and no-replay guarantees. Plugin capabilities provide the
+transport, command translation and supported-operation facts. A broad legacy
+interface is not evidence that every method is implemented.
+
+API and frontend addresses remain separate. Moonraker camera discovery queries
+the backend API while the plugin resolves relative webcam URLs against the
+configured frontend port. Model-specific camera defaults and triggered snapshot
+selection also belong to the plugin; camera persistence remains shared.
+
+This boundary applies to control execution and capability projection. Existing
+catalog/onboarding inference and legacy import/export normalization are separate
+responsibilities and are not redesigned by this control-path refactor.
+
 ### Key Components
 
 #### Controllers

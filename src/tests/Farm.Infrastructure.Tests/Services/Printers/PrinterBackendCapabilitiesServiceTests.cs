@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Backend.Plugin.FlashForge;
@@ -26,7 +28,7 @@ public class PrinterBackendCapabilitiesServiceTests
     [InlineData(PrinterBackend.SDCP, false, false, false, false)]
     [InlineData(PrinterBackend.Unknown, false, false, false, false)]
     [InlineData((PrinterBackend)999, false, false, false, false)]
-    public async Task GetByPrinterIdAsync_ConcreteBackend_ReportsOnlyProvenSharedRoutes(
+    public async Task GetByPrinterIdAsync_ConcreteBackend_ReportsPluginDeclaredControls(
         PrinterBackend backend,
         bool homing,
         bool homingZ,
@@ -54,7 +56,8 @@ public class PrinterBackendCapabilitiesServiceTests
             Name = "capability-test",
             Backend = (int)backend,
             ServerUrl = "http://printer.local",
-            BackendPort = 80,
+            BackendPort = 8899,
+            FrontendPort = 8080,
         };
         var repo = new Mock<IPrintersRepository>();
         repo.Setup(repository => repository.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>()))
@@ -94,10 +97,82 @@ public class PrinterBackendCapabilitiesServiceTests
         }
     }
 
+    [Fact]
+    public async Task GetByPrinterIdAsync_CustomBackendMetadata_ProjectsOnlyDeclaredImplementedControls()
+    {
+        var backend = (PrinterBackend)999;
+        var client = new Mock<IBackendClient>();
+        client.As<ISupportsMovement>();
+        client.As<ISupportsTemperatureControl>();
+        client.As<ISupportsMotorControl>();
+        client.As<ISupportsPrinterControlCapabilities>()
+            .SetupGet(value => value.ControlCapabilities)
+            .Returns(new PrinterControlCapabilities
+            {
+                SupportsHomingZ = true,
+                SupportsBedTemperature = true,
+                SupportsDisableMotors = true,
+                SupportsExtrusion = true,
+                SupportedAxes = ["z"],
+            });
+        var clients = new Mock<IBackendClientFactory>();
+        clients.Setup(value => value.GetClient(backend)).Returns(client.Object);
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(), Backend = (int)backend,
+            ServerUrl = "http://printer.local", BackendPort = 9000, FrontendPort = 8000,
+        };
+        var repo = new Mock<IPrintersRepository>();
+        repo.Setup(value => value.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>())).ReturnsAsync(printer);
+        var factory = new BackendCapabilityFactory(clients.Object, NullLogger<BackendCapabilityFactory>.Instance);
+        var service = new PrinterBackendCapabilitiesService(repo.Object, factory, clients.Object);
+
+        PrinterBackendCapabilitiesDto result = (await service.GetByPrinterIdAsync(printer.Id, CancellationToken.None))!;
+
+        Assert.False(result.SupportsHoming);
+        Assert.False(result.SupportsHomingXY);
+        Assert.True(result.SupportsHomingZ);
+        Assert.False(result.SupportsHotendTemperature);
+        Assert.True(result.SupportsBedTemperature);
+        Assert.True(result.SupportsDisableMotors);
+        Assert.False(result.SupportsExtrusion);
+        Assert.Equal(["z"], result.SupportedAxes);
+        Assert.False(result.SupportsAbsoluteMovement);
+        Assert.False(result.SupportsZOffsetFirmwareSave);
+    }
+
+    [Fact]
+    public async Task GetByPrinterIdAsync_TypedInterfacesWithoutMetadata_RemainsConservative()
+    {
+        var client = new Mock<IBackendClient>();
+        client.As<ISupportsMovement>();
+        client.As<ISupportsTemperatureControl>();
+        client.As<ISupportsMotorControl>();
+        client.As<ISupportsExtrusionControl>();
+        var clients = new Mock<IBackendClientFactory>();
+        clients.Setup(value => value.GetClient(It.IsAny<PrinterBackend>())).Returns(client.Object);
+        var printer = new Printer { Id = Guid.NewGuid(), Backend = (int)PrinterBackend.Moonraker };
+        var repo = new Mock<IPrintersRepository>();
+        repo.Setup(value => value.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>())).ReturnsAsync(printer);
+        var factory = new BackendCapabilityFactory(clients.Object, NullLogger<BackendCapabilityFactory>.Instance);
+        var service = new PrinterBackendCapabilitiesService(repo.Object, factory, clients.Object);
+
+        PrinterBackendCapabilitiesDto result = (await service.GetByPrinterIdAsync(printer.Id, CancellationToken.None))!;
+
+        Assert.False(result.SupportsHoming);
+        Assert.False(result.SupportsHomingXY);
+        Assert.False(result.SupportsHomingZ);
+        Assert.False(result.SupportsHotendTemperature);
+        Assert.False(result.SupportsBedTemperature);
+        Assert.False(result.SupportsDisableMotors);
+        Assert.False(result.SupportsExtrusion);
+        Assert.Empty(result.SupportedAxes);
+    }
+
     [Theory]
     [InlineData(PrinterBackend.PrusaLink)]
     [InlineData(PrinterBackend.FlashForge)]
-    public async Task GetByPrinterIdAsync_GenericRouteTargetsDifferentPort_DoesNotAdvertiseTemperature(
+    public async Task GetByPrinterIdAsync_TemperatureInterfaceWithoutMetadata_DoesNotAdvertiseTemperature(
         PrinterBackend backend)
     {
         var printer = new Printer
@@ -194,7 +269,7 @@ public class PrinterBackendCapabilitiesServiceTests
         var client = new Mock<IBackendClient>();
         client.As<ISupportsVerifiedSafetyDiscovery>()
             .Setup(value => value.DiscoverVerifiedSafetyAsync(
-                "http://printer.local:8080",
+                "http://printer.local:7125",
                 It.IsAny<PrinterCredential?>(),
                 "1",
                 It.IsAny<CancellationToken>()))
@@ -240,6 +315,7 @@ public class PrinterBackendCapabilitiesServiceTests
             Id = printerId,
             Backend = (int)PrinterBackend.Moonraker,
             ServerUrl = "http://printer.local",
+            BackendPort = 7125,
             FrontendPort = 8080,
         };
         var repo = new Mock<IPrintersRepository>();
@@ -250,7 +326,7 @@ public class PrinterBackendCapabilitiesServiceTests
         var client = new Mock<IBackendClient>();
         client.As<ISupportsVerifiedSafetyDiscovery>()
             .SetupSequence(value => value.DiscoverVerifiedSafetyAsync(
-                "http://printer.local:8080",
+                "http://printer.local:7125",
                 It.IsAny<PrinterCredential?>(),
                 "1",
                 It.IsAny<CancellationToken>()))
@@ -291,7 +367,7 @@ public class PrinterBackendCapabilitiesServiceTests
         Assert.False(refreshed.SupportsFilamentLoad);
         client.As<ISupportsVerifiedSafetyDiscovery>().Verify(value =>
             value.DiscoverVerifiedSafetyAsync(
-                "http://printer.local:8080",
+                "http://printer.local:7125",
                 It.IsAny<PrinterCredential?>(),
                 "1",
                 It.IsAny<CancellationToken>()),
@@ -334,17 +410,97 @@ public class PrinterBackendCapabilitiesServiceTests
             result.VerifiedSafety.Operations.AbsoluteMovement.Support);
     }
 
-    [Fact]
-    public void ResolveMoonrakerDispatchUrl_InvalidFrontendPort_ReturnsOriginalUrl()
+    [Theory]
+    [InlineData("http://printer.local", 7125, 80, "http://printer.local:7125", "http://printer.local")]
+    [InlineData("http://printer.local", 4408, 80, "http://printer.local:4408", "http://printer.local")]
+    [InlineData("http://printer.local", 80, 8080, "http://printer.local", "http://printer.local:8080")]
+    [InlineData("https://printer.local", 443, 8443, "https://printer.local", "https://printer.local:8443")]
+    [InlineData("https://printer.local:8443/moonraker", 9443, 8443, "https://printer.local:9443/moonraker", "https://printer.local:8443/moonraker")]
+    [InlineData("http://[::1]", 7125, 80, "http://[::1]:7125", "http://[::1]")]
+    public void BackendUrl_SplitPorts_UsesBackendAndPreservesFrontend(
+        string serverUrl, int backendPort, int frontendPort, string expectedBackend, string expectedFrontend)
     {
-        const string serverUrl = "http://printer.local";
+        var printer = new Printer
+        {
+            Backend = (int)PrinterBackend.Moonraker,
+            ServerUrl = serverUrl,
+            BackendPort = backendPort,
+            FrontendPort = frontendPort,
+        };
 
-        string result =
-            PrinterBackendEndpointResolver.ResolveMoonrakerDispatchUrl(
-                serverUrl,
-                70_000);
+        Assert.Equal(expectedBackend, printer.BackendUrl);
+        Assert.Equal(expectedFrontend, printer.FrontendUrl);
+    }
 
-        Assert.Equal(serverUrl, result);
+    [Theory]
+    [InlineData(7125)]
+    [InlineData(4408)]
+    public async Task GetByPrinterIdAsync_FrontendReturnsHtml_DiscoversMovementFromBackend(int backendPort)
+    {
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Backend = (int)PrinterBackend.Moonraker,
+            ServerUrl = "http://printer.local",
+            BackendPort = backendPort,
+            FrontendPort = 80,
+        };
+        using var handler = new SplitPortMoonrakerHandler(backendPort);
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
+        var clients = new Mock<IBackendClientFactory>();
+        clients.Setup(factory => factory.GetClient(PrinterBackend.Moonraker)).Returns(client);
+        var repo = new Mock<IPrintersRepository>();
+        repo.Setup(repository => repository.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printer);
+        var service = new PrinterBackendCapabilitiesService(
+            repo.Object, Mock.Of<IBackendCapabilityFactory>(), clients.Object);
+
+        PrinterBackendCapabilitiesDto result = Assert.IsType<PrinterBackendCapabilitiesDto>(
+            await service.GetByPrinterIdAsync(printer.Id, CancellationToken.None));
+
+        Assert.True(result.SupportsAbsoluteMovement);
+        Assert.Equal(VerifiedSafetyFactState.Verified, result.VerifiedSafety.Positioning.TravelEnvelopeMm.State);
+        Assert.Equal(new SafetyVector3Dto(225, 232, 230), result.VerifiedSafety.Positioning.TravelEnvelopeMm.Value!.Maximum);
+        Assert.Equal(new SafetyVector3Dto(0, 0, 0), result.VerifiedSafety.Positioning.CoordinateOriginMm.Value);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.All(handler.Requests, uri => Assert.Equal(backendPort, uri.Port));
+        Assert.Equal("http://printer.local", printer.FrontendUrl);
+    }
+
+    private sealed class SplitPortMoonrakerHandler(int backendPort) : HttpMessageHandler
+    {
+        public List<Uri> Requests { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Uri uri = request.RequestUri!;
+            Requests.Add(uri);
+            if (uri.Port != backendPort)
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("<html>Fluidd</html>", Encoding.UTF8, "text/html"),
+                });
+            }
+
+            string json = uri.AbsolutePath switch
+            {
+                "/printer/objects/list" => """{"result":{"objects":["toolhead","gcode_move"]}}""",
+                "/printer/objects/query" => """
+                    {"result":{"status":{
+                      "toolhead":{"axis_minimum":[-20,-20,-10,0],"axis_maximum":[225,232,230,0]},
+                      "gcode_move":{"homing_origin":[0,0,0,0]}
+                    }}}
+                    """,
+                _ => throw new InvalidOperationException($"Unexpected test endpoint: {uri.AbsolutePath}"),
+            };
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json"),
+            });
+        }
     }
 
     [Fact]
