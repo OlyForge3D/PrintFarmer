@@ -411,7 +411,8 @@ platform digest, identity labels, and explicit compatibility/migration status.
 The envelope carries the manifest SHA-256 outside the manifest itself, together
 with release ID, version, channel, source commit, and authorization hash. An
 offline consumer must verify the envelope bundle against the pinned publisher
-workflow identity, recompute the manifest digest, then validate that every
+workflow identity, recompute the SHA-256 over the exact canonical serialized
+manifest bytes, then validate that every
 manifest identity and platform label agrees. The current release set is
 explicitly `managedEligible: false`; its compatibility and migration status
 therefore state `not-qualified-for-installation` rather than claiming host
@@ -422,7 +423,14 @@ and pushed image signature/SPDX verification. It verifies published release
 asset bytes on retries, publishes immutable version tags, and advances the
 durable channel pointer last. The ledger pointer is the sole channel pointer;
 stable/insider discovery aliases remain isolated and cannot substitute for the
-signed, immutable manifest.
+signed, immutable manifest. Before promotion, it downloads the public manifest
+and envelope again, verifies the signed envelope, byte-compares all three
+manifest assets (manifest, envelope, bundle), and recomputes the manifest
+digest from the downloaded bytes. If a retry finds an existing release, it
+must recover and byte-compare those original assets and reuse the existing
+bundle; it never re-signs or replaces public release artifacts. The manifest
+schema rejects unknown complete-set, image, platform, and identity-label
+fields rather than silently projecting them away.
 
 Before public assets, tags or version tags are written, publication preflight
 revalidates ancestry, trust protections, version order, complete-set bytes and

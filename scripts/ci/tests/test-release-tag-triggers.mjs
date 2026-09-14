@@ -13,7 +13,7 @@ import {
   parseTag, parseVersionFile, reserve as reserveRelease, transact, validateCandidate, validateCompleteSet,
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence, hotfixReasonDigest, ReleasePolicyError,
   validateRecord, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks, publisherWorkflowIdentity,
-  releaseManifest, releaseManifestEnvelope, validateReleaseManifestEnvelope,
+  releaseManifest, releaseManifestEnvelope, validateReleaseManifestBytes, validateReleaseManifestEnvelope,
 } from '../release-policy.mjs';
 import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedger, publicLedgerFields, readTag, readVersion, verifyProtection,
   parseGithubTimestamp, verifyStableQualification, verifyReleaseChecks } from '../release-github.mjs';
@@ -2414,9 +2414,9 @@ test('normalized attestation and artifact writers reject raw, unknown and weaken
     const set = completeSet(identity);
     set.futurePrivate = { secret: 'private-value' };
     set.images.api.platforms['linux/amd64'].labels.reviewerId = 'private-value';
-    writeAuthorizationSet(identity, set);
-    assert.doesNotMatch(readFileSync(privateSetPath, 'utf8'), privateFields);
-    assert.deepEqual(JSON.parse(readFileSync(privateSetPath, 'utf8')), completeSet(identity));
+    assert.throws(() => writeAuthorizationSet(identity, set), /public set fields|public set labels/);
+    assert.equal(existsSync(privateSetPath), false);
+    writeAuthorizationSet(identity, completeSet(identity));
     const env = { GITHUB_REPOSITORY: context().repository, GITHUB_REF: context().ref,
       RELEASE_SIGNER_IDENTITY: publisherWorkflowIdentity,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
@@ -3153,7 +3153,7 @@ function addUnknownSetFields(set) {
   }
 }
 
-test('public complete-set projection is closed, canonical and idempotent for private and ledger sets', () => {
+test('public complete sets are closed, canonical and idempotent', () => {
   const seed = state();
   const identity = record(seed);
   const set = completeSet(identity);
@@ -3162,18 +3162,18 @@ test('public complete-set projection is closed, canonical and idempotent for pri
   assert.deepEqual(projected.images, set.images);
   addUnknownSetFields(set);
   const before = JSON.stringify(set);
-  assert.deepEqual(writePublicSet(identity, set), projected);
+  assert.throws(() => writePublicSet(identity, set), /public set/i);
   assert.equal(JSON.stringify(set), before, 'Projection must not mutate hashed input');
   assert.deepEqual(writePublicSet(identity, projected), projected);
   assert.deepEqual(writePublicSet(projected.identity, projected), projected);
-  advance(seed, identity, set, sha, '');
+  advance(seed, identity, completeSet(identity), sha, '');
   const ledger = publicLedger(seed);
   const entry = ledger.reservations[identity.allocationKey];
   assert.deepEqual(writePublicSet(entry.record, entry.set), projected);
   assert.deepEqual(publicLedger(ledger), ledger);
   assert.equal(entry.identitySha256, hash(identity));
-  assert.equal(entry.setHash, publicSetHash(set));
-  assert.equal(ledger.pointers.insider.setHash, publicSetHash(set));
+  assert.equal(entry.setHash, publicSetHash(completeSet(identity)));
+  assert.equal(ledger.pointers.insider.setHash, publicSetHash(completeSet(identity)));
   for (const poison of publicSetPoisons(identity)) {
     for (const original of [completeSet(identity), projected]) {
       const changed = structuredClone(original);
@@ -3227,11 +3227,11 @@ test('every ledger write path rejects poisoned stored public sets before Git blo
   for (const operation of operations) {
     const contaminated = structuredClone(clean);
     addUnknownSetFields(contaminated.reservations[identity.allocationKey].set);
-    let persisted;
+    let calls = 0;
     const adapter = gitLedger(async (endpoint, method, body) => {
+      calls++;
       if (endpoint === `git/commits/${sha}`) return { tree: { sha: anchor } };
       if (endpoint === 'git/blobs') {
-        persisted = JSON.parse(body.content);
         return { sha: anchor };
       }
       if (endpoint === 'git/trees') return { sha: anchor };
@@ -3243,14 +3243,10 @@ test('every ledger write path rejects poisoned stored public sets before Git blo
       assert.deepEqual(body, { sha: newerSha, force: false });
       return {};
     }, anchor);
-    await transact({
+    await assert.rejects(transact({
       read: async () => ({ revision: sha, state: contaminated }), compareAndSet: adapter.compareAndSet,
-    }, operation);
-    assert.doesNotMatch(JSON.stringify(persisted), /futurePrivate|private-value/);
-    assert.deepEqual(persisted.reservations[identity.allocationKey].set, clean.reservations[identity.allocationKey].set);
-    assert.equal(persisted.reservations[identity.allocationKey].identitySha256, hash(identity));
-    assert.equal(persisted.reservations[identity.allocationKey].setHash, publicSetHash(set));
-    assert.deepEqual(publicLedger(persisted), persisted);
+    }, operation), /public set/i);
+    assert.equal(calls, 0, 'Unknown persisted release-set data must block before Git writes');
   }
   t.diagnostic(`${rejected} poisoned-set/transaction combinations rejected before any Git call`);
 });
@@ -3610,6 +3606,9 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
   const set = completeSet(identity);
   set.futurePrivate = { value: 'private-future-value' };
   set.images.api.platforms['linux/amd64'].labels.futurePrivate = 'private-label';
+  assert.throws(() => releaseManifest(identity, set), /public set fields|public set labels/);
+  delete set.futurePrivate;
+  delete set.images.api.platforms['linux/amd64'].labels.futurePrivate;
   advance(ledger, identity, set, sha, '');
   const sanitized = publicLedger(ledger);
   const serialized = JSON.stringify(sanitized);
@@ -3634,6 +3633,12 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
     assert.deepEqual(envelope, releaseManifestEnvelope(manifest));
     assert.deepEqual(readReleaseManifest().manifest, manifest);
     validateReleaseManifestEnvelope(envelope, manifest);
+    const serializedManifest = readFileSync(resolve(root, 'release-assets/release-manifest.json'), 'utf8');
+    assert.deepEqual(validateReleaseManifestBytes(serializedManifest, envelope), manifest);
+    assert.throws(() => validateReleaseManifestBytes(`${serializedManifest}\n`, envelope),
+      /serialization is not canonical|digest mismatch/);
+    assert.throws(() => validateReleaseManifestBytes(
+      serializedManifest.replace('"schema":1', '"schema":2'), envelope), /Invalid release manifest schema|digest mismatch/);
     assert.throws(() => validateReleaseManifestEnvelope({ ...envelope, sourceCommit: newerSha }, manifest),
       /envelope mismatch/);
     assert.throws(() => validateReleaseManifestEnvelope(envelope, {
@@ -3671,10 +3676,10 @@ test('the shared public field projection rejects wrong types rather than coercin
   }
 });
 
-test('executed signing and asset-copy commands keep normalized authorization separate from public projection', async () => {
+test('executed manifest signing command binds the exact serialized manifest and reuses no fabricated bundle', async () => {
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8').replace(/\r\n/g, '\n');
-  const signing = docker.split('      - name: Sign immutable authorization\n')[1]
-    .split('      - uses: actions/upload-artifact')[0].split('        run: |\n')[1]
+  const signing = docker.split('      - name: Sign externally-digested complete release manifest\n')[1]
+    .split('      - name: Publish and verify public corresponding-source assets')[0].split('        run: |\n')[1]
     .split('\n').map(line => line.replace(/^          /, '')).join('\n');
   const publication = docker.split('\n').filter(line =>
     /^\s+cp \.\.\/\.artifacts\/release-authorization\/public-identity/.test(line))
@@ -3700,7 +3705,6 @@ test('executed signing and asset-copy commands keep normalized authorization sep
     writeAuthorization(identity);
     writeAuthorizationSet(identity, completeSet(identity));
     emitPublicReleaseAssets(identity, completeSet(identity));
-    // Echo the signing input into the mock bundle to detect any wrong-file publication.
     const mock = `cosign() {
       local bundle="" source="" previous=""
       for arg in "$@"; do
@@ -3712,25 +3716,17 @@ test('executed signing and asset-copy commands keep normalized authorization sep
     }\n`;
     const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
     const result = spawnSync(shell, ['-c', `${mock}${signing}`],
-      { cwd: root, encoding: 'utf8' });
+      { cwd: root, encoding: 'utf8', env: {
+        ...process.env, VERSION: identity.canonicalVersion, RELEASE_SIGNER_IDENTITY: publisherWorkflowIdentity,
+      } });
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr);
-    copyFileSync('.artifacts/release-authorization/public-identity.json',
-      'release-assets/release-identity.json');
-    copyFileSync('.artifacts/release-authorization/public-identity.bundle.json',
-      'release-assets/release-identity.bundle.json');
-    copyFileSync(manifestEnvelopePath, manifestEnvelopeBundle);
     assert.doesNotMatch(result.stdout + result.stderr, /private-publisher|private-future/);
-    const bundle = readFileSync('release-assets/release-identity.bundle.json', 'utf8');
-    assert.deepEqual(JSON.parse(bundle), publicAuthorization(identity));
-    assert.doesNotMatch(bundle, /protection|publisher|futurePrivate|private-/);
-    assert.equal(readFileSync(authorizationBundle, 'utf8'), JSON.stringify(identity));
     assert.equal(readFileSync(authorizationPath, 'utf8'), JSON.stringify(identity));
-    assert.equal(readFileSync(manifestEnvelopeBundle, 'utf8'), readFileSync(manifestEnvelopePath, 'utf8'));
-    for (const file of uploadedAuthorizationFiles) {
-      assert.ok(existsSync(file), `Missing uploaded authorization artifact: ${file}`);
-      assert.doesNotMatch(readFileSync(file, 'utf8'), privateFields, file);
-    }
+    assert.equal(readFileSync(manifestEnvelopeBundle, 'utf8'), readFileSync(manifestEnvelopePath, 'utf8'),
+      'The actual signing block must create the bundle from the envelope');
+    assert.ok(uploadedAuthorizationFiles.includes(manifestEnvelopeBundle));
+    assert.doesNotMatch(readFileSync(manifestEnvelopeBundle, 'utf8'), privateFields);
   } finally {
     process.chdir(cwd);
     rmSync(root, { recursive: true, force: true });

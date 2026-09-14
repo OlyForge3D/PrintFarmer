@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   publisherWorkflowIdentity, requireThat, validateCompleteSet, validateRecord, publicAuthorization,
   releaseManifest, releaseManifestEnvelope, validatePublicAuthorization, validateReleaseManifest,
-  validateReleaseManifestEnvelope, writePublicSet,
+  validateReleaseManifestBytes, validateReleaseManifestEnvelope, writePublicSet,
 } from './release-policy.mjs';
 export { publicAuthorization, writePublicSet } from './release-policy.mjs';
 
@@ -20,7 +20,7 @@ export const manifestEnvelopeBundle = `${authorizationDirectory}/release-manifes
 
 function writeAuthorizationFile(path, content) {
   requireThat([authorizationPath, privateSetPath, manifestPath, manifestEnvelopePath,
-    manifestEnvelopeBundle, 'release-identity.json',
+    'release-identity.json',
     `${authorizationDirectory}/public-identity.json`].includes(path), 'Invalid authorization destination');
   if (path !== 'release-identity.json') {
     for (const directory of ['.artifacts', authorizationDirectory]) {
@@ -110,9 +110,8 @@ export function writeReleaseManifest(record, set) {
 }
 
 export function readReleaseManifest() {
-  const manifest = readPrivateJson(manifestPath);
   const envelope = readPrivateJson(manifestEnvelopePath);
-  validateReleaseManifestEnvelope(envelope, manifest);
+  const manifest = validateReleaseManifestBytes(readFileSync(manifestPath, 'utf8'), envelope);
   return { manifest, envelope };
 }
 

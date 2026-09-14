@@ -250,6 +250,7 @@ export function writePublicSet(record, set, identitySha256) {
   requireString(identitySha256, hashPattern, 'public set identity hash');
   const identity = { ...publicAuthorization(record), identitySha256 };
   requireObject(set, 'public set');
+  requireKeys(set, ['schema', 'identity', 'managedEligible', 'images'], [], 'public set');
   requireThat(set.schema === 1 && set.managedEligible === false, 'Invalid public set schema/eligibility');
   requireObject(set.identity, 'public set identity');
   requireThat(hash(set.identity) === hash(identity) ||
@@ -264,13 +265,16 @@ export function writePublicSet(record, set, identitySha256) {
   for (const [name, expectedPlatforms] of Object.entries(components)) {
     const image = set.images[name];
     requireObject(image, 'public set image');
+    requireKeys(image, ['digest', 'platforms'], [], 'public set image');
     const digest = publicDigest(image.digest);
     requireKeys(image.platforms, expectedPlatforms, [], 'public set platform');
     const platforms = {};
     for (const platform of expectedPlatforms) {
       const value = image.platforms[platform];
       requireObject(value, 'public set platform');
+      requireKeys(value, ['digest', 'labels'], [], 'public set platform');
       requireObject(value.labels, 'public set labels');
+      requireKeys(value.labels, Object.keys(labels), [], 'public set labels');
       for (const [key, expected] of Object.entries(labels)) {
         requireThat(Object.hasOwn(value.labels, key) && value.labels[key] === expected, 'Invalid public set identity label');
       }
@@ -298,7 +302,10 @@ export function validateReleaseManifest(manifest) {
   validatePublicAuthorization(manifest.identity);
   requireThat(hash(manifest.completeSet.identity) === hash(manifest.identity),
     'Release manifest identity mismatch');
-  writePublicSet(manifest.completeSet.identity, manifest.completeSet, manifest.identity.identitySha256);
+  const canonicalSet = writePublicSet(manifest.completeSet.identity, manifest.completeSet,
+    manifest.identity.identitySha256);
+  requireThat(isDeepStrictEqual(manifest.completeSet, canonicalSet),
+    'Release manifest complete set is not canonical');
   for (const claim of [manifest.compatibility, manifest.migration]) {
     requireKeys(claim, ['schema', 'managedEligible', 'status'], [], 'release manifest constraint');
     requireThat(claim.schema === 1 && claim.managedEligible === false &&
@@ -317,8 +324,27 @@ export function releaseManifestEnvelope(manifest) {
     channel: manifest.identity.channel,
     sourceCommit: manifest.identity.sourceCommit,
     identitySha256: manifest.identity.identitySha256,
-    manifestSha256: hash(manifest),
+    manifestSha256: releaseManifestSha256(JSON.stringify(manifest)),
   };
+}
+
+export function releaseManifestSha256(serializedManifest) {
+  requireThat(typeof serializedManifest === 'string', 'Invalid serialized release manifest');
+  return createHash('sha256').update(serializedManifest).digest('hex');
+}
+
+export function validateReleaseManifestBytes(serializedManifest, envelope) {
+  requireThat(typeof serializedManifest === 'string', 'Invalid serialized release manifest');
+  let manifest;
+  try { manifest = JSON.parse(serializedManifest); } catch {
+    throw new ReleasePolicyError('Malformed serialized release manifest');
+  }
+  requireThat(serializedManifest === JSON.stringify(manifest),
+    'Release manifest serialization is not canonical');
+  validateReleaseManifestEnvelope(envelope, manifest);
+  requireThat(releaseManifestSha256(serializedManifest) === envelope.manifestSha256,
+    'Published release manifest digest mismatch');
+  return manifest;
 }
 
 export function validateReleaseManifestEnvelope(envelope, manifest) {

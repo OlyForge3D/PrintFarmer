@@ -271,6 +271,25 @@ jobs:
               --type spdxjson \
               --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com
+            platform_digests="$(
+              docker buildx imagetools inspect "$reference" --raw |
+                jq -r '.manifests[]
+                  | select(.annotations["vnd.docker.reference.type"] != "attestation-manifest")
+                  | select(.platform.os == "linux")
+                  | .digest'
+            )"
+            [[ -n "$platform_digests" ]]
+            while IFS= read -r platform_digest; do
+              [[ "$platform_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+              platform_reference="ghcr.io/olyforge3d/printfarmer-${image}@${platform_digest}"
+              cosign verify "$platform_reference" \
+                --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com
+              cosign verify-attestation "$platform_reference" \
+                --type spdxjson \
+                --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com
+            done <<< "$platform_digests"
           done
       - name: Smoke test ARM64 image digests
         run: |
@@ -302,11 +321,34 @@ jobs:
             "ghcr.io/olyforge3d/printfarmer-monolith@${monolith_digest}" \
             -c 'test -f /app/Farm.Web.Api.dll && test -f /app/wwwroot/index.html && dotnet --info >/dev/null'
       - name: Sign externally-digested complete release manifest
+        env:
+          GH_TOKEN: ${{ steps.publisher.outputs.token }}
+          VERSION: ${{ steps.consume.outputs.version }}
         run: |
           set -euo pipefail
-          cosign sign-blob --yes \
-            --bundle .artifacts/release-authorization/release-manifest.envelope.bundle.json \
-            .artifacts/release-authorization/release-manifest.envelope.json
+          manifest_dir=.artifacts/release-authorization
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            recovery_dir="$RUNNER_TEMP/recovered-release-manifest"
+            mkdir -p "$recovery_dir"
+            gh release download "$VERSION" \
+              --pattern release-manifest.json \
+              --pattern release-manifest.envelope.json \
+              --pattern release-manifest.envelope.bundle.json \
+              --dir "$recovery_dir"
+            cmp -s "$manifest_dir/release-manifest.json" "$recovery_dir/release-manifest.json"
+            cmp -s "$manifest_dir/release-manifest.envelope.json" "$recovery_dir/release-manifest.envelope.json"
+            cp "$recovery_dir/release-manifest.envelope.bundle.json" \
+              "$manifest_dir/release-manifest.envelope.bundle.json"
+          else
+            cosign sign-blob --yes \
+              --bundle "$manifest_dir/release-manifest.envelope.bundle.json" \
+              "$manifest_dir/release-manifest.envelope.json"
+          fi
+          cosign verify-blob \
+            --bundle "$manifest_dir/release-manifest.envelope.bundle.json" \
+            --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$manifest_dir/release-manifest.envelope.json"
       - name: Publish and verify public corresponding-source assets
         working-directory: source
         env:
@@ -366,6 +408,13 @@ jobs:
             --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             release-assets/release-manifest.envelope.json
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { validateReleaseManifestBytes } from "./scripts/ci/release-policy.mjs";
+            validateReleaseManifestBytes(
+              readFileSync("release-assets/release-manifest.json", "utf8"),
+              JSON.parse(readFileSync("release-assets/release-manifest.envelope.json", "utf8")));
+          '
 
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "Release $VERSION already exists; verifying immutable assets"
@@ -419,6 +468,30 @@ jobs:
             curl --fail --silent --show-error --location --head \
               --retry 6 --retry-delay 5 --retry-all-errors "$asset_url" >/dev/null
           done
+          published_manifest_dir="$RUNNER_TEMP/published-release-manifest"
+          mkdir -p "$published_manifest_dir"
+          gh release download "$VERSION" \
+            --pattern release-manifest.json \
+            --pattern release-manifest.envelope.json \
+            --pattern release-manifest.envelope.bundle.json \
+            --dir "$published_manifest_dir"
+          cmp -s release-assets/release-manifest.json "$published_manifest_dir/release-manifest.json"
+          cmp -s release-assets/release-manifest.envelope.json "$published_manifest_dir/release-manifest.envelope.json"
+          cmp -s release-assets/release-manifest.envelope.bundle.json \
+            "$published_manifest_dir/release-manifest.envelope.bundle.json"
+          cosign verify-blob \
+            --bundle "$published_manifest_dir/release-manifest.envelope.bundle.json" \
+            --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$published_manifest_dir/release-manifest.envelope.json"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { validateReleaseManifestBytes } from "./scripts/ci/release-policy.mjs";
+            validateReleaseManifestBytes(
+              readFileSync(process.argv[1], "utf8"),
+              JSON.parse(readFileSync(process.argv[2], "utf8")));
+          ' "$published_manifest_dir/release-manifest.json" \
+            "$published_manifest_dir/release-manifest.envelope.json"
       - name: Promote validated digests
         env:
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
