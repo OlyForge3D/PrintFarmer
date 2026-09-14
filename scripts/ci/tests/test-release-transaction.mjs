@@ -357,6 +357,7 @@ test('publisher has exactly one protected deployment containing every credential
   assert.match(job, /RELEASE_REGISTRY_TOKEN/);
   assert.match(job, /release-control\.mjs authorize/);
   assert.match(job, /release-set\.mjs tag/);
+  assert.match(job, /release-set\.mjs alias/);
   assert.match(job, /release-control\.mjs advance/);
   assert.ok(job.indexOf('release-transaction.mjs validate') <
     job.indexOf('actions/create-github-app-token@'));
@@ -402,6 +403,8 @@ test('publisher uses one reusable-workflow signer identity for every verificatio
     job.indexOf('release-set.mjs tag'));
   assert.ok(job.indexOf('cosign verify-attestation \\"$reference\\"') <
     job.indexOf('release-control.mjs advance'));
+  assert.ok(job.indexOf('release-set.mjs tag') < job.indexOf('release-set.mjs alias'));
+  assert.ok(job.indexOf('release-set.mjs alias') < job.indexOf('release-control.mjs advance'));
 });
 
 test('every docker publisher release-control consumer follows one immutable workflow checkout in its job', () => {

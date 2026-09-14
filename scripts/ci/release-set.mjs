@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { components, identityLabels, requireThat, validateCompleteSet } from './release-policy.mjs';
+import {
+  compareVersions, components, identityLabels, parseTag, requireThat, validateCompleteSet,
+} from './release-policy.mjs';
 import { command } from './release-github.mjs';
 import { emitPublicReleaseAssets, privateSetPath, readPrivateJson, verifyAuthorization, writeAuthorizationSet } from './release-authorization.mjs';
 
@@ -52,6 +54,51 @@ export function publishImmutableTags(record, set, inspect, create) {
   }
 }
 
+export function plannedReleaseAliases(record, set) {
+  validateCompleteSet(record, set);
+  const parsed = parseTag(record.sourceTag);
+  const aliases = record.channel === 'stable'
+    ? [record.canonicalVersion, parsed.major, `${parsed.major}.${parsed.minor}`, 'latest']
+    : [record.canonicalVersion];
+  return Object.fromEntries(Object.entries(set.images).map(([component, image]) => [component,
+    aliases.map(alias => ({
+      tag: `ghcr.io/olyforge3d/printfarmer-${component}:${alias}`,
+      digest: image.digest,
+      mutable: alias !== record.canonicalVersion,
+      channel: record.channel,
+    }))]));
+}
+
+export function publishReleaseAliases(record, set, inspect, create) {
+  const plan = plannedReleaseAliases(record, set);
+  for (const aliases of Object.values(plan)) {
+    for (const alias of aliases) {
+      const existing = inspect(alias.tag);
+      if (!existing) continue;
+      requireThat(existing.digest === alias.digest || alias.mutable,
+        `Immutable image tag conflict: ${alias.tag}`);
+      if (alias.mutable && existing.digest !== alias.digest) {
+        requireThat(existing.version && compareVersions(record.canonicalVersion, existing.version) > 0,
+          `Alias regression or unverified existing version: ${alias.tag}`);
+        requireThat(record.channel === 'stable' && parseTag(`v${existing.version}`).channel === 'stable',
+          `Cross-channel alias movement rejected: ${alias.tag}`);
+      }
+    }
+  }
+  for (const aliases of Object.values(plan)) {
+    for (const alias of aliases) {
+      const existing = inspect(alias.tag);
+      if (!existing) create(alias.tag, alias.digest);
+      else if (existing.digest !== alias.digest) create(alias.tag, alias.digest);
+      const published = inspect(alias.tag);
+      requireThat(published?.digest === alias.digest,
+        `Alias compare-and-set conflict: ${alias.tag}`);
+      if (alias.mutable) requireThat(record.channel === 'stable', 'Only stable aliases are mutable');
+    }
+  }
+  return plan;
+}
+
 function main() {
   const record = verifyAuthorization(process.env, command);
   if (process.argv[2] === 'inspect') {
@@ -74,6 +121,23 @@ function main() {
         throw error;
       }
     }, (tag, source) => command('docker', ['buildx', 'imagetools', 'create', '--tag', tag, source]));
+  } else if (process.argv[2] === 'alias') {
+    const set = readPrivateJson(privateSetPath);
+    publishReleaseAliases(record, set, tag => {
+      try {
+        const output = command('docker', ['buildx', 'imagetools', 'inspect', tag, '--format',
+          '{{json .Image}}']);
+        const image = JSON.parse(output);
+        const digest = image?.Manifest?.Digest ?? image?.Digest;
+        const version = image?.Config?.Labels?.['org.opencontainers.image.version'];
+        requireThat(/^sha256:[a-f0-9]{64}$/.test(digest), 'Registry returned no alias digest');
+        return { digest, version };
+      } catch (error) {
+        if (/\bmanifest unknown\b|\bMANIFEST_UNKNOWN\b/.test(String(error.stderr))) return undefined;
+        throw error;
+      }
+    }, (tag, digest) => command('docker', ['buildx', 'imagetools', 'create', '--tag', tag,
+      `${tag.slice(0, tag.lastIndexOf(':'))}@${digest}`]));
   } else throw new Error('Expected inspect or tag');
 }
 

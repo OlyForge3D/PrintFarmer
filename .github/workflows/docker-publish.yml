@@ -544,6 +544,10 @@ jobs:
         env:
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
         run: node scripts/ci/release-set.mjs tag
+      - name: Publish channel-isolated verified image aliases
+        env:
+          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
+        run: node scripts/ci/release-set.mjs alias
       - name: Advance the complete channel pointer last
         id: advance
         env:

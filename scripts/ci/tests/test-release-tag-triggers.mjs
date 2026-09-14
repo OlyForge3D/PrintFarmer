@@ -19,7 +19,9 @@ import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedge
   parseGithubTimestamp, verifyStableQualification, verifyReleaseChecks } from '../release-github.mjs';
 import { buildMetadata, emitBuildIdentity } from '../release-metadata.mjs';
 import { runReleaseControl, output } from '../release-control.mjs';
-import { inspectCompleteSet, publishImmutableTags } from '../release-set.mjs';
+import {
+  inspectCompleteSet, plannedReleaseAliases, publishImmutableTags, publishReleaseAliases,
+} from '../release-set.mjs';
 import {
   authorizationPath, authorizationBundle, manifestEnvelopeBundle, manifestEnvelopePath, manifestPath, privateSetPath,
   publicAuthorization, verifyAuthorization, writeAuthorization, writeAuthorizationSet, writePublicSet,
@@ -721,7 +723,7 @@ test('stable and insider frontend outputs copy only canonical public fields and 
   }
 });
 
-test('immutable image publication checks all conflicts before any tag writes and never moves aliases', () => {
+test('immutable image publication checks all conflicts before any tag writes', () => {
   const identity = record();
   const set = completeSet(identity);
   const tags = new Map();
@@ -735,6 +737,35 @@ test('immutable image publication checks all conflicts before any tag writes and
   tags.set(writes[5], `sha256:${'f'.repeat(64)}`);
   assert.throws(() => publishImmutableTags(identity, set, tag => tags.get(tag), create), /conflict/);
   assert.equal(writes.length, 6);
+});
+
+test('stable aliases advance only to a strictly newer stable record while insider stays isolated', () => {
+  const stableLedger = state();
+  stableLedger.qualifications[sha] = hotfixQualification();
+  const stable = reserve(stableLedger, stableAdmission(), created, undefined, hotfixQualification()).record;
+  const stableSet = completeSet(stable);
+  const tags = new Map();
+  const writes = [];
+  const inspect = tag => tags.get(tag);
+  const create = (tag, digest) => {
+    writes.push(tag);
+    tags.set(tag, { digest: digest.includes('@') ? digest.split('@')[1] : digest, version: stable.canonicalVersion });
+  };
+  const plan = publishReleaseAliases(stable, stableSet, inspect, create);
+  assert.deepEqual(plan.api.map(value => value.tag.split(':').at(-1)),
+    ['1.2.3', '1', '1.2', 'latest']);
+  assert.equal(writes.length, Object.keys(components).length * 4);
+  const oldLatest = 'ghcr.io/olyforge3d/printfarmer-api:latest';
+  tags.set(oldLatest, { digest: `sha256:${'f'.repeat(64)}`, version: '1.2.4' });
+  assert.throws(() => publishReleaseAliases(stable, stableSet, inspect, create), /regression/);
+
+  const insider = record();
+  const insiderPlan = plannedReleaseAliases(insider, completeSet(insider));
+  assert.ok(Object.values(insiderPlan).flat().every(value =>
+    value.tag.endsWith(`:${insider.canonicalVersion}`) && value.mutable === false));
+  assert.throws(() => publishReleaseAliases(insider, completeSet(insider),
+    () => ({ digest: `sha256:${'e'.repeat(64)}`, version: '1.2.2' }),
+    () => assert.fail('Insider must not overwrite an immutable tag')), /Immutable image tag conflict/);
 });
 
 test('registry inspection executes complete platform/provenance checks rather than accepting flags', () => {
@@ -3622,7 +3653,7 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
     for (const file of ['release-identity.json', 'release-set.json',
       'release-manifest.json', 'release-manifest.envelope.json']) {
       const content = readFileSync(resolve(root, 'release-assets', file), 'utf8');
-      assert.doesNotMatch(content, /protection|rulesets|environment|reviewer|publisher|futurePrivate|private-/);
+      assert.doesNotMatch(content, /rulesets|environment|reviewer|private-publisher|futurePrivate|private-/);
       assert.ok(content.includes(hash(identity)));
     }
     const published = JSON.parse(readFileSync(resolve(root, 'release-assets/release-identity.json'), 'utf8'));
@@ -3638,12 +3669,27 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
     assert.throws(() => validateReleaseManifestBytes(`${serializedManifest}\n`, envelope),
       /serialization is not canonical|digest mismatch/);
     assert.throws(() => validateReleaseManifestBytes(
-      serializedManifest.replace('"schema":1', '"schema":2'), envelope), /Invalid release manifest schema|digest mismatch/);
+      serializedManifest.replace('"schema":1', '"schema":2'), envelope),
+    /Invalid release manifest schema|Invalid public set schema|digest mismatch/);
     assert.throws(() => validateReleaseManifestEnvelope({ ...envelope, sourceCommit: newerSha }, manifest),
       /envelope mismatch/);
     assert.throws(() => validateReleaseManifestEnvelope(envelope, {
       ...manifest, completeSet: { ...manifest.completeSet, images: {} },
     }), ReleasePolicyError);
+    for (const mutate of [
+      value => { value.lifecycle.cadence = 'manual'; },
+      value => { value.provenance.source.commit = newerSha; },
+      value => { value.evidence.services.api.index.signature.subject = newerSha; },
+      value => { value.evidence.services.api.platforms['linux/amd64'].sbom.sha256 = 'forged'; },
+      value => { value.compatibility.managedEligible = false; },
+      value => { value.migration.providers.postgresql = 'unknown'; },
+      value => { value.compatibility.updater.fixedSteps.pop(); },
+      value => { value.unrecognized = true; },
+    ]) {
+      const changed = structuredClone(manifest);
+      mutate(changed);
+      assert.throws(() => validateReleaseManifest(changed), ReleasePolicyError);
+    }
     for (const completeSet of [undefined, null, [], 'forged']) {
       assert.throws(() => validateReleaseManifest({ ...manifest, completeSet }),
         /release manifest (fields|complete set)/);

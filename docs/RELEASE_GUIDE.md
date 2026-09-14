@@ -407,17 +407,21 @@ before any version-tag write.
 
 Each release also publishes a version-addressed `release-manifest.json` and a
 separately signed `release-manifest.envelope.json` with its Cosign bundle. The
-manifest binds the authorization projection, every immutable image/index and
-platform digest, identity labels, and explicit compatibility/migration status.
+versioned manifest binds the authorization projection, canonical lifecycle
+(publication, expiry, cadence, release-notes and signing identity), source-tag
+and workflow/build provenance, every immutable image/index and platform digest,
+signature/SBOM/provenance subject, trust/ACL digest, identity labels, complete
+service/platform compatibility, storage/configuration/template/updater steps,
+provider migration heads, downtime/backup requirements, and rollback strategy.
 The envelope carries the manifest SHA-256 outside the manifest itself, together
 with release ID, version, channel, source commit, and authorization hash. An
 offline consumer must verify the envelope bundle against the pinned publisher
 workflow identity, recompute the SHA-256 over the exact canonical serialized
 manifest bytes, then validate that every
-manifest identity and platform label agrees. The current release set is
-explicitly `managedEligible: false`; its compatibility and migration status
-therefore state `not-qualified-for-installation` rather than claiming host
-eligibility. No installer or mutable alias may treat it as an update candidate.
+manifest identity, lifecycle provenance, evidence subject and platform label
+agrees. Compatibility and migration claims are eligible only when this full
+closed record validates; unknown, partial, mixed-subject, or invalid evidence
+is rejected before signing and cannot become an update candidate.
 
 The protected job signs the manifest envelope only after complete-set inspection
 and pushed image signature/SPDX verification. It verifies published release
@@ -450,13 +454,14 @@ bytes are rejected. A failed build/qualification/set check leaves the previous
 pointer intact.
 The ledger's candidate pointer is **not** authenticated update discovery.
 
-**#2660 owns signed managed eligibility and publication aliases.** These outputs
-say `managedEligible: false`; a source-only public release is not an install
-candidate. This workflow does not move `stable`, `latest`, `insider`, or major/
-minor aliases. Historical aliases remain untouched until #2660 implements
-complete-manifest publication and alias isolation. Installer application defaults
-remain legacy inputs, not a competing authority for managed releases; generating
-digest-pinned installer references belongs to that signed-manifest consumer.
+After complete public-asset verification and immutable version-tag promotion,
+the publisher derives aliases only from the validated signed record. Stable
+releases may advance exact, major, minor, and `latest` aliases only to a
+strictly newer stable SemVer value; an older hotfix line or an insider value
+cannot replace them. Insider, beta, and RC releases publish only their exact
+immutable tag; they never move stable aliases. Every alias is read again after
+publication, so a concurrent conflicting write fails before the durable
+channel pointer advances.
 
 ## Stable qualification and candidate lifecycle
 

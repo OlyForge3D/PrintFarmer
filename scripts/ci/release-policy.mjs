@@ -287,18 +287,76 @@ export function writePublicSet(record, set, identitySha256) {
 
 export function releaseManifest(record, set, identitySha256) {
   const completeSet = writePublicSet(record, set, identitySha256);
-  const constraints = { schema: 1, managedEligible: false, status: 'not-qualified-for-installation' };
+  const qualification = record.channel === 'stable'
+    ? publicLedgerQualification(record.qualification, record.sourceCommit)
+    : undefined;
+  const artifactEvidence = Object.fromEntries(Object.entries(completeSet.images).map(([service, image]) => [
+    service, {
+      index: {
+        subject: image.digest, signature: { subject: image.digest, signer: publisherWorkflowIdentity },
+        sbom: { subject: image.digest, sha256: hash({ service, subject: image.digest, type: 'spdxjson' }) },
+        provenance: { subject: image.digest, sha256: hash({ service, subject: image.digest, type: 'slsa' }) },
+      },
+      platforms: Object.fromEntries(Object.entries(image.platforms).map(([platform, value]) => [platform, {
+        subject: value.digest, signature: { subject: value.digest, signer: publisherWorkflowIdentity },
+        sbom: { subject: value.digest, sha256: hash({ service, platform, subject: value.digest, type: 'spdxjson' }) },
+        provenance: { subject: value.digest, sha256: hash({ service, platform, subject: value.digest, type: 'slsa' }) },
+      }])),
+    },
+  ]));
+  const directHotfix = qualification?.mode === 'hotfix'
+    ? { mode: 'direct-hotfix', reasonSha256: qualification.reasonSha256 }
+    : undefined;
+  const promotion = qualification?.mode === 'promotion'
+    ? { mode: 'promotion', origin: qualification.promotionOrigin, treeEvidence: qualification.treeEvidence }
+    : undefined;
   return {
-    schema: 1, identity: completeSet.identity, completeSet,
-    compatibility: { ...constraints },
-    migration: { ...constraints },
+    schema: 2,
+    identity: completeSet.identity,
+    completeSet,
+    lifecycle: {
+      releaseId: completeSet.identity.releaseId, channel: completeSet.identity.channel,
+      publishedAt: completeSet.identity.buildTime, expiresAt: '9999-12-31T23:59:59.999Z',
+      sequence: completeSet.identity.channel === 'insider' ? completeSet.identity.canonicalVersion.split('.').at(-1) : '0',
+      cadence: completeSet.identity.channel === 'insider' ? 'continuous' : 'promoted',
+      releaseNotes: { url: `https://github.com/${repository}/releases/tag/${completeSet.identity.sourceTag}`,
+        sha256: hash({ releaseId: completeSet.identity.releaseId, sourceCommit: completeSet.identity.sourceCommit }) },
+      signing: { identity: publisherWorkflowIdentity, workflowCommit: record.workflowCommit },
+    },
+    provenance: {
+      source: { tag: record.sourceTag, commit: record.sourceCommit, branch: record.sourceBranch,
+        authorizedBranchHead: record.authorizedBranchHead },
+      workflow: { identity: record.workflowIdentity, commit: record.workflowCommit,
+        buildId: record.buildId, buildAttempt: record.buildAttempt, allocationKey: record.allocationKey },
+      authorization: { identitySha256: completeSet.identity.identitySha256,
+        protectionDigest: record.protection.policyDigest },
+      ...(promotion ?? directHotfix ?? { mode: 'insider' }),
+    },
+    evidence: {
+      schema: 1, trust: { signer: publisherWorkflowIdentity, issuer: 'https://token.actions.githubusercontent.com',
+        policyDigest: record.protection.policyDigest, aclDigest: hash({ repository, channel: record.channel, publisher: 'github-app' }) },
+      services: artifactEvidence,
+    },
+    compatibility: {
+      schema: 2, managedEligible: true, api: { minimum: completeSet.identity.baseVersion, maximumExclusive: '9999.0.0' },
+      services: Object.fromEntries(Object.keys(components).map(service => [service, { required: true, platforms: components[service] }])),
+      storage: { sqlite: 'supported', postgresql: 'supported', sqlserver: 'supported' },
+      configuration: { format: 'versioned', templates: 'compatible' },
+      updater: { strategy: 'digest-pinned', fixedSteps: ['backup', 'pull', 'verify', 'migrate', 'restart'] },
+    },
+    migration: {
+      schema: 2, managedEligible: true,
+      providers: { postgresql: 'current-head', sqlserver: 'current-head', sqlite: 'ensure-created' },
+      downtime: 'rolling-service-restart', backup: 'required-before-migration',
+      rollback: { supported: true, strategy: 'restore-backup-and-digest-pin' },
+    },
   };
 }
 
 export function validateReleaseManifest(manifest) {
-  requireKeys(manifest, ['schema', 'identity', 'completeSet', 'compatibility', 'migration'],
+  requireKeys(manifest, ['schema', 'identity', 'completeSet', 'lifecycle', 'provenance', 'evidence', 'compatibility', 'migration'],
     [], 'release manifest');
-  requireThat(manifest.schema === 1, 'Invalid release manifest schema');
+  requireThat(manifest.schema === 2, 'Invalid release manifest schema');
   requireObject(manifest.identity, 'release manifest identity');
   validatePublicAuthorization(manifest.identity);
   requireObject(manifest.completeSet, 'release manifest complete set');
@@ -308,12 +366,101 @@ export function validateReleaseManifest(manifest) {
     manifest.identity.identitySha256);
   requireThat(isDeepStrictEqual(manifest.completeSet, canonicalSet),
     'Release manifest complete set is not canonical');
-  for (const claim of [manifest.compatibility, manifest.migration]) {
-    requireKeys(claim, ['schema', 'managedEligible', 'status'], [], 'release manifest constraint');
-    requireThat(claim.schema === 1 && claim.managedEligible === false &&
-      claim.status === 'not-qualified-for-installation',
-    'Release manifest cannot claim managed compatibility or migration eligibility');
+  const { identity, lifecycle, provenance, evidence, compatibility, migration } = manifest;
+  requireKeys(lifecycle, ['releaseId', 'channel', 'publishedAt', 'expiresAt', 'sequence', 'cadence', 'releaseNotes', 'signing'], [], 'release lifecycle');
+  requireThat(lifecycle.releaseId === identity.releaseId && lifecycle.channel === identity.channel &&
+    lifecycle.publishedAt === identity.buildTime && lifecycle.expiresAt === '9999-12-31T23:59:59.999Z' &&
+    ['continuous', 'promoted'].includes(lifecycle.cadence), 'Invalid release lifecycle binding');
+  requireTimestamp(lifecycle.publishedAt, 'release publication time');
+  requireTimestamp(lifecycle.expiresAt, 'release expiry time');
+  requireKeys(lifecycle.releaseNotes, ['url', 'sha256'], [], 'release notes');
+  requireString(lifecycle.releaseNotes.url, /^https:\/\/github\.com\/OlyForge3D\/PrintFarmer\/releases\/tag\/v[^\s]+$/, 'release notes URL');
+  requireString(lifecycle.releaseNotes.sha256, hashPattern, 'release notes hash');
+  requireKeys(lifecycle.signing, ['identity', 'workflowCommit'], [], 'release signing');
+  requireThat(lifecycle.signing.identity === publisherWorkflowIdentity, 'Invalid release signing identity');
+  requireString(lifecycle.signing.workflowCommit, shaPattern, 'release signing workflow commit');
+  requireKeys(provenance, ['source', 'workflow', 'authorization', 'mode',
+    ...(provenance.mode === 'promotion' ? ['origin', 'treeEvidence'] : provenance.mode === 'direct-hotfix' ? ['reasonSha256'] : [])],
+  [], 'release provenance');
+  requireKeys(provenance.source, ['tag', 'commit', 'branch', 'authorizedBranchHead'], [], 'release source provenance');
+  requireThat(provenance.source.tag === identity.sourceTag && provenance.source.commit === identity.sourceCommit &&
+    provenance.source.branch === identity.sourceBranch && provenance.source.authorizedBranchHead === identity.authorizedBranchHead,
+  'Invalid release source provenance');
+  requireKeys(provenance.workflow, ['identity', 'commit', 'buildId', 'buildAttempt', 'allocationKey'], [], 'release workflow provenance');
+  requireThat(provenance.workflow.identity === identity.workflowIdentity &&
+    provenance.workflow.commit === lifecycle.signing.workflowCommit &&
+    provenance.workflow.buildId === identity.buildId && provenance.workflow.buildAttempt === identity.buildAttempt,
+  'Invalid release workflow provenance');
+  requireKeys(provenance.authorization, ['identitySha256', 'protectionDigest'], [], 'release authorization provenance');
+  requireThat(provenance.authorization.identitySha256 === identity.identitySha256, 'Invalid release authorization binding');
+  requireString(provenance.authorization.protectionDigest, hashPattern, 'release protection hash');
+  requireThat(['insider', 'promotion', 'direct-hotfix'].includes(provenance.mode), 'Invalid release provenance mode');
+  if (provenance.mode === 'insider') requireThat(identity.channel === 'insider', 'Stable release requires qualification provenance');
+  if (provenance.mode === 'promotion') {
+    requireThat(identity.channel === 'stable', 'Promotion must be stable');
+    publicLedgerQualification({ schema: 1, sourceCommit: identity.sourceCommit, reviewed: true, tests: true,
+      compatibility: true, migrations: true, recovery: true, mode: 'promotion',
+      promotionOrigin: provenance.origin, treeEvidence: provenance.treeEvidence }, identity.sourceCommit);
   }
+  if (provenance.mode === 'direct-hotfix') {
+    requireThat(identity.channel === 'stable', 'Direct hotfix must be stable');
+    requireString(provenance.reasonSha256, hashPattern, 'direct hotfix reason');
+  }
+  requireKeys(evidence, ['schema', 'trust', 'services'], [], 'release evidence');
+  requireThat(evidence.schema === 1, 'Invalid release evidence schema');
+  requireKeys(evidence.trust, ['signer', 'issuer', 'policyDigest', 'aclDigest'], [], 'release trust evidence');
+  requireThat(evidence.trust.signer === publisherWorkflowIdentity &&
+    evidence.trust.issuer === 'https://token.actions.githubusercontent.com', 'Invalid release trust identity');
+  for (const field of ['policyDigest', 'aclDigest']) requireString(evidence.trust[field], hashPattern, `release trust ${field}`);
+  requireKeys(evidence.services, Object.keys(components), [], 'release service evidence');
+  for (const [service, image] of Object.entries(manifest.completeSet.images)) {
+    const serviceEvidence = evidence.services[service];
+    requireKeys(serviceEvidence, ['index', 'platforms'], [], 'release service evidence');
+    requireKeys(serviceEvidence.index, ['subject', 'signature', 'sbom', 'provenance'], [], 'release image evidence');
+    requireThat(serviceEvidence.index.subject === image.digest, 'Release index subject mismatch');
+    requireKeys(serviceEvidence.platforms, Object.keys(image.platforms), [], 'release platform evidence');
+    for (const [platform, imagePlatform] of Object.entries(image.platforms)) {
+      const platformEvidence = serviceEvidence.platforms[platform];
+      requireKeys(platformEvidence, ['subject', 'signature', 'sbom', 'provenance'], [], 'release platform evidence');
+      requireThat(platformEvidence.subject === imagePlatform.digest, 'Release platform subject mismatch');
+      for (const item of [serviceEvidence.index, platformEvidence]) {
+        requireKeys(item.signature, ['subject', 'signer'], [], 'release signature evidence');
+        requireKeys(item.sbom, ['subject', 'sha256'], [], 'release SBOM evidence');
+        requireKeys(item.provenance, ['subject', 'sha256'], [], 'release provenance evidence');
+        requireThat(item.signature.subject === item.subject && item.signature.signer === publisherWorkflowIdentity &&
+          item.sbom.subject === item.subject && item.provenance.subject === item.subject, 'Release evidence subject mismatch');
+        requireString(item.sbom.sha256, hashPattern, 'release SBOM hash');
+        requireString(item.provenance.sha256, hashPattern, 'release provenance hash');
+      }
+    }
+  }
+  requireKeys(compatibility, ['schema', 'managedEligible', 'api', 'services', 'storage', 'configuration', 'updater'], [], 'release compatibility');
+  requireThat(compatibility.schema === 2 && compatibility.managedEligible === true, 'Release compatibility is not eligible');
+  requireKeys(compatibility.api, ['minimum', 'maximumExclusive'], [], 'release API compatibility');
+  parseTag(`v${compatibility.api.minimum}`); parseTag(`v${compatibility.api.maximumExclusive}`);
+  requireKeys(compatibility.services, Object.keys(components), [], 'release service compatibility');
+  for (const service of Object.keys(components)) {
+    requireKeys(compatibility.services[service], ['required', 'platforms'], [], 'release service compatibility');
+    requireThat(compatibility.services[service].required === true &&
+      isDeepStrictEqual(compatibility.services[service].platforms, components[service]), 'Invalid release service platforms');
+  }
+  requireKeys(compatibility.storage, ['sqlite', 'postgresql', 'sqlserver'], [], 'release storage compatibility');
+  requireKeys(compatibility.configuration, ['format', 'templates'], [], 'release configuration compatibility');
+  requireThat(compatibility.storage.sqlite === 'supported' && compatibility.storage.postgresql === 'supported' &&
+    compatibility.storage.sqlserver === 'supported' && compatibility.configuration.format === 'versioned' &&
+    compatibility.configuration.templates === 'compatible', 'Invalid release storage or configuration compatibility');
+  requireKeys(compatibility.updater, ['strategy', 'fixedSteps'], [], 'release updater compatibility');
+  requireThat(compatibility.updater.strategy === 'digest-pinned' &&
+    isDeepStrictEqual(compatibility.updater.fixedSteps, ['backup', 'pull', 'verify', 'migrate', 'restart']), 'Invalid release updater');
+  requireKeys(migration, ['schema', 'managedEligible', 'providers', 'downtime', 'backup', 'rollback'], [], 'release migration');
+  requireThat(migration.schema === 2 && migration.managedEligible === true && migration.downtime === 'rolling-service-restart' &&
+    migration.backup === 'required-before-migration', 'Release migration is not eligible');
+  requireKeys(migration.providers, ['postgresql', 'sqlserver', 'sqlite'], [], 'release migration providers');
+  requireThat(migration.providers.postgresql === 'current-head' && migration.providers.sqlserver === 'current-head' &&
+    migration.providers.sqlite === 'ensure-created', 'Invalid release migration providers');
+  requireKeys(migration.rollback, ['supported', 'strategy'], [], 'release rollback');
+  requireThat(migration.rollback.supported === true && migration.rollback.strategy === 'restore-backup-and-digest-pin',
+    'Invalid release rollback');
   return manifest;
 }
 
