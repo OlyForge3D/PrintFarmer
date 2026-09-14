@@ -301,6 +301,12 @@ jobs:
           docker run --rm --platform linux/arm64 --entrypoint /bin/sh \
             "ghcr.io/olyforge3d/printfarmer-monolith@${monolith_digest}" \
             -c 'test -f /app/Farm.Web.Api.dll && test -f /app/wwwroot/index.html && dotnet --info >/dev/null'
+      - name: Sign externally-digested complete release manifest
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --bundle .artifacts/release-authorization/release-manifest.envelope.bundle.json \
+            .artifacts/release-authorization/release-manifest.envelope.json
       - name: Publish and verify public corresponding-source assets
         working-directory: source
         env:
@@ -317,6 +323,9 @@ jobs:
           cp ../.artifacts/release-authorization/public-identity.json release-assets/release-identity.json
           cp ../.artifacts/release-authorization/public-identity.bundle.json release-assets/release-identity.bundle.json
           cp ../.artifacts/release-authorization/release-set.json release-assets/release-set.json
+          cp ../.artifacts/release-authorization/release-manifest.json release-assets/release-manifest.json
+          cp ../.artifacts/release-authorization/release-manifest.envelope.json release-assets/release-manifest.envelope.json
+          cp ../.artifacts/release-authorization/release-manifest.envelope.bundle.json release-assets/release-manifest.envelope.bundle.json
           cp release-artifacts/*.spdx.json release-artifacts/digest-*.txt release-assets/
 
           expected_assets=(
@@ -327,6 +336,9 @@ jobs:
             release-identity.json
             release-identity.bundle.json
             release-set.json
+            release-manifest.json
+            release-manifest.envelope.json
+            release-manifest.envelope.bundle.json
             "printfarmer-api-${VERSION}.spdx.json"
             "printfarmer-frontend-${VERSION}.spdx.json"
             "printfarmer-slicer-host-${VERSION}.spdx.json"
@@ -349,6 +361,11 @@ jobs:
             --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             release-assets/release-identity.json
+          cosign verify-blob \
+            --bundle release-assets/release-manifest.envelope.bundle.json \
+            --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            release-assets/release-manifest.envelope.json
 
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "Release $VERSION already exists; verifying immutable assets"
@@ -428,6 +445,9 @@ jobs:
             .artifacts/release-authorization/release-identity.json
             .artifacts/release-authorization/release-identity.bundle.json
             .artifacts/release-authorization/release-set.json
+            .artifacts/release-authorization/release-manifest.json
+            .artifacts/release-authorization/release-manifest.envelope.json
+            .artifacts/release-authorization/release-manifest.envelope.bundle.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30

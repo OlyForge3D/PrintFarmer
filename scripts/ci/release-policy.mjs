@@ -281,6 +281,55 @@ export function writePublicSet(record, set, identitySha256) {
   return { schema: 1, identity, managedEligible: false, images };
 }
 
+export function releaseManifest(record, set, identitySha256) {
+  const completeSet = writePublicSet(record, set, identitySha256);
+  const constraints = { schema: 1, managedEligible: false, status: 'not-qualified-for-installation' };
+  return {
+    schema: 1, identity: completeSet.identity, completeSet,
+    compatibility: { ...constraints },
+    migration: { ...constraints },
+  };
+}
+
+export function validateReleaseManifest(manifest) {
+  requireKeys(manifest, ['schema', 'identity', 'completeSet', 'compatibility', 'migration'],
+    [], 'release manifest');
+  requireThat(manifest.schema === 1, 'Invalid release manifest schema');
+  validatePublicAuthorization(manifest.identity);
+  requireThat(hash(manifest.completeSet.identity) === hash(manifest.identity),
+    'Release manifest identity mismatch');
+  writePublicSet(manifest.completeSet.identity, manifest.completeSet, manifest.identity.identitySha256);
+  for (const claim of [manifest.compatibility, manifest.migration]) {
+    requireKeys(claim, ['schema', 'managedEligible', 'status'], [], 'release manifest constraint');
+    requireThat(claim.schema === 1 && claim.managedEligible === false &&
+      claim.status === 'not-qualified-for-installation',
+    'Release manifest cannot claim managed compatibility or migration eligibility');
+  }
+  return manifest;
+}
+
+export function releaseManifestEnvelope(manifest) {
+  validateReleaseManifest(manifest);
+  return {
+    schema: 1,
+    releaseId: manifest.identity.releaseId,
+    canonicalVersion: manifest.identity.canonicalVersion,
+    channel: manifest.identity.channel,
+    sourceCommit: manifest.identity.sourceCommit,
+    identitySha256: manifest.identity.identitySha256,
+    manifestSha256: hash(manifest),
+  };
+}
+
+export function validateReleaseManifestEnvelope(envelope, manifest) {
+  validateReleaseManifest(manifest);
+  requireKeys(envelope, ['schema', 'releaseId', 'canonicalVersion', 'channel', 'sourceCommit',
+    'identitySha256', 'manifestSha256'], [], 'release manifest envelope');
+  const expected = releaseManifestEnvelope(manifest);
+  requireThat(hash(envelope) === hash(expected), 'Release manifest envelope mismatch');
+  return envelope;
+}
+
 export function validateApprovalMode(mode) {
   requireThat(['single-maintainer', 'separation-of-duties'].includes(mode),
     'Owner blocker: RELEASE_APPROVAL_MODE must be single-maintainer or separation-of-duties');

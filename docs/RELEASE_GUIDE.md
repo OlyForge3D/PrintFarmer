@@ -404,6 +404,26 @@ notices, SBOMs, identity and digest records are publicly verified first; uploads
 never clobber differing bytes. Existing version tags must resolve to the exact
 candidate digest or publication fails before any version-tag write.
 
+Each release also publishes a version-addressed `release-manifest.json` and a
+separately signed `release-manifest.envelope.json` with its Cosign bundle. The
+manifest binds the authorization projection, every immutable image/index and
+platform digest, identity labels, and explicit compatibility/migration status.
+The envelope carries the manifest SHA-256 outside the manifest itself, together
+with release ID, version, channel, source commit, and authorization hash. An
+offline consumer must verify the envelope bundle against the pinned publisher
+workflow identity, recompute the manifest digest, then validate that every
+manifest identity and platform label agrees. The current release set is
+explicitly `managedEligible: false`; its compatibility and migration status
+therefore state `not-qualified-for-installation` rather than claiming host
+eligibility. No installer or mutable alias may treat it as an update candidate.
+
+The protected job signs the manifest envelope only after complete-set inspection
+and pushed image signature/SPDX verification. It verifies published release
+asset bytes on retries, publishes immutable version tags, and advances the
+durable channel pointer last. The ledger pointer is the sole channel pointer;
+stable/insider discovery aliases remain isolated and cannot substitute for the
+signed, immutable manifest.
+
 Before public assets, tags or version tags are written, publication preflight
 revalidates ancestry, trust protections, version order, complete-set bytes and
 the expected pointer snapshot. The final ledger transaction compares that

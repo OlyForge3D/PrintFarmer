@@ -13,6 +13,7 @@ import {
   parseTag, parseVersionFile, reserve as reserveRelease, transact, validateCandidate, validateCompleteSet,
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence, hotfixReasonDigest, ReleasePolicyError,
   validateRecord, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks, publisherWorkflowIdentity,
+  releaseManifest, releaseManifestEnvelope, validateReleaseManifestEnvelope,
 } from '../release-policy.mjs';
 import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedger, publicLedgerFields, readTag, readVersion, verifyProtection,
   parseGithubTimestamp, verifyStableQualification, verifyReleaseChecks } from '../release-github.mjs';
@@ -20,8 +21,9 @@ import { buildMetadata, emitBuildIdentity } from '../release-metadata.mjs';
 import { runReleaseControl, output } from '../release-control.mjs';
 import { inspectCompleteSet, publishImmutableTags } from '../release-set.mjs';
 import {
-  authorizationPath, authorizationBundle, privateSetPath, publicAuthorization, verifyAuthorization,
-  writeAuthorization, writeAuthorizationSet, writePublicSet, emitPublicReleaseAssets, readPrivateJson,
+  authorizationPath, authorizationBundle, manifestEnvelopeBundle, manifestEnvelopePath, manifestPath, privateSetPath,
+  publicAuthorization, verifyAuthorization, writeAuthorization, writeAuthorizationSet, writePublicSet,
+  emitPublicReleaseAssets, readPrivateJson, readReleaseManifest,
 } from '../release-authorization.mjs';
 import {
   qualificationJobNamespace, qualificationLifetimeMs, qualificationPath,
@@ -2360,7 +2362,10 @@ test('every release artifact upload path is explicitly inventoried, including bo
       '.artifacts/release-authorization/public-identity.json',
       '.artifacts/release-authorization/public-identity.bundle.json',
     ],
-    [authorizationPath, authorizationBundle, privateSetPath],
+    [
+      authorizationPath, authorizationBundle, privateSetPath,
+      manifestPath, manifestEnvelopePath, manifestEnvelopeBundle,
+    ],
   ]);
   // Keep the call graph closed: a new reusable workflow/action must be inventoried too.
   for (const file of [authority, docker]) {
@@ -3615,13 +3620,25 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
   const root = resolve('.artifacts', `public-assets-${process.pid}`);
   try {
     emitPublicReleaseAssets(identity, set, root);
-    for (const file of ['release-identity.json', 'release-set.json']) {
+    for (const file of ['release-identity.json', 'release-set.json',
+      'release-manifest.json', 'release-manifest.envelope.json']) {
       const content = readFileSync(resolve(root, 'release-assets', file), 'utf8');
       assert.doesNotMatch(content, /protection|rulesets|environment|reviewer|publisher|futurePrivate|private-/);
       assert.ok(content.includes(hash(identity)));
     }
     const published = JSON.parse(readFileSync(resolve(root, 'release-assets/release-identity.json'), 'utf8'));
     assert.deepEqual(published, publicAuthorization(identity));
+    const manifest = JSON.parse(readFileSync(resolve(root, 'release-assets/release-manifest.json'), 'utf8'));
+    const envelope = JSON.parse(readFileSync(resolve(root, 'release-assets/release-manifest.envelope.json'), 'utf8'));
+    assert.deepEqual(manifest, releaseManifest(identity, set));
+    assert.deepEqual(envelope, releaseManifestEnvelope(manifest));
+    assert.deepEqual(readReleaseManifest().manifest, manifest);
+    validateReleaseManifestEnvelope(envelope, manifest);
+    assert.throws(() => validateReleaseManifestEnvelope({ ...envelope, sourceCommit: newerSha }, manifest),
+      /envelope mismatch/);
+    assert.throws(() => validateReleaseManifestEnvelope(envelope, {
+      ...manifest, completeSet: { ...manifest.completeSet, images: {} },
+    }), ReleasePolicyError);
     let tag;
     const store = memoryStore(ledger);
     await ensureSourceTag(async (endpoint, method, body) => {
@@ -3666,6 +3683,12 @@ test('executed signing and asset-copy commands keep normalized authorization sep
     'cp ../.artifacts/release-authorization/public-identity.json release-assets/release-identity.json',
     'cp ../.artifacts/release-authorization/public-identity.bundle.json release-assets/release-identity.bundle.json',
   ]);
+  assert.match(docker, /Sign externally-digested complete release manifest/);
+  assert.match(docker, /release-manifest\.envelope\.bundle\.json/);
+  assert.ok(docker.indexOf('Sign externally-digested complete release manifest') >
+    docker.indexOf('Verify every pushed digest signature and SPDX attestation'));
+  assert.ok(docker.indexOf('Sign externally-digested complete release manifest') <
+    docker.indexOf('Publish and verify public corresponding-source assets'));
   const uploadedAuthorizationFiles = artifactUploads('.github/workflows/docker-publish.yml').flat()
     .filter(path => path.startsWith('.artifacts/release-authorization/'));
   const root = resolve('.artifacts', `sign-public-${process.pid}`);
@@ -3696,12 +3719,14 @@ test('executed signing and asset-copy commands keep normalized authorization sep
       'release-assets/release-identity.json');
     copyFileSync('.artifacts/release-authorization/public-identity.bundle.json',
       'release-assets/release-identity.bundle.json');
+    copyFileSync(manifestEnvelopePath, manifestEnvelopeBundle);
     assert.doesNotMatch(result.stdout + result.stderr, /private-publisher|private-future/);
     const bundle = readFileSync('release-assets/release-identity.bundle.json', 'utf8');
     assert.deepEqual(JSON.parse(bundle), publicAuthorization(identity));
     assert.doesNotMatch(bundle, /protection|publisher|futurePrivate|private-/);
     assert.equal(readFileSync(authorizationBundle, 'utf8'), JSON.stringify(identity));
     assert.equal(readFileSync(authorizationPath, 'utf8'), JSON.stringify(identity));
+    assert.equal(readFileSync(manifestEnvelopeBundle, 'utf8'), readFileSync(manifestEnvelopePath, 'utf8'));
     for (const file of uploadedAuthorizationFiles) {
       assert.ok(existsSync(file), `Missing uploaded authorization artifact: ${file}`);
       assert.doesNotMatch(readFileSync(file, 'utf8'), privateFields, file);
