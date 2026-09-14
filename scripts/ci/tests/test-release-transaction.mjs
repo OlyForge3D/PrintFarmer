@@ -351,8 +351,17 @@ test('diagnostic CLI consumes same-run release qualification without authorizing
   mkdirSync(scratch, { recursive: true });
   t.after(() => rmSync(scratch, { recursive: true, force: true }));
   process.chdir(scratch);
-  await qualifyTransaction(value, fixture.api, runtimeNow);
+  const qualification = await qualifyTransaction(value, fixture.api, runtimeNow);
   process.chdir(cwd);
+  const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+  const handoff = spawnSync(shell, ['-c',
+    'set -euo pipefail; umask 077; mkdir -p .artifacts/release-transaction; ' +
+    'cat > .artifacts/release-transaction/qualification.json'], {
+    cwd: scratch,
+    encoding: 'utf8',
+    input: `${JSON.stringify(qualification)}\n`,
+  });
+  assert.equal(handoff.status, 0, handoff.stderr);
   const result = spawnSync(process.execPath, [script, 'diagnose'], {
     cwd: scratch,
     encoding: 'utf8',

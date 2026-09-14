@@ -133,7 +133,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TRANSACTION: ${{ needs.admit.outputs.transaction }}
-        run: node scripts/ci/release-transaction.mjs qualify
+        run: |
+          set -euo pipefail
+          umask 077
+          qualification="$(node scripts/ci/release-transaction.mjs qualify)"
+          qualification_bytes="$(printf '%s' "$qualification" | wc -c)"
+          if [[ "$qualification_bytes" -le 0 || "$qualification_bytes" -gt 1048576 ]]; then
+            echo "Qualification evidence is empty or oversized"
+            exit 1
+          fi
+          mkdir -p .artifacts/release-transaction
+          if [[ -e .artifacts/release-transaction/qualification.json ]]; then
+            echo "Qualification evidence path already exists"
+            exit 1
+          fi
+          printf '%s\n' "$qualification" > .artifacts/release-transaction/qualification.json
+          node -e "JSON.parse(require('fs').readFileSync('.artifacts/release-transaction/qualification.json', 'utf8'))"
       - name: Export bounded qualification references
         id: evidence
         run: |

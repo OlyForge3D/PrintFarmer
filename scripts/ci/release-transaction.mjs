@@ -57,19 +57,24 @@ function artifactFile(path) {
 }
 
 function writeValidatedJson(path, value, validate) {
-  validate(value);
-  const content = `${JSON.stringify(value, undefined, 2)}\n`;
-  requireThat(Buffer.byteLength(content, 'utf8') <= maximumReceiptBytes,
-    'Release artifact exceeds the maximum receipt size');
+  const content = validatedJson(value, validate);
   const target = artifactFile(path);
   mkdirSync(dirname(target), { recursive: true });
   const descriptor = openSync(target,
     constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600);
   try {
-    writeFileSync(descriptor, content); // lgtm[js/http-to-file-access] Validated, bounded receipt at a constant path.
+    writeFileSync(descriptor, content);
   } finally {
     closeSync(descriptor);
   }
+}
+
+function validatedJson(value, validate) {
+  validate(value);
+  const content = `${JSON.stringify(value, undefined, 2)}\n`;
+  requireThat(Buffer.byteLength(content, 'utf8') <= maximumReceiptBytes,
+    'Release artifact exceeds the maximum receipt size');
+  return content;
 }
 
 function readBoundedJson(path, description) {
@@ -330,8 +335,8 @@ export function validateQualificationReceipt(value, transaction, requiredMode, n
 export async function qualifyTransaction(transaction, api = githubClient(process.env.GH_TOKEN),
   now = Date.now()) {
   const receipt = await verifyTransactionQualification(transaction, api, now);
-  writeValidatedJson(qualificationPath, receipt,
-    value => validateQualificationReceipt(value, transaction, transaction.mode, now));
+  validatedJson(receipt, value =>
+    validateQualificationReceipt(value, transaction, transaction.mode, now));
   return receipt;
 }
 
@@ -395,7 +400,8 @@ async function main() {
     return;
   }
   if (operation === 'qualify') {
-    await qualifyTransaction(transaction);
+    const qualification = await qualifyTransaction(transaction);
+    process.stdout.write(`${JSON.stringify(qualification)}\n`);
     return;
   }
   const requiredMode = operation === 'rehearse' ? 'rehearsal' : transaction.mode;
