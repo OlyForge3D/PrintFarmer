@@ -110,7 +110,9 @@ public class PrintersServiceObjectExclusionTests
 
         result.Success.Should().BeTrue();
         result.Message.Should().Be("Object 'cube' skipped");
-        objectExclusionClient.Verify(c => c.ExcludeObjectAsync(It.IsAny<string>(), "cube", It.IsAny<CancellationToken>()), Times.Once);
+        objectExclusionClient.Verify(c => c.GetCurrentJobObjectsAsync("http://moonraker.local:7125", It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()), Times.Once);
+        objectExclusionClient.Verify(c => c.ExcludeObjectAsync("http://moonraker.local:7125", "cube", It.IsAny<CancellationToken>()), Times.Once);
+        printer.FrontendUrl.Should().Be("http://moonraker.local");
     }
 
     private static AppDbContext CreateDbContext()
@@ -127,7 +129,8 @@ public class PrintersServiceObjectExclusionTests
         Id = Guid.NewGuid(),
         Name = "Moonraker",
         ServerUrl = "http://moonraker.local",
-        FrontendPort = 7125,
+        BackendPort = 7125,
+        FrontendPort = 80,
         Backend = (int)PrinterBackend.Moonraker,
     };
 

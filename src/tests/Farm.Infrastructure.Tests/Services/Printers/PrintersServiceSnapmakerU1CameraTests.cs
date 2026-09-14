@@ -58,6 +58,8 @@ public class PrintersServiceSnapmakerU1CameraTests
         dto!.CameraAccessMode.Should().Be(CameraAccessMode.StreamAndSnapshot);
         dto.CameraStreamFormat.Should().Be(CameraStreamFormat.Mjpeg);
         dto.CameraSnapshotStrategy.Should().Be(CameraSnapshotStrategy.DirectUrl);
+        detection.Verify(c => c.DetectConfiguredCameraUrlsAsync(
+            "http://voron.local", 80, It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static Mock<ISupportsConfiguredCameraDetection> CreateDetectionClient((string? StreamUrl, string? SnapshotUrl) urls)
