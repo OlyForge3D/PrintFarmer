@@ -67,9 +67,23 @@ to the account, not a printer or farm, and is stored on the backend so other
 devices retrieve the same choice.
 
 This field controls web guidance presentation only. It does not change motion
-admission, permissions, firmware limits, duplicate protection, recovery, or
+admission, permissions, firmware limits, duplicate protection, or
 emergency-stop behavior. Existing clients may ignore the additional response
 property; no mobile implementation change is required.
+
+### Manual-motion receipts
+
+`POST /api/printers/{id}/control-operations` retains UUID idempotency and
+permission checks. `GET .../{operationId}` and `GET .../current` expose
+active-command coordination through `barrierHeld`. `Unknown` is a final
+historical outcome, not a recovery prerequisite; requests with the same
+idempotency key return that receipt without replaying motion.
+
+The former `.../{operationId}/recovery` and `.../recovery/complete` routes have
+been removed. Old calls return `404` and never submit evidence or issue motion.
+The compatibility `requiresRecovery` field is always `false`. Historical enum
+values and evidence remain readable; updated clients must not infer a lock from
+an old receipt state alone. Update React and iOS together with the API.
 
 ## API Contract and Calibration Capabilities
 

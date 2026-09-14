@@ -71,8 +71,4 @@ public sealed record PrinterPhysicalControlDto(
 public sealed record PrinterControlCurrentDto(PrinterPhysicalControlDto PhysicalControl,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] PrinterControlOperationDto? Operation);
 
-public sealed record PrinterControlRecoveryRequest(
-    string Reason, string SenderIsolation, string SenderIsolationEvidence,
-    bool ControllerQueueCleared, bool PhysicallyStationary, string PhysicalEvidence);
-
 public sealed record PrinterControlInvalidation(Guid PrinterId, Guid OperationId, string RowVersion);

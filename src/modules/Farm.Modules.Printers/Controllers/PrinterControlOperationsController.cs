@@ -40,7 +40,7 @@ public sealed class PrinterControlOperationsController(
             SetHeaders(dto);
             string location = $"/api/printers/{printerId}/control-operations/{id}";
             Response.Headers.Location = location;
-            return dto.State is PrinterControlState.Succeeded or PrinterControlState.Failed or PrinterControlState.Recovered
+            return dto.State is PrinterControlState.Succeeded or PrinterControlState.Failed or PrinterControlState.Unknown or PrinterControlState.Recovered
                 ? Ok(dto) : Accepted(location, dto);
         });
 
@@ -65,33 +65,6 @@ public sealed class PrinterControlOperationsController(
             return Ok(await operations.GetCurrentAsync(printerId, ct));
         });
 
-    [HttpPost("{operationId:guid}/recovery")]
-    [ProducesResponseType(typeof(PrinterControlOperationDto), 202)]
-    [RequirePermission(PrintFarmerPermissions.Queue.Reconcile)]
-    public Task<IActionResult> RecoverAsync(Guid printerId, Guid operationId, CancellationToken ct) =>
-        ExecuteAsync(async () =>
-        {
-            await RequireAccessAsync(printerId, PrinterGroupAccessLevel.Submit, ct);
-            PrinterControlOperationDto dto = await operations.BeginRecoveryAsync(
-                printerId, operationId, RequireMatch(), QueueActorIdentity.Resolve(User), ct);
-            SetHeaders(dto);
-            return Accepted($"/api/printers/{printerId}/control-operations/{operationId}", dto);
-        });
-
-    [HttpPost("{operationId:guid}/recovery/complete")]
-    [ProducesResponseType(typeof(PrinterControlOperationDto), 200)]
-    [RequirePermission(PrintFarmerPermissions.Queue.Reconcile)]
-    public Task<IActionResult> CompleteRecoveryAsync(Guid printerId, Guid operationId,
-        [FromBody] PrinterControlRecoveryRequest request, CancellationToken ct) =>
-        ExecuteAsync(async () =>
-        {
-            await RequireAccessAsync(printerId, PrinterGroupAccessLevel.Submit, ct);
-            PrinterControlOperationDto dto = await operations.CompleteRecoveryAsync(
-                printerId, operationId, RequireMatch(), QueueActorIdentity.Resolve(User), request, ct);
-            SetHeaders(dto);
-            return Ok(dto);
-        });
-
     private async Task RequireAccessAsync(Guid printerId, PrinterGroupAccessLevel level, CancellationToken ct)
     {
         if (!await authorization.CanAccessPrinterAsync(User, printerId, level, ct) ||
@@ -99,17 +72,6 @@ public sealed class PrinterControlOperationsController(
         {
             throw new PrinterControlException(404, "not_found", "Printer not found.");
         }
-    }
-
-    private string RequireMatch()
-    {
-        string revision = Request.Headers.IfMatch.ToString();
-        if (string.IsNullOrWhiteSpace(revision))
-        {
-            throw new PrinterControlException(428, "missing_precondition", "If-Match is required.");
-        }
-
-        return revision;
     }
 
     private void SetHeaders(PrinterControlOperationDto dto)

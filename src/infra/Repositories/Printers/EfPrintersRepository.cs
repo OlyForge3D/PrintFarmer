@@ -144,7 +144,7 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
                     operation =>
                     operation.PrinterId == trackedPrinter.Id &&
                     operation.State != PrinterControlState.Succeeded && operation.State != PrinterControlState.Failed &&
-                    operation.State != PrinterControlState.Recovered, ct))
+                    operation.State != PrinterControlState.Unknown && operation.State != PrinterControlState.Recovered, ct))
             {
                 throw new PrinterControlException(409, "physical_control_barrier", "Resolve the physical control operation before deleting this printer.");
             }

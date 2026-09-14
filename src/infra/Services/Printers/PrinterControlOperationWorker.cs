@@ -11,11 +11,12 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <summary>Owns physical sends independently of HTTP lifetimes. Never replays a committed send.</summary>
 public sealed class PrinterControlOperationWorker(
     IServiceScopeFactory scopes,
-    ILogger<PrinterControlOperationWorker> logger) : BackgroundService
+    ILogger<PrinterControlOperationWorker> logger,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
     private readonly Guid owner = Guid.NewGuid();
     private readonly ConcurrentDictionary<Guid, Execution> active = new();
-    private readonly ConcurrentDictionary<Guid, byte> quiesced = new();
+    private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
     private volatile bool stopAdmissions;
 
     public override async Task StopAsync(CancellationToken cancellationToken)
@@ -93,29 +94,24 @@ public sealed class PrinterControlOperationWorker(
             {
                 await execution.Task;
                 active.TryRemove(id, out _);
-                execution.Stop.Dispose();
+                execution.Dispose();
             }
             else
             {
-                await scope.ServiceProvider.GetRequiredService<PrinterControlOperationService>().MaintainOwnerAsync(id, owner, false, ct);
+                if (await scope.ServiceProvider.GetRequiredService<PrinterControlOperationService>().MaintainOwnerAsync(id, owner, false, ct))
+                {
+                    execution.RenewLease();
+                }
+                else
+                {
+                    await execution.Stop.CancelAsync();
+                }
             }
         }
 
         await using AsyncServiceScope scan = scopes.CreateAsyncScope();
         AppDbContext scanDb = scan.ServiceProvider.GetRequiredService<AppDbContext>();
         PrinterControlOperationService service = scan.ServiceProvider.GetRequiredService<PrinterControlOperationService>();
-        Guid[] recoveries = await scanDb.PrinterControlOperations.AsNoTracking()
-            .Where(o => o.State == PrinterControlState.Recovering && o.OwnerToken == owner &&
-                o.SenderIsolation != PrinterSenderIsolation.Confirmed)
-            .Select(o => o.Id).ToArrayAsync(ct);
-        foreach (Guid id in recoveries)
-        {
-            if (quiesced.ContainsKey(id))
-            {
-                await service.MaintainOwnerAsync(id, owner, true, ct);
-            }
-        }
-
         await service.ReconcileOrphansAsync(ct);
         Guid[] legacy = await scanDb.PrinterDispatchStates.AsNoTracking().Where(s =>
             s.PhysicalControlCommandId != null && s.PhysicalControlAttemptId == null &&
@@ -139,14 +135,14 @@ public sealed class PrinterControlOperationWorker(
             .OrderBy(o => o.CreatedAtUtc).Take(20).Select(o => o.Id).ToArrayAsync(ct);
         foreach (Guid id in queued)
         {
-            var execution = new Execution();
+            var execution = new Execution(clock);
             if (active.TryAdd(id, execution))
             {
                 execution.Task = RunOneAsync(id, execution.Stop.Token);
             }
             else
             {
-                execution.Stop.Dispose();
+                execution.Dispose();
             }
         }
     }
@@ -202,7 +198,8 @@ public sealed class PrinterControlOperationWorker(
                 return;
             }
 
-            // No request token, retry policy, elapsed-motion timeout or lifecycle consumer.
+            // Cancellation bounds sender lifetime, not physical-outcome certainty.
+            ct.ThrowIfCancellationRequested();
             await channel.ExecuteAsync(id, intent, ct);
             success = true;
         }
@@ -225,8 +222,6 @@ public sealed class PrinterControlOperationWorker(
         {
             if (claimed)
             {
-                quiesced.TryAdd(id, 0);
-
                 // The channel's await-using has now aborted/disposed and joined its I/O.
                 // Retry only the durable outcome write, never the physical request.
                 await PersistResultAsync(id, success, failure);
@@ -245,14 +240,6 @@ public sealed class PrinterControlOperationWorker(
                 PrinterControlOperationService service = scope.ServiceProvider.GetRequiredService<PrinterControlOperationService>();
                 await service.SetOutcomeAsync(id, owner, success, failure, CancellationToken.None);
                 await service.MaintainOwnerAsync(id, owner, isolated: true, CancellationToken.None);
-                AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                if (await db.PrinterControlOperations.AnyAsync(operation => operation.Id == id &&
-                    (operation.State == PrinterControlState.Succeeded || operation.State == PrinterControlState.Failed ||
-                     operation.State == PrinterControlState.Recovered)))
-                {
-                    quiesced.TryRemove(id, out _);
-                }
-
                 return;
             }
             catch (Exception exception)
@@ -264,14 +251,32 @@ public sealed class PrinterControlOperationWorker(
             }
         }
 
-        // Owner liveness will expose an unresolved sent operation as Unknown. Never send again.
-        logger.LogError("Motion result {OperationId} remains unpersisted; durable barrier retained.", id);
+        logger.LogError("Motion result {OperationId} remains unpersisted; owner expiry will release coordination without replay.", id);
     }
 
-    private sealed class Execution
+    private sealed class Execution : IDisposable
     {
-        public CancellationTokenSource Stop { get; } = new();
+        private readonly CancellationTokenSource deadline;
+        private readonly CancellationTokenSource lease;
+
+        public Execution(TimeProvider clock)
+        {
+            deadline = new(PrinterControlOperationService.CommandTimeout, clock);
+            lease = new(PrinterControlOperationService.SenderLease, clock);
+            Stop = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, lease.Token);
+        }
+
+        public CancellationTokenSource Stop { get; }
 
         public Task Task { get; set; } = Task.CompletedTask;
+
+        public void RenewLease() => lease.CancelAfter(PrinterControlOperationService.SenderLease);
+
+        public void Dispose()
+        {
+            Stop.Dispose();
+            deadline.Dispose();
+            lease.Dispose();
+        }
     }
 }

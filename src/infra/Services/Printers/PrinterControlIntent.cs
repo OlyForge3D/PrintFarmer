@@ -8,6 +8,16 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <summary>Pure validation and canonical identity for semantic motion intents.</summary>
 public static class PrinterControlIntent
 {
+    public static PrinterControlKind? LegacyKind(string? operation) => operation switch
+    {
+        "home" => PrinterControlKind.HomeAll,
+        "home_xy" => PrinterControlKind.HomeXY,
+        "home_z" => PrinterControlKind.HomeZ,
+        "move" => PrinterControlKind.Jog,
+        "move_to" => PrinterControlKind.MoveTo,
+        _ => null,
+    };
+
     public static bool IsValid(PrinterControlRequest request)
     {
         if (!Enum.IsDefined(request.Kind) ||
