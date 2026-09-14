@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useImperativeHandle, forwardRef } from 'react';
+import { generateUUID } from '@/utils/uuid';
 import { apiClient } from '@/services/api';
 import { PlusIcon, DeleteIcon, LoadingIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui/Button';
@@ -94,15 +95,19 @@ export const ModelAliasEditor = forwardRef<ModelAliasEditorRef, ModelAliasEditor
       return;
     }
 
-    const newAlias: LocalAlias = {
-      id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      slicerModelName: newAliasName.trim(),
-      slicerType: newSlicerType,
-      isNew: true,
-    };
-    setAliases(prev => [...prev, newAlias]);
-    setNewAliasName('');
-    setError(null);
+    try {
+      const newAlias: LocalAlias = {
+        id: generateUUID(),
+        slicerModelName: newAliasName.trim(),
+        slicerType: newSlicerType,
+        isNew: true,
+      };
+      setAliases(prev => [...prev, newAlias]);
+      setNewAliasName('');
+      setError(null);
+    } catch (error) {
+      setError(`Failed to add alias: ${error instanceof Error ? error.message : 'Unable to generate a secure ID'}`);
+    }
   };
 
   const handleDeleteAlias = (aliasId: string) => {

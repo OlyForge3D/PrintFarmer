@@ -6,6 +6,7 @@
 // issue #2343.
 import type { AxiosError, AxiosInstance, AxiosRequestConfig } from "axios";
 import axios from "axios";
+import { generateUUID } from "@/utils/uuid";
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
 import { extractValidationErrorMessage } from "@/common/utils/apiErrors";
 import { resetAuthenticatedSignalRSession } from "@/common/auth/authenticatedSignalRSession";
@@ -34,19 +35,7 @@ interface PfInternalRequestConfig extends PfRequestConfig {
 
 // Utility to generate a correlation ID (UUID v4)
 function generateCorrelationId(): string {
-  // Use crypto API if available, fallback to random
-  if (typeof crypto !== "undefined" && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  // Fallback: simple random string
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
-    /[xy]/g,
-    function (c) {
-      const r = (Math.random() * 16) | 0,
-        v = c === "x" ? r : (r & 0x3) | 0x8;
-      return v.toString(16);
-    }
-  );
+  return generateUUID();
 }
 
 function createHttpClient(): AxiosInstance {

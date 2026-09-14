@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { slicerService } from '@/services/slicerService';
@@ -44,6 +44,7 @@ describe('ModelUploadModal', () => {
 
   afterEach(() => {
     queryClient.clear();
+    vi.unstubAllGlobals();
   });
 
   const renderModal = (props = {}) => {
@@ -58,6 +59,50 @@ describe('ModelUploadModal', () => {
       </QueryClientProvider>
     );
   };
+
+  describe('HTTP LAN queue identities', () => {
+    function addFiles(method: 'select' | 'drop', files: File[]) {
+      if (method === 'select') {
+        fireEvent.change(document.querySelector('#model-file-upload')!, { target: { files } });
+      } else {
+        fireEvent.drop(screen.getByText('Drag files here or click to browse'), { dataTransfer: { files } });
+      }
+    }
+
+    it.each(['select', 'drop'] as const)('keeps secure queue identities stable through %s, removal and upload', async (method) => {
+      vi.stubGlobal('crypto', { getRandomValues: vi.fn(crypto.getRandomValues.bind(crypto)) });
+      vi.mocked(slicerService.uploadModel).mockResolvedValue({ id: 'server-id', url: 'server-url' });
+      const first = new File(['first'], 'first.stl');
+      const second = new File(['second'], 'second.stl');
+      renderModal();
+      expect(crypto.getRandomValues).not.toHaveBeenCalled();
+
+      addFiles(method, [first]);
+      const firstName = screen.getByText(first.name);
+      addFiles(method, [second]);
+      expect(screen.getByText(first.name)).toBe(firstName);
+      expect(crypto.getRandomValues).toHaveBeenCalledTimes(2);
+
+      fireEvent.click(within(screen.getByText(second.name).parentElement!).getByRole('button'));
+      expect(screen.queryByText(second.name)).not.toBeInTheDocument();
+      expect(screen.getByText(first.name)).toBe(firstName);
+      fireEvent.click(screen.getByRole('button', { name: /upload 1 file/i }));
+      await waitFor(() => expect(screen.getByText('✓ Done')).toBeInTheDocument());
+      expect(slicerService.uploadModel).toHaveBeenCalledExactlyOnceWith(first, expect.any(Function));
+      expect(screen.getByText(first.name)).toBe(firstName);
+      expect(crypto.getRandomValues).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['select', 'drop'] as const)('reports missing secure randomness during %s without queueing or uploading', (method) => {
+      vi.stubGlobal('crypto', {});
+      renderModal();
+      addFiles(method, [new File(['test'], 'test.stl')]);
+
+      expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('no cryptographically secure random source available'));
+      expect(screen.queryByText('test.stl')).not.toBeInTheDocument();
+      expect(slicerService.uploadModel).not.toHaveBeenCalled();
+    });
+  });
 
   describe('Upload Lifecycle', () => {
     it('should show progress capped at 95% during network upload', async () => {

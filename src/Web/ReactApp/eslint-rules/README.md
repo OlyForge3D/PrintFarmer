@@ -13,6 +13,19 @@ about. Registered in [`eslint-plugin-local.js`](./eslint-plugin-local.js) and co
 | `local/pf-no-oversized-radius` | Border radii stay inside the `DESIGN-LANGUAGE.md` scale. See below. |
 | `local/pf-no-inert-state-bg` | Direct `hover:`/`active:` backgrounds must differ from the background already active at that interaction stage. See below. |
 
+## Shared UUID generation
+
+The built-in `no-restricted-properties` rule prevents production TypeScript and
+TSX from accessing `randomUUID` outside `src/utils/uuid.ts`. Import `generateUUID`
+from `@/utils/uuid` instead: it uses secure randomness on HTTP LAN origins where
+the native `randomUUID` API is unavailable. The restriction also covers bracket
+access and destructuring; tests and E2E fixtures may access the native API to
+exercise compatibility behavior.
+
+Callers still own ID lifetime and retry reuse. Do not regenerate existing
+persisted idempotency keys when migrating a caller. Deterministic IDs and React
+`useId()` are not random UUID generation and are outside this restriction.
+
 ## `local/pf-no-inert-state-bg`
 
 This rule prevents token migrations from silently erasing interactive feedback. It reports a

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import * as THREE from 'three';
@@ -19,6 +19,12 @@ vi.mock('../SlicerBedVisualization', () => ({
     return null;
   },
 }));
+
+vi.mock('@/features/models3d/utils/textGeometry', () => ({
+  generateTextGeometry: vi.fn(),
+  geometryToStlBlobUrl: vi.fn(() => 'blob:test-text'),
+}));
+import { generateTextGeometry } from '@/features/models3d/utils/textGeometry';
 
 import { SlicerWorkspace } from '../SlicerWorkspace';
 import type { LoadedModel, BedConfig } from '../SlicerBedVisualization';
@@ -43,6 +49,67 @@ describe('SlicerWorkspace multi-plate', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     lastBedProps = {};
+  });
+
+  describe('HTTP LAN text model identities', () => {
+    beforeEach(() => {
+      vi.stubGlobal('crypto', { getRandomValues: vi.fn(crypto.getRandomValues.bind(crypto)) });
+      vi.stubGlobal('URL', class extends URL { static revokeObjectURL = vi.fn(); });
+      vi.mocked(generateTextGeometry).mockImplementation(async () => ({
+        geometry: new THREE.BufferGeometry(), width: 10, height: 5,
+      }));
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    function startTextPlacement() {
+      fireEvent.click(screen.getByTitle('3D Text (A)'));
+      fireEvent.change(screen.getByRole('textbox', { name: /^Text/ }), { target: { value: 'Hello' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Place on Model' }));
+    }
+
+    async function placeText() {
+      const onTextPlace = lastBedProps.onTextPlace as (point: THREE.Vector3, normal: THREE.Vector3) => Promise<void>;
+      await act(async () => { await onTextPlace(new THREE.Vector3(1, 2, 3), new THREE.Vector3(0, 0, 1)); });
+    }
+
+    it('creates one secure ID per placement without reminting on workspace updates', async () => {
+      const onModelsReplace = vi.fn();
+      const { rerender } = render(<SlicerWorkspace bedConfig={bedConfig} onModelsReplace={onModelsReplace} />);
+      startTextPlacement();
+      const callsBeforePlacement = vi.mocked(crypto.getRandomValues).mock.calls.length;
+
+      await placeText();
+      const [removedId, [first]] = onModelsReplace.mock.calls[0];
+      expect(removedId).toBe('__text_add__');
+      expect(first).toEqual({
+        id: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
+        fileName: '[text]_Hello.stl', url: 'blob:test-text',
+        position: [1, 2, 3], rotation: expect.any(Array), scale: [1, 1, 1],
+      });
+      expect(crypto.getRandomValues).toHaveBeenCalledTimes(callsBeforePlacement + 1);
+      rerender(<SlicerWorkspace bedConfig={bedConfig} models={[first]} onModelsReplace={onModelsReplace} />);
+      expect(crypto.getRandomValues).toHaveBeenCalledTimes(callsBeforePlacement + 1);
+      expect(onModelsReplace).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Place on Model' }));
+      await placeText();
+      expect(onModelsReplace.mock.calls[1][1][0].id).not.toBe(first.id);
+      expect(crypto.getRandomValues).toHaveBeenCalledTimes(callsBeforePlacement + 2);
+    });
+
+    it('surfaces secure ID generation failure through the existing text-placement error toast', async () => {
+      const onModelsReplace = vi.fn();
+      render(<SlicerWorkspace bedConfig={bedConfig} onModelsReplace={onModelsReplace} />);
+      startTextPlacement();
+      vi.stubGlobal('crypto', {});
+
+      await placeText();
+
+      expect(mockToast.error).toHaveBeenCalledWith(expect.stringContaining('no cryptographically secure random source available'));
+      expect(mockToast.success).not.toHaveBeenCalled();
+      expect(onModelsReplace).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Place on Model' })).toBeEnabled();
+    });
   });
 
   it('per-plate arrange operates on the CLICKED plate only (stale-closure lock)', async () => {

@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockMutateAsync = vi.fn();
 
@@ -11,6 +11,7 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
+import { toast } from 'sonner';
 import { AdjustStockModal } from '../components/AdjustStockModal';
 import type { BinDto, PartInventoryDto } from '@/types/partsInventory';
 
@@ -54,7 +55,10 @@ function submit() {
 describe('AdjustStockModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal('crypto', { getRandomValues: vi.fn(crypto.getRandomValues.bind(crypto)) });
   });
+
+  afterEach(() => vi.unstubAllGlobals());
 
   it('reuses the SAME operationKey when an identical payload is retried after a failure', async () => {
     // First submit fails with a transient (network) error — no HTTP status —
@@ -65,6 +69,7 @@ describe('AdjustStockModal', () => {
       .mockResolvedValueOnce({});
 
     render(<AdjustStockModal isOpen onClose={vi.fn()} part={makePart()} bins={bins} />);
+    expect(crypto.getRandomValues).not.toHaveBeenCalled();
 
     submit();
     await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1));
@@ -74,8 +79,29 @@ describe('AdjustStockModal', () => {
 
     const firstKey = mockMutateAsync.mock.calls[0][0].request.operationKey;
     const secondKey = mockMutateAsync.mock.calls[1][0].request.operationKey;
-    expect(firstKey).toBeTruthy();
+    expect(firstKey).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(crypto.getRandomValues).toHaveBeenCalledTimes(1);
     expect(secondKey).toBe(firstKey);
+  });
+
+  it('surfaces secure ID generation failure without submitting and allows recovery', async () => {
+    const secureCrypto = crypto;
+    vi.stubGlobal('crypto', {});
+    const onClose = vi.fn();
+    render(<AdjustStockModal isOpen onClose={onClose} part={makePart()} bins={bins} />);
+
+    submit();
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining('no cryptographically secure random source available'),
+    ));
+    expect(mockMutateAsync).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+
+    vi.stubGlobal('crypto', secureCrypto);
+    mockMutateAsync.mockResolvedValueOnce({});
+    submit();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(crypto.getRandomValues).toHaveBeenCalledTimes(1);
   });
 
   it('rotates the operationKey after a 409 rejection (new logical operation)', async () => {

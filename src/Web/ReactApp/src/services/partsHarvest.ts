@@ -7,6 +7,7 @@
  * featureDisabled flows without success-shaped fallbacks.
  */
 
+import { generateUUID } from '@/utils/uuid';
 import { apiClient } from '@/services/api';
 import type {
   HarvestJobRequest,
@@ -321,17 +322,7 @@ export async function listParts(
   }
 }
 
-/**
- * Generate a UUIDv4-shaped operation key for idempotent harvest replay.
- * Falls back to a Math.random string when crypto.randomUUID is unavailable.
- */
+/** Generate a secure UUID operation key for idempotent harvest replay. */
 export function generateHarvestOperationKey(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  return generateUUID();
 }
