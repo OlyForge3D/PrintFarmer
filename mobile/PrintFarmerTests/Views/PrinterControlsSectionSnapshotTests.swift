@@ -145,11 +145,11 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                     try await settle(controller)
                     let submitted = try XCTUnwrap(service.submittedControlOperations.first)
                     for state in [PrinterControlOperationState.queued, .running, outcome] {
-                        let terminal = state == .succeeded || state == .failed
+                        let terminal = state.isTerminal
                         let operation = PrinterControlOperation.controlsFixture(
                             printerID: printer.id, operationID: submitted.operationID, request: submitted.request,
                             state: state, evidence: state == .succeeded ? .motionQueueDrained : state == .failed ? .notSent : .none,
-                            held: !terminal, recovery: state == .unknown
+                            held: !terminal
                         )
                         service.controlOperationToReturn = operation
                         service.currentControlOperationToReturn = .controlsFixture(operation)
@@ -246,17 +246,17 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             XCTAssertEqual(model.motionStatusSummary, "Submitting motion. Controls locked until completion.")
             barrier.release()
             try await settle(controller)
-            XCTAssertTrue(model.hasUnresolvedMotion, "A lost response cannot unlock motion")
+            XCTAssertFalse(model.hasUnresolvedMotion, "The current server projection releases coordination")
             XCTAssertTrue(model.motionStatusNeedsAttention)
-            XCTAssertNotNil(model.motionAdmissionResubmissionID)
-            XCTAssertEqual(go.configuration?.showsActivityIndicator, false, "Unconfirmed admission uses recovery feedback, not endless progress")
+            XCTAssertNil(model.motionBlockedReason)
+            XCTAssertEqual(go.configuration?.showsActivityIndicator, false, "Unknown outcome is not endless progress")
             XCTAssertNil(go.accessibilityValue)
-            XCTAssertFalse(go.isEnabled)
+            XCTAssertTrue(go.isEnabled)
             XCTAssertEqual(service.submittedControlOperations.count, 2)
         }
     }
 
-    func test_motionLocalRejectionRemainsVisibleWithUnrelatedRecoveryLock() async throws {
+    func test_motionLocalRejectionRemainsVisibleWithUnrelatedActiveOperation() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.essentialLayoutCaps)
         service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
@@ -265,12 +265,12 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         await model.moveTo(x: 20, y: nil, z: nil, feedrateMmMin: nil)
         XCTAssertNotNil(model.lastError)
         XCTAssertTrue(service.submittedControlOperations.isEmpty, "The incomplete target is rejected locally")
-        let operation = PrinterControlOperation.controlsFixture(printerID: printer.id, state: .unknown, recovery: true)
+        let operation = PrinterControlOperation.controlsFixture(printerID: printer.id, state: .running)
         service.currentControlOperationToReturn = .controlsFixture(operation)
         await model.refreshControlOperation()
         XCTAssertTrue(model.hasUnresolvedMotion)
         XCTAssertTrue(model.motionStatusNeedsAttention)
-        XCTAssertEqual(model.motionStatusSummary, "Motion outcome uncertain. Controls locked. Inspect the printer and use recovery.")
+        XCTAssertEqual(model.motionStatusSummary, "Motion blocked. Review motion controls for error details.")
         let (window, controller) = install(
             VStack {
                 PrinterSetupControlsContent.PrinterMotionStatusBanner(viewModel: model)
@@ -305,12 +305,11 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         add(attachment)
     }
 
-    func test_durableUnknownRemainsVisibleOfflineWithReadOnlyRecoveryActions() async throws {
+    func test_durableUnknownRemainsVisibleOfflineWithRefreshOnly() async throws {
         let printer = try makePrinter(backend: .moonraker, isOnline: false)
         let service = makeService(caps: Self.layoutCaps)
-        service.currentControlOperationToReturn = .controlsFixture(.controlsFixture(
-            printerID: printer.id, state: .unknown, recovery: true
-        ))
+        let operation = PrinterControlOperation.controlsFixture(printerID: printer.id, state: .running)
+        service.currentControlOperationToReturn = .controlsFixture(operation)
         let suite = "MotionStatusView-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -320,6 +319,11 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
             printerService: service, printer: printer, serverID: server.id
         )
         await model.loadCapabilities()
+        service.controlOperationToReturn = .controlsFixture(
+            printerID: printer.id, operationID: operation.operationId, state: .unknown, held: false
+        )
+        service.currentControlOperationToReturn = .controlsFixture(try XCTUnwrap(service.controlOperationToReturn))
+        await model.refreshControlOperation()
         let (window, controller) = install(
             PrinterSetupControlsContent(printer: printer, viewModel: model)
                 .environment(registry)
@@ -336,8 +340,12 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         refresh.sendActions(for: .touchUpInside)
         try await settle(controller)
         XCTAssertGreaterThan(service.currentControlOperationReadCount, before)
-        XCTAssertTrue(model.motionStatusMessage?.contains("isolation") == true)
-        XCTAssertTrue(model.hasUnresolvedMotion)
+        XCTAssertTrue(model.motionStatusMessage?.contains("outcome is unknown") == true)
+        XCTAssertFalse(model.hasUnresolvedMotion)
+        XCTAssertFalse(nativeControls(in: controller.view).contains {
+            $0.accessibilityIdentifier == "printer.controls.motion.recovery"
+                || $0.accessibilityIdentifier == "printer.controls.motion.review-admission"
+        })
         XCTAssertTrue(service.submittedControlOperations.isEmpty)
         XCTAssertNil(service.homeCalledWith)
         XCTAssertNil(service.moveCalledWith)
@@ -386,7 +394,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertNil(service.homeCalledWith)
     }
 
-    func test_unconfirmedAdmissionReviewDisclosesActuationAndDeclineDoesNotSend() async throws {
+    func test_unconfirmedAdmissionOffersRefreshWithoutRecoveryOrReplay() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let service = makeService(caps: Self.layoutCaps)
         let model = makeDurableMotionModel(printer: printer, service: service)
@@ -394,28 +402,23 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         service.submitControlOperationHandler = { _, _, _ in throw NetworkError.timeout }
         await model.homeAll()
         XCTAssertEqual(service.submittedControlOperations.count, 1, "Motion admission failed: \(String(describing: model.lastError))")
-        let operationID = try XCTUnwrap(model.motionAdmissionResubmissionID)
         let (window, controller) = install(PrinterSetupControlsContent(printer: printer, viewModel: model))
         defer { window.isHidden = true; model.deactivate() }
         try await settle(controller)
-        let review = try XCTUnwrap(nativeControls(in: controller.view).first {
+        XCTAssertFalse(nativeControls(in: controller.view).contains {
             $0.accessibilityIdentifier == "printer.controls.motion.review-admission"
+                || $0.accessibilityIdentifier == "printer.controls.motion.recovery"
         })
-        XCTAssertTrue(review.isEnabled)
-        XCTAssertGreaterThanOrEqual(review.bounds.height, 44)
-        review.sendActions(for: .touchUpInside)
+        let refresh = try XCTUnwrap(nativeControls(in: controller.view).first {
+            $0.accessibilityIdentifier == "printer.controls.motion.refresh"
+        })
+        XCTAssertTrue(refresh.isEnabled)
+        refresh.sendActions(for: .touchUpInside)
         try await settle(controller)
-        let alert = try XCTUnwrap(controller.presentedViewController as? UIAlertController)
-        XCTAssertTrue(alert.message?.contains("may start the original motion") == true)
-        XCTAssertTrue(alert.message?.contains("without sending motion twice") == true)
-        XCTAssertTrue(alert.message?.contains(operationID.uuidString) == true)
-        XCTAssertTrue(alert.actions.contains { $0.title == "Keep blocked" && $0.style == .cancel })
-        XCTAssertTrue(alert.actions.contains { $0.title == "Resubmit same operation" && $0.style == .destructive })
-        XCTAssertEqual(service.submittedControlOperations.count, 1, "Opening confirmation cannot submit")
-        alert.dismiss(animated: false)
-        try await settle(controller)
-        XCTAssertTrue(model.hasUnresolvedMotion)
-        XCTAssertEqual(service.submittedControlOperations.count, 1, "Declining/dismissing cannot submit")
+        XCTAssertFalse(model.hasUnresolvedMotion)
+        XCTAssertNil(model.motionBlockedReason)
+        XCTAssertTrue(model.motionStatusNeedsAttention)
+        XCTAssertEqual(service.submittedControlOperations.count, 1, "Status refresh cannot replay motion")
     }
 
     private static var essentialLayoutCaps: PrinterBackendCapabilities {

@@ -51,13 +51,14 @@ test.describe('Printer motion feedback without physical commands', () => {
     expect(errors).toEqual([]);
   });
 
-  test('unknown outcomes retain visible warnings and permission-aware recovery guidance', async ({ page }) => {
+  test('unknown outcomes retain honest warnings without recovery or retry controls', async ({ page }) => {
     await mountMotionFixture(page, 'Unknown');
     await expect(page.getByRole('status')).toHaveText('Motion: Jog: outcome unknown');
     await expect(page.getByText(/Do not repeat this movement/)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Recheck motion status' })).toBeVisible();
-    await expect(page.getByText(/Recovery requires queue:reconcile/)).toBeVisible();
-    await expect(page.getByRole('button', { name: /Request recovery/ })).toHaveCount(0);
+    await expect(page.getByText(/queue:reconcile|authorized operator/)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /recover|retry|re-submit/i })).toHaveCount(0);
+    await expect(page.getByRole('checkbox')).toHaveCount(0);
   });
 
   for (const viewportWidth of [1280, 320]) {

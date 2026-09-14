@@ -126,9 +126,6 @@ struct PrinterSetupControlsContent: View {
     /// Kept outside disabled controls and offline branches so uncertainty is actionable.
     struct PrinterMotionStatusBanner: View {
         @ObservedObject var viewModel: PrinterControlsViewModel
-        @State private var showsAdmissionConfirmation = false
-        @State private var admissionOperationID: UUID?
-        @State private var admissionSummary = ""
         @State private var showsDetails = false
 
         var body: some View {
@@ -160,30 +157,9 @@ struct PrinterSetupControlsContent: View {
                     if viewModel.hasUnresolvedMotion || viewModel.motionStatusNeedsAttention || showsDetails {
                         ControlActionButton(
                             title: "Refresh motion status", identifier: "printer.controls.motion.refresh",
-                            hint: "Reads the saved operation. Never sends or retries motion."
+                            hint: "Reads current status and operation history. Never sends or retries motion."
                         ) { Task { await viewModel.refreshControlOperation() } }
                         .disabled(viewModel.isRefreshingControlOperation || !viewModel.isActive)
-                    }
-                    if let operationID = viewModel.motionAdmissionResubmissionID {
-                        ControlActionButton(
-                            title: "Review saved admission", identifier: "printer.controls.motion.review-admission",
-                            hint: "Requires confirmation. Resubmitting the same operation may start the original motion."
-                        ) {
-                            admissionOperationID = operationID
-                            admissionSummary = viewModel.savedMotionAdmissionSummary ?? ""
-                            showsAdmissionConfirmation = true
-                        }
-                    }
-                    if viewModel.isResubmittingMotionAdmission {
-                        Text("Checking and resubmitting only the confirmed saved admission…")
-                            .font(.footnote)
-                    }
-                    if viewModel.hasUnresolvedMotion || viewModel.motionStatusNeedsAttention,
-                       let recoveryURL = viewModel.motionRecoveryURL {
-                        Link("Open printer recovery on web", destination: recoveryURL)
-                            .frame(minHeight: 44)
-                            .accessibilityHint("An operator with queue:reconcile permission and printer Submit access must verify isolation and inspect the physical machine before releasing recovery.")
-                            .accessibilityIdentifier("printer.controls.motion.recovery")
                     }
                 }
                 .foregroundStyle(Color.pfTextPrimary)
@@ -195,15 +171,6 @@ struct PrinterSetupControlsContent: View {
                 .onChange(of: viewModel.motionOperationID) { _, _ in showsDetails = false }
                 .onChange(of: viewModel.controlOperation?.state) { _, state in
                     if state == .succeeded { showsDetails = false }
-                }
-                .alert("Resubmit saved motion?", isPresented: $showsAdmissionConfirmation) {
-                    Button("Resubmit same operation", role: .destructive) {
-                        guard let operationID = admissionOperationID else { return }
-                        Task { await viewModel.resubmitUnconfirmedMotionAdmission(operationID: operationID) }
-                    }
-                    Button("Keep blocked", role: .cancel) {}
-                } message: {
-                    Text("\(admissionSummary)\n\n\(PrinterControlsViewModel.motionAdmissionResubmissionWarning)")
                 }
             }
         }

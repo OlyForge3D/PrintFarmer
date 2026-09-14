@@ -187,12 +187,12 @@ final class HomeSubgroupTests: XCTestCase {
         XCTAssertEqual(hint, "Disabled while printing.")
     }
 
-    func test_accessibilityHint_moonrakerRecoveryBarrier_returnsRecoveryReason() async throws {
+    func test_accessibilityHint_moonrakerActiveBarrier_returnsCoordinationReason() async throws {
         let printer = try TestData.decodePrinter()
         let service = MockPrinterService()
         let operationID = UUID()
         let timestamp = Date()
-        let recoveringOperation = PrinterControlOperation(
+        let runningOperation = PrinterControlOperation(
             operationId: operationID,
             printerId: printer.id,
             kind: .homeAll,
@@ -200,27 +200,27 @@ final class HomeSubgroupTests: XCTestCase {
             y: nil,
             z: nil,
             f: nil,
-            state: .recovering,
-            rowVersion: "test-recovery",
+            state: .running,
+            rowVersion: "test-running",
             createdAtUtc: timestamp,
             updatedAtUtc: timestamp,
             startedAtUtc: timestamp,
             completedAtUtc: nil,
             barrierHeld: true,
-            requiresRecovery: true,
-            completionEvidence: .none,
+            requiresRecovery: false,
+            completionEvidence: PrinterControlCompletionEvidence.none,
             failure: nil,
-            senderIsolation: .externalVerificationRequired
+            senderIsolation: .notRequested
         )
         service.currentControlOperationToReturn = .init(
             physicalControl: .init(
                 supportedOperations: [.homeAll, .homeXY, .homeZ, .jog, .moveTo],
                 barrierHeld: true,
                 operationId: operationID,
-                state: .recovering,
-                requiresRecovery: true
+                state: .running,
+                requiresRecovery: false
             ),
-            operation: recoveringOperation
+            operation: runningOperation
         )
         let viewModel = PrinterControlsViewModel.configuredForTests(
             printerService: service, printer: printer
@@ -233,7 +233,7 @@ final class HomeSubgroupTests: XCTestCase {
 
         XCTAssertEqual(
             hint,
-            "Motion outcome is uncertain or recovery is in progress. Controls remain locked. An operator with queue:reconcile permission and printer Submit access must verify sender isolation, clear queued backend work and inspect the machine using printer recovery on the web."
+            "A motion operation is active. Controls remain unavailable while it is queued or running; leaving this screen does not cancel it."
         )
     }
 

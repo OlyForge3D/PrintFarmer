@@ -60,7 +60,7 @@ final class PrinterServiceTests: XCTestCase {
                 request: intent
             )
             XCTAssertEqual(operation.state, .queued)
-            XCTAssertFalse(operation.isSafelyComplete)
+            XCTAssertFalse(operation.isSettled)
             XCTAssertEqual(operation.y, intent.y)
             XCTAssertNil(operation.startedAtUtc)
             XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
@@ -81,7 +81,7 @@ final class PrinterServiceTests: XCTestCase {
         let result = try await printerService.getControlOperation(
             printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId
         )
-        XCTAssertTrue(result.isSafelyComplete)
+        XCTAssertTrue(result.isSettled)
         let sent = try XCTUnwrap(mockAPIClient.capturedRequests.first)
         XCTAssertEqual(sent.httpMethod, "GET")
         XCTAssertEqual(sent.url?.path, "/api/printers/\(TestData.testUUID)/control-operations/\(ControlOperationTestJSON.operationId)")
@@ -252,7 +252,6 @@ final class PrinterServiceTests: XCTestCase {
             ControlOperationTestJSON.operation(state: "FutureState"),
             ControlOperationTestJSON.operation(kind: "FutureKind"),
             ControlOperationTestJSON.operation(state: "Running", barrierHeld: false),
-            ControlOperationTestJSON.operation(state: "Succeeded", barrierHeld: false),
             good.replacingOccurrences(of: "\"opaque-r1\"", with: "\"\""),
             good.replacingOccurrences(of: "\"requiresRecovery\":false,", with: ""),
             good.replacingOccurrences(of: "\"senderIsolation\":\"NotRequested\"", with: "\"senderIsolation\":7"),
@@ -320,7 +319,7 @@ final class PrinterServiceTests: XCTestCase {
         let confirmed = try await printerService.getControlOperation(
             printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId
         )
-        XCTAssertTrue(confirmed.isSafelyComplete)
+        XCTAssertTrue(confirmed.isSettled)
         XCTAssertEqual(confirmed.operationId, ControlOperationTestJSON.operationId)
         XCTAssertEqual(mockAPIClient.capturedRequests.map(\.httpMethod), ["POST", "GET"])
     }
@@ -329,8 +328,8 @@ final class PrinterServiceTests: XCTestCase {
         let states: [(state: PrinterControlOperationState, evidence: PrinterControlCompletionEvidence, terminal: Bool)] = [
             (.queued, .none, false),
             (.running, .none, false),
-            (.unknown, .none, false),
-            (.recovering, .none, false),
+            (.unknown, .none, true),
+            (.recovering, .none, true),
             (.succeeded, .motionQueueDrained, true),
             (.failed, .notSent, true),
             (.recovered, .operatorVerifiedRecovery, true)
@@ -344,7 +343,7 @@ final class PrinterServiceTests: XCTestCase {
                 mockAPIClient.stubResponse(json: ControlOperationTestJSON.operation(
                     state: state.rawValue, barrierHeld: !terminal,
                     evidence: evidence.rawValue, y: nil, f: nil,
-                    requiresRecovery: state == .unknown || state == .recovering
+                    requiresRecovery: false
                 ), statusCode: status)
                 var admission: PrinterControlOperation?
                 do {

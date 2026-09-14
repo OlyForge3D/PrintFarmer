@@ -17,8 +17,8 @@ registerAuthenticatedSignalRTransport('printer-control-operations', async () => 
   trackers.clear();
 });
 const emptySnapshot: ControlOperationSnapshot = {
-  current: null, operation: null, etag: null, saved: null,
-  checking: false, submitting: false, admitting: false, uncertain: true, missingAdmission: false, error: null,
+  current: null, operation: null, saved: null,
+  checking: false, submitting: false, admitting: false, uncertain: true, error: null,
 };
 const emptySubscribe = () => () => undefined;
 const getEmptySnapshot = () => emptySnapshot;
@@ -38,7 +38,7 @@ export function usePrinterControlOperation(printer?: Pick<Printer, 'id' | 'backe
     const existing = trackers.get(scope);
     if (existing?.token === token) return existing.tracker;
     const generation = sessionGeneration;
-    const created = new PrinterControlTracker(printerId, scope,
+    const created = new PrinterControlTracker(printerId,
       () => generation === sessionGeneration && localStorage.getItem('auth-token') === token);
     trackers.set(scope, { token, tracker: created });
     return created;
@@ -76,7 +76,8 @@ export function usePrinterControlOperation(printer?: Pick<Printer, 'id' | 'backe
     };
   }, [tracker, printerId]);
 
-  const pending = !!snapshot.saved || !!snapshot.current?.physicalControl.barrierHeld || !!snapshot.current?.physicalControl.requiresRecovery;
+  const pending = !!snapshot.saved || !!snapshot.current?.physicalControl.barrierHeld ||
+    (!!snapshot.operation?.barrierHeld && ['Queued', 'Running'].includes(snapshot.operation.state));
   useEffect(() => {
     if (!tracker || !pending) return;
     // Connected SignalR is still lossy. Poll REST without replaying commands.
@@ -120,9 +121,7 @@ export function usePrinterControlOperation(printer?: Pick<Printer, 'id' | 'backe
   const supported = snapshot.current?.physicalControl.supportedOperations;
   return {
     ...snapshot, tracker, execute, isMoonraker,
-    canRetryAdmission: !!tracker?.canRetryAdmission(),
     blocked: isMoonraker && (!tracker || tracker.isBlocked() || !supported?.length),
-    canRecover: !!auth?.isAuthenticated && auth.hasPermission('queue', 'reconcile'),
   };
 }
 

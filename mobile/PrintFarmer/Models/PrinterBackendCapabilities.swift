@@ -21,7 +21,7 @@ enum PrinterControlOperationState: String, Codable, Sendable {
     case recovered = "Recovered"
 
     var isTerminal: Bool {
-        self == .succeeded || self == .failed || self == .recovered
+        self != .queued && self != .running
     }
 }
 
@@ -78,20 +78,13 @@ struct PrinterControlOperation: Codable, Equatable, Sendable {
     var completedAtUtc: Date?
     let barrierHeld: Bool
     let requiresRecovery: Bool
-    let completionEvidence: PrinterControlCompletionEvidence
+    var completionEvidence: PrinterControlCompletionEvidence?
     var failure: PrinterControlOperationFailure?
-    let senderIsolation: PrinterControlSenderIsolation
+    var senderIsolation: PrinterControlSenderIsolation?
 
-    /// Only an authoritative read may release a caller's pending barrier.
-    /// Acceptance, transport errors and telemetry provide no such evidence.
-    var isSafelyComplete: Bool {
-        guard !barrierHeld, !requiresRecovery else { return false }
-        switch state {
-        case .succeeded: return completionEvidence == .motionQueueDrained
-        case .failed: return completionEvidence == .notSent || completionEvidence == .backendRejected
-        case .recovered: return completionEvidence == .operatorVerifiedRecovery
-        default: return false
-        }
+    /// Settled does not mean successful: Unknown never confirms physical motion.
+    var isSettled: Bool {
+        !barrierHeld && state.isTerminal
     }
 
     func validate(printerId: UUID, operationId: UUID? = nil) throws {
@@ -99,7 +92,7 @@ struct PrinterControlOperation: Codable, Equatable, Sendable {
               operationId == nil || self.operationId == operationId,
               !rowVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               updatedAtUtc >= createdAtUtc,
-              barrierHeld || isSafelyComplete else {
+              (barrierHeld && !state.isTerminal) || isSettled else {
             throw PrinterControlOperationError.invalidResponse
         }
     }
@@ -145,7 +138,7 @@ struct PrinterPhysicalControl: Codable, Equatable, Sendable {
     }
 
     var isExplicitlyUnlocked: Bool {
-        !barrierHeld && !requiresRecovery && state == nil && operationId == nil
+        !barrierHeld && state == nil && operationId == nil
     }
 }
 
@@ -182,8 +175,7 @@ struct PrinterCurrentControlOperation: Codable, Equatable, Sendable {
             guard operation.barrierHeld,
                   physicalControl.operationId == operation.operationId,
                   physicalControl.state == operation.state,
-                  physicalControl.barrierHeld == operation.barrierHeld,
-                  physicalControl.requiresRecovery == operation.requiresRecovery else {
+                  physicalControl.barrierHeld == operation.barrierHeld else {
                 throw PrinterControlOperationError.invalidResponse
             }
         } else if physicalControl.operationId != nil || physicalControl.state != nil

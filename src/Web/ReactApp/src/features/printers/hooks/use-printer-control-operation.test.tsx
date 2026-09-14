@@ -81,22 +81,12 @@ beforeEach(() => {
 afterEach(() => { client.clear(); vi.useRealTimers(); });
 
 describe('motion clients and invalidation lifecycle', () => {
-  it.each([
-    { name: 'nonadmin queue reconciler', authenticated: true, admin: false, reconcile: true, expected: true },
-    { name: 'ordinary operator', authenticated: true, admin: false, reconcile: false, expected: false },
-    { name: 'administrator with permission bypass', authenticated: true, admin: true, reconcile: true, expected: true },
-    { name: 'administrator without resolved reconcile permission', authenticated: true, admin: true, reconcile: false, expected: false },
-    { name: 'signed-out administrator', authenticated: false, admin: true, reconcile: true, expected: false },
-    { name: 'signed-out queue reconciler', authenticated: false, admin: false, reconcile: true, expected: false },
-  ])('gates recovery for $name', async ({ authenticated, admin, reconcile, expected }) => {
-    auth = {
-      ...auth, isAuthenticated: authenticated,
-      hasRole: role => role === 'farm_admin' && admin,
-      hasPermission: (resource, action) => resource === 'queue' && action === 'reconcile' && reconcile,
-    };
+  it('does not expose recovery permissions or admission retries to an ordinary operator', async () => {
     const { result, unmount } = renderHook(() => usePrinterControlOperation({ id: printerId, backend: PrinterBackend.Moonraker }), { wrapper });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    expect(result.current.canRecover).toBe(expected);
+    expect(result.current.blocked).toBe(false);
+    expect(result.current).not.toHaveProperty('canRecover');
+    expect(result.current).not.toHaveProperty('canRetryAdmission');
     unmount();
   });
 
@@ -150,21 +140,38 @@ describe('motion clients and invalidation lifecycle', () => {
     expect(apiClient.getCurrentPrinterControlOperation).toHaveBeenCalledTimes(finalReads);
   });
 
-  it('polls unresolved saved admission while connected but never re-submits and cleans up on unmount', async () => {
+  it('releases missing admission after a fresh idle status, without polling forever or resubmitting', async () => {
     events.connected = true;
     vi.mocked(apiClient.createPrinterControlOperation).mockRejectedValueOnce(new Error('lost before admission'));
     vi.mocked(apiClient.getPrinterControlOperation).mockRejectedValue({ statusCode: 404 });
     const view = renderHook(() => usePrinterControlOperation({ id: printerId, backend: PrinterBackend.Moonraker }), { wrapper });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-    await act(async () => { await expect(view.result.current.execute(intents[0])).rejects.toThrow('retained'); });
+    await act(async () => { await expect(view.result.current.execute(intents[0])).rejects.toThrow('no command was retried'); });
     const reads = vi.mocked(apiClient.getPrinterControlOperation).mock.calls.length;
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
-    expect(apiClient.getPrinterControlOperation).toHaveBeenCalledTimes(reads + 6_000 / CONTROL_RECHECK_MS);
-    expect(view.result.current.blocked).toBe(true);
+    expect(apiClient.getPrinterControlOperation).toHaveBeenCalledTimes(reads);
+    expect(view.result.current.blocked).toBe(false);
+    expect(view.result.current.error).toContain('outcome is unknown');
     expect(apiClient.createPrinterControlOperation).toHaveBeenCalledTimes(1);
     view.unmount();
     await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
-    expect(apiClient.getPrinterControlOperation).toHaveBeenCalledTimes(reads + 6_000 / CONTROL_RECHECK_MS);
+    expect(apiClient.getPrinterControlOperation).toHaveBeenCalledTimes(reads);
+  });
+
+  it('settles Unknown with honest failure feedback and makes ordinary motion available again', async () => {
+    const { result, unmount } = renderHook(() => usePrinterControlOperation({ id: printerId, backend: PrinterBackend.Moonraker }), { wrapper });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    let task!: ReturnType<typeof result.current.execute>;
+    await act(async () => { task = result.current.execute(intents[0]); await vi.advanceTimersByTimeAsync(0); });
+    op = { ...op!, state: 'Unknown', barrierHeld: false, senderIsolation: 'Pending' };
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
+    expect(await task).toMatchObject({ success: false, error: expect.stringContaining('Unknown') });
+    expect(result.current.blocked).toBe(false);
+    expect(result.current.saved).toBeNull();
+    expect(result.current.operation?.state).toBe('Unknown');
+    expect(apiClient.createPrinterControlOperation).toHaveBeenCalledTimes(1);
+    expect([...Array(localStorage.length)].map((_, index) => localStorage.key(index))).toEqual(['auth-token']);
+    unmount();
   });
 
   it('rechecks REST on reconnect, foreground, navigation and stale/duplicate hints without replay', async () => {
