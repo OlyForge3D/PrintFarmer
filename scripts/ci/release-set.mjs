@@ -149,7 +149,14 @@ function main() {
       [name, readFileSync(`artifacts/digest-${name}/digest-${name}.txt`, 'utf8').trim()]));
     const set = inspectCompleteSet(record, digests);
     writeAuthorizationSet(record, set);
-    emitPublicReleaseAssets(record, set, '.', process.env.RELEASE_NOTES_SHA256);
+    const metadataBytes = readFileSync('.artifacts/release-authorization/source-release-metadata.json', 'utf8');
+    const metadata = JSON.parse(metadataBytes);
+    const sourceArtifactBytes = Object.fromEntries(Object.values(metadata.schemas).map(schema => [
+      schema.artifact,
+      readFileSync(`.artifacts/release-authorization/source-artifacts/${schema.artifact}`),
+    ]));
+    emitPublicReleaseAssets(record, set, '.', process.env.RELEASE_NOTES_SHA256,
+      metadataBytes, sourceArtifactBytes);
   } else if (process.argv[2] === 'tag') {
     const set = readPrivateJson(privateSetPath);
     publishImmutableTags(record, set, tag => {

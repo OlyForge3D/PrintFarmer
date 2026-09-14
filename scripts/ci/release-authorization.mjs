@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   publisherWorkflowIdentity, requireThat, validateCompleteSet, validateRecord, publicAuthorization,
   releaseManifest, releaseManifestEnvelope, validatePublicAuthorization, validateReleaseManifest,
-  validateReleaseManifestBytes, validateReleaseManifestEnvelope, writePublicSet,
+  validateReleaseManifestBytes, validateReleaseManifestEnvelope, writePublicSet, releaseMetadataEvidence,
 } from './release-policy.mjs';
 export { publicAuthorization, writePublicSet } from './release-policy.mjs';
 
@@ -99,8 +99,9 @@ export function writeAuthorizationSet(record, set) {
   writeAuthorizationFile(privateSetPath, JSON.stringify(normalized));
 }
 
-export function writeReleaseManifest(record, set, releaseNotesSha256) {
-  const manifest = releaseManifest(record, set, undefined, releaseNotesSha256);
+export function writeReleaseManifest(record, set, releaseNotesSha256, metadataBytes, sourceArtifactBytes) {
+  const metadata = releaseMetadataEvidence(record, metadataBytes, sourceArtifactBytes);
+  const manifest = releaseManifest(record, set, undefined, releaseNotesSha256, metadata);
   const envelope = releaseManifestEnvelope(manifest);
   validateReleaseManifest(manifest);
   validateReleaseManifestEnvelope(envelope, manifest);
@@ -119,9 +120,11 @@ export function readReleaseManifest() {
   return { manifest, envelope, serializedManifest, serializedEnvelope };
 }
 
-export function emitPublicReleaseAssets(record, set, root = '.', releaseNotesSha256) {
+export function emitPublicReleaseAssets(record, set, root = '.', releaseNotesSha256, metadataBytes, sourceArtifactBytes) {
   const projected = writePublicSet(record, set);
-  const { manifest, envelope } = writeReleaseManifest(record, set, releaseNotesSha256);
+  if (metadataBytes !== undefined) {
+    writeReleaseManifest(record, set, releaseNotesSha256, metadataBytes, sourceArtifactBytes);
+  }
   const directory = join(root, 'release-assets');
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, 'release-identity.json'), JSON.stringify(projected.identity));

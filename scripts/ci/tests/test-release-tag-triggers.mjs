@@ -51,7 +51,7 @@ const context = (overrides = {}) => ({
 });
 
 const releaseMetadataFixture = version => ({
-  ...loadReleaseMetadata('1.2.3'),
+  ...loadReleaseMetadata('0.2.3'),
   version,
 });
 
@@ -91,41 +91,6 @@ test('release notes derive bounded merged PRs and mandatory version-controlled o
     metadata,
   });
 
-  test('closed release metadata is canonical, complete, and digest-bound into the manifest', () => {
-    const metadata = loadReleaseMetadata('1.2.3');
-    const identity = record();
-    const manifest = releaseManifest(identity, completeSet(identity), undefined, releaseNotesHash);
-    assert.equal(manifest.evidence.releaseMetadata.sha256, hash(metadata));
-    assert.equal(manifest.compatibility.releaseMetadata.version, identity.baseVersion);
-    for (const mutate of [
-      value => { value.migrations.postgresql.AppDbContext = 'current-head'; },
-      value => { value.operations.ordered = ['pull', 'verify']; },
-      value => { value.rollback.class = 'supported'; },
-    ]) {
-      const changed = structuredClone(metadata);
-      mutate(changed);
-      const path = resolve('.artifacts', `invalid-release-metadata-${process.pid}.json`);
-      writeFileSync(path, JSON.stringify(changed));
-      assert.throws(() => loadReleaseMetadata('1.2.3', path), ReleasePolicyError);
-      rmSync(path, { force: true });
-    }
-  });
-
-  test('release manifest bytes and envelope reject canonicality and binding substitutions', () => {
-    const identity = record();
-    const manifest = releaseManifest(identity, completeSet(identity), undefined, releaseNotesHash);
-    const envelope = releaseManifestEnvelope(manifest);
-    const serialized = JSON.stringify(manifest);
-    assert.deepEqual(validateReleaseManifestBytes(serialized, envelope), manifest);
-    assert.throws(() => validateReleaseManifestBytes(`${serialized}\n`, envelope), ReleasePolicyError);
-    assert.throws(() => validateReleaseManifestBytes(JSON.stringify({
-      ...manifest, lifecycle: { ...manifest.lifecycle, releaseId: 'insider:9.9.9-insider.1' },
-    }), envelope), ReleasePolicyError);
-    assert.throws(() => validateReleaseManifestEnvelope({
-      ...envelope, manifestSha256: 'f'.repeat(64),
-    }, manifest), ReleasePolicyError);
-  });
-
   assert.match(notes, /Release range: v1\.2\.2\.\.\./);
   assert.match(notes, /#42/);
   assert.match(notes, /Run provider migration/);
@@ -142,6 +107,42 @@ test('release notes derive bounded merged PRs and mandatory version-controlled o
   }
   assert.throws(() => releaseNotes({ version: '1.2.3', sourceCommit: sha, previousTag: 'v1.2.2',
     pullRequests: [], changelog: 'entry', metadata }), /at least one merged pull request/);
+});
+
+test('closed release metadata is canonical, complete, and digest-bound into the manifest', () => {
+  const metadata = releaseMetadataFixture('1.2.3');
+  const identity = record();
+  const manifest = releaseManifest(identity, completeSet(identity), undefined, releaseNotesHash, metadata);
+  assert.equal(manifest.evidence.releaseMetadata.sha256, hash(metadata));
+  assert.equal(manifest.compatibility.releaseMetadata.version, identity.baseVersion);
+  for (const mutate of [
+    value => { value.migrations.postgresql.AppDbContext = 'current-head'; },
+    value => { value.operations.ordered = ['pull', 'verify']; },
+    value => { value.rollback.class = 'supported'; },
+  ]) {
+    const changed = structuredClone(metadata);
+    mutate(changed);
+    const path = resolve('.artifacts', `invalid-release-metadata-${process.pid}.json`);
+    writeFileSync(path, JSON.stringify(changed));
+    assert.throws(() => loadReleaseMetadata('1.2.3', path), ReleasePolicyError);
+    rmSync(path, { force: true });
+  }
+});
+
+test('release manifest bytes and envelope reject canonicality and binding substitutions', () => {
+  const identity = record();
+  const manifest = releaseManifest(identity, completeSet(identity), undefined, releaseNotesHash,
+    releaseMetadataFixture(identity.baseVersion));
+  const envelope = releaseManifestEnvelope(manifest);
+  const serialized = JSON.stringify(manifest);
+  assert.deepEqual(validateReleaseManifestBytes(serialized, envelope), manifest);
+  assert.throws(() => validateReleaseManifestBytes(`${serialized}\n`, envelope), ReleasePolicyError);
+  assert.throws(() => validateReleaseManifestBytes(JSON.stringify({
+    ...manifest, lifecycle: { ...manifest.lifecycle, releaseId: 'insider:9.9.9-insider.1' },
+  }), envelope), ReleasePolicyError);
+  assert.throws(() => validateReleaseManifestEnvelope({
+    ...envelope, manifestSha256: 'f'.repeat(64),
+  }, manifest), ReleasePolicyError);
 });
 
 test('every docker publisher bash run block parses', () => {
@@ -3901,7 +3902,8 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
   const set = completeSet(identity);
   set.futurePrivate = { value: 'private-future-value' };
   set.images.api.platforms['linux/amd64'].labels.futurePrivate = 'private-label';
-  assert.throws(() => releaseManifest(identity, set, undefined, releaseNotesHash), /public set fields|public set labels/);
+  assert.throws(() => releaseManifest(identity, set, undefined, releaseNotesHash,
+    releaseMetadataFixture(identity.baseVersion)), /public set fields|public set labels/);
   delete set.futurePrivate;
   delete set.images.api.platforms['linux/amd64'].labels.futurePrivate;
   advance(ledger, identity, set, sha, '');
@@ -3923,7 +3925,8 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
     assert.deepEqual(published, publicAuthorization(identity));
     assert.equal(existsSync(resolve(root, 'release-assets/release-manifest.json')), false);
     assert.equal(existsSync(resolve(root, 'release-assets/release-manifest.envelope.json')), false);
-    const manifest = releaseManifest(identity, set, undefined, releaseNotesHash);
+    const manifest = releaseManifest(identity, set, undefined, releaseNotesHash,
+      releaseMetadataFixture(identity.baseVersion));
     for (const mutate of [
       value => { value.lifecycle.cadence = 'manual'; },
       value => { value.provenance.source.commit = newerSha; },
@@ -4038,7 +4041,14 @@ test('executed signing commands preserve signed subjects and never let verificat
     const identity = await authorizedRecord();
     writeAuthorization(identity);
     writeAuthorizationSet(identity, completeSet(identity));
-    emitPublicReleaseAssets(identity, completeSet(identity), '.', releaseNotesHash);
+    const metadataBytes = readFileSync('release-metadata/1.2.3.json', 'utf8');
+    const metadata = JSON.parse(metadataBytes);
+    const sourceArtifacts = Object.fromEntries(Object.values(metadata.schemas).map(schema => [
+      schema.artifact, readFileSync(schema.artifact),
+    ]));
+    mkdirSync('.artifacts/release-authorization', { recursive: true });
+    writeFileSync('.artifacts/release-authorization/source-release-metadata.json', metadataBytes);
+    emitPublicReleaseAssets(identity, completeSet(identity), '.', releaseNotesHash, metadataBytes, sourceArtifacts);
     const mock = `cosign() {
       local operation="$1" bundle="" source="" previous=""
       shift

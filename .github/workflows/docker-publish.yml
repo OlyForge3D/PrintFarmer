@@ -166,6 +166,36 @@ jobs:
           RELEASE_SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
         run: node scripts/ci/release-control.mjs consume
+      - name: Stage qualified source metadata and canonical artifacts
+        env:
+          RELEASE_SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
+          RELEASE_VERSION: ${{ steps.consume.outputs.version }}
+        run: |
+          set -euo pipefail
+          RELEASE_BASE_VERSION="${RELEASE_VERSION#v}"
+          RELEASE_BASE_VERSION="${RELEASE_BASE_VERSION%%-*}"
+          export RELEASE_BASE_VERSION
+          metadata="source/release-metadata/${RELEASE_BASE_VERSION}.json"
+          test -s "$metadata"
+          node --input-type=module -e '
+            import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+            import { dirname, join, resolve } from "node:path";
+            import { releaseMetadataEvidence } from "./scripts/ci/release-policy.mjs";
+            const record = { sourceCommit: process.env.RELEASE_SOURCE_COMMIT, baseVersion: process.env.RELEASE_BASE_VERSION };
+            const bytes = readFileSync(process.argv[1], "utf8");
+            const metadata = JSON.parse(bytes);
+            const artifacts = Object.fromEntries(Object.values(metadata.schemas).map(schema =>
+              [schema.artifact, readFileSync(join("source", schema.artifact))]));
+            const target = resolve(".artifacts/release-authorization/source-release-metadata.json");
+            mkdirSync(dirname(target), { recursive: true });
+            writeFileSync(target, bytes, { mode: 0o600 });
+            for (const [path, value] of Object.entries(artifacts)) {
+              const destination = resolve(".artifacts/release-authorization/source-artifacts", path);
+              mkdirSync(dirname(destination), { recursive: true });
+              writeFileSync(destination, value, { mode: 0o600 });
+            }
+            releaseMetadataEvidence(record, bytes, artifacts, process.env.RELEASE_SOURCE_COMMIT);
+          ' "$metadata"
       - name: Validate all revocable controls before publication
         id: preflight
         env:

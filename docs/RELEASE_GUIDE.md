@@ -131,7 +131,7 @@ publisher capability or authority to contact, enroll, or update hosts.
 Canonical authenticated release notes are an asset in that same set. The
 single-dispatch pipeline generates them from the bounded previous-release-tag
 to selected-source range, associated merged PRs, the matching `CHANGELOG.md`
-entry, and `release-metadata/<canonical-version>.json`. They are hashed in the
+entry, and `release-metadata/<base-version>.json`. They are hashed in the
 signed manifest and presented before either journey installs.
 Every release notes file has Features, Fixes, Breaking changes, Compatibility,
 Migration, Downtime, Backup, and Recovery sections. A release with no
@@ -275,8 +275,11 @@ retaining full-record hashes and publicly reproducible set hashes. Unknown
 authorization fields are rejected, not silently approved. The normalized complete set and original authorization bundle remain
 available to downstream consumers without relying on artifact confidentiality.
 Ledger schema 1 explicitly permits only `schema`, `anchor`, decimal `counter`,
-optional `lastHistoricalStable`, and the `reservations`, `identities`, `pointers`,
-`stages`, and `qualifications` maps. Every transaction validates the complete
+optional `lastHistoricalStable`, `channelSequences`, and the `reservations`,
+`identities`, `pointers`, `stages`, and `qualifications` maps. An
+owner-reviewed schema migration and recovery procedure is required before
+changing an existing durable ledger shape; recovery cannot recreate or weaken
+retained allocation, pointer, or sequence evidence. Every transaction validates the complete
 ledger before mutation and again before persistence. Source tagging additionally
 projects the complete ledger and binds the original signed record before
 **any write**, including `POST git/tags`, then rechecks before creating the public
@@ -338,7 +341,10 @@ Private protection must predate or equal authorization.
 Progress fields are constrained variants: `tagObject` is a 40-hex SHA;
 `tagPublished`, when present, must be `true` and requires `tagObject`.
 `set` and `setHash` must occur together. Pointers bind to an existing matching
-complete reservation; stage high-water entries bind to real insider identities.
+complete reservation through the signed release identity, canonical version,
+channel, source commit, allocation key, identity digest, manifest digest,
+envelope digest, and combined manifest-envelope digest; stage high-water
+entries bind to real insider identities.
 Adjacent ledger commits still forbid loss or alteration of immutable
 reservations, tags, sets and pointer identities. Qualifications are append-only:
 every prior source-SHA entry must remain byte-for-byte identical under
@@ -361,16 +367,19 @@ Unknown fields within sets, images, platforms and label maps are omitted, not
 copied. `setHash` is SHA-256 of UTF-8 `JSON.stringify(writePublicSet(record, set))`,
 using the projector's fixed field/component/platform order. It covers the exact
 public set, not an unavailable private payload; public assets and persisted sets
-can reproduce it. Every ledger read/write recomputes it and verifies pointer
-binding. `identitySha256` continues to cover the original full authorization.
+can reproduce it. Every ledger read/write recomputes it, but the consumer
+discovery pointer binds the signed manifest and envelope rather than this
+unsigned complete-set hash. `identitySha256` continues to cover the original
+full authorization.
 CAS and immutable-tag semantics are unchanged.
 
 Owner-entered qualifications are strict public schema-1 records keyed by the
 exact source commit. They contain `schema: 1`, matching `sourceCommit`, boolean
 `reviewed`, `tests`, `compatibility`, `migrations`, and `recovery` claims (all
-`true`), and `mode`. `mode: promotion` additionally requires `promotionOrigin`
-containing only `allocationKey`, `releaseId`, `sourceCommit`, and public `setHash`
-of the qualified immutable insider set, plus `treeEvidence`:
+`true`), and `mode`. `mode: promotion` additionally requires `promotionOrigin` containing the
+persisted insider pointer's `allocationKey`, `releaseId`, `sourceCommit`,
+`manifestSha256`, and `envelopeSha256` of the qualified immutable insider set,
+plus `treeEvidence`:
 
 - `schema: 1`, `originTree`, `sourceTree`: exact Git tree IDs.
 - `metadataChanges`: either empty or one `{path: "VERSION", before, after}`

@@ -64,10 +64,32 @@ export function loadReleaseTrustPolicy(path = resolve(repositoryRoot, 'release-t
     Array.isArray(policy.signers) && policy.signers.length > 0 &&
     Array.isArray(policy.revokedReleaseIds) && Array.isArray(policy.revokedSignerIdentities),
   'Invalid release trust policy');
+  requireTimestamp(policy.revocationEpoch, 'release trust revocation epoch');
+  requireThat(policy.revokedReleaseIds.every(value => typeof value === 'string' &&
+    /^(stable|insider):\d+\.\d+\.\d+(?:-(?:insider|beta|rc)\.[1-9]\d*)?$/.test(value)) &&
+    new Set(policy.revokedReleaseIds).size === policy.revokedReleaseIds.length &&
+    policy.revokedSignerIdentities.every(value => typeof value === 'string' && value.length > 0) &&
+    new Set(policy.revokedSignerIdentities).size === policy.revokedSignerIdentities.length,
+  'Invalid release trust revocation evidence');
+  const signerWindows = [];
   for (const signer of policy.signers) {
     requireKeys(signer, ['identity', 'validFrom', 'validUntil'], [], 'release trust signer');
-    requireThat(signer.identity === publisherWorkflowIdentity && Date.parse(signer.validFrom) < Date.parse(signer.validUntil),
+    requireTimestamp(signer.validFrom, 'release trust signer validFrom');
+    requireTimestamp(signer.validUntil, 'release trust signer validUntil');
+    requireThat(signer.identity === publisherWorkflowIdentity && !policy.revokedSignerIdentities.includes(signer.identity) &&
+      Date.parse(signer.validFrom) < Date.parse(signer.validUntil),
       'Invalid release trust signer');
+    signerWindows.push(`${signer.identity}:${signer.validFrom}:${signer.validUntil}`);
+  }
+  requireThat(new Set(signerWindows).size === signerWindows.length, 'Duplicate release trust signer window');
+  const orderedSigners = [...policy.signers].sort((left, right) =>
+    left.validFrom.localeCompare(right.validFrom) || left.identity.localeCompare(right.identity));
+  for (let index = 1; index < orderedSigners.length; index += 1) {
+    const previous = orderedSigners[index - 1];
+    const current = orderedSigners[index];
+    const overlap = Date.parse(previous.validUntil) - Date.parse(current.validFrom);
+    requireThat(overlap >= 0 && overlap <= policy.rotationOverlapSeconds * 1000,
+      'Invalid release trust signer rotation overlap');
   }
   requireThat(JSON.stringify(policy) === readFileSync(path, 'utf8').trim(), 'Release trust policy is not canonical');
   return policy;
@@ -77,15 +99,23 @@ const metadataComponentKeys = ['frontend', 'mobile', 'backend', 'workerApplicati
   'workerEngine', 'workerDistribution', 'workerCapability', 'artifacts'];
 const metadataSchemaKeys = ['configuration', 'storage', 'templates'];
 
+export function sha256Bytes(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
 export function loadReleaseMetadata(version, path = resolve(repositoryRoot, 'release-metadata', `${version}.json`)) {
+  let serialized;
+  try { serialized = readFileSync(path, 'utf8'); } catch {
+    throw new ReleasePolicyError('Release metadata is unavailable or malformed');
+  }
   let metadata;
-  try { metadata = JSON.parse(readFileSync(path, 'utf8')); } catch {
+  try { metadata = JSON.parse(serialized); } catch {
     throw new ReleasePolicyError('Release metadata is unavailable or malformed');
   }
   requireKeys(metadata, ['schema', 'version', 'releasePaths', 'minimumUpdater', 'components',
     'schemas', 'migrations', 'operations', 'rollback', 'notes'], [], 'release metadata');
-  requireThat(metadata.schema === 2 && metadata.version === version &&
-    JSON.stringify(metadata) === readFileSync(path, 'utf8').trim(), 'Release metadata is not canonical');
+  requireThat(metadata.schema === 3 && metadata.version === version &&
+    serialized === JSON.stringify(metadata), 'Release metadata is not canonical');
   requireString(metadata.minimumUpdater, /^\d+\.\d+\.\d+$/, 'release minimum updater');
   requireKeys(metadata.releasePaths, ['sourceReleaseIds', 'upgradeHops', 'allowedChannelPaths'], [], 'release paths');
   requireThat(Array.isArray(metadata.releasePaths.sourceReleaseIds) && metadata.releasePaths.sourceReleaseIds.length > 0 &&
@@ -108,7 +138,8 @@ export function loadReleaseMetadata(version, path = resolve(repositoryRoot, 'rel
   }
   requireKeys(metadata.schemas, metadataSchemaKeys, [], 'release schema requirements');
   for (const schema of Object.values(metadata.schemas)) {
-    requireKeys(schema, ['sha256', 'read', 'write'], [], 'release schema requirement');
+    requireKeys(schema, ['artifact', 'sha256', 'read', 'write'], [], 'release schema requirement');
+    requireString(schema.artifact, /^(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/, 'release schema artifact');
     requireString(schema.sha256, hashPattern, 'release schema hash');
     requireThat(Array.isArray(schema.read) && schema.read.length > 0 &&
       schema.read.every(value => typeof value === 'string' && /^[1-9]\d*$/.test(value)) &&
@@ -129,6 +160,36 @@ export function loadReleaseMetadata(version, path = resolve(repositoryRoot, 'rel
   requireKeys(metadata.notes, ['compatibility', 'migration', 'downtime', 'backup', 'recovery'], [], 'release notes metadata');
   for (const value of Object.values(metadata.notes)) requireThat(typeof value === 'string' && value.trim().length > 0, 'Invalid release notes metadata');
   return metadata;
+}
+
+export function releaseMetadataEvidence(record, serialized, sourceArtifactBytes, capturedSourceCommit = record.sourceCommit) {
+  requireString(record.sourceCommit, shaPattern, 'release metadata source commit');
+  requireThat(capturedSourceCommit === record.sourceCommit,
+    'Release metadata checkout does not match the authorized source commit');
+  requireThat(typeof serialized === 'string' && serialized.length > 0, 'Release metadata bytes are unavailable');
+  let metadata;
+  try { metadata = JSON.parse(serialized); } catch {
+    throw new ReleasePolicyError('Release metadata bytes are malformed');
+  }
+  requireThat(serialized === JSON.stringify(metadata), 'Release metadata bytes are not canonical');
+  const metadataPath = resolve('.artifacts', 'release-authorization', 'source-release-metadata.json');
+  // Reuse the closed-schema loader without allowing the control checkout to supply the bytes.
+  const expected = loadReleaseMetadata(record.baseVersion, metadataPath);
+  requireThat(isDeepStrictEqual(metadata, expected), 'Release metadata parse divergence');
+  requireThat(sourceArtifactBytes && typeof sourceArtifactBytes === 'object', 'Release metadata artifacts are unavailable');
+  for (const schema of Object.values(metadata.schemas)) {
+    const bytes = sourceArtifactBytes[schema.artifact];
+    requireThat(typeof bytes === 'string' || Buffer.isBuffer(bytes), `Release metadata artifact is unavailable: ${schema.artifact}`);
+    requireThat(sha256Bytes(bytes) === schema.sha256,
+      `Release metadata artifact digest mismatch: ${schema.artifact}`);
+  }
+  return {
+    sourceCommit: record.sourceCommit,
+    path: `release-metadata/${record.baseVersion}.json`,
+    sha256: sha256Bytes(serialized),
+    bytes: serialized,
+    metadata,
+  };
 }
 
 export function requireString(value, pattern, description) {
@@ -371,7 +432,7 @@ export function writePublicSet(record, set, identitySha256) {
   return { schema: 1, identity, managedEligible: false, images };
 }
 
-export function releaseManifest(record, set, identitySha256, releaseNotesSha256, metadata) {
+export function releaseManifest(record, set, identitySha256, releaseNotesSha256, metadataEvidence) {
   requireString(releaseNotesSha256, hashPattern, 'release notes hash');
   const completeSet = writePublicSet(record, set, identitySha256);
   const maximumExclusive = `${BigInt(completeSet.identity.baseVersion.split('.')[0]) + 1n}.0.0`;
@@ -380,10 +441,22 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256,
     ? publicLedgerQualification(record.qualification, record.sourceCommit)
     : undefined;
   const trustPolicy = loadReleaseTrustPolicy();
-  const releaseMetadata = metadata ?? loadReleaseMetadata(record.baseVersion);
-  metadata ??= releaseMetadata;
-  requireThat(metadata.version === record.baseVersion && hash(metadata) === hash(releaseMetadata),
-    'Release metadata differs from qualified source metadata');
+  requireThat(!trustPolicy.revokedReleaseIds.includes(record.releaseId) &&
+    !trustPolicy.revokedSignerIdentities.includes(publisherWorkflowIdentity),
+  'Release signer or release ID is revoked');
+  const signingWindow = trustPolicy.signers.filter(signer => signer.identity === publisherWorkflowIdentity &&
+    Date.parse(signer.validFrom) <= Date.parse(record.created) &&
+    Date.parse(record.created) <= Date.parse(signer.validUntil));
+  requireThat(signingWindow.length === 1, 'Release signer is not valid for the captured authorization time');
+  const releaseMetadata = metadataEvidence?.metadata ?? metadataEvidence ?? loadReleaseMetadata(record.baseVersion);
+  const metadataBytes = metadataEvidence?.bytes ?? JSON.stringify(releaseMetadata);
+  requireThat(metadataEvidence === undefined || !metadataEvidence.metadata || (
+    metadataEvidence.sourceCommit === record.sourceCommit &&
+    metadataEvidence.path === `release-metadata/${record.baseVersion}.json` &&
+    metadataEvidence.sha256 === sha256Bytes(metadataBytes) &&
+    isDeepStrictEqual(metadataEvidence.metadata, releaseMetadata) &&
+    metadataBytes === JSON.stringify(releaseMetadata)),
+  'Release metadata differs from qualified source metadata');
   const artifactEvidence = Object.fromEntries(Object.entries(completeSet.images).map(([service, image]) => [
     service, {
       index: {
@@ -426,20 +499,25 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256,
     },
     evidence: {
       schema: 2, trust: { signer: publisherWorkflowIdentity, issuer: trustPolicy.issuer,
+        provenance: 'control-workflow', workflowCommit: record.workflowCommit,
         policyDigest: record.protection.policyDigest, trustPolicySha256: hash(trustPolicy) },
-      releaseMetadata: { schema: metadata.schema, version: metadata.version, sha256: hash(metadata) },
+      releaseMetadata: {
+        schema: releaseMetadata.schema, version: releaseMetadata.version, sha256: sha256Bytes(metadataBytes),
+        sourceCommit: metadataEvidence?.sourceCommit ?? record.sourceCommit,
+        path: metadataEvidence?.path ?? `release-metadata/${record.baseVersion}.json`,
+      },
       services: artifactEvidence,
     },
     compatibility: {
-      schema: 3, managedEligible: metadata.releasePaths.allowedChannelPaths.some(path =>
-        path[1] === completeSet.identity.channel), releaseMetadata: metadata,
+      schema: 3, managedEligible: releaseMetadata.releasePaths.allowedChannelPaths.some(path =>
+        path[1] === completeSet.identity.channel), releaseMetadata,
       api: { minimum: completeSet.identity.baseVersion, maximumExclusive },
       services: Object.fromEntries(Object.keys(components).map(service => [service, {
         required: true, platforms: components[service],
       }])),
-      storage: metadata.schemas.storage,
-      configuration: { configuration: metadata.schemas.configuration, templates: metadata.schemas.templates },
-      updater: { minimum: metadata.minimumUpdater, strategy: 'digest-pinned', fixedSteps: metadata.operations.ordered },
+      storage: releaseMetadata.schemas.storage,
+      configuration: { configuration: releaseMetadata.schemas.configuration, templates: releaseMetadata.schemas.templates },
+      updater: { minimum: releaseMetadata.minimumUpdater, strategy: 'digest-pinned', fixedSteps: releaseMetadata.operations.ordered },
     },
     consumption: {
       schema: 1,
@@ -452,9 +530,9 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256,
       },
       publisherApproval: 'publication-only',
     },
-    migration: { schema: 3, managedEligible: metadata.releasePaths.allowedChannelPaths.some(path =>
-      path[1] === completeSet.identity.channel), providers: metadata.migrations,
-      operations: metadata.operations, rollback: metadata.rollback },
+    migration: { schema: 3, managedEligible: releaseMetadata.releasePaths.allowedChannelPaths.some(path =>
+      path[1] === completeSet.identity.channel), providers: releaseMetadata.migrations,
+      operations: releaseMetadata.operations, rollback: releaseMetadata.rollback },
   };
 }
 
@@ -520,16 +598,26 @@ export function validateReleaseManifest(manifest) {
   }
   requireKeys(evidence, ['schema', 'trust', 'releaseMetadata', 'services'], [], 'release evidence');
   requireThat(evidence.schema === 2, 'Invalid release evidence schema');
-  requireKeys(evidence.trust, ['signer', 'issuer', 'policyDigest', 'trustPolicySha256'], [], 'release trust evidence');
+  requireKeys(evidence.trust, ['signer', 'issuer', 'provenance', 'workflowCommit', 'policyDigest', 'trustPolicySha256'], [], 'release trust evidence');
   requireThat(evidence.trust.signer === publisherWorkflowIdentity &&
-    evidence.trust.issuer === 'https://token.actions.githubusercontent.com', 'Invalid release trust identity');
+    evidence.trust.issuer === 'https://token.actions.githubusercontent.com' &&
+    evidence.trust.provenance === 'control-workflow' &&
+    shaPattern.test(evidence.trust.workflowCommit), 'Invalid release trust identity');
   requireString(evidence.trust.policyDigest, hashPattern, 'release trust policyDigest');
-  requireThat(evidence.trust.trustPolicySha256 === hash(loadReleaseTrustPolicy()),
+  const trustPolicy = loadReleaseTrustPolicy();
+  requireThat(!trustPolicy.revokedReleaseIds.includes(identity.releaseId) &&
+    !trustPolicy.revokedSignerIdentities.includes(evidence.trust.signer) &&
+    trustPolicy.signers.filter(signer => signer.identity === evidence.trust.signer &&
+      Date.parse(signer.validFrom) <= Date.parse(identity.buildTime) &&
+      Date.parse(identity.buildTime) <= Date.parse(signer.validUntil)).length === 1 &&
+    evidence.trust.trustPolicySha256 === hash(trustPolicy),
     'Release trust policy hash mismatch');
-  requireKeys(evidence.releaseMetadata, ['schema', 'version', 'sha256'], [], 'release metadata evidence');
+  requireKeys(evidence.releaseMetadata, ['schema', 'version', 'sha256', 'sourceCommit', 'path'], [], 'release metadata evidence');
   const metadata = compatibility.releaseMetadata;
-  requireThat(evidence.releaseMetadata.schema === 2 && evidence.releaseMetadata.version === identity.baseVersion &&
-    evidence.releaseMetadata.sha256 === hash(metadata),
+  requireThat(evidence.releaseMetadata.schema === 3 && evidence.releaseMetadata.version === identity.baseVersion &&
+    evidence.releaseMetadata.sourceCommit === identity.sourceCommit &&
+    evidence.releaseMetadata.path === `release-metadata/${identity.baseVersion}.json` &&
+    evidence.releaseMetadata.sha256 === sha256Bytes(JSON.stringify(metadata)),
   'Release metadata hash mismatch');
   requireKeys(evidence.services, Object.keys(components), [], 'release service evidence');
   for (const [service, image] of Object.entries(manifest.completeSet.images)) {
