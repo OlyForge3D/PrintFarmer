@@ -32,6 +32,8 @@ import { publicIdentity, publicIdentityFields } from '../../../src/Web/ReactApp/
 const sha = 'a'.repeat(40);
 const newerSha = 'b'.repeat(40);
 const anchor = 'c'.repeat(40);
+const workflowControlSha = '9'.repeat(40);
+const currentCanonicalSha = '8'.repeat(40);
 const created = '2026-09-12T20:00:00.000Z';
 const context = (overrides = {}) => ({
   repository: 'OlyForge3D/PrintFarmer', event: 'workflow_dispatch',
@@ -42,7 +44,7 @@ const context = (overrides = {}) => ({
 });
 
 test('transaction-bound release operations reject missing transactions before verification or network access', async () => {
-  for (const operation of ['authorize', 'advance', 'consume', 'preflight']) {
+  for (const operation of ['admit', 'authorize', 'advance', 'consume', 'preflight']) {
     let verified = false;
     await assert.rejects(runReleaseControl(operation, {
       GH_TOKEN: 'github-fixture',
@@ -52,7 +54,7 @@ test('transaction-bound release operations reject missing transactions before ve
   }
 });
 
-test('authorization rejects blank, malformed and invalid transactions before API or artifact mutation', async () => {
+test('admission and authorization reject blank, malformed and invalid transactions before API or artifact mutation', async () => {
   const previous = globalThis.fetch;
   const cwd = process.cwd();
   const root = resolve('.artifacts', `invalid-authorization-transaction-${process.pid}`);
@@ -60,17 +62,23 @@ test('authorization rejects blank, malformed and invalid transactions before API
   process.chdir(root);
   globalThis.fetch = () => assert.fail('Invalid transaction must fail before network access');
   try {
-    for (const transaction of ['', '   ', '{', 'null', '{}', JSON.stringify({
-      kind: 'release-transaction',
-      schema: 2,
-    })]) {
-      await assert.rejects(runReleaseControl('authorize', {
-        GH_TOKEN: 'github-fixture',
-        RELEASE_PUBLISHER_TOKEN: 'publisher-fixture',
-        RELEASE_TRANSACTION: transaction,
-      }), /Missing release transaction|JSON|release transaction/);
-      assert.equal(existsSync(authorizationPath), false);
-      assert.equal(existsSync(qualificationPath), false);
+    for (const operation of ['admit', 'authorize']) {
+      for (const [transaction, expected] of [
+        ['', /Missing release transaction/],
+        ['   ', /Missing release transaction/],
+        ['{', /^Release transaction is malformed$/],
+        ['null', /release transaction/],
+        ['{}', /release transaction/],
+        [JSON.stringify({ kind: 'release-transaction', schema: 2 }), /release transaction/],
+      ]) {
+        await assert.rejects(runReleaseControl(operation, {
+          GH_TOKEN: 'github-fixture',
+          RELEASE_PUBLISHER_TOKEN: 'publisher-fixture',
+          RELEASE_TRANSACTION: transaction,
+        }), error => error instanceof ReleasePolicyError && expected.test(error.message));
+        assert.equal(existsSync(authorizationPath), false);
+        assert.equal(existsSync(qualificationPath), false);
+      }
     }
   } finally {
     globalThis.fetch = previous;
@@ -2477,9 +2485,14 @@ test('raw policy identity changes do not affect normalized digests and API error
 function authorizationFixture(initial = state(), settings = {}) {
   const channel = settings.channel ?? 'insider';
   const sourceCommit = settings.sourceCommit ?? sha;
+  const observedBranchHead = settings.observedBranchHead ?? sourceCommit;
+  const workflowCommit = settings.workflowCommit ?? workflowControlSha;
+  const currentBranchHead = settings.currentBranchHead ?? observedBranchHead;
   const branch = channel === 'stable' ? 'main' : 'development';
-  const selected = context({ channel, eventSha: sourceCommit, workflowSha: sourceCommit,
-    ref: 'refs/heads/development', workflowBranch: 'development' });
+  const selected = context({
+    channel, eventSha: sourceCommit, workflowSha: workflowCommit, observedBranchHead,
+    ref: 'refs/heads/development', workflowBranch: 'development',
+  });
   const policy = protectionFixture(channel, settings.approvalMode);
   const { api: policies, environment, branchRules } = policy;
   branchRules.find(rule => rule.type === 'required_status_checks').parameters.required_status_checks
@@ -2505,7 +2518,7 @@ function authorizationFixture(initial = state(), settings = {}) {
   for (const snapshot of settings.history ?? [initial]) appendSnapshot(snapshot);
   let advanced = false;
   let tag;
-  let canonicalHead = sourceCommit;
+  let canonicalHead = currentBranchHead;
   let canonicalComparison = { status: 'ahead', merge_base_commit: { sha: sourceCommit } };
   const calls = [];
   const ledgerWrites = [];
@@ -2515,8 +2528,8 @@ function authorizationFixture(initial = state(), settings = {}) {
     RELEASE_APPROVAL_MODE: settings.approvalMode ?? 'separation-of-duties',
     RELEASE_ADMITTED_APPROVAL_MODE: settings.approvalMode ?? 'separation-of-duties',
     GITHUB_REPOSITORY: selected.repository, GITHUB_EVENT_NAME: selected.event,
-    GITHUB_REF: selected.ref, GITHUB_SHA: sourceCommit,
-    GITHUB_WORKFLOW_REF: selected.workflowIdentity, GITHUB_WORKFLOW_SHA: sourceCommit,
+    GITHUB_REF: selected.ref, GITHUB_SHA: workflowCommit,
+    GITHUB_WORKFLOW_REF: selected.workflowIdentity, GITHUB_WORKFLOW_SHA: workflowCommit,
     GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '1', RELEASE_CHANNEL: channel,
   };
   const transaction = {
@@ -2526,16 +2539,17 @@ function authorizationFixture(initial = state(), settings = {}) {
     channel,
     sourceBranch: branch,
     sourceCommit,
-    observedBranchHead: sourceCommit,
+    observedBranchHead,
     workflowIdentity: selected.workflowIdentity,
-    workflowCommit: sourceCommit,
+    workflowCommit,
     runId: '42',
     runAttempt: '1',
     approvalMode: env.RELEASE_APPROVAL_MODE,
   };
   env.RELEASE_TRANSACTION = JSON.stringify(transaction);
   env.RELEASE_SOURCE_COMMIT = sourceCommit;
-  const canonical = canonicalAuthorizationFixture(sourceCommit, channel, env.RELEASE_APPROVAL_MODE);
+  const canonical = canonicalAuthorizationFixture(
+    sourceCommit, channel, env.RELEASE_APPROVAL_MODE, workflowCommit);
   const qualificationStartedAt = new Date(Date.now() - 4 * 60_000).toISOString();
   const qualificationCompletedAt = new Date(Date.now() - 2 * 60_000).toISOString();
   const qualificationRunUrl = `https://github.com/${selected.repository}/actions/runs/42`;
@@ -2544,7 +2558,7 @@ function authorizationFixture(initial = state(), settings = {}) {
     name: `${qualificationJobNamespace} / ${name}`,
     run_id: 42,
     run_attempt: 1,
-    head_sha: sourceCommit,
+    head_sha: workflowCommit,
     status: 'completed',
     conclusion: 'success',
     started_at: qualificationStartedAt,
@@ -2580,7 +2594,7 @@ function authorizationFixture(initial = state(), settings = {}) {
         object: { type: 'commit', sha: settings.headDriftAfterTree && comparedTree ? 'f'.repeat(40) : canonicalHead },
       });
       if (endpoint === 'git/ref/heads/development') return response({
-        ref: 'refs/heads/development', object: { type: 'commit', sha: sourceCommit },
+        ref: 'refs/heads/development', object: { type: 'commit', sha: workflowCommit },
       });
       if (endpoint === 'git/ref/heads/release-ledger') return response({ object: { sha: head } });
       if (endpoint === `compare/${sourceCommit}...${canonicalHead}`) return response(canonicalComparison);
@@ -2604,7 +2618,7 @@ function authorizationFixture(initial = state(), settings = {}) {
           repository: { full_name: selected.repository },
           head_repository: { full_name: selected.repository },
           head_branch: 'development',
-          head_sha: sourceCommit,
+          head_sha: workflowCommit,
           event: 'workflow_dispatch',
           html_url: qualificationRunUrl,
           status: 'in_progress',
@@ -2617,6 +2631,24 @@ function authorizationFixture(initial = state(), settings = {}) {
       if (endpoint === 'actions/runs/42/attempts/1/jobs?per_page=100') {
         return response({ total_count: transactionJobs.length, jobs: transactionJobs });
       }
+      if (workflowCommit !== sourceCommit &&
+        endpoint.startsWith(`commits/${workflowCommit}/check-runs`)) {
+        const checks = {
+          total_count: transactionJobs.length,
+          check_runs: transactionJobs.map(job => ({
+            id: job.id,
+            name: job.name,
+            head_sha: workflowCommit,
+            status: 'completed',
+            conclusion: 'success',
+            completed_at: qualificationCompletedAt,
+            app: { id: 15368, slug: 'github-actions' },
+            check_suite: { id: 100 },
+            url: job.check_run_url,
+          })),
+        };
+        return response(checks);
+      }
       if (endpoint.startsWith(`commits/${sourceCommit}/check-runs`)) {
         const names = [...releaseBuildChecks, ...canonicalValidationChecks];
         const checkRuns = names
@@ -2624,17 +2656,19 @@ function authorizationFixture(initial = state(), settings = {}) {
             conclusion: 'success', app: { slug: 'github-actions' }, check_suite: { id: 100 },
             completed_at: new Date(Date.now() - 5 * 60_000).toISOString(),
             url: `https://api.github.com/repos/OlyForge3D/PrintFarmer/check-runs/${id + 1}` }));
-        checkRuns.push(...transactionJobs.map(job => ({
-          id: job.id,
-          name: job.name,
-          head_sha: sourceCommit,
-          status: 'completed',
-          conclusion: 'success',
-          completed_at: qualificationCompletedAt,
-          app: { id: 15368, slug: 'github-actions' },
-          check_suite: { id: 100 },
-          url: job.check_run_url,
-        })));
+        if (workflowCommit === sourceCommit) {
+          checkRuns.push(...transactionJobs.map(job => ({
+            id: job.id,
+            name: job.name,
+            head_sha: workflowCommit,
+            status: 'completed',
+            conclusion: 'success',
+            completed_at: qualificationCompletedAt,
+            app: { id: 15368, slug: 'github-actions' },
+            check_suite: { id: 100 },
+            url: job.check_run_url,
+          })));
+        }
         const checks = { total_count: checkRuns.length, check_runs: checkRuns };
         settings.mutateChecks?.(checks);
         return response(checks);
@@ -2686,6 +2720,92 @@ function authorizationFixture(initial = state(), settings = {}) {
     },
   };
 }
+
+test('executed admission pins transaction source while workflow control and canonical heads differ', async () => {
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `distinct-admission-identity-${process.pid}`);
+  const savedFetch = globalThis.fetch;
+  const savedOutput = process.env.GITHUB_OUTPUT;
+  const savedRunnerTemp = process.env.RUNNER_TEMP;
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  try {
+    const runnerTemp = resolve('runner');
+    const outputDirectory = resolve(runnerTemp, '_runner_file_commands');
+    const outputPath = resolve(outputDirectory, 'set_output_12345678-1234-1234-1234-123456789abc');
+    mkdirSync(outputDirectory, { recursive: true });
+    writeFileSync(outputPath, '');
+    process.env.RUNNER_TEMP = runnerTemp;
+    process.env.GITHUB_OUTPUT = outputPath;
+    const stable = authorizationFixture(state(), {
+      channel: 'stable',
+      sourceCommit: sha,
+      observedBranchHead: sha,
+      workflowCommit: workflowControlSha,
+      currentBranchHead: sha,
+    });
+    globalThis.fetch = stable.fetch;
+    const stableAdmission = await runFixtureControl('admit', stable);
+    assert.equal(stable.env.GITHUB_SHA, workflowControlSha);
+    assert.equal(stableAdmission.sourceCommit, sha);
+    assert.equal(stableAdmission.workflowCommit, workflowControlSha);
+    assert.equal(stableAdmission.channel, 'stable');
+    assert.match(readFileSync(outputPath, 'utf8'), new RegExp(`^source_sha=${sha}$`, 'm'));
+
+    const insider = authorizationFixture(state(), {
+      sourceCommit: sha,
+      observedBranchHead: newerSha,
+      workflowCommit: workflowControlSha,
+      currentBranchHead: currentCanonicalSha,
+    });
+    globalThis.fetch = insider.fetch;
+    const insiderAdmission = await runFixtureControl('admit', insider);
+    assert.equal(insiderAdmission.sourceCommit, sha);
+    assert.equal(insiderAdmission.authorizedBranchHead, newerSha);
+    assert.equal(insiderAdmission.workflowCommit, workflowControlSha);
+    assert.equal(insiderAdmission.channel, 'insider');
+  } finally {
+    globalThis.fetch = savedFetch;
+    if (savedOutput === undefined) delete process.env.GITHUB_OUTPUT;
+    else process.env.GITHUB_OUTPUT = savedOutput;
+    if (savedRunnerTemp === undefined) delete process.env.RUNNER_TEMP;
+    else process.env.RUNNER_TEMP = savedRunnerTemp;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('executed admission and authorization use identical immutable transaction bindings', async () => {
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `transaction-binding-${process.pid}`);
+  const savedFetch = globalThis.fetch;
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  try {
+    const fixture = authorizationFixture(state(), {
+      sourceCommit: sha,
+      observedBranchHead: newerSha,
+      workflowCommit: workflowControlSha,
+      currentBranchHead: currentCanonicalSha,
+    });
+    globalThis.fetch = fixture.fetch;
+    const admitted = await runFixtureControl('admit', fixture);
+    const authorized = await runFixtureControl('authorize', fixture);
+    assert.deepEqual(
+      Object.fromEntries(['sourceCommit', 'channel', 'sourceBranch', 'buildId', 'buildAttempt',
+        'workflowIdentity', 'workflowCommit'].map(field => [field, admitted[field]])),
+      Object.fromEntries(['sourceCommit', 'channel', 'sourceBranch', 'buildId', 'buildAttempt',
+        'workflowIdentity', 'workflowCommit'].map(field => [field, authorized[field]])),
+    );
+    assert.equal(authorized.sourceCommit, sha);
+    assert.equal(authorized.authorizedBranchHead, newerSha);
+    assert.equal(authorized.workflowCommit, workflowControlSha);
+  } finally {
+    globalThis.fetch = savedFetch;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('executed authority rejects initial and newly advanced stable floors before any source or publication write', async () => {
   const cwd = process.cwd();
@@ -2758,7 +2878,10 @@ test('executed authority preserves existing exact reservations after stable adva
     for (const identity of [insider, stable]) {
       writeAuthorization(identity);
       const original = readFileSync(authorizationPath, 'utf8');
-      const fixture = authorizationFixture(publicLedger(ledger), { channel: identity.channel });
+      const fixture = authorizationFixture(publicLedger(ledger), {
+        channel: identity.channel,
+        workflowCommit: identity.workflowCommit,
+      });
       globalThis.fetch = fixture.fetch;
       await runReleaseControl('admit', fixture.env);
       await runFixtureControl('authorize', fixture);

@@ -348,7 +348,13 @@ export function readQualificationReceipt(transaction, now = Date.now()) {
 export function transactionFromEnvironment(env = process.env) {
   requireThat(typeof env.RELEASE_TRANSACTION === 'string' && env.RELEASE_TRANSACTION.trim(),
     'Missing release transaction');
-  return validateTransaction(JSON.parse(env.RELEASE_TRANSACTION));
+  let transaction;
+  try {
+    transaction = JSON.parse(env.RELEASE_TRANSACTION);
+  } catch {
+    requireThat(false, 'Release transaction is malformed');
+  }
+  return validateTransaction(transaction);
 }
 
 async function main() {

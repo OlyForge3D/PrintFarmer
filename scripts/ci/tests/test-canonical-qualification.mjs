@@ -561,8 +561,7 @@ test('legacy qualification evidence remains reachable and separate from transact
   assert.equal((control.match(/await verifyCanonicalReleaseEvidence/g) ?? []).length, 1);
   assert.match(control, /qualificationClient\(env\.GH_TOKEN\)/);
   assert.doesNotMatch(control, /if \(!transaction\)/);
-  assert.match(control,
-    /const transaction = operation === 'admit' \? undefined : transactionFromEnvironment\(env\)/);
+  assert.match(control, /const transaction = transactionFromEnvironment\(env\)/);
   assert.ok(control.indexOf('await verifyCanonicalReleaseEvidence') >
     control.indexOf("if (operation === 'admit')"));
   assert.doesNotMatch(control, /sourceCommit: transaction\?\.sourceCommit \?\? env\.RELEASE_SOURCE_COMMIT/);

@@ -5,7 +5,7 @@ import {
   identityLabels, parseTag, verifyProtectionEvidence, validateReservationAdmission, validateApprovalMode,
 } from './release-policy.mjs';
 import {
-  branchHead, command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion,
+  command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion,
   verifyCanonicalSource, verifyProtection,
   verifyStableQualification, verifyReleaseChecks,
 } from './release-github.mjs';
@@ -15,12 +15,11 @@ import {
   privateSetPath, publicAuthorization, readPrivateAuthorization, readPrivateJson, verifyAuthorization, writeAuthorization, writePublicSet,
 } from './release-authorization.mjs';
 import {
-  readQualificationReceipt, transactionFromEnvironment, validateTransaction,
+  readQualificationReceipt, transactionFromEnvironment,
   verifyTransactionQualification,
 } from './release-transaction.mjs';
 
-export function runContext(env = process.env, transaction = env.RELEASE_TRANSACTION ?
-  validateTransaction(JSON.parse(env.RELEASE_TRANSACTION)) : undefined) {
+export function runContext(env = process.env, transaction = transactionFromEnvironment(env)) {
   const ref = env.GITHUB_REF;
   return {
     repository: env.GITHUB_REPOSITORY, event: env.GITHUB_EVENT_NAME,
@@ -68,7 +67,7 @@ export function output(name, value) {
 export async function runReleaseControl(operation, env = process.env, verify = command) {
   requireThat(['admit', 'authorize', 'consume', 'preflight', 'advance'].includes(operation), 'Unknown release operation');
   const consumer = ['consume', 'preflight', 'advance'].includes(operation);
-  const transaction = operation === 'admit' ? undefined : transactionFromEnvironment(env);
+  const transaction = transactionFromEnvironment(env);
   const privileged = ['authorize', 'preflight', 'advance'].includes(operation);
   if (privileged) {
     requireThat(env.RELEASE_PUBLISHER_TOKEN && env.RELEASE_PUBLISHER_TOKEN !== env.GH_TOKEN,
@@ -91,23 +90,25 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       requireThat(transaction.approvalMode === env.RELEASE_APPROVAL_MODE,
         'Approval mode changed after transaction selection; rerun all jobs');
     }
-    const channel = context.event === 'schedule' ? 'insider' : context.channel;
+    const channel = transaction.channel;
     const branch = channel === 'stable' ? 'main' : 'development';
     const { state } = await store.read();
-    const selectedHead = operation === 'authorize' ? transaction.sourceCommit : await branchHead(api, branch);
+    const selectedHead = transaction.sourceCommit;
+    await verifyCanonicalSource(api, branch, selectedHead);
     const admission = admit(context, selectedHead, await readVersion(api, selectedHead));
     validateReservationAdmission(state, admission);
     if (operation === 'admit') {
       await verifyCanonicalReleaseEvidence(qualificationClient(env.GH_TOKEN),
-        selectedHead, admission.channel, env.RELEASE_APPROVAL_MODE);
+        selectedHead, admission.channel, env.RELEASE_APPROVAL_MODE, Date.now(),
+        transaction.workflowCommit);
       await verifyReleaseChecks(api, selectedHead);
-      requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift before authorization');
+      await verifyCanonicalSource(api, branch, selectedHead);
     }
     output('source_sha', context.eventSha);
     output('channel', admission.channel);
     if (operation === 'admit') {
       output('approval_mode', env.RELEASE_APPROVAL_MODE);
-      return;
+      return admission;
     }
     readQualificationReceipt(transaction);
     await verifyTransactionQualification(transaction, api);
@@ -139,7 +140,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     writeAuthorization(record);
     output('public_identity', JSON.stringify(publicAuthorization(record)));
     output('verified_branch_head', await verifyCanonicalSource(api, branch, selectedHead));
-    return;
+    return record;
   }
 
   const record = verifyAuthorization(env, verify);

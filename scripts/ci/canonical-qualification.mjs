@@ -235,11 +235,12 @@ async function verifyNativeReview(api, binding, sha, ci, comment, qualifier) {
     time(review.submitted_at) <= time(comment.created_at), 'Missing fresh exact-SHA native approval');
 }
 
-export async function verifyQualification(api, runId, mode, now = Date.now(), complete = true) {
+export async function verifyQualification(api, runId, mode, now = Date.now(), complete = true, expected) {
   validateApprovalMode(mode);
   const repo = await api('');
   requireThat(repo.full_name === repository, 'Untrusted qualification repository');
-  const trustedHead = await head(api, repo.default_branch);
+  const trustedHead = expected?.workflowCommit ?? await head(api, repo.default_branch);
+  requireString(trustedHead, shaPattern, 'qualification workflow commit');
   const raw = await api(`actions/runs/${runId}`);
   const binding = parseQualificationTitle(raw.display_title);
   requireThat(binding.mode === mode, 'Qualification approval mode mismatch');
@@ -250,7 +251,8 @@ export async function verifyQualification(api, runId, mode, now = Date.now(), co
   await permission(api, run.actor?.login);
   requireThat(triggeringActor === qualifier, 'Qualification actor changed');
   const branch = binding.channel === 'stable' ? 'main' : 'development';
-  const sha = await head(api, branch);
+  const sha = expected?.sourceCommit ?? await head(api, branch);
+  requireString(sha, shaPattern, 'qualification source commit');
   const ci = await workflowRun(api, binding.validationRun, '.github/workflows/ci.yml', branch, sha);
   requireThat(ci.event === 'workflow_dispatch' && time(ci.created_at) <= time(ci.updated_at) &&
     time(ci.updated_at) <= time(run.created_at) && now >= time(run.created_at) &&
@@ -285,8 +287,10 @@ export async function verifyQualification(api, runId, mode, now = Date.now(), co
     await verifyNativeReview(api, binding, sha, ci, comment, qualifier);
   }
   if (complete) await requireJobs(api, run, ['Verify canonical qualification']);
-  requireThat(await head(api, branch) === sha && await head(api, repo.default_branch) === trustedHead,
-    'Canonical or trusted HEAD moved during qualification');
+  if (!expected) {
+    requireThat(await head(api, branch) === sha && await head(api, repo.default_branch) === trustedHead,
+      'Canonical or trusted HEAD moved during qualification');
+  }
   return { schema: 1, sourceCommit: sha, channel: binding.channel, approvalMode: mode,
     validationRun: String(ci.id), qualificationRun: String(run.id), trustedHead,
     defaultBranch: repo.default_branch };
@@ -296,7 +300,7 @@ export function qualificationDescription(evidence) {
   return `QUALIFIED (${evidence.approvalMode === 'single-maintainer' ? 'self-attested' : 'native non-self'}) @ ${evidence.sourceCommit.slice(0, 12)}`;
 }
 
-export async function verifyCanonicalReleaseEvidence(api, sha, channel, mode, now = Date.now()) {
+export async function verifyCanonicalReleaseEvidence(api, sha, channel, mode, now = Date.now(), workflowCommit) {
   requireString(sha, shaPattern, 'release qualification SHA');
   validateApprovalMode(mode);
   const statuses = array(await api(`commits/${sha}/statuses?per_page=100`));
@@ -310,7 +314,8 @@ export async function verifyCanonicalReleaseEvidence(api, sha, channel, mode, no
   const raw = await api(`actions/runs/${match[1]}`);
   const title = /^Canonical evidence for ([1-9][0-9]*)$/.exec(raw.display_title ?? '');
   requireThat(title, 'Untrusted qualification evidence producer');
-  const evidence = await verifyQualification(api, title[1], mode, now);
+  const evidence = await verifyQualification(api, title[1], mode, now, true,
+    workflowCommit ? { sourceCommit: sha, workflowCommit } : undefined);
   const writer = await workflowRun(api, match[1], evidenceWorkflow, evidence.defaultBranch, evidence.trustedHead);
   requireThat(writer.event === 'workflow_run' && evidence.channel === channel && evidence.sourceCommit === sha &&
     status.description === qualificationDescription(evidence) &&
