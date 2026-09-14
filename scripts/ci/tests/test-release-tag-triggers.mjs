@@ -3697,6 +3697,10 @@ test('executed signing commands preserve signed subjects and never let verificat
     docker.indexOf('Verify every pushed digest signature and SPDX attestation'));
   assert.ok(docker.indexOf('Sign externally-digested complete release manifest') <
     docker.indexOf('Publish and verify public corresponding-source assets'));
+  assert.ok(docker.indexOf('Publish and verify public corresponding-source assets') <
+    docker.indexOf('Promote validated immutable image tags'));
+  assert.ok(docker.indexOf('Promote validated immutable image tags') <
+    docker.indexOf('Advance the complete channel pointer last'));
   const uploadedAuthorizationFiles = artifactUploads('.github/workflows/docker-publish.yml').flat()
     .filter(path => path.startsWith('.artifacts/release-authorization/'));
   const root = resolve('.artifacts', `sign-public-${process.pid}`);

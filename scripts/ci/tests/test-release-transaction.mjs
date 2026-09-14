@@ -387,7 +387,13 @@ test('publisher uses one reusable-workflow signer identity for every verificatio
     'https://github.com/OlyForge3D/PrintFarmer/.github/workflows/docker-publish.yml@refs/heads/development';
   assert.equal(publisher.env.RELEASE_SIGNER_IDENTITY, expected);
   const job = JSON.stringify(publisher.jobs.publish);
-  assert.equal((job.match(/--certificate-identity \\"?\$RELEASE_SIGNER_IDENTITY/g) || []).length, 3);
+  const verificationCommands = job.split(/cosign verify(?:-attestation|-blob)?/).slice(1);
+  assert.ok(verificationCommands.length >= 5);
+  for (const command of verificationCommands) {
+    const invocation = command.split('cosign ')[0];
+    assert.match(invocation, /--certificate-identity \\"?\$RELEASE_SIGNER_IDENTITY/);
+    assert.match(invocation, /--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/);
+  }
   assert.match(job, /cosign verify \\"\$reference\\"/);
   assert.match(job, /cosign verify-attestation \\"\$reference\\"/);
   assert.match(job, /--type spdxjson/);

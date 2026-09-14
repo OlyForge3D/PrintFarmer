@@ -400,9 +400,10 @@ development metadata.
 
 The complete platform set, labels, source tag, signatures and SPDX attestations
 are checked before immutable version-tag publication. Corresponding source,
-notices, SBOMs, identity and digest records are publicly verified first; uploads
-never clobber differing bytes. Existing version tags must resolve to the exact
-candidate digest or publication fails before any version-tag write.
+notices, SBOMs, identity, manifest, and digest records are published and
+externally verified first; uploads never clobber differing bytes. Existing
+version tags must resolve to the exact candidate digest or publication fails
+before any version-tag write.
 
 Each release also publishes a version-addressed `release-manifest.json` and a
 separately signed `release-manifest.envelope.json` with its Cosign bundle. The
@@ -420,7 +421,7 @@ eligibility. No installer or mutable alias may treat it as an update candidate.
 
 The protected job signs the manifest envelope only after complete-set inspection
 and pushed image signature/SPDX verification. It verifies published release
-asset bytes on retries, publishes immutable version tags, and advances the
+asset bytes on retries, then publishes immutable version tags and advances the
 durable channel pointer last. The ledger pointer is the sole channel pointer;
 stable/insider discovery aliases remain isolated and cannot substitute for the
 signed, immutable manifest. Before promotion, it downloads the public manifest

@@ -320,10 +320,6 @@ jobs:
           docker run --rm --platform linux/arm64 --entrypoint /bin/sh \
             "ghcr.io/olyforge3d/printfarmer-monolith@${monolith_digest}" \
             -c 'test -f /app/Farm.Web.Api.dll && test -f /app/wwwroot/index.html && dotnet --info >/dev/null'
-      - name: Promote validated immutable image tags
-        env:
-          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
-        run: node scripts/ci/release-set.mjs tag
       - name: Sign externally-digested complete release manifest
         env:
           GH_TOKEN: ${{ steps.publisher.outputs.token }}
@@ -526,6 +522,10 @@ jobs:
               JSON.parse(readFileSync(process.argv[2], "utf8")));
           ' "$published_manifest_dir/release-manifest.json" \
             "$published_manifest_dir/release-manifest.envelope.json"
+      - name: Promote validated immutable image tags
+        env:
+          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
+        run: node scripts/ci/release-set.mjs tag
       - name: Advance the complete channel pointer last
         id: advance
         env:
