@@ -83,14 +83,14 @@ live rulesets/environments/ledger/publisher setup. #2660 still owns signed
 managed eligibility, image aliases and generated installer references; no
 source-only release or unsigned candidate pointer is an update candidate.
 
-**Canonical qualification (#2686):** the
-[non-publishing qualification path](RELEASE_GUIDE.md#retired-manual-canonical-qualification-history)
-requires new full-safe manual CI on live `main`/`development` HEAD and a fresh
-commit/run-bound review confirmation. Default-branch verification and a separate
-bounded status writer establish a live, completed audit chain; no PR verdict is
-copied to a squash SHA and no tree-equality review inference is permitted.
-Manual CI includes the genuine `path-casing`, `Contract drift gate` and unsigned
-`Build (iOS)` archive executions in that same run/check suite (#2688).
+**Canonical qualification (#2686):** `consolidated-release.yml` automatically
+runs full-safe qualification for the exact selected `main`/`development` source
+before protected publication and binds the resulting job/check evidence to the
+immutable transaction. The
+[retired manual qualification path](RELEASE_GUIDE.md#retired-manual-canonical-qualification-history)
+is historical context only. Automatic qualification includes the genuine
+`path-casing`, `Contract drift gate` and unsigned `Build (iOS)` archive
+executions in the same run/check suite (#2688).
 External same-name green checks cannot substitute. The archive runs on macOS;
 this graph makes no Windows-build or iOS-simulator-test claim. Evidence expires
 24 hours after CI creation, including queue time; a new graph requires new CI.

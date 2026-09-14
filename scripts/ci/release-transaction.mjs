@@ -9,6 +9,7 @@ import {
 import {
   releaseRequiredChecks, repository, requireKeys, requireString, requireThat, validateApprovalMode,
 } from './release-policy.mjs';
+import { positiveRehearsal, readOnlyClient } from './release-rehearsal.mjs';
 
 export const qualificationPath = '.artifacts/release-transaction/qualification.json';
 export const rehearsalReceiptPath = '.artifacts/release-transaction/rehearsal-receipt.json';
@@ -380,13 +381,84 @@ export function writeDiagnosticReceipt(transaction, qualification, now = Date.no
 
 export const writeRehearsalReceipt = writeDiagnosticReceipt;
 
+export async function runLiveDiagnostic(
+  transaction,
+  qualification,
+  env = process.env,
+  fetcher = fetch,
+  now = Date.now(),
+) {
+  validateQualificationReceipt(qualification, transaction, transaction.mode, now);
+  requireThat(env.GITHUB_REPOSITORY === repository &&
+    env.GITHUB_RUN_ID === transaction.runId &&
+    env.GITHUB_SHA === transaction.workflowCommit &&
+    env.GITHUB_WORKFLOW_SHA === transaction.workflowCommit &&
+    env.GITHUB_REF === 'refs/heads/development' &&
+    env.GITHUB_WORKFLOW_REF === transaction.workflowIdentity,
+  'Untrusted diagnostic workflow-call context');
+  requireString(env.GITHUB_RUN_ATTEMPT, positivePattern, 'diagnostic run attempt');
+  requireString(env.RELEASE_LEDGER_ANCHOR, shaPattern, 'diagnostic ledger anchor');
+  const api = readOnlyClient(env.GH_TOKEN, fetcher);
+  const context = Object.freeze({
+    channel: transaction.channel,
+    branch: transaction.sourceBranch,
+    sha: transaction.sourceCommit,
+    workflowSha: transaction.workflowCommit,
+    run: transaction.runId,
+    attempt: env.GITHUB_RUN_ATTEMPT,
+    anchor: env.RELEASE_LEDGER_ANCHOR,
+    mode: transaction.approvalMode,
+  });
+  const live = await positiveRehearsal(undefined, api, context, {
+    verifyEvidence: async () => validateQualificationReceipt(
+      qualification,
+      transaction,
+      transaction.mode,
+      now,
+    ),
+  });
+  const receipt = {
+    kind: 'release-rehearsal-only',
+    schema: 3,
+    passed: true,
+    transaction,
+    qualificationCheckedAt: qualification.checkedAt,
+    qualificationExpiresAt: qualification.expiresAt,
+    publicationAuthorized: false,
+    liveEvidence: {
+      run: live.run,
+      source: live.source,
+      inventoryDigest: live.inventoryDigest,
+      readOnlyVerified: live.readOnlyVerified,
+    },
+  };
+  writeValidatedJson(rehearsalReceiptPath, receipt, value => {
+    requireKeys(value, [
+      'kind', 'schema', 'passed', 'transaction', 'qualificationCheckedAt',
+      'qualificationExpiresAt', 'publicationAuthorized', 'liveEvidence',
+    ], [], 'live diagnostic receipt');
+    requireThat(value.kind === 'release-rehearsal-only' && value.schema === 3 &&
+      value.passed === true &&
+      value.publicationAuthorized === false &&
+      JSON.stringify(value.transaction) === JSON.stringify(transaction) &&
+      value.qualificationCheckedAt === qualification.checkedAt &&
+      value.qualificationExpiresAt === qualification.expiresAt &&
+      value.liveEvidence?.run === transaction.runId &&
+      value.liveEvidence?.source === transaction.sourceCommit &&
+      /^[a-f0-9]{64}$/.test(value.liveEvidence?.inventoryDigest) &&
+      value.liveEvidence?.readOnlyVerified === true,
+    'Invalid live diagnostic evidence');
+  });
+  return receipt;
+}
+
 export function transactionFromEnvironment(env = process.env) {
   return validateTransaction(JSON.parse(env.RELEASE_TRANSACTION || '{}'));
 }
 
 async function main() {
   const operation = process.argv[2];
-  requireThat(['select', 'validate', 'qualify', 'diagnose', 'rehearse'].includes(operation),
+  requireThat(['select', 'validate', 'qualify', 'diagnose', 'diagnose-live', 'rehearse'].includes(operation),
     'Unknown release transaction operation');
   if (operation === 'select') {
     const transaction = await selectTransaction();
@@ -405,7 +477,12 @@ async function main() {
     return;
   }
   const requiredMode = operation === 'rehearse' ? 'rehearsal' : transaction.mode;
-  writeDiagnosticReceipt(transaction, readQualificationReceipt(transaction, requiredMode));
+  const qualification = readQualificationReceipt(transaction, requiredMode);
+  if (operation === 'diagnose-live') {
+    await runLiveDiagnostic(transaction, qualification);
+    return;
+  }
+  writeDiagnosticReceipt(transaction, qualification);
 }
 
 if (process.argv[1]?.replaceAll('\\', '/').endsWith('/scripts/ci/release-transaction.mjs')) {

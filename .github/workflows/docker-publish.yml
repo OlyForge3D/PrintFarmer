@@ -148,6 +148,19 @@ jobs:
           RELEASE_SOURCE_COMMIT: ${{ inputs.source_sha }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
         run: node scripts/ci/release-control.mjs consume
+      - name: Validate all revocable controls before publication
+        id: preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
+          RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+          RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
+          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
+          RELEASE_TRANSACTION: ${{ inputs.transaction }}
+          RELEASE_SOURCE_COMMIT: ${{ inputs.source_sha }}
+        run: node scripts/ci/release-control.mjs preflight
       - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4
         with:
           platforms: arm64,amd64
@@ -240,22 +253,12 @@ jobs:
             cp "source/release-artifacts/printfarmer-${image}-${{ steps.consume.outputs.version }}.spdx.json" \
               "artifacts/sbom-${image}/"
           done
-      - name: Validate complete set and all revocable controls
-        id: preflight
+      - name: Validate complete immutable set
         env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
-          RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
-          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
-          RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
-          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
           RELEASE_TRANSACTION: ${{ inputs.transaction }}
           RELEASE_SOURCE_COMMIT: ${{ inputs.source_sha }}
-        run: |
-          set -euo pipefail
-          node scripts/ci/release-set.mjs inspect
-          node scripts/ci/release-control.mjs preflight
+        run: node scripts/ci/release-set.mjs inspect
       - name: Smoke test ARM64 image digests
         run: |
           set -euo pipefail

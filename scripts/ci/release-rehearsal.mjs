@@ -3,11 +3,12 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   components, repository, requireThat, requireString, validateApprovalMode,
 } from './release-policy.mjs';
-import { githubRequestUrl, gitLedger, verifyProtection } from './release-github.mjs';
+import { githubRequestUrl, gitLedger, verifyCanonicalSource, verifyProtection } from './release-github.mjs';
 import { qualificationRequestUrl, verifyCanonicalReleaseEvidence } from './canonical-qualification.mjs';
 import { evidenceCollection, readEvidencePages } from './github-evidence-pages.mjs';
 
 export const rehearsalWorkflow = '.github/workflows/release-protection-rehearsal.yml';
+export const controlWorkflow = '.github/workflows/consolidated-release.yml';
 export const packageNames = Object.keys(components).map(name => `printfarmer-${name}`);
 export const shaPattern = /^[a-f0-9]{40}$/;
 const root = `https://api.github.com/repos/${repository}`;
@@ -46,7 +47,7 @@ export function rehearsalContext(env) {
 
 export function rehearsalReadUrl(endpoint) {
   requireThat(typeof endpoint === 'string', 'Invalid rehearsal read route');
-  requireThat(!/^(?:environments|packages)\//.test(endpoint),
+  requireThat(!/^environments\//.test(endpoint),
     'Unapproved rehearsal read URL');
   const packages = /^packages\/(printfarmer-[a-z-]+)(\/versions\?per_page=100&page=[1-9][0-9]*)?$/;
   const match = packages.exec(endpoint);
@@ -60,7 +61,7 @@ export function rehearsalReadUrl(endpoint) {
     /^releases\?per_page=100&page=[1-9][0-9]*$/,
     /^releases\/[1-9][0-9]*\/assets\?per_page=100&page=[1-9][0-9]*$/,
     /^actions\/runs\/[1-9][0-9]*$/,
-    /^actions\/workflows\/release-protection-rehearsal\.yml$/,
+    /^actions\/workflows\/(?:release-protection-rehearsal|consolidated-release)\.yml$/,
     /^actions\/workflows\/(?:consolidated-release|docker-publish)\.yml\/runs\?status=(?:queued|in_progress|waiting|pending|requested)&per_page=100$/,
   ];
   if (reads.some(pattern => pattern.test(endpoint))) return `${root}/${endpoint}`;
@@ -172,7 +173,7 @@ function ordered(entries, key) {
   return entries.sort((a, b) => String(a[key]).localeCompare(String(b[key]), 'en'));
 }
 
-export async function snapshot(api, context) {
+export async function snapshot(api, context, options = {}) {
   const tags = ordered((await allPages(api, 'git/matching-refs/tags')).map(ref => {
     requireThat(typeof ref.ref === 'string' && ref.ref.startsWith('refs/tags/') &&
       ['tag', 'commit'].includes(ref.object?.type), 'Malformed tag inventory');
@@ -186,7 +187,7 @@ export async function snapshot(api, context) {
     requireString(ref.object.sha, shaPattern, 'branch head');
     heads[branch] = ref.object.sha;
   }
-  requireThat(heads[context.branch] === context.sha, 'Canonical HEAD drift');
+  await verifyCanonicalSource(api, context.branch, context.sha);
   const ledgerCommit = await api(`git/commits/${heads['release-ledger']}`);
   requireThat(ledgerCommit.sha === heads['release-ledger'], 'Ledger commit mismatch');
   requireString(ledgerCommit.tree?.sha, shaPattern, 'ledger tree');
@@ -205,20 +206,22 @@ export async function snapshot(api, context) {
     releases.push({ id: release.id, tag: text(release.tag_name), digest: digest(release), assets });
   }
   const packages = {};
-  for (const name of packageNames) {
-    const metadata = await api(`packages/${name}`);
-    requireThat(metadata.name === name && metadata.package_type === 'container' &&
-      Number.isSafeInteger(metadata.version_count) && metadata.version_count >= 0,
-    'Malformed package metadata');
-    const versions = ordered((await allPages(api, `packages/${name}/versions`)).map(version => {
-      integer(version.id);
-      requireThat(/^sha256:[a-f0-9]{64}$/.test(version.name) &&
-        Array.isArray(version.metadata?.container?.tags) &&
-        version.metadata.container.tags.every(tag => typeof tag === 'string'), 'Malformed package version');
-      return { id: version.id, name: version.name, digest: digest(version) };
-    }), 'id');
-    requireThat(versions.length === metadata.version_count, 'Package inventory count mismatch');
-    packages[name] = { id: integer(metadata.id), digest: digest(metadata), versions };
+  if (options.includePackages !== false) {
+    for (const name of packageNames) {
+      const metadata = await api(`packages/${name}`);
+      requireThat(metadata.name === name && metadata.package_type === 'container' &&
+        Number.isSafeInteger(metadata.version_count) && metadata.version_count >= 0,
+      'Malformed package metadata');
+      const versions = ordered((await allPages(api, `packages/${name}/versions`)).map(version => {
+        integer(version.id);
+        requireThat(/^sha256:[a-f0-9]{64}$/.test(version.name) &&
+          Array.isArray(version.metadata?.container?.tags) &&
+          version.metadata.container.tags.every(tag => typeof tag === 'string'), 'Malformed package version');
+        return { id: version.id, name: version.name, digest: digest(version) };
+      }), 'id');
+      requireThat(versions.length === metadata.version_count, 'Package inventory count mismatch');
+      packages[name] = { id: integer(metadata.id), digest: digest(metadata), versions };
+    }
   }
   return { tags, heads, ledger: { head: ledger.revision, tree: ledgerCommit.tree.sha,
     state: digest(ledger.state) }, releases: ordered(releases, 'id'), packages };
@@ -229,40 +232,55 @@ export function verifyUnchanged(before, after) {
 }
 
 export async function verifyRuntime(api, context) {
-  const definition = await api('actions/workflows/release-protection-rehearsal.yml');
+  const definition = await api('actions/workflows/consolidated-release.yml');
   const run = await api(`actions/runs/${context.run}`);
-  requireThat(definition.path === rehearsalWorkflow && definition.state === 'active' &&
+  requireThat(definition.path === controlWorkflow && definition.state === 'active' &&
     run.workflow_id === definition.id && String(run.id) === context.run &&
-    run.path === rehearsalWorkflow && run.event === 'workflow_dispatch' && run.run_attempt === 1 &&
-    run.head_sha === context.sha && run.head_branch === context.branch &&
+    run.path === controlWorkflow && run.event === 'workflow_dispatch' &&
+    String(run.run_attempt) === context.attempt &&
+    run.head_sha === context.workflowSha && run.head_branch === 'development' &&
     run.repository?.full_name === repository && run.head_repository?.full_name === repository &&
     run.status === 'in_progress', 'Untrusted live rehearsal run');
   for (const workflow of ['consolidated-release', 'docker-publish']) {
     for (const status of ['queued', 'in_progress', 'waiting', 'pending', 'requested']) {
       const result = await api(`actions/workflows/${workflow}.yml/runs?status=${status}&per_page=100`);
-      requireThat(result.total_count === 0 && Array.isArray(result.workflow_runs) &&
-        result.workflow_runs.length === 0, 'Publisher active or inventory incomplete');
+      requireThat(Number.isSafeInteger(result.total_count) && result.total_count >= 0 &&
+        result.total_count < 100 && Array.isArray(result.workflow_runs) &&
+        result.workflow_runs.length === result.total_count,
+      'Publisher activity inventory incomplete');
+      const allowed = workflow === 'consolidated-release' ?
+        result.workflow_runs.every(candidate =>
+          String(candidate.id) === context.run &&
+          String(candidate.run_attempt) === context.attempt) :
+        result.workflow_runs.length === 0;
+      requireThat(allowed, 'Another publisher is active');
     }
   }
 }
 
 export async function positiveRehearsal(app, generic, context, settings) {
   await verifyRuntime(generic, context);
-  const before = await snapshot(generic, context);
-  await verifyProtection(app, context.channel, settings.appId, context.mode, settings.reviewers, context.sha);
-  // This endpoint is checked separately even if protection policy were to omit status checks.
-  const statuses = await app(`commits/${context.sha}/status?per_page=100`);
-  requireThat(statuses.sha === context.sha && Array.isArray(statuses.statuses) &&
-    statuses.total_count === statuses.statuses.length && statuses.total_count > 0,
-  'Missing positive App commit-status read observation');
-  const ledger = await gitLedger(app, context.anchor).read();
-  requireThat(ledger.revision === before.ledger.head && digest(ledger.state) === before.ledger.state,
-    'App ledger proof differs from inventory');
-  await verifyCanonicalReleaseEvidence(generic, context.sha, context.channel, context.mode);
+  const before = await snapshot(generic, context, { includePackages: Boolean(app) });
+  if (app) {
+    await verifyProtection(app, context.channel, settings.appId, context.mode, settings.reviewers, context.sha);
+    const statuses = await app(`commits/${context.sha}/status?per_page=100`);
+    requireThat(statuses.sha === context.sha && Array.isArray(statuses.statuses) &&
+      statuses.total_count === statuses.statuses.length && statuses.total_count > 0,
+    'Missing positive App commit-status read observation');
+    const ledger = await gitLedger(app, context.anchor).read();
+    requireThat(ledger.revision === before.ledger.head && digest(ledger.state) === before.ledger.state,
+      'App ledger proof differs from inventory');
+    await verifyCanonicalReleaseEvidence(generic, context.sha, context.channel, context.mode);
+  } else {
+    requireThat(typeof settings.verifyEvidence === 'function',
+      'Read-only diagnostic evidence verifier required');
+    await settings.verifyEvidence(generic);
+  }
   await verifyRuntime(generic, context);
-  const after = await snapshot(generic, context);
+  const after = await snapshot(generic, context, { includePackages: Boolean(app) });
   verifyUnchanged(before, after);
   return { kind: 'release-rehearsal-only', schema: 1, run: context.run, source: context.sha,
-    appReadsVerified: true, commitStatusReadObserved: true, commitStatusGrantEvidenceRequired: true,
+    appReadsVerified: Boolean(app), commitStatusReadObserved: Boolean(app),
+    commitStatusGrantEvidenceRequired: Boolean(app), readOnlyVerified: true,
     before, after, inventoryDigest: digest(after) };
 }

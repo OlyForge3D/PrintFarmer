@@ -850,12 +850,14 @@ secret, package permission, OIDC permission, or write permission. The reviewed
 consolidated release workflow calls it after exact-source qualification and
 passes the same immutable transaction plus the same-run qualification artifact.
 
-The workflow validates both inputs, runs the bounded release-control test suite,
-and emits a `release-rehearsal-only` receipt with
-`publicationAuthorized: false`. Release qualification and authorization reject
-that receipt type. The diagnostic path cannot reserve an identity, create a
-tag, publish a package or GitHub Release, mutate the ledger, or advance a
-channel pointer.
+The workflow validates both inputs and the same-run qualification receipt, then
+uses bounded GET-only GitHub clients to verify the live caller run, canonical
+source ancestry, release-ledger snapshot, tags, and GitHub Releases before and
+after the diagnostic. It emits a `release-rehearsal-only` receipt with
+`publicationAuthorized: false` and only a sanitized inventory digest. Release
+qualification and authorization reject that receipt type. The diagnostic path
+cannot reserve an identity, create a tag, publish a package or GitHub Release,
+mutate the ledger, or advance a channel pointer.
 
 ## Validation
 

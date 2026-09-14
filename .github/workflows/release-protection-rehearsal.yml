@@ -41,15 +41,12 @@ jobs:
         env:
           RELEASE_TRANSACTION: ${{ inputs.transaction }}
         run: node scripts/ci/release-transaction.mjs validate
-      - name: Exercise bounded read-only release controls
-        run: >-
-          node --test
-          scripts/ci/tests/test-release-transaction.mjs
-          scripts/ci/tests/test-release-rehearsal.mjs
-      - name: Emit a typed non-authorizing diagnostic receipt
+      - name: Execute live bounded read-only release diagnostics
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_TRANSACTION: ${{ inputs.transaction }}
-        run: node scripts/ci/release-transaction.mjs diagnose
+          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+        run: node scripts/ci/release-transaction.mjs diagnose-live
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: internal-release-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}

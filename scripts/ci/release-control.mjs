@@ -187,12 +187,10 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     const transaction = transactionFromEnvironment(env);
     requireThat(transaction.mode === 'release' && transaction.sourceCommit === record.sourceCommit,
       'Publication preflight transaction binding mismatch');
-    await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
+    const currentBranchHead = await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
     await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
       env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
-    const set = readPrivateJson(privateSetPath);
     const expectedPointer = state.pointers[record.channel]?.setHash || '';
-    advance(structuredClone(state), record, set, currentBranchHead, expectedPointer);
     output('verified_branch_head', currentBranchHead);
     output('expected_pointer', expectedPointer);
   } else if (operation === 'advance') {

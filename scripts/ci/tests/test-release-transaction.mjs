@@ -7,8 +7,9 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import {
   qualificationJobNamespace, qualificationLifetimeMs, qualificationPath, rehearsalReceiptPath,
-  qualifyTransaction, selectTransaction, transactionPath, validateQualificationReceipt, validateTransaction,
-  verifyTransactionQualification, writeRehearsalReceipt,
+  qualifyTransaction, runLiveDiagnostic, selectTransaction, transactionPath,
+  validateQualificationReceipt, validateTransaction, verifyTransactionQualification,
+  writeRehearsalReceipt,
 } from '../release-transaction.mjs';
 import { admit } from '../release-policy.mjs';
 import { validateTransactionOperation } from '../release-control.mjs';
@@ -376,6 +377,127 @@ test('diagnostic CLI consumes same-run release qualification without authorizing
   assert.equal(process.cwd(), cwd);
 });
 
+test('live diagnostic uses GET-only transport, verifies immutable evidence and writes bounded receipt', async t => {
+  const { value, fixture } = await transaction();
+  const qualification = await verifyTransactionQualification(value, fixture.api, now);
+  const ledgerAnchor = 'd'.repeat(40);
+  const ledgerHead = 'e'.repeat(40);
+  const ledgerTree = 'f'.repeat(40);
+  const ledgerBlob = '1'.repeat(40);
+  const ledgerState = {
+    schema: 1,
+    anchor: ledgerAnchor,
+    counter: '0',
+    reservations: {},
+    identities: {},
+    pointers: {},
+    stages: {},
+    qualifications: {},
+  };
+  const calls = [];
+  const packageIds = new Map();
+  const response = value => new Response(JSON.stringify(value), { status: 200 });
+  const fetcher = async (url, options) => {
+    assert.equal(options.method, 'GET');
+    assert.equal(options.body, undefined);
+    calls.push(url);
+    const parsed = new URL(url);
+    const repositoryPrefix = '/repos/OlyForge3D/PrintFarmer/';
+    const organizationPrefix = '/orgs/OlyForge3D/packages/container/';
+    if (parsed.pathname.startsWith(organizationPrefix)) {
+      const suffix = parsed.pathname.slice(organizationPrefix.length);
+      const [name, operation] = suffix.split('/');
+      if (operation === 'versions') return response([]);
+      if (!packageIds.has(name)) packageIds.set(name, packageIds.size + 1);
+      return response({ id: packageIds.get(name), name, package_type: 'container', version_count: 0 });
+    }
+    assert.ok(parsed.pathname.startsWith(repositoryPrefix), url);
+    const endpoint = `${parsed.pathname.slice(repositoryPrefix.length)}${parsed.search}`;
+    if (endpoint === 'actions/workflows/consolidated-release.yml') {
+      return response({ id: 9, path: '.github/workflows/consolidated-release.yml', state: 'active' });
+    }
+    if (endpoint === 'actions/runs/42') {
+      return response({
+        id: 42,
+        run_attempt: 1,
+        path: '.github/workflows/consolidated-release.yml',
+        workflow_id: 9,
+        repository: { full_name: 'OlyForge3D/PrintFarmer' },
+        head_repository: { full_name: 'OlyForge3D/PrintFarmer' },
+        head_branch: 'development',
+        head_sha: workflowSha,
+        event: 'workflow_dispatch',
+        status: 'in_progress',
+      });
+    }
+    if (endpoint.startsWith('actions/workflows/consolidated-release.yml/runs?')) {
+      const active = endpoint.includes('status=in_progress');
+      return response({
+        total_count: active ? 1 : 0,
+        workflow_runs: active ? [{ id: 42, run_attempt: 1 }] : [],
+      });
+    }
+    if (endpoint.startsWith('actions/workflows/docker-publish.yml/runs?')) {
+      return response({ total_count: 0, workflow_runs: [] });
+    }
+    if (endpoint === 'git/matching-refs/tags?per_page=100&page=1' ||
+      endpoint === 'releases?per_page=100&page=1') return response([]);
+    if (endpoint === 'git/ref/heads/main') {
+      return response({ ref: 'refs/heads/main', object: { type: 'commit', sha: sourceSha } });
+    }
+    if (endpoint === 'git/ref/heads/development') {
+      return response({ ref: 'refs/heads/development', object: { type: 'commit', sha: sourceSha } });
+    }
+    if (endpoint === 'git/ref/heads/release-ledger') {
+      return response({ ref: 'refs/heads/release-ledger', object: { type: 'commit', sha: ledgerHead } });
+    }
+    if (endpoint === `compare/${ledgerAnchor}...${ledgerHead}`) return response({ status: 'ahead' });
+    if (endpoint === `git/commits/${ledgerHead}`) {
+      return response({ sha: ledgerHead, tree: { sha: ledgerTree }, parents: [{ sha: ledgerAnchor }] });
+    }
+    if (endpoint === `git/trees/${ledgerTree}`) {
+      return response({ truncated: false, tree: [{ path: 'state.json', type: 'blob', sha: ledgerBlob }] });
+    }
+    if (endpoint === `git/blobs/${ledgerBlob}`) {
+      return response({ encoding: 'base64', content: Buffer.from(JSON.stringify(ledgerState)).toString('base64') });
+    }
+    if (endpoint === `git/commits/${ledgerAnchor}`) {
+      return response({ sha: ledgerAnchor, tree: { sha: '2'.repeat(40) }, parents: [] });
+    }
+    if (endpoint === `commits/${sourceSha}/status?per_page=100`) {
+      return response({ sha: sourceSha, total_count: 0, statuses: [] });
+    }
+    throw new Error(`Unexpected live diagnostic endpoint: ${endpoint}`);
+  };
+  const cwd = process.cwd();
+  const scratch = resolve('.artifacts', `release-live-diagnostic-${randomUUID()}`);
+  mkdirSync(scratch, { recursive: true });
+  process.chdir(scratch);
+  t.after(() => {
+    process.chdir(cwd);
+    rmSync(scratch, { recursive: true, force: true });
+  });
+  const env = {
+    ...base,
+    RELEASE_TRANSACTION: JSON.stringify(value),
+    RELEASE_LEDGER_ANCHOR: ledgerAnchor,
+  };
+  const receipt = await runLiveDiagnostic(
+    value,
+    qualification,
+    env,
+    fetcher,
+    now,
+  );
+  assert.equal(receipt.kind, 'release-rehearsal-only');
+  assert.equal(receipt.publicationAuthorized, false);
+  assert.equal(receipt.liveEvidence.readOnlyVerified, true);
+  assert.match(receipt.liveEvidence.inventoryDigest, /^[a-f0-9]{64}$/);
+  assert.ok(calls.length > 20);
+  assert.ok(calls.every(url => url.startsWith('https://api.github.com/')));
+  assert.deepEqual(JSON.parse(readFileSync(rehearsalReceiptPath, 'utf8')), receipt);
+});
+
 test('qualification writer rejects oversized network evidence before writing', async t => {
   const { value, fixture } = await transaction();
   fixture.jobs[0].html_url = `https://github.com/${'x'.repeat(1024 * 1024)}`;
@@ -435,6 +557,21 @@ test('publisher has exactly one protected deployment containing every credential
   assert.doesNotMatch(JSON.stringify(publisher), /release-(?:publisher|rehearsal)-/);
 });
 
+test('publisher completes revocable preflight before registry login and image publication', () => {
+  const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
+  const steps = publisher.jobs.publish.steps;
+  const named = name => steps.findIndex(step => step.name === name);
+  const login = steps.findIndex(step => step.uses?.startsWith('docker/login-action@'));
+  assert.ok(named('Validate all revocable controls before publication') >
+    named('Consume the signed authorization in this protected job'));
+  assert.ok(named('Validate all revocable controls before publication') < login);
+  assert.ok(login < named('Build, attest and sign the complete immutable image set'));
+  assert.ok(named('Build, attest and sign the complete immutable image set') <
+    named('Validate complete immutable set'));
+  assert.ok(named('Validate complete immutable set') <
+    named('Publish and verify public corresponding-source assets'));
+});
+
 test('every docker publisher release-control consumer follows one immutable workflow checkout in its job', () => {
   const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
   const steps = publisher.jobs.publish.steps;
@@ -453,7 +590,7 @@ test('privileged workflow actions are pinned to full commit SHAs with version co
   const pending = [
     '.github/workflows/consolidated-release.yml',
     '.github/workflows/docker-publish.yml',
-    '.github/actions/release-authorization/action.yml',
+    '.github/workflows/release-protection-rehearsal.yml',
   ];
   const visited = new Set();
   while (pending.length > 0) {

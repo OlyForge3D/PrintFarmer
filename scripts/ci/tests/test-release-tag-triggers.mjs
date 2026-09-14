@@ -2258,8 +2258,7 @@ test('every release artifact upload path is explicitly inventoried, including bo
     ['.artifacts/release-transaction/rehearsal-receipt.json'],
   ]);
   // Keep the call graph closed: a new reusable workflow/action must be inventoried too.
-  const action = '.github/actions/release-authorization/action.yml';
-  for (const file of [authority, docker, diagnostics, action]) {
+  for (const file of [authority, docker, diagnostics]) {
     const text = readFileSync(file, 'utf8');
     assert.equal(artifactUploads(file).length, (text.match(/uses:\s*actions\/upload-artifact@/g) || []).length);
     for (const [, local] of text.matchAll(/uses: \.\/([^\s]+)/g)) {
@@ -2267,8 +2266,6 @@ test('every release artifact upload path is explicitly inventoried, including bo
         '.github/workflows/ci.yml',
         '.github/workflows/docker-publish.yml',
         '.github/workflows/release-protection-rehearsal.yml',
-        '.github/actions/release-authorization',
-        '.release-control/.github/actions/release-authorization',
       ].includes(local), local);
     }
     assert.doesNotMatch(text, /(?:gh api|curl).*(?:rulesets|environments|rules\/branches)|sign\.log/);
@@ -2414,6 +2411,8 @@ function authorizationFixture(initial = state(), settings = {}) {
   for (const snapshot of settings.history ?? [initial]) appendSnapshot(snapshot);
   let advanced = false;
   let tag;
+  let canonicalHead = sourceCommit;
+  let canonicalComparison = { status: 'ahead', merge_base_commit: { sha: sourceCommit } };
   const calls = [];
   const ledgerWrites = [];
   const env = {
@@ -2430,6 +2429,8 @@ function authorizationFixture(initial = state(), settings = {}) {
   return {
     env, calls, ledgerWrites, environment, branchRules,
     deleteTag() { tag = undefined; },
+    setCanonicalHead(value) { canonicalHead = value; },
+    setCanonicalComparison(value) { canonicalComparison = value; },
     async fetch(url, options) {
       const endpoint = url.replace(/^https:\/\/api\.github\.com\/repos\/OlyForge3D\/PrintFarmer\/?/, '');
       assert.notEqual(endpoint, url, `Unexpected API host/path: ${url}`);
@@ -2449,12 +2450,13 @@ function authorizationFixture(initial = state(), settings = {}) {
       }
       if (endpoint === `git/ref/heads/${branch}`) return response({
         ref: `refs/heads/${branch}`,
-        object: { type: 'commit', sha: settings.headDriftAfterTree && comparedTree ? 'f'.repeat(40) : sourceCommit },
+        object: { type: 'commit', sha: settings.headDriftAfterTree && comparedTree ? 'f'.repeat(40) : canonicalHead },
       });
       if (endpoint === 'git/ref/heads/development') return response({
         ref: 'refs/heads/development', object: { type: 'commit', sha: sourceCommit },
       });
       if (endpoint === 'git/ref/heads/release-ledger') return response({ object: { sha: head } });
+      if (endpoint === `compare/${sourceCommit}...${canonicalHead}`) return response(canonicalComparison);
       if (endpoint.startsWith('compare/')) return response({ status: 'ahead' });
       if (endpoint.startsWith('contents/VERSION?')) {
         return response({ encoding: 'base64', content: Buffer.from('v1.2.3\n').toString('base64') });
@@ -3066,6 +3068,19 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     assert.equal(JSON.parse(publicIdentity).identitySha256, hash(identity));
     fixture.calls.length = 0;
     writeFileSync(privateSetPath, JSON.stringify(completeSet(identity)));
+    fixture.calls.length = 0;
+    await runReleaseControl('preflight', {
+      ...fixture.env,
+      RELEASE_PUBLIC_IDENTITY: consumer.RELEASE_PUBLIC_IDENTITY,
+      RELEASE_TRANSACTION: consumer.RELEASE_TRANSACTION,
+      RELEASE_SOURCE_COMMIT: identity.sourceCommit,
+    }, verify);
+    const preflightOutputs = readFileSync(process.env.GITHUB_OUTPUT, 'utf8');
+    assert.match(preflightOutputs, new RegExp(`^verified_branch_head=${identity.sourceCommit}$`, 'm'));
+    assert.match(preflightOutputs, /^expected_pointer=$/m);
+    assert.ok(fixture.calls.every(call => call.method === 'GET'),
+      'Publication preflight must remain read-only');
+    fixture.calls.length = 0;
     await runReleaseControl('advance', {
       ...fixture.env,
       RELEASE_PUBLIC_IDENTITY: consumer.RELEASE_PUBLIC_IDENTITY,
@@ -3106,6 +3121,57 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
   }
 });
 }
+
+test('publication preflight accepts canonical ancestry and rejects branch drift before writes', async () => {
+  const fixture = authorizationFixture();
+  const originalFetch = globalThis.fetch;
+  const cwd = process.cwd();
+  const previousOutput = process.env.GITHUB_OUTPUT;
+  const previousRunner = process.env.RUNNER_TEMP;
+  const root = resolve('.artifacts', `preflight-${process.pid}`);
+  mkdirSync(resolve(root, 'runner', '_runner_file_commands'), { recursive: true });
+  process.chdir(root);
+  process.env.RUNNER_TEMP = resolve('runner');
+  process.env.GITHUB_OUTPUT = resolve('runner', '_runner_file_commands',
+    'set_output_00000000-0000-0000-0000-000000000000');
+  writeFileSync(process.env.GITHUB_OUTPUT, '');
+  globalThis.fetch = fixture.fetch;
+  try {
+    await runReleaseControl('authorize', fixture.env);
+    const identity = JSON.parse(readFileSync(authorizationPath, 'utf8'));
+    writeFileSync(privateSetPath, JSON.stringify(completeSet(identity)));
+    const env = {
+      ...fixture.env,
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_TRANSACTION: JSON.stringify(releaseTransaction(identity)),
+      RELEASE_SOURCE_COMMIT: identity.sourceCommit,
+    };
+    fixture.calls.length = 0;
+    fixture.setCanonicalHead(newerSha);
+    await runReleaseControl('preflight', env, () => {});
+    const outputs = readFileSync(process.env.GITHUB_OUTPUT, 'utf8');
+    assert.match(outputs, new RegExp(`^verified_branch_head=${newerSha}$`, 'm'));
+    assert.match(outputs, /^expected_pointer=$/m);
+    assert.ok(fixture.calls.every(call => call.method === 'GET'));
+    fixture.calls.length = 0;
+    fixture.setCanonicalHead('f'.repeat(40));
+    fixture.setCanonicalComparison({
+      status: 'diverged',
+      merge_base_commit: { sha: anchor },
+    });
+    await assert.rejects(runReleaseControl('preflight', env, () => {}),
+      /trusted canonical branch history/);
+    assert.ok(fixture.calls.every(call => call.method === 'GET'));
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousOutput === undefined) delete process.env.GITHUB_OUTPUT;
+    else process.env.GITHUB_OUTPUT = previousOutput;
+    if (previousRunner === undefined) delete process.env.RUNNER_TEMP;
+    else process.env.RUNNER_TEMP = previousRunner;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('missing, malformed and weakened signed protection evidence always fails closed', async () => {
   const evidence = await verifyProtection(protectionFixture().api, 'insider', '123', 'separation-of-duties');

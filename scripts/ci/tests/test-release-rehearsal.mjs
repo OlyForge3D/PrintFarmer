@@ -22,7 +22,7 @@ test('internal diagnostics are hidden, environment-free and least privilege', ()
     'pull-requests': 'read',
   });
   assert.doesNotMatch(source,
-    /secrets\.|vars\.|environment:|id-token:|packages:|contents: write|create-github-app-token/);
+    /secrets\.|environment:|id-token:|packages:|contents: write|create-github-app-token/);
 });
 
 test('internal diagnostics cannot call publisher or mutation operations', () => {
@@ -33,7 +33,8 @@ test('internal diagnostics cannot call publisher or mutation operations', () => 
     /RELEASE_PUBLISHER|RELEASE_REGISTRY|cosign|docker login|gh release|git\/refs|git\/tags/);
   assert.match(source, /release-transaction\.mjs validate/);
   assert.match(source, /actions\/download-artifact@[0-9a-f]{40}/);
-  assert.match(source, /release-transaction\.mjs diagnose/);
+  assert.match(source, /release-transaction\.mjs diagnose-live/);
+  assert.match(source, /RELEASE_LEDGER_ANCHOR: \$\{\{ vars\.RELEASE_LEDGER_ANCHOR \}\}/);
   assert.match(source, /rehearsal-receipt\.json/);
 });
 
@@ -87,15 +88,22 @@ test('diagnostic URL allowlist excludes publication and environment endpoints', 
     'git/ref/heads/development',
     'git/ref/heads/release-ledger',
     'releases?per_page=100&page=1',
+    'packages/printfarmer-api',
+    'packages/printfarmer-api/versions?per_page=100&page=1',
     'actions/workflows/consolidated-release.yml/runs?status=queued&per_page=100',
   ]) {
-    assert.equal(rehearsalReadUrl(endpoint), `${repositoryApi}${endpoint}`);
+    const expected = endpoint.startsWith('packages/') ?
+      `https://api.github.com/orgs/OlyForge3D/packages/container/${endpoint.slice('packages/'.length)}` :
+      `${repositoryApi}${endpoint}`;
+    assert.equal(rehearsalReadUrl(endpoint), expected);
   }
   for (const endpoint of [
     'environments/release-stable',
     'environments/release-insider',
+    'packages/unknown-package',
     'packages/container/printfarmer-api/versions/1',
   ]) {
-    assert.throws(() => rehearsalReadUrl(endpoint), /Unapproved rehearsal read URL/);
+    assert.throws(() => rehearsalReadUrl(endpoint),
+      /Unapproved rehearsal read URL|route or method is not allowlisted/);
   }
 });
