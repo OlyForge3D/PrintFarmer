@@ -47,7 +47,7 @@ public sealed class PrinterControlOperationService(
     IDbOutboxSequenceAllocator sequence,
     IQueueResourceAuthorizationService authorization,
     IAuthenticationService authentication,
-    IMoonrakerMotionChannelFactory? channels = null)
+    IBackendClientFactory? clients = null)
 {
     public const string EventType = "PrintFarmer.Printer.ControlOperationUpdated.v1";
     public static readonly TimeSpan OwnerLiveness = TimeSpan.FromSeconds(45);
@@ -78,10 +78,7 @@ public sealed class PrinterControlOperationService(
         Printer printer = await db.Printers.SingleOrDefaultAsync(p => p.Id == printerId, ct)
             ?? throw Error(404, "not_found", "Printer not found.");
         ValidatePrinter(printer);
-        if (channels is null)
-        {
-            throw Error(422, "printer_operation_unsupported", "The Moonraker motion plugin is unavailable.");
-        }
+        _ = RequireMotionCapability(printer, request.Kind);
 
         PrinterDispatchState? barrier = await db.PrinterDispatchStates.SingleOrDefaultAsync(state => state.PrinterId == printerId, ct);
         if (barrier is null)
@@ -208,7 +205,7 @@ public sealed class PrinterControlOperationService(
             select new { printer.Backend, Barrier = barrier, Operation = operation })
             .SingleOrDefaultAsync(ct) ?? throw Error(404, "not_found", "Printer not found.");
         PrinterPhysicalControlDto projection = new(
-            current.Backend == (int)PrinterBackend.Moonraker ? Enum.GetValues<PrinterControlKind>() : [],
+            GetMotionCapability(clients, current.Backend)?.SupportedMotionKinds.ToArray() ?? [],
             current.Barrier?.PhysicalControlCommandId.HasValue == true,
             current.Operation?.Id, current.Operation?.State,
             current.Operation?.RequiresRecovery == true || current.Barrier?.PhysicalControlRequiresReconciliation == true);
@@ -292,7 +289,7 @@ public sealed class PrinterControlOperationService(
                 await ImportLegacyAsync(printerId, ct);
                 PrinterDispatchState? barrier = await db.PrinterDispatchStates.SingleOrDefaultAsync(s => s.PrinterId == printerId, ct);
                 Printer? printer = await db.Printers.SingleOrDefaultAsync(p => p.Id == printerId, ct);
-                if (barrier?.PhysicalControlCommandId is not Guid id || printer?.Backend != (int)PrinterBackend.Moonraker)
+                if (barrier?.PhysicalControlCommandId is not Guid id || printer is null)
                 {
                     return null;
                 }
@@ -511,6 +508,7 @@ public sealed class PrinterControlOperationService(
         await AuthorizeActorAsync(operation.PrinterId, operation.ActorSubject, ct);
         Printer printer = await db.Printers.SingleAsync(p => p.Id == operation.PrinterId, ct);
         ValidatePrinter(printer);
+        _ = RequireMotionCapability(printer, operation.Kind);
         if (PrinterControlIntent.ConfigurationIdentity(printer) != operation.PrinterConfigurationIdentity)
         {
             throw Error(409, "printer_configuration_changed", "Printer configuration changed before send.");
@@ -680,7 +678,6 @@ public sealed class PrinterControlOperationService(
         PrinterDispatchState? barrier = await db.PrinterDispatchStates.SingleOrDefaultAsync(s => s.PrinterId == printerId, ct);
         if (barrier?.PhysicalControlCommandId is not Guid id || barrier.PhysicalControlAttemptId.HasValue ||
             barrier.ActiveDispatchAttemptId.HasValue || barrier.ActiveJobId.HasValue ||
-            !await db.Printers.AnyAsync(p => p.Id == printerId && p.Backend == (int)PrinterBackend.Moonraker, ct) ||
             await db.PrintJobs.WhereOccupiesPrinter().AnyAsync(j => j.AssignedPrinterId == printerId, ct) ||
             await db.PrinterControlOperations.AnyAsync(o => o.Id == id, ct))
         {
@@ -696,7 +693,9 @@ public sealed class PrinterControlOperationService(
             "move_to" => PrinterControlKind.MoveTo,
             _ => null,
         };
-        if (kind is null)
+        Printer? printer = await db.Printers.AsNoTracking().SingleOrDefaultAsync(p => p.Id == printerId, ct);
+        if (kind is null || printer is null ||
+            GetMotionCapability(clients, printer.Backend)?.SupportedMotionKinds.Contains(kind.Value) != true)
         {
             return;
         }
@@ -726,7 +725,7 @@ public sealed class PrinterControlOperationService(
     }
 
     public static async Task<Dictionary<Guid, PrinterPhysicalControlDto>> ProjectAsync(
-        AppDbContext db, Guid[] printerIds, CancellationToken ct)
+        AppDbContext db, Guid[] printerIds, IBackendClientFactory? clients, CancellationToken ct)
     {
         await using IDbContextTransaction? snapshot = await BeginReadSnapshotAsync(db, ct);
         var rows = await (
@@ -740,7 +739,7 @@ public sealed class PrinterControlOperationService(
             from operation in records.DefaultIfEmpty()
             select new { printer.Id, printer.Backend, Barrier = barrier, Operation = operation }).ToListAsync(ct);
         return rows.ToDictionary(row => row.Id, row => new PrinterPhysicalControlDto(
-            row.Backend == (int)PrinterBackend.Moonraker ? Enum.GetValues<PrinterControlKind>() : [],
+            GetMotionCapability(clients, row.Backend)?.SupportedMotionKinds.ToArray() ?? [],
             row.Barrier?.PhysicalControlCommandId.HasValue == true, row.Operation?.Id, row.Operation?.State,
             row.Operation?.RequiresRecovery == true || row.Barrier?.PhysicalControlRequiresReconciliation == true));
     }
@@ -807,14 +806,30 @@ public sealed class PrinterControlOperationService(
 
     private static void ValidatePrinter(Printer printer)
     {
-        if (printer.Backend != (int)PrinterBackend.Moonraker)
-        {
-            throw Error(422, "unsupported", "Durable motion control is supported only by Moonraker.");
-        }
-
         if (!printer.IsEnabled || printer.InMaintenance)
         {
             throw Error(409, "printer_unavailable", "The printer is disabled or in maintenance.");
+        }
+    }
+
+    internal ISupportsDurableMotion RequireMotionCapability(Printer printer, PrinterControlKind kind)
+    {
+        ISupportsDurableMotion? motion = GetMotionCapability(clients, printer.Backend);
+        return motion?.SupportedMotionKinds.Contains(kind) == true
+            ? motion
+            : throw Error(422, "printer_operation_unsupported", "The installed backend does not support this durable motion operation.");
+    }
+
+    private static ISupportsDurableMotion? GetMotionCapability(IBackendClientFactory? clients, int backend)
+    {
+        try
+        {
+            return clients?.GetClient(backend) as ISupportsDurableMotion;
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            // Missing or unresolvable plugins must not advertise or admit physical sends.
+            return null;
         }
     }
 

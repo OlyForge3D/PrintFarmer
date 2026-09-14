@@ -37,11 +37,18 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     private readonly Mock<IAuthenticationService> authentication = new();
     private readonly Mock<IPrinterSafetyGuard> safety = new();
     private readonly FakeChannel channel = new();
+    private readonly Mock<IBackendClientFactory> clients = new();
+    private readonly Mock<IBackendClient> client = new();
+    private readonly Mock<ISupportsDurableMotion> motionCapability;
     private readonly SnapshotCommands commands = new();
     private ServiceProvider provider = null!;
 
     public PrinterControlOperationTests()
     {
+        motionCapability = client.As<ISupportsDurableMotion>();
+        motionCapability.SetupGet(m => m.SupportedMotionKinds).Returns(Enum.GetValues<PrinterControlKind>());
+        motionCapability.Setup(m => m.ConnectAsync(It.IsAny<Printer>(), It.IsAny<CancellationToken>())).ReturnsAsync(channel);
+        clients.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(client.Object);
         keepAlive = new SqliteConnection(connectionString);
         authorization.Setup(a => a.CanActorAccessPrinterAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
         authorization.Setup(a => a.CanAccessPrinterAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
@@ -62,9 +69,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         services.AddSingleton(safety.Object);
         services.AddSingleton<IDbOutboxSequenceAllocator, DbOutboxSequenceAllocator>();
         services.AddScoped<PrinterControlOperationService>();
-        var factory = new Mock<IMoonrakerMotionChannelFactory>();
-        factory.Setup(f => f.ConnectAsync(It.IsAny<Printer>(), It.IsAny<CancellationToken>())).ReturnsAsync(channel);
-        services.AddSingleton(factory.Object);
+        services.AddSingleton(clients.Object);
         provider = services.BuildServiceProvider();
         await using AsyncServiceScope scope = provider.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -136,6 +141,10 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
                 printerId, Guid.NewGuid(), userId.ToString(), new(PrinterControlKind.HomeAll), default));
         Assert.Equal("printer_operation_unsupported", error.Code);
         Assert.Equal(422, error.Status);
+        Assert.Empty((await scope.ServiceProvider.GetRequiredService<PrinterControlOperationService>()
+            .GetCurrentAsync(printerId, default)).PhysicalControl.SupportedOperations);
+        Assert.Empty((await PrinterControlOperationService.ProjectAsync(
+            scope.ServiceProvider.GetRequiredService<AppDbContext>(), [printerId], null, default))[printerId].SupportedOperations);
         Assert.Equal(0, await scope.ServiceProvider.GetRequiredService<AppDbContext>().PrinterControlOperations.CountAsync());
         Guid queuedBeforePluginLoss = Guid.NewGuid();
         await AdmitAsync(queuedBeforePluginLoss);
@@ -162,6 +171,86 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         Assert.Equal(x, operation.X);
         Assert.Equal(y, operation.Y);
         Assert.Equal(z, operation.Z);
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task WorkerAsync_AdvertisedNonMoonrakerBackend_UsesSemanticCapabilityAndExactCorrelation()
+    {
+        const int customBackend = 9001;
+        clients.Setup(f => f.GetClient(customBackend)).Returns(client.Object);
+        motionCapability.SetupGet(m => m.SupportedMotionKinds).Returns([PrinterControlKind.HomeAll]);
+        await ChangeAsync(async (db, service) =>
+        {
+            (await db.Printers.SingleAsync()).Backend = customBackend;
+            await db.SaveChangesAsync();
+            Assert.Equal([PrinterControlKind.HomeAll], (await service.GetCurrentAsync(printerId, default)).PhysicalControl.SupportedOperations);
+            Assert.Equal([PrinterControlKind.HomeAll],
+                (await PrinterControlOperationService.ProjectAsync(db, [printerId], clients.Object, default))[printerId].SupportedOperations);
+        });
+
+        Guid id = Guid.NewGuid();
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance);
+        await worker.StartAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(new PrinterControlRequest(PrinterControlKind.HomeAll), channel.Request);
+        Assert.Equal(id, channel.CorrelationId);
+        motionCapability.Verify(m => m.ConnectAsync(It.Is<Printer>(p => p.Backend == customBackend &&
+            p.BackendUrl == "http://test.invalid:7125"), It.IsAny<CancellationToken>()), Times.Once);
+        channel.Completion.SetResult();
+        await WaitForStateAsync(id, PrinterControlState.Succeeded);
+        await worker.StopAsync(default);
+        Assert.Equal(1, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task AdmitAsync_UnadvertisedKind_IsUnsupportedWithoutPersistingOrSending()
+    {
+        motionCapability.SetupGet(m => m.SupportedMotionKinds).Returns([PrinterControlKind.HomeZ]);
+        await ChangeAsync(async (db, service) =>
+        {
+            PrinterControlException error = await Assert.ThrowsAsync<PrinterControlException>(() =>
+                service.AdmitAsync(printerId, Guid.NewGuid(), userId.ToString(), new(PrinterControlKind.HomeAll), default));
+            Assert.Equal("printer_operation_unsupported", error.Code);
+            Assert.Empty(await db.PrinterControlOperations.ToArrayAsync());
+        });
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task AdmitAsync_UnresolvablePlugin_ReportsUnsupportedAndProjectsNoKinds()
+    {
+        clients.Setup(f => f.GetClient((int)PrinterBackend.Moonraker))
+            .Throws(new InvalidOperationException("Plugin was not registered."));
+        await ChangeAsync(async (db, service) =>
+        {
+            PrinterControlException error = await Assert.ThrowsAsync<PrinterControlException>(() =>
+                service.AdmitAsync(printerId, Guid.NewGuid(), userId.ToString(), new(PrinterControlKind.HomeAll), default));
+            Assert.Equal("printer_operation_unsupported", error.Code);
+            Assert.Empty((await service.GetCurrentAsync(printerId, default)).PhysicalControl.SupportedOperations);
+            Assert.Empty((await PrinterControlOperationService.ProjectAsync(db, [printerId], clients.Object, default))[printerId].SupportedOperations);
+            Assert.Empty(await db.PrinterControlOperations.ToArrayAsync());
+        });
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task CommitSendAsync_CapabilityWithdrawnAfterAdmission_DoesNotCommitSend()
+    {
+        Guid id = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            Guid owner = Guid.NewGuid();
+            Assert.NotNull(await service.ClaimAsync(id, owner, default));
+            motionCapability.SetupGet(m => m.SupportedMotionKinds).Returns([]);
+            PrinterControlException error = await Assert.ThrowsAsync<PrinterControlException>(() =>
+                service.CommitSendAsync(id, owner, default));
+            Assert.Equal("printer_operation_unsupported", error.Code);
+            Assert.Null((await db.PrinterControlOperations.AsNoTracking().SingleAsync()).SendCommittedAtUtc);
+        });
         Assert.Equal(0, channel.SendCount);
     }
 
@@ -241,13 +330,8 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         if (allowed)
         {
             await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            string command = scenario switch
-            {
-                "z_only" => "G1 Z3",
-                "single_axis" => kind == PrinterControlKind.Jog ? "G1 X1" : "G1 X51",
-                _ => kind == PrinterControlKind.Jog ? "G1 X1 Y2 Z3" : "G1 X51 Y2 Z3",
-            };
-            Assert.Contains($"\n{command}\n", channel.Script, StringComparison.Ordinal);
+            Assert.Equal(new PrinterControlRequest(kind, scenario == "z_only" ? null : x,
+                scenario == "multi_axis" ? 2 : null, scenario is "multi_axis" or "z_only" ? 3 : null), channel.Request);
             channel.Completion.SetResult();
         }
 
@@ -298,7 +382,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         {
             if (bulk)
             {
-                PrinterPhysicalControlDto projection = (await PrinterControlOperationService.ProjectAsync(db, [printerId], default))[printerId];
+                PrinterPhysicalControlDto projection = (await PrinterControlOperationService.ProjectAsync(db, [printerId], clients.Object, default))[printerId];
                 Assert.Equal(!settled, projection.BarrierHeld);
                 Assert.Equal(settled ? null : id, projection.OperationId);
                 Assert.Equal(settled ? null : PrinterControlState.Running, projection.State);
@@ -332,7 +416,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
                 await ChangeAsync(async (db, service) =>
                 {
                     AssertCoherent(await service.GetCurrentAsync(printerId, default));
-                    PrinterPhysicalControlDto projection = (await PrinterControlOperationService.ProjectAsync(db, [printerId], default))[printerId];
+                    PrinterPhysicalControlDto projection = (await PrinterControlOperationService.ProjectAsync(db, [printerId], clients.Object, default))[printerId];
                     Assert.Equal(projection.BarrierHeld, projection.OperationId.HasValue);
                     Assert.Equal(projection.BarrierHeld, projection.State == PrinterControlState.Running);
                 });
@@ -1022,7 +1106,8 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             NullLogger<PrinterControlOperationWorker>.Instance);
         await worker.StartAsync(default);
         await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.EndsWith("\nM400", channel.Script, StringComparison.Ordinal);
+        Assert.Equal(new PrinterControlRequest(kind, X: kind is PrinterControlKind.Jog or PrinterControlKind.MoveTo ? 1.5 : null,
+            Y: kind == PrinterControlKind.MoveTo ? 2 : null, Z: kind == PrinterControlKind.MoveTo ? 10 : null), channel.Request);
         channel.Completion.SetResult();
         await WaitForStateAsync(id, PrinterControlState.Succeeded);
         await worker.StopAsync(default);
@@ -1238,7 +1323,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             barrier.PhysicalControlCommandId = Guid.NewGuid();
             barrier.PhysicalControlRequiresReconciliation = true;
             await db.SaveChangesAsync();
-            PrinterPhysicalControlDto projection = (await PrinterControlOperationService.ProjectAsync(db, [printerId], default))[printerId];
+            PrinterPhysicalControlDto projection = (await PrinterControlOperationService.ProjectAsync(db, [printerId], clients.Object, default))[printerId];
             Assert.Empty(projection.SupportedOperations);
             Assert.True(projection.BarrierHeld);
             Assert.True(projection.RequiresRecovery);
@@ -1383,7 +1468,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             NullLogger<PrinterControlOperationWorker>.Instance);
         await worker.StartAsync(default);
         await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.EndsWith("\nM400", channel.Script, StringComparison.Ordinal);
+        Assert.Equal(new PrinterControlRequest(PrinterControlKind.HomeAll), channel.Request);
         Assert.Equal(PrinterControlState.Running, (await GetAsync(id)).State);
         channel.Completion.SetResult();
         await WaitForStateAsync(id, PrinterControlState.Succeeded);
@@ -1587,14 +1672,15 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     private static PrinterControlRecoveryRequest Evidence() => new("Inspected", "ExternallyVerified",
         "Original sender process stopped and network isolated", true, true, "Queue cleared independently; printer physically inspected stationary");
 
-    private sealed class FakeChannel : IMoonrakerMotionChannel
+    private sealed class FakeChannel : IPrinterMotionChannel
     {
         public TaskCompletionSource Sent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Disposed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int SendCount { get; private set; }
         public bool Idle { get; set; } = true;
-        public string Script { get; private set; } = string.Empty;
+        public PrinterControlRequest? Request { get; private set; }
+        public Guid? CorrelationId { get; private set; }
         public Task<bool> IsIdleAsync(CancellationToken ct) => Task.FromResult(Idle);
         public PrinterStatusDto? MotionState { get; set; }
         public Task<PrinterStatusDto> ReadMotionStateAsync(Guid printerId, CancellationToken ct) =>
@@ -1604,10 +1690,11 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
                     HomedAxes = new(["x", "y", "z"], DateTime.UtcNow, 15, "test"),
                     CoordinateOriginOffsetMm = new(new(0, 0, 0), DateTime.UtcNow, 15, "test"),
                 }));
-        public async Task ExecuteAsync(Guid correlationId, string script, CancellationToken ct)
+        public async Task ExecuteAsync(Guid correlationId, PrinterControlRequest request, CancellationToken ct)
         {
             SendCount++;
-            Script = script;
+            Request = request;
+            CorrelationId = correlationId;
             Sent.SetResult();
             await Completion.Task.WaitAsync(ct);
         }

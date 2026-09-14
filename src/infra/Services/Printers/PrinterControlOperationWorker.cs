@@ -175,9 +175,8 @@ public sealed class PrinterControlOperationWorker(
                 throw new PrinterControlException(409, "printer_configuration_changed", "Printer configuration changed.");
             }
 
-            IMoonrakerMotionChannelFactory channels = scope.ServiceProvider.GetService<IMoonrakerMotionChannelFactory>()
-                ?? throw new PrinterControlException(422, "printer_operation_unsupported", "The Moonraker motion plugin is unavailable.");
-            await using IMoonrakerMotionChannel channel = await channels.ConnectAsync(printer, ct);
+            ISupportsDurableMotion motion = service.RequireMotionCapability(printer, operation.Kind);
+            await using IPrinterMotionChannel channel = await motion.ConnectAsync(printer, ct);
             if (!await channel.IsIdleAsync(ct))
             {
                 throw new PrinterControlException(409, "printer_busy", "The backend is not ready and idle.");
@@ -204,7 +203,7 @@ public sealed class PrinterControlOperationWorker(
             }
 
             // No request token, retry policy, elapsed-motion timeout or lifecycle consumer.
-            await channel.ExecuteAsync(id, PrinterControlIntent.BuildScript(intent), ct);
+            await channel.ExecuteAsync(id, intent, ct);
             success = true;
         }
         catch (PrinterControlException exception)

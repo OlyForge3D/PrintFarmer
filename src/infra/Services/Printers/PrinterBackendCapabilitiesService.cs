@@ -67,23 +67,35 @@ public class PrinterBackendCapabilitiesService(
         var backend = (PrinterBackend)printer.Backend;
         BackendCapabilities capabilities = _capabilityFactory.GetSupportedCapabilities(backend);
         bool supportsHistory = _capabilityFactory.TryGetHistoryClientTyped(backend, out _);
-        bool movement = _capabilityFactory.TryGetMovementClientTyped(backend, out ISupportsMovement? movementClient)
-            && movementClient is not null;
-        bool temperature = _capabilityFactory.TryGetTemperatureControlClientTyped(backend, out ISupportsTemperatureControl? temperatureClient)
-            && temperatureClient is not null;
-        bool gcode = _capabilityFactory.TryGetGcodeExecutionClientTyped(backend, out ISupportsGcodeExecution? gcodeClient)
-            && gcodeClient is not null;
+        object? controlClient = null;
+        try
+        {
+            controlClient = _backendClientFactory?.GetClient(backend);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            // Unknown or unavailable plugins cannot declare physical controls.
+        }
 
-        // These are shared-route guarantees, not the broad interfaces' sometimes-stubbed methods.
-        // Home/Z and generic temperature use BuildMoonrakerUrl even for non-Moonraker
-        // printers. Only advertise those routes when that port matches the backend endpoint.
-        bool backendPortMatches = printer.ServerUri is { } serverUri
-            && printer.BackendPort == (printer.FrontendPort ?? (serverUri.Scheme == "https" ? 443 : 80));
-        bool homing = movement && backend is PrinterBackend.Moonraker or PrinterBackend.OctoPrint or PrinterBackend.PrusaLink;
-        bool moonraker = backend == PrinterBackend.Moonraker;
-        bool heater = (moonraker && temperature)
-            || (backend == PrinterBackend.OctoPrint && temperatureClient is ISupportsOctoPrintTemperature)
-            || (backendPortMatches && temperature && backend is PrinterBackend.PrusaLink or PrinterBackend.FlashForge);
+        if (controlClient is null)
+        {
+            if (_capabilityFactory.TryGetMovementClientTyped(backend, out ISupportsMovement? movementClient) &&
+                movementClient is ISupportsPrinterControlCapabilities)
+            {
+                controlClient = movementClient;
+            }
+            else if (_capabilityFactory.TryGetTemperatureControlClientTyped(backend, out ISupportsTemperatureControl? temperatureClient) &&
+                temperatureClient is ISupportsPrinterControlCapabilities)
+            {
+                controlClient = temperatureClient;
+            }
+        }
+
+        PrinterControlCapabilities controls =
+            (controlClient as ISupportsPrinterControlCapabilities)?.ControlCapabilities ?? new();
+        bool movement = controlClient is ISupportsMovement;
+        bool temperature = controlClient is ISupportsTemperatureControl;
+        bool homing = movement && controls.SupportsHoming;
 
         PrinterVerifiedSafetyDto verifiedSafety =
             await GetVerifiedSafetyAsync(printer, backend, ct);
@@ -113,9 +125,8 @@ public class PrinterBackendCapabilitiesService(
                 verifiedSafety.Operations.AbsoluteMovement.Support ==
                 VerifiedSafetySupport.Supported,
 
-            // Only Moonraker's current service route preserves its backend URL contract.
-            SupportsDisableMotors = moonraker && gcode,
-            SupportsExtrusion = moonraker && gcode,
+            SupportsDisableMotors = controls.SupportsDisableMotors && controlClient is ISupportsMotorControl,
+            SupportsExtrusion = controls.SupportsExtrusion && controlClient is ISupportsExtrusionControl,
             SupportsZOffset = true,
 
             // SAVE_CONFIG does not persist SET_GCODE_OFFSET; M851/M500 is not universal
@@ -124,10 +135,10 @@ public class PrinterBackendCapabilitiesService(
                 verifiedSafety.Operations.FirmwareZOffsetSave.Support ==
                 VerifiedSafetySupport.Supported,
             SupportsHoming = homing,
-            SupportsHomingXY = homing,
-            SupportsHomingZ = homing && (moonraker || backendPortMatches),
-            SupportsHotendTemperature = heater,
-            SupportsBedTemperature = heater,
+            SupportsHomingXY = movement && controls.SupportsHomingXY,
+            SupportsHomingZ = movement && controls.SupportsHomingZ,
+            SupportsHotendTemperature = temperature && controls.SupportsHotendTemperature,
+            SupportsBedTemperature = temperature && controls.SupportsBedTemperature,
 
             // Moonraker calls configurable LOAD_FILAMENT/UNLOAD_FILAMENT/M600 macros.
             // No per-printer macro discovery exists here; preserve the legacy broad flag
@@ -141,7 +152,7 @@ public class PrinterBackendCapabilitiesService(
             SupportsFilamentChange =
                 verifiedSafety.Operations.FilamentChange.Support ==
                 VerifiedSafetySupport.Supported,
-            SupportedAxes = homing ? ["x", "y", "z"] : [],
+            SupportedAxes = movement ? controls.SupportedAxes.ToArray() : [],
             VerifiedSafety = verifiedSafety,
         };
     }
@@ -153,8 +164,7 @@ public class PrinterBackendCapabilitiesService(
     {
         string sourceRevision = printer.ConfigurationRevision.ToString(
             System.Globalization.CultureInfo.InvariantCulture);
-        string dispatchUrl =
-            PrinterBackendEndpointResolver.ResolveDispatchUrl(printer);
+        string dispatchUrl = printer.BackendUrl;
         var key = new VerifiedSafetyCacheKey(
             printer.Id,
             backend,

@@ -13,7 +13,7 @@ namespace Farm.Backend.Plugin.PrusaLink;
 
 #pragma warning disable CS1066 // Default value for optional parameter not enforced for interface members
 
-public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
+public partial class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsFileList,
     ISupportsFileUpload,
     ISupportsFileDelete,

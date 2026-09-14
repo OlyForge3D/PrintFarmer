@@ -16,7 +16,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.OctoPrint;
 
-public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? logger = null, BackendTimeoutSettings? timeouts = null) : IOctoPrintClient,
+public partial class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? logger = null, BackendTimeoutSettings? timeouts = null) : IOctoPrintClient,
     ISupportsFileDownload,
     ISupportsFileList,
     ISupportsFileUpload,
@@ -134,6 +134,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         bool timeoutAsTimeoutException = false,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (timeoutSeconds <= 0)
         {
             timeoutSeconds = DefaultTimeoutSeconds;
@@ -166,6 +167,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             attemptNumber++;
             try
             {
+                cts.Token.ThrowIfCancellationRequested();
                 HttpResponseMessage response = await _httpClient.SendAsync(request, cts.Token);
                 LogResponse(response);
                 return response;
@@ -1133,16 +1135,17 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <param name="ct">Cancellation token</param>
     public async Task<bool> SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         bool success = true;
 
         if (bedTemp.HasValue)
         {
-            success = await SetBedTempAsync(baseUrl, credential, bedTemp.Value) && success;
+            success = await SetBedTempAsync(baseUrl, credential, bedTemp.Value, ct) && success;
         }
 
         if (hotendTemp.HasValue)
         {
-            success = await SetHotendTempAsync(baseUrl, credential, hotendTemp.Value) && success;
+            success = await SetHotendTempAsync(baseUrl, credential, hotendTemp.Value, "tool0", ct) && success;
         }
 
         return success;
@@ -1176,7 +1179,10 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// </summary>
     /// <param name="baseUrl">Base URL of OctoPrint server</param>
     /// <param name="credential">Printer credential for authentication</param>
-    public async Task<bool> SendHomeAsync(string baseUrl, PrinterCredential? credential)
+    public Task<bool> SendHomeAsync(string baseUrl, PrinterCredential? credential)
+        => SendHomeAsync(baseUrl, credential, CancellationToken.None);
+
+    private async Task<bool> SendHomeAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
@@ -1188,7 +1194,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
         try
         {
-            HttpResponseMessage response = await SendWithRetryAsync(request);
+            using HttpResponseMessage response = await SendWithRetryAsync(request, cancellationToken: ct);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -1216,7 +1222,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
         try
         {
-            HttpResponseMessage response = await SendWithRetryAsync(request);
+            using HttpResponseMessage response = await SendWithRetryAsync(request, cancellationToken: ct);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -1244,7 +1250,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
         try
         {
-            HttpResponseMessage response = await SendWithRetryAsync(request);
+            using HttpResponseMessage response = await SendWithRetryAsync(request, cancellationToken: ct);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -1261,7 +1267,10 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <param name="baseUrl">Base URL of OctoPrint server</param>
     /// <param name="credential">Printer credential for authentication</param>
     /// <param name="bedTemp">Target bed temperature in Celsius (0 to turn off)</param>
-    public async Task<bool> SetBedTempAsync(string baseUrl, PrinterCredential? credential, double bedTemp)
+    public Task<bool> SetBedTempAsync(string baseUrl, PrinterCredential? credential, double bedTemp)
+        => SetBedTempAsync(baseUrl, credential, bedTemp, CancellationToken.None);
+
+    private async Task<bool> SetBedTempAsync(string baseUrl, PrinterCredential? credential, double bedTemp, CancellationToken ct)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/bed");
@@ -1273,7 +1282,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
         try
         {
-            HttpResponseMessage response = await SendWithRetryAsync(request);
+            using HttpResponseMessage response = await SendWithRetryAsync(request, cancellationToken: ct);
             if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
             {
                 throw new Farm.Infrastructure.Services.Printers.PrinterBackendBusyException(
@@ -1301,7 +1310,10 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <param name="credential">Printer credential for authentication</param>
     /// <param name="hotendTemp">Target temperature in Celsius (0 to turn off)</param>
     /// <param name="tool">Tool index to set temperature for (default "tool0" for first hotend)</param>
-    public async Task<bool> SetHotendTempAsync(string baseUrl, PrinterCredential? credential, double hotendTemp, string tool = "tool0")
+    public Task<bool> SetHotendTempAsync(string baseUrl, PrinterCredential? credential, double hotendTemp, string tool = "tool0")
+        => SetHotendTempAsync(baseUrl, credential, hotendTemp, tool, CancellationToken.None);
+
+    private async Task<bool> SetHotendTempAsync(string baseUrl, PrinterCredential? credential, double hotendTemp, string tool, CancellationToken ct)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/tool");
@@ -1313,7 +1325,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
         try
         {
-            HttpResponseMessage response = await SendWithRetryAsync(request);
+            using HttpResponseMessage response = await SendWithRetryAsync(request, cancellationToken: ct);
             if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
             {
                 throw new Farm.Infrastructure.Services.Printers.PrinterBackendBusyException(
@@ -2529,7 +2541,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// Homes all axes (ISupportsMovement.HomeAsync).
     /// </summary>
     public Task<bool> HomeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
-        => SendHomeAsync(baseUrl, credential);
+        => SendHomeAsync(baseUrl, credential, ct);
 
     /// <summary>
     /// Homes all axes without credentials (ISupportsMovement.SendHomeAsync).

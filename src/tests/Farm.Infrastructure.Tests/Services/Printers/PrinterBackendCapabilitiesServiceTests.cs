@@ -28,7 +28,7 @@ public class PrinterBackendCapabilitiesServiceTests
     [InlineData(PrinterBackend.SDCP, false, false, false, false)]
     [InlineData(PrinterBackend.Unknown, false, false, false, false)]
     [InlineData((PrinterBackend)999, false, false, false, false)]
-    public async Task GetByPrinterIdAsync_ConcreteBackend_ReportsOnlyProvenSharedRoutes(
+    public async Task GetByPrinterIdAsync_ConcreteBackend_ReportsPluginDeclaredControls(
         PrinterBackend backend,
         bool homing,
         bool homingZ,
@@ -56,7 +56,8 @@ public class PrinterBackendCapabilitiesServiceTests
             Name = "capability-test",
             Backend = (int)backend,
             ServerUrl = "http://printer.local",
-            BackendPort = 80,
+            BackendPort = 8899,
+            FrontendPort = 8080,
         };
         var repo = new Mock<IPrintersRepository>();
         repo.Setup(repository => repository.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>()))
@@ -96,10 +97,82 @@ public class PrinterBackendCapabilitiesServiceTests
         }
     }
 
+    [Fact]
+    public async Task GetByPrinterIdAsync_CustomBackendMetadata_ProjectsOnlyDeclaredImplementedControls()
+    {
+        var backend = (PrinterBackend)999;
+        var client = new Mock<IBackendClient>();
+        client.As<ISupportsMovement>();
+        client.As<ISupportsTemperatureControl>();
+        client.As<ISupportsMotorControl>();
+        client.As<ISupportsPrinterControlCapabilities>()
+            .SetupGet(value => value.ControlCapabilities)
+            .Returns(new PrinterControlCapabilities
+            {
+                SupportsHomingZ = true,
+                SupportsBedTemperature = true,
+                SupportsDisableMotors = true,
+                SupportsExtrusion = true,
+                SupportedAxes = ["z"],
+            });
+        var clients = new Mock<IBackendClientFactory>();
+        clients.Setup(value => value.GetClient(backend)).Returns(client.Object);
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(), Backend = (int)backend,
+            ServerUrl = "http://printer.local", BackendPort = 9000, FrontendPort = 8000,
+        };
+        var repo = new Mock<IPrintersRepository>();
+        repo.Setup(value => value.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>())).ReturnsAsync(printer);
+        var factory = new BackendCapabilityFactory(clients.Object, NullLogger<BackendCapabilityFactory>.Instance);
+        var service = new PrinterBackendCapabilitiesService(repo.Object, factory, clients.Object);
+
+        PrinterBackendCapabilitiesDto result = (await service.GetByPrinterIdAsync(printer.Id, CancellationToken.None))!;
+
+        Assert.False(result.SupportsHoming);
+        Assert.False(result.SupportsHomingXY);
+        Assert.True(result.SupportsHomingZ);
+        Assert.False(result.SupportsHotendTemperature);
+        Assert.True(result.SupportsBedTemperature);
+        Assert.True(result.SupportsDisableMotors);
+        Assert.False(result.SupportsExtrusion);
+        Assert.Equal(["z"], result.SupportedAxes);
+        Assert.False(result.SupportsAbsoluteMovement);
+        Assert.False(result.SupportsZOffsetFirmwareSave);
+    }
+
+    [Fact]
+    public async Task GetByPrinterIdAsync_TypedInterfacesWithoutMetadata_RemainsConservative()
+    {
+        var client = new Mock<IBackendClient>();
+        client.As<ISupportsMovement>();
+        client.As<ISupportsTemperatureControl>();
+        client.As<ISupportsMotorControl>();
+        client.As<ISupportsExtrusionControl>();
+        var clients = new Mock<IBackendClientFactory>();
+        clients.Setup(value => value.GetClient(It.IsAny<PrinterBackend>())).Returns(client.Object);
+        var printer = new Printer { Id = Guid.NewGuid(), Backend = (int)PrinterBackend.Moonraker };
+        var repo = new Mock<IPrintersRepository>();
+        repo.Setup(value => value.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>())).ReturnsAsync(printer);
+        var factory = new BackendCapabilityFactory(clients.Object, NullLogger<BackendCapabilityFactory>.Instance);
+        var service = new PrinterBackendCapabilitiesService(repo.Object, factory, clients.Object);
+
+        PrinterBackendCapabilitiesDto result = (await service.GetByPrinterIdAsync(printer.Id, CancellationToken.None))!;
+
+        Assert.False(result.SupportsHoming);
+        Assert.False(result.SupportsHomingXY);
+        Assert.False(result.SupportsHomingZ);
+        Assert.False(result.SupportsHotendTemperature);
+        Assert.False(result.SupportsBedTemperature);
+        Assert.False(result.SupportsDisableMotors);
+        Assert.False(result.SupportsExtrusion);
+        Assert.Empty(result.SupportedAxes);
+    }
+
     [Theory]
     [InlineData(PrinterBackend.PrusaLink)]
     [InlineData(PrinterBackend.FlashForge)]
-    public async Task GetByPrinterIdAsync_GenericRouteTargetsDifferentPort_DoesNotAdvertiseTemperature(
+    public async Task GetByPrinterIdAsync_TemperatureInterfaceWithoutMetadata_DoesNotAdvertiseTemperature(
         PrinterBackend backend)
     {
         var printer = new Printer
@@ -344,7 +417,7 @@ public class PrinterBackendCapabilitiesServiceTests
     [InlineData("https://printer.local", 443, 8443, "https://printer.local", "https://printer.local:8443")]
     [InlineData("https://printer.local:8443/moonraker", 9443, 8443, "https://printer.local:9443/moonraker", "https://printer.local:8443/moonraker")]
     [InlineData("http://[::1]", 7125, 80, "http://[::1]:7125", "http://[::1]")]
-    public void ResolveDispatchUrl_SplitPorts_UsesBackendAndPreservesFrontend(
+    public void BackendUrl_SplitPorts_UsesBackendAndPreservesFrontend(
         string serverUrl, int backendPort, int frontendPort, string expectedBackend, string expectedFrontend)
     {
         var printer = new Printer
@@ -355,7 +428,7 @@ public class PrinterBackendCapabilitiesServiceTests
             FrontendPort = frontendPort,
         };
 
-        Assert.Equal(expectedBackend, PrinterBackendEndpointResolver.ResolveDispatchUrl(printer));
+        Assert.Equal(expectedBackend, printer.BackendUrl);
         Assert.Equal(expectedFrontend, printer.FrontendUrl);
     }
 

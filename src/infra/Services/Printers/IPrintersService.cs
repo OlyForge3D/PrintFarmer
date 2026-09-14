@@ -537,6 +537,15 @@ public interface IPrintersService
     /// <returns>True if motors disabled successfully, false if backend unavailable or unsupported</returns>
     Task<bool> DisableMotorsAsync(Guid id, CancellationToken ct);
 
+    /// <summary>Performs a bounded relative extrusion through the backend's maintenance capability.</summary>
+    Task<bool> ExtrudeFilamentAsync(Guid id, double distanceMm, int feedrateMmPerMinute, CancellationToken ct);
+
+    /// <summary>Saves a calibrated Z-offset through the backend's firmware capability.</summary>
+    Task<bool> SaveZOffsetToFirmwareAsync(Guid id, decimal offsetMm, CancellationToken ct);
+
+    /// <summary>Performs a typed multi-material action through the backend capability.</summary>
+    Task<bool> ExecuteMmuAsync(Guid id, MmuControlRequest request, CancellationToken ct);
+
     /// <summary>
     /// Sends an arbitrary G-code command to the printer.
     /// </summary>
