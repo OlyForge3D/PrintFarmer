@@ -66,8 +66,10 @@ const cryptoEvidenceFixture = set => {
       signatureBytes,
       attestationBytes,
       predicateBytes: predicate,
-      signatureBundleBytes: JSON.stringify([{ payload: 'signed-payload', optional: { Bundle: { Payload: { integratedTime: 1780000000 }, SignedEntryTimestamp: 'proof' } } }]),
-      attestationBundleBytes: JSON.stringify([{ payload: 'dsse-payload', optional: { Bundle: { Payload: { integratedTime: 1780000000 }, SignedEntryTimestamp: 'proof' } } }]),
+      signatureBundleBytes: JSON.stringify([{ payload: 'signed-payload', optional: {
+        Bundle: { Payload: { integratedTime: 1780000000 }, SignedEntryTimestamp: 'proof' } } }]),
+      attestationBundleBytes: JSON.stringify([{ payload: 'dsse-payload', optional: {
+        Bundle: { Payload: { integratedTime: 1780000000 }, SignedEntryTimestamp: 'proof' } } }]),
     };
   };
   const services = Object.fromEntries(Object.entries(set.images).map(([service, image]) => [

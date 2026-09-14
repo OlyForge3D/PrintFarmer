@@ -378,6 +378,12 @@ test('publisher completes revocable preflight before registry login and image pu
     named('Validate complete immutable set and stage verifier evidence'));
   assert.ok(named('Validate complete immutable set and stage verifier evidence') <
     named('Publish and verify public corresponding-source assets'));
+  assert.ok(named('Publish and verify signed manifest before mutable aliases') <
+    named('Reverify the activated public release before aliases'));
+  assert.ok(named('Reverify the activated public release before aliases') <
+    named('Publish channel-isolated verified image aliases'));
+  assert.ok(named('Reverify the activated public release before aliases') <
+    named('Advance the complete channel pointer last'));
   assert.ok(named('Validate complete immutable set and stage verifier evidence') <
     named('Publish and verify public corresponding-source assets'));
 });
@@ -405,6 +411,9 @@ test('publisher uses one reusable-workflow signer identity for every verificatio
     job.indexOf('release-control.mjs advance'));
   assert.ok(job.indexOf('release-set.mjs tag') < job.indexOf('release-set.mjs alias'));
   assert.ok(job.indexOf('release-set.mjs alias') < job.indexOf('release-control.mjs advance'));
+  assert.match(job, /env -u GH_TOKEN -u GITHUB_TOKEN curl --fail/);
+  assert.match(job, /cosign download signature \\"\$reference\\" \| jq -sc/);
+  assert.match(job, /cosign download attestation \\"\$reference\\" \| jq -sc/);
 });
 
 test('every docker publisher release-control consumer follows one immutable workflow checkout in its job', () => {

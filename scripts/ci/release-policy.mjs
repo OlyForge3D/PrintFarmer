@@ -433,9 +433,9 @@ export function writePublicSet(record, set, identitySha256) {
   return { schema: 1, identity, managedEligible: false, images };
 }
 
-function validateManifestCryptoEvidence(services, completeSet) {
+function validateManifestCryptoEvidence(services, completeSet, trust) {
   try {
-    validateEvidenceSet({ schema: 1, services }, completeSet);
+    validateEvidenceSet({ schema: 1, services }, completeSet, trust);
   } catch (error) {
     throw new ReleasePolicyError(error.message);
   }

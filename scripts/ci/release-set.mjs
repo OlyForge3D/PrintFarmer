@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import {
-  compareVersions, components, identityLabels, parseTag, requireThat, validateCompleteSet,
+  compareVersions, components, identityLabels, loadReleaseTrustPolicy, parseTag, requireThat, validateCompleteSet,
 } from './release-policy.mjs';
 import { command } from './release-github.mjs';
 import { readEvidence, stageEvidenceFromFiles } from './release-evidence.mjs';
@@ -152,13 +152,17 @@ function main() {
     const digests = Object.fromEntries(Object.keys(components).map(name =>
       [name, readFileSync(`artifacts/digest-${name}/digest-${name}.txt`, 'utf8').trim()]));
     const set = inspectCompleteSet(record, digests);
-    stageEvidenceFromFiles(evidencePath, set, process.argv[3] ?? '.artifacts/release-authorization/crypto-evidence');
+    stageEvidenceFromFiles(evidencePath, set, process.argv[3] ?? '.artifacts/release-authorization/crypto-evidence', {
+      policy: loadReleaseTrustPolicy(), releaseId: record.releaseId, trustedTime: record.created,
+    });
   } else if (process.argv[2] === 'inspect') {
     requireThat(evidencePathIndex !== -1 && evidencePath, 'Explicit crypto evidence path is required');
     const digests = Object.fromEntries(Object.keys(components).map(name =>
       [name, readFileSync(`artifacts/digest-${name}/digest-${name}.txt`, 'utf8').trim()]));
     const set = inspectCompleteSet(record, digests);
-    const cryptoEvidence = readEvidence(evidencePath, set);
+    const cryptoEvidence = readEvidence(evidencePath, set, {
+      policy: loadReleaseTrustPolicy(), releaseId: record.releaseId, trustedTime: record.created,
+    });
     writeAuthorizationSet(record, set);
     const metadataBytes = readFileSync('.artifacts/release-authorization/source-release-metadata.json', 'utf8');
     const metadata = JSON.parse(metadataBytes);

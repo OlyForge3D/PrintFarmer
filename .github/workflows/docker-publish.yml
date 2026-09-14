@@ -361,8 +361,8 @@ jobs:
               --type spdxjson \
               --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$index_evidence/attestation.json"
-            cosign download signature "$reference" > "$index_evidence/signature.bundle.json"
-            cosign download attestation "$reference" > "$index_evidence/attestation.bundle.json"
+            cosign download signature "$reference" | jq -sc . > "$index_evidence/signature.bundle.json"
+            cosign download attestation "$reference" | jq -sc . > "$index_evidence/attestation.bundle.json"
             cp "artifacts/sbom-${image}/printfarmer-${image}-${{ steps.consume.outputs.version }}.spdx.json" \
               "$index_evidence/predicate.json"
             platform_digests="$(
@@ -386,8 +386,8 @@ jobs:
                 --type spdxjson \
                 --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$platform_evidence/attestation.json"
-              cosign download signature "$platform_reference" > "$platform_evidence/signature.bundle.json"
-              cosign download attestation "$platform_reference" > "$platform_evidence/attestation.bundle.json"
+              cosign download signature "$platform_reference" | jq -sc . > "$platform_evidence/signature.bundle.json"
+              cosign download attestation "$platform_reference" | jq -sc . > "$platform_evidence/attestation.bundle.json"
               cp "source/crypto-evidence/platforms/${image}/${platform_suffix}.spdx.json" \
                 "$platform_evidence/predicate.json"
             done <<< "$platform_digests"
@@ -733,6 +733,71 @@ jobs:
             asset_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${VERSION}/${asset}"
             curl --fail --silent --show-error --location --head \
               --retry 6 --retry-delay 5 --retry-all-errors "$asset_url" >/dev/null
+          done
+      - name: Reverify the activated public release before aliases
+        env:
+          VERSION: ${{ steps.consume.outputs.version }}
+          RELEASE_NOTES_SHA256: ${{ env.RELEASE_NOTES_SHA256 }}
+        run: |
+          set -euo pipefail
+          public_root="$RUNNER_TEMP/activated-public-release"
+          mkdir -p "$public_root"
+          release_json="$public_root/release.json"
+          env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --silent --show-error --location \
+            --retry 6 --retry-delay 5 --retry-all-errors \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${VERSION}" > "$release_json"
+          [[ "$(jq -r .draft "$release_json")" == false ]] ||
+            { echo "Release remained draft after activation"; exit 1; }
+          mapfile -t public_assets < <(jq -r '.assets[] | [.name, .browser_download_url] | @tsv' "$release_json")
+          expected_inventory="$( (find source/release-assets -maxdepth 1 -type f -printf '%f\n'; printf '%s\n' \
+            release-manifest.json release-manifest.envelope.json release-manifest.envelope.bundle.json) | sort)"
+          [[ "$(printf '%s\n' "${public_assets[@]}" | cut -f1 | sort)" == "$expected_inventory" ]] ||
+            { echo "Activated release asset inventory is incomplete or unexpected"; exit 1; }
+          for asset in "${public_assets[@]}"; do
+            name="${asset%%$'\t'*}"
+            url="${asset#*$'\t'}"
+            env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --silent --show-error --location \
+              --retry 6 --retry-delay 5 --retry-all-errors "$url" > "$public_root/$name"
+            local="source/release-assets/$name"
+            [[ -f "$local" ]] || local=".artifacts/release-authorization/$name"
+            cmp -s "$local" "$public_root/$name" ||
+              { echo "Activated release asset differs from signed local bytes: $name"; exit 1; }
+          done
+          cosign verify-blob --bundle "$public_root/release-manifest.envelope.bundle.json" \
+            --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$public_root/release-manifest.envelope.json"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { validateReleaseManifestBytes } from "./scripts/ci/release-policy.mjs";
+            const manifest = validateReleaseManifestBytes(readFileSync(process.argv[1], "utf8"),
+              JSON.parse(readFileSync(process.argv[2], "utf8")));
+            if (manifest.lifecycle.releaseNotes.sha256 !== process.env.RELEASE_NOTES_SHA256) {
+              throw new Error("Activated release notes hash differs from manifest");
+            }
+          ' "$public_root/release-manifest.json" "$public_root/release-manifest.envelope.json"
+          for image in api frontend slicer-host printer-discovery orcaslicer-worker monolith; do
+            digest="$(tr -d '[:space:]' < "artifacts/digest-${image}/digest-${image}.txt")"
+            references=( "index $digest" )
+            while read -r platform platform_digest; do
+              references+=( "${platform//\//-} $platform_digest" )
+            done < <(docker buildx imagetools inspect "ghcr.io/olyforge3d/printfarmer-${image}@${digest}" --raw |
+              jq -r '.manifests[] | select(.annotations["vnd.docker.reference.type"] != "attestation-manifest") |
+                select(.platform.os == "linux") | "\(.platform.os)/\(.platform.architecture) \(.digest)"')
+            for entry in "${references[@]}"; do
+              scope="${entry%% *}"
+              subject="${entry#* }"
+              reference="ghcr.io/olyforge3d/printfarmer-${image}@${subject}"
+              evidence=".artifacts/release-authorization/crypto-evidence/$image/$scope"
+              cosign verify "$reference" --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
+              cosign verify-attestation "$reference" --type spdxjson --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
+              cosign download signature "$reference" | jq -sc . | cmp -s "$evidence/signature.bundle.json" - ||
+                { echo "Activated signature bundle differs: $image/$scope"; exit 1; }
+              cosign download attestation "$reference" | jq -sc . | cmp -s "$evidence/attestation.bundle.json" - ||
+                { echo "Activated attestation bundle differs: $image/$scope"; exit 1; }
+            done
           done
       - name: Publish channel-isolated verified image aliases
         env:

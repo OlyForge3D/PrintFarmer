@@ -552,6 +552,19 @@ immutable tag; they never move stable aliases. Every alias is read again after
 publication, so a concurrent conflicting write fails before the durable
 channel pointer advances.
 
+Before aliases or the durable channel pointer can move, the publisher performs
+a fresh unauthenticated version-addressed GitHub release GET after undraft. It
+requires the exact complete inventory, downloads and byte-compares every
+public asset, validates the signed manifest/envelope/notes binding, and
+rechecks every manifest-pinned index and platform Cosign signature,
+attestation, normalized DSSE bundle, and SPDX predicate against the registry.
+Evidence staging rejects a revoked release or signer, an issuer/identity
+mismatch, absent signed transparency material, transparency time outside the
+certificate or signer rotation window, a pre-revocation epoch entry, or a
+certificate older than the control policy maximum. These are publication
+preconditions only; #2666 remains responsible for consumer-side trusted-time,
+replay, rollback, and update execution enforcement.
+
 ## Stable qualification and candidate lifecycle
 
 Stable requires an owner-reviewed ledger qualification at the exact main SHA:
