@@ -2479,6 +2479,7 @@ test('every release artifact upload path is explicitly inventoried, including bo
     ],
     [
       manifestPath, manifestEnvelopePath, manifestEnvelopeBundle,
+      '.artifacts/release-authorization/release-notes.md',
     ],
     [
       authorizationPath, authorizationBundle, privateSetPath,

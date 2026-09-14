@@ -60,15 +60,19 @@ function command(name, args) {
 }
 
 function main() {
-  const version = process.env.VERSION;
+  const rawVersion = process.env.VERSION;
   const sourceCommit = process.env.SOURCE_COMMIT;
+  const sourceTag = process.env.SOURCE_TAG;
   const repository = process.env.GITHUB_REPOSITORY;
   const output = process.env.RELEASE_NOTES_OUTPUT;
-  requireText(version, 'VERSION'); requireText(repository, 'GITHUB_REPOSITORY'); requireText(output, 'RELEASE_NOTES_OUTPUT');
+  requireText(rawVersion, 'VERSION'); requireText(sourceTag, 'SOURCE_TAG'); requireText(repository, 'GITHUB_REPOSITORY'); requireText(output, 'RELEASE_NOTES_OUTPUT');
+  requireThat(/^v?\d+\.\d+\.\d+(?:-(?:insider|beta|rc)\.\d+)?$/.test(rawVersion), 'Release notes require a canonical version');
+  const version = rawVersion.startsWith('v') ? rawVersion.slice(1) : rawVersion;
+  requireThat(sourceTag === `v${version}`, 'Release notes source tag does not match canonical version');
   requireThat(/^[a-f0-9]{40}$/.test(sourceCommit || ''), 'Release notes require the exact source commit');
   const tags = command('git', ['for-each-ref', '--merged', sourceCommit, '--sort=-v:refname',
     '--format=%(refname:strip=2)', 'refs/tags']).trim().split(/\r?\n/);
-  const previousTag = tags.find(tag => tag !== `v${version}` && /^v\d+\.\d+\.\d+/.test(tag));
+  const previousTag = tags.find(tag => tag !== sourceTag && /^v\d+\.\d+\.\d+/.test(tag));
   requireThat(previousTag, 'Release notes require a previous canonical release tag');
   const commitShas = command('gh', ['api', `repos/${repository}/compare/${previousTag}...${sourceCommit}`, '--jq', '.commits[].sha'])
     .trim().split(/\r?\n/).filter(Boolean);

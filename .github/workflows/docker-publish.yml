@@ -280,13 +280,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.consume.outputs.version }}
+          SOURCE_TAG: v${{ steps.consume.outputs.version }}
           SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
         run: |
           set -euo pipefail
           release_notes=../.artifacts/release-authorization/release-notes.md
           mkdir -p "$(dirname "$release_notes")"
-          RELEASE_NOTES_OUTPUT="$release_notes" \
-            node ../scripts/ci/release-notes.mjs
+          RELEASE_NOTES_OUTPUT="$release_notes" node ../scripts/ci/release-notes.mjs
           release_notes_sha256="$(sha256sum "$release_notes" | cut -d ' ' -f1)"
           [[ "$release_notes_sha256" =~ ^[a-f0-9]{64}$ ]]
           printf 'RELEASE_NOTES_SHA256=%s\n' "$release_notes_sha256" >> "$GITHUB_ENV"
@@ -392,20 +392,23 @@ jobs:
                 [.artifacts[] | select(.expired == false and (.name | test("^release-manifest-[1-9][0-9]*-[1-9][0-9]*$")))] |
                 sort_by(.created_at) | .[0].name // empty'
             )" || { echo "Signed manifest recovery artifact lookup failed"; exit 1; }
-            [[ -n "$artifact_name" ]] || { echo "Signed manifest recovery artifact is unavailable for this retry"; exit 1; }
-            recovery_dir="$RUNNER_TEMP/recovered-release-manifest"
-            mkdir -p "$recovery_dir"
-            gh run download "$GITHUB_RUN_ID" --name "$artifact_name" --dir "$recovery_dir" ||
-              { echo "Signed manifest recovery artifact download failed"; exit 1; }
-            expected_manifest_assets="$(printf '%s\n' release-manifest.envelope.bundle.json release-manifest.envelope.json release-manifest.json | sort)"
-            recovered_manifest_assets="$(find "$recovery_dir" -maxdepth 1 -type f -printf '%f\n' | sort)"
-            [[ "$recovered_manifest_assets" == "$expected_manifest_assets" ]] ||
-              { echo "Signed manifest recovery artifact is incomplete or contains unexpected files"; exit 1; }
-            cmp -s "$manifest_dir/release-manifest.json" "$recovery_dir/release-manifest.json" ||
-              { echo "Recovered signed manifest bytes differ from this authorized transaction"; exit 1; }
-            cmp -s "$manifest_dir/release-manifest.envelope.json" "$recovery_dir/release-manifest.envelope.json" ||
-              { echo "Recovered signed manifest envelope differs from this authorized transaction"; exit 1; }
-            cp "$recovery_dir/release-manifest.envelope.bundle.json" "$manifest_dir/release-manifest.envelope.bundle.json"
+            if [[ -n "$artifact_name" ]]; then
+              recovery_dir="$RUNNER_TEMP/recovered-release-manifest"
+              mkdir -p "$recovery_dir"
+              gh run download "$GITHUB_RUN_ID" --name "$artifact_name" --dir "$recovery_dir" ||
+                { echo "Signed manifest recovery artifact download failed"; exit 1; }
+              expected_manifest_assets="$(printf '%s\n' release-manifest.envelope.bundle.json release-manifest.envelope.json release-manifest.json release-notes.md | sort)"
+              recovered_manifest_assets="$(find "$recovery_dir" -maxdepth 1 -type f -printf '%f\n' | sort)"
+              [[ "$recovered_manifest_assets" == "$expected_manifest_assets" ]] ||
+                { echo "Signed manifest recovery artifact is incomplete or contains unexpected files"; exit 1; }
+              for asset in release-manifest.json release-manifest.envelope.json release-notes.md; do
+                cmp -s "$manifest_dir/$asset" "$recovery_dir/$asset" ||
+                  { echo "Recovered signed release bytes differ from this authorized transaction: $asset"; exit 1; }
+              done
+              cp "$recovery_dir/release-manifest.envelope.bundle.json" "$manifest_dir/release-manifest.envelope.bundle.json"
+            else
+              cosign sign-blob --yes --bundle "$manifest_dir/release-manifest.envelope.bundle.json" "$manifest_dir/release-manifest.envelope.json"
+            fi
           else
             cosign sign-blob --yes \
               --bundle "$manifest_dir/release-manifest.envelope.bundle.json" \
@@ -424,6 +427,7 @@ jobs:
             .artifacts/release-authorization/release-manifest.json
             .artifacts/release-authorization/release-manifest.envelope.json
             .artifacts/release-authorization/release-manifest.envelope.bundle.json
+            .artifacts/release-authorization/release-notes.md
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
