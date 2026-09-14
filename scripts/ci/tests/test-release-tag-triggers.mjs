@@ -3778,6 +3778,7 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
     for (const mutate of [
       value => { value.lifecycle.cadence = 'manual'; },
       value => { value.provenance.source.commit = newerSha; },
+      value => { value.provenance.workflow.allocationKey = 'invalid'; },
       value => { value.evidence.services.api.index.signature.subject = newerSha; },
       value => { value.evidence.services.api.platforms['linux/amd64'].sbom.subject = `sha256:${'f'.repeat(64)}`; },
       value => { value.compatibility.managedEligible = false; },

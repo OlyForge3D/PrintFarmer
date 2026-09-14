@@ -409,6 +409,7 @@ export function validateReleaseManifest(manifest) {
     provenance.workflow.commit === lifecycle.signing.workflowCommit &&
     provenance.workflow.buildId === identity.buildId && provenance.workflow.buildAttempt === identity.buildAttempt,
   'Invalid release workflow provenance');
+  requireString(provenance.workflow.allocationKey, hashPattern, 'release workflow allocation key');
   requireKeys(provenance.authorization, ['identitySha256', 'protectionDigest'], [], 'release authorization provenance');
   requireThat(provenance.authorization.identitySha256 === identity.identitySha256, 'Invalid release authorization binding');
   requireString(provenance.authorization.protectionDigest, hashPattern, 'release protection hash');

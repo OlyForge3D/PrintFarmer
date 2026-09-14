@@ -280,7 +280,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.consume.outputs.version }}
-          SOURCE_TAG: v${{ steps.consume.outputs.version }}
+          SOURCE_TAG: ${{ steps.consume.outputs.version }}
           SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
         run: |
           set -euo pipefail
@@ -572,7 +572,11 @@ jobs:
           ' "$recovered/release-manifest.json" "$recovered/release-manifest.envelope.json"
           expected_prerelease=false
           [[ "$VERSION" == *-* ]] && expected_prerelease=true
-          gh release edit "$VERSION" --draft=false --prerelease="$expected_prerelease"
+          gh release edit "$VERSION" --notes-file release-assets/release-notes.md \
+            --draft=false --prerelease="$expected_prerelease"
+          gh release view "$VERSION" --json body --jq .body > "$recovered/release-body.md"
+          cmp -s release-assets/release-notes.md "$recovered/release-body.md" ||
+            { echo "Published release body differs from canonical signed notes"; exit 1; }
           release_state="$(
             gh release view "$VERSION" --json isDraft,isPrerelease \
               --jq '[.isDraft, .isPrerelease] | @tsv'
