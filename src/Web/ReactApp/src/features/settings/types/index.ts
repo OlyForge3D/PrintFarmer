@@ -21,8 +21,12 @@ export interface UpdateFarmSettingsRequest {
   enabledModes?: ('Simple' | 'Advanced')[];
 }
 
+export type PrinterControlMode = 'Guided' | 'Expert';
+
 /** Response from GET /api/settings/user */
 export interface UserSettingsResponse {
+  /** Account preference; older responses may omit it, in which case use Guided. */
+  printerControlMode?: PrinterControlMode;
   userId: string;
   theme: string;
   locale: string;
@@ -34,6 +38,7 @@ export interface UserSettingsResponse {
 
 /** Request body for PUT /api/settings/user */
 export interface UpdateUserSettingsRequest {
+  printerControlMode?: PrinterControlMode;
   theme?: string;
   locale?: string;
   itemsPerPage?: number;

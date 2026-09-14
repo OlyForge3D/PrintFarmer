@@ -191,7 +191,7 @@ public sealed class PrinterControlOperationWorker(
                     ? new PrinterSafetyMoveRequest(observed.X + (operation.X ?? 0), observed.Y + (operation.Y ?? 0), observed.Z + (operation.Z ?? 0))
                     : new PrinterSafetyMoveRequest(operation.X, operation.Y, operation.Z);
                 PrinterSafetyValidationResult safety = await scope.ServiceProvider.GetRequiredService<IPrinterSafetyGuard>()
-                    .ValidateObservedMoveAsync(operation.PrinterId, target, observed, ct);
+                    .ValidateObservedManualMoveAsync(operation.PrinterId, target, observed, ct);
                 if (!safety.Success)
                 {
                     throw new PrinterControlException(safety.StatusCode, safety.Code ?? "unsafe_motion", "Motion safety validation failed.");

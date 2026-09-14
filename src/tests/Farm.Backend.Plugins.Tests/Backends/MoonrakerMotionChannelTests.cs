@@ -71,7 +71,18 @@ public sealed class MoonrakerMotionChannelTests
     {
         string script = PrinterControlIntent.BuildScript(new(PrinterControlKind.MoveTo, 10, 20, 30, 1200));
         Assert.Equal("SAVE_GCODE_STATE NAME=printfarmer_motion\nG90\nG1 X10 Y20 Z30 F1200\nRESTORE_GCODE_STATE NAME=printfarmer_motion MOVE=0\nM400", script);
-        Assert.False(PrinterControlIntent.IsValid(new(PrinterControlKind.MoveTo, 10)));
+        Assert.True(PrinterControlIntent.IsValid(new(PrinterControlKind.MoveTo, 10)));
+    }
+
+    [Theory]
+    [InlineData(10d, null, null, "G1 X10")]
+    [InlineData(null, 20d, null, "G1 Y20")]
+    [InlineData(null, null, -1d, "G1 Z-1")]
+    [InlineData(10d, 20d, null, "G1 X10 Y20")]
+    public void BuildScript_SparseMoveTo_PreservesOmittedAxes(double? x, double? y, double? z, string command)
+    {
+        string script = PrinterControlIntent.BuildScript(new(PrinterControlKind.MoveTo, x, y, z));
+        Assert.Equal($"SAVE_GCODE_STATE NAME=printfarmer_motion\nG90\n{command}\nRESTORE_GCODE_STATE NAME=printfarmer_motion MOVE=0\nM400", script);
     }
 
     [Fact]
@@ -107,7 +118,9 @@ public sealed class MoonrakerMotionChannelTests
         Task operation = channel.ExecuteAsync(id, "G28\nM400", default);
         await socket.Sent.Task;
         socket.Enqueue($"{{\"id\":\"{id}\",\"error\":{{\"code\":400,\"message\":\"private macro detail\"}}}}");
-        Exception error = await Assert.ThrowsAsync<InvalidOperationException>(() => operation);
+        PrinterControlException error = await Assert.ThrowsAsync<PrinterControlException>(() => operation);
+        Assert.Equal("printer_firmware_rejected", error.Code);
+        Assert.Equal(1, socket.SendCount);
         Assert.DoesNotContain("private macro detail", error.Message);
     }
 

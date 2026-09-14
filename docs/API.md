@@ -52,6 +52,25 @@ Printer, slicer, worker, queue, artifact, capability, and real-time response
 contracts never return API keys, usernames, passwords, worker keys, internal
 paths, backend endpoints, or private service URLs.
 
+## User Printer-Control Preference
+
+`GET /api/settings/user` returns the authenticated user's `printerControlMode`:
+`"Guided"` (the default) or `"Expert"`. `PUT /api/settings/user` accepts the same
+case-sensitive strings and the current concurrency revision (`rowVersion` or
+`If-Match`). A request containing only the mode and revision preserves all other
+settings; a stale revision returns `409`.
+
+Omitting `printerControlMode`, or sending `null`, preserves the user's saved
+choice, so older web/mobile clients can still save unrelated preferences.
+Invalid strings and non-string JSON values are rejected. The preference belongs
+to the account, not a printer or farm, and is stored on the backend so other
+devices retrieve the same choice.
+
+This field controls web guidance presentation only. It does not change motion
+admission, permissions, firmware limits, duplicate protection, recovery, or
+emergency-stop behavior. Existing clients may ignore the additional response
+property; no mobile implementation change is required.
+
 ## API Contract and Calibration Capabilities
 
 ### Contract negotiation

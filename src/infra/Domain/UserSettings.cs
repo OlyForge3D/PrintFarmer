@@ -19,6 +19,12 @@ public class UserSettings : IRevisionedEntity
     [MaxLength(32)]
     public string Theme { get; set; } = "system";
 
+    /// <summary>
+    /// Printer-motion presentation preference only; never changes permissions or motion protections.
+    /// </summary>
+    [MaxLength(16)]
+    public string PrinterControlMode { get; set; } = "Guided";
+
     [MaxLength(16)]
     public string Locale { get; set; } = "en";
 

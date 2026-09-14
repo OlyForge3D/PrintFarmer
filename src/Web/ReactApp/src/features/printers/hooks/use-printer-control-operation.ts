@@ -18,7 +18,7 @@ registerAuthenticatedSignalRTransport('printer-control-operations', async () => 
 });
 const emptySnapshot: ControlOperationSnapshot = {
   current: null, operation: null, etag: null, saved: null,
-  checking: false, submitting: false, uncertain: true, missingAdmission: false, error: null,
+  checking: false, submitting: false, admitting: false, uncertain: true, missingAdmission: false, error: null,
 };
 const emptySubscribe = () => () => undefined;
 const getEmptySnapshot = () => emptySnapshot;

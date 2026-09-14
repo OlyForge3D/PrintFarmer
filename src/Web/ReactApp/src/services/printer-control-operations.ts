@@ -29,7 +29,7 @@ const savedSchema = z.object({
 });
 type SavedOperation = z.infer<typeof savedSchema>;
 
-export const CONTROL_RECHECK_MS = 2_000;
+export const CONTROL_RECHECK_MS = 1_000;
 export interface ControlOperationSnapshot {
   current: PrinterControlCurrent | null;
   operation: PrinterControlOperation | null;
@@ -37,6 +37,7 @@ export interface ControlOperationSnapshot {
   saved: SavedOperation | null;
   checking: boolean;
   submitting: boolean;
+  admitting: boolean;
   uncertain: boolean;
   missingAdmission: boolean;
   error: string | null;
@@ -51,6 +52,8 @@ export class PrinterControlTracker {
   private storageInvalid = false;
   private completedOperation: PrinterControlOperation | null = null;
   private lastReadCompletedAt = Number.NEGATIVE_INFINITY;
+  private reservationGeneration = 0;
+  private refreshGeneration = 0;
 
   private waitForChange(signal: AbortSignal): Promise<void> {
     return new Promise(resolve => {
@@ -81,7 +84,7 @@ export class PrinterControlTracker {
     }
     this.snapshot = {
       current: null, operation: null, etag: null, saved,
-      checking: true, submitting: false, uncertain: true, missingAdmission: false,
+      checking: true, submitting: false, admitting: false, uncertain: true, missingAdmission: false,
       error: this.storageInvalid ? 'The saved motion receipt cannot be read. Motion remains locked; contact an administrator.' : null,
     };
   }
@@ -192,8 +195,13 @@ export class PrinterControlTracker {
   refresh = (): Promise<PrinterControlOperation | null> => {
     if (this.refreshTask) {
       this.invalidated = true;
+      if (this.refreshGeneration !== this.reservationGeneration) {
+        // Admission must await the replacement read, not a discarded pre-reservation result.
+        return this.refreshTask.then(() => this.refreshTask ?? this.refresh());
+      }
       return this.refreshTask;
     }
+    this.refreshGeneration = this.reservationGeneration;
     this.refreshTask = this.read().finally(() => {
       this.refreshTask = null;
       if (this.invalidated && this.isSessionCurrent()) {
@@ -213,10 +221,15 @@ export class PrinterControlTracker {
 
   private async read(): Promise<PrinterControlOperation | null> {
     this.assertSession();
+    const generation = this.reservationGeneration;
     let missingAdmission = false;
     try {
       let current = this.validateCurrent(await apiClient.getCurrentPrinterControlOperation(this.printerId));
       this.assertSession();
+      if (generation !== this.reservationGeneration) {
+        this.invalidated = true;
+        return null;
+      }
       let saved = this.snapshot.saved;
       const operationId = saved?.operationId ?? current.operation?.operationId;
       let operation = current.operation;
@@ -233,7 +246,7 @@ export class PrinterControlTracker {
           this.assertSession();
           if (mutationErrorStatus(error) === 404 && current.operation) await this.confirmAdmission(current.operation);
           missingAdmission = !!saved && !this.snapshot.saved?.admissionConfirmed && mutationErrorStatus(error) === 404;
-          this.update({ current, missingAdmission });
+          if (generation === this.reservationGeneration) this.update({ current, missingAdmission });
           throw error;
         }
       }
@@ -255,6 +268,11 @@ export class PrinterControlTracker {
         await this.confirmAdmission(tracked);
         saved = this.snapshot.saved;
       }
+      // A background read started before a new reservation must not replace its receipt or status.
+      if (generation !== this.reservationGeneration) {
+        this.invalidated = true;
+        return null;
+      }
       this.update({
         current, operation, etag, checking: false, missingAdmission: false,
         saved: saved && tracked && isControlOperationResolved(tracked) ? null : saved,
@@ -262,6 +280,10 @@ export class PrinterControlTracker {
       });
       return tracked;
     } catch (error) {
+      if (generation !== this.reservationGeneration) {
+        this.invalidated = true;
+        return null;
+      }
       const status = mutationErrorStatus(error);
       this.update({
         checking: false, uncertain: true, etag: null, missingAdmission,
@@ -294,7 +316,8 @@ export class PrinterControlTracker {
       const saved = savedSchema.parse({ operationId: generateUUID(), intent });
       // Fail closed if persistence is unavailable. Never send before the receipt is durable locally.
       localStorage.setItem(this.storageKey, JSON.stringify(saved));
-      this.update({ saved, submitting: true, uncertain: true, error: null });
+      this.reservationGeneration++;
+      this.update({ saved, operation: null, etag: null, submitting: true, admitting: true, uncertain: true, error: null });
       return saved;
     };
     const saved = navigator.locks
@@ -309,11 +332,16 @@ export class PrinterControlTracker {
     } catch {
       this.update({ error: 'The admission response was lost or rejected. Recheck this operation; it may still execute.' });
       await this.refresh().catch(() => undefined);
+      this.update({ admitting: false });
       throw new Error('Motion admission is uncertain. The original operation ID was retained; no command was replayed.');
     } finally {
       this.update({ submitting: false });
     }
-    await this.refresh();
+    try {
+      await this.refresh();
+    } finally {
+      this.update({ admitting: false });
+    }
     while (!signal.aborted) {
       const operation = this.completedOperation?.operationId === saved.operationId ? this.completedOperation : this.snapshot.operation;
       this.assertSession();

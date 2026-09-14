@@ -4,7 +4,7 @@ import { getAuthEpoch } from '@/common/auth/authEpoch';
 import { toast } from 'sonner';
 import type { UserSettingsResponse, UpdateUserSettingsRequest } from '@/features/settings/types';
 
-const USER_SETTINGS_KEY = ['settings', 'user'] as const;
+export const USER_SETTINGS_KEY = ['settings', 'user'] as const;
 
 export function useUserSettings() {
   return useQuery<UserSettingsResponse>({
@@ -21,6 +21,7 @@ export function useUpdateUserSettings() {
   const queryClient = useQueryClient();
 
   return useMutation<UserSettingsResponse, Error, UpdateUserSettingsRequest, { epochAtStart: number }>({
+    mutationKey: USER_SETTINGS_KEY,
     mutationFn: async (body) => {
       const res = await apiClient.put<UserSettingsResponse>('/settings/user', body);
       return res.data;

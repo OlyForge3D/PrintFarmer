@@ -621,7 +621,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   };
 
   const handleMoveTo = async (position: MoveRequest) => {
-    if (movementActionPending) return;
+    if (movementActionPending || !canManualMoveNow || ![position.x, position.y, position.z].every(Number.isFinite)) return;
     setMovementActionPending(true);
     try {
       const result = await motion.execute({ kind: 'MoveTo', ...position });

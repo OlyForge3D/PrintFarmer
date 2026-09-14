@@ -1,4 +1,7 @@
-import { ControlPadButton, MovementInput, MoveDistanceSlider } from '@/common/components/ui';
+import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
+import { PrinterControlsMode, PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
+import { MotionControlButton } from '@/features/printers/components/MotionControlButton';
+import { ControlPadButton, MoveDistanceSlider } from '@/common/components/ui';
 import type { MoveRequest } from '@/types/api';
 import {
   HomeIcon,
@@ -42,9 +45,9 @@ interface MovementControlSectionProps {
   onStepChange: (step: number) => void;
   onExtrudeStepChange: (step: number) => void;
   onExtrudeSpeedChange: (speed: number) => void;
-  onMove: (axis: 'X' | 'Y' | 'Z', distance: number) => void;
-  onMoveTo?: (position: MoveRequest) => void;
-  onHome: (axes?: string) => void;
+  onMove: (axis: 'X' | 'Y' | 'Z', distance: number) => void | Promise<void>;
+  onMoveTo?: (position: MoveRequest) => void | Promise<void>;
+  onHome: (axes?: string) => void | Promise<void>;
   onDisableMotors: () => void;
   onExtrude: (direction: 'extrude' | 'retract') => void;
 
@@ -91,11 +94,11 @@ export function MovementControlSection({
   const isZHomed = isHomedStateKnown && homedAxesLower.includes('z');
   const isXYHomed = isXHomed && isYHomed;
   const isAllHomed = isXYHomed && isZHomed;
-  const completePosition = [moveX, moveY, moveZ].every(value => value !== '' && Number.isFinite(value));
 
   return (
     <div className="mb-2">
-      <div className="flex gap-6 items-start">
+      <PrinterControlsMode />
+      <div className="flex flex-wrap gap-6 items-start">
         {/* Left Column: Move */}
         <div className="flex flex-col gap-2 items-start">
           <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide -ml-1">
@@ -105,7 +108,7 @@ export function MovementControlSection({
             {/* XY Pad */}
             <div className="grid grid-cols-3 grid-rows-3 gap-1 w-fit">
               {/* Top row */}
-              <ControlPadButton
+              <MotionControlButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onHome()}
                 title="Home all axes"
@@ -114,15 +117,15 @@ export function MovementControlSection({
                 style={getHomeButtonStyle(isHomedStateKnown, isAllHomed).style}
               >
                 <HomeIcon className="h-4 w-4" />
-              </ControlPadButton>
-              <ControlPadButton
+              </MotionControlButton>
+              <MotionControlButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onMove('Y', step)}
                 aria-label="Jog Y positive"
                 padSize="small"
               >
                 ▲
-              </ControlPadButton>
+              </MotionControlButton>
               <ControlPadButton
                 disabled={!canDisableMotors}
                 onClick={onDisableMotors}
@@ -133,15 +136,15 @@ export function MovementControlSection({
               </ControlPadButton>
 
               {/* Middle row */}
-              <ControlPadButton
+              <MotionControlButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onMove('X', -step)}
                 aria-label="Jog X negative"
                 padSize="small"
               >
                 ◀
-              </ControlPadButton>
-              <ControlPadButton
+              </MotionControlButton>
+              <MotionControlButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onHome('xy')}
                 title="Home X/Y"
@@ -150,40 +153,40 @@ export function MovementControlSection({
                 style={getHomeButtonStyle(isHomedStateKnown, isXYHomed).style}
               >
                 <HomeIcon className="h-4 w-4" />
-              </ControlPadButton>
-              <ControlPadButton
+              </MotionControlButton>
+              <MotionControlButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onMove('X', step)}
                 aria-label="Jog X positive"
                 padSize="small"
               >
                 ▶
-              </ControlPadButton>
+              </MotionControlButton>
 
               {/* Bottom row */}
               <div></div>
-              <ControlPadButton
+              <MotionControlButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onMove('Y', -step)}
                 aria-label="Jog Y negative"
                 padSize="small"
               >
                 ▼
-              </ControlPadButton>
+              </MotionControlButton>
               <div></div>
             </div>
 
             {/* Z Pad */}
             <div className="flex flex-col gap-1 w-fit">
-              <ControlPadButton
+              <MotionControlButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onMove('Z', step)}
                 aria-label="Jog Z positive"
                 padSize="small"
               >
                 Z+
-              </ControlPadButton>
-              <ControlPadButton
+              </MotionControlButton>
+              <MotionControlButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onHome('z')}
                 title="Home Z"
@@ -192,15 +195,15 @@ export function MovementControlSection({
                 style={getHomeButtonStyle(isHomedStateKnown, isZHomed).style}
               >
                 <HomeIcon className="h-4 w-4" />
-              </ControlPadButton>
-              <ControlPadButton
+              </MotionControlButton>
+              <MotionControlButton
                 disabled={movementActionPending || !canMove}
                 onClick={() => onMove('Z', -step)}
                 aria-label="Jog Z negative"
                 padSize="small"
               >
                 Z-
-              </ControlPadButton>
+              </MotionControlButton>
             </div>
 
             {/* Extrude Pad */}
@@ -285,60 +288,15 @@ export function MovementControlSection({
         {rightContent}
       </div>
 
-      {/* Manual position inputs */}
-      <div className="grid grid-cols-4 gap-2 mt-3 w-full max-w-[24rem] pt-2">
-        <MovementInput
-          axis="X"
-          currentPosition={printerX}
-          disabled={movementActionPending || !canManualMove}
-          value={moveX}
-          onChange={(e) => onMoveXChange(e.target.value === '' ? '' : Number(e.target.value))}
-          className="w-full!"
-        />
-        <MovementInput
-          axis="Y"
-          currentPosition={printerY}
-          disabled={movementActionPending || !canManualMove}
-          value={moveY}
-          onChange={(e) => onMoveYChange(e.target.value === '' ? '' : Number(e.target.value))}
-          className="w-full!"
-        />
-        <MovementInput
-          axis="Z"
-          currentPosition={printerZ}
-          disabled={movementActionPending || !canManualMove}
-          value={moveZ}
-          onChange={(e) => onMoveZChange(e.target.value === '' ? '' : Number(e.target.value))}
-          className="w-full!"
-        />
-        <div className="pt-2 h-full flex items-stretch">
-          <ControlPadButton
-            disabled={
-              movementActionPending ||
-              !canManualMove ||
-              (onMoveTo ? !completePosition : (moveX === '' && moveY === '' && moveZ === ''))
-            }
-            onClick={async () => {
-              if (onMoveTo) {
-                if (!completePosition) return;
-                onMoveTo({
-                  x: Number(moveX), y: Number(moveY), z: Number(moveZ),
-                });
-                return;
-              }
-              if (moveX !== '') await onMove('X', Number(moveX));
-              if (moveY !== '') await onMove('Y', Number(moveY));
-              if (moveZ !== '') await onMove('Z', Number(moveZ));
-            }}
-            title="Go to position"
-            padSize="medium"
-            className="w-full h-11 text-xs font-semibold"
-          >
-            GO
-          </ControlPadButton>
-        </div>
-        {onMoveTo && !completePosition && <p className="col-span-4 text-xs text-pf-text-secondary">Enter valid X, Y, and Z coordinates for absolute movement.</p>}
-      </div>
+      <PrinterCoordinateRow
+        values={{ X: moveX, Y: moveY, Z: moveZ }}
+        positions={{ X: printerX, Y: printerY, Z: printerZ }}
+        onChange={(axis, value) => ({ X: onMoveXChange, Y: onMoveYChange, Z: onMoveZChange })[axis](value)}
+        disabled={movementActionPending || !canManualMove}
+        onMove={onMove}
+        onMoveTo={onMoveTo}
+      />
+      <PrinterMotionHelp absolute={!!onMoveTo} />
     </div>
   );
 }

@@ -1,3 +1,5 @@
+export type { PrinterControlMode, UserSettingsResponse, UpdateUserSettingsRequest } from '@/features/settings/types/index';
+
 export type SettingsScopeId = 'user' | 'system';
 
 /** Sub-page within a settings category */
