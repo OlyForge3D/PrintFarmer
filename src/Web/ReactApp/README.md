@@ -162,10 +162,15 @@ Tests use Vitest and React Testing Library. See `src/test/` for examples.
 
 ## API Integration
 
-### Durable Moonraker motion
+### Capability-based durable motion
 
 Home All/XY/Z, relative jogs, absolute positioning, and calibration use durable
-`/api/printers/{id}/control-operations` records. HTTP 202 means admission, not
+`/api/printers/{id}/control-operations` records when the authoritative current
+status advertises `physicalControl.supportedOperations`, regardless of the
+printer's backend name. Loading or failed capability reads never imply legacy
+support. A known empty list uses the existing legacy routes; a durable plugin's
+unadvertised operations are rejected without legacy fallback.
+HTTP 202 means admission, not
 completion, and must contain an unresolved operation. HTTP 200 admission replay
 must contain a valid terminal receipt for that same operation ID; mismatched
 status/state combinations, malformed receipts, and other successful HTTP statuses
@@ -195,10 +200,10 @@ never triggers a retry, a new UUID, or a legacy fallback. If an exact receipt is
 missing but fresh current status has no active barrier, controls become available
 without claiming the previous movement succeeded. The outcome warning remains;
 do not repeat an unconfirmed movement. Older servers must be updated for
-Moonraker motion.
-Other printer backends retain their existing motion endpoints.
-Moonraker absolute GO/Enter requires finite X, Y, and Z coordinates together;
-non-Moonraker partial-axis controls retain their existing behavior. Calibration
+durable motion.
+Non-durable printer plugins retain their existing motion endpoints.
+Durable absolute GO/Enter requires finite X, Y, and Z coordinates together;
+legacy partial-axis controls retain their existing behavior. Calibration
 Z adjustments retain the explicitly selected bed-center X/Y target.
 
 Unknown outcomes are settled failures, not persistent recovery gates. There is

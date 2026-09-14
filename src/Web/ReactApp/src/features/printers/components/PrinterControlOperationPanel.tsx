@@ -26,7 +26,7 @@ function operationStatus(operation: PrinterControlOperation): string {
 }
 
 export function PrinterControlOperationPanel({ control }: Props) {
-  if (!control.isMoonraker) return null;
+  if (!control.usesDurableMotion && !control.blocked && !control.operation && !control.error) return null;
   const { saved, error, tracker, uncertain, checking, admitting } = control;
   const operation = saved && control.operation?.operationId !== saved.operationId ? null : control.operation;
   const visibleError = admitting && !operation ? null : error;
@@ -54,7 +54,6 @@ export function PrinterControlOperationPanel({ control }: Props) {
       {unknownOutcome && <p>Do not repeat this movement. Its completion is not confirmed and it was not retried. Leaving this page does not cancel a command already sent.</p>}
       {operation?.failure && <p role="alert" className="text-pf-error">{operation.failure.message}</p>}
       {!tracker && <p>Sign in to check motion availability.</p>}
-      {control.current && !control.current.physicalControl.supportedOperations.length && <p>Update the server to enable Moonraker motion controls.</p>}
       {externalBarrier && <p>Another printer action is active. Motion controls will be available when it finishes.</p>}
       {needsAttention && recheck}
       {(operation || saved || tracker) && (

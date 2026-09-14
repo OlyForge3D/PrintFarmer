@@ -23,7 +23,7 @@ export function mountMotionPanel(element: HTMLElement, state: 'Queued' | 'Runnin
   const tracker = new PrinterControlTracker(operation.printerId, () => true);
   tracker.refresh = async () => operation;
   const control: PrinterControlOperationController = {
-    isMoonraker: true, blocked: operation.barrierHeld, checking: false, submitting: false,
+    usesDurableMotion: true, blocked: operation.barrierHeld, checking: false, submitting: false,
     admitting: false, uncertain: false, error: null, saved: null, operation,
     current: {
       operation: operation.barrierHeld ? operation : null,

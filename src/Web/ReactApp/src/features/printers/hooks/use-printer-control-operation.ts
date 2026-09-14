@@ -8,7 +8,7 @@ import { apiClient } from '@/services/api';
 import { printerSignalRService as printerSignalR } from '@/services/printer-signalr';
 import { CONTROL_RECHECK_MS, PrinterControlTracker } from '@/services/printer-control-operations';
 import type { ControlOperationSnapshot } from '@/services/printer-control-operations';
-import { PrinterBackend, type CommandResult, type Printer, type PrinterControlIntent } from '@/types/api';
+import type { CommandResult, Printer, PrinterControlIntent } from '@/types/api';
 
 const trackers = new Map<string, { token: string; tracker: PrinterControlTracker }>();
 let sessionGeneration = 0;
@@ -26,7 +26,6 @@ const getEmptySnapshot = () => emptySnapshot;
 export function usePrinterControlOperation(printer?: Pick<Printer, 'id' | 'backend'>) {
   const auth = useContext(AuthContext);
   const queryClient = useQueryClient();
-  const isMoonraker = printer?.backend === PrinterBackend.Moonraker;
   const subject = auth?.isAuthenticated ? auth.user?.id : undefined;
   const token = subject ? localStorage.getItem('auth-token') : null;
   const printerId = printer?.id;
@@ -34,7 +33,7 @@ export function usePrinterControlOperation(printer?: Pick<Printer, 'id' | 'backe
     ? `printfarmer:control-operation:${JSON.stringify([new URL(getApiBaseUrl(), window.location.origin).href, subject, printerId])}`
     : null;
   const tracker = useMemo(() => {
-    if (!isMoonraker || !scope || !token || !printerId) return null;
+    if (!scope || !token || !printerId) return null;
     const existing = trackers.get(scope);
     if (existing?.token === token) return existing.tracker;
     const generation = sessionGeneration;
@@ -42,7 +41,7 @@ export function usePrinterControlOperation(printer?: Pick<Printer, 'id' | 'backe
       () => generation === sessionGeneration && localStorage.getItem('auth-token') === token);
     trackers.set(scope, { token, tracker: created });
     return created;
-  }, [isMoonraker, scope, token, printerId]);
+  }, [scope, token, printerId]);
   const snapshot = useSyncExternalStore(tracker?.subscribe ?? emptySubscribe, tracker?.getSnapshot ?? getEmptySnapshot);
   const lifetime = useRef(new AbortController());
 
@@ -89,9 +88,14 @@ export function usePrinterControlOperation(printer?: Pick<Printer, 'id' | 'backe
 
   const execute = useCallback(async (intent: PrinterControlIntent): Promise<CommandResult> => {
     if (!printerId) throw new Error('Select a printer first.');
+    if (!tracker) throw new Error('An authenticated session is required to check motion capabilities.');
+    if (tracker.isBlocked()) {
+      throw new Error(tracker.getSnapshot().error ?? 'Another command is active or motion capabilities are not yet available.');
+    }
+    const supported = tracker.getSnapshot().current?.physicalControl.supportedOperations;
+    if (!supported) throw new Error('Motion capabilities are not yet available.');
     let result: CommandResult;
-    if (isMoonraker) {
-      if (!tracker) throw new Error('An authenticated session is required for durable motion.');
+    if (supported.length > 0) {
       result = await tracker.execute(intent, lifetime.current.signal);
     } else {
       const move = {
@@ -116,12 +120,13 @@ export function usePrinterControlOperation(printer?: Pick<Printer, 'id' | 'backe
     }
     void queryClient.invalidateQueries({ queryKey: queryKeys.printers });
     return result;
-  }, [printerId, isMoonraker, tracker, queryClient]);
+  }, [printerId, tracker, queryClient]);
 
   const supported = snapshot.current?.physicalControl.supportedOperations;
   return {
-    ...snapshot, tracker, execute, isMoonraker,
-    blocked: isMoonraker && (!tracker || tracker.isBlocked() || !supported?.length),
+    ...snapshot, tracker, execute,
+    usesDurableMotion: !!supported?.length,
+    blocked: !tracker || tracker.isBlocked(),
   };
 }
 

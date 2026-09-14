@@ -7,7 +7,7 @@ import type { AuthContextType } from '@/contexts/AuthContextValue';
 import { usePrinterControlOperation } from '@/features/printers/hooks/use-printer-control-operation';
 import { apiClient } from '@/services/api';
 import { CONTROL_RECHECK_MS } from '@/services/printer-control-operations';
-import { PrinterBackend, type PrinterControlIntent, type PrinterControlOperation } from '@/types/api';
+import { PrinterBackend, type PrinterControlIntent, type PrinterControlOperation, type PrinterControlOperationKind } from '@/types/api';
 
 const events = vi.hoisted(() => ({
   connected: false,
@@ -35,6 +35,7 @@ let op: PrinterControlOperation | null;
 let auth: AuthContextType;
 let identity = 0;
 let client: QueryClient;
+let supportedOperations: PrinterControlOperationKind[];
 const intents: PrinterControlIntent[] = [
   { kind: 'HomeAll' }, { kind: 'HomeXY' }, { kind: 'HomeZ' },
   { kind: 'Jog', x: 5 }, { kind: 'MoveTo', x: 110, y: 110, z: 10, f: 3000 },
@@ -55,9 +56,10 @@ beforeEach(() => {
   } as unknown as AuthContextType;
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   op = null;
+  supportedOperations = ['HomeAll', 'HomeXY', 'HomeZ', 'Jog', 'MoveTo'];
   vi.mocked(apiClient.getCurrentPrinterControlOperation).mockImplementation(async () => ({
     physicalControl: {
-      supportedOperations: ['HomeAll', 'HomeXY', 'HomeZ', 'Jog', 'MoveTo'],
+      supportedOperations,
       barrierHeld: op?.barrierHeld ?? false,
       operationId: op?.barrierHeld ? op.operationId : null,
       state: op?.barrierHeld ? op.state : null,
@@ -90,10 +92,13 @@ describe('motion clients and invalidation lifecycle', () => {
     unmount();
   });
 
-  it.each(intents)('Moonraker $kind uses only durable admission and REST completion', async intent => {
-    const { result, unmount } = renderHook(() => usePrinterControlOperation({ id: printerId, backend: PrinterBackend.Moonraker }), { wrapper });
+  it.each([PrinterBackend.Moonraker, PrinterBackend.PrusaLink].flatMap(backend =>
+    intents.map(intent => ({ backend, intent, kind: intent.kind }))))(
+    'advertised durable $backend $kind uses only control operations and REST completion', async ({ backend, intent }) => {
+    const { result, unmount } = renderHook(() => usePrinterControlOperation({ id: printerId, backend }), { wrapper });
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(result.current.blocked).toBe(false);
+    expect(result.current.usesDurableMotion).toBe(true);
     let task!: ReturnType<typeof result.current.execute>;
     await act(async () => { task = result.current.execute(intent); await vi.advanceTimersByTimeAsync(0); });
     expect(apiClient.createPrinterControlOperation).toHaveBeenCalledWith(printerId, expect.any(String), intent);
@@ -105,8 +110,12 @@ describe('motion clients and invalidation lifecycle', () => {
     unmount();
   });
 
-  it('preserves all five non-Moonraker legacy routes without durable admission', async () => {
+  it('preserves all five legacy routes when authoritative capabilities advertise no durable operations', async () => {
+    supportedOperations = [];
     const { result, unmount } = renderHook(() => usePrinterControlOperation({ id: printerId, backend: PrinterBackend.PrusaLink }), { wrapper });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.usesDurableMotion).toBe(false);
+    expect(result.current.blocked).toBe(false);
     for (const intent of intents) expect((await result.current.execute(intent)).success).toBe(true);
     expect(apiClient.homePrinter).toHaveBeenCalledWith(printerId);
     expect(apiClient.homeXY).toHaveBeenCalledWith(printerId);
@@ -114,6 +123,55 @@ describe('motion clients and invalidation lifecycle', () => {
     expect(apiClient.movePrinter).toHaveBeenCalledWith(printerId, { x: 5 });
     expect(apiClient.movePrinterTo).toHaveBeenCalledWith(printerId, { x: 110, y: 110, z: 10, f: 3000 });
     expect(apiClient.createPrinterControlOperation).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('never falls back to legacy while capability loading is pending', async () => {
+    vi.mocked(apiClient.getCurrentPrinterControlOperation).mockReturnValue(new Promise(() => undefined));
+    const { result, unmount } = renderHook(() => usePrinterControlOperation({ id: printerId, backend: PrinterBackend.PrusaLink }), { wrapper });
+    expect(result.current.blocked).toBe(true);
+    await expect(result.current.execute({ kind: 'HomeAll' })).rejects.toThrow('not yet available');
+    expect(apiClient.createPrinterControlOperation).not.toHaveBeenCalled();
+    expect(apiClient.homePrinter).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it.each([403, 404, 500])('does not infer legacy support from failed capability lookup HTTP%s', async statusCode => {
+    vi.mocked(apiClient.getCurrentPrinterControlOperation).mockRejectedValue({ statusCode });
+    const { result, unmount } = renderHook(() => usePrinterControlOperation({ id: printerId, backend: PrinterBackend.PrusaLink }), { wrapper });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.blocked).toBe(true);
+    await expect(result.current.execute({ kind: 'HomeAll' })).rejects.toThrow();
+    expect(apiClient.createPrinterControlOperation).not.toHaveBeenCalled();
+    expect(apiClient.homePrinter).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('does not send an unadvertised operation to legacy routes for a durable plugin', async () => {
+    supportedOperations = ['HomeAll'];
+    const { result, unmount } = renderHook(() => usePrinterControlOperation({ id: printerId, backend: PrinterBackend.PrusaLink }), { wrapper });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    await expect(result.current.execute({ kind: 'Jog', x: 5 })).rejects.toThrow('does not support');
+    expect(apiClient.createPrinterControlOperation).not.toHaveBeenCalled();
+    expect(apiClient.movePrinter).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('keeps legacy motion blocked while the authoritative current barrier is active', async () => {
+    supportedOperations = [];
+    op = {
+      printerId, operationId: '22222222-2222-4222-8222-222222222222', kind: 'HomeAll',
+      x: null, y: null, z: null, f: null, state: 'Running', rowVersion: 'v1',
+      barrierHeld: true, requiresRecovery: false, completionEvidence: 'None',
+      senderIsolation: 'NotRequested', failure: null,
+      createdAtUtc: '2026-09-12T18:00:00Z', updatedAtUtc: '2026-09-12T18:00:00Z',
+      startedAtUtc: null, completedAtUtc: null,
+    };
+    const { result, unmount } = renderHook(() => usePrinterControlOperation({ id: printerId, backend: PrinterBackend.PrusaLink }), { wrapper });
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.blocked).toBe(true);
+    await expect(result.current.execute({ kind: 'HomeAll' })).rejects.toThrow();
+    expect(apiClient.homePrinter).not.toHaveBeenCalled();
     unmount();
   });
 

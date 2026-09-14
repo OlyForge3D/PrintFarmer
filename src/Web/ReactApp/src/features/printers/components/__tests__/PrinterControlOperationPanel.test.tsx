@@ -9,7 +9,7 @@ vi.mock('sonner', () => ({ toast: { error: toastError } }));
 
 function control(overrides: Partial<PrinterControlOperationController> = {}): PrinterControlOperationController {
   return {
-    isMoonraker: true, blocked: false, checking: false, submitting: false, admitting: false, uncertain: false, error: null,
+    usesDurableMotion: true, blocked: false, checking: false, submitting: false, admitting: false, uncertain: false, error: null,
     saved: null,
     operation: {
       operationId: 'op-1', printerId: 'printer-1', kind: 'HomeAll', state: 'Unknown', rowVersion: 'v1',
