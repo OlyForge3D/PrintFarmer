@@ -1692,6 +1692,15 @@ final class PrinterControlsViewModel: ObservableObject {
                     commandNotice = "Motion outcome is unknown. Inspect the printer before another action. No command will be replayed."
                 }
             }
+            guard canPublishRead(generation), motionReadID == readID, !motionSubmissionInFlight else { return }
+            if projection.isExplicitlyUnlocked, projection.supportedOperations.isEmpty,
+               !hasUnresolvedMotion, !hasDurableMotionBarrier,
+               pendingCommand == nil, commandTask == nil, calibrationLease == nil,
+               commandIdentity.map({ !commandLeases.contains($0) }) == true {
+                // Historical observation IDs are not coordination: only a fresh,
+                // explicitly clear server projection may withdraw durable routing.
+                durableMotionRequired = false
+            }
         } catch {
             guard canPublishRead(generation), motionReadID == readID else { return }
             motionCurrentVerified = false

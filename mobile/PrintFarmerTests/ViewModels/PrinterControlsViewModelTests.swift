@@ -3875,6 +3875,145 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         try await finish(model, service)
     }
 
+    private var withdrawnMotionCapability: PrinterCurrentControlOperation {
+        .init(physicalControl: .init(
+            supportedOperations: [], barrierHeld: false, requiresRecovery: false
+        ), operation: nil)
+    }
+
+    func test_authoritativeClearCapabilityWithdrawalRestoresLegacyWithoutRecreation() async throws {
+        let (model, service) = try await fixture(backend: .octoPrint)
+        XCTAssertTrue(model.usesDurableMotion)
+        service.currentControlOperationToReturn = withdrawnMotionCapability
+        await model.refreshControlOperation()
+        XCTAssertFalse(model.usesDurableMotion)
+        XCTAssertNil(model.motionBlockedReason)
+        XCTAssertNil(model.operationReadError)
+        await model.homeZ()
+        XCTAssertNotNil(service.homeZCalledWith)
+        XCTAssertTrue(service.submittedControlOperations.isEmpty)
+        model.deactivate()
+    }
+
+    func test_capabilityWithdrawalCannotDowngradeHeldCurrentOrExactReceipt() async throws {
+        let (model, service) = try await fixture()
+        admitRunning(service)
+        await model.homeAll()
+        let sent = try XCTUnwrap(service.submittedControlOperations.last)
+        let held = PrinterControlOperation.controlsFixture(
+            printerID: sent.printerID, operationID: sent.operationID,
+            request: sent.request, state: .unknown, held: true
+        )
+        service.controlOperationToReturn = held
+        service.currentControlOperationToReturn = .init(
+            physicalControl: .init(
+                supportedOperations: [], barrierHeld: true,
+                operationId: held.operationId, state: held.state, requiresRecovery: false
+            ), operation: held
+        )
+        await model.refreshControlOperation()
+        XCTAssertTrue(model.usesDurableMotion)
+        XCTAssertTrue(model.hasDurableMotionBarrier)
+        service.currentControlOperationToReturn = withdrawnMotionCapability
+        await model.refreshControlOperation()
+        XCTAssertTrue(model.usesDurableMotion, "A later exact receipt still owns coordination")
+        XCTAssertTrue(model.hasUnresolvedMotion)
+        await model.homeZ()
+        XCTAssertNil(service.homeZCalledWith)
+        XCTAssertEqual(service.submittedControlOperations.count, 1)
+        service.controlOperationToReturn = .controlsFixture(
+            printerID: sent.printerID, operationID: sent.operationID,
+            request: sent.request, state: .unknown, held: false
+        )
+        await model.refreshControlOperation()
+        XCTAssertFalse(model.hasUnresolvedMotion)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertFalse(model.usesDurableMotion, "Settled history must not become a routing lock")
+        await model.homeZ()
+        XCTAssertNotNil(service.homeZCalledWith)
+        model.deactivate()
+    }
+
+    func test_capabilityWithdrawalWaitsForInFlightAdmissionWithoutReplaying() async throws {
+        let (model, service) = try await fixture()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        service.submitControlOperationHandler = { _, _, _ in
+            await barrier.arriveAndWait()
+            throw NetworkError.timeout
+        }
+        let submission = Task { await model.homeAll() }
+        await barrier.waitUntilArrived()
+        service.currentControlOperationToReturn = withdrawnMotionCapability
+        await model.refreshControlOperation()
+        XCTAssertTrue(model.usesDurableMotion)
+        XCTAssertNotNil(model.pendingCommand)
+        await model.homeZ()
+        XCTAssertNil(service.homeZCalledWith)
+        XCTAssertEqual(service.submittedControlOperations.count, 1)
+        barrier.close()
+        await submission.value
+        XCTAssertFalse(model.usesDurableMotion, "An observation-only ID cannot retain the routing gate")
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertTrue(model.commandNotice?.contains("unknown") == true)
+        XCTAssertEqual(service.submittedControlOperations.count, 1)
+        XCTAssertNil(service.homeZCalledWith)
+    }
+
+    func test_missingOrInvalidCurrentEvidenceNeverDowngradesAdvertisedRouting() async throws {
+        for error in [NetworkError.timeout, .invalidResponse, .notFound] {
+            let (model, service) = try await fixture(server: UUID())
+            var missingTelemetry = model.printer
+            missingTelemetry.physicalControl = nil
+            model.handlePrinterUpdate(missingTelemetry)
+            service.currentControlOperationHandler = { _ in throw error }
+            await model.refreshControlOperation()
+            XCTAssertTrue(model.usesDurableMotion)
+            XCTAssertNotNil(model.motionBlockedReason)
+            await model.homeAll()
+            XCTAssertNil(service.homeCalledWith)
+            XCTAssertTrue(service.submittedControlOperations.isEmpty)
+            service.currentControlOperationHandler = nil
+            service.currentControlOperationToReturn = .init(
+                physicalControl: .init(
+                    supportedOperations: [], barrierHeld: false, operationId: UUID(), requiresRecovery: false
+                ), operation: nil
+            )
+            await model.refreshControlOperation()
+            XCTAssertTrue(model.usesDurableMotion, "Malformed empty capability evidence cannot authorize legacy motion")
+            XCTAssertNotNil(model.operationReadError)
+            model.deactivate()
+        }
+    }
+
+    func test_capabilityWithdrawalRespectsOtherOwnersInFlightLease() async throws {
+        let (original, service) = try await fixture()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        service.submitControlOperationHandler = { _, _, _ in
+            await barrier.arriveAndWait()
+            throw NetworkError.timeout
+        }
+        let submission = Task { await original.homeAll() }
+        await barrier.waitUntilArrived()
+        service.currentControlOperationToReturn = withdrawnMotionCapability
+        let (other, _) = try await fixture(service: service)
+        XCTAssertTrue(other.usesDurableMotion)
+        XCTAssertTrue(other.isExecuting)
+        await other.homeZ()
+        XCTAssertNil(service.homeZCalledWith)
+        barrier.close()
+        await submission.value
+        await other.refreshControlOperation()
+        XCTAssertFalse(other.usesDurableMotion)
+        XCTAssertFalse(other.isExecuting)
+        await other.homeZ()
+        XCTAssertNotNil(service.homeZCalledWith)
+        XCTAssertEqual(service.submittedControlOperations.count, 1)
+        other.deactivate()
+        original.deactivate()
+    }
+
     func test_allHomeJogAndAbsoluteEntryPointsUseDurableIntentWithoutLegacyFallback() async throws {
         let (model, service) = try await fixture()
         admitRunning(service)
