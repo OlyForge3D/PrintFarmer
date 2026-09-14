@@ -36,7 +36,7 @@ describe('canonical frontend release identity', () => {
       channel, canonicalVersion: version, baseVersion: '1.2.3',
       sourceBranch: branch, sourceTag: `v${version}`, sourceCommit: 'a'.repeat(40),
       authorizedBranchHead: 'a'.repeat(40), buildId: '45', buildAttempt: '2',
-      workflowIdentity: `OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/${branch}`,
+      workflowIdentity: 'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development',
       created: '2026-09-12T20:00:00.000Z',
     };
     const allocation = allocationKey(record);
