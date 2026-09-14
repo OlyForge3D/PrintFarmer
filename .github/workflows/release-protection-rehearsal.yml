@@ -139,9 +139,82 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  fixture:
+    name: Owner-approved App-only inert fixture
+    needs: [admission, positive]
+    if: inputs.denial_probes
+    environment: release-rehearsal-fixture-${{ inputs.channel }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+      checks: read
+      statuses: read
+      pull-requests: read
+    outputs:
+      inventory_digest: ${{ steps.verify.outputs.inventory_digest }}
+    steps:
+      - name: Reject untrusted dispatches and reruns
+        id: admission
+        shell: bash
+        env:
+          REHEARSAL_CHANNEL: ${{ inputs.channel }}
+        run: |
+          node --input-type=module <<'NODE'
+          const env = process.env;
+          const repository = 'OlyForge3D/PrintFarmer';
+          const workflow = '.github/workflows/release-protection-rehearsal.yml';
+          const branch = { insider: 'development', stable: 'main' }[env.REHEARSAL_CHANNEL];
+          const trusted = ['insider', 'stable'].includes(env.REHEARSAL_CHANNEL) &&
+            env.GITHUB_REPOSITORY === repository &&
+            env.GITHUB_EVENT_NAME === 'workflow_dispatch' &&
+            env.GITHUB_REF === `refs/heads/${branch}` &&
+            env.GITHUB_WORKFLOW_REF === `${repository}/${workflow}@refs/heads/${branch}` &&
+            /^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? '') &&
+            env.GITHUB_WORKFLOW_SHA === env.GITHUB_SHA &&
+            env.GITHUB_RUN_ATTEMPT === '1' &&
+            /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID ?? '');
+          if (!trusted) {
+            console.error('Untrusted rehearsal dispatch; protected jobs blocked');
+            process.exitCode = 1;
+          }
+          NODE
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        with:
+          node-version: 24
+      - name: Install locked workflow parser without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Provision exactly one inert fixture with an ephemeral App token
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REHEARSAL_CHANNEL: ${{ inputs.channel }}
+          REHEARSAL_DENIAL_PROBES: ${{ inputs.denial_probes }}
+          REHEARSAL_POSITIVE_DIGEST: ${{ needs.positive.outputs.inventory_digest }}
+          RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          RELEASE_REHEARSAL_FIXTURE_PRIVATE_KEY: ${{ secrets.RELEASE_REHEARSAL_FIXTURE_PRIVATE_KEY }}
+          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+        run: node scripts/ci/release-rehearsal-control.mjs fixture
+      - name: Preserve secret-free intended fixture evidence
+        if: always() && steps.admission.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: release-rehearsal-fixture-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/release-rehearsal/receipt.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+
   probes:
     name: Owner-approved generic-token denial probes
-    needs: [admission, positive]
+    needs: [admission, positive, fixture]
     if: inputs.denial_probes
     environment: release-${{ inputs.channel }}
     runs-on: ubuntu-latest
@@ -191,8 +264,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REHEARSAL_CHANNEL: ${{ inputs.channel }}
           REHEARSAL_DENIAL_PROBES: ${{ inputs.denial_probes }}
-          REHEARSAL_POSITIVE_DIGEST: ${{ needs.positive.outputs.inventory_digest }}
-          RELEASE_REHEARSAL_APPROVED_SHA: ${{ vars.RELEASE_REHEARSAL_APPROVED_SHA }}
+          REHEARSAL_POSITIVE_DIGEST: ${{ needs.fixture.outputs.inventory_digest }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
         run: node scripts/ci/release-rehearsal-control.mjs probes
