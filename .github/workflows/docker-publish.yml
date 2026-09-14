@@ -290,7 +290,8 @@ jobs:
             while IFS= read -r platform_digest; do
               [[ "$platform_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
               platform_suffix="${platform_digest#sha256:}"
-              platform_sbom="release-artifacts/printfarmer-${image}-${platform_suffix}.spdx.json"
+              platform_sbom="crypto-evidence/platforms/${image}/${platform_suffix}.spdx.json"
+              mkdir -p "$(dirname "$platform_sbom")"
               syft "registry:${repository}@${platform_digest}" -o "spdx-json=${platform_sbom}"
               node scripts/compliance/enrich-sbom.mjs \
                 --sbom "$platform_sbom" \
@@ -387,7 +388,7 @@ jobs:
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$platform_evidence/attestation.json"
               cosign download signature "$platform_reference" > "$platform_evidence/signature.bundle.json"
               cosign download attestation "$platform_reference" > "$platform_evidence/attestation.bundle.json"
-              cp "source/release-artifacts/printfarmer-${image}-${platform_suffix}.spdx.json" \
+              cp "source/crypto-evidence/platforms/${image}/${platform_suffix}.spdx.json" \
                 "$platform_evidence/predicate.json"
             done <<< "$platform_digests"
           done
@@ -600,16 +601,16 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             release-assets/release-identity.json
 
-          createdThisRun=false
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "Release $VERSION already exists; verifying immutable assets"
             validate_preexisting_source_inventory
             [[ "$remote_inventory" != "$expected_complete_inventory" ]] || verify_complete_retry_assets
           else
             create_args=(release create "$VERSION" --draft --verify-tag --title "$VERSION" --notes-file release-assets/release-notes.md)
-            [[ "$VERSION" == *-* ]] && create_args+=(--prerelease)
+            if [[ "$VERSION" == *-* ]]; then
+              create_args+=(--prerelease)
+            fi
             gh "${create_args[@]}"
-            createdThisRun=true
             verify_new_release_is_empty
           fi
 
@@ -695,7 +696,9 @@ jobs:
             if (manifest.lifecycle.releaseNotes.sha256 !== process.env.RELEASE_NOTES_SHA256) throw new Error("Release notes hash differs from signed manifest");
           ' "$recovered/release-manifest.json" "$recovered/release-manifest.envelope.json"
           expected_prerelease=false
-          [[ "$VERSION" == *-* ]] && expected_prerelease=true
+          if [[ "$VERSION" == *-* ]]; then
+            expected_prerelease=true
+          fi
           expected_final_inventory="$(printf '%s\n' \
             release-notes.md release-manifest.json release-manifest.envelope.json release-manifest.envelope.bundle.json \
             PrintFarmer-"${VERSION}"-source.tar.gz PrintFarmer-"${VERSION}"-source.json LICENSE THIRD-PARTY-NOTICES.md \
