@@ -122,6 +122,4 @@ export function emitPublicReleaseAssets(record, set, root = '.', releaseNotesSha
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, 'release-identity.json'), JSON.stringify(projected.identity));
   writeFileSync(join(directory, 'release-set.json'), JSON.stringify(projected));
-  writeFileSync(join(directory, 'release-manifest.json'), JSON.stringify(manifest));
-  writeFileSync(join(directory, 'release-manifest.envelope.json'), JSON.stringify(envelope));
 }

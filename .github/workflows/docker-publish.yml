@@ -364,7 +364,7 @@ jobs:
             -c 'test -f /app/Farm.Web.Api.dll && test -f /app/wwwroot/index.html && dotnet --info >/dev/null'
       - name: Sign externally-digested complete release manifest
         env:
-          GH_TOKEN: ${{ steps.publisher.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.consume.outputs.version }}
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
         run: |
@@ -439,17 +439,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          node scripts/compliance/create-source-bundle.mjs \
-            --revision '${{ fromJSON(inputs.transaction).sourceCommit }}' \
-            --version "$VERSION" \
-            --output release-assets
-          cp LICENSE THIRD-PARTY-NOTICES.md release-assets/
-          cp ../.artifacts/release-authorization/public-identity.json release-assets/release-identity.json
-          cp ../.artifacts/release-authorization/public-identity.bundle.json release-assets/release-identity.bundle.json
-          cp ../release-assets/release-set.json release-assets/release-set.json
-          cp ../.artifacts/release-authorization/release-notes.md release-assets/release-notes.md
-          cp release-artifacts/*.spdx.json release-artifacts/digest-*.txt release-assets/
-
           expected_source_assets=(
             "PrintFarmer-${VERSION}-source.tar.gz"
             "PrintFarmer-${VERSION}-source.json"
@@ -481,12 +470,59 @@ jobs:
           expected_complete_inventory="$(
             printf '%s\n' "${expected_source_assets[@]}" "${expected_manifest_assets[@]}" | sort
           )"
+          validate_local_source_inventory() {
+            local_inventory="$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)"
+            [[ -z "$local_inventory" || "$local_inventory" == "$expected_source_inventory" ]] ||
+              { echo "Local source asset inventory is incomplete or contains unexpected files"; exit 1; }
+          }
           validate_preexisting_source_inventory() {
             remote_inventory="$(gh release view "$VERSION" --json assets --jq '.assets[].name' | sort)"
             [[ "$remote_inventory" == "$expected_source_inventory" ||
                "$remote_inventory" == "$expected_complete_inventory" ]] ||
               { echo "Draft release asset inventory is incomplete or contains unexpected files"; exit 1; }
           }
+          verify_new_release_is_empty() {
+            remote_inventory="$(gh release view "$VERSION" --json assets --jq '.assets[].name' | sort)"
+            [[ -z "$remote_inventory" ]] ||
+              { echo "New draft release must be empty before source asset upload"; exit 1; }
+          }
+          validate_local_source_inventory
+          verify_complete_retry_assets() {
+            recovery_dir="$RUNNER_TEMP/preexisting-complete-release"
+            mkdir -p "$recovery_dir"
+            for asset_name in release-notes.md "${expected_manifest_assets[@]}"; do
+              gh release download "$VERSION" --pattern "$asset_name" --dir "$recovery_dir"
+            done
+            cmp -s release-assets/release-notes.md "$recovery_dir/release-notes.md" ||
+              { echo "Published release notes differ from the validated build"; exit 1; }
+            for asset_name in "${expected_manifest_assets[@]}"; do
+              cmp -s "../.artifacts/release-authorization/$asset_name" "$recovery_dir/$asset_name" ||
+                { echo "Published signed manifest asset differs: $asset_name"; exit 1; }
+            done
+            cosign verify-blob --bundle "$recovery_dir/release-manifest.envelope.bundle.json" \
+              --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "$recovery_dir/release-manifest.envelope.json"
+            node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              import { validateReleaseManifestBytes } from "../scripts/ci/release-policy.mjs";
+              const manifest = validateReleaseManifestBytes(readFileSync(process.argv[1], "utf8"),
+                JSON.parse(readFileSync(process.argv[2], "utf8")));
+              if (manifest.lifecycle.releaseNotes.sha256 !== process.env.RELEASE_NOTES_SHA256) {
+                throw new Error("Release notes hash differs from signed manifest");
+              }
+            ' "$recovery_dir/release-manifest.json" "$recovery_dir/release-manifest.envelope.json"
+          }
+          node scripts/compliance/create-source-bundle.mjs \
+            --revision '${{ fromJSON(inputs.transaction).sourceCommit }}' \
+            --version "$VERSION" \
+            --output release-assets
+          cp LICENSE THIRD-PARTY-NOTICES.md release-assets/
+          cp ../.artifacts/release-authorization/public-identity.json release-assets/release-identity.json
+          cp ../.artifacts/release-authorization/public-identity.bundle.json release-assets/release-identity.bundle.json
+          cp ../release-assets/release-set.json release-assets/release-set.json
+          cp ../.artifacts/release-authorization/release-notes.md release-assets/release-notes.md
+          cp release-artifacts/*.spdx.json release-artifacts/digest-*.txt release-assets/
           for asset_name in "${expected_source_assets[@]}"; do
             test -s "release-assets/$asset_name"
           done
@@ -498,13 +534,17 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             release-assets/release-identity.json
 
+          createdThisRun=false
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "Release $VERSION already exists; verifying immutable assets"
             validate_preexisting_source_inventory
+            [[ "$remote_inventory" != "$expected_complete_inventory" ]] || verify_complete_retry_assets
           else
             create_args=(release create "$VERSION" --draft --verify-tag --title "$VERSION" --notes-file release-assets/release-notes.md)
             [[ "$VERSION" == *-* ]] && create_args+=(--prerelease)
             gh "${create_args[@]}"
+            createdThisRun=true
+            verify_new_release_is_empty
           fi
 
           existing_assets="$(gh release view "$VERSION" --json assets --jq '.assets[].name')"
@@ -590,6 +630,17 @@ jobs:
           ' "$recovered/release-manifest.json" "$recovered/release-manifest.envelope.json"
           expected_prerelease=false
           [[ "$VERSION" == *-* ]] && expected_prerelease=true
+          expected_final_inventory="$(printf '%s\n' \
+            release-notes.md release-manifest.json release-manifest.envelope.json release-manifest.envelope.bundle.json \
+            PrintFarmer-"${VERSION}"-source.tar.gz PrintFarmer-"${VERSION}"-source.json LICENSE THIRD-PARTY-NOTICES.md \
+            release-identity.json release-identity.bundle.json release-set.json \
+            printfarmer-api-"${VERSION}".spdx.json printfarmer-frontend-"${VERSION}".spdx.json \
+            printfarmer-slicer-host-"${VERSION}".spdx.json printfarmer-printer-discovery-"${VERSION}".spdx.json \
+            printfarmer-orcaslicer-worker-"${VERSION}".spdx.json printfarmer-monolith-"${VERSION}".spdx.json \
+            digest-api.txt digest-frontend.txt digest-slicer-host.txt digest-printer-discovery.txt \
+            digest-orcaslicer-worker.txt digest-monolith.txt | sort)"
+          [[ "$(gh release view "$VERSION" --json assets --jq '.assets[].name' | sort)" == "$expected_final_inventory" ]] ||
+            { echo "Draft release asset inventory is incomplete or contains unexpected files"; exit 1; }
           gh release edit "$VERSION" --notes-file release-assets/release-notes.md \
             --draft=false --prerelease="$expected_prerelease"
           gh release view "$VERSION" --json body > "$recovered/release-body.json"
@@ -607,6 +658,8 @@ jobs:
               --jq '[.isDraft, .isPrerelease] | @tsv'
           )"
           [[ "$release_state" == "$(printf 'false\t%s' "$expected_prerelease")" ]]
+          [[ "$(gh release view "$VERSION" --json assets --jq '.assets[].name' | sort)" == "$expected_final_inventory" ]] ||
+            { echo "Published release asset inventory is incomplete or contains unexpected files"; exit 1; }
           for asset in release-notes.md release-manifest.json release-manifest.envelope.json release-manifest.envelope.bundle.json; do
             asset_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${VERSION}/${asset}"
             curl --fail --silent --show-error --location --head \

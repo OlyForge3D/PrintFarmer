@@ -125,8 +125,15 @@ export function publishReleaseAliases(record, set, inspect, create) {
   for (const aliases of Object.values(plan)) {
     for (const alias of aliases) {
       const existing = inspect(alias.tag);
-      if (!existing) create(alias.tag, alias.digest);
-      else if (existing.digest !== alias.digest) create(alias.tag, alias.digest);
+      if (existing?.digest !== alias.digest) {
+        if (existing) {
+          requireThat(existing.version && compareVersions(record.canonicalVersion, existing.version) > 0,
+            `Alias regression or unverified existing version: ${alias.tag}`);
+          requireThat(parseTag(`v${existing.version}`).channel === 'stable',
+            `Cross-channel alias movement rejected: ${alias.tag}`);
+        }
+        create(alias.tag, alias.digest);
+      }
       const published = inspect(alias.tag);
       requireThat(published?.digest === alias.digest,
         `Alias compare-and-set conflict: ${alias.tag}`);

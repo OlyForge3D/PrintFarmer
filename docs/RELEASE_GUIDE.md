@@ -469,6 +469,16 @@ bundle; it never re-signs or replaces public release artifacts. The manifest
 schema rejects unknown complete-set, image, platform, and identity-label
 fields rather than silently projecting them away.
 
+Before source construction or upload, a pre-existing draft must have exactly
+the source asset set or that set plus the signed manifest triplet. A new draft
+is re-read and must be empty before its first upload. Empty, partial, duplicate,
+mixed, or unexpected inventories fail before any release mutation. A complete
+retry verifies the downloaded notes, manifest, envelope, and bundle against the
+authorized bytes and Cosign trust identity before immutable tags can move. The
+only authoritative manifest/envelope bytes are the signed
+`release-authorization` artifacts; source-asset preparation does not create a
+second unsigned copy.
+
 The first attempt persists the complete signed triplet as a run-bound Actions
 artifact before any public upload. A retry must recover the earliest unexpired
 triplet from that same run, require its exact sorted inventory and byte-for-byte

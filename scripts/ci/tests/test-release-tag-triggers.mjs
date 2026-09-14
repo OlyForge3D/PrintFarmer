@@ -3674,7 +3674,7 @@ test('workflow wiring keeps authorization and every publisher consumer in one pr
   assert.match(readFileSync('.gitignore', 'utf8'), /^\.artifacts\/$/m);
 });
 
-test('source publication validates existing inventory before uploads and permits only valid retries', () => {
+test('source publication executes fail-closed inventory guards before persistent writes', () => {
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8').replace(/\r\n/g, '\n');
   const sourcePublication = docker.split('      - name: Publish and verify public corresponding-source assets\n')[1]
     .split('      - name: Promote validated immutable image tags')[0];
@@ -3683,15 +3683,25 @@ test('source publication validates existing inventory before uploads and permits
   assert.match(sourcePublication,
     /\[\[ "\$remote_inventory" == "\$expected_source_inventory" \|\|\n             "\$remote_inventory" == "\$expected_complete_inventory" \]\]/);
 
-  const guard = sourcePublication.match(/          validate_preexisting_source_inventory\(\) \{\n([\s\S]*?)\n          \}/)?.[0]
-    .replace(/^          /gm, '');
-  assert.ok(guard, 'Expected the production pre-upload inventory guard');
+  const productionFunction = name => {
+    const found = sourcePublication.match(new RegExp(`          ${name}\\(\\) \\{\\n([\\s\\S]*?)\\n          \\}`))?.[0];
+    assert.ok(found, `Expected production ${name} guard`);
+    return found.replace(/^          /gm, '');
+  };
+  const localGuard = productionFunction('validate_local_source_inventory');
+  const existingGuard = productionFunction('validate_preexisting_source_inventory');
+  const createdGuard = productionFunction('verify_new_release_is_empty');
   const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
   const source = ['source.tar.gz', 'source.json'];
   const manifest = ['release-manifest.json', 'release-manifest.envelope.json', 'release-manifest.envelope.bundle.json'];
   const exactInventory = assets => [...assets].sort().join('\n');
-  const executeGuard = inventory => {
-    const script = `${guard}
+  const executeGuard = ({ local = [], remote = [], operation }) => {
+    const root = resolve('.artifacts', `source-inventory-${process.pid}-${Math.random().toString(16).slice(2)}`);
+    mkdirSync(resolve(root, 'release-assets'), { recursive: true });
+    for (const asset of local) writeFileSync(resolve(root, 'release-assets', asset), 'fixture');
+    const script = `${localGuard}
+${existingGuard}
+${createdGuard}
 expected_source_inventory='source.json
 source.tar.gz'
 expected_complete_inventory='release-manifest.envelope.bundle.json
@@ -3700,18 +3710,29 @@ release-manifest.json
 source.json
 source.tar.gz'
 gh() { printf '%s\n' "$REMOTE_INVENTORY"; }
-validate_preexisting_source_inventory`;
-    return spawnSync(shell, ['-c', script], {
+${operation}`;
+    const result = spawnSync(shell, ['-c', script], {
+      cwd: root,
       encoding: 'utf8',
-      env: { ...process.env, VERSION: 'v1.2.3', REMOTE_INVENTORY: exactInventory(inventory) },
+      env: { ...process.env, VERSION: 'v1.2.3', REMOTE_INVENTORY: exactInventory(remote) },
     });
+    rmSync(root, { recursive: true, force: true });
+    return result;
   };
-  assert.equal(executeGuard(source).status, 0, 'Existing source-only release is valid');
-  assert.equal(executeGuard([...source, ...manifest]).status, 0,
+  assert.equal(executeGuard({ operation: 'validate_local_source_inventory' }).status, 0);
+  assert.equal(executeGuard({ local: source, operation: 'validate_local_source_inventory' }).status, 0);
+  assert.notEqual(executeGuard({ local: ['unexpected.txt'], operation: 'validate_local_source_inventory' }).status, 0,
+    'Unexpected local assets block before source construction');
+  assert.equal(executeGuard({ remote: source, operation: 'validate_preexisting_source_inventory' }).status, 0);
+  assert.equal(executeGuard({ remote: [...source, ...manifest], operation: 'validate_preexisting_source_inventory' }).status, 0,
     'Retry after manifest upload proceeds to manifest verification and pointer advancement');
-  assert.notEqual(executeGuard(source.slice(1)).status, 0, 'Missing source assets are rejected');
-  assert.notEqual(executeGuard([...source, 'unexpected.txt']).status, 0, 'Unexpected source assets are rejected');
-  assert.notEqual(executeGuard([...source, manifest[0]]).status, 0, 'Partial manifest inventories are rejected');
+  for (const remote of [[], source.slice(1), [...source, manifest[0]], [...source, 'unexpected.txt'], [...source, ...source]]) {
+    assert.notEqual(executeGuard({ remote, operation: 'validate_preexisting_source_inventory' }).status, 0,
+      `Invalid pre-existing inventory is rejected: ${remote.join(',')}`);
+  }
+  assert.equal(executeGuard({ operation: 'verify_new_release_is_empty' }).status, 0);
+  assert.notEqual(executeGuard({ remote: ['concurrent.txt'], operation: 'verify_new_release_is_empty' }).status, 0,
+    'A concurrent asset on a newly created release blocks before upload');
   const releaseExists = sourcePublication.indexOf('if gh release view "$VERSION" >/dev/null 2>&1; then');
   const guardInvocation = sourcePublication.indexOf('validate_preexisting_source_inventory', releaseExists);
   assert.ok(guardInvocation > releaseExists && guardInvocation < sourcePublication.indexOf('gh release upload'),
@@ -3785,43 +3806,16 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
   const root = resolve('.artifacts', `public-assets-${process.pid}`);
   try {
     emitPublicReleaseAssets(identity, set, root, releaseNotesHash);
-    for (const file of ['release-identity.json', 'release-set.json',
-      'release-manifest.json', 'release-manifest.envelope.json']) {
+    for (const file of ['release-identity.json', 'release-set.json']) {
       const content = readFileSync(resolve(root, 'release-assets', file), 'utf8');
       assert.doesNotMatch(content, /rulesets|environment|reviewer|private-publisher|futurePrivate|private-/);
       assert.ok(content.includes(hash(identity)));
     }
     const published = JSON.parse(readFileSync(resolve(root, 'release-assets/release-identity.json'), 'utf8'));
     assert.deepEqual(published, publicAuthorization(identity));
-    const manifest = JSON.parse(readFileSync(resolve(root, 'release-assets/release-manifest.json'), 'utf8'));
-    const envelope = JSON.parse(readFileSync(resolve(root, 'release-assets/release-manifest.envelope.json'), 'utf8'));
-    assert.deepEqual(manifest, releaseManifest(identity, set, undefined, releaseNotesHash));
-    assert.deepEqual(manifest.consumption, {
-      schema: 1,
-      immutableReleaseSet: 'signed-complete-set',
-      manualUpdate: { releaseSet: 'signed-complete-set', hostAuthorization: 'one-time-manual-approval' },
-      autoUpdate: {
-        releaseSet: 'signed-complete-set',
-        hostAuthorization: 'bounded-administrator-standing-permission',
-        hostPolicy: 'issue-2665-2666',
-      },
-      publisherApproval: 'publication-only',
-    });
-    assert.deepEqual(envelope, releaseManifestEnvelope(manifest));
-    assert.deepEqual(readReleaseManifest().manifest, manifest);
-    validateReleaseManifestEnvelope(envelope, manifest);
-    const serializedManifest = readFileSync(resolve(root, 'release-assets/release-manifest.json'), 'utf8');
-    assert.deepEqual(validateReleaseManifestBytes(serializedManifest, envelope), manifest);
-    assert.throws(() => validateReleaseManifestBytes(`${serializedManifest}\n`, envelope),
-      /serialization is not canonical|digest mismatch/);
-    assert.throws(() => validateReleaseManifestBytes(
-      serializedManifest.replace('"schema":1', '"schema":2'), envelope),
-    /Invalid release manifest schema|Invalid public set schema|digest mismatch/);
-    assert.throws(() => validateReleaseManifestEnvelope({ ...envelope, sourceCommit: newerSha }, manifest),
-      /envelope mismatch/);
-    assert.throws(() => validateReleaseManifestEnvelope(envelope, {
-      ...manifest, completeSet: { ...manifest.completeSet, images: {} },
-    }), ReleasePolicyError);
+    assert.equal(existsSync(resolve(root, 'release-assets/release-manifest.json')), false);
+    assert.equal(existsSync(resolve(root, 'release-assets/release-manifest.envelope.json')), false);
+    const manifest = releaseManifest(identity, set, undefined, releaseNotesHash);
     for (const mutate of [
       value => { value.lifecycle.cadence = 'manual'; },
       value => { value.provenance.source.commit = newerSha; },
