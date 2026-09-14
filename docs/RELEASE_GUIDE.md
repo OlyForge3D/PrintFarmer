@@ -82,6 +82,30 @@ Stable is the installation default. Insider requires separate administrator
 opt-in and a reduced-stability warning; running a release workflow does not
 enroll or update any host. Versions and channels do not prove compatibility.
 
+## Signed release-set consumer contract
+
+The signed `release-manifest.json`, its signed envelope and the exact canonical
+`release-notes.md` bytes define one complete immutable release set. Both
+**Manual Update Now** and administrator-enabled **Auto-update** must download,
+verify, and consume that same set before installation; neither may select a
+different channel, tag, image subset, notes file, or unsigned metadata.
+
+The release manifest's closed `consumption` object is metadata for consumers,
+not an authorization grant. It records that Manual Update Now needs a
+one-time host approval and Auto-update needs a bounded administrator standing
+permission governed by #2665/#2666. The one protected publisher approval is
+strictly publication-only: it cannot enable host outbound update checks,
+select a host channel, approve a host update plan, or enroll any installation
+in Auto-update.
+
+Canonical authenticated release notes are an asset in that same set. They are
+hashed in the signed manifest and presented before either journey installs.
+Every release notes file has Features, Fixes, Breaking changes, Compatibility,
+Migration, Downtime, Backup, and Recovery sections. A release with no
+release-specific change must say `None.` or `N/A` explicitly; consumers must
+still read the signed compatibility and migration metadata rather than infer
+that an omitted section is safe.
+
 TestFlight remains independent under `ios/vX.Y-{alpha,beta,rc}.N`. Historical
 `v1.0-beta.*` identities and their `ios/*` aliases retain their original objects.
 No migration rewrites existing source tags, registry tags, or historical evidence.

@@ -286,6 +286,7 @@ export function writePublicSet(record, set, identitySha256) {
 }
 
 export function releaseManifest(record, set, identitySha256, releaseNotesSha256) {
+  requireString(releaseNotesSha256, hashPattern, 'release notes hash');
   const completeSet = writePublicSet(record, set, identitySha256);
   const maximumExclusive = `${BigInt(completeSet.identity.baseVersion.split('.')[0]) + 1n}.0.0`;
   const expiresAt = new Date(Date.parse(completeSet.identity.buildTime) + 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -319,8 +320,8 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256)
       publishedAt: completeSet.identity.buildTime, expiresAt,
       sequence: completeSet.identity.channel === 'insider' ? parseTag(completeSet.identity.sourceTag).sequence : '0',
       cadence: completeSet.identity.channel === 'insider' ? 'continuous' : 'promoted',
-      releaseNotes: { url: `https://github.com/${repository}/releases/download/${completeSet.identity.canonicalVersion}/release-notes.md`,
-        sha256: releaseNotesSha256 ?? hash({ releaseId: completeSet.identity.releaseId, sourceCommit: completeSet.identity.sourceCommit }) },
+      releaseNotes: { url: `https://github.com/${repository}/releases/download/${completeSet.identity.sourceTag}/release-notes.md`,
+        sha256: releaseNotesSha256 },
       signing: { identity: publisherWorkflowIdentity, workflowCommit: record.workflowCommit },
     },
     provenance: {
@@ -344,6 +345,17 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256)
       configuration: { format: 'versioned', templates: 'compatible' },
       updater: { strategy: 'digest-pinned', fixedSteps: ['backup', 'pull', 'verify', 'migrate', 'restart'] },
     },
+    consumption: {
+      schema: 1,
+      immutableReleaseSet: 'signed-complete-set',
+      manualUpdate: { releaseSet: 'signed-complete-set', hostAuthorization: 'one-time-manual-approval' },
+      autoUpdate: {
+        releaseSet: 'signed-complete-set',
+        hostAuthorization: 'bounded-administrator-standing-permission',
+        hostPolicy: 'issue-2665-2666',
+      },
+      publisherApproval: 'publication-only',
+    },
     migration: {
       schema: 2, managedEligible: true,
       providers: { postgresql: 'current-head', sqlserver: 'current-head', sqlite: 'ensure-created' },
@@ -354,7 +366,7 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256)
 }
 
 export function validateReleaseManifest(manifest) {
-  requireKeys(manifest, ['schema', 'identity', 'completeSet', 'lifecycle', 'provenance', 'evidence', 'compatibility', 'migration'],
+  requireKeys(manifest, ['schema', 'identity', 'completeSet', 'lifecycle', 'provenance', 'evidence', 'compatibility', 'consumption', 'migration'],
     [], 'release manifest');
   requireThat(manifest.schema === 2, 'Invalid release manifest schema');
   requireObject(manifest.identity, 'release manifest identity');
@@ -378,7 +390,9 @@ export function validateReleaseManifest(manifest) {
   requireTimestamp(lifecycle.publishedAt, 'release publication time');
   requireTimestamp(lifecycle.expiresAt, 'release expiry time');
   requireKeys(lifecycle.releaseNotes, ['url', 'sha256'], [], 'release notes');
-  requireString(lifecycle.releaseNotes.url, /^https:\/\/github\.com\/OlyForge3D\/PrintFarmer\/releases\/download\/[^\s]+\/release-notes\.md$/, 'release notes URL');
+  requireThat(lifecycle.releaseNotes.url ===
+    `https://github.com/${repository}/releases/download/${identity.sourceTag}/release-notes.md`,
+  'Invalid release notes URL');
   requireString(lifecycle.releaseNotes.sha256, hashPattern, 'release notes hash');
   requireKeys(lifecycle.signing, ['identity', 'workflowCommit'], [], 'release signing');
   requireThat(lifecycle.signing.identity === publisherWorkflowIdentity, 'Invalid release signing identity');
@@ -458,6 +472,18 @@ export function validateReleaseManifest(manifest) {
   requireKeys(compatibility.updater, ['strategy', 'fixedSteps'], [], 'release updater compatibility');
   requireThat(compatibility.updater.strategy === 'digest-pinned' &&
     isDeepStrictEqual(compatibility.updater.fixedSteps, ['backup', 'pull', 'verify', 'migrate', 'restart']), 'Invalid release updater');
+  requireKeys(manifest.consumption, ['schema', 'immutableReleaseSet', 'manualUpdate', 'autoUpdate', 'publisherApproval'],
+    [], 'release consumption');
+  const { consumption } = manifest;
+  requireThat(consumption.schema === 1 && consumption.immutableReleaseSet === 'signed-complete-set' &&
+    consumption.publisherApproval === 'publication-only', 'Invalid release consumption authority');
+  requireKeys(consumption.manualUpdate, ['releaseSet', 'hostAuthorization'], [], 'manual update consumption');
+  requireThat(consumption.manualUpdate.releaseSet === consumption.immutableReleaseSet &&
+    consumption.manualUpdate.hostAuthorization === 'one-time-manual-approval', 'Invalid manual update consumption');
+  requireKeys(consumption.autoUpdate, ['releaseSet', 'hostAuthorization', 'hostPolicy'], [], 'auto-update consumption');
+  requireThat(consumption.autoUpdate.releaseSet === consumption.immutableReleaseSet &&
+    consumption.autoUpdate.hostAuthorization === 'bounded-administrator-standing-permission' &&
+    consumption.autoUpdate.hostPolicy === 'issue-2665-2666', 'Invalid auto-update consumption');
   requireKeys(migration, ['schema', 'managedEligible', 'providers', 'downtime', 'backup', 'rollback'], [], 'release migration');
   requireThat(migration.schema === 2 && migration.managedEligible === true && migration.downtime === 'rolling-service-restart' &&
     migration.backup === 'required-before-migration', 'Release migration is not eligible');

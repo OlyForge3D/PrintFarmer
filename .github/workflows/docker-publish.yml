@@ -274,6 +274,7 @@ jobs:
             cp "source/release-artifacts/digest-${image}.txt" "artifacts/digest-${image}/"
             cp "source/release-artifacts/printfarmer-${image}-${{ steps.consume.outputs.version }}.spdx.json" \
               "artifacts/sbom-${image}/"
+          done
       - name: Generate canonical release notes before signing
         env:
           VERSION: ${{ steps.consume.outputs.version }}
@@ -281,12 +282,51 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .artifacts/release-authorization
-          printf 'PrintFarmer %s\n\nSource commit: %s\n' "$VERSION" "$SOURCE_COMMIT" \
-            > .artifacts/release-authorization/release-notes.md
+          cat > .artifacts/release-authorization/release-notes.md <<EOF
+          ## PrintFarmer $VERSION
+
+          Source commit: $SOURCE_COMMIT
+
+          ### Features
+
+          None.
+
+          ### Fixes
+
+          None.
+
+          ### Breaking changes
+
+          None.
+
+          ### Compatibility
+
+          This complete signed immutable release set supports the declared API,
+          service-platform, storage, and configuration compatibility in
+          \`release-manifest.json\`.
+
+          ### Migration
+
+          N/A: no release-specific migration instructions beyond the verified
+          provider metadata in \`release-manifest.json\`.
+
+          ### Downtime
+
+          N/A: no release-specific downtime beyond the manifest's declared
+          rolling service restart.
+
+          ### Backup
+
+          Required before any migration, as declared in \`release-manifest.json\`.
+
+          ### Recovery
+
+          Restore the verified backup and re-pin the verified image digests, as
+          declared in \`release-manifest.json\`.
+          EOF
           printf 'RELEASE_NOTES_SHA256=%s\n' \
             "$(sha256sum .artifacts/release-authorization/release-notes.md | cut -d ' ' -f1)" \
             >> "$GITHUB_ENV"
-          done
       - name: Validate complete immutable set
         env:
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
@@ -439,10 +479,7 @@ jobs:
           cp LICENSE THIRD-PARTY-NOTICES.md release-assets/
           cp ../.artifacts/release-authorization/public-identity.json release-assets/release-identity.json
           cp ../.artifacts/release-authorization/public-identity.bundle.json release-assets/release-identity.bundle.json
-          cp ../.artifacts/release-authorization/release-set.json release-assets/release-set.json
-          cp ../.artifacts/release-authorization/release-manifest.json release-assets/release-manifest.json
-          cp ../.artifacts/release-authorization/release-manifest.envelope.json release-assets/release-manifest.envelope.json
-          cp ../.artifacts/release-authorization/release-manifest.envelope.bundle.json release-assets/release-manifest.envelope.bundle.json
+          cp ../release-assets/release-set.json release-assets/release-set.json
           cp ../.artifacts/release-authorization/release-notes.md release-assets/release-notes.md
           cp release-artifacts/*.spdx.json release-artifacts/digest-*.txt release-assets/
 
@@ -454,9 +491,6 @@ jobs:
             release-identity.json
             release-identity.bundle.json
             release-set.json
-            release-manifest.json
-            release-manifest.envelope.json
-            release-manifest.envelope.bundle.json
             release-notes.md
             "printfarmer-api-${VERSION}.spdx.json"
             "printfarmer-frontend-${VERSION}.spdx.json"
@@ -481,21 +515,6 @@ jobs:
             --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             release-assets/release-identity.json
-          cosign verify-blob \
-            --bundle release-assets/release-manifest.envelope.bundle.json \
-            --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            release-assets/release-manifest.envelope.json
-          node --input-type=module -e '
-            import { readFileSync } from "node:fs";
-            import { validateReleaseManifestBytes } from "../scripts/ci/release-policy.mjs";
-            const manifest = validateReleaseManifestBytes(
-              readFileSync("release-assets/release-manifest.json", "utf8"),
-              JSON.parse(readFileSync("release-assets/release-manifest.envelope.json", "utf8")));
-            if (manifest.lifecycle.releaseNotes.sha256 !== process.env.RELEASE_NOTES_SHA256) {
-              throw new Error("Canonical release-notes bytes differ from the signed manifest");
-            }
-          '
 
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "Release $VERSION already exists; verifying immutable assets"
@@ -525,49 +544,6 @@ jobs:
             gh release upload "$VERSION" "${upload_files[@]}"
           fi
 
-          expected_prerelease=false
-          [[ "$VERSION" == *-* ]] && expected_prerelease=true
-          release_is_draft="$(gh release view "$VERSION" --json isDraft --jq '.isDraft')"
-          release_is_prerelease="$(gh release view "$VERSION" --json isPrerelease --jq '.isPrerelease')"
-          if [[ "$release_is_draft" == "true" || "$release_is_prerelease" != "$expected_prerelease" ]]; then
-            gh release edit "$VERSION" --draft=false --prerelease="$expected_prerelease"
-          fi
-          release_state="$(
-            gh release view "$VERSION" --json isDraft,isPrerelease \
-              --jq '[.isDraft, .isPrerelease] | @tsv'
-          )"
-          [[ "$release_state" == "$(printf 'false\t%s' "$expected_prerelease")" ]]
-          published_assets="$(gh release view "$VERSION" --json assets --jq '.assets[].name')"
-          for asset_name in "${expected_assets[@]}"; do
-            grep -Fxq "$asset_name" <<< "$published_assets"
-            asset_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${VERSION}/${asset_name}"
-            curl --fail --silent --show-error --location --head \
-              --retry 6 --retry-delay 5 --retry-all-errors "$asset_url" >/dev/null
-          done
-          published_manifest_dir="$RUNNER_TEMP/published-release-manifest"
-          mkdir -p "$published_manifest_dir"
-          gh release download "$VERSION" \
-            --pattern release-manifest.json \
-            --pattern release-manifest.envelope.json \
-            --pattern release-manifest.envelope.bundle.json \
-            --dir "$published_manifest_dir"
-          cmp -s release-assets/release-manifest.json "$published_manifest_dir/release-manifest.json"
-          cmp -s release-assets/release-manifest.envelope.json "$published_manifest_dir/release-manifest.envelope.json"
-          cmp -s release-assets/release-manifest.envelope.bundle.json \
-            "$published_manifest_dir/release-manifest.envelope.bundle.json"
-          cosign verify-blob \
-            --bundle "$published_manifest_dir/release-manifest.envelope.bundle.json" \
-            --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            "$published_manifest_dir/release-manifest.envelope.json"
-          node --input-type=module -e '
-            import { readFileSync } from "node:fs";
-            import { validateReleaseManifestBytes } from "../scripts/ci/release-policy.mjs";
-            validateReleaseManifestBytes(
-              readFileSync(process.argv[1], "utf8"),
-              JSON.parse(readFileSync(process.argv[2], "utf8")));
-          ' "$published_manifest_dir/release-manifest.json" \
-            "$published_manifest_dir/release-manifest.envelope.json"
       - name: Promote validated immutable image tags
         env:
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
@@ -576,6 +552,54 @@ jobs:
         env:
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
         run: node scripts/ci/release-set.mjs alias
+      - name: Publish and verify signed manifest immediately before pointer
+        working-directory: source
+        env:
+          GH_TOKEN: ${{ steps.publisher.outputs.token }}
+          VERSION: ${{ steps.consume.outputs.version }}
+        run: |
+          set -euo pipefail
+          manifest_dir=../.artifacts/release-authorization
+          release_assets=release-assets
+          mkdir -p "$release_assets"
+          for asset in release-manifest.json release-manifest.envelope.json release-manifest.envelope.bundle.json; do
+            cp "$manifest_dir/$asset" "$release_assets/$asset"
+            gh release upload "$VERSION" "$release_assets/$asset" --clobber=false
+          done
+          recovered="$RUNNER_TEMP/published-signed-manifest"
+          mkdir -p "$recovered"
+          gh release download "$VERSION" --pattern release-manifest.json \
+            --pattern release-manifest.envelope.json \
+            --pattern release-manifest.envelope.bundle.json --dir "$recovered"
+          for asset in release-manifest.json release-manifest.envelope.json release-manifest.envelope.bundle.json; do
+            cmp -s "$release_assets/$asset" "$recovered/$asset" ||
+              { echo "Published signed manifest asset differs: $asset"; exit 1; }
+          done
+          cosign verify-blob --bundle "$recovered/release-manifest.envelope.bundle.json" \
+            --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$recovered/release-manifest.envelope.json"
+          [[ "$(sha256sum release-assets/release-notes.md | cut -d ' ' -f1)" == "$RELEASE_NOTES_SHA256" ]]
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { validateReleaseManifestBytes } from "../scripts/ci/release-policy.mjs";
+            const manifest = validateReleaseManifestBytes(readFileSync(process.argv[1], "utf8"),
+              JSON.parse(readFileSync(process.argv[2], "utf8")));
+            if (manifest.lifecycle.releaseNotes.sha256 !== process.env.RELEASE_NOTES_SHA256) throw new Error("Release notes hash differs from signed manifest");
+          ' "$recovered/release-manifest.json" "$recovered/release-manifest.envelope.json"
+          expected_prerelease=false
+          [[ "$VERSION" == *-* ]] && expected_prerelease=true
+          gh release edit "$VERSION" --draft=false --prerelease="$expected_prerelease"
+          release_state="$(
+            gh release view "$VERSION" --json isDraft,isPrerelease \
+              --jq '[.isDraft, .isPrerelease] | @tsv'
+          )"
+          [[ "$release_state" == "$(printf 'false\t%s' "$expected_prerelease")" ]]
+          for asset in release-notes.md release-manifest.json release-manifest.envelope.json release-manifest.envelope.bundle.json; do
+            asset_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${VERSION}/${asset}"
+            curl --fail --silent --show-error --location --head \
+              --retry 6 --retry-delay 5 --retry-all-errors "$asset_url" >/dev/null
+          done
       - name: Advance the complete channel pointer last
         id: advance
         env:

@@ -40,12 +40,25 @@ const anchor = 'c'.repeat(40);
 const workflowControlSha = '9'.repeat(40);
 const currentCanonicalSha = '8'.repeat(40);
 const created = '2026-09-12T20:00:00.000Z';
+const releaseNotesHash = 'd'.repeat(64);
 const context = (overrides = {}) => ({
   repository: 'OlyForge3D/PrintFarmer', event: 'workflow_dispatch',
   ref: 'refs/heads/development', eventSha: sha,
   workflowIdentity: 'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development',
   workflowSha: sha, workflowBranch: 'development', buildId: '42', buildAttempt: '1',
   channel: 'insider', ...overrides,
+});
+
+test('every docker publisher bash run block parses', () => {
+  const workflow = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
+  const runBlocks = [...workflow.matchAll(/^        run: \|\r?\n((?:          .*(?:\r?\n|$))*)/gm)]
+    .map(([, block]) => block.replace(/^          /gm, ''));
+  assert.ok(runBlocks.length > 0, 'Expected Docker publisher Bash run blocks');
+  const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+  for (const runBlock of runBlocks) {
+    const result = spawnSync(shell, ['-n'], { input: runBlock, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  }
 });
 
 test('transaction-bound release operations reject missing transactions before verification or network access', async () => {
@@ -3675,7 +3688,7 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
   const set = completeSet(identity);
   set.futurePrivate = { value: 'private-future-value' };
   set.images.api.platforms['linux/amd64'].labels.futurePrivate = 'private-label';
-  assert.throws(() => releaseManifest(identity, set), /public set fields|public set labels/);
+  assert.throws(() => releaseManifest(identity, set, undefined, releaseNotesHash), /public set fields|public set labels/);
   delete set.futurePrivate;
   delete set.images.api.platforms['linux/amd64'].labels.futurePrivate;
   advance(ledger, identity, set, sha, '');
@@ -3687,7 +3700,7 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
   assert.deepEqual(publicLedger(sanitized), sanitized, 'Public ledger serialization must be idempotent');
   const root = resolve('.artifacts', `public-assets-${process.pid}`);
   try {
-    emitPublicReleaseAssets(identity, set, root);
+    emitPublicReleaseAssets(identity, set, root, releaseNotesHash);
     for (const file of ['release-identity.json', 'release-set.json',
       'release-manifest.json', 'release-manifest.envelope.json']) {
       const content = readFileSync(resolve(root, 'release-assets', file), 'utf8');
@@ -3698,7 +3711,18 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
     assert.deepEqual(published, publicAuthorization(identity));
     const manifest = JSON.parse(readFileSync(resolve(root, 'release-assets/release-manifest.json'), 'utf8'));
     const envelope = JSON.parse(readFileSync(resolve(root, 'release-assets/release-manifest.envelope.json'), 'utf8'));
-    assert.deepEqual(manifest, releaseManifest(identity, set));
+    assert.deepEqual(manifest, releaseManifest(identity, set, undefined, releaseNotesHash));
+    assert.deepEqual(manifest.consumption, {
+      schema: 1,
+      immutableReleaseSet: 'signed-complete-set',
+      manualUpdate: { releaseSet: 'signed-complete-set', hostAuthorization: 'one-time-manual-approval' },
+      autoUpdate: {
+        releaseSet: 'signed-complete-set',
+        hostAuthorization: 'bounded-administrator-standing-permission',
+        hostPolicy: 'issue-2665-2666',
+      },
+      publisherApproval: 'publication-only',
+    });
     assert.deepEqual(envelope, releaseManifestEnvelope(manifest));
     assert.deepEqual(readReleaseManifest().manifest, manifest);
     validateReleaseManifestEnvelope(envelope, manifest);
@@ -3722,6 +3746,9 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
       value => { value.compatibility.managedEligible = false; },
       value => { value.migration.providers.postgresql = 'unknown'; },
       value => { value.compatibility.updater.fixedSteps.pop(); },
+      value => { value.consumption.publisherApproval = 'host-update'; },
+      value => { value.consumption.autoUpdate.releaseSet = 'other-set'; },
+      value => { value.consumption.autoUpdate.hostPolicy = 'publisher-selected'; },
       value => { value.unrecognized = true; },
     ]) {
       const changed = structuredClone(manifest);
@@ -3792,7 +3819,15 @@ test('executed signing commands preserve signed subjects and never let verificat
   assert.ok(docker.indexOf('Publish and verify public corresponding-source assets') <
     docker.indexOf('Promote validated immutable image tags'));
   assert.ok(docker.indexOf('Promote validated immutable image tags') <
+    docker.indexOf('Publish and verify signed manifest immediately before pointer'));
+  assert.ok(docker.indexOf('Publish and verify signed manifest immediately before pointer') <
     docker.indexOf('Advance the complete channel pointer last'));
+  const canonicalNotes = docker.split('      - name: Generate canonical release notes before signing\n')[1]
+    .split('      - name: Validate complete immutable set')[0];
+  for (const section of ['Features', 'Fixes', 'Breaking changes', 'Compatibility', 'Migration', 'Downtime', 'Backup', 'Recovery']) {
+    assert.match(canonicalNotes, new RegExp(`### ${section}`));
+  }
+  assert.match(canonicalNotes, /None\.|N\/A/);
   const uploadedAuthorizationFiles = artifactUploads('.github/workflows/docker-publish.yml').flat()
     .filter(path => path.startsWith('.artifacts/release-authorization/'));
   const root = resolve('.artifacts', `sign-public-${process.pid}`);
@@ -3804,7 +3839,7 @@ test('executed signing commands preserve signed subjects and never let verificat
     const identity = await authorizedRecord();
     writeAuthorization(identity);
     writeAuthorizationSet(identity, completeSet(identity));
-    emitPublicReleaseAssets(identity, completeSet(identity));
+    emitPublicReleaseAssets(identity, completeSet(identity), '.', releaseNotesHash);
     const mock = `cosign() {
       local operation="$1" bundle="" source="" previous=""
       shift
