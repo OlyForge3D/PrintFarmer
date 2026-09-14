@@ -70,13 +70,19 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
 - Command feedback appears beneath the originating **Heat**, **Move & home**,
   or **Filament tools** heading, not below the scrolling page. Pending commands
   show visible progress and a local **Stop waiting for command** action; home
-  and jog buttons also show a spinner. Errors and dismissal stay in that card,
+  jog and absolute GO buttons also show a stable-size spinner and a VoiceOver
+  pending value. Errors and dismissal stay in that card,
   as do acceptance, telemetry confirmation and interrupted-observation notices.
   Request acceptance never implies physical completion, and stopping observation
   never claims to stop the printer.
   Unresolved durable Moonraker motion does not offer **Stop waiting**. Its
   status, explicit admission confirmation and web-recovery guidance remain
-  outside disabled/offline controls, while command feedback stays in its card.
+  outside disabled/offline controls. One concise global status replaces repeated
+  motion-card notices and the duplicate motion lock reason. Routine progress and
+  success use a neutral surface; uncertainty and recovery retain warning styling.
+  **Motion details** reveals the operation ID and technical diagnostics, with a
+  touch target and VoiceOver expanded/collapsed state. Success collapses diagnostics;
+  uncertain motion keeps refresh, recovery and confirmed same-ID retry accessible.
 
 ### Native geometry and visual comparison
 
@@ -340,6 +346,11 @@ These tests prove native guards and typed synthetic shared-contract behavior,
   envelope and clearance, plus fresh homing and matching coordinate-frame telemetry.
   It checks the effective destination against those bounds and clearance again
   immediately before transport; backend preflight remains authoritative.
+  **Position help** provides touch/VoiceOver-accessible coordinate and precision
+  guidance instead of a permanent paragraph. Pristine inputs have no error;
+  edited invalid targets show one inline validation message. Help remains available
+  while motion is locked. Missing Moonraker coordinates are never inferred from
+  the bracketed position readouts.
 - Precision is checked in both the editor and command owner before dispatch:
   shared Moonraker/FlashForge temperature formatting emits whole degrees, and
   Moonraker movement formatting emits at most three decimal millimetres.

@@ -113,7 +113,7 @@ enum Heater: String, CaseIterable, Sendable {
 
 enum ControlNumberInput {
     static let absoluteCoordinatesMessage = "Enter destination coordinate in mm for X, Y, or Z. Unspecified axes remain unchanged."
-    static let durableAbsoluteCoordinatesMessage = "Enter all X, Y and Z destination coordinates in mm. Durable Moonraker positioning requires a complete target; missing axes are never guessed."
+    static let durableAbsoluteCoordinatesMessage = "Enter X, Y and Z destinations in mm, including zero. All three are required."
     static let heaterPrecisionMessage = "Use whole degrees Celsius. Fractional targets are not supported; no rounding is applied."
     static let coordinatePrecisionMessage = "Use at most 3 decimal places in millimetres. No rounding is applied."
     static let customFeedrateMessage = "Custom feedrates are unavailable without a verified maximum. Leave this field blank to use the established axis-specific rate."
@@ -1424,7 +1424,7 @@ final class PrinterControlsViewModel: ObservableObject {
     var motionStatusMessage: String? {
         guard usesDurableMotion else { return nil }
         if let reason = motionBlockedReason { return reason }
-        guard let operation = controlOperation else { return nil }
+        guard let operation = presentedMotionOperation else { return nil }
         switch operation.state {
         case .succeeded: return "Motion queue completion confirmed by the server. Check the machine before further setup."
         case .recovered: return "An authorized operator released the recovery barrier. The original motion did not succeed; review the machine before starting a new operation."
@@ -1434,6 +1434,61 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     var motionOperationID: UUID? { pendingMotion?.operationID ?? controlOperation?.operationId ?? physicalControl?.operationId }
+
+    private var presentedMotionOperation: PrinterControlOperation? {
+        guard controlOperation?.operationId == motionOperationID else { return nil }
+        return controlOperation
+    }
+
+    private var hasMotionUncertainty: Bool {
+        controlOperation?.requiresRecovery == true || physicalControl?.requiresRecovery == true
+            || [.unknown, .recovering].contains(controlOperation?.state)
+            || [.unknown, .recovering].contains(physicalControl?.state)
+    }
+
+    /// Presentation only. Locking and completion continue to use authoritative evidence.
+    var motionStatusNeedsAttention: Bool {
+        hasMotionUncertainty || operationReadError != nil
+            || lastError?.command.section == .motion
+            || (hasUnconfirmedMotionAdmission && !motionSubmissionInFlight)
+            || (motionBlockedReason != nil && !hasUnresolvedMotion && !motionSubmissionInFlight)
+            || [.failed, .recovered].contains(presentedMotionOperation?.state)
+    }
+
+    var motionStatusSummary: String? {
+        guard motionStatusMessage != nil else { return nil }
+        if hasMotionUncertainty {
+            return "Motion outcome uncertain. Controls locked. Inspect the printer and use recovery."
+        }
+        if motionSubmissionInFlight { return "Submitting motion. Controls locked until completion." }
+        if lastError?.command.section == .motion { return "Motion blocked. Review motion controls for error details." }
+        if hasUnconfirmedMotionAdmission {
+            if let request = pendingMotion?.request, request.kind == .moveTo,
+               request.x == nil || request.y == nil || request.z == nil {
+                return "Saved motion has an incomplete XYZ target. Controls locked; it cannot be resubmitted. Missing axes will not be filled."
+            }
+            return motionAdmissionResubmissionID != nil
+                ? "Motion not confirmed. Controls locked. Review the saved operation before retrying."
+                : "Motion not confirmed. Controls locked; refresh status or use recovery."
+        }
+        if operationReadError != nil { return "Motion status unavailable. Controls locked; refresh to check again." }
+        if hasUnresolvedMotion {
+            return presentedMotionOperation?.state == .queued
+                ? "Motion queued. Controls locked until completion."
+                : "Motion in progress. Controls locked until completion."
+        }
+        if motionBlockedReason != nil {
+            if motionUserID == nil { return "Sign in again to check motion status." }
+            if !motionCurrentVerified { return "Checking motion status. Controls locked." }
+            return "Server update required for motion controls."
+        }
+        switch presentedMotionOperation?.state {
+        case .succeeded: return "Motion completed. Check the printer before continuing."
+        case .failed: return "Motion failed. Review details before continuing."
+        case .recovered: return "Recovery released. Motion did not succeed; check the printer."
+        default: return motionStatusMessage
+        }
+    }
 
     static let motionAdmissionResubmissionWarning = "This may start the original motion if it was never admitted. If already admitted, the same operation ID and unchanged intent return the existing operation without sending motion twice. This does not retry known Unknown execution or release a recovery barrier. Inspect the machine and keep people clear. Choose Keep blocked to decline."
 
