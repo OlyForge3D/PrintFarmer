@@ -1461,7 +1461,7 @@ final class PrinterControlsViewModel: ObservableObject {
             return "Motion outcome uncertain. Controls locked. Inspect the printer and use recovery."
         }
         if motionSubmissionInFlight { return "Submitting motion. Controls locked until completion." }
-        if lastError?.command.section == .motion { return "Motion blocked. Review the error below." }
+        if lastError?.command.section == .motion { return "Motion blocked. Review motion controls for error details." }
         if hasUnconfirmedMotionAdmission {
             if let request = pendingMotion?.request, request.kind == .moveTo,
                request.x == nil || request.y == nil || request.z == nil {
