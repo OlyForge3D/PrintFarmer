@@ -9,14 +9,16 @@ on:
         options: [stable, insider]
         default: stable
         required: true
-      stage:
-        description: Insider stage; choose none for stable
-        type: choice
-        options: [none, insider, beta, rc]
-        default: none
-      version:
-        description: Optional exact tag assertion; N is allocated, never caller-selected
+      source_sha:
+        description: Optional full canonical-branch HEAD SHA; blank pins the selected branch HEAD once
         type: string
+        required: false
+      mode:
+        description: Release publishes after approval; rehearsal is structurally non-publishing
+        type: choice
+        options: [release, rehearsal]
+        default: rehearsal
+        required: true
   schedule:
     - cron: '27 9 * * *'
 
@@ -40,11 +42,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh workflow run consolidated-release.yml --repo "$GITHUB_REPOSITORY" \
-            --ref development -f channel=insider -f stage=insider
+            --ref development -f channel=insider -f mode=release
 
   admit:
     if: github.event_name != 'schedule'
-    name: Read-only release admission
+    name: Pin release transaction
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -56,28 +58,80 @@ jobs:
       source_sha: ${{ steps.admit.outputs.source_sha }}
       channel: ${{ steps.admit.outputs.channel }}
       approval_mode: ${{ steps.admit.outputs.approval_mode }}
+      transaction: ${{ steps.select.outputs.transaction }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.workflow_sha }}
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - name: Admit exact canonical branch HEAD
+      - name: Resolve and bind canonical source once
+        id: select
+        env:
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+        run: |
+          set -euo pipefail
+          transaction="$(node scripts/ci/release-transaction.mjs select)"
+          echo "transaction=$transaction" >> "$GITHUB_OUTPUT"
+      - name: Admit immutable release transaction
         id: admit
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_CHANNEL: ${{ inputs.channel }}
-          RELEASE_STAGE: ${{ inputs.stage }}
-          RELEASE_TAG: ${{ inputs.version }}
+          RELEASE_TRANSACTION: ${{ steps.select.outputs.transaction }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
         run: node scripts/ci/release-control.mjs admit
 
+  qualification:
+    name: Automatic exact-source qualification
+    needs: admit
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+    with:
+      release_qualification: true
+      source_sha: ${{ needs.admit.outputs.source_sha }}
+      source_branch: ${{ needs.admit.outputs.channel == 'stable' && 'main' || 'development' }}
+
+  collect-qualification:
+    name: Collect genuine qualification evidence
+    needs: [admit, qualification]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      statuses: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Verify exact-SHA checks and review evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TRANSACTION: ${{ needs.admit.outputs.transaction }}
+        run: node scripts/ci/release-transaction.mjs qualify
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/release-transaction/qualification.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+
   authorize:
     name: Reserve and authorize immutable source
-    needs: admit
+    if: inputs.mode == 'release'
+    needs: [admit, qualification, collect-qualification]
     runs-on: ubuntu-latest
     environment: release-${{ needs.admit.outputs.channel }}
     permissions:
@@ -92,12 +146,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.admit.outputs.source_sha }}
+          ref: ${{ github.workflow_sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/release-transaction
       - name: Check sole authored version base
         run: bash scripts/sync-monorepo-version.sh --check
       - name: Require owner-provisioned registry authority before reservation
@@ -125,9 +183,7 @@ jobs:
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
           RELEASE_ADMITTED_APPROVAL_MODE: ${{ needs.admit.outputs.approval_mode }}
           RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
-          RELEASE_CHANNEL: ${{ inputs.channel }}
-          RELEASE_STAGE: ${{ inputs.stage }}
-          RELEASE_TAG: ${{ inputs.version }}
+          RELEASE_TRANSACTION: ${{ needs.admit.outputs.transaction }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
         run: node scripts/ci/release-control.mjs authorize
       - name: Install Cosign
@@ -153,8 +209,46 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
 
+  rehearsal:
+    name: Approve non-publishing rehearsal
+    if: inputs.mode == 'rehearsal'
+    needs: [admit, qualification, collect-qualification]
+    runs-on: ubuntu-latest
+    environment: release-${{ needs.admit.outputs.channel }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-qualification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/release-transaction
+      - name: Create typed non-release receipt
+        env:
+          RELEASE_TRANSACTION: ${{ needs.admit.outputs.transaction }}
+        run: node scripts/ci/release-transaction.mjs rehearse
+      - name: Exercise bounded non-publishing controls
+        run: >-
+          node --test
+          scripts/ci/tests/test-release-transaction.mjs
+          scripts/ci/tests/test-release-rehearsal.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-rehearsal-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/release-transaction/rehearsal-receipt.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+
   publish:
     needs: authorize
+    if: inputs.mode == 'release'
     uses: ./.github/workflows/docker-publish.yml
     permissions:
       actions: write
@@ -163,4 +257,38 @@ jobs:
       id-token: write
     with:
       identity: ${{ needs.authorize.outputs.public_identity }}
+      transaction: ${{ needs.admit.outputs.transaction }}
     secrets: inherit
+
+  diagnostics:
+    name: Release transaction summary
+    if: always() && github.event_name != 'schedule'
+    needs: [admit, qualification, collect-qualification, authorize, rehearsal, publish]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Write bounded result
+        env:
+          MODE: ${{ inputs.mode }}
+          CHANNEL: ${{ inputs.channel }}
+          SOURCE_SHA: ${{ needs.admit.outputs.source_sha }}
+          QUALIFICATION: ${{ needs.qualification.result }}
+          EVIDENCE: ${{ needs.collect-qualification.result }}
+          AUTHORIZATION: ${{ needs.authorize.result }}
+          REHEARSAL: ${{ needs.rehearsal.result }}
+          PUBLICATION: ${{ needs.publish.result }}
+        run: |
+          {
+            echo "## Release transaction"
+            echo "- mode: \`$MODE\`"
+            echo "- channel: \`$CHANNEL\`"
+            echo "- source: \`$SOURCE_SHA\`"
+            echo "- qualification: \`$QUALIFICATION\`"
+            echo "- evidence: \`$EVIDENCE\`"
+            echo "- authorization: \`$AUTHORIZATION\`"
+            echo "- rehearsal: \`$REHEARSAL\`"
+            echo "- publication: \`$PUBLICATION\`"
+            if [ "$MODE" = rehearsal ]; then
+              echo "- result: rehearsal-only; publication was not authorized"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

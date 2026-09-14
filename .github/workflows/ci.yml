@@ -1,7 +1,20 @@
 name: CI
 
 on:
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      release_qualification:
+        description: Run the full canonical release qualification matrix
+        type: boolean
+        default: false
+      source_sha:
+        description: Immutable source commit selected by the release transaction
+        type: string
+        default: ''
+      source_branch:
+        description: Canonical source branch selected by the release transaction
+        type: string
+        default: ''
   push:
     branches: [main, development, 'release/**']
     # No path filter: every trusted-branch or release-candidate push must
@@ -21,23 +34,24 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  CI_SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+  CI_SOURCE_BRANCH: ${{ inputs.source_branch || github.head_ref || github.ref_name }}
+
 jobs:
   # Only exact canonical-branch manual validation owns these check names.
   # Other refs/events use distinct skipped names so they cannot shadow PR gates.
   canonical-path-casing:
     name: >-
-      ${{ github.event_name == 'workflow_dispatch' &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') &&
+      ${{ inputs.release_qualification &&
       'path-casing' || 'Canonical path casing (not selected)' }}
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
+    if: inputs.release_qualification
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ env.CI_SOURCE_SHA }}
           persist-credentials: false
           fetch-depth: 0
       - name: Node setup
@@ -50,19 +64,16 @@ jobs:
 
   canonical-contract-drift:
     name: >-
-      ${{ github.event_name == 'workflow_dispatch' &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') &&
+      ${{ inputs.release_qualification &&
       'Contract drift gate' || 'Canonical contract drift (not selected)' }}
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
+    if: inputs.release_qualification
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ env.CI_SOURCE_SHA }}
           persist-credentials: false
           fetch-depth: 0
       - name: Setup Node
@@ -80,8 +91,8 @@ jobs:
         # first-parent delta, not an empty dispatch diff or a moving branch.
         env:
           EVENT_NAME: push
-          BEFORE_SHA: ${{ github.sha }}^1
-          AFTER_SHA: ${{ github.sha }}
+          BEFORE_SHA: ${{ env.CI_SOURCE_SHA }}^1
+          AFTER_SHA: ${{ env.CI_SOURCE_SHA }}
           OUT_FILE: ${{ runner.temp }}/canonical-contract-drift-changed.z
         run: bash scripts/ci/compute-change-set.sh
       - name: Fail closed if the diff could not be computed
@@ -102,12 +113,9 @@ jobs:
 
   canonical-ios-build:
     name: >-
-      ${{ github.event_name == 'workflow_dispatch' &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') &&
+      ${{ inputs.release_qualification &&
       'Build (iOS)' || 'Canonical iOS build (not selected)' }}
-    if: >-
-      github.event_name == 'workflow_dispatch' &&
-      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
+    if: inputs.release_qualification
     runs-on: macos-latest
     timeout-minutes: 45
     defaults:
@@ -117,7 +125,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ env.CI_SOURCE_SHA }}
           persist-credentials: false
       # Keep the actual archive steps equivalent to ios-pr-ci.yml. Manual
       # validation never selects/skips these steps and needs no signing secrets.
@@ -178,11 +186,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          ref: ${{ env.CI_SOURCE_SHA }}
           fetch-depth: 0
 
       - name: Validate optional stabilization lifecycle
         env:
-          CANDIDATE_BRANCH: ${{ github.head_ref || github.ref_name }}
+          CANDIDATE_BRANCH: ${{ env.CI_SOURCE_BRANCH }}
           RELEASE_CANDIDATE_MAX_DAYS: ${{ vars.RELEASE_CANDIDATE_MAX_DAYS }}
         run: node scripts/ci/validate-release-candidate.mjs
 
@@ -190,11 +199,11 @@ jobs:
         id: diff
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          BASE_REF: ${{ env.CI_SOURCE_BRANCH }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BEFORE_SHA: ${{ github.event.before }}
-          AFTER_SHA: ${{ github.sha }}
+          AFTER_SHA: ${{ env.CI_SOURCE_SHA }}
           OUT_FILE: ${{ runner.temp }}/changed.z
         run: bash scripts/ci/compute-change-set.sh
 
@@ -202,7 +211,7 @@ jobs:
         id: selector
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          BASE_REF: ${{ env.CI_SOURCE_BRANCH }}
           CHANGED_FILES_FROM_Z: ${{ steps.diff.outputs.changed_file }}
           FORCE_FULL_SAFE: ${{ steps.diff.outputs.force_full_safe }}
         run: bash scripts/ci/select-dotnet-tests.sh
@@ -251,6 +260,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -387,6 +398,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -416,6 +429,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -464,6 +479,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -857,6 +874,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -957,6 +976,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -1104,6 +1125,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -1269,10 +1292,8 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Require all manual canonical checks
-        if: >-
-          github.event_name == 'workflow_dispatch' &&
-          (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
+      - name: Require all release qualification checks
+        if: inputs.release_qualification
         env:
           PATH_CASING_RESULT: ${{ needs.canonical-path-casing.result }}
           CONTRACT_DRIFT_RESULT: ${{ needs.canonical-contract-drift.result }}
@@ -1280,7 +1301,7 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "## Manual canonical checks"
+            echo "## Automatic release qualification checks"
             printf -- '- path-casing (Linux): `%s`\n' "$PATH_CASING_RESULT"
             printf -- '- Contract drift gate (Linux, first-parent delta): `%s`\n' "$CONTRACT_DRIFT_RESULT"
             printf -- '- Build (iOS) (macOS, unsigned archive): `%s`\n' "$IOS_BUILD_RESULT"

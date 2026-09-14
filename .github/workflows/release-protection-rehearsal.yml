@@ -1,12 +1,11 @@
 name: Bounded release protection rehearsal
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       channel:
         description: Canonical channel to inspect; never publishes
-        type: choice
-        options: [insider, stable]
+        type: string
         default: insider
         required: true
       denial_probes:

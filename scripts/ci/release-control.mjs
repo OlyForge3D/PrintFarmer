@@ -5,7 +5,8 @@ import {
   identityLabels, parseTag, verifyProtectionEvidence, validateReservationAdmission, validateApprovalMode,
 } from './release-policy.mjs';
 import {
-  branchHead, command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion, verifyProtection,
+  branchHead, command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion,
+  verifyCanonicalSource, verifyProtection,
   verifyStableQualification, verifyReleaseChecks,
 } from './release-github.mjs';
 import { emitBuildIdentity } from './release-metadata.mjs';
@@ -13,16 +14,22 @@ import { qualificationClient, verifyCanonicalReleaseEvidence } from './canonical
 import {
   privateSetPath, publicAuthorization, readPrivateAuthorization, readPrivateJson, verifyAuthorization, writeAuthorization, writePublicSet,
 } from './release-authorization.mjs';
+import {
+  readQualificationReceipt, transactionFromEnvironment, validateTransaction,
+} from './release-transaction.mjs';
 
 export function runContext(env = process.env) {
+  const transaction = env.RELEASE_TRANSACTION ?
+    validateTransaction(JSON.parse(env.RELEASE_TRANSACTION)) : undefined;
   const ref = env.GITHUB_REF;
   return {
     repository: env.GITHUB_REPOSITORY, event: env.GITHUB_EVENT_NAME,
-    ref, eventSha: env.GITHUB_SHA,
-    workflowIdentity: env.GITHUB_WORKFLOW_REF, workflowSha: env.GITHUB_WORKFLOW_SHA,
+    ref, eventSha: transaction?.sourceCommit ?? env.GITHUB_SHA,
+    workflowIdentity: transaction?.workflowIdentity ?? env.GITHUB_WORKFLOW_REF,
+    workflowSha: transaction?.workflowCommit ?? env.GITHUB_WORKFLOW_SHA,
     workflowBranch: ref?.replace('refs/heads/', ''),
     buildId: env.GITHUB_RUN_ID, buildAttempt: env.GITHUB_RUN_ATTEMPT,
-    channel: env.RELEASE_CHANNEL,
+    channel: transaction?.channel ?? env.RELEASE_CHANNEL,
     stage: env.RELEASE_STAGE && env.RELEASE_STAGE !== 'none' ? env.RELEASE_STAGE : undefined,
     requestedTag: env.RELEASE_TAG || undefined,
   };
@@ -66,6 +73,9 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   const context = runContext(env);
   const store = gitLedger(api, env.RELEASE_LEDGER_ANCHOR);
   if (['admit', 'authorize'].includes(operation)) {
+    const transaction = env.RELEASE_TRANSACTION ? transactionFromEnvironment(env) : undefined;
+    if (transaction) requireThat(transaction.mode === 'release',
+      'Rehearsal transaction cannot enter release authorization');
     validateApprovalMode(env.RELEASE_APPROVAL_MODE);
     if (operation === 'authorize') {
       validateApprovalMode(env.RELEASE_ADMITTED_APPROVAL_MODE);
@@ -75,28 +85,37 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     const channel = context.event === 'schedule' ? 'insider' : context.channel;
     const branch = channel === 'stable' ? 'main' : 'development';
     const { state } = await store.read();
-    const selectedHead = await branchHead(api, branch);
+    const selectedHead = transaction?.sourceCommit ?? await branchHead(api, branch);
     const admission = admit(context, selectedHead, await readVersion(api, selectedHead));
     validateReservationAdmission(state, admission);
-    await verifyCanonicalReleaseEvidence(qualificationClient(env.GH_TOKEN),
-      selectedHead, admission.channel, env.RELEASE_APPROVAL_MODE);
-    if (operation === 'admit') await verifyReleaseChecks(api, selectedHead);
-    requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift before authorization');
+    if (!transaction) {
+      await verifyCanonicalReleaseEvidence(qualificationClient(env.GH_TOKEN),
+        selectedHead, admission.channel, env.RELEASE_APPROVAL_MODE);
+      if (operation === 'admit') await verifyReleaseChecks(api, selectedHead);
+      requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift before authorization');
+    }
     output('source_sha', context.eventSha);
     output('channel', admission.channel);
     if (operation === 'admit') {
       output('approval_mode', env.RELEASE_APPROVAL_MODE);
       return;
     }
+    if (transaction) readQualificationReceipt(transaction, 'release');
+    if (transaction) await verifyCanonicalSource(api, branch, selectedHead);
     const protection = await verifyProtection(api, admission.channel, env.RELEASE_PUBLISHER_APP_ID,
       env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, selectedHead);
     const record = await transact(store, async state => {
       const existing = validateReservationAdmission(state, admission);
-      await verifyCanonicalReleaseEvidence(qualificationClient(env.GH_TOKEN),
-        selectedHead, admission.channel, env.RELEASE_APPROVAL_MODE);
-      requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during allocation retry');
+      if (transaction) {
+        readQualificationReceipt(transaction, 'release');
+      } else {
+        await verifyCanonicalReleaseEvidence(qualificationClient(env.GH_TOKEN),
+          selectedHead, admission.channel, env.RELEASE_APPROVAL_MODE);
+        requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during allocation retry');
+      }
       const qualification = await verifyStableQualification(api, state, admission);
-      requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during qualification');
+      if (!transaction) requireThat(await branchHead(api, branch) === selectedHead,
+        'HEAD drift during qualification');
       if (existing?.identitySha256) {
         // A lost private artifact cannot be reconstructed from public ledger data.
         const saved = readPrivateAuthorization();
@@ -146,8 +165,15 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   } else if (operation === 'advance') {
     const set = readPrivateJson(privateSetPath);
     const expectedPointer = state.pointers[record.channel]?.setHash || '';
+    if (env.RELEASE_TRANSACTION) {
+      const transaction = transactionFromEnvironment(env);
+      requireThat(transaction.mode === 'release' && transaction.sourceCommit === record.sourceCommit,
+        'Pointer transaction binding mismatch');
+      await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
+    }
     await transact(store, async latest => advance(latest, record, set,
-      await branchHead(api, record.sourceBranch), expectedPointer));
+      env.RELEASE_TRANSACTION ? record.sourceCommit :
+        await branchHead(api, record.sourceBranch), expectedPointer));
     output('set_hash', hash(writePublicSet(record, set)));
   } else {
     throw new Error(`Unknown operation: ${operation}`);

@@ -29,6 +29,31 @@ Review `VERSION` on the selected canonical branch and dispatch
 [`consolidated-release.yml`](../.github/workflows/consolidated-release.yml).
 Do not replace these helpers with direct Git or GitHub release commands.
 
+The supported administrator journey is:
+
+1. Open **Consolidated Release** and select `stable` or `insider`.
+2. Leave **source_sha** blank to pin that branch's current HEAD once, or enter
+   the full lowercase 40-character SHA currently shown for the selected branch.
+3. Select `release` or the explicitly non-publishing `rehearsal` mode.
+4. Click **Run workflow** on the matching canonical branch and approve the one
+   pending `release-stable` or `release-insider` transaction environment.
+5. Follow the generated Actions summary. Qualification, evidence collection,
+   allocation, ledger/tag work, publication, pointer advancement and bounded
+   diagnostics are automatic and fail closed.
+
+Do not dispatch CI, qualification, evidence-recorder or rehearsal workflows
+separately. Do not supply CI run IDs, comment IDs, tags or allocator values, and
+do not author formatted commit comments or statuses. A source SHA that does not
+equal the canonical branch HEAD observed by the dispatch is rejected rather
+than silently replaced. Once admitted, later branch movement does not retarget
+the transaction.
+
+`rehearsal` uses the same source selection and qualification path, but the
+approved rehearsal job contains no publisher App, registry or OIDC credential
+references and cannot call reserve, tag, publish or pointer-advance operations.
+Its `release-rehearsal-only` receipt has `publicationAuthorized: false` and is
+not accepted as release qualification or authorization.
+
 | Channel | Base authority | Canonical version | Source tag |
 | --- | --- | --- | --- |
 | Stable | `main:VERSION` | `X.Y.Z` | `vX.Y.Z` |
@@ -499,7 +524,12 @@ owner override or carried-across-sync status cannot substitute for it. The low-l
 check adapter understands both status vocabularies, but release admission and
 each allocation retry require the completed canonical workflow audit chain.
 
-### Non-publishing canonical qualification
+### Retired manual canonical qualification history
+
+> The procedure below is retained only as historical design context. It is not
+> a supported operator path. `consolidated-release.yml` now starts the reusable
+> canonical CI graph and collects exact-SHA checks/review evidence automatically.
+> Do not dispatch these retired workflows or create formatted commit comments.
 
 The qualification mechanism has three deliberately separate parts:
 
@@ -770,6 +800,13 @@ Before enabling:
    alone does not constrain another workflow's `GITHUB_TOKEN`, so this package
    ACL cutover is mandatory owner evidence, not implied by environment setup.
    Infrastructure package ownership is unchanged.
+   The single human gate remains `release-stable` / `release-insider`.
+   Credential-only `release-publisher-stable` /
+   `release-publisher-insider` environments retain the matching canonical
+   branch restriction and hold downstream publisher/registry credentials, but
+   must not configure required reviewers. This prevents internal build/publish
+   jobs from creating additional human approval ceremonies after the approved
+   transaction has produced its signed authorization.
 6. Read the effective policies back and rehearse denied publication before
    first authorized publication, including rejected writes with a generic
    repository workflow token. Release jobs request no repository-token contents
@@ -783,10 +820,16 @@ high water without changing old reservations, and review a continuity checkpoint
 migration. Never reset N after a base/workflow change. An unprovable floor means
 publication remains disabled. No normal workflow has a reset/bypass operation.
 
-### Bounded protection rehearsal (#2668)
+### Retired standalone rehearsal history (#2668)
 
-`release-protection-rehearsal.yml` is a separate, manually dispatched verifier,
-**not** a mode of `consolidated-release.yml`. Its receipts have the distinct
+> The standalone workflow below is retained as internal historical
+> infrastructure and is not an operator entry point. Use `mode: rehearsal` in
+> **Consolidated Release**. That path performs one transaction approval, exposes
+> no production publication credential references, and emits a typed
+> non-authorizing receipt.
+
+`release-protection-rehearsal.yml` was the separate manually dispatched verifier
+superseded by the integrated mode. Its receipts have the distinct
 `release-rehearsal-only` kind and are never release identities, signatures,
 reservations or publication authorization. Do not approve a production
 `Reserve and authorize immutable source` job to obtain rehearsal evidence.

@@ -26,14 +26,22 @@ The reusable Docker workflow is an authorized consumer, not a second entry point
 ## Publication
 
 Dispatch `consolidated-release.yml` on the selected canonical branch with the
-matching channel. Leave `version` unset for normal allocation; it is only an
-assertion against the durable result. Stable selects no stage; insider defaults
-to `insider` and also supports the guide's beta/RC progression.
+matching channel. Leave `source_sha` blank to pin the branch HEAD once or enter
+that exact full SHA as an assertion. Select `release`; do not provide a version,
+tag, allocator value, CI run ID, comment ID or formatted attestation. Approve
+the single `release-<channel>` transaction environment. The workflow starts
+canonical qualification, collects evidence, allocates identity and publishes
+automatically.
 
 Follow that run through authorization, immutable source/tag/assets and complete
 image-set verification. A successful source-only release is not a managed-update
 candidate. Record the workflow run, source SHA and resulting canonical identity.
 TestFlight remains independent in the `ios/` namespace.
+
+For a safe validation, select `rehearsal` in the same workflow. Rehearsal uses
+the same source and qualification path but has no publisher/registry credential
+references, cannot invoke reservation or publication controls, and emits only
+a `release-rehearsal-only` receipt with `publicationAuthorized: false`.
 
 ## Retired paths and recovery
 

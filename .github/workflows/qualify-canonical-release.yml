@@ -4,12 +4,11 @@ run-name: >-
   review ${{ inputs.review_comment }} PR ${{ inputs.native_pr }} mode ${{ vars.RELEASE_APPROVAL_MODE }}
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       channel:
         description: Canonical channel to qualify; never publishes
-        type: choice
-        options: [stable, insider]
+        type: string
         required: true
       validation_run:
         description: Fresh successful manual CI run on live canonical HEAD (attempt 1)

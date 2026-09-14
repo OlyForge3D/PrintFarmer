@@ -2,10 +2,7 @@ name: Record canonical qualification
 run-name: Canonical evidence for ${{ github.event.workflow_run.id }}
 
 on:
-  # Default workflow only; API-revalidated metadata, no source/artifacts from triggering run.
-  workflow_run:  # zizmor: ignore[dangerous-triggers]
-    workflows: [Qualify canonical release]
-    types: [completed]
+  workflow_call:
 
 permissions:
   contents: read
@@ -17,12 +14,7 @@ concurrency:
 jobs:
   record:
     name: Record canonical evidence
-    if: >-
-      github.repository == 'OlyForge3D/PrintFarmer' &&
-      github.event.workflow_run.event == 'workflow_dispatch' &&
-      github.event.workflow_run.head_repository.full_name == github.repository &&
-      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
-      github.run_attempt == 1
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

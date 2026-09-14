@@ -636,7 +636,7 @@ test('workflow separates App reads from generic writes without any publisher or 
   assert.match(workflow, /ref: \$\{\{ github.workflow_sha \}\}/);
   assert.equal((workflow.match(/persist-credentials: false/g) ?? []).length, 3);
   assert.doesNotMatch(probes, /secrets\.|create-github-app-token|REHEARSAL_APP_TOKEN/);
-  assert.doesNotMatch(workflow, /id-token:|cosign|REGISTRY_TOKEN|REGISTRY_USER|workflow_call|schedule:|secrets: inherit|release-control\.mjs|docker-publish\.yml/);
+  assert.doesNotMatch(workflow, /id-token:|cosign|REGISTRY_TOKEN|REGISTRY_USER|schedule:|secrets: inherit|release-control\.mjs|docker-publish\.yml/);
   for (const source of ['release-rehearsal', 'release-rehearsal-probes', 'release-rehearsal-control']) {
     const text = readFileSync(`scripts/ci/${source}.mjs`, 'utf8');
     assert.doesNotMatch(text, /\b(?:reserve|ensureSourceTag|compareAndSet|advance|writeAuthorization|emitBuildIdentity)\s*\(/);

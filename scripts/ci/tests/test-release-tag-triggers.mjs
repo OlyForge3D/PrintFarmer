@@ -2213,11 +2213,15 @@ function artifactUploads(workflow) {
 test('every release artifact upload path is explicitly inventoried, including both signed handoffs', () => {
   const authority = '.github/workflows/consolidated-release.yml';
   const docker = '.github/workflows/docker-publish.yml';
-  assert.deepEqual(artifactUploads(authority), [[
-    authorizationPath, authorizationBundle,
-    '.artifacts/release-authorization/public-identity.json',
-    '.artifacts/release-authorization/public-identity.bundle.json',
-  ]]);
+  assert.deepEqual(artifactUploads(authority), [
+    ['.artifacts/release-transaction/qualification.json'],
+    [
+      authorizationPath, authorizationBundle,
+      '.artifacts/release-authorization/public-identity.json',
+      '.artifacts/release-authorization/public-identity.bundle.json',
+    ],
+    ['.artifacts/release-transaction/rehearsal-receipt.json'],
+  ]);
   assert.deepEqual(artifactUploads(docker), [
     ['./publish/slicer-host'], ['./publish/api'], ['./publish/orcaslicer-worker'],
     ['./publish/printer-discovery'], ['./publish/compliance/license-inventory.json'],
@@ -2231,7 +2235,11 @@ test('every release artifact upload path is explicitly inventoried, including bo
     const text = readFileSync(file, 'utf8');
     assert.equal(artifactUploads(file).length, (text.match(/uses:\s*actions\/upload-artifact@/g) || []).length);
     for (const [, local] of text.matchAll(/uses: \.\/([^\s]+)/g)) {
-      assert.ok(['.github/workflows/docker-publish.yml', '.github/actions/release-authorization'].includes(local), local);
+      assert.ok([
+        '.github/workflows/ci.yml',
+        '.github/workflows/docker-publish.yml',
+        '.github/actions/release-authorization',
+      ].includes(local), local);
     }
     assert.doesNotMatch(text, /(?:gh api|curl).*(?:rulesets|environments|rules\/branches)|sign\.log/);
   }

@@ -154,6 +154,18 @@ export async function branchHead(api, branch) {
   return sha;
 }
 
+export async function verifyCanonicalSource(api, branch, sourceCommit) {
+  requireThat(['main', 'development'].includes(branch), 'Invalid canonical branch');
+  requireString(sourceCommit, shaPattern, 'canonical source commit');
+  const currentHead = await branchHead(api, branch);
+  if (currentHead === sourceCommit) return currentHead;
+  const comparison = await api(`compare/${sourceCommit}...${currentHead}`);
+  requireThat(comparison?.status === 'ahead' &&
+    comparison.merge_base_commit?.sha === sourceCommit,
+  'Pinned source is no longer trusted canonical branch history');
+  return currentHead;
+}
+
 export async function readVersion(api, sha) {
   requireString(sha, shaPattern, 'VERSION commit');
   const file = await api(`contents/VERSION?ref=${encodeURIComponent(sha)}`);
