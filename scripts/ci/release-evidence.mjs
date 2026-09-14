@@ -3,8 +3,6 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
-const signer = 'https://github.com/OlyForge3D/PrintFarmer/.github/workflows/docker-publish.yml@refs/heads/development';
-const issuer = 'https://token.actions.githubusercontent.com';
 
 function requireThat(condition, message) {
   if (!condition) throw new Error(message);
@@ -16,6 +14,14 @@ function sha256(bytes) {
 
 function parseJson(bytes, label) {
   try { return JSON.parse(bytes); } catch { throw new Error(`Malformed ${label}`); }
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalJson(value[key])]));
+  }
+  return value;
 }
 
 function subjects(result, label) {
@@ -45,7 +51,9 @@ function validateVerification(bytes, expectedDigest, type, expectedPredicate) {
   const entries = subjects(parseJson(bytes, type), type);
   requireThat(entries.every(entry => entry.subject === expectedDigest), `${type} subject mismatch`);
   if (expectedPredicate !== undefined) {
-    requireThat(entries.some(entry => JSON.stringify(entry.predicate) === expectedPredicate),
+    const parsedPredicate = parseJson(expectedPredicate, 'SPDX predicate');
+    requireThat(entries.some(entry =>
+      JSON.stringify(canonicalJson(entry.predicate)) === JSON.stringify(canonicalJson(parsedPredicate))),
       'SPDX predicate mismatch');
   }
 }

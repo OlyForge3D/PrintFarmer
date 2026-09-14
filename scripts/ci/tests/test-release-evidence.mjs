@@ -27,6 +27,14 @@ test('stages validated index and platform crypto evidence', () => {
     assert.deepEqual(readEvidence(evidencePath, completeSet).set, result.set);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+test('accepts formatted key-reordered predicate bytes while retaining their raw digest', () => {
+  const formattedPredicate = '{\n  "name": "PrintFarmer",\n  "SPDXID": "SPDXRef-DOCUMENT"\n}\n';
+  const attestedPredicate = { SPDXID: 'SPDXRef-DOCUMENT', name: 'PrintFarmer' };
+  const evidence = signed(digest, attestedPredicate);
+  evidence.predicateBytes = formattedPredicate;
+  const normalized = normalizeEvidence({ subject: digest, ...evidence });
+  assert.notEqual(normalized.sbom.predicateSha256, normalized.sbom.sha256);
+});
 test('rejects swapped signature subject, predicate, and platform', () => {
   assert.throws(() => normalizeEvidence({ subject: digest, ...signed(other) }), /subject mismatch/);
   const swappedPredicate = signed(digest, { SPDXID: 'other' });

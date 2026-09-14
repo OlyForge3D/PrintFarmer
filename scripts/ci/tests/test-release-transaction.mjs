@@ -373,12 +373,12 @@ test('publisher completes revocable preflight before registry login and image pu
   assert.ok(named('Validate all revocable controls before publication') < login);
   assert.ok(login < named('Build, attest and sign the complete immutable image set'));
   assert.ok(named('Build, attest and sign the complete immutable image set') <
-    named('Validate complete immutable set'));
-  assert.ok(named('Validate complete immutable set') <
     named('Verify every pushed digest signature and SPDX attestation'));
   assert.ok(named('Verify every pushed digest signature and SPDX attestation') <
+    named('Validate complete immutable set and stage verifier evidence'));
+  assert.ok(named('Validate complete immutable set and stage verifier evidence') <
     named('Publish and verify public corresponding-source assets'));
-  assert.ok(named('Validate complete immutable set') <
+  assert.ok(named('Validate complete immutable set and stage verifier evidence') <
     named('Publish and verify public corresponding-source assets'));
 });
 
@@ -395,13 +395,13 @@ test('publisher uses one reusable-workflow signer identity for every verificatio
     assert.match(invocation, /--certificate-identity \\"?\$RELEASE_SIGNER_IDENTITY/);
     assert.match(invocation, /--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/);
   }
-  assert.match(job, /cosign verify \\"\$reference\\"/);
-  assert.match(job, /cosign verify-attestation \\"\$reference\\"/);
+  assert.match(job, /cosign verify --output json \\"\$reference\\"/);
+  assert.match(job, /cosign verify-attestation --output json \\"\$reference\\"/);
   assert.match(job, /--type spdxjson/);
   assert.match(job, /registry_digest/);
-  assert.ok(job.indexOf('cosign verify \\"$reference\\"') <
+  assert.ok(job.indexOf('cosign verify --output json \\"$reference\\"') <
     job.indexOf('release-set.mjs tag'));
-  assert.ok(job.indexOf('cosign verify-attestation \\"$reference\\"') <
+  assert.ok(job.indexOf('cosign verify-attestation --output json \\"$reference\\"') <
     job.indexOf('release-control.mjs advance'));
   assert.ok(job.indexOf('release-set.mjs tag') < job.indexOf('release-set.mjs alias'));
   assert.ok(job.indexOf('release-set.mjs alias') < job.indexOf('release-control.mjs advance'));
