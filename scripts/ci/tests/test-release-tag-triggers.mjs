@@ -3676,8 +3676,11 @@ test('the shared public field projection rejects wrong types rather than coercin
   }
 });
 
-test('executed manifest signing command binds the exact serialized manifest and reuses no fabricated bundle', async () => {
+test('executed signing commands preserve signed subjects and never let verification rewrite bundles', async () => {
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8').replace(/\r\n/g, '\n');
+  const authorizationSigning = docker.split('      - name: Sign immutable authorization\n')[1]
+    .split('      - uses: actions/upload-artifact')[0].split('        run: |\n')[1]
+    .split('\n').map(line => line.replace(/^          /, '')).join('\n');
   const signing = docker.split('      - name: Sign externally-digested complete release manifest\n')[1]
     .split('      - name: Publish and verify public corresponding-source assets')[0].split('        run: |\n')[1]
     .split('\n').map(line => line.replace(/^          /, '')).join('\n');
@@ -3699,6 +3702,7 @@ test('executed manifest signing command binds the exact serialized manifest and 
   const root = resolve('.artifacts', `sign-public-${process.pid}`);
   const cwd = process.cwd();
   mkdirSync(root, { recursive: true });
+  symlinkSync(resolve(cwd, 'scripts'), resolve(root, 'scripts'), 'junction');
   process.chdir(root);
   try {
     const identity = await authorizedRecord();
@@ -3706,25 +3710,49 @@ test('executed manifest signing command binds the exact serialized manifest and 
     writeAuthorizationSet(identity, completeSet(identity));
     emitPublicReleaseAssets(identity, completeSet(identity));
     const mock = `cosign() {
-      local bundle="" source="" previous=""
+      local operation="$1" bundle="" source="" previous=""
+      shift
       for arg in "$@"; do
         if [[ "$previous" == "--bundle" ]]; then bundle="$arg"; fi
         previous="$arg"
         source="$arg"
       done
-      cp "$source" "$bundle"
+      case "$operation" in
+        sign-blob)
+          printf '%s\\n' "$source" >> "$COSIGN_WITNESS"
+          printf 'signed:%s' "$source" > "$bundle"
+          ;;
+        verify-blob)
+          [[ -s "$bundle" && -f "$source" ]]
+          ;;
+        *) return 64 ;;
+      esac
     }\n`;
     const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+    const witness = resolve(root, 'cosign-subjects.txt');
+    const authorizationResult = spawnSync(shell, ['-c', `${mock}${authorizationSigning}`],
+      { cwd: root, encoding: 'utf8', env: {
+        ...process.env, COSIGN_WITNESS: witness,
+      } });
+    assert.ifError(authorizationResult.error);
+    assert.equal(authorizationResult.status, 0, authorizationResult.stderr);
     const result = spawnSync(shell, ['-c', `${mock}${signing}`],
       { cwd: root, encoding: 'utf8', env: {
         ...process.env, VERSION: identity.canonicalVersion, RELEASE_SIGNER_IDENTITY: publisherWorkflowIdentity,
+        RELEASE_PUBLIC_IDENTITY: JSON.stringify(readReleaseManifest().manifest.identity),
+        COSIGN_WITNESS: witness,
       } });
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr);
     assert.doesNotMatch(result.stdout + result.stderr, /private-publisher|private-future/);
     assert.equal(readFileSync(authorizationPath, 'utf8'), JSON.stringify(identity));
-    assert.equal(readFileSync(manifestEnvelopeBundle, 'utf8'), readFileSync(manifestEnvelopePath, 'utf8'),
-      'The actual signing block must create the bundle from the envelope');
+    assert.equal(readFileSync(manifestEnvelopeBundle, 'utf8'),
+      `signed:${manifestEnvelopePath}`);
+    assert.deepEqual(readFileSync(witness, 'utf8').trim().split('\n'), [
+      authorizationPath,
+      '.artifacts/release-authorization/public-identity.json',
+      manifestEnvelopePath,
+    ]);
     assert.ok(uploadedAuthorizationFiles.includes(manifestEnvelopeBundle));
     assert.doesNotMatch(readFileSync(manifestEnvelopeBundle, 'utf8'), privateFields);
   } finally {

@@ -320,14 +320,48 @@ jobs:
           docker run --rm --platform linux/arm64 --entrypoint /bin/sh \
             "ghcr.io/olyforge3d/printfarmer-monolith@${monolith_digest}" \
             -c 'test -f /app/Farm.Web.Api.dll && test -f /app/wwwroot/index.html && dotnet --info >/dev/null'
+      - name: Promote validated immutable image tags
+        env:
+          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
+        run: node scripts/ci/release-set.mjs tag
       - name: Sign externally-digested complete release manifest
         env:
           GH_TOKEN: ${{ steps.publisher.outputs.token }}
           VERSION: ${{ steps.consume.outputs.version }}
+          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
         run: |
           set -euo pipefail
           manifest_dir=.artifacts/release-authorization
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import {
+              validatePublicAuthorization, validateReleaseManifestBytes,
+            } from "./scripts/ci/release-policy.mjs";
+            const expected = JSON.parse(process.env.RELEASE_PUBLIC_IDENTITY);
+            validatePublicAuthorization(expected);
+            const envelope = JSON.parse(readFileSync(".artifacts/release-authorization/release-manifest.envelope.json", "utf8"));
+            const manifest = validateReleaseManifestBytes(
+              readFileSync(".artifacts/release-authorization/release-manifest.json", "utf8"), envelope);
+            if (manifest.identity.releaseId !== expected.releaseId ||
+                manifest.identity.canonicalVersion !== expected.canonicalVersion ||
+                manifest.identity.identitySha256 !== expected.identitySha256) {
+              throw new Error("Manifest identity differs from authorized output");
+            }
+          '
+          existing_manifest_assets=""
           if gh release view "$VERSION" >/dev/null 2>&1; then
+            existing_manifest_assets="$(gh release view "$VERSION" --json assets --jq '
+              [.assets[].name |
+                select(. == "release-manifest.json" or
+                       . == "release-manifest.envelope.json" or
+                       . == "release-manifest.envelope.bundle.json")] | join("\n")'
+            )"
+          fi
+          if [[ -n "$existing_manifest_assets" && "$(wc -l <<< "$existing_manifest_assets")" -ne 3 ]]; then
+            echo "Existing release has a partial manifest asset set"
+            exit 1
+          fi
+          if [[ -n "$existing_manifest_assets" ]]; then
             recovery_dir="$RUNNER_TEMP/recovered-release-manifest"
             mkdir -p "$recovery_dir"
             gh release download "$VERSION" \
@@ -410,7 +444,7 @@ jobs:
             release-assets/release-manifest.envelope.json
           node --input-type=module -e '
             import { readFileSync } from "node:fs";
-            import { validateReleaseManifestBytes } from "./scripts/ci/release-policy.mjs";
+            import { validateReleaseManifestBytes } from "../scripts/ci/release-policy.mjs";
             validateReleaseManifestBytes(
               readFileSync("release-assets/release-manifest.json", "utf8"),
               JSON.parse(readFileSync("release-assets/release-manifest.envelope.json", "utf8")));
@@ -486,16 +520,12 @@ jobs:
             "$published_manifest_dir/release-manifest.envelope.json"
           node --input-type=module -e '
             import { readFileSync } from "node:fs";
-            import { validateReleaseManifestBytes } from "./scripts/ci/release-policy.mjs";
+            import { validateReleaseManifestBytes } from "../scripts/ci/release-policy.mjs";
             validateReleaseManifestBytes(
               readFileSync(process.argv[1], "utf8"),
               JSON.parse(readFileSync(process.argv[2], "utf8")));
           ' "$published_manifest_dir/release-manifest.json" \
             "$published_manifest_dir/release-manifest.envelope.json"
-      - name: Promote validated digests
-        env:
-          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
-        run: node scripts/ci/release-set.mjs tag
       - name: Advance the complete channel pointer last
         id: advance
         env:
