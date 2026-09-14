@@ -138,9 +138,10 @@ public class PrintersControllerControlGuardsTests
     }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task LegacyMotionAsync_MissingPluginOrMissingDurableTransport_NeverFallsBack(bool missingPlugin)
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task LegacyMotionAsync_MissingPluginOrMissingDurableTransport_NeverFallsBack(bool missingPlugin, bool unregisteredBackend)
     {
         Guid id = Guid.NewGuid();
         var printers = new Mock<IPrintersService>();
@@ -149,7 +150,10 @@ public class PrintersControllerControlGuardsTests
         var factory = new Mock<IBackendClientFactory>();
         if (missingPlugin)
         {
-            factory.Setup(value => value.GetClient(PrinterBackend.Moonraker)).Throws(new InvalidOperationException("not installed"));
+            Exception exception = unregisteredBackend
+                ? new ArgumentException("Unsupported printer backend: Moonraker")
+                : new InvalidOperationException("not installed");
+            factory.Setup(value => value.GetClient(PrinterBackend.Moonraker)).Throws(exception);
         }
         else
         {

@@ -2977,7 +2977,7 @@ public class PrintersController(
         {
             client = _backendClientFactory.GetClient((PrinterBackend)backend.Value);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or KeyNotFoundException)
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
             _logger.LogWarning("Cannot resolve motion backend {Backend}: {ErrorType}", backend.Value, ex.GetType().Name);
             return UnsupportedMotion();

@@ -693,13 +693,13 @@ public sealed class PrinterControlOperationService(
             "move_to" => PrinterControlKind.MoveTo,
             _ => null,
         };
-        Printer? printer = await db.Printers.AsNoTracking().SingleOrDefaultAsync(p => p.Id == printerId, ct);
-        if (kind is null || printer is null ||
-            GetMotionCapability(clients, printer.Backend)?.SupportedMotionKinds.Contains(kind.Value) != true)
+        if (kind is null || !await db.Printers.AnyAsync(p => p.Id == printerId, ct))
         {
             return;
         }
 
+        // Historical barrier labels identify uncertain motion, not executable intent.
+        // Recovery must survive plugin loss; only new admission/send consults live support.
         var operation = new PrinterControlOperation
         {
             Id = id,

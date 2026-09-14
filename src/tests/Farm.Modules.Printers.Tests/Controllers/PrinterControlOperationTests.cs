@@ -1459,6 +1459,128 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         Assert.Equal(PrinterSenderIsolation.ExternalVerificationRequired, result.SenderIsolation);
     }
 
+    [Theory]
+    [InlineData("missing", "home", PrinterControlKind.HomeAll)]
+    [InlineData("missing", "move", PrinterControlKind.Jog)]
+    [InlineData("unresolvable", "home", PrinterControlKind.HomeAll)]
+    [InlineData("unresolvable", "move", PrinterControlKind.Jog)]
+    [InlineData("withdrawn", "home", PrinterControlKind.HomeAll)]
+    [InlineData("withdrawn", "move", PrinterControlKind.Jog)]
+    public async Task ImportLegacyAsync_UnavailableCapability_PreservesReceiptAndExternalRecoveryWithoutReplay(
+        string capabilityState, string legacyOperation, PrinterControlKind kind)
+    {
+        Guid id = Guid.NewGuid();
+        await SeedUnavailableLegacyMotionAsync(id, legacyOperation, capabilityState);
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ImportLegacyAsync(printerId, default);
+            await service.ImportLegacyAsync(printerId, default);
+            clients.Verify(f => f.GetClient(It.IsAny<int>()), Times.Never);
+            PrinterControlOperation operation = await db.PrinterControlOperations.SingleAsync();
+            Assert.Equal("legacy:unknown", operation.NormalizedIntent);
+            Assert.NotNull(operation.SendCommittedAtUtc);
+            Assert.Null(operation.OwnerToken);
+            Assert.Null(operation.X);
+            Assert.Null(operation.Y);
+            Assert.Null(operation.Z);
+            Assert.Equal(1, await db.QueueOperationAudits.CountAsync());
+            Assert.Equal(1, await db.QueueDispatchOutbox.CountAsync());
+            Assert.Null(await service.ClaimAsync(id, Guid.NewGuid(), default));
+        });
+
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance);
+        await worker.TickAsync(default);
+        PrinterControlOperationDto receipt = await GetAsync(id);
+        Assert.Equal(kind, receipt.Kind);
+        Assert.Equal(PrinterControlState.Unknown, receipt.State);
+        Assert.Equal("legacy_outcome_unknown", receipt.Failure?.Code);
+        Assert.True(receipt.BarrierHeld);
+        Assert.True(receipt.RequiresRecovery);
+        Assert.Equal(PrinterControlEvidence.None, receipt.CompletionEvidence);
+        Assert.Equal(PrinterSenderIsolation.ExternalVerificationRequired, receipt.SenderIsolation);
+
+        await ChangeAsync(async (_, service) =>
+        {
+            PrinterControlOperationDto recovery = await service.BeginRecoveryAsync(
+                printerId, id, Quote(receipt.RowVersion), userId.ToString(), default);
+            PrinterControlException blocked = await Assert.ThrowsAsync<PrinterControlException>(() =>
+                service.CompleteRecoveryAsync(printerId, id, Quote(recovery.RowVersion), userId.ToString(),
+                    new("checked", "ServiceConfirmed", "socket closed", true, true, "inspected"), default));
+            Assert.Equal("recovery_prerequisite", blocked.Code);
+            PrinterControlOperationDto recovered = await service.CompleteRecoveryAsync(
+                printerId, id, Quote(recovery.RowVersion), userId.ToString(), Evidence(), default);
+            Assert.Equal(PrinterControlState.Recovered, recovered.State);
+            Assert.Equal(PrinterControlEvidence.OperatorVerifiedRecovery, recovered.CompletionEvidence);
+            Assert.False(recovered.BarrierHeld);
+            PrinterControlException unsupported = await Assert.ThrowsAsync<PrinterControlException>(() =>
+                service.AdmitAsync(printerId, Guid.NewGuid(), userId.ToString(),
+                    new(kind, X: kind == PrinterControlKind.Jog ? 1 : null), default));
+            Assert.Equal("printer_operation_unsupported", unsupported.Code);
+        });
+        motionCapability.Verify(m => m.ConnectAsync(It.IsAny<Printer>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData("missing", "home")]
+    [InlineData("missing", "move")]
+    [InlineData("unresolvable", "home")]
+    [InlineData("unresolvable", "move")]
+    [InlineData("withdrawn", "home")]
+    [InlineData("withdrawn", "move")]
+    public async Task PrepareEmergencyStopAsync_UnavailableLegacyCapability_ImportsReceiptAndFencesAttemptWithoutSending(
+        string capabilityState, string legacyOperation)
+    {
+        Guid id = Guid.NewGuid();
+        await SeedUnavailableLegacyMotionAsync(id, legacyOperation, capabilityState);
+        await ChangeAsync(async (db, service) =>
+        {
+            PrinterEmergencyStopLease? lease = await service.PrepareEmergencyStopAsync(printerId, userId.ToString(), default);
+            Assert.NotNull(lease);
+            Assert.Equal(id, lease.OperationId);
+            clients.Verify(f => f.GetClient(It.IsAny<int>()), Times.Never);
+            PrinterEmergencyStopAttempt attempt = await db.PrinterEmergencyStopAttempts.SingleAsync();
+            Assert.Equal(lease.AttemptId, attempt.Id);
+            Assert.Equal(id, attempt.OperationId);
+            Assert.Equal(PrinterEmergencyStopDelivery.Pending, attempt.Delivery);
+            Assert.Null(attempt.SendCommittedAtUtc);
+            PrinterControlOperationDto receipt = await service.GetAsync(printerId, id, default);
+            Assert.Equal(PrinterControlState.Recovering, receipt.State);
+            Assert.Equal(PrinterSenderIsolation.ExternalVerificationRequired, receipt.SenderIsolation);
+            Assert.True(receipt.BarrierHeld);
+
+            await service.FinishEmergencyStopAsync(printerId, lease, PrinterEmergencyStopDelivery.NotSent, default);
+            receipt = await service.GetAsync(printerId, id, default);
+            Assert.True(receipt.BarrierHeld);
+            Assert.Equal(PrinterSenderIsolation.ExternalVerificationRequired, receipt.SenderIsolation);
+            PrinterControlOperationDto recovered = await service.CompleteRecoveryAsync(
+                printerId, id, Quote(receipt.RowVersion), userId.ToString(), Evidence(), default);
+            Assert.Equal(PrinterControlState.Recovered, recovered.State);
+            Assert.False(recovered.BarrierHeld);
+            Assert.Equal(PrinterEmergencyStopDelivery.NotSent,
+                (await db.PrinterEmergencyStopAttempts.AsNoTracking().SingleAsync()).Delivery);
+        });
+        motionCapability.Verify(m => m.ConnectAsync(It.IsAny<Printer>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData("extrude")]
+    [InlineData("disable_motors")]
+    [InlineData("async_motion")]
+    public async Task ImportLegacyAsync_UnrecognizedBarrierLabel_DoesNotInventMotionReceipt(string operation)
+    {
+        Guid id = Guid.NewGuid();
+        await SeedUnavailableLegacyMotionAsync(id, operation, "missing");
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ImportLegacyAsync(printerId, default);
+            Assert.Empty(await db.PrinterControlOperations.ToArrayAsync());
+            Assert.Equal(id, (await db.PrinterDispatchStates.SingleAsync()).PhysicalControlCommandId);
+        });
+    }
+
     [Fact]
     public async Task WorkerAsync_RequestEnds_OperationRemainsRunningUntilExactCompletion()
     {
@@ -1611,6 +1733,35 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),
             Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>(),
             Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver>());
+    }
+
+    private async Task SeedUnavailableLegacyMotionAsync(Guid id, string operation, string capabilityState)
+    {
+        const int backend = 9001;
+        if (capabilityState == "withdrawn")
+        {
+            clients.Setup(f => f.GetClient(backend)).Returns(client.Object);
+            motionCapability.SetupGet(m => m.SupportedMotionKinds).Returns([PrinterControlKind.HomeZ]);
+        }
+        else if (capabilityState == "unresolvable")
+        {
+            clients.Setup(f => f.GetClient(backend)).Throws(new InvalidOperationException("Plugin cannot be resolved."));
+        }
+        else
+        {
+            clients.Setup(f => f.GetClient(backend)).Throws(new ArgumentException("Plugin is not installed."));
+        }
+
+        await ChangeAsync(async (db, _) =>
+        {
+            (await db.Printers.SingleAsync()).Backend = backend;
+            PrinterDispatchState barrier = await db.PrinterDispatchStates.SingleAsync();
+            barrier.PhysicalControlCommandId = id;
+            barrier.PhysicalControlOperation = operation;
+            barrier.PhysicalControlActorSubject = userId.ToString();
+            barrier.PhysicalControlStartedAtUtc = DateTime.UtcNow.AddMinutes(-5);
+            await db.SaveChangesAsync();
+        });
     }
 
     private async Task ChangeAsync(Func<AppDbContext, PrinterControlOperationService, Task> change)
