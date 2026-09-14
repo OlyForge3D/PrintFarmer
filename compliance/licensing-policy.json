@@ -116,8 +116,7 @@
       "path": ".github/workflows/consolidated-release.yml",
       "contains": [
         "node scripts/ci/release-control.mjs admit",
-        "uses: ./.github/workflows/docker-publish.yml",
-        "uses: ./.github/workflows/release-protection-rehearsal.yml"
+        "uses: ./.github/workflows/docker-publish.yml"
       ],
       "notContains": [
         "REPO_PAT",

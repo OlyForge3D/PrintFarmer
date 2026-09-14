@@ -9,10 +9,8 @@ import {
 import {
   releaseRequiredChecks, repository, requireKeys, requireString, requireThat, validateApprovalMode,
 } from './release-policy.mjs';
-import { positiveRehearsal, readOnlyClient } from './release-rehearsal.mjs';
 
 export const qualificationPath = '.artifacts/release-transaction/qualification.json';
-export const rehearsalReceiptPath = '.artifacts/release-transaction/rehearsal-receipt.json';
 export const transactionPath = '.artifacts/release-transaction/transaction.json';
 export const qualificationLifetimeMs = 30 * 60 * 1000;
 export const evidenceLifetimeMs = 24 * 60 * 60 * 1000;
@@ -97,8 +95,6 @@ export async function selectTransaction(env = process.env, api = githubClient(en
   requireString(env.GITHUB_RUN_ATTEMPT, positivePattern, 'run attempt');
   const channel = env.RELEASE_CHANNEL;
   const branch = channelBranch(channel);
-  const mode = env.RELEASE_MODE;
-  requireThat(['release', 'rehearsal'].includes(mode), 'Invalid release mode');
   requireString(env.GITHUB_SHA, shaPattern, 'workflow commit');
   requireString(env.GITHUB_WORKFLOW_SHA, shaPattern, 'workflow definition commit');
   requireThat(env.GITHUB_REF === 'refs/heads/development' &&
@@ -113,7 +109,7 @@ export async function selectTransaction(env = process.env, api = githubClient(en
       throw new Error('Rerun recovery transaction is missing or malformed');
     }
     requireThat(recovered.runId === env.GITHUB_RUN_ID && recovered.runAttempt === '1' &&
-      recovered.channel === channel && recovered.mode === mode &&
+      recovered.channel === channel &&
       recovered.workflowCommit === env.GITHUB_WORKFLOW_SHA &&
       recovered.approvalMode === env.RELEASE_APPROVAL_MODE,
     'Rerun recovery transaction does not match the immutable original dispatch');
@@ -138,7 +134,6 @@ export async function selectTransaction(env = process.env, api = githubClient(en
     kind: 'release-transaction',
     schema: 2,
     repository,
-    mode,
     channel,
     sourceBranch: branch,
     sourceCommit,
@@ -154,12 +149,12 @@ export async function selectTransaction(env = process.env, api = githubClient(en
 
 export function validateTransaction(value) {
   requireKeys(value, [
-    'kind', 'schema', 'repository', 'mode', 'channel', 'sourceBranch', 'sourceCommit',
+    'kind', 'schema', 'repository', 'channel', 'sourceBranch', 'sourceCommit',
     'observedBranchHead', 'workflowIdentity', 'workflowCommit', 'runId', 'runAttempt',
     'approvalMode',
   ], [], 'release transaction');
   requireThat(value.kind === 'release-transaction' && value.schema === 2 &&
-    value.repository === repository && ['release', 'rehearsal'].includes(value.mode),
+    value.repository === repository,
   'Invalid release transaction identity');
   const branch = channelBranch(value.channel);
   requireThat(value.sourceBranch === branch &&
@@ -287,18 +282,17 @@ export async function verifyTransactionQualification(
   };
 }
 
-export function validateQualificationReceipt(value, transaction, requiredMode, now = Date.now()) {
+export function validateQualificationReceipt(value, transaction, now = Date.now()) {
   requireKeys(value, [
     'kind', 'schema', 'transaction', 'checkedAt', 'expiresAt', 'qualifiedBranchHead',
     'run', 'jobs', 'sourceEvidence',
   ], [], 'release qualification receipt');
   requireThat(value.kind === 'release-qualification' && value.schema === 2,
-    'Rehearsal evidence cannot authorize release');
+    'Invalid release qualification receipt');
   validateTransaction(value.transaction);
   validateTransaction(transaction);
   requireThat(JSON.stringify(value.transaction) === JSON.stringify(transaction),
     'Qualification receipt belongs to another release transaction');
-  requireThat(value.transaction.mode === requiredMode, 'Qualification mode mismatch');
   const checkedAt = timestamp(value.checkedAt, 'qualification timestamp');
   const expiresAt = timestamp(value.expiresAt, 'qualification expiry');
   requireThat(expiresAt - checkedAt === qualificationLifetimeMs &&
@@ -337,119 +331,18 @@ export async function qualifyTransaction(transaction, api = githubClient(process
   now = Date.now()) {
   const receipt = await verifyTransactionQualification(transaction, api, now);
   validatedJson(receipt, value =>
-    validateQualificationReceipt(value, transaction, transaction.mode, now));
+    validateQualificationReceipt(value, transaction, now));
   return receipt;
 }
 
-export function readQualificationReceipt(transaction, requiredMode, now = Date.now()) {
+export function readQualificationReceipt(transaction, now = Date.now()) {
   let value;
   try {
     value = readBoundedJson(qualificationPath, 'Qualification receipt');
   } catch {
     throw new Error('Qualification receipt unavailable or malformed');
   }
-  return validateQualificationReceipt(value, transaction, requiredMode, now);
-}
-
-export function writeDiagnosticReceipt(transaction, qualification, now = Date.now()) {
-  validateQualificationReceipt(qualification, transaction, transaction.mode, now);
-  const receipt = {
-    kind: 'release-rehearsal-only',
-    schema: 3,
-    passed: true,
-    transaction,
-    qualificationCheckedAt: qualification.checkedAt,
-    qualificationExpiresAt: qualification.expiresAt,
-    publicationAuthorized: false,
-  };
-  writeValidatedJson(rehearsalReceiptPath, receipt, value => {
-    requireKeys(value, [
-      'kind', 'schema', 'passed', 'transaction', 'qualificationCheckedAt',
-      'qualificationExpiresAt', 'publicationAuthorized',
-    ], [], 'diagnostic receipt');
-    requireThat(value.kind === 'release-rehearsal-only' && value.schema === 3 &&
-      value.passed === true && value.publicationAuthorized === false,
-    'Invalid non-authorizing diagnostic receipt');
-    validateTransaction(value.transaction);
-    requireThat(JSON.stringify(value.transaction) === JSON.stringify(transaction) &&
-      value.qualificationCheckedAt === qualification.checkedAt &&
-      value.qualificationExpiresAt === qualification.expiresAt,
-    'Diagnostic receipt evidence mismatch');
-  });
-  return receipt;
-}
-
-export const writeRehearsalReceipt = writeDiagnosticReceipt;
-
-export async function runLiveDiagnostic(
-  transaction,
-  qualification,
-  env = process.env,
-  fetcher = fetch,
-  now = Date.now(),
-) {
-  validateQualificationReceipt(qualification, transaction, transaction.mode, now);
-  requireThat(env.GITHUB_REPOSITORY === repository &&
-    env.GITHUB_RUN_ID === transaction.runId &&
-    env.GITHUB_SHA === transaction.workflowCommit &&
-    env.GITHUB_WORKFLOW_SHA === transaction.workflowCommit &&
-    env.GITHUB_REF === 'refs/heads/development' &&
-    env.GITHUB_WORKFLOW_REF === transaction.workflowIdentity,
-  'Untrusted diagnostic workflow-call context');
-  requireString(env.GITHUB_RUN_ATTEMPT, positivePattern, 'diagnostic run attempt');
-  requireString(env.RELEASE_LEDGER_ANCHOR, shaPattern, 'diagnostic ledger anchor');
-  const api = readOnlyClient(env.GH_TOKEN, fetcher);
-  const context = Object.freeze({
-    channel: transaction.channel,
-    branch: transaction.sourceBranch,
-    sha: transaction.sourceCommit,
-    workflowSha: transaction.workflowCommit,
-    run: transaction.runId,
-    attempt: env.GITHUB_RUN_ATTEMPT,
-    anchor: env.RELEASE_LEDGER_ANCHOR,
-    mode: transaction.approvalMode,
-  });
-  const live = await positiveRehearsal(undefined, api, context, {
-    verifyEvidence: async () => validateQualificationReceipt(
-      qualification,
-      transaction,
-      transaction.mode,
-      now,
-    ),
-  });
-  const receipt = {
-    kind: 'release-rehearsal-only',
-    schema: 3,
-    passed: true,
-    transaction,
-    qualificationCheckedAt: qualification.checkedAt,
-    qualificationExpiresAt: qualification.expiresAt,
-    publicationAuthorized: false,
-    liveEvidence: {
-      run: live.run,
-      source: live.source,
-      inventoryDigest: live.inventoryDigest,
-      readOnlyVerified: live.readOnlyVerified,
-    },
-  };
-  writeValidatedJson(rehearsalReceiptPath, receipt, value => {
-    requireKeys(value, [
-      'kind', 'schema', 'passed', 'transaction', 'qualificationCheckedAt',
-      'qualificationExpiresAt', 'publicationAuthorized', 'liveEvidence',
-    ], [], 'live diagnostic receipt');
-    requireThat(value.kind === 'release-rehearsal-only' && value.schema === 3 &&
-      value.passed === true &&
-      value.publicationAuthorized === false &&
-      JSON.stringify(value.transaction) === JSON.stringify(transaction) &&
-      value.qualificationCheckedAt === qualification.checkedAt &&
-      value.qualificationExpiresAt === qualification.expiresAt &&
-      value.liveEvidence?.run === transaction.runId &&
-      value.liveEvidence?.source === transaction.sourceCommit &&
-      /^[a-f0-9]{64}$/.test(value.liveEvidence?.inventoryDigest) &&
-      value.liveEvidence?.readOnlyVerified === true,
-    'Invalid live diagnostic evidence');
-  });
-  return receipt;
+  return validateQualificationReceipt(value, transaction, now);
 }
 
 export function transactionFromEnvironment(env = process.env) {
@@ -458,7 +351,7 @@ export function transactionFromEnvironment(env = process.env) {
 
 async function main() {
   const operation = process.argv[2];
-  requireThat(['select', 'validate', 'qualify', 'diagnose', 'diagnose-live', 'rehearse'].includes(operation),
+  requireThat(['select', 'validate', 'qualify'].includes(operation),
     'Unknown release transaction operation');
   if (operation === 'select') {
     const transaction = await selectTransaction();
@@ -474,15 +367,7 @@ async function main() {
   if (operation === 'qualify') {
     const qualification = await qualifyTransaction(transaction);
     process.stdout.write(`${JSON.stringify(qualification)}\n`);
-    return;
   }
-  const requiredMode = operation === 'rehearse' ? 'rehearsal' : transaction.mode;
-  const qualification = readQualificationReceipt(transaction, requiredMode);
-  if (operation === 'diagnose-live') {
-    await runLiveDiagnostic(transaction, qualification);
-    return;
-  }
-  writeDiagnosticReceipt(transaction, qualification);
 }
 
 if (process.argv[1]?.replaceAll('\\', '/').endsWith('/scripts/ci/release-transaction.mjs')) {

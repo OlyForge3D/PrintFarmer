@@ -101,8 +101,8 @@ Newer runs, reruns, mode drift, edited review, failed checks or HEAD movement
 invalidate qualification. Publication admission revalidates the chain before
 reservation and each CAS retry rather than trusting a green status alone.
 Qualification has no release credentials, environments, OIDC or ledger writes.
-It does not complete #2668 activation: ledger/package rehearsals and private
-owner publisher-credential provisioning remain separate.
+Private owner publisher-credential provisioning remains separate from the
+automated release path.
 
 **Approval corrections (#2682, #2684):** activation under #2668 requires the
 explicit `RELEASE_APPROVAL_MODE` policy. `single-maintainer`
@@ -126,8 +126,9 @@ The current review producer targets open PR heads, not subsequent squash commits
 canonical-SHA review evidence remains an explicit #2668 activation prerequisite,
 never a status copied from another SHA or a fabricated independent approver.
 See [approval configuration](RELEASE_GUIDE.md#explicit-release-approval-configuration)
-for private delegation evidence and cutover. All other #2679 controls, including
-package ACL isolation and negative rehearsals, remain unchanged.
+for private delegation evidence and cutover. All other #2679 controls,
+including package ACL isolation and automated negative-path tests, remain
+unchanged.
 
 The local #2668 implementation establishes the following publication policy,
 as documented in the [release guide](RELEASE_GUIDE.md#release-channels-and-branches):
@@ -961,8 +962,9 @@ production validation runs are implied by this design document.
   non-publishing stabilization lifecycle and executable event-validation tests.
   Preserve `docs\RELEASE_GUIDE.md`'s disjoint container and TestFlight tag guidance.
   Gate cutover on historical tag inventory, allocator continuity, live
-  protections and a credential-free negative-event rehearsal; legacy artifacts
-  remain immutable and cannot become managed candidates through relabeling.
+  protections and credential-free automated negative-event tests; legacy
+  artifacts remain immutable and cannot become managed candidates through
+  relabeling.
 
 ### I2 — Complete release contract and publication
 

@@ -38,15 +38,13 @@ The supported administrator journey is:
 3. Click **Run workflow** on `development` and approve the one
    pending `release-stable` or `release-insider` transaction environment.
 4. Follow the generated Actions summary. Qualification, evidence collection,
-   allocation, ledger/tag work, publication, pointer advancement and bounded
-   diagnostics are automatic and fail closed.
+   allocation, ledger/tag work, publication and pointer advancement are
+   automatic and fail closed.
 
 The consolidated journey does not require separately dispatching CI,
-qualification, evidence-recorder or diagnostic workflows. Internal release
-diagnostics are maintainer-only, non-publishing, and intentionally absent from
-the normal workflow form. Do not supply CI run IDs, comment IDs, tags, fixture
-values, evidence values, or allocator values to the consolidated journey, and
-do not author formatted commit comments or statuses.
+qualification, or evidence-recorder workflows. Do not supply CI run IDs,
+comment IDs, tags, fixture values, evidence values, or allocator values to the
+consolidated journey, and do not author formatted commit comments or statuses.
 An explicit source outside the selected canonical branch's ancestry is rejected;
 once admitted, later branch movement does not retarget the source commit.
 
@@ -59,11 +57,9 @@ environment approval. Receipts last 30 minutes and underlying evidence must
 predate collection, remain within its own freshness window, and not be future
 dated. Delayed approval beyond the receipt window requires a new dispatch.
 
-The hidden internal diagnostic workflow has no production environment,
-publisher App, registry credential, OIDC permission, or write permission. Its
-`release-rehearsal-only` receipt has `publicationAuthorized: false` and is not
-accepted as release qualification or authorization. It is a maintainer
-diagnostic, not an administrator release ceremony.
+By owner decision, release validation is limited to automated tests,
+static/fail-closed checks, and code review. There is no alternate live workflow,
+mode, environment, receipt, fixture, probe, or operator ceremony.
 
 `release-stable` and `release-insider` are the only publication environments.
 Each real run creates exactly one deployment to the selected environment. The
@@ -74,13 +70,12 @@ advances the channel pointer last.
 | Channel | Base authority | Canonical version | Source tag |
 | --- | --- | --- | --- |
 | Stable | `main:VERSION` | `X.Y.Z` | `vX.Y.Z` |
-| Insider | `development:VERSION` | `X.Y.Z-insider.N`, `X.Y.Z-beta.N`, `X.Y.Z-rc.N` | canonical version prefixed with `v` |
+| Insider | `development:VERSION` | `X.Y.Z-insider.N` | canonical version prefixed with `v` |
 
 `VERSION` contains exactly `vX.Y.Z` and an optional final newline. Numeric
 components have no leading zeros. Prerelease N is positive, never caller-assigned.
-The optional dispatch `version` is an assertion against the allocated result,
-not a version authority. Omit it for normal allocation. The `stage` field must
-be empty for stable; insider defaults to `insider`.
+The release identity is allocated automatically; the dispatch does not accept a
+version, stage, tag, or allocator input.
 
 Stable is the installation default. Insider requires separate administrator
 opt-in and a reduced-stability warning; running a release workflow does not
@@ -454,8 +449,8 @@ Read-only live API evidence on 2026-09-12:
 
 - Ruleset **12465886 `Main`** is **disabled**, has an empty include scope, and
   only deletion/non-fast-forward rules. It does not enforce release policy.
-- `release-stable` and `release-insider` are the existing protected publication
-  environments. No additional publisher or rehearsal environment is required.
+- `release-stable` and `release-insider` are the only protected publication
+  environments.
 - No `RELEASE_*` variables are configured. Repository access reports admin,
   but #2668 retains explicit owner approval of storage/continuity/publisher policy.
   No live ruleset/environment was changed and no publisher app was provisioned.
@@ -686,10 +681,10 @@ retain their existing single-page bounds. Exceeding a bound requires a reviewed
 extension rather than deleting audit evidence.
 The macOS archive must finish within that same 24-hour window; runner queue
 time does not extend evidence lifetime. Land this graph on each canonical branch
-before qualifying that channel. A previous 38-job rehearsal lacks the three
+before qualifying that channel. A previous 38-job test execution lacks the three
 executions and cannot be repaired with extra statuses: dispatch new CI and review
 the new exact HEAD. Local tests verify the graph and evidence rejection, not a
-live canonical CI/archive execution; the first post-merge rehearsal remains required.
+live canonical CI/archive execution.
 
 **Stable activation blocker (live read, 2026-09-13):** `main` currently requires
 the three release build contexts and `squad/pre-pr-verdict`, but lacks
@@ -730,8 +725,8 @@ payloads are hints that must match live repository/workflow/run data.
 This path changes no release protection profile, signed identity schema/digest,
 ledger schema or publication policy. #2679/#2683/#2685 branch/environment/tag,
 publisher, ledger-continuity and package-isolation controls remain mandatory.
-After merge, #2668 still requires owner-approved ledger seed/anchor/continuity,
-package ACL verification and safe rehearsals. Publisher App/registry credential
+After merge, #2668 still requires owner-approved ledger seed/anchor/continuity
+and package ACL verification. Publisher App/registry credential
 provisioning remains a **private, separate owner step**. No secret value is
 needed to qualify; never put credentials in commit comments, issues or artifacts.
 
@@ -778,7 +773,7 @@ of duties, four-eyes control or independent approval. The normalized evidence
 attests the checked environment policy, not the identity of a particular
 approver. Switching modes changes the branch and environment approval policy: exact SHA and
 branch restrictions, App isolation, immutable tags, ledger continuity, package
-ACL isolation and negative rehearsals remain mandatory.
+ACL isolation and automated negative-path tests remain mandatory.
 
 Before enabling:
 
@@ -829,11 +824,11 @@ Before enabling:
    Their deployment branch policy allows the immutable `development` workflow
    control ref for both channels; the selected source remains independently
    pinned to `main` for stable or `development` for insider.
-6. Read the effective policies back and rehearse denied publication before
-   first authorized publication, including rejected writes with a generic
-   repository workflow token. Release jobs request no repository-token contents
-   or package write scope: the protected App publishes source assets and the
-   protected package credential publishes application images.
+6. Read the effective policies back and verify the automated fail-closed tests
+   before first authorized publication. Release jobs request no
+   repository-token contents or package write scope: the protected App
+   publishes source assets and the protected package credential publishes
+   application images.
 
 Missing state, invalid ancestry, counter rollback or lost reservations block
 publication. Recovery is owner-only: stop publishers, compare retained ledger
@@ -842,34 +837,17 @@ high water without changing old reservations, and review a continuity checkpoint
 migration. Never reset N after a base/workflow change. An unprovable floor means
 publication remains disabled. No normal workflow has a reset/bypass operation.
 
-### Internal diagnostic workflow (#2668)
-
-`release-protection-rehearsal.yml` is a hidden `workflow_call` maintenance
-workflow, not a normal administrator entry point. It has no environment,
-secret, package permission, OIDC permission, or write permission. The reviewed
-consolidated release workflow calls it after exact-source qualification and
-passes the same immutable transaction plus the same-run qualification artifact.
-
-The workflow validates both inputs and the same-run qualification receipt, then
-uses bounded GET-only GitHub clients to verify the live caller run, canonical
-source ancestry, release-ledger snapshot, tags, and GitHub Releases before and
-after the diagnostic. It emits a `release-rehearsal-only` receipt with
-`publicationAuthorized: false` and only a sanitized inventory digest. Release
-qualification and authorization reject that receipt type. The diagnostic path
-cannot reserve an identity, create a tag, publish a package or GitHub Release,
-mutate the ledger, or advance a channel pointer.
-
 ## Validation
 
 Run from the repository root:
 
 ```text
 node --test scripts/ci/tests/test-release-tag-triggers.mjs scripts/ci/tests/test-daily-development-images.mjs
-node --test scripts/ci/tests/test-release-rehearsal.mjs
+node --test scripts/ci/tests/test-release-transaction.mjs scripts/ci/tests/test-github-evidence-pages.mjs
 ```
 
-Fixtures execute admission denials without writes, positive stable/insider/
-beta/RC paths, numeric ordering, atomic contention, retry/attempt/migration
+Fixtures execute admission denials without writes, positive stable/insider
+paths, numeric ordering, atomic contention, retry/attempt/migration
 semantics, tag peeling/movement, same-identity byte conflicts, complete-set/
 platform checks, stale-source races, promotion and candidate lifecycle policy.
 History fixtures include three-snapshot retained/restored qualification mutations,
@@ -895,7 +873,7 @@ remain retryable; new stale reservations cannot reach publication.
 The same suite scans repository executable scripts, actions and workflows for
 tag creation, force pushes and direct release/API publication. Its explicit
 writer inventory permits only the guarded ledger adapter, authorized Docker
-consumer, bounded rehearsal probe and App-only fixture modules, and separate `ios/` TestFlight writers.
+consumer, App-only fixture modules, and separate `ios/` TestFlight writers.
 This is a source regression check, not a substitute for repository protection
 or runtime authorization.
 Both retired server helpers execute against sentinel publication commands for

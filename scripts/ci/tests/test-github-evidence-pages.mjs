@@ -4,7 +4,6 @@ import { repository } from '../release-policy.mjs';
 import { evidenceBaseEndpoint, evidenceCollection, readEvidencePages } from '../github-evidence-pages.mjs';
 import { qualificationClient, qualificationRequestUrl } from '../canonical-qualification.mjs';
 import { githubClient, githubRequestUrl, verifyReleaseChecks } from '../release-github.mjs';
-import { readOnlyClient } from '../release-rehearsal.mjs';
 
 const sha = 'a'.repeat(40);
 const root = `https://api.github.com/repos/${repository}/`;
@@ -265,7 +264,6 @@ test('array without terminal evidence exhausts bounded page budget', async () =>
 for (const [name, client] of [
   ['qualification', fetcher => qualificationClient('test-only', false, fetcher)],
   ['release', fetcher => githubClient('test-only', fetcher)],
-  ['rehearsal read-only', fetcher => readOnlyClient('test-only', fetcher)],
 ]) {
   test(`${name} transport collects 141 checks with numeric links and exact source routes`, async () => {
     const f = pages(checks, 141, numericRoot);

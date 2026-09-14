@@ -88,7 +88,6 @@ const releaseTransaction = identity => ({
   kind: 'release-transaction',
   schema: 2,
   repository: identity.repository,
-  mode: 'release',
   channel: identity.channel,
   sourceBranch: identity.sourceBranch,
   sourceCommit: identity.sourceCommit,
@@ -2241,7 +2240,6 @@ function artifactUploads(workflow) {
 test('every release artifact upload path is explicitly inventoried, including both signed handoffs', () => {
   const authority = '.github/workflows/consolidated-release.yml';
   const docker = '.github/workflows/docker-publish.yml';
-  const diagnostics = '.github/workflows/release-protection-rehearsal.yml';
   assert.deepEqual(artifactUploads(authority), [
     ['.artifacts/release-transaction/transaction.json'],
     ['.artifacts/release-transaction/qualification.json'],
@@ -2254,18 +2252,14 @@ test('every release artifact upload path is explicitly inventoried, including bo
     ],
     [authorizationPath, authorizationBundle, privateSetPath],
   ]);
-  assert.deepEqual(artifactUploads(diagnostics), [
-    ['.artifacts/release-transaction/rehearsal-receipt.json'],
-  ]);
   // Keep the call graph closed: a new reusable workflow/action must be inventoried too.
-  for (const file of [authority, docker, diagnostics]) {
+  for (const file of [authority, docker]) {
     const text = readFileSync(file, 'utf8');
     assert.equal(artifactUploads(file).length, (text.match(/uses:\s*actions\/upload-artifact@/g) || []).length);
     for (const [, local] of text.matchAll(/uses: \.\/([^\s]+)/g)) {
       assert.ok([
         '.github/workflows/ci.yml',
         '.github/workflows/docker-publish.yml',
-        '.github/workflows/release-protection-rehearsal.yml',
       ].includes(local), local);
     }
     assert.doesNotMatch(text, /(?:gh api|curl).*(?:rulesets|environments|rules\/branches)|sign\.log/);

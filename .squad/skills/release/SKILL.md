@@ -41,7 +41,11 @@ Qualification receipts are bound to the dispatch run, immutable attempt-one
 transaction, workflow commit, GitHub Actions check suite, namespaced jobs,
 exact source checks, evidence timestamps and live branch policy. They expire
 after 30 minutes and are reverified after approval.
-`release-stable` and `release-insider` are the only publication environments. The normal dispatch has only channel and optional source SHA, and the selected environment supplies the single approval for the complete protected transaction. Internal diagnostics are hidden, environment-free, read-only, and emit only a `release-rehearsal-only` receipt with `publicationAuthorized: false`.
+`release-stable` and `release-insider` are the only publication environments.
+The dispatch has only channel and optional source SHA, and the selected
+environment supplies the single approval for the complete protected
+transaction. There is no alternate live diagnostic or non-publishing release
+ceremony; validation is automated and fail closed.
 
 ## Retired paths and recovery
 

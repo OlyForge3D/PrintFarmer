@@ -65,14 +65,6 @@ export function output(name, value) {
   }
 }
 
-export function validateTransactionOperation(operation, transaction) {
-  if (transaction && operation === 'authorize') {
-    requireThat(transaction.mode === 'release',
-      'Rehearsal transaction cannot enter release authorization');
-  }
-  return transaction;
-}
-
 export async function runReleaseControl(operation, env = process.env, verify = command) {
   requireThat(['admit', 'authorize', 'consume', 'preflight', 'advance'].includes(operation), 'Unknown release operation');
   const privileged = ['authorize', 'preflight', 'advance'].includes(operation);
@@ -93,7 +85,6 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     const transaction = env.RELEASE_TRANSACTION ? transactionFromEnvironment(env) : undefined;
     validateApprovalMode(env.RELEASE_APPROVAL_MODE);
     if (operation === 'authorize') {
-      validateTransactionOperation(operation, transaction);
       validateApprovalMode(env.RELEASE_ADMITTED_APPROVAL_MODE);
       requireThat(env.RELEASE_ADMITTED_APPROVAL_MODE === env.RELEASE_APPROVAL_MODE,
         'Approval mode changed after admission; align repository and environment policy and rerun all jobs');
@@ -117,7 +108,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       return;
     }
     if (transaction) {
-      readQualificationReceipt(transaction, 'release');
+      readQualificationReceipt(transaction);
       await verifyTransactionQualification(transaction, api);
     }
     if (transaction) await verifyCanonicalSource(api, branch, selectedHead);
@@ -126,7 +117,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     const record = await transact(store, async state => {
       const existing = validateReservationAdmission(state, admission);
       if (transaction) {
-        readQualificationReceipt(transaction, 'release');
+        readQualificationReceipt(transaction);
         await verifyTransactionQualification(transaction, api);
       } else {
         await verifyCanonicalReleaseEvidence(qualificationClient(env.GH_TOKEN),
@@ -185,7 +176,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     output('sbom_url', `https://github.com/${record.repository}/releases/download/${record.sourceTag}/printfarmer-${component ? `${component}-` : ''}${record.sourceTag}.spdx.json`);
   } else if (operation === 'preflight') {
     const transaction = transactionFromEnvironment(env);
-    requireThat(transaction.mode === 'release' && transaction.sourceCommit === record.sourceCommit,
+    requireThat(transaction.sourceCommit === record.sourceCommit,
       'Publication preflight transaction binding mismatch');
     const currentBranchHead = await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
     await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
@@ -200,7 +191,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       'Channel pointer changed after publication preflight');
     if (env.RELEASE_TRANSACTION) {
       const transaction = transactionFromEnvironment(env);
-      requireThat(transaction.mode === 'release' && transaction.sourceCommit === record.sourceCommit,
+      requireThat(transaction.sourceCommit === record.sourceCommit,
         'Pointer transaction binding mismatch');
       await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
       await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,

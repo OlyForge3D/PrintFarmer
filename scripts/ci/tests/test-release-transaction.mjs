@@ -1,18 +1,14 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import test from 'node:test';
 import { load } from 'js-yaml';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import {
-  qualificationJobNamespace, qualificationLifetimeMs, qualificationPath, rehearsalReceiptPath,
-  qualifyTransaction, runLiveDiagnostic, selectTransaction, transactionPath,
+  qualificationJobNamespace, qualificationLifetimeMs, qualificationPath,
+  qualifyTransaction, selectTransaction, transactionPath,
   validateQualificationReceipt, validateTransaction, verifyTransactionQualification,
-  writeRehearsalReceipt,
 } from '../release-transaction.mjs';
-import { admit } from '../release-policy.mjs';
-import { validateTransactionOperation } from '../release-control.mjs';
 
 const workflowSha = 'a'.repeat(40);
 const sourceSha = 'b'.repeat(40);
@@ -34,7 +30,6 @@ const base = {
   GITHUB_RUN_ID: '42',
   GITHUB_RUN_ATTEMPT: '1',
   RELEASE_CHANNEL: 'insider',
-  RELEASE_MODE: 'release',
   RELEASE_APPROVAL_MODE: 'single-maintainer',
   GH_TOKEN: 'test-only',
 };
@@ -173,7 +168,6 @@ test('selection rejects foreign refs, malformed sources, and workflow substituti
   for (const overrides of [
     { GITHUB_REF: 'refs/heads/main' },
     { RELEASE_SOURCE_SHA: 'bad' },
-    { RELEASE_MODE: 'dry-run' },
     { GITHUB_WORKFLOW_SHA: sourceSha },
   ]) {
     await assert.rejects(selectTransaction({ ...base, ...overrides }, apiFixture().api));
@@ -210,29 +204,6 @@ test('same-run rerun recovers immutable attempt-one transaction and revalidates 
   }, first.fixture.api), /trusted canonical branch history/);
 });
 
-test('rehearsal transaction passes real admission before authorization is considered', async () => {
-  const { value } = await transaction('insider');
-  value.mode = 'rehearsal';
-  const admission = admit({
-    repository: value.repository,
-    event: 'workflow_dispatch',
-    ref: 'refs/heads/development',
-    eventSha: value.sourceCommit,
-    workflowIdentity: value.workflowIdentity,
-    workflowSha: value.workflowCommit,
-    workflowBranch: 'development',
-    observedBranchHead: value.observedBranchHead,
-    buildId: value.runId,
-    buildAttempt: value.runAttempt,
-    channel: value.channel,
-  }, value.sourceCommit, 'v1.2.3\n');
-  assert.equal(admission.sourceCommit, sourceSha);
-  assert.equal(admission.workflowCommit, workflowSha);
-  assert.equal(validateTransactionOperation('admit', value), value);
-  assert.throws(() => validateTransactionOperation('authorize', value),
-    /cannot enter release authorization/);
-});
-
 test('qualification binds namespaced jobs to this run, attempt, app, suite and source checks', async () => {
   const { value, fixture } = await transaction();
   const receipt = await verifyTransactionQualification(value, fixture.api, now);
@@ -256,14 +227,14 @@ test('qualification binds namespaced jobs to this run, attempt, app, suite and s
 test('qualification receipt freshness rejects expiry, future, malformed lifetime and delayed approval', async () => {
   const { value, fixture } = await transaction();
   const receipt = await verifyTransactionQualification(value, fixture.api, now);
-  assert.equal(validateQualificationReceipt(receipt, value, 'release', now), receipt);
-  assert.equal(validateQualificationReceipt(receipt, value, 'release', now + qualificationLifetimeMs), receipt);
-  assert.throws(() => validateQualificationReceipt(receipt, value, 'release', now + qualificationLifetimeMs + 1),
+  assert.equal(validateQualificationReceipt(receipt, value, now), receipt);
+  assert.equal(validateQualificationReceipt(receipt, value, now + qualificationLifetimeMs), receipt);
+  assert.throws(() => validateQualificationReceipt(receipt, value, now + qualificationLifetimeMs + 1),
     /expired/);
   assert.throws(() => validateQualificationReceipt({ ...receipt, checkedAt: new Date(now + 1).toISOString() },
-    value, 'release', now), /future-dated|invalid lifetime/);
+    value, now), /future-dated|invalid lifetime/);
   assert.throws(() => validateQualificationReceipt({ ...receipt,
-    expiresAt: new Date(now + qualificationLifetimeMs + 1).toISOString() }, value, 'release', now),
+    expiresAt: new Date(now + qualificationLifetimeMs + 1).toISOString() }, value, now),
   /invalid lifetime/);
 });
 
@@ -318,184 +289,9 @@ test('GitHub REST second-precision timestamps remain valid throughout qualificat
   receipt.checkedAt = '2026-09-13T20:00:00Z';
   receipt.expiresAt = '2026-09-13T20:30:00Z';
   receipt.sourceEvidence.collectedAt = receipt.checkedAt;
-  assert.equal(validateQualificationReceipt(receipt, value, 'release', now), receipt);
-});
-
-test('qualification and rehearsal receipts are closed transaction-bound variants', async t => {
-  const { value, fixture } = await transaction();
-  value.mode = 'rehearsal';
-  const qualification = await verifyTransactionQualification(value, fixture.api, now);
-  assert.equal(validateQualificationReceipt(qualification, value, 'rehearsal', now), qualification);
-  const cwd = process.cwd();
-  const scratch = resolve('.artifacts', `release-transaction-${randomUUID()}`);
-  mkdirSync(scratch, { recursive: true });
-  process.chdir(scratch);
-  t.after(() => {
-    process.chdir(cwd);
-    rmSync(scratch, { recursive: true, force: true });
-  });
-
-  const receipt = writeRehearsalReceipt(value, qualification, now);
-  assert.equal(receipt.kind, 'release-rehearsal-only');
-  assert.equal(receipt.publicationAuthorized, false);
-  assert.throws(() => validateQualificationReceipt(receipt, value, 'release', now),
-    /cannot authorize release|qualification receipt/);
-  assert.throws(() => validateTransaction({ ...value, future: true }));
-});
-
-test('diagnostic CLI consumes same-run release qualification without authorizing publication', async t => {
-  const { value, fixture } = await transaction();
-  const runtimeNow = Date.now();
-  const cwd = process.cwd();
-  const script = resolve('scripts/ci/release-transaction.mjs');
-  const scratch = resolve('.artifacts', `release-diagnostic-${randomUUID()}`);
-  mkdirSync(scratch, { recursive: true });
-  t.after(() => rmSync(scratch, { recursive: true, force: true }));
-  process.chdir(scratch);
-  const qualification = await qualifyTransaction(value, fixture.api, runtimeNow);
-  process.chdir(cwd);
-  const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
-  const handoff = spawnSync(shell, ['-c',
-    'set -euo pipefail; umask 077; mkdir -p .artifacts/release-transaction; ' +
-    'cat > .artifacts/release-transaction/qualification.json'], {
-    cwd: scratch,
-    encoding: 'utf8',
-    input: `${JSON.stringify(qualification)}\n`,
-  });
-  assert.equal(handoff.status, 0, handoff.stderr);
-  const result = spawnSync(process.execPath, [script, 'diagnose'], {
-    cwd: scratch,
-    encoding: 'utf8',
-    env: { ...process.env, RELEASE_TRANSACTION: JSON.stringify(value) },
-  });
-  assert.equal(result.status, 0, result.stderr);
-  const receipt = JSON.parse(readFileSync(resolve(scratch, rehearsalReceiptPath), 'utf8'));
-  assert.equal(receipt.kind, 'release-rehearsal-only');
-  assert.equal(receipt.publicationAuthorized, false);
-  assert.throws(() => validateQualificationReceipt(receipt, value, 'release', runtimeNow),
-    /cannot authorize release|qualification receipt/);
-  assert.equal(process.cwd(), cwd);
-});
-
-test('live diagnostic uses GET-only transport, verifies immutable evidence and writes bounded receipt', async t => {
-  const { value, fixture } = await transaction();
-  const qualification = await verifyTransactionQualification(value, fixture.api, now);
-  const ledgerAnchor = 'd'.repeat(40);
-  const ledgerHead = 'e'.repeat(40);
-  const ledgerTree = 'f'.repeat(40);
-  const ledgerBlob = '1'.repeat(40);
-  const ledgerState = {
-    schema: 1,
-    anchor: ledgerAnchor,
-    counter: '0',
-    reservations: {},
-    identities: {},
-    pointers: {},
-    stages: {},
-    qualifications: {},
-  };
-  const calls = [];
-  const packageIds = new Map();
-  const response = value => new Response(JSON.stringify(value), { status: 200 });
-  const fetcher = async (url, options) => {
-    assert.equal(options.method, 'GET');
-    assert.equal(options.body, undefined);
-    calls.push(url);
-    const parsed = new URL(url);
-    const repositoryPrefix = '/repos/OlyForge3D/PrintFarmer/';
-    const organizationPrefix = '/orgs/OlyForge3D/packages/container/';
-    if (parsed.pathname.startsWith(organizationPrefix)) {
-      const suffix = parsed.pathname.slice(organizationPrefix.length);
-      const [name, operation] = suffix.split('/');
-      if (operation === 'versions') return response([]);
-      if (!packageIds.has(name)) packageIds.set(name, packageIds.size + 1);
-      return response({ id: packageIds.get(name), name, package_type: 'container', version_count: 0 });
-    }
-    assert.ok(parsed.pathname.startsWith(repositoryPrefix), url);
-    const endpoint = `${parsed.pathname.slice(repositoryPrefix.length)}${parsed.search}`;
-    if (endpoint === 'actions/workflows/consolidated-release.yml') {
-      return response({ id: 9, path: '.github/workflows/consolidated-release.yml', state: 'active' });
-    }
-    if (endpoint === 'actions/runs/42') {
-      return response({
-        id: 42,
-        run_attempt: 1,
-        path: '.github/workflows/consolidated-release.yml',
-        workflow_id: 9,
-        repository: { full_name: 'OlyForge3D/PrintFarmer' },
-        head_repository: { full_name: 'OlyForge3D/PrintFarmer' },
-        head_branch: 'development',
-        head_sha: workflowSha,
-        event: 'workflow_dispatch',
-        status: 'in_progress',
-      });
-    }
-    if (endpoint.startsWith('actions/workflows/consolidated-release.yml/runs?')) {
-      const active = endpoint.includes('status=in_progress');
-      return response({
-        total_count: active ? 1 : 0,
-        workflow_runs: active ? [{ id: 42, run_attempt: 1 }] : [],
-      });
-    }
-    if (endpoint.startsWith('actions/workflows/docker-publish.yml/runs?')) {
-      return response({ total_count: 0, workflow_runs: [] });
-    }
-    if (endpoint === 'git/matching-refs/tags?per_page=100&page=1' ||
-      endpoint === 'releases?per_page=100&page=1') return response([]);
-    if (endpoint === 'git/ref/heads/main') {
-      return response({ ref: 'refs/heads/main', object: { type: 'commit', sha: sourceSha } });
-    }
-    if (endpoint === 'git/ref/heads/development') {
-      return response({ ref: 'refs/heads/development', object: { type: 'commit', sha: sourceSha } });
-    }
-    if (endpoint === 'git/ref/heads/release-ledger') {
-      return response({ ref: 'refs/heads/release-ledger', object: { type: 'commit', sha: ledgerHead } });
-    }
-    if (endpoint === `compare/${ledgerAnchor}...${ledgerHead}`) return response({ status: 'ahead' });
-    if (endpoint === `git/commits/${ledgerHead}`) {
-      return response({ sha: ledgerHead, tree: { sha: ledgerTree }, parents: [{ sha: ledgerAnchor }] });
-    }
-    if (endpoint === `git/trees/${ledgerTree}`) {
-      return response({ truncated: false, tree: [{ path: 'state.json', type: 'blob', sha: ledgerBlob }] });
-    }
-    if (endpoint === `git/blobs/${ledgerBlob}`) {
-      return response({ encoding: 'base64', content: Buffer.from(JSON.stringify(ledgerState)).toString('base64') });
-    }
-    if (endpoint === `git/commits/${ledgerAnchor}`) {
-      return response({ sha: ledgerAnchor, tree: { sha: '2'.repeat(40) }, parents: [] });
-    }
-    if (endpoint === `commits/${sourceSha}/status?per_page=100`) {
-      return response({ sha: sourceSha, total_count: 0, statuses: [] });
-    }
-    throw new Error(`Unexpected live diagnostic endpoint: ${endpoint}`);
-  };
-  const cwd = process.cwd();
-  const scratch = resolve('.artifacts', `release-live-diagnostic-${randomUUID()}`);
-  mkdirSync(scratch, { recursive: true });
-  process.chdir(scratch);
-  t.after(() => {
-    process.chdir(cwd);
-    rmSync(scratch, { recursive: true, force: true });
-  });
-  const env = {
-    ...base,
-    RELEASE_TRANSACTION: JSON.stringify(value),
-    RELEASE_LEDGER_ANCHOR: ledgerAnchor,
-  };
-  const receipt = await runLiveDiagnostic(
-    value,
-    qualification,
-    env,
-    fetcher,
-    now,
-  );
-  assert.equal(receipt.kind, 'release-rehearsal-only');
-  assert.equal(receipt.publicationAuthorized, false);
-  assert.equal(receipt.liveEvidence.readOnlyVerified, true);
-  assert.match(receipt.liveEvidence.inventoryDigest, /^[a-f0-9]{64}$/);
-  assert.ok(calls.length > 20);
-  assert.ok(calls.every(url => url.startsWith('https://api.github.com/')));
-  assert.deepEqual(JSON.parse(readFileSync(rehearsalReceiptPath, 'utf8')), receipt);
+  assert.equal(validateQualificationReceipt(receipt, value, now), receipt);
+  assert.throws(() => validateTransaction({ ...value, unsupported: true }),
+    /release transaction fields/);
 });
 
 test('qualification writer rejects oversized network evidence before writing', async t => {
@@ -514,13 +310,14 @@ test('qualification writer rejects oversized network evidence before writing', a
   assert.equal(existsSync(qualificationPath), false);
 });
 
-test('single authority has direct dependencies, one approval, isolated rehearsal, and diagnostics', () => {
+test('single authority has direct dependencies, one approval, and no alternate ceremony', () => {
   const workflow = load(readFileSync('.github/workflows/consolidated-release.yml', 'utf8'));
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), ['channel', 'source_sha']);
   assert.deepEqual(workflow.jobs.publish.needs,
-    ['admit', 'qualification', 'collect-qualification', 'internal-diagnostics']);
+    ['admit', 'qualification', 'collect-qualification']);
   assert.equal(workflow.jobs.authorize, undefined);
-  assert.equal(workflow.jobs.rehearsal, undefined);
+  assert.deepEqual(Object.keys(workflow.jobs),
+    ['schedule-insider', 'admit', 'qualification', 'collect-qualification', 'publish', 'summary']);
   assert.equal(workflow.jobs.publish.with.transaction, '${{ needs.admit.outputs.transaction }}');
   assert.equal(workflow.jobs.publish.with.source_sha, '${{ needs.admit.outputs.source_sha }}');
   assert.equal(workflow.jobs.publish.with.channel, '${{ needs.admit.outputs.channel }}');
@@ -528,19 +325,17 @@ test('single authority has direct dependencies, one approval, isolated rehearsal
   assert.equal(workflow.jobs.publish.with.verified_branch_head, undefined);
   assert.match(JSON.stringify(workflow.jobs['schedule-insider']), /--ref development/);
   assert.doesNotMatch(JSON.stringify(workflow.jobs['schedule-insider']), /mode=/);
-  const diagnostics = JSON.stringify(workflow.jobs.diagnostics);
-  assert.match(diagnostics, /public_identity|qualification|evidence|publication|source/i);
+  const summary = JSON.stringify(workflow.jobs.summary);
+  assert.match(summary, /public_identity|qualification|evidence|publication|source/i);
+  assert.doesNotMatch(JSON.stringify(workflow), /RELEASE_MODE/);
 });
 
-test('legacy qualifier and recorder remain reachable while diagnostics are hidden', () => {
+test('legacy qualifier and recorder remain reachable without an alternate release workflow', () => {
   const qualify = load(readFileSync('.github/workflows/qualify-canonical-release.yml', 'utf8'));
   const record = load(readFileSync('.github/workflows/record-canonical-qualification.yml', 'utf8'));
-  const rehearsal = load(readFileSync('.github/workflows/release-protection-rehearsal.yml', 'utf8'));
   assert.ok(qualify.on.workflow_dispatch);
   assert.ok(record.on.workflow_run);
   assert.notEqual(record.jobs.record.if, false);
-  assert.ok(rehearsal.on.workflow_call);
-  assert.equal(rehearsal.on.workflow_dispatch, undefined);
 });
 
 test('publisher has exactly one protected deployment containing every credential and mutation', () => {
@@ -554,7 +349,6 @@ test('publisher has exactly one protected deployment containing every credential
   assert.match(job, /release-control\.mjs authorize/);
   assert.match(job, /release-set\.mjs tag/);
   assert.match(job, /release-control\.mjs advance/);
-  assert.doesNotMatch(JSON.stringify(publisher), /release-(?:publisher|rehearsal)-/);
 });
 
 test('publisher completes revocable preflight before registry login and image publication', () => {
@@ -590,7 +384,6 @@ test('privileged workflow actions are pinned to full commit SHAs with version co
   const pending = [
     '.github/workflows/consolidated-release.yml',
     '.github/workflows/docker-publish.yml',
-    '.github/workflows/release-protection-rehearsal.yml',
   ];
   const visited = new Set();
   while (pending.length > 0) {
