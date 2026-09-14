@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { canonicalValidationChecks } from './canonical-qualification.mjs';
 import {
-  branchHead, githubClient, verifyCanonicalSource, verifyReleaseChecks,
+  branchHead, githubClient, parseGithubTimestamp, verifyCanonicalSource, verifyReleaseChecks,
 } from './release-github.mjs';
 import {
   releaseRequiredChecks, repository, requireKeys, requireString, requireThat, validateApprovalMode,
@@ -27,9 +27,7 @@ function channelBranch(channel) {
 }
 
 function timestamp(value, description) {
-  requireThat(typeof value === 'string' && new Date(value).toISOString() === value,
-    `Invalid ${description}`);
-  return Date.parse(value);
+  return parseGithubTimestamp(value, description);
 }
 
 function freshEvidenceTimestamp(value, description, now, notBefore = now - evidenceLifetimeMs) {

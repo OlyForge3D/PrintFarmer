@@ -316,6 +316,7 @@ for (const failed of [false, true]) {
   test(`release consumer reconciles required checks and statuses beyond page one: failed=${failed}`, async () => {
     const statuses = `commits/${sha}/status?per_page=100`;
     const collections = new Map([checks, statuses].map(endpoint => [endpoint, pages(endpoint, 139)]));
+    const evidenceAt = new Date().toISOString();
     const api = githubClient('test-only', async url => {
       const path = url.slice(root.length);
       const endpoint = path.replace(/&page=\d+$/, '');
@@ -327,6 +328,9 @@ for (const failed of [false, true]) {
         entry.status = 'completed';
         entry.conclusion = 'success';
         entry.state = failed && entry.id === 139 ? 'failure' : 'success';
+        entry.completed_at = evidenceAt;
+        entry.created_at = evidenceAt;
+        entry.updated_at = evidenceAt;
       }
       return new Response(JSON.stringify(result.data), { headers: { link: result.link } });
     });

@@ -328,9 +328,8 @@ export async function verifyReleaseChecks(
     Array.isArray(statuses.statuses) && statuses.statuses.length === statuses.total_count,
   'Status evidence malformed, truncated or not bound to exact SHA');
   const evidenceTimestamp = (value, description) => {
-    const parsed = Date.parse(value);
-    requireThat(typeof value === 'string' && Number.isFinite(parsed) &&
-      new Date(parsed).toISOString() === value &&
+    const parsed = parseGithubTimestamp(value, description);
+    requireThat(
       parsed <= collectedAt && collectedAt - parsed <= maximumAgeMs,
     `${description} is missing, stale, future-dated, or post-collection`);
     return parsed;
@@ -388,6 +387,18 @@ export async function verifyReleaseChecks(
     collectedAt: new Date(collectedAt).toISOString(),
     checks: evidence,
   };
+}
+
+export function parseGithubTimestamp(value, description = 'GitHub timestamp') {
+  const match = typeof value === 'string' &&
+    /^(\d{4})-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.exec(value);
+  const parsed = match ? Date.parse(value) : Number.NaN;
+  const canonical = Number.isFinite(parsed) ? new Date(parsed).toISOString() : '';
+  const expectedCanonical = typeof value === 'string' && value.endsWith('Z') && !value.includes('.') ?
+    value.replace(/Z$/, '.000Z') : value;
+  requireThat(Boolean(match) && match[1] !== '0000' && Number.isFinite(parsed) &&
+    canonical === expectedCanonical, `Invalid ${description}`);
+  return parsed;
 }
 
 export async function verifyProtection(api, channel, publisherAppId, approvalMode, ownerApprovedReviewers, sourceCommit) {

@@ -277,14 +277,47 @@ test('underlying qualification evidence rejects missing, stale, future and post-
       statuses.statuses[0].updated_at = '2026-09-13T20:00:00.001Z';
     },
     f => { f.jobs[0].completed_at = '2026-09-13T20:00:00.001Z'; },
+    f => { f.sourceChecks[0].completed_at = '2026-09-13T19:30:00+00:00'; },
+    f => { f.sourceChecks[0].completed_at = '2026-02-30T19:30:00Z'; },
+    f => { f.sourceChecks[0].completed_at = '2026-09-13T19:30:00.1234Z'; },
+    f => { f.sourceChecks[0].completed_at = '2026-09-13T19:30:00'; },
+    f => {
+      const statuses = f.values.get(`commits/${sourceSha}/status?per_page=100`);
+      statuses.statuses[0].created_at = '2026-09-13T19:32:00Z';
+      statuses.statuses[0].updated_at = '2026-09-13T19:31:00Z';
+    },
+    f => { f.jobs[0].completed_at = '2026-09-13T19:39:59Z'; },
   ]) {
     const isolated = await transaction();
     mutate(isolated.fixture);
     await assert.rejects(
       verifyTransactionQualification(isolated.value, isolated.fixture.api, now),
-      /missing|stale|future|post-collection|timestamps/,
+      /Invalid|missing|stale|future|post-collection|timestamps/,
     );
   }
+});
+
+test('GitHub REST second-precision timestamps remain valid throughout qualification and receipt validation', async () => {
+  const { value, fixture } = await transaction();
+  const run = fixture.values.get('actions/runs/42');
+  run.run_started_at = '2026-09-13T19:35:00Z';
+  run.updated_at = '2026-09-13T19:55:00Z';
+  for (const job of fixture.jobs) {
+    job.started_at = '2026-09-13T19:40:00Z';
+    job.completed_at = '2026-09-13T19:50:00Z';
+  }
+  for (const check of [...fixture.transactionChecks, ...fixture.sourceChecks]) {
+    check.completed_at = check.head_sha === workflowSha ?
+      '2026-09-13T19:50:00Z' : '2026-09-13T19:30:00Z';
+  }
+  const statuses = fixture.values.get(`commits/${sourceSha}/status?per_page=100`);
+  statuses.statuses[0].created_at = '2026-09-13T19:31:00Z';
+  statuses.statuses[0].updated_at = '2026-09-13T19:31:00Z';
+  const receipt = await verifyTransactionQualification(value, fixture.api, now);
+  receipt.checkedAt = '2026-09-13T20:00:00Z';
+  receipt.expiresAt = '2026-09-13T20:30:00Z';
+  receipt.sourceEvidence.collectedAt = receipt.checkedAt;
+  assert.equal(validateQualificationReceipt(receipt, value, 'release', now), receipt);
 });
 
 test('qualification and rehearsal receipts are closed transaction-bound variants', async t => {
@@ -341,6 +374,30 @@ test('publisher admission validates transaction and credential jobs use publishe
   assert.ok(environments.length > 0);
   assert.ok(environments.every(environment =>
     environment === 'release-publisher-${{ fromJSON(inputs.identity).channel }}'));
+});
+
+test('every docker publisher release-control consumer follows one immutable workflow checkout in its job', () => {
+  const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
+  const consumers = [];
+  for (const [jobName, job] of Object.entries(publisher.jobs)) {
+    const steps = job.steps ?? [];
+    const checkoutIndexes = steps.flatMap((step, index) =>
+      step.uses?.startsWith('actions/checkout@') &&
+      step.with?.ref === '${{ fromJSON(inputs.transaction).workflowCommit }}' &&
+      step.with?.path === '.release-control' &&
+      step.with?.['persist-credentials'] === false ? [index] : []);
+    const consumerIndexes = steps.flatMap((step, index) =>
+      (typeof step.uses === 'string' && step.uses.startsWith('./.release-control/')) ||
+      (typeof step.run === 'string' && step.run.includes('.release-control/')) ? [index] : []);
+    if (consumerIndexes.length === 0) continue;
+    consumers.push(jobName);
+    assert.equal(checkoutIndexes.length, 1, `${jobName} must have one immutable control checkout`);
+    assert.ok(consumerIndexes.every(index => checkoutIndexes[0] < index),
+      `${jobName} must checkout immutable control before every consumer`);
+  }
+  assert.deepEqual(consumers.sort(), [
+    'admission', 'build-containers', 'build-dotnet', 'build-frontend', 'build-monolith', 'promote-images',
+  ]);
 });
 
 test('privileged workflow actions are pinned to full commit SHAs with version comments', () => {

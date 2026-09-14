@@ -12,7 +12,7 @@ import {
   validateRecord, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks,
 } from '../release-policy.mjs';
 import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedger, publicLedgerFields, readTag, readVersion, verifyProtection,
-  verifyStableQualification, verifyReleaseChecks } from '../release-github.mjs';
+  parseGithubTimestamp, verifyStableQualification, verifyReleaseChecks } from '../release-github.mjs';
 import { buildMetadata, emitBuildIdentity } from '../release-metadata.mjs';
 import { runContext, runReleaseControl, output } from '../release-control.mjs';
 import { inspectCompleteSet, publishImmutableTags } from '../release-set.mjs';
@@ -2113,7 +2113,7 @@ test('exact-SHA status and check failures deny admission and authorization befor
         for (const mutation of mutations) {
           const fixture = authorizationFixture(state(), { approvalMode, ...mutation });
           globalThis.fetch = fixture.fetch;
-          await assert.rejects(runReleaseControl(operation, fixture.env), /qualification|evidence|stale/);
+          await assert.rejects(runReleaseControl(operation, fixture.env), /Invalid|qualification|evidence|stale/);
           assert.ok(fixture.calls.every(call => call.method === 'GET'));
           assert.deepEqual(fixture.ledgerWrites, []);
         }
@@ -2151,6 +2151,36 @@ test('additional configured checks enforce latest exact run and integration bind
     await assert.rejects(runReleaseControl('authorize', fixture.env), /qualification/);
     assert.deepEqual(fixture.ledgerWrites, []);
   } finally { globalThis.fetch = previous; }
+});
+
+test('GitHub evidence timestamps accept seconds or milliseconds and reject unsupported REST shapes', async () => {
+  const collectedAt = Date.parse('2026-09-13T20:00:00.000Z');
+  for (const value of ['2026-09-13T19:30:00Z', '2026-09-13T19:30:00.123Z']) {
+    assert.equal(parseGithubTimestamp(value), Date.parse(value));
+    const checks = { total_count: 1, check_runs: [{
+      id: 1, name: 'extra', head_sha: sha, status: 'completed', conclusion: 'success',
+      completed_at: value, app: { id: 123 },
+    }] };
+    const statuses = { sha, total_count: 0, statuses: [] };
+    await verifyReleaseChecks(
+      async endpoint => endpoint.includes('/check-runs?') ? checks : statuses,
+      sha,
+      [{ context: 'extra', integration_id: 123 }],
+      collectedAt,
+    );
+  }
+  for (const value of [
+    '2026-09-13T19:30:00+00:00',
+    '2026-09-13T19:30:00-07:00',
+    '2026-09-13T19:30:00.1234Z',
+    '2026-09-13T19:30:00.Z',
+    '2026-02-30T19:30:00Z',
+    '2026-09-13T24:00:00Z',
+    '0000-09-13T19:30:00Z',
+    '2026-09-13T19:30:00',
+    '2026-09-13t19:30:00z',
+    '',
+  ]) assert.throws(() => parseGithubTimestamp(value), /Invalid GitHub timestamp/);
 });
 
 test('release admission rejects PR-head self-attestation, carried review and owner override as canonical evidence', async () => {
