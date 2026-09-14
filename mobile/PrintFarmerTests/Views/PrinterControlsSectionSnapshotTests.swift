@@ -1061,6 +1061,7 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
                         supportedIdentifiers = visibleIdentifiers
                     } else {
                         let expectedIdentifiers = supportedIdentifiers.subtracting([
+                            "printer.controls.absolute.help",
                             "printer.controls.absolute.x",
                             "printer.controls.absolute.y",
                             "printer.controls.absolute.z",
