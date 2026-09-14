@@ -66,8 +66,7 @@ function writeValidatedJson(path, value, validate) {
   const descriptor = openSync(target,
     constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600);
   try {
-    // lgtm[js/http-to-file-access] Schema-validated, size-bounded receipt under a constant directory.
-    writeFileSync(descriptor, content);
+    writeFileSync(descriptor, content); // lgtm[js/http-to-file-access] Validated, bounded receipt at a constant path.
   } finally {
     closeSync(descriptor);
   }
