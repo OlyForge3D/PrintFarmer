@@ -1,4 +1,6 @@
-import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync,
+} from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { canonicalValidationChecks } from './canonical-qualification.mjs';
 import {
@@ -61,18 +63,27 @@ function writeValidatedJson(path, value, validate) {
     'Release artifact exceeds the maximum receipt size');
   const target = artifactFile(path);
   mkdirSync(dirname(target), { recursive: true });
-  // codeql[js/http-to-file-access]: The network-derived receipt is schema-validated,
-  // size-bounded, and written only beneath the constant release artifact directory.
-  writeFileSync(target, content, { mode: 0o600 });
+  const descriptor = openSync(target,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600);
+  try {
+    // lgtm[js/http-to-file-access] Schema-validated, size-bounded receipt under a constant directory.
+    writeFileSync(descriptor, content);
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 function readBoundedJson(path, description) {
   const target = artifactFile(path);
-  const metadata = lstatSync(target);
-  requireThat(metadata.isFile() && !metadata.isSymbolicLink() &&
-    metadata.size > 0 && metadata.size <= maximumReceiptBytes,
-  `${description} is missing, linked, empty, or oversized`);
-  return JSON.parse(readFileSync(target, 'utf8'));
+  const descriptor = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const metadata = fstatSync(descriptor);
+    requireThat(metadata.isFile() && metadata.size > 0 && metadata.size <= maximumReceiptBytes,
+      `${description} is missing, linked, empty, or oversized`);
+    return JSON.parse(readFileSync(descriptor, 'utf8'));
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 export async function selectTransaction(env = process.env, api = githubClient(env.GH_TOKEN)) {

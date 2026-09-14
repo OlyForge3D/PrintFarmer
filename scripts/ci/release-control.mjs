@@ -204,7 +204,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       const transaction = transactionFromEnvironment(env);
       requireThat(transaction.mode === 'release' && transaction.sourceCommit === record.sourceCommit,
         'Pointer transaction binding mismatch');
-      const currentBranchHead = await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
+      await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
       await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
         env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
       requireThat(/^[a-f0-9]{40}$/.test(env.RELEASE_VERIFIED_BRANCH_HEAD || ''),

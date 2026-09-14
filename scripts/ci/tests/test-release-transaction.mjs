@@ -345,13 +345,14 @@ test('qualification and rehearsal receipts are closed transaction-bound variants
 test('diagnostic CLI consumes same-run release qualification without authorizing publication', async t => {
   const { value, fixture } = await transaction();
   const runtimeNow = Date.now();
-  const qualification = await verifyTransactionQualification(value, fixture.api, runtimeNow);
   const cwd = process.cwd();
   const script = resolve('scripts/ci/release-transaction.mjs');
   const scratch = resolve('.artifacts', `release-diagnostic-${randomUUID()}`);
-  mkdirSync(resolve(scratch, '.artifacts/release-transaction'), { recursive: true });
-  writeFileSync(resolve(scratch, qualificationPath), `${JSON.stringify(qualification)}\n`);
+  mkdirSync(scratch, { recursive: true });
   t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  process.chdir(scratch);
+  await qualifyTransaction(value, fixture.api, runtimeNow);
+  process.chdir(cwd);
   const result = spawnSync(process.execPath, [script, 'diagnose'], {
     cwd: scratch,
     encoding: 'utf8',

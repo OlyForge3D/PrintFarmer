@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
-import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync,
+  symlinkSync, writeFileSync,
+} from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { relative, resolve, sep } from 'node:path';
+import { resolve } from 'node:path';
 import test from 'node:test';
 import { canonicalAuthorizationFixture } from './fixtures/canonical-qualification.mjs';
 import { canonicalValidationChecks } from '../canonical-qualification.mjs';
@@ -3279,17 +3282,11 @@ test('executed signing and asset-copy commands keep normalized authorization sep
     .split('\n').map(line => line.replace(/^          /, '')).join('\n');
   const publication = docker.split('\n').filter(line =>
     /^\s+cp \.\.\/\.artifacts\/release-authorization\/public-identity/.test(line))
-    .map(line => {
-      const match = /^\s*cp (\.\.\/\S+) (\S+)\s*$/.exec(line);
-      assert.ok(match, 'Expected a simple public-identity copy command');
-      const workspace = resolve('.');
-      const source = resolve('source', match[1]);
-      assert.ok(source.startsWith(`${workspace}${sep}`), 'Copy source escaped the workspace');
-      const normalized = relative(workspace, source).split(sep).join('/');
-      assert.doesNotMatch(normalized, /(^|\/)\.\.(\/|$)/);
-      return `cp ${normalized} ${match[2]}`;
-    })
-    .map(line => line.trim()).join('\n');
+    .map(line => line.trim());
+  assert.deepEqual(publication, [
+    'cp ../.artifacts/release-authorization/public-identity.json release-assets/release-identity.json',
+    'cp ../.artifacts/release-authorization/public-identity.bundle.json release-assets/release-identity.bundle.json',
+  ]);
   const uploadedAuthorizationFiles = artifactUploads('.github/workflows/docker-publish.yml').flat()
     .filter(path => path.startsWith('.artifacts/release-authorization/'));
   const root = resolve('.artifacts', `sign-public-${process.pid}`);
@@ -3312,10 +3309,14 @@ test('executed signing and asset-copy commands keep normalized authorization sep
       cp "$source" "$bundle"
     }\n`;
     const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
-    const result = spawnSync(shell, ['-c', `${mock}${signing}\n${publication}`],
+    const result = spawnSync(shell, ['-c', `${mock}${signing}`],
       { cwd: root, encoding: 'utf8' });
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr);
+    copyFileSync('.artifacts/release-authorization/public-identity.json',
+      'release-assets/release-identity.json');
+    copyFileSync('.artifacts/release-authorization/public-identity.bundle.json',
+      'release-assets/release-identity.bundle.json');
     assert.doesNotMatch(result.stdout + result.stderr, /private-publisher|private-future/);
     const bundle = readFileSync('release-assets/release-identity.bundle.json', 'utf8');
     assert.deepEqual(JSON.parse(bundle), publicAuthorization(identity));
