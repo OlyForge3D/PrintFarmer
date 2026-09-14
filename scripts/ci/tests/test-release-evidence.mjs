@@ -93,7 +93,7 @@ test('accepts only versioned Cosign signature download formats and rejects forge
   extra.signatureBundleBytes = JSON.stringify([
     ...JSON.parse(extra.signatureBundleBytes), JSON.parse(extra.signatureBundleBytes)[0],
   ]);
-  assert.throws(() => normalizeEvidence({ subject: digest, ...extra }), /entry count/);
+  assert.throws(() => normalizeEvidence({ subject: digest, ...extra }), /signature download/);
 });
 
 test('rejects stale, revoked, substituted, and out-of-window bundle trust before staging', () => {
@@ -115,6 +115,9 @@ test('rejects stale, revoked, substituted, and out-of-window bundle trust before
     const alteredVerification = JSON.parse(altered.api.index.signatureBytes);
     alteredVerification[0].optional.certificate = 'not-a-certificate';
     altered.api.index.signatureBytes = JSON.stringify(alteredVerification);
+    const alteredDownload = JSON.parse(altered.api.index.signatureBundleBytes);
+    alteredDownload[0].Cert = 'not-a-certificate';
+    altered.api.index.signatureBundleBytes = JSON.stringify(alteredDownload);
     assert.throws(() => stageEvidence(path, completeSet, altered, trust()), /certificate/);
     assert.throws(() => stageEvidence(path, completeSet, collected, trust({
       policy: { ...trust().policy, signers: [{ ...trust().policy.signers[0], validUntil: '2026-09-01T00:00:00.000Z' }] },

@@ -106,7 +106,7 @@ function validateBundleTrust(bundle, trust) {
   }
 }
 
-function validateDsseBundle(bundle, subject, predicateBytes) {
+function validateDsseBundle(bundle, subject, predicateBytes, verification) {
   const entries = Array.isArray(bundle) ? bundle : [bundle];
   requireThat(entries.length > 0 && entries.every(entry => typeof entry?.payload === 'string' &&
     entry.payload.length > 0 && entry.payloadType === 'application/vnd.in-toto+json' &&
@@ -114,7 +114,8 @@ function validateDsseBundle(bundle, subject, predicateBytes) {
     entry.signatures.every(signature => typeof signature?.sig === 'string' && signature.sig.length > 0)),
   'Malformed Cosign DSSE attestation bundle');
   const predicate = parseJson(predicateBytes, 'SPDX predicate');
-  for (const entry of entries) {
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index];
     let statement;
     try { statement = JSON.parse(Buffer.from(entry.payload, 'base64').toString('utf8')); } catch {
       throw new Error('Malformed Cosign DSSE payload');
@@ -122,19 +123,26 @@ function validateDsseBundle(bundle, subject, predicateBytes) {
     requireThat(statement?.subject?.[0]?.digest?.sha256 === subject.slice(7) &&
       JSON.stringify(canonicalJson(statement.predicate)) === JSON.stringify(canonicalJson(predicate)),
     'Cosign DSSE subject or SPDX predicate mismatch');
+    requireThat(typeof verification[index]?.payload === 'string' &&
+      verification[index].payload === entry.payload,
+    'Cosign DSSE download is not the verified attestation');
   }
 }
 
-function validateSignatureDownload(bundle) {
+function validateSignatureDownload(bundle, verification) {
   const entries = Array.isArray(bundle) ? bundle : [bundle];
-  requireThat(entries.length > 0 && entries.every(entry => {
+  requireThat(entries.length === verification.length && entries.length > 0 && entries.every((entry, index) => {
     const legacy = typeof entry?.Base64Signature === 'string' && entry.Base64Signature.length > 0 &&
       typeof entry?.Payload === 'string' && entry.Payload.length > 0 &&
       entry.SignedPayload === undefined && entry.Cert === undefined && entry.Bundle === undefined;
     const modern = typeof entry?.SignedPayload === 'string' && entry.SignedPayload.length > 0 &&
       typeof entry?.Cert === 'string' && entry.Cert.length > 0 && entry?.Bundle &&
       typeof entry.Bundle === 'object' && entry.Base64Signature === undefined;
-    return legacy || modern;
+    if (!legacy && !modern) return false;
+    if (legacy) return true;
+    const optional = verification[index]?.optional;
+    return optional?.certificate === entry.Cert &&
+      JSON.stringify(canonicalJson(optional.Bundle)) === JSON.stringify(canonicalJson(entry.Bundle));
   }),
   'Malformed Cosign signature download');
 }
@@ -145,8 +153,8 @@ function evidenceObject(subject, signatureBytes, attestationBytes, predicateByte
   const attestationVerification = verificationEntries(attestationBytes, subject, 'attestation', predicateBytes);
   const signatureBundle = parseJson(signatureBundleBytes, 'signature bundle');
   const attestationBundle = parseJson(attestationBundleBytes, 'attestation bundle');
-  validateSignatureDownload(signatureBundle);
-  validateDsseBundle(attestationBundle, subject, predicateBytes);
+  validateSignatureDownload(signatureBundle, signatureVerification);
+  validateDsseBundle(attestationBundle, subject, predicateBytes, attestationVerification);
   requireThat((Array.isArray(signatureBundle) ? signatureBundle.length : 1) === signatureVerification.length &&
     (Array.isArray(attestationBundle) ? attestationBundle.length : 1) === attestationVerification.length,
   'Cosign verification/download entry count mismatch');
@@ -210,12 +218,13 @@ function validateStored(value, digest, platform, trust) {
   validateVerification(value.signature.bytes, digest, 'signature');
   validateVerification(value.sbom.bytes, digest, 'attestation', value.sbom.predicate);
   const signatureBundle = parseJson(value.signature.bundle, 'signature bundle');
-  validateSignatureDownload(signatureBundle);
-  validateDsseBundle(parseJson(value.sbom.bundle, 'attestation bundle'), digest, value.sbom.predicate);
   const signatureVerification = verificationEntries(value.signature.bytes, digest, 'signature');
   const attestationVerification = verificationEntries(value.sbom.bytes, digest, 'attestation', value.sbom.predicate);
+  const attestationBundle = parseJson(value.sbom.bundle, 'attestation bundle');
+  validateSignatureDownload(signatureBundle, signatureVerification);
+  validateDsseBundle(attestationBundle, digest, value.sbom.predicate, attestationVerification);
   requireThat((Array.isArray(signatureBundle) ? signatureBundle.length : 1) === signatureVerification.length &&
-    (Array.isArray(parseJson(value.sbom.bundle, 'attestation bundle')) ? parseJson(value.sbom.bundle, 'attestation bundle').length : 1) === attestationVerification.length,
+    (Array.isArray(attestationBundle) ? attestationBundle.length : 1) === attestationVerification.length,
   'Cosign verification/download entry count mismatch');
   validateBundleTrust(signatureVerification, trust);
   validateBundleTrust(attestationVerification, trust);

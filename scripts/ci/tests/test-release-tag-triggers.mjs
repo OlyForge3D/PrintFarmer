@@ -66,8 +66,7 @@ const cryptoEvidenceFixture = set => {
       signatureBytes,
       attestationBytes,
       predicateBytes: predicate,
-      signatureBundleBytes: JSON.stringify([{ SignedPayload: 'signed-payload', Cert: 'certificate',
-        Bundle: { Payload: { integratedTime: 1780000000 }, SignedEntryTimestamp: 'proof' } }]),
+      signatureBundleBytes: JSON.stringify([{ Base64Signature: 'signature', Payload: 'signed-payload' }]),
       attestationBundleBytes: JSON.stringify([{ payload: Buffer.from(JSON.stringify({
         subject: [{ digest: { sha256: digest.slice(7) } }], predicate: JSON.parse(predicate),
       })).toString('base64'), payloadType: 'application/vnd.in-toto+json',
