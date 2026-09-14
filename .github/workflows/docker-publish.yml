@@ -387,28 +387,26 @@ jobs:
             }
           '
           if [[ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]]; then
-            artifact_name="$(
-              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" --jq '
-                [.artifacts[] | select(.expired == false and (.name | test("^release-manifest-[1-9][0-9]*-[1-9][0-9]*$")))] |
-                sort_by(.created_at) | .[0].name // empty'
-            )" || { echo "Signed manifest recovery artifact lookup failed"; exit 1; }
-            if [[ -n "$artifact_name" ]]; then
-              recovery_dir="$RUNNER_TEMP/recovered-release-manifest"
-              mkdir -p "$recovery_dir"
-              gh run download "$GITHUB_RUN_ID" --name "$artifact_name" --dir "$recovery_dir" ||
-                { echo "Signed manifest recovery artifact download failed"; exit 1; }
-              expected_manifest_assets="$(printf '%s\n' release-manifest.envelope.bundle.json release-manifest.envelope.json release-manifest.json release-notes.md | sort)"
-              recovered_manifest_assets="$(find "$recovery_dir" -maxdepth 1 -type f -printf '%f\n' | sort)"
-              [[ "$recovered_manifest_assets" == "$expected_manifest_assets" ]] ||
-                { echo "Signed manifest recovery artifact is incomplete or contains unexpected files"; exit 1; }
-              for asset in release-manifest.json release-manifest.envelope.json release-notes.md; do
-                cmp -s "$manifest_dir/$asset" "$recovery_dir/$asset" ||
-                  { echo "Recovered signed release bytes differ from this authorized transaction: $asset"; exit 1; }
-              done
-              cp "$recovery_dir/release-manifest.envelope.bundle.json" "$manifest_dir/release-manifest.envelope.bundle.json"
-            else
-              cosign sign-blob --yes --bundle "$manifest_dir/release-manifest.envelope.bundle.json" "$manifest_dir/release-manifest.envelope.json"
-            fi
+            mapfile -t recovery_artifacts < <(
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" --jq "
+                [.artifacts[] | select(.expired == false and
+                  (.name == \"release-manifest-${GITHUB_RUN_ID}-1\"))] | .[].name"
+            ) || { echo "Signed manifest recovery artifact lookup failed"; exit 1; }
+            [[ "${#recovery_artifacts[@]}" -eq 1 ]] ||
+              { echo "Signed manifest recovery evidence is absent, ambiguous, or expired"; exit 1; }
+            recovery_dir="$RUNNER_TEMP/recovered-release-manifest"
+            mkdir -p "$recovery_dir"
+            gh run download "$GITHUB_RUN_ID" --name "${recovery_artifacts[0]}" --dir "$recovery_dir" ||
+              { echo "Signed manifest recovery artifact download failed"; exit 1; }
+            expected_manifest_assets="$(printf '%s\n' release-manifest.envelope.bundle.json release-manifest.envelope.json release-manifest.json release-notes.md | sort)"
+            recovered_manifest_assets="$(find "$recovery_dir" -maxdepth 1 -type f -printf '%f\n' | sort)"
+            [[ "$recovered_manifest_assets" == "$expected_manifest_assets" ]] ||
+              { echo "Signed manifest recovery artifact is incomplete or contains unexpected files"; exit 1; }
+            for asset in release-manifest.json release-manifest.envelope.json release-notes.md; do
+              cmp -s "$manifest_dir/$asset" "$recovery_dir/$asset" ||
+                { echo "Recovered signed release bytes differ from this authorized transaction: $asset"; exit 1; }
+            done
+            cp "$recovery_dir/release-manifest.envelope.bundle.json" "$manifest_dir/release-manifest.envelope.bundle.json"
           else
             cosign sign-blob --yes \
               --bundle "$manifest_dir/release-manifest.envelope.bundle.json" \

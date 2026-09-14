@@ -34,7 +34,7 @@ export function releaseNotes({ version, sourceCommit, previousTag, pullRequests,
     'Release notes require a matching changelog entry');
   const entries = pullRequests.map(pr => {
     requireThat(Number.isSafeInteger(pr.number) && pr.number > 0 && typeof pr.title === 'string' &&
-      pr.title.trim().length > 0 && !/[\r\n[\]()`]/.test(pr.title) && typeof pr.url === 'string' &&
+      pr.title.trim().length > 0 && !/[\r\n[\]`]/.test(pr.title) && typeof pr.url === 'string' &&
       /^https:\/\/github\.com\/OlyForge3D\/PrintFarmer\/pull\/[1-9][0-9]*$/.test(pr.url) &&
       !/[\r\n]/.test(pr.url),
     'Release notes contain malformed merged pull request data');
