@@ -3,6 +3,7 @@ import {
   compareVersions, components, identityLabels, parseTag, requireThat, validateCompleteSet,
 } from './release-policy.mjs';
 import { command } from './release-github.mjs';
+import { readEvidence, stageEvidenceFromFiles } from './release-evidence.mjs';
 import { emitPublicReleaseAssets, privateSetPath, readPrivateJson, verifyAuthorization, writeAuthorizationSet } from './release-authorization.mjs';
 
 export function inspectCompleteSet(record, digests, run = command) {
@@ -144,10 +145,20 @@ export function publishReleaseAliases(record, set, inspect, create) {
 
 function main() {
   const record = verifyAuthorization(process.env, command);
-  if (process.argv[2] === 'inspect') {
+  const evidencePathIndex = process.argv.indexOf('--evidence');
+  const evidencePath = evidencePathIndex === -1 ? undefined : process.argv[evidencePathIndex + 1];
+  if (process.argv[2] === 'evidence') {
+    requireThat(evidencePathIndex !== -1 && evidencePath, 'Explicit crypto evidence path is required');
     const digests = Object.fromEntries(Object.keys(components).map(name =>
       [name, readFileSync(`artifacts/digest-${name}/digest-${name}.txt`, 'utf8').trim()]));
     const set = inspectCompleteSet(record, digests);
+    stageEvidenceFromFiles(evidencePath, set, process.argv[3] ?? '.artifacts/release-authorization/crypto-evidence');
+  } else if (process.argv[2] === 'inspect') {
+    requireThat(evidencePathIndex !== -1 && evidencePath, 'Explicit crypto evidence path is required');
+    const digests = Object.fromEntries(Object.keys(components).map(name =>
+      [name, readFileSync(`artifacts/digest-${name}/digest-${name}.txt`, 'utf8').trim()]));
+    const set = inspectCompleteSet(record, digests);
+    const cryptoEvidence = readEvidence(evidencePath, set);
     writeAuthorizationSet(record, set);
     const metadataBytes = readFileSync('.artifacts/release-authorization/source-release-metadata.json', 'utf8');
     const metadata = JSON.parse(metadataBytes);
@@ -156,7 +167,7 @@ function main() {
       readFileSync(`.artifacts/release-authorization/source-artifacts/${schema.artifact}`),
     ]));
     emitPublicReleaseAssets(record, set, '.', process.env.RELEASE_NOTES_SHA256,
-      metadataBytes, sourceArtifactBytes);
+      metadataBytes, sourceArtifactBytes, cryptoEvidence);
   } else if (process.argv[2] === 'tag') {
     const set = readPrivateJson(privateSetPath);
     publishImmutableTags(record, set, tag => {

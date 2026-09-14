@@ -99,9 +99,9 @@ export function writeAuthorizationSet(record, set) {
   writeAuthorizationFile(privateSetPath, JSON.stringify(normalized));
 }
 
-export function writeReleaseManifest(record, set, releaseNotesSha256, metadataBytes, sourceArtifactBytes) {
+export function writeReleaseManifest(record, set, releaseNotesSha256, metadataBytes, sourceArtifactBytes, cryptoEvidence) {
   const metadata = releaseMetadataEvidence(record, metadataBytes, sourceArtifactBytes);
-  const manifest = releaseManifest(record, set, undefined, releaseNotesSha256, metadata);
+  const manifest = releaseManifest(record, set, undefined, releaseNotesSha256, metadata, cryptoEvidence);
   const envelope = releaseManifestEnvelope(manifest);
   validateReleaseManifest(manifest);
   validateReleaseManifestEnvelope(envelope, manifest);
@@ -120,10 +120,10 @@ export function readReleaseManifest() {
   return { manifest, envelope, serializedManifest, serializedEnvelope };
 }
 
-export function emitPublicReleaseAssets(record, set, root = '.', releaseNotesSha256, metadataBytes, sourceArtifactBytes) {
+export function emitPublicReleaseAssets(record, set, root = '.', releaseNotesSha256, metadataBytes, sourceArtifactBytes, cryptoEvidence) {
   const projected = writePublicSet(record, set);
   if (metadataBytes !== undefined) {
-    writeReleaseManifest(record, set, releaseNotesSha256, metadataBytes, sourceArtifactBytes);
+    writeReleaseManifest(record, set, releaseNotesSha256, metadataBytes, sourceArtifactBytes, cryptoEvidence);
   }
   const directory = join(root, 'release-assets');
   mkdirSync(directory, { recursive: true });

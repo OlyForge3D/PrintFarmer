@@ -34,6 +34,7 @@ import {
 } from '../release-transaction.mjs';
 import { publicIdentity, publicIdentityFields } from '../../../src/Web/ReactApp/public-release-identity.mjs';
 import { changelogEntry, releaseNotes, validateReleaseNotesMetadata } from '../release-notes.mjs';
+import { normalizeEvidence } from '../release-evidence.mjs';
 
 const sha = 'a'.repeat(40);
 const newerSha = 'b'.repeat(40);
@@ -54,10 +55,29 @@ const releaseMetadataFixture = version => ({
   ...loadReleaseMetadata('0.2.3'),
   version,
 });
+const cryptoEvidenceFixture = set => {
+  const subject = digest => {
+    const predicate = JSON.stringify({ SPDXID: 'SPDXRef-DOCUMENT' });
+    const signatureBytes = JSON.stringify([{ critical: { image: { 'docker-manifest-digest': digest } } }]);
+    const attestationBytes = JSON.stringify([{ payload: Buffer.from(JSON.stringify({
+      subject: [{ digest: { sha256: digest.slice(7) } }], predicate: JSON.parse(predicate),
+    })).toString('base64') }]);
+    return { signatureBytes, attestationBytes, predicateBytes: predicate };
+  };
+  const services = Object.fromEntries(Object.entries(set.images).map(([service, image]) => [
+    service, {
+      index: normalizeEvidence({ subject: image.digest, ...subject(image.digest) }),
+      platforms: Object.fromEntries(Object.entries(image.platforms).map(([platform, value]) => [
+        platform, normalizeEvidence({ subject: value.digest, platform, ...subject(value.digest) }),
+      ])),
+    },
+  ]));
+  return { schema: 1, services, sha256: hash({ schema: 1, services }) };
+};
 
 const signedManifest = (identity, set) => {
   const manifest = releaseManifest(identity, set, undefined, releaseNotesHash,
-    releaseMetadataFixture(identity.baseVersion));
+    releaseMetadataFixture(identity.baseVersion), cryptoEvidenceFixture(set));
   const envelope = releaseManifestEnvelope(manifest);
   return { serializedManifest: JSON.stringify(manifest), serializedEnvelope: JSON.stringify(envelope) };
 };
@@ -112,7 +132,8 @@ test('release notes derive bounded merged PRs and mandatory version-controlled o
 test('closed release metadata is canonical, complete, and digest-bound into the manifest', () => {
   const metadata = releaseMetadataFixture('1.2.3');
   const identity = record();
-  const manifest = releaseManifest(identity, completeSet(identity), undefined, releaseNotesHash, metadata);
+  const set = completeSet(identity);
+  const manifest = releaseManifest(identity, set, undefined, releaseNotesHash, metadata, cryptoEvidenceFixture(set));
   assert.equal(manifest.evidence.releaseMetadata.sha256, hash(metadata));
   assert.equal(manifest.compatibility.releaseMetadata.version, identity.baseVersion);
   for (const mutate of [
@@ -131,8 +152,9 @@ test('closed release metadata is canonical, complete, and digest-bound into the 
 
 test('release manifest bytes and envelope reject canonicality and binding substitutions', () => {
   const identity = record();
-  const manifest = releaseManifest(identity, completeSet(identity), undefined, releaseNotesHash,
-    releaseMetadataFixture(identity.baseVersion));
+  const set = completeSet(identity);
+  const manifest = releaseManifest(identity, set, undefined, releaseNotesHash,
+    releaseMetadataFixture(identity.baseVersion), cryptoEvidenceFixture(set));
   const envelope = releaseManifestEnvelope(manifest);
   const serialized = JSON.stringify(manifest);
   assert.deepEqual(validateReleaseManifestBytes(serialized, envelope), manifest);
@@ -143,6 +165,19 @@ test('release manifest bytes and envelope reject canonicality and binding substi
   assert.throws(() => validateReleaseManifestEnvelope({
     ...envelope, manifestSha256: 'f'.repeat(64),
   }, manifest), ReleasePolicyError);
+  assert.throws(() => validateReleaseManifest({
+  ...manifest,
+  evidence: {
+    ...manifest.evidence,
+    services: {
+      ...manifest.evidence.services,
+      api: {
+        ...manifest.evidence.services.api,
+        index: { ...manifest.evidence.services.api.index, subject: `sha256:${'f'.repeat(64)}` },
+      },
+    },
+  },
+  }), /Evidence subject\/platform mismatch/);
 });
 
 test('every docker publisher bash run block parses', () => {
@@ -2584,6 +2619,7 @@ test('every release artifact upload path is explicitly inventoried, including bo
     ],
     [
       manifestPath, manifestEnvelopePath, manifestEnvelopeBundle,
+      '.artifacts/release-authorization/release-crypto-evidence.json',
       '.artifacts/release-authorization/release-notes.md',
     ],
     [
@@ -3926,7 +3962,7 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
     assert.equal(existsSync(resolve(root, 'release-assets/release-manifest.json')), false);
     assert.equal(existsSync(resolve(root, 'release-assets/release-manifest.envelope.json')), false);
     const manifest = releaseManifest(identity, set, undefined, releaseNotesHash,
-      releaseMetadataFixture(identity.baseVersion));
+      releaseMetadataFixture(identity.baseVersion), cryptoEvidenceFixture(set));
     for (const mutate of [
       value => { value.lifecycle.cadence = 'manual'; },
       value => { value.provenance.source.commit = newerSha; },
@@ -4048,7 +4084,9 @@ test('executed signing commands preserve signed subjects and never let verificat
     ]));
     mkdirSync('.artifacts/release-authorization', { recursive: true });
     writeFileSync('.artifacts/release-authorization/source-release-metadata.json', metadataBytes);
-    emitPublicReleaseAssets(identity, completeSet(identity), '.', releaseNotesHash, metadataBytes, sourceArtifacts);
+    const set = completeSet(identity);
+    emitPublicReleaseAssets(identity, set, '.', releaseNotesHash, metadataBytes, sourceArtifacts,
+      cryptoEvidenceFixture(set));
     const mock = `cosign() {
       local operation="$1" bundle="" source="" previous=""
       shift

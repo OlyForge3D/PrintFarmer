@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { publicIdentityFields } from '../../src/Web/ReactApp/public-release-identity.mjs';
+import { validateEvidenceSet } from './release-evidence.mjs';
 
 export const repository = 'OlyForge3D/PrintFarmer';
 export const workflow = '.github/workflows/consolidated-release.yml';
@@ -432,7 +433,15 @@ export function writePublicSet(record, set, identitySha256) {
   return { schema: 1, identity, managedEligible: false, images };
 }
 
-export function releaseManifest(record, set, identitySha256, releaseNotesSha256, metadataEvidence) {
+function validateManifestCryptoEvidence(services, completeSet) {
+  try {
+    validateEvidenceSet({ schema: 1, services }, completeSet);
+  } catch (error) {
+    throw new ReleasePolicyError(error.message);
+  }
+}
+
+export function releaseManifest(record, set, identitySha256, releaseNotesSha256, metadataEvidence, cryptoEvidence) {
   requireString(releaseNotesSha256, hashPattern, 'release notes hash');
   const completeSet = writePublicSet(record, set, identitySha256);
   const maximumExclusive = `${BigInt(completeSet.identity.baseVersion.split('.')[0]) + 1n}.0.0`;
@@ -457,18 +466,9 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256,
     isDeepStrictEqual(metadataEvidence.metadata, releaseMetadata) &&
     metadataBytes === JSON.stringify(releaseMetadata)),
   'Release metadata differs from qualified source metadata');
-  const artifactEvidence = Object.fromEntries(Object.entries(completeSet.images).map(([service, image]) => [
-    service, {
-      index: {
-        subject: image.digest, signature: { subject: image.digest, signer: publisherWorkflowIdentity },
-        sbom: { subject: image.digest, type: 'spdxjson', signer: publisherWorkflowIdentity },
-      },
-      platforms: Object.fromEntries(Object.entries(image.platforms).map(([platform, value]) => [platform, {
-        subject: value.digest, signature: { subject: value.digest, signer: publisherWorkflowIdentity },
-        sbom: { subject: value.digest, type: 'spdxjson', signer: publisherWorkflowIdentity },
-      }])),
-    },
-  ]));
+  requireThat(cryptoEvidence?.schema === 1 && typeof cryptoEvidence.sha256 === 'string' &&
+    hashPattern.test(cryptoEvidence.sha256) && cryptoEvidence.services, 'Missing immutable crypto evidence');
+  validateManifestCryptoEvidence(cryptoEvidence.services, completeSet);
   const directHotfix = qualification?.mode === 'hotfix'
     ? { mode: 'direct-hotfix', reasonSha256: qualification.reasonSha256 }
     : undefined;
@@ -506,7 +506,8 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256,
         sourceCommit: metadataEvidence?.sourceCommit ?? record.sourceCommit,
         path: metadataEvidence?.path ?? `release-metadata/${record.baseVersion}.json`,
       },
-      services: artifactEvidence,
+      services: cryptoEvidence.services,
+      cryptoEvidence: { schema: 1, sha256: cryptoEvidence.sha256 },
     },
     compatibility: {
       schema: 3, managedEligible: releaseMetadata.releasePaths.allowedChannelPaths.some(path =>
@@ -596,7 +597,7 @@ export function validateReleaseManifest(manifest) {
     requireThat(identity.channel === 'stable', 'Direct hotfix must be stable');
     requireString(provenance.reasonSha256, hashPattern, 'direct hotfix reason');
   }
-  requireKeys(evidence, ['schema', 'trust', 'releaseMetadata', 'services'], [], 'release evidence');
+  requireKeys(evidence, ['schema', 'trust', 'releaseMetadata', 'services', 'cryptoEvidence'], [], 'release evidence');
   requireThat(evidence.schema === 2, 'Invalid release evidence schema');
   requireKeys(evidence.trust, ['signer', 'issuer', 'provenance', 'workflowCommit', 'policyDigest', 'trustPolicySha256'], [], 'release trust evidence');
   requireThat(evidence.trust.signer === publisherWorkflowIdentity &&
@@ -619,27 +620,12 @@ export function validateReleaseManifest(manifest) {
     evidence.releaseMetadata.path === `release-metadata/${identity.baseVersion}.json` &&
     evidence.releaseMetadata.sha256 === sha256Bytes(JSON.stringify(metadata)),
   'Release metadata hash mismatch');
-  requireKeys(evidence.services, Object.keys(components), [], 'release service evidence');
-  for (const [service, image] of Object.entries(manifest.completeSet.images)) {
-    const serviceEvidence = evidence.services[service];
-    requireKeys(serviceEvidence, ['index', 'platforms'], [], 'release service evidence');
-    requireKeys(serviceEvidence.index, ['subject', 'signature', 'sbom'], [], 'release image evidence');
-    requireThat(serviceEvidence.index.subject === image.digest, 'Release index subject mismatch');
-    requireKeys(serviceEvidence.platforms, Object.keys(image.platforms), [], 'release platform evidence');
-    for (const [platform, imagePlatform] of Object.entries(image.platforms)) {
-      const platformEvidence = serviceEvidence.platforms[platform];
-      requireKeys(platformEvidence, ['subject', 'signature', 'sbom'], [], 'release platform evidence');
-      requireThat(platformEvidence.subject === imagePlatform.digest, 'Release platform subject mismatch');
-      for (const item of [serviceEvidence.index, platformEvidence]) {
-        requireKeys(item.signature, ['subject', 'signer'], [], 'release signature evidence');
-        requireKeys(item.sbom, ['subject', 'type', 'signer'], [], 'release SBOM evidence');
-        requireThat(item.signature.subject === item.subject && item.signature.signer === publisherWorkflowIdentity &&
-          item.sbom.subject === item.subject && item.sbom.type === 'spdxjson' &&
-          item.sbom.signer === publisherWorkflowIdentity,
-        'Release evidence subject mismatch');
-      }
-    }
-  }
+  requireThat(evidence.cryptoEvidence.schema === 1 && hashPattern.test(evidence.cryptoEvidence.sha256),
+    'Invalid immutable crypto evidence binding');
+  validateManifestCryptoEvidence(evidence.services, manifest.completeSet);
+  requireThat(evidence.cryptoEvidence.sha256 === sha256Bytes(JSON.stringify({
+    schema: 1, services: evidence.services,
+  })), 'Immutable crypto evidence digest mismatch');
   requireKeys(compatibility, ['schema', 'managedEligible', 'releaseMetadata', 'api', 'services', 'storage', 'configuration', 'updater'], [], 'release compatibility');
   requireThat(compatibility.schema === 3 && compatibility.managedEligible ===
     metadata.releasePaths.allowedChannelPaths.some(path => path[1] === identity.channel), 'Release compatibility is not eligible');
@@ -654,6 +640,7 @@ export function validateReleaseManifest(manifest) {
     requireThat(compatibility.services[service].required === true &&
       isDeepStrictEqual(compatibility.services[service].platforms, components[service]), 'Invalid release service platforms');
   }
+
   requireThat(hash(compatibility.storage) === hash(metadata.schemas.storage), 'Release storage compatibility mismatch');
   requireKeys(compatibility.configuration, ['configuration', 'templates'], [], 'release configuration compatibility');
   requireThat(hash(compatibility.configuration.configuration) === hash(metadata.schemas.configuration) &&

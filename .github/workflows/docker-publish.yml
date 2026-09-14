@@ -289,7 +289,16 @@ jobs:
             [[ -n "$platform_digests" ]]
             while IFS= read -r platform_digest; do
               [[ "$platform_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-              cosign attest --yes --type spdxjson --predicate "$sbom" "${repository}@${platform_digest}"
+              platform_suffix="${platform_digest#sha256:}"
+              platform_sbom="release-artifacts/printfarmer-${image}-${platform_suffix}.spdx.json"
+              syft "registry:${repository}@${platform_digest}" -o "spdx-json=${platform_sbom}"
+              node scripts/compliance/enrich-sbom.mjs \
+                --sbom "$platform_sbom" \
+                --inventory compliance-artifacts/license-inventory.json \
+                --version "$RELEASE_VERSION" \
+                --revision "$source_sha" \
+                "${extra[@]}"
+              cosign attest --yes --type spdxjson --predicate "$platform_sbom" "${repository}@${platform_digest}"
               cosign sign --yes "${repository}@${platform_digest}"
             done <<< "$platform_digests"
           }
@@ -329,13 +338,10 @@ jobs:
           release_notes_sha256="$(sha256sum "$release_notes" | cut -d ' ' -f1)"
           [[ "$release_notes_sha256" =~ ^[a-f0-9]{64}$ ]]
           printf 'RELEASE_NOTES_SHA256=%s\n' "$release_notes_sha256" >> "$GITHUB_ENV"
-      - name: Validate complete immutable set
-        env:
-          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
-        run: node scripts/ci/release-set.mjs inspect
       - name: Verify every pushed digest signature and SPDX attestation
         run: |
           set -euo pipefail
+          evidence_root=.artifacts/release-authorization/crypto-evidence
           for image in api frontend slicer-host printer-discovery orcaslicer-worker monolith; do
             digest="$(tr -d '[:space:]' < "artifacts/digest-${image}/digest-${image}.txt")"
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
@@ -345,33 +351,51 @@ jobs:
                 sed -n 's/^Digest:[[:space:]]*//p'
             )"
             [[ "$registry_digest" == "$digest" ]]
-            cosign verify "$reference" \
+            index_evidence="$evidence_root/$image/index"
+            mkdir -p "$index_evidence"
+            cosign verify --output json "$reference" \
               --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com
-            cosign verify-attestation "$reference" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$index_evidence/signature.json"
+            cosign verify-attestation --output json "$reference" \
               --type spdxjson \
               --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$index_evidence/attestation.json"
+            cp "artifacts/sbom-${image}/printfarmer-${image}-${{ steps.consume.outputs.version }}.spdx.json" \
+              "$index_evidence/predicate.json"
             platform_digests="$(
               docker buildx imagetools inspect "$reference" --raw |
                 jq -r '.manifests[]
                   | select(.annotations["vnd.docker.reference.type"] != "attestation-manifest")
                   | select(.platform.os == "linux")
-                  | .digest'
+                  | "\(.platform.os)/\(.platform.architecture) \(.digest)"'
             )"
             [[ -n "$platform_digests" ]]
-            while IFS= read -r platform_digest; do
+            while read -r platform platform_digest; do
               [[ "$platform_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
               platform_reference="ghcr.io/olyforge3d/printfarmer-${image}@${platform_digest}"
-              cosign verify "$platform_reference" \
+              platform_evidence="$evidence_root/$image/platforms/${platform//\//-}"
+              platform_suffix="${platform_digest#sha256:}"
+              mkdir -p "$platform_evidence"
+              cosign verify --output json "$platform_reference" \
                 --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
-                --certificate-oidc-issuer https://token.actions.githubusercontent.com
-              cosign verify-attestation "$platform_reference" \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$platform_evidence/signature.json"
+              cosign verify-attestation --output json "$platform_reference" \
                 --type spdxjson \
                 --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
-                --certificate-oidc-issuer https://token.actions.githubusercontent.com
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$platform_evidence/attestation.json"
+              cp "source/release-artifacts/printfarmer-${image}-${platform_suffix}.spdx.json" \
+                "$platform_evidence/predicate.json"
             done <<< "$platform_digests"
           done
+      - name: Validate complete immutable set and stage verifier evidence
+        env:
+          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
+        run: |
+          set -euo pipefail
+          evidence_path=.artifacts/release-authorization/release-crypto-evidence.json
+          node scripts/ci/release-set.mjs evidence --evidence "$evidence_path" \
+            .artifacts/release-authorization/crypto-evidence
+          node scripts/ci/release-set.mjs inspect --evidence "$evidence_path"
       - name: Smoke test ARM64 image digests
         run: |
           set -euo pipefail
@@ -437,11 +461,11 @@ jobs:
             mkdir -p "$recovery_dir"
             gh run download "$GITHUB_RUN_ID" --name "${recovery_artifacts[0]}" --dir "$recovery_dir" ||
               { echo "Signed manifest recovery artifact download failed"; exit 1; }
-            expected_manifest_assets="$(printf '%s\n' release-manifest.envelope.bundle.json release-manifest.envelope.json release-manifest.json release-notes.md | sort)"
+            expected_manifest_assets="$(printf '%s\n' release-crypto-evidence.json release-manifest.envelope.bundle.json release-manifest.envelope.json release-manifest.json release-notes.md | sort)"
             recovered_manifest_assets="$(find "$recovery_dir" -maxdepth 1 -type f -printf '%f\n' | sort)"
             [[ "$recovered_manifest_assets" == "$expected_manifest_assets" ]] ||
               { echo "Signed manifest recovery artifact is incomplete or contains unexpected files"; exit 1; }
-            for asset in release-manifest.json release-manifest.envelope.json release-notes.md; do
+            for asset in release-crypto-evidence.json release-manifest.json release-manifest.envelope.json release-notes.md; do
               cmp -s "$manifest_dir/$asset" "$recovery_dir/$asset" ||
                 { echo "Recovered signed release bytes differ from this authorized transaction: $asset"; exit 1; }
             done
@@ -464,6 +488,7 @@ jobs:
             .artifacts/release-authorization/release-manifest.json
             .artifacts/release-authorization/release-manifest.envelope.json
             .artifacts/release-authorization/release-manifest.envelope.bundle.json
+            .artifacts/release-authorization/release-crypto-evidence.json
             .artifacts/release-authorization/release-notes.md
           include-hidden-files: true
           if-no-files-found: error
