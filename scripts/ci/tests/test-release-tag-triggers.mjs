@@ -607,6 +607,7 @@ test('durable reservation reuses identity across same-run attempts and increases
   assert.deepEqual(retry, first);
   const second = await transact(store, state => reserve(state, admission({ buildAttempt: '2' }), created).record);
   assert.deepEqual(second, first);
+  await transact(store, state => advance(state, first, completeSet(first), sha, ''));
   const baseBump = { ...admission({ buildId: '43' }), baseVersion: '1.3.0' };
   const migrated = { ...baseBump, workflowIdentity: 'owner-approved-replacement' };
   assert.throws(() => reserve(state(), migrated, created), /workflow/);
@@ -621,14 +622,19 @@ test('durable reservation reuses identity across same-run attempts and increases
 
 test('concurrent allocators use a real CAS retry boundary and never recycle failed reservations', async () => {
   const store = memoryStore();
-  const results = await Promise.all(Array.from({ length: 12 }, (_, index) => transact(store,
+  const results = await Promise.allSettled(Array.from({ length: 12 }, (_, index) => transact(store,
     state => reserve(state, admission({ buildId: String(index + 100) }), created).record)));
-  assert.equal(new Set(results.map(item => item.sequence)).size, 12);
-  assert.equal((await store.read()).state.counter, '12');
+  const accepted = results.filter(result => result.status === 'fulfilled');
+  const rejected = results.filter(result => result.status === 'rejected');
+  assert.equal(accepted.length, 1);
+  assert.equal(rejected.length, 11);
+  assert.ok(rejected.every(result => /Unadvanced insider reservation blocks a new insider allocation/.test(result.reason.message)));
+  assert.equal((await store.read()).state.counter, '1');
   const retry = await transact(store, state => reserve(state, admission({ buildId: '100' }), created).record);
-  assert.equal(retry.sequence, results[0].sequence);
+  assert.equal(retry.sequence, accepted[0].value.sequence);
+  await transact(store, state => advance(state, accepted[0].value, completeSet(accepted[0].value), sha, ''));
   const next = await transact(store, state => reserve(state, admission({ buildId: '999' }), created).record);
-  assert.equal(next.sequence, '13');
+  assert.equal(next.sequence, '2');
 });
 
 test('every new stable and insider reservation exceeds the historical or current stable floor before persistence', async () => {
@@ -716,9 +722,15 @@ test('continuity loss, reset and malformed persisted state fail closed', () => {
 
 test('beta/ordinary insider/RC share N and enforce nonregressing SemVer stage progression', () => {
   const ledger = state();
-  assert.equal(record(ledger, { stage: 'beta' }).canonicalVersion, '1.2.3-beta.1');
-  assert.equal(record(ledger, { buildId: '43' }).canonicalVersion, '1.2.3-insider.2');
-  assert.equal(record(ledger, { buildId: '44', stage: 'rc' }).canonicalVersion, '1.2.3-rc.3');
+  const beta = record(ledger, { stage: 'beta' });
+  assert.equal(beta.canonicalVersion, '1.2.3-beta.1');
+  advance(ledger, beta, completeSet(beta), sha, '');
+  const ordinary = record(ledger, { buildId: '43' });
+  assert.equal(ordinary.canonicalVersion, '1.2.3-insider.2');
+  advance(ledger, ordinary, completeSet(ordinary), sha, ledger.pointers.insider.manifestEnvelopeSha256);
+  const rc = record(ledger, { buildId: '44', stage: 'rc' });
+  assert.equal(rc.canonicalVersion, '1.2.3-rc.3');
+  advance(ledger, rc, completeSet(rc), sha, ledger.pointers.insider.manifestEnvelopeSha256);
   assert.throws(() => record(ledger, { buildId: '45' }), /Stage regression/);
   assert.equal(record(ledger, { stage: 'rc' }).canonicalVersion, '1.2.3-rc.4',
     'A distinct run allocates the next RC identity');
@@ -784,10 +796,11 @@ test('record consumers reject foreign callers while allowing same-run retry atte
 test('complete-set CAS accepts forward branch movement but rejects version and byte regressions', async () => {
   const ledger = state();
   const old = record(ledger);
+  const oldPointer = advance(ledger, old, completeSet(old), sha, '');
   const current = record(ledger, { buildId: '43', eventSha: newerSha, workflowSha: newerSha });
   const set = completeSet(current);
   assert.throws(() => validateCompleteSet(current, { ...set, managedEligible: true }), /managed eligibility/);
-  advance(ledger, current, set, newerSha, '');
+  advance(ledger, current, set, newerSha, oldPointer.manifestEnvelopeSha256);
   const previous = structuredClone(ledger.pointers);
   assert.equal(advance(ledger, current, set, 'd'.repeat(40), publicSetHash(set)).setHash, publicSetHash(set));
   assert.throws(() => advance(ledger, old, completeSet(old), 'd'.repeat(40), publicSetHash(set)), /version regression/);
@@ -857,21 +870,29 @@ test('stable-sequence migration is explicit, deterministic, and rejects signed l
   assert.deepEqual(migrated.channelSequences, { insider: '0', stable: '0' });
   validateLedger(migrated, anchor);
 
+  const pendingLegacy = state();
+  pendingLegacy.qualifications[sha] = hotfixQualification();
+  const pending = reserve(pendingLegacy, stableAdmission(), created, undefined, hotfixQualification()).record;
+  delete pendingLegacy.channelSequences;
+  const migratedPending = migrateLegacyLedger(pendingLegacy, anchor);
+  assert.deepEqual(migratedPending.channelSequences, { insider: '0', stable: '0' });
+  assert.equal(migratedPending.reservations[pending.allocationKey].stableSequence, '1');
+  assert.equal(migratedPending.reservations[pending.allocationKey].record.stableSequence, '1');
+  validateLedger(migratedPending, anchor);
+
   const malformed = structuredClone(legacy);
   malformed.pointers.stable = { allocationKey: 'a'.repeat(64) };
   assert.throws(() => migrateLegacyLedger(malformed, anchor), /owner recovery/);
   assert.throws(() => migrateLegacyLedger(state(), anchor), /pre-stable-sequence/);
 });
 
-test('two concurrent complete sets cannot both win the same expected pointer', async () => {
+test('an unadvanced insider reservation blocks overlapping allocations', async () => {
   const ledger = state();
   const a = record(ledger);
-  const b = record(ledger, { buildId: '43' });
-  const store = memoryStore(ledger);
-  const outcomes = await Promise.allSettled([a, b].map(identity => transact(store,
-    state => advance(state, identity, completeSet(identity), sha, ''))));
-  assert.equal(outcomes.filter(result => result.status === 'fulfilled').length, 1);
-  assert.equal(store.writes, 1);
+  assert.throws(() => record(ledger, { buildId: '43' }),
+    /Unadvanced insider reservation blocks a new insider allocation/);
+  advance(ledger, a, completeSet(a), sha, '');
+  assert.doesNotThrow(() => record(ledger, { buildId: '43' }));
 });
 
 test('emitted public identity excludes private and future fields without altering the authorization record', () => {
@@ -1860,10 +1881,10 @@ test('valid every-edge allocations preserve seed floors, stable semantics and no
     };
     const insider = append(next => record(next));
     assert.equal(insider.sequence, '9007199254740994');
-    append(next => record(next));
     append(next => { next.reservations[insider.allocationKey].tagObject = 'd'.repeat(40); });
     append(next => { next.reservations[insider.allocationKey].tagPublished = true; });
     append(next => advance(next, insider, completeSet(insider), sha, ''));
+    append(next => record(next));
     append(next => { next.qualifications[sha] = hotfixQualification(); });
     const stableAdmission = admission({ channel: 'stable' });
     const stable = append(next => reserve(next, stableAdmission, created, undefined, hotfixQualification()).record);
@@ -1875,6 +1896,7 @@ test('valid every-edge allocations preserve seed floors, stable semantics and no
     const rcAdmission = admit(context({ buildId: '43', buildAttempt: '2', stage: 'rc' }), sha, 'v1.2.4\n', '1.2.3');
     const rc = append(next => reserve(next, rcAdmission, created).record);
     assert.equal(rc.sequence, '9007199254740995');
+    append(next => advance(next, rc, completeSet(rc), sha, next.pointers.insider.manifestEnvelopeSha256));
     const betaAdmission = admit(context({ buildId: '44', buildAttempt: '3', stage: 'beta' }), sha, 'v1.2.5\n', '1.2.3');
     const beta = append(next => reserve(next, betaAdmission, created).record);
     assert.equal(beta.sequence, '9007199254740996');

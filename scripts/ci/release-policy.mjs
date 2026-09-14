@@ -478,7 +478,10 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256,
   requireTimestamp(cryptoEvidence.verificationTime, 'post-sign evidence verification time');
   requireThat(Date.parse(record.created) <= Date.parse(cryptoEvidence.verificationTime),
     'Evidence verification predates authorization');
-  validateManifestCryptoEvidence(cryptoEvidence.services, completeSet);
+  validateManifestCryptoEvidence(cryptoEvidence.services, completeSet, {
+    policy: loadReleaseTrustPolicy(), releaseId: record.releaseId, createdTime: record.created,
+    trustedTime: cryptoEvidence.verificationTime,
+  });
   const directHotfix = qualification?.mode === 'hotfix'
     ? { mode: 'direct-hotfix', reasonSha256: qualification.reasonSha256 }
     : undefined;
@@ -512,7 +515,7 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256,
       schema: 2, trust: { signer: publisherWorkflowIdentity, issuer: trustPolicy.issuer,
         provenance: 'control-workflow', workflowCommit: record.workflowCommit,
         policyDigest: record.protection.policyDigest, trustPolicySha256: hash(trustPolicy),
-        verificationTime: cryptoEvidence.verificationTime },
+        createdTime: record.created, verificationTime: cryptoEvidence.verificationTime },
       releaseMetadata: {
         schema: releaseMetadata.schema, version: releaseMetadata.version, sha256: sha256Bytes(metadataBytes),
         sourceCommit: metadataEvidence?.sourceCommit ?? record.sourceCommit,
@@ -611,14 +614,15 @@ export function validateReleaseManifest(manifest) {
   }
   requireKeys(evidence, ['schema', 'trust', 'releaseMetadata', 'services', 'cryptoEvidence'], [], 'release evidence');
   requireThat(evidence.schema === 2, 'Invalid release evidence schema');
-  requireKeys(evidence.trust, ['signer', 'issuer', 'provenance', 'workflowCommit', 'policyDigest', 'trustPolicySha256', 'verificationTime'], [], 'release trust evidence');
+  requireKeys(evidence.trust, ['signer', 'issuer', 'provenance', 'workflowCommit', 'policyDigest', 'trustPolicySha256', 'createdTime', 'verificationTime'], [], 'release trust evidence');
   requireThat(evidence.trust.signer === publisherWorkflowIdentity &&
     evidence.trust.issuer === 'https://token.actions.githubusercontent.com' &&
     evidence.trust.provenance === 'control-workflow' &&
     shaPattern.test(evidence.trust.workflowCommit), 'Invalid release trust identity');
   requireString(evidence.trust.policyDigest, hashPattern, 'release trust policyDigest');
+  requireTimestamp(evidence.trust.createdTime, 'authorization creation time');
   requireTimestamp(evidence.trust.verificationTime, 'post-sign evidence verification time');
-  requireThat(Date.parse(identity.buildTime) <= Date.parse(evidence.trust.verificationTime),
+  requireThat(Date.parse(evidence.trust.createdTime) <= Date.parse(evidence.trust.verificationTime),
     'Evidence verification predates authorization');
   const trustPolicy = loadReleaseTrustPolicy();
   requireThat(!trustPolicy.revokedReleaseIds.includes(identity.releaseId) &&
@@ -637,7 +641,10 @@ export function validateReleaseManifest(manifest) {
   'Release metadata hash mismatch');
   requireThat(evidence.cryptoEvidence.schema === 1 && hashPattern.test(evidence.cryptoEvidence.sha256),
     'Invalid immutable crypto evidence binding');
-  validateManifestCryptoEvidence(evidence.services, manifest.completeSet);
+  validateManifestCryptoEvidence(evidence.services, manifest.completeSet, {
+    policy: trustPolicy, releaseId: identity.releaseId, createdTime: evidence.trust.createdTime,
+    trustedTime: evidence.trust.verificationTime,
+  });
   requireThat(evidence.cryptoEvidence.sha256 === sha256Bytes(JSON.stringify({
     schema: 1, verificationTime: evidence.trust.verificationTime, services: evidence.services,
   })), 'Immutable crypto evidence digest mismatch');
@@ -1075,7 +1082,7 @@ export function migrateLegacyLedger(legacy, anchor) {
   }
   migrated.channelSequences = {
     insider: migrated.counter,
-    stable: stableReservations.length.toString(),
+    stable: '0',
   };
   validateLedger(migrated, anchor);
   return migrated;
@@ -1189,6 +1196,11 @@ export function reserve(state, admission, created, protection, verifiedQualifica
     requireThat(!Object.values(state.reservations).some(reservation =>
       reservation.record.channel === 'stable' && !reservation.set),
     'Unadvanced stable reservation blocks a new stable allocation');
+  }
+  if (admission.channel === 'insider') {
+    requireThat(!Object.values(state.reservations).some(reservation =>
+      reservation.record.channel === 'insider' && !reservation.set),
+    'Unadvanced insider reservation blocks a new insider allocation');
   }
   const key = allocationKey(admission);
   const sequence = admission.channel === 'insider'
