@@ -152,7 +152,6 @@ struct PrinterSetupControlsContent: View {
                                 Text("Operation \(operationID.uuidString)").textSelection(.enabled)
                             }
                             if let error = viewModel.operationReadError { Text(error) }
-                            if viewModel.hasUnresolvedMotion, let error = viewModel.lastError { Text(error.message) }
                         }
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
@@ -247,8 +246,7 @@ struct PrinterControlCommandFeedback: View {
 
     var body: some View {
         if viewModel.feedbackSection == section,
-           section != .motion || viewModel.motionStatusSummary == nil
-            || (viewModel.lastError != nil && !viewModel.hasUnresolvedMotion) {
+           section != .motion || viewModel.motionStatusSummary == nil || viewModel.lastError != nil {
             VStack(alignment: .leading, spacing: 8) {
                 if let error = viewModel.lastError {
                     errorBanner(error)

@@ -256,6 +256,39 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         }
     }
 
+    func test_motionLocalRejectionRemainsVisibleWithUnrelatedRecoveryLock() async throws {
+        let printer = try makePrinter(backend: .moonraker)
+        let service = makeService(caps: Self.essentialLayoutCaps)
+        service.statusToReturn = VerifiedSafetyFixtures.status(id: printer.id)
+        let model = makeDurableMotionModel(printer: printer, service: service)
+        await model.loadCapabilities()
+        await model.moveTo(x: 20, y: nil, z: nil, feedrateMmMin: nil)
+        XCTAssertNotNil(model.lastError)
+        XCTAssertTrue(service.submittedControlOperations.isEmpty, "The incomplete target is rejected locally")
+        let operation = PrinterControlOperation.controlsFixture(printerID: printer.id, state: .unknown, recovery: true)
+        service.currentControlOperationToReturn = .controlsFixture(operation)
+        await model.refreshControlOperation()
+        XCTAssertTrue(model.hasUnresolvedMotion)
+        XCTAssertTrue(model.motionStatusNeedsAttention)
+        XCTAssertEqual(model.motionStatusSummary, "Motion outcome uncertain. Controls locked. Inspect the printer and use recovery.")
+        let (window, controller) = install(
+            VStack {
+                PrinterSetupControlsContent.PrinterMotionStatusBanner(viewModel: model)
+                PrinterControlCommandFeedback(viewModel: model, section: .motion)
+            }
+        )
+        defer { window.isHidden = true; model.deactivate() }
+        try await settle(controller)
+        let dismiss = try XCTUnwrap(nativeControls(in: controller.view).first {
+            $0.accessibilityIdentifier == "printer.controls.dismiss-error"
+        })
+        XCTAssertTrue(dismiss.isEnabled, "Local rejection cannot disappear behind the diagnostics disclosure")
+        dismiss.sendActions(for: .touchUpInside)
+        XCTAssertNil(model.lastError)
+        XCTAssertTrue(model.hasUnresolvedMotion, "Dismissing presentation never releases the safety lock")
+        XCTAssertTrue(service.submittedControlOperations.isEmpty)
+    }
+
     private func captureMotionEvidence(
         _ window: UIWindow, _ controller: UIHostingController<AnyView>, width: CGFloat, name: String
     ) async throws {

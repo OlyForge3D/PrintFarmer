@@ -209,7 +209,7 @@ struct JogSubgroup: View {
                          + " " + ControlNumberInput.coordinatePrecisionMessage)
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("printer.controls.absolute.complete-target")
+                        .accessibilityIdentifier("printer.controls.absolute.help-text")
                 }
                 rowLayout {
                     ForEach(["X", "Y", "Z"], id: \.self) { axis in

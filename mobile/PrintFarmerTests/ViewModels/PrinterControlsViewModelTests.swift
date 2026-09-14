@@ -3794,6 +3794,10 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         let (model, service) = try await fixture()
         XCTAssertNil(model.motionAdmissionResubmissionID)
         XCTAssertTrue(model.motionBlockedReason?.contains("incomplete XYZ") == true)
+        XCTAssertTrue(model.motionStatusSummary?.contains("incomplete XYZ") == true)
+        XCTAssertTrue(model.motionStatusSummary?.contains("cannot be resubmitted") == true)
+        XCTAssertFalse(model.motionStatusSummary?.contains("Review the saved operation") == true)
+        XCTAssertTrue(model.motionStatusNeedsAttention)
         await model.resubmitUnconfirmedMotionAdmission(operationID: operationID)
         XCTAssertTrue(service.submittedControlOperations.isEmpty)
         XCTAssertNil(service.moveToCalledWith)
@@ -3801,6 +3805,32 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         XCTAssertTrue(model.operationReadError?.contains("could not be verified") == true)
         XCTAssertEqual(defaults.data(forKey: key), data)
         XCTAssertEqual(model.motionOperationID, operationID)
+    }
+
+    func test_restoredDifferentIdentityCannotHideKnownUnknownMotion() async throws {
+        let service = MockPrinterService()
+        let printer = try TestData.decodePrinter()
+        let unknown = PrinterControlOperation.controlsFixture(printerID: printer.id, state: .unknown)
+        service.currentControlOperationToReturn = .controlsFixture(unknown)
+        service.controlOperationToReturn = unknown
+        let (model, _) = try await fixture(service: service)
+        service.currentControlOperationToReturn = .init(physicalControl: .init(
+            supportedOperations: PrinterControlOperationKind.allCases, barrierHeld: false, requiresRecovery: false
+        ), operation: nil)
+        await model.refreshControlOperation()
+        XCTAssertEqual(model.controlOperation?.state, .unknown)
+        let restoredID = UUID()
+        let key = "printer-motion.v1.\(serverID.uuidString).\(userID.uuidString).\(printer.id.uuidString)"
+        defaults.set(Data("""
+        {"operationID":"\(restoredID.uuidString)","request":{"kind":"HomeAll"}}
+        """.utf8), forKey: key)
+        await model.homeAll()
+        XCTAssertEqual(model.motionOperationID, restoredID)
+        XCTAssertNotEqual(model.controlOperation?.operationId, restoredID)
+        XCTAssertTrue(model.motionStatusNeedsAttention)
+        XCTAssertEqual(model.motionStatusSummary, "Motion outcome uncertain. Controls locked. Inspect the printer and use recovery.")
+        XCTAssertTrue(model.hasUnresolvedMotion)
+        XCTAssertTrue(service.submittedControlOperations.isEmpty)
     }
 
     func test_responseLossPersistsIdentityAcrossNavigationAndOnlyReadsOnReopen() async throws {

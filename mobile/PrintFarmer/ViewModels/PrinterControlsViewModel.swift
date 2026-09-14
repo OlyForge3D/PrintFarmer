@@ -1440,13 +1440,16 @@ final class PrinterControlsViewModel: ObservableObject {
         return controlOperation
     }
 
+    private var hasMotionUncertainty: Bool {
+        controlOperation?.requiresRecovery == true || physicalControl?.requiresRecovery == true
+            || [.unknown, .recovering].contains(controlOperation?.state)
+            || [.unknown, .recovering].contains(physicalControl?.state)
+    }
+
     /// Presentation only. Locking and completion continue to use authoritative evidence.
     var motionStatusNeedsAttention: Bool {
-        hasDurableMotionBarrier && (
-            presentedMotionOperation?.requiresRecovery == true || physicalControl?.requiresRecovery == true
-                || [.unknown, .recovering].contains(presentedMotionOperation?.state)
-                || [.unknown, .recovering].contains(physicalControl?.state)
-        ) || operationReadError != nil
+        hasMotionUncertainty || operationReadError != nil
+            || lastError?.command.section == .motion
             || (hasUnconfirmedMotionAdmission && !motionSubmissionInFlight)
             || (motionBlockedReason != nil && !hasUnresolvedMotion && !motionSubmissionInFlight)
             || [.failed, .recovered].contains(presentedMotionOperation?.state)
@@ -1454,14 +1457,19 @@ final class PrinterControlsViewModel: ObservableObject {
 
     var motionStatusSummary: String? {
         guard motionStatusMessage != nil else { return nil }
-        if presentedMotionOperation?.requiresRecovery == true || physicalControl?.requiresRecovery == true
-            || [.unknown, .recovering].contains(presentedMotionOperation?.state)
-            || [.unknown, .recovering].contains(physicalControl?.state) {
+        if hasMotionUncertainty {
             return "Motion outcome uncertain. Controls locked. Inspect the printer and use recovery."
         }
         if motionSubmissionInFlight { return "Submitting motion. Controls locked until completion." }
+        if lastError?.command.section == .motion { return "Motion blocked. Review the error below." }
         if hasUnconfirmedMotionAdmission {
-            return "Motion not confirmed. Controls locked. Review the saved operation before retrying."
+            if let request = pendingMotion?.request, request.kind == .moveTo,
+               request.x == nil || request.y == nil || request.z == nil {
+                return "Saved motion has an incomplete XYZ target. Controls locked; it cannot be resubmitted. Missing axes will not be filled."
+            }
+            return motionAdmissionResubmissionID != nil
+                ? "Motion not confirmed. Controls locked. Review the saved operation before retrying."
+                : "Motion not confirmed. Controls locked; refresh status or use recovery."
         }
         if operationReadError != nil { return "Motion status unavailable. Controls locked; refresh to check again." }
         if hasUnresolvedMotion {
@@ -1469,7 +1477,11 @@ final class PrinterControlsViewModel: ObservableObject {
                 ? "Motion queued. Controls locked until completion."
                 : "Motion in progress. Controls locked until completion."
         }
-        if motionBlockedReason != nil { return motionBlockedReason }
+        if motionBlockedReason != nil {
+            if motionUserID == nil { return "Sign in again to check motion status." }
+            if !motionCurrentVerified { return "Checking motion status. Controls locked." }
+            return "Server update required for motion controls."
+        }
         switch presentedMotionOperation?.state {
         case .succeeded: return "Motion completed. Check the printer before continuing."
         case .failed: return "Motion failed. Review details before continuing."
