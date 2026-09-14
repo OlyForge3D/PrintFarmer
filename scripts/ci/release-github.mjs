@@ -104,8 +104,11 @@ export function githubRequestUrl(endpoint, method) {
     /^contents\/VERSION\?ref=[a-f0-9]{40}$/,
     /^commits\/[a-f0-9]{40}\/check-runs\?per_page=100$/,
     /^commits\/[a-f0-9]{40}\/status\?per_page=100$/,
+    /^actions\/runs\/[1-9][0-9]*$/,
+    /^actions\/runs\/[1-9][0-9]*\/attempts\/[1-9][0-9]*\/jobs\?per_page=100$/,
+    /^actions\/workflows\/consolidated-release\.yml$/,
     /^rules\/branches\/(?:main|development)\?per_page=100$/,
-    /^environments\/release-(?:stable|insider)(?:\/deployment-branch-policies)?$/,
+    /^environments\/release-(?:publisher-)?(?:stable|insider)(?:\/deployment-branch-policies)?$/,
     /^rulesets(?:\/[1-9][0-9]*|\?per_page=100)$/,
   ];
   requireThat((method === 'GET' && reads.some(pattern => pattern.test(evidenceBaseEndpoint(endpoint)))) ||
@@ -341,6 +344,14 @@ export async function verifyReleaseChecks(api, sourceCommit, required = releaseR
     requireThat(requiredPassed && (!latestCheck || checkPassed) && (!latestStatus || statusPassed),
     'Missing successful exact-SHA required qualification');
   }
+  const review = statuses.statuses
+    .filter(status => status?.context === releaseReviewStatus)
+    .sort((a, b) => b.id - a.id)[0];
+  return {
+    sourceCommit,
+    reviewUrl: review?.target_url,
+    checks: required.map(policy => policy.context),
+  };
 }
 
 export async function verifyProtection(api, channel, publisherAppId, approvalMode, ownerApprovedReviewers, sourceCommit) {
@@ -364,6 +375,9 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
   }
   const environment = await readPolicy(`environments/release-${channel}`);
   const branchPolicies = await readPolicy(`environments/release-${channel}/deployment-branch-policies`);
+  const publisherEnvironment = await readPolicy(`environments/release-publisher-${channel}`);
+  const publisherBranchPolicies =
+    await readPolicy(`environments/release-publisher-${channel}/deployment-branch-policies`);
   const allRulesets = await readPolicy('rulesets?per_page=100');
   requireThat(allRulesets.length < 100, 'Ruleset listing may be truncated');
   const rulesets = [];
@@ -376,7 +390,8 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
     rulesets.push(detail);
   }
   const evidence = { schema: 1, repository, channel, branch, publisherAppId,
-    verifiedAt: new Date().toISOString(), branchRules, branchRulesets, environment, branchPolicies, rulesets };
+    verifiedAt: new Date().toISOString(), branchRules, branchRulesets, environment, branchPolicies,
+    publisherEnvironment, publisherBranchPolicies, rulesets };
   const normalized = normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers);
   if (sourceCommit !== undefined) {
     const required = branchRules.filter(rule => rule.type === 'required_status_checks')

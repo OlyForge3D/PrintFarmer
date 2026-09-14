@@ -33,7 +33,8 @@ The supported administrator journey is:
 
 1. Open **Consolidated Release** and select `stable` or `insider`.
 2. Leave **source_sha** blank to pin that branch's current HEAD once, or enter
-   the full lowercase 40-character SHA currently shown for the selected branch.
+   a full lowercase 40-character SHA that is either that HEAD or its trusted
+   ancestor. The workflow definition remains pinned independently.
 3. Select `release` or the explicitly non-publishing `rehearsal` mode.
 4. Click **Run workflow** on the matching canonical branch and approve the one
    pending `release-stable` or `release-insider` transaction environment.
@@ -41,18 +42,34 @@ The supported administrator journey is:
    allocation, ledger/tag work, publication, pointer advancement and bounded
    diagnostics are automatic and fail closed.
 
-Do not dispatch CI, qualification, evidence-recorder or rehearsal workflows
-separately. Do not supply CI run IDs, comment IDs, tags or allocator values, and
-do not author formatted commit comments or statuses. A source SHA that does not
-equal the canonical branch HEAD observed by the dispatch is rejected rather
-than silently replaced. Once admitted, later branch movement does not retarget
-the transaction.
+The consolidated journey does not require separately dispatching CI,
+qualification, evidence-recorder or rehearsal workflows. Those bounded control
+workflows remain available for their established verification and recovery
+purposes. Do not supply CI run IDs, comment IDs, tags or allocator values to the
+consolidated journey, and do not author formatted commit comments or statuses.
+An explicit source outside the selected canonical branch's ancestry is rejected;
+once admitted, later branch movement does not retarget the source commit.
 
-`rehearsal` uses the same source selection and qualification path, but the
-approved rehearsal job contains no publisher App, registry or OIDC credential
+Qualification is bound to the current release run ID, attempt, GitHub Actions
+App, check suite, workflow commit, and namespaced reusable-workflow jobs. The
+same authorization step re-reads that API evidence, exact-source required
+checks, review status, and live strict branch policy after environment approval.
+Receipts last 30 minutes; delayed approval beyond that window requires a new
+dispatch rather than accepting stale evidence.
+
+`rehearsal` uses the same source selection and qualification path in the
+distinct `release-rehearsal-<channel>` environment, but that job contains no
+publisher App, registry or OIDC credential
 references and cannot call reserve, tag, publish or pointer-advance operations.
 Its `release-rehearsal-only` receipt has `publicationAuthorized: false` and is
 not accepted as release qualification or authorization.
+
+Each `release-publisher-<channel>` environment must be provisioned before use
+with administrator bypass disabled, exactly one branch policy for the channel's
+canonical branch, and zero required reviewers. The separate
+`release-<channel>` environment is the single human approval boundary. Missing
+or auto-created publisher environments fail verification before credentials,
+registry writes, release assets, or pointer advancement.
 
 | Channel | Base authority | Canonical version | Source tag |
 | --- | --- | --- | --- |

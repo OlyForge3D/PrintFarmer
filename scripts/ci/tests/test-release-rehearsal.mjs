@@ -85,6 +85,14 @@ function fixture() {
       reviewers: [{ type: 'User', reviewer: { id: 7, login: 'jpapiez' } }] }] });
   values.set('environments/release-insider/deployment-branch-policies',
     { branch_policies: [{ name: 'development', type: 'branch' }] });
+  values.set('environments/release-publisher-insider', {
+    name: 'release-publisher-insider',
+    can_admins_bypass: false,
+    deployment_branch_policy: { custom_branch_policies: true, protected_branches: false },
+    protection_rules: [],
+  });
+  values.set('environments/release-publisher-insider/deployment-branch-policies',
+    { branch_policies: [{ name: 'development', type: 'branch' }] });
   for (const [branch, id] of [['development', sha], ['main', 'b'.repeat(40)], ['release-ledger', head]]) {
     values.set(`git/ref/heads/${branch}`, { ref: `refs/heads/${branch}`, object: { type: 'commit', sha: id } });
   }

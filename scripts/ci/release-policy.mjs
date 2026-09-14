@@ -93,14 +93,19 @@ export function admit(context, selectedHead, versionText, lastStable) {
   requireThat(['workflow_dispatch', 'schedule'].includes(context.event), 'Event cannot authorize publication');
   requireThat(context.workflowIdentity === `${repository}/${workflow}@refs/heads/${context.workflowBranch}`,
     'Untrusted workflow/caller identity');
-  requireThat(context.workflowSha === context.eventSha, 'Workflow SHA mismatch');
+  requireString(context.workflowSha, shaPattern, 'workflow commit');
+  if (context.observedBranchHead === undefined) {
+    requireThat(context.workflowSha === context.eventSha, 'Workflow SHA mismatch');
+  }
   const channel = context.event === 'schedule' ? 'insider' : context.channel;
   const sourceBranch = channel === 'stable' ? 'main' : 'development';
   requireThat(['stable', 'insider'].includes(channel), 'Invalid channel');
   requireThat(context.ref === `refs/heads/${sourceBranch}`, 'Branch/channel mismatch');
   requireThat(context.workflowBranch === sourceBranch, 'Workflow/source branch mismatch');
   requireThat(shaPattern.test(selectedHead) && context.eventSha === selectedHead,
-    'Source must equal canonical branch HEAD at admission; reselect and requalify');
+    'Source transaction does not match the pinned canonical HEAD selection at admission');
+  const authorizedBranchHead = context.observedBranchHead ?? selectedHead;
+  requireString(authorizedBranchHead, shaPattern, 'observed canonical branch HEAD');
   for (const field of ['buildId', 'buildAttempt']) {
     requireString(context[field], positivePattern, field);
   }
@@ -119,7 +124,7 @@ export function admit(context, selectedHead, versionText, lastStable) {
   }
   return {
     repository, channel, baseVersion, sourceBranch, ...(stage ? { stage } : {}),
-    sourceCommit: selectedHead, authorizedBranchHead: selectedHead,
+    sourceCommit: selectedHead, authorizedBranchHead,
     buildId: context.buildId, buildAttempt: context.buildAttempt,
     workflowIdentity: context.workflowIdentity, workflowCommit: context.workflowSha,
   };
@@ -148,9 +153,9 @@ export function validateAdmission(admission) {
   requireThat(admission.sourceBranch === branch &&
     admission.workflowIdentity === `${repository}/${workflow}@refs/heads/${branch}`,
   'Invalid ledger admission workflow/branch');
-  requireString(admission.sourceCommit, shaPattern, 'ledger admission source commit');
-  requireThat(admission.authorizedBranchHead === admission.sourceCommit &&
-    admission.workflowCommit === admission.sourceCommit, 'Invalid ledger admission commit binding');
+  for (const field of ['sourceCommit', 'authorizedBranchHead', 'workflowCommit']) {
+    requireString(admission[field], shaPattern, `ledger admission ${field}`);
+  }
   for (const field of ['buildId', 'buildAttempt']) requireString(admission[field], positivePattern, `ledger admission ${field}`);
   requireThat(admission.channel === 'stable' || ['insider', 'beta', 'rc'].includes(admission.stage),
     'Invalid ledger admission stage');
@@ -205,12 +210,16 @@ export function validatePublicAuthorization(identity) {
   requireThat(identity.canonicalVersion === tag.canonicalVersion && identity.baseVersion === tag.baseVersion &&
     identity.channel === tag.channel && identity.releaseId === `${tag.channel}:${tag.canonicalVersion}`,
   'Invalid public authorization canonical identity');
-  validateAdmission({
-    repository, channel: identity.channel, baseVersion: identity.baseVersion, sourceBranch: identity.sourceBranch,
-    sourceCommit: identity.sourceCommit, authorizedBranchHead: identity.authorizedBranchHead,
-    buildId: identity.buildId, buildAttempt: identity.buildAttempt, workflowIdentity: identity.workflowIdentity,
-    workflowCommit: identity.sourceCommit, ...(tag.stage ? { stage: tag.stage } : {}),
-  });
+  const branch = identity.channel === 'stable' ? 'main' : 'development';
+  requireThat(identity.sourceBranch === branch &&
+    identity.workflowIdentity === `${repository}/${workflow}@refs/heads/${branch}`,
+  'Invalid public authorization workflow/branch');
+  for (const field of ['sourceCommit', 'authorizedBranchHead']) {
+    requireString(identity[field], shaPattern, `public authorization ${field}`);
+  }
+  for (const field of ['buildId', 'buildAttempt']) {
+    requireString(identity[field], positivePattern, `public authorization ${field}`);
+  }
   requireTimestamp(identity.buildTime, 'authorization timestamp');
   requireString(identity.identitySha256, hashPattern, 'public authorization identity hash');
 }
@@ -302,7 +311,10 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
     /^[1-9][0-9]*$/.test(publisherAppId || '') && evidence.publisherAppId === publisherAppId &&
     Number.isFinite(Date.parse(evidence.verifiedAt)),
   'Missing or mismatched publisher protection evidence');
-  const { branchRules: rules, branchRulesets, environment, branchPolicies: policies, rulesets } = evidence;
+  const {
+    branchRules: rules, branchRulesets, environment, branchPolicies: policies,
+    publisherEnvironment, publisherBranchPolicies, rulesets,
+  } = evidence;
   requireThat(Array.isArray(rules) && rules.length > 0 && rules.length < 100 &&
     rules.every(rule => rule && typeof rule.type === 'string' &&
       Number.isSafeInteger(rule.ruleset_id) && rule.ruleset_id > 0) &&
@@ -373,6 +385,17 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
       approved.includes(entry.reviewer.login.toLowerCase())),
     'Owner blocker: publishing environment reviewers must be explicitly owner-approved users');
   }
+  requireThat(publisherEnvironment?.name === `release-publisher-${channel}` &&
+    publisherEnvironment.can_admins_bypass === false &&
+    publisherEnvironment.deployment_branch_policy?.custom_branch_policies === true &&
+    publisherEnvironment.deployment_branch_policy?.protected_branches === false &&
+    Array.isArray(publisherEnvironment.protection_rules) &&
+    publisherEnvironment.protection_rules.length === 0,
+  'Owner blocker: publisher environment must be pre-created, branch-restricted, non-bypassable, and reviewer-free');
+  requireThat(publisherBranchPolicies?.branch_policies?.length === 1 &&
+    publisherBranchPolicies.branch_policies[0].name === branch &&
+    publisherBranchPolicies.branch_policies[0].type === 'branch',
+  'Owner blocker: publisher environment must allow only its canonical branch');
   for (const name of ['release-canonical-tags', 'release-ledger-continuity',
     'release-tag-creators', 'release-ledger-writer']) {
     const rule = rulesets.find(item => item.name === name && item.enforcement === 'active');
@@ -679,7 +702,7 @@ export function verifyConsumer(record, stored, context, identitySha256 = hash(st
     record.channel === tag.channel && record.stage === tag.stage && record.sequence === tag.sequence &&
     record.releaseId === `${tag.channel}:${tag.canonicalVersion}` &&
     record.allocationKey === allocationKey(record) &&
-    shaPattern.test(record.sourceCommit) && record.workflowCommit === record.sourceCommit &&
+    shaPattern.test(record.sourceCommit) && shaPattern.test(record.workflowCommit) &&
     record.workflowIdentity === `${repository}/${workflow}@refs/heads/${record.sourceBranch}`,
   'Invalid canonical record identity');
   requireThat(context.repository === repository &&
@@ -687,7 +710,7 @@ export function verifyConsumer(record, stored, context, identitySha256 = hash(st
     context.workflowSha === record.workflowCommit &&
     context.eventSha === record.sourceCommit &&
     context.ref === `refs/heads/${record.sourceBranch}` &&
-    record.authorizedBranchHead === record.sourceCommit &&
+    shaPattern.test(record.authorizedBranchHead) &&
     record.sourceBranch === (record.channel === 'stable' ? 'main' : 'development') &&
     ['stable', 'insider'].includes(record.channel) &&
     context.buildId === record.buildId && context.buildAttempt === record.buildAttempt &&

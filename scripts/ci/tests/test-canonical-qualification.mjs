@@ -536,14 +536,14 @@ test('malformed run titles and unknown/native mode combinations fail closed', ()
   assert.throws(() => qualificationTitle('insider', '10', '50', '60', 'single-maintainer'));
 });
 
-test('retired qualification workflows are internal-only and separate from publishing', () => {
+test('canonical qualification and recorder remain reachable and separate from publishing', () => {
   const qualify = load(read('.github/workflows/qualify-canonical-release.yml'));
   const writer = load(read('.github/workflows/record-canonical-qualification.yml'));
-  assert.deepEqual(Object.keys(qualify.on), ['workflow_call']);
-  assert.deepEqual(Object.keys(writer.on), ['workflow_call']);
+  assert.deepEqual(Object.keys(qualify.on), ['workflow_dispatch']);
+  assert.deepEqual(Object.keys(writer.on), ['workflow_run']);
   assert.equal(qualify.permissions.contents, 'read');
   assert.equal(qualify.jobs.verify.permissions.statuses, undefined);
-  assert.equal(writer.jobs.record.if, false);
+  assert.match(writer.jobs.record.if, /workflow_run\.event/);
   assert.deepEqual(Object.entries(writer.jobs.record.permissions).filter(([, value]) => value === 'write'),
     [['statuses', 'write']]);
   for (const [path, workflow] of [[qualificationWorkflow, qualify], [evidenceWorkflow, writer]]) {

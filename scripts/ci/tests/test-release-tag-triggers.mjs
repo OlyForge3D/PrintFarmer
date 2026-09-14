@@ -926,7 +926,7 @@ test('workflow entry points have no direct tag/manual Docker bypass; iOS namespa
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
   assert.match(docker, /workflow_call:/);
   assert.doesNotMatch(docker, /^\s{2}(push|workflow_dispatch|schedule):/m);
-  assert.match(docker, /uses: actions\/download-artifact@v8/);
+  assert.match(docker, /uses: actions\/download-artifact@[0-9a-f]{40}\s+# v8/);
   assert.match(docker, /cosign verify-blob/);
   assert.doesNotMatch(docker, /^\s+(?:packages|contents): write$/m);
   assert.match(docker, /password: \$\{\{ secrets\.RELEASE_REGISTRY_TOKEN \}\}/);
@@ -1803,6 +1803,13 @@ function protectionFixture(channel = 'insider', approvalMode = 'separation-of-du
     environment.protection_rules[0].prevent_self_review = false;
     environment.protection_rules[0].reviewers[0].reviewer.login = 'jpapiez';
   }
+  const publisherEnvironment = {
+    name: `release-publisher-${channel}`,
+    privateMarker: 'raw-publisher-environment-sentinel',
+    can_admins_bypass: false,
+    deployment_branch_policy: { custom_branch_policies: true, protected_branches: false },
+    protection_rules: [],
+  };
   const branchRules = [
     { type: 'deletion' }, { type: 'non_fast_forward' },
     { type: 'pull_request', parameters: {
@@ -1822,12 +1829,18 @@ function protectionFixture(channel = 'insider', approvalMode = 'separation-of-du
     if (endpoint === `rules/branches/${branch}?per_page=100`) return branchRules;
     if (endpoint === 'rulesets/5') return branchRuleset;
     if (endpoint === `environments/release-${channel}`) return environment;
-    if (endpoint.endsWith('/deployment-branch-policies')) return { branch_policies: [{ name: branch, type: 'branch' }] };
+    if (endpoint === `environments/release-${channel}/deployment-branch-policies`) {
+      return { branch_policies: [{ name: branch, type: 'branch' }] };
+    }
+    if (endpoint === `environments/release-publisher-${channel}`) return publisherEnvironment;
+    if (endpoint === `environments/release-publisher-${channel}/deployment-branch-policies`) {
+      return { branch_policies: [{ name: branch, type: 'branch' }] };
+    }
     if (endpoint === 'rulesets?per_page=100') return rulesets;
     if (endpoint.startsWith('rulesets/')) return rulesets.find(rule => rule.id === Number(endpoint.split('/')[1]));
     throw new Error(endpoint);
   };
-  return { api, environment, rulesets, branchRules, branchRuleset };
+  return { api, environment, publisherEnvironment, rulesets, branchRules, branchRuleset };
 }
 
 test('live protection adapter accepts only scoped reviewer-gated environments and exclusive publisher rules', async () => {
@@ -1849,6 +1862,32 @@ test('live protection adapter accepts only scoped reviewer-gated environments an
     ? rulesets.map(rule => ({ ...rule, enforcement: 'active' })) : api(endpoint);
   rulesets[0].enforcement = 'disabled';
   await assert.rejects(verifyProtection(staleListing, 'insider', '123', 'separation-of-duties'), /active release-canonical-tags/);
+});
+
+test('publisher environments are pre-created, canonical-branch-only, non-bypassable and reviewer-free', async () => {
+  for (const mutate of [
+    fixture => { fixture.publisherEnvironment.can_admins_bypass = true; },
+    fixture => { fixture.publisherEnvironment.can_admins_bypass = undefined; },
+    fixture => { fixture.publisherEnvironment.deployment_branch_policy.custom_branch_policies = false; },
+    fixture => { fixture.publisherEnvironment.deployment_branch_policy.protected_branches = true; },
+    fixture => { fixture.publisherEnvironment.protection_rules.push({ type: 'required_reviewers', reviewers: [] }); },
+  ]) {
+    const fixture = protectionFixture();
+    mutate(fixture);
+    await assert.rejects(verifyProtection(fixture.api, 'insider', '123', 'separation-of-duties'),
+      /publisher environment/);
+  }
+  const missing = protectionFixture();
+  const missingApi = async endpoint => {
+    if (endpoint === 'environments/release-publisher-insider') {
+      const error = new Error('missing');
+      error.status = 404;
+      throw error;
+    }
+    return missing.api(endpoint);
+  };
+  await assert.rejects(verifyProtection(missingApi, 'insider', '123', 'separation-of-duties'),
+    /Protection policy read failed: HTTP 404/);
 });
 
 for (const channel of ['stable', 'insider']) {
@@ -3115,7 +3154,7 @@ test('workflow wiring transports only public outputs and each consumer verifies 
   const action = readFileSync('.github/actions/release-authorization/action.yml', 'utf8');
   const authorize = authority.split('\n  authorize:')[1].split('\n  publish:')[0];
   assert.match(authorize, /environment: release-/);
-  assert.ok(authorize.indexOf('uses: actions/create-github-app-token@v2') <
+  assert.ok(authorize.indexOf('uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349') <
     authorize.indexOf('node scripts/ci/release-control.mjs authorize'));
   assert.match(authorize, /permission-administration: read/);
   assert.match(authorize, /GH_TOKEN: \$\{\{ github\.token \}\}\n\s+RELEASE_PUBLISHER_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
@@ -3143,7 +3182,7 @@ test('workflow wiring transports only public outputs and each consumer verifies 
     assert.ok([...publicIdentityFields, 'identitySha256', 'buildTime'].includes(match[1]), match[1]);
   }
   for (const match of (authority + docker + action).matchAll(/steps\.(?:authorize|consume)\.outputs\.(\w+)/g)) {
-    assert.ok(['public_identity', 'frontend_identity', 'version', 'container_version', 'channel', 'identity_hash',
+    assert.ok(['public_identity', 'verified_branch_head', 'frontend_identity', 'version', 'container_version', 'channel', 'identity_hash',
       'source_archive_url', 'sbom_url'].includes(match[1]), match[1]);
   }
   assert.match(action, /name: release-authorization-\$\{\{ github.run_attempt \}\}/);

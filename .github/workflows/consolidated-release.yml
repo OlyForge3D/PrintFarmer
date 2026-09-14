@@ -60,16 +60,17 @@ jobs:
       approval_mode: ${{ steps.admit.outputs.approval_mode }}
       transaction: ${{ steps.select.outputs.transaction }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
       - name: Resolve and bind canonical source once
         id: select
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_CHANNEL: ${{ inputs.channel }}
           RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
           RELEASE_MODE: ${{ inputs.mode }}
@@ -107,12 +108,16 @@ jobs:
       actions: read
       checks: read
       statuses: read
+    outputs:
+      run_url: ${{ steps.evidence.outputs.run_url }}
+      review_url: ${{ steps.evidence.outputs.review_url }}
+      expires_at: ${{ steps.evidence.outputs.expires_at }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
       - name: Verify exact-SHA checks and review evidence
@@ -120,7 +125,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TRANSACTION: ${{ needs.admit.outputs.transaction }}
         run: node scripts/ci/release-transaction.mjs qualify
-      - uses: actions/upload-artifact@v7
+      - name: Export bounded qualification references
+        id: evidence
+        run: |
+          set -euo pipefail
+          echo "run_url=$(jq -r '.run.url' .artifacts/release-transaction/qualification.json)" >> "$GITHUB_OUTPUT"
+          echo "review_url=$(jq -r '.sourceEvidence.reviewUrl' .artifacts/release-transaction/qualification.json)" >> "$GITHUB_OUTPUT"
+          echo "expires_at=$(jq -r '.expiresAt' .artifacts/release-transaction/qualification.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: release-qualification-${{ github.run_id }}-${{ github.run_attempt }}
           path: .artifacts/release-transaction/qualification.json
@@ -143,29 +155,25 @@ jobs:
       pull-requests: read
     outputs:
       public_identity: ${{ steps.authorize.outputs.public_identity }}
+      verified_branch_head: ${{ steps.authorize.outputs.verified_branch_head }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ github.workflow_sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: release-qualification-${{ github.run_id }}-${{ github.run_attempt }}
           path: .artifacts/release-transaction
       - name: Check sole authored version base
         run: bash scripts/sync-monorepo-version.sh --check
-      - name: Require owner-provisioned registry authority before reservation
-        env:
-          REGISTRY_USER: ${{ vars.RELEASE_REGISTRY_USER }}
-          REGISTRY_TOKEN: ${{ secrets.RELEASE_REGISTRY_TOKEN }}
-        run: test -n "$REGISTRY_USER" && test -n "$REGISTRY_TOKEN"
       - name: Obtain protected publisher app token
         id: publisher
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2
         with:
           app-id: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
           private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
@@ -187,7 +195,7 @@ jobs:
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
         run: node scripts/ci/release-control.mjs authorize
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
       - name: Sign immutable source and App-verified protection attestation
         run: |
           set -euo pipefail
@@ -198,7 +206,7 @@ jobs:
           cosign sign-blob --yes \
             --bundle .artifacts/release-authorization/public-identity.bundle.json \
             .artifacts/release-authorization/public-identity.json
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: release-authorization-${{ github.run_attempt }}
           path: |
@@ -214,18 +222,18 @@ jobs:
     if: inputs.mode == 'rehearsal'
     needs: [admit, qualification, collect-qualification]
     runs-on: ubuntu-latest
-    environment: release-${{ needs.admit.outputs.channel }}
+    environment: release-rehearsal-${{ needs.admit.outputs.channel }}
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: release-qualification-${{ github.run_id }}-${{ github.run_attempt }}
           path: .artifacts/release-transaction
@@ -238,7 +246,7 @@ jobs:
           node --test
           scripts/ci/tests/test-release-transaction.mjs
           scripts/ci/tests/test-release-rehearsal.mjs
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: release-rehearsal-${{ github.run_id }}-${{ github.run_attempt }}
           path: .artifacts/release-transaction/rehearsal-receipt.json
@@ -247,7 +255,7 @@ jobs:
           retention-days: 30
 
   publish:
-    needs: authorize
+    needs: [admit, authorize]
     if: inputs.mode == 'release'
     uses: ./.github/workflows/docker-publish.yml
     permissions:
@@ -258,6 +266,7 @@ jobs:
     with:
       identity: ${{ needs.authorize.outputs.public_identity }}
       transaction: ${{ needs.admit.outputs.transaction }}
+      verified_branch_head: ${{ needs.authorize.outputs.verified_branch_head }}
     secrets: inherit
 
   diagnostics:
@@ -277,6 +286,11 @@ jobs:
           AUTHORIZATION: ${{ needs.authorize.result }}
           REHEARSAL: ${{ needs.rehearsal.result }}
           PUBLICATION: ${{ needs.publish.result }}
+          PUBLIC_IDENTITY: ${{ needs.authorize.outputs.public_identity }}
+          QUALIFICATION_URL: ${{ needs.collect-qualification.outputs.run_url }}
+          REVIEW_URL: ${{ needs.collect-qualification.outputs.review_url }}
+          QUALIFICATION_EXPIRES: ${{ needs.collect-qualification.outputs.expires_at }}
+          PUBLISHED_SET_DIGEST: ${{ needs.publish.outputs.published_set_digest }}
         run: |
           {
             echo "## Release transaction"
@@ -288,7 +302,14 @@ jobs:
             echo "- authorization: \`$AUTHORIZATION\`"
             echo "- rehearsal: \`$REHEARSAL\`"
             echo "- publication: \`$PUBLICATION\`"
+            echo "- qualification run: ${QUALIFICATION_URL:-unavailable}"
+            echo "- review evidence: ${REVIEW_URL:-unavailable}"
+            echo "- qualification expires: \`${QUALIFICATION_EXPIRES:-unavailable}\`"
+            echo "- canonical identity: \`${PUBLIC_IDENTITY:-not-authorized}\`"
+            echo "- published set digest: \`${PUBLISHED_SET_DIGEST:-not-published}\`"
             if [ "$MODE" = rehearsal ]; then
               echo "- result: rehearsal-only; publication was not authorized"
+            elif [ "$PUBLICATION" != success ]; then
+              echo "- action: inspect the failed admission, qualification, approval, authorization, or publication job above; no secret values are included here"
             fi
           } >> "$GITHUB_STEP_SUMMARY"

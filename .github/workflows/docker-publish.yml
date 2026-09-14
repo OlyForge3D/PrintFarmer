@@ -22,6 +22,14 @@ on:
         description: Immutable same-run release transaction binding
         type: string
         required: true
+      verified_branch_head:
+        description: Current canonical branch head verified immediately before publication
+        type: string
+        required: true
+    outputs:
+      published_set_digest:
+        description: SHA-256 digest of the verified complete release set
+        value: ${{ jobs.promote-images.outputs.set_hash }}
 
 concurrency:
   group: docker-publish-${{ fromJSON(inputs.identity).channel }}
@@ -56,10 +64,17 @@ jobs:
             OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development) ;;
             *) exit 1 ;;
           esac
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        with:
+          node-version: 24
+      - name: Require validated non-empty release transaction
+        env:
+          RELEASE_TRANSACTION: ${{ inputs.transaction }}
+        run: node scripts/ci/release-transaction.mjs validate
       - name: Verify signed branch-at-authorization evidence
         env:
           GH_TOKEN: ${{ github.token }}
@@ -73,18 +88,18 @@ jobs:
     runs-on: ubuntu-latest
     needs: admission
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ fromJSON(inputs.identity).sourceCommit }}
           persist-credentials: false
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -109,7 +124,7 @@ jobs:
           fi
 
       - name: Cache NuGet packages
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('src/**/*.csproj') }}
@@ -154,35 +169,35 @@ jobs:
             -c Release --no-build -o ./publish/slicer-host/plugins/slicer
 
       - name: Upload Slicer Host artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: slicer-host-publish-${{ github.run_attempt }}
           path: ./publish/slicer-host
           retention-days: 1
 
       - name: Upload API artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: api-publish-${{ github.run_attempt }}
           path: ./publish/api
           retention-days: 1
 
       - name: Upload OrcaSlicer Worker artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: orcaslicer-worker-publish-${{ github.run_attempt }}
           path: ./publish/orcaslicer-worker
           retention-days: 1
 
       - name: Upload Printer Discovery artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: printer-discovery-publish-${{ github.run_attempt }}
           path: ./publish/printer-discovery
           retention-days: 1
 
       - name: Upload reviewed license inventory
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: license-inventory-${{ github.run_attempt }}
           path: ./publish/compliance/license-inventory.json
@@ -197,7 +212,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: admission
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ fromJSON(inputs.identity).sourceCommit }}
           persist-credentials: false
@@ -209,7 +224,7 @@ jobs:
         uses: ./.github/actions/release-authorization
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -231,7 +246,7 @@ jobs:
         run: node scripts/compliance/create-npm-notices.mjs
 
       - name: Upload frontend artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: frontend-build-${{ github.run_attempt }}
           path: src/Web/ReactApp/dist
@@ -253,13 +268,13 @@ jobs:
       base_image: ${{ steps.verify.outputs.base_image }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ fromJSON(inputs.identity).sourceCommit }}
           persist-credentials: false
 
       - name: Log in to GHCR (for manifest check)
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -288,7 +303,7 @@ jobs:
 
       - name: Trigger base image build if needed
         if: steps.check.outputs.exists != 'true'
-        uses: actions/github-script@v9
+        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553  # v9
         with:
           script: |
             console.log('Triggering OrcaSlicer base image workflow...');
@@ -384,7 +399,7 @@ jobs:
             dockerfile: Dockerfile.orcaslicer-worker-optimized
             platforms: linux/amd64
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ fromJSON(inputs.identity).sourceCommit }}
           persist-credentials: false
@@ -397,26 +412,26 @@ jobs:
         uses: ./.github/actions/release-authorization
 
       - name: Download artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: ${{ matrix.artifact }}-${{ github.run_attempt }}
           path: ./artifact
 
       - name: Download reviewed license inventory
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: license-inventory-${{ github.run_attempt }}
           path: ./compliance-artifacts
 
       - name: Set up QEMU
         if: contains(matrix.platforms, 'arm64')
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ vars.RELEASE_REGISTRY_USER }}
@@ -571,7 +586,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}
           tags: |
@@ -598,7 +613,7 @@ jobs:
 
       - name: Build and push immutable digest
         id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7
         with:
           context: .
           file: .github/dockerfiles/${{ matrix.dockerfile }}
@@ -617,10 +632,10 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Install Syft
-        uses: anchore/sbom-action/download-syft@v0.24.2
+        uses: anchore/sbom-action/download-syft@006b7ce8314066bdf1765b4500370d40fa6917a3  # v0.24.2
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
 
       - name: Generate and validate image SPDX SBOM
         env:
@@ -654,7 +669,7 @@ jobs:
             > 'release-artifacts/digest-${{ matrix.image }}.txt'
 
       - name: Upload image SPDX SBOM
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: sbom-${{ matrix.image }}-attempt-${{ github.run_attempt }}
           path: release-artifacts/*.spdx.json
@@ -662,7 +677,7 @@ jobs:
           retention-days: 30
 
       - name: Upload image digest
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: digest-${{ matrix.image }}-attempt-${{ github.run_attempt }}
           path: release-artifacts/digest-*.txt
@@ -684,7 +699,7 @@ jobs:
       actions: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ fromJSON(inputs.identity).sourceCommit }}
           persist-credentials: false
@@ -694,7 +709,7 @@ jobs:
         run: echo "full=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Download reviewed license inventory
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: license-inventory-${{ github.run_attempt }}
           path: ./compliance-artifacts
@@ -706,18 +721,18 @@ jobs:
         uses: ./.github/actions/release-authorization
 
       - name: Set up QEMU for multi-arch builds
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4
         with:
           platforms: arm64,amd64
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4
         with:
           driver-opts: |
             network=host
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ vars.RELEASE_REGISTRY_USER }}
@@ -725,7 +740,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-monolith
           tags: |
@@ -757,7 +772,7 @@ jobs:
 
       - name: Build and push immutable monolith digest
         id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7
         with:
           context: .
           file: scripts/docker/dockerfiles/Dockerfile.multistage
@@ -787,10 +802,10 @@ jobs:
             ORCASLICER_SHA256=${{ env.ORCA_SHA256 }}
 
       - name: Install Syft
-        uses: anchore/sbom-action/download-syft@v0.24.2
+        uses: anchore/sbom-action/download-syft@006b7ce8314066bdf1765b4500370d40fa6917a3  # v0.24.2
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
 
       - name: Generate and validate canonical SPDX SBOM
         env:
@@ -820,7 +835,7 @@ jobs:
             > release-artifacts/digest-monolith.txt
 
       - name: Upload canonical SPDX SBOM
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: sbom-monolith-attempt-${{ github.run_attempt }}
           path: release-artifacts/*.spdx.json
@@ -828,7 +843,7 @@ jobs:
           retention-days: 30
 
       - name: Upload monolith image digest
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: digest-monolith-attempt-${{ github.run_attempt }}
           path: release-artifacts/digest-monolith.txt
@@ -849,9 +864,10 @@ jobs:
       actions: read
     outputs:
       smoke_tag: ${{ steps.tags.outputs.smoke_tag }}
+      set_hash: ${{ steps.advance.outputs.set_hash }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ fromJSON(inputs.identity).sourceCommit }}
           persist-credentials: false
@@ -863,7 +879,7 @@ jobs:
 
       - name: Obtain protected publisher app token
         id: publisher
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2
         with:
           app-id: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
           private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
@@ -872,18 +888,18 @@ jobs:
           permission-actions: read
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Download image digests
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           pattern: digest-*-attempt-${{ github.run_attempt }}
           path: artifacts
 
       - name: Download image SPDX SBOMs
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           pattern: sbom-*-attempt-${{ github.run_attempt }}
           path: artifacts
@@ -925,7 +941,7 @@ jobs:
           done
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v4.1.2
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
 
       - name: Verify image signatures and SPDX attestations
         run: |
@@ -951,13 +967,13 @@ jobs:
           echo "smoke_tag=${{ fromJSON(inputs.identity).canonicalVersion }}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ vars.RELEASE_REGISTRY_USER }}
@@ -1148,14 +1164,16 @@ jobs:
         run: node scripts/ci/release-set.mjs tag
 
       - name: Compare-and-set complete channel candidate last
+        id: advance
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
           RELEASE_TRANSACTION: ${{ inputs.transaction }}
+          RELEASE_VERIFIED_BRANCH_HEAD: ${{ inputs.verified_branch_head }}
         run: node scripts/ci/release-control.mjs advance
 
       - name: Export identity prerequisite for signed-manifest consumer
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: release-identity-and-complete-set-${{ github.run_attempt }}
           path: |
