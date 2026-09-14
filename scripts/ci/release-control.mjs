@@ -12,7 +12,7 @@ import {
 import { emitBuildIdentity } from './release-metadata.mjs';
 import { qualificationClient, verifyCanonicalReleaseEvidence } from './canonical-qualification.mjs';
 import {
-  privateSetPath, publicAuthorization, readPrivateAuthorization, readPrivateJson, verifyAuthorization, writeAuthorization, writePublicSet,
+  privateSetPath, publicAuthorization, readPrivateAuthorization, readPrivateJson, readReleaseManifest, verifyAuthorization, writeAuthorization, writePublicSet,
 } from './release-authorization.mjs';
 import {
   readQualificationReceipt, transactionFromEnvironment,
@@ -177,13 +177,13 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     const currentBranchHead = await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
     await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
       env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
-    const expectedPointer = state.pointers[record.channel]?.setHash || '';
+    const expectedPointer = state.pointers[record.channel]?.manifestEnvelopeSha256 || '';
     output('verified_branch_head', currentBranchHead);
     output('expected_pointer', expectedPointer);
   } else if (operation === 'advance') {
     const set = readPrivateJson(privateSetPath);
     const expectedPointer = env.RELEASE_EXPECTED_POINTER ?? '';
-    requireThat((state.pointers[record.channel]?.setHash || '') === expectedPointer,
+    requireThat((state.pointers[record.channel]?.manifestEnvelopeSha256 || '') === expectedPointer,
       'Channel pointer changed after publication preflight');
     requireThat(transaction.sourceCommit === record.sourceCommit,
       'Pointer transaction binding mismatch');
@@ -192,7 +192,9 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
     requireThat(/^[a-f0-9]{40}$/.test(env.RELEASE_VERIFIED_BRANCH_HEAD || ''),
       'Missing publication preflight branch evidence');
-    await transact(store, async latest => advance(latest, record, set,
+    const { serializedManifest, serializedEnvelope } = readReleaseManifest();
+    const signed = { serializedManifest, serializedEnvelope };
+    await transact(store, async latest => advance(latest, record, set, signed,
       await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit), expectedPointer));
     output('set_hash', hash(writePublicSet(record, set)));
   } else {

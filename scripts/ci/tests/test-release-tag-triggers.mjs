@@ -9,7 +9,7 @@ import test from 'node:test';
 import { canonicalAuthorizationFixture } from './fixtures/canonical-qualification.mjs';
 import { canonicalValidationChecks } from '../canonical-qualification.mjs';
 import {
-  admit, advance, allocationKey, compareVersions, components, hash, identityLabels,
+  admit, advance as advancePolicy, allocationKey, compareVersions, components, hash, identityLabels, signedReleasePointer,
   parseTag, parseVersionFile, reserve as reserveRelease, transact, validateCandidate, validateCompleteSet,
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence, hotfixReasonDigest, ReleasePolicyError,
   validateRecord, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks, publisherWorkflowIdentity,
@@ -49,6 +49,29 @@ const context = (overrides = {}) => ({
   workflowSha: sha, workflowBranch: 'development', buildId: '42', buildAttempt: '1',
   channel: 'insider', ...overrides,
 });
+
+const releaseMetadataFixture = version => ({
+  ...loadReleaseMetadata('1.2.3'),
+  version,
+});
+
+const signedManifest = (identity, set) => {
+  const manifest = releaseManifest(identity, set, undefined, releaseNotesHash,
+    releaseMetadataFixture(identity.baseVersion));
+  const envelope = releaseManifestEnvelope(manifest);
+  return { serializedManifest: JSON.stringify(manifest), serializedEnvelope: JSON.stringify(envelope) };
+};
+
+const advance = (ledger, identity, set, currentHead, expectedPointer, signed = signedManifest(identity, set)) => {
+  const pointer = signedReleasePointer(identity, signed);
+  const legacySetHash = publicSetHash(set);
+  const priorPointer = Object.values(ledger.pointers)
+    .find(candidate => ledger.reservations[candidate.allocationKey]?.setHash === expectedPointer);
+  const result = advancePolicy(ledger, identity, set, signed, currentHead,
+    expectedPointer === legacySetHash ? pointer.manifestEnvelopeSha256
+      : priorPointer?.manifestEnvelopeSha256 ?? expectedPointer);
+  return { ...result, setHash: legacySetHash };
+};
 
 test('changelog release entry parser handles final, multiple, and literal z content', () => {
   const entry = heading => `### Features\n\n${heading}\n\n### Fixes\n\nNone.\n\n### Breaking changes\n\nN/A`;
@@ -176,7 +199,7 @@ test('admission and authorization reject blank, malformed and invalid transactio
     rmSync(root, { recursive: true, force: true });
   }
 });
-const state = () => ({ schema: 1, anchor, counter: '0', reservations: {}, identities: {}, pointers: {}, stages: {}, qualifications: {} });
+const state = () => ({ schema: 1, anchor, counter: '0', channelSequences: { insider: '0', stable: '0' }, reservations: {}, identities: {}, pointers: {}, stages: {}, qualifications: {} });
 const hotfixQualification = () => ({
   schema: 1, sourceCommit: sha, reviewed: true, tests: true, compatibility: true,
   migrations: true, recovery: true, mode: 'hotfix',
@@ -295,11 +318,13 @@ async function runFixtureControl(operation, fixture, env = fixture.env, verify) 
 }
 function promotionQualification(identity, set, sourceCommit = newerSha) {
   const tree = { schema: 1, originTree: 'd'.repeat(40), sourceTree: 'd'.repeat(40), metadataChanges: [] };
+  const pointer = signedReleasePointer(identity, signedManifest(identity, set));
   return {
     schema: 1, sourceCommit, reviewed: true, tests: true, compatibility: true,
     migrations: true, recovery: true, mode: 'promotion',
     promotionOrigin: { allocationKey: identity.allocationKey, releaseId: identity.releaseId,
-      sourceCommit: identity.sourceCommit, setHash: publicSetHash(set) },
+      sourceCommit: identity.sourceCommit, manifestSha256: pointer.manifestSha256,
+      envelopeSha256: pointer.envelopeSha256 },
     treeEvidence: { ...tree, diffSha256: hash(tree) },
   };
 }
@@ -735,6 +760,45 @@ test('complete-set CAS accepts forward branch movement but rejects version and b
   assert.equal(advance(ledger, current, set, newerSha, publicSetHash(set)).setHash, publicSetHash(set));
 });
 
+test('durable pointers are closed, signed-byte-bound, and channel-sequenced', () => {
+  const ledger = state();
+  const insider = record(ledger);
+  const insiderSet = completeSet(insider);
+  const insiderSigned = signedManifest(insider, insiderSet);
+  advance(ledger, insider, insiderSet, sha, '', insiderSigned);
+  const pointer = ledger.pointers.insider;
+  assert.deepEqual(Object.keys(pointer).sort(), [
+    'allocationKey', 'canonicalVersion', 'channel', 'envelopeSha256', 'identitySha256',
+    'manifestEnvelopeSha256', 'manifestSha256', 'releaseId', 'sourceCommit',
+  ]);
+  assert.equal(pointer.channel, 'insider');
+  assert.equal(ledger.channelSequences.insider, insider.sequence);
+
+  const alteredSet = completeSet(insider);
+  alteredSet.images.api.digest = `sha256:${'f'.repeat(64)}`;
+  assert.throws(() => advance(ledger, insider, alteredSet, sha, pointer.manifestEnvelopeSha256),
+    /Same identity, different bytes/);
+  assert.throws(() => advance(ledger, insider, insiderSet, sha, pointer.manifestEnvelopeSha256, {
+    ...insiderSigned, serializedEnvelope: `${insiderSigned.serializedEnvelope} `,
+  }), /serialization is not canonical/);
+
+  const tampered = structuredClone(ledger);
+  tampered.pointers.insider.manifestSha256 = 'f'.repeat(64);
+  assert.throws(() => validateLedger(tampered, anchor), /pointer binding/);
+  tampered.pointers.insider = { ...ledger.pointers.insider, channel: 'stable' };
+  tampered.pointers.stable = tampered.pointers.insider;
+  delete tampered.pointers.insider;
+  assert.throws(() => validateLedger(tampered, anchor), /pointer/);
+
+  ledger.qualifications[sha] = hotfixQualification();
+  const stable = reserve(ledger, stableAdmission(), created, undefined, hotfixQualification()).record;
+  advance(ledger, stable, completeSet(stable), newerSha, '', signedManifest(stable, completeSet(stable)));
+  assert.equal(ledger.channelSequences.stable, '1');
+  const replay = structuredClone(ledger);
+  replay.channelSequences.stable = '0';
+  assert.throws(() => validateLedger(replay, anchor), /positive durable channel sequence/);
+});
+
 test('two concurrent complete sets cannot both win the same expected pointer', async () => {
   const ledger = state();
   const a = record(ledger);
@@ -915,11 +979,11 @@ test('stable promotion requires exact-main qualification and never reuses inside
   ledger.qualifications[newerSha] = promotionQualification(insider, set);
   for (const [field, value] of Object.entries({
     allocationKey: 'd'.repeat(64), releaseId: 'insider:1.2.3-insider.99',
-    sourceCommit: newerSha, setHash: 'd'.repeat(64),
+    sourceCommit: newerSha, manifestSha256: 'd'.repeat(64), envelopeSha256: 'd'.repeat(64),
   })) {
     const changed = structuredClone(ledger);
     changed.qualifications[newerSha].promotionOrigin[field] = value;
-    assert.throws(() => reserve(publicLedger(changed), stable, created), /qualified immutable insider set/);
+    assert.throws(() => reserve(publicLedger(changed), stable, created), /qualified immutable insider pointer/);
   }
   assert.throws(() => reserve(ledger, stable, created), /verified at authorization/);
   Object.assign(ledger, publicLedger(ledger));
@@ -1141,7 +1205,8 @@ test('well-typed record and admission substitutions cannot break canonical or ha
   const entry = projected.reservations[identity.allocationKey];
   assert.equal(entry.setHash, hash(entry.set), 'Anyone can reproduce the hash from the public set alone');
   assert.notEqual(entry.setHash, hash(set), 'The public set hash must not claim to cover hidden authorization fields');
-  for (const field of ['setHash', 'releaseId', 'canonicalVersion', 'sourceCommit', 'allocationKey']) {
+  for (const field of ['releaseId', 'canonicalVersion', 'sourceCommit', 'allocationKey',
+    'manifestSha256', 'envelopeSha256', 'manifestEnvelopeSha256']) {
     const changed = structuredClone(projected);
     delete changed.pointers.insider[field];
     assert.throws(() => publicLedger(changed), ReleasePolicyError);
@@ -1625,6 +1690,7 @@ test('history rejects valid-schema new reservations at or below the preceding st
         const previous = publicLedger(stableFloorLedger(kind, '1.2.4'));
         const isolated = state();
         isolated.counter = previous.counter;
+        isolated.channelSequences = structuredClone(previous.channelSequences);
         isolated.qualifications[sha] = hotfixQualification();
         const selected = channel === 'stable' ? stableAdmission(baseVersion, { buildId: '43' })
           : { ...admission(), baseVersion };
@@ -1635,6 +1701,7 @@ test('history rejects valid-schema new reservations at or below the preceding st
         Object.assign(changed.identities, added.identities);
         Object.assign(changed.stages, added.stages);
         changed.counter = added.counter;
+        changed.channelSequences = added.channelSequences;
         validateLedger(changed, anchor);
         for (const snapshots of [[previous, changed], [previous, changed, changed]]) {
           await assertHistoryRejected(() => ledgerHistoryFixture(snapshots), identity,
@@ -1657,6 +1724,8 @@ test('every counter edge requires exactly one matching insider reservation and n
     const added = reserve(isolated, admitted, created).record;
     next.reservations[added.allocationKey] = publicLedger(isolated).reservations[added.allocationKey];
     next.identities[added.canonicalVersion] = added.allocationKey;
+    next.channelSequences.insider = (BigInt(next.channelSequences.insider) > BigInt(sequence)
+      ? next.channelSequences.insider : sequence);
     if (!next.stages[baseVersion] || compareVersions(added.canonicalVersion, next.stages[baseVersion]) > 0) {
       next.stages[baseVersion] = added.canonicalVersion;
     }
@@ -1758,7 +1827,7 @@ for (const mode of ['promotion', 'hotfix']) {
         eventSha: 'f'.repeat(40), workflowSha: 'f'.repeat(40) });
       const alternativeSet = completeSet(alternative);
       advance(seed, alternative, alternativeSet, alternative.sourceCommit, publicSetHash(insiderSet));
-      const promotion = promotionQualification(insider, insiderSet);
+      const promotion = promotionQualification(alternative, alternativeSet);
       const hotfix = { ...hotfixQualification(), sourceCommit: newerSha };
       const qualification = structuredClone(mode === 'promotion' ? promotion : hotfix);
       if (mode === 'promotion') {
@@ -1892,9 +1961,8 @@ test('every continuity invariant is enforced before writes across older history 
     }, /immutable setHash/],
     ['pointer deletion', next => { delete next.pointers.insider; }, /pointer rollback/],
     ['pointer rollback', next => {
-      next.pointers.insider = { releaseId: first.releaseId, canonicalVersion: first.canonicalVersion,
-        sourceCommit: first.sourceCommit, allocationKey: first.allocationKey,
-        setHash: next.reservations[first.allocationKey].setHash };
+      next.pointers.insider = signedReleasePointer(first,
+        signedManifest(first, next.reservations[first.allocationKey].set));
     }, /pointer rollback/],
   ];
   for (const [name, mutate, expected] of mutations) {
@@ -3207,7 +3275,8 @@ test('every ledger write path removes unknown top-level seed fields without chan
     assert.equal(entry.set.identity.identitySha256, hash(identity));
     assert.deepEqual(entry.set.images, set.images);
     assert.equal(entry.tagPublished, true);
-    assert.equal(persisted.pointers.insider.setHash, publicSetHash(set));
+    assert.equal(persisted.pointers.insider.manifestEnvelopeSha256,
+      signedReleasePointer(identity, signedManifest(identity, set)).manifestEnvelopeSha256);
     assert.deepEqual(fixture.ledgerWrites[4], fixture.ledgerWrites[5]);
     verifyConsumer(identity, entry.record, context(), entry.identitySha256);
   } finally {
@@ -3328,7 +3397,8 @@ test('public complete sets are closed, canonical and idempotent', () => {
   assert.deepEqual(publicLedger(ledger), ledger);
   assert.equal(entry.identitySha256, hash(identity));
   assert.equal(entry.setHash, publicSetHash(completeSet(identity)));
-  assert.equal(ledger.pointers.insider.setHash, publicSetHash(completeSet(identity)));
+  assert.equal(ledger.pointers.insider.manifestEnvelopeSha256,
+    signedReleasePointer(identity, signedManifest(identity, completeSet(identity))).manifestEnvelopeSha256);
   for (const poison of publicSetPoisons(identity)) {
     for (const original of [completeSet(identity), projected]) {
       const changed = structuredClone(original);
@@ -3532,6 +3602,9 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     assert.equal(JSON.parse(publicIdentity).identitySha256, hash(identity));
     fixture.calls.length = 0;
     writeFileSync(privateSetPath, JSON.stringify(completeSet(identity)));
+    const manifest = signedManifest(identity, completeSet(identity));
+    writeFileSync(manifestPath, manifest.serializedManifest);
+    writeFileSync(manifestEnvelopePath, manifest.serializedEnvelope);
     fixture.calls.length = 0;
     await runReleaseControl('preflight', {
       ...fixture.env,

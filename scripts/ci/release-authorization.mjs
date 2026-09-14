@@ -110,9 +110,13 @@ export function writeReleaseManifest(record, set, releaseNotesSha256) {
 }
 
 export function readReleaseManifest() {
-  const envelope = readPrivateJson(manifestEnvelopePath);
-  const manifest = validateReleaseManifestBytes(readFileSync(manifestPath, 'utf8'), envelope);
-  return { manifest, envelope };
+  const serializedManifest = readFileSync(manifestPath, 'utf8');
+  const serializedEnvelope = readFileSync(manifestEnvelopePath, 'utf8');
+  let envelope;
+  try { envelope = JSON.parse(serializedEnvelope); }
+  catch { throw new Error('Private authorization unavailable or malformed'); }
+  const manifest = validateReleaseManifestBytes(serializedManifest, envelope);
+  return { manifest, envelope, serializedManifest, serializedEnvelope };
 }
 
 export function emitPublicReleaseAssets(record, set, root = '.', releaseNotesSha256) {

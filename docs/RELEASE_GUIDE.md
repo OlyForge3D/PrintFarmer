@@ -109,6 +109,25 @@ non-canonical metadata blocks publication. This is a **producer contract**:
 Manual Update Now and administrator-opt-in Auto-update. #2660 neither checks,
 enrolls, nor updates a host.
 
+The durable channel pointer is the authenticated discovery record for that
+immutable set. It binds release ID, canonical version, channel, source commit,
+allocation key, identity digest, manifest digest, envelope digest, and their
+combined binding; it is written only after the public signed manifest has been
+validated. A pointer cannot be reused for different signed bytes. Insider
+sequences follow the durable ledger counter, while stable publication has its
+own positive durable channel sequence; lower, equal, cross-channel, or
+conflicting pointer sequences fail closed. Stable promotion records the exact
+persisted insider pointer's release, source, and manifest/envelope digests,
+never an unsigned complete-set hash.
+
+The versioned trust policy is also signed by digest into the manifest. It fixes
+the trust root, permitted signer identities and validity windows, certificate
+freshness, revocation epoch/lists, and rotation overlap. #2666 must apply those
+inputs at an explicit trusted verification time; reject expired, revoked,
+unknown, replayed, downgraded, or rotation-invalid release sets; and preserve
+durable per-channel high-water state. Those are consumer obligations, not a
+publisher capability or authority to contact, enroll, or update hosts.
+
 Canonical authenticated release notes are an asset in that same set. The
 single-dispatch pipeline generates them from the bounded previous-release-tag
 to selected-source range, associated merged PRs, the matching `CHANGELOG.md`

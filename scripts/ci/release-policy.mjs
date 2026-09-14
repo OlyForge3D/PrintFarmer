@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { publicIdentityFields } from '../../src/Web/ReactApp/public-release-identity.mjs';
 
@@ -18,6 +20,7 @@ const tagPattern = new RegExp(`^v(${basePattern})(?:-(insider|beta|rc)\\.([1-9][
 const shaPattern = /^[a-f0-9]{40}$/;
 const hashPattern = /^[a-f0-9]{64}$/;
 const positivePattern = /^[1-9][0-9]*$/;
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const components = {
   api: ['linux/amd64', 'linux/arm64'],
   frontend: ['linux/amd64', 'linux/arm64'],
@@ -46,7 +49,7 @@ export function requireKeys(value, required, optional = [], description = 'relea
   `Invalid ${description} fields`);
 }
 
-export function loadReleaseTrustPolicy(path = 'release-trust-policy.json') {
+export function loadReleaseTrustPolicy(path = resolve(repositoryRoot, 'release-trust-policy.json')) {
   let policy;
   try { policy = JSON.parse(readFileSync(path, 'utf8')); } catch {
     throw new ReleasePolicyError('Release trust policy is unavailable or malformed');
@@ -74,7 +77,7 @@ const metadataComponentKeys = ['frontend', 'mobile', 'backend', 'workerApplicati
   'workerEngine', 'workerDistribution', 'workerCapability', 'artifacts'];
 const metadataSchemaKeys = ['configuration', 'storage', 'templates'];
 
-export function loadReleaseMetadata(version, path = `release-metadata/${version}.json`) {
+export function loadReleaseMetadata(version, path = resolve(repositoryRoot, 'release-metadata', `${version}.json`)) {
   let metadata;
   try { metadata = JSON.parse(readFileSync(path, 'utf8')); } catch {
     throw new ReleasePolicyError('Release metadata is unavailable or malformed');
@@ -377,9 +380,10 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256,
     ? publicLedgerQualification(record.qualification, record.sourceCommit)
     : undefined;
   const trustPolicy = loadReleaseTrustPolicy();
-  metadata ??= loadReleaseMetadata(record.baseVersion);
-  const releaseMetadata = loadReleaseMetadata(record.baseVersion);
-  requireThat(hash(metadata) === hash(releaseMetadata), 'Release metadata differs from qualified source metadata');
+  const releaseMetadata = metadata ?? loadReleaseMetadata(record.baseVersion);
+  metadata ??= releaseMetadata;
+  requireThat(metadata.version === record.baseVersion && hash(metadata) === hash(releaseMetadata),
+    'Release metadata differs from qualified source metadata');
   const artifactEvidence = Object.fromEntries(Object.entries(completeSet.images).map(([service, image]) => [
     service, {
       index: {
@@ -525,7 +529,7 @@ export function validateReleaseManifest(manifest) {
   requireKeys(evidence.releaseMetadata, ['schema', 'version', 'sha256'], [], 'release metadata evidence');
   const metadata = compatibility.releaseMetadata;
   requireThat(evidence.releaseMetadata.schema === 2 && evidence.releaseMetadata.version === identity.baseVersion &&
-    evidence.releaseMetadata.sha256 === hash(metadata) && hash(loadReleaseMetadata(identity.baseVersion)) === hash(metadata),
+    evidence.releaseMetadata.sha256 === hash(metadata),
   'Release metadata hash mismatch');
   requireKeys(evidence.services, Object.keys(components), [], 'release service evidence');
   for (const [service, image] of Object.entries(manifest.completeSet.images)) {
@@ -823,8 +827,13 @@ export function validateLedger(state, anchor) {
     shaPattern.test(anchor) && state.anchor === anchor,
     'Ledger missing or continuity anchor mismatch: owner recovery required');
   requireString(state.counter, /^(0|[1-9][0-9]*)$/, 'ledger counter');
-  for (const field of ['reservations', 'identities', 'pointers', 'stages', 'qualifications']) {
+  for (const field of ['reservations', 'identities', 'pointers', 'stages', 'qualifications', 'channelSequences']) {
     requireObject(state[field], `public ledger ${field}`);
+  }
+  requireKeys(state.channelSequences, ['insider', 'stable'], [], 'public ledger channel sequences');
+  for (const [channel, sequence] of Object.entries(state.channelSequences)) {
+    requireThat(['insider', 'stable'].includes(channel), 'Invalid public ledger sequence channel');
+    requireString(sequence, /^(0|[1-9][0-9]*)$/, 'public ledger channel sequence');
   }
   if (Object.hasOwn(state, 'lastHistoricalStable')) {
     requireThat(typeof state.lastHistoricalStable === 'string' &&
@@ -837,6 +846,7 @@ export function validateLedger(state, anchor) {
       'Ledger identity continuity violation');
   }
   const sequences = new Set();
+  let highestInsiderSequence = 0n;
   for (const [key, reservation] of Object.entries(state.reservations)) {
     requireString(key, hashPattern, 'ledger allocation key');
     requireObject(reservation, 'public ledger reservation');
@@ -865,13 +875,19 @@ export function validateLedger(state, anchor) {
         reservation.identitySha256 ?? hash(reservation.record))), 'Public set hash mismatch');
     }
     if (reservation.sequence) {
-      requireThat(BigInt(reservation.sequence) <= BigInt(state.counter) &&
+      requireThat(BigInt(reservation.sequence) <= BigInt(state.channelSequences.insider) &&
         !sequences.has(reservation.sequence), 'Ledger sequence continuity violation');
       sequences.add(reservation.sequence);
+      if (BigInt(reservation.sequence) > highestInsiderSequence) {
+        highestInsiderSequence = BigInt(reservation.sequence);
+      }
       requireThat(state.stages[reservation.record.baseVersion] &&
         compareVersions(state.stages[reservation.record.baseVersion], reservation.record.canonicalVersion) >= 0,
       'Ledger stage continuity violation');
     }
+    requireThat(BigInt(state.counter) >= highestInsiderSequence &&
+      BigInt(state.channelSequences.insider) >= highestInsiderSequence,
+    'Ledger sequence continuity violation');
     if (reservation.record.channel === 'stable') {
       const qualification = state.qualifications[reservation.record.sourceCommit];
       publicLedgerQualification(qualification, reservation.record.sourceCommit);
@@ -890,14 +906,29 @@ export function validateLedger(state, anchor) {
       'Invalid public ledger stage');
   }
   for (const [channel, pointer] of Object.entries(state.pointers)) {
-    requireKeys(pointer, ['releaseId', 'canonicalVersion', 'sourceCommit', 'setHash', 'allocationKey'],
+    requireKeys(pointer, ['releaseId', 'canonicalVersion', 'channel', 'sourceCommit', 'allocationKey',
+      'identitySha256', 'manifestSha256', 'envelopeSha256', 'manifestEnvelopeSha256'],
       [], 'public ledger pointer');
     requireThat(['stable', 'insider'].includes(channel), 'Invalid public ledger pointer channel');
     const reservation = state.reservations[pointer.allocationKey];
     requireThat(reservation?.set && reservation.record.channel === channel &&
-      pointer.setHash === reservation.setHash && pointer.releaseId === reservation.record.releaseId &&
+      pointer.channel === channel && pointer.identitySha256 === (reservation.identitySha256 ?? hash(reservation.record)) &&
+      pointer.releaseId === reservation.record.releaseId &&
       pointer.canonicalVersion === reservation.record.canonicalVersion &&
-      pointer.sourceCommit === reservation.record.sourceCommit, 'Invalid public ledger pointer binding');
+      pointer.sourceCommit === reservation.record.sourceCommit &&
+      [pointer.identitySha256, pointer.manifestSha256, pointer.envelopeSha256, pointer.manifestEnvelopeSha256]
+        .every(value => hashPattern.test(value)) &&
+      pointer.manifestEnvelopeSha256 === hash({
+        manifestSha256: pointer.manifestSha256,
+        envelopeSha256: pointer.envelopeSha256,
+      }), 'Invalid public ledger pointer binding');
+    if (channel === 'stable') {
+      requireThat(BigInt(state.channelSequences.stable) > 0n,
+        'Stable pointer requires a positive durable channel sequence');
+    } else {
+      requireThat(BigInt(reservation.record.sequence) <= BigInt(state.channelSequences.insider),
+        'Insider pointer sequence replay, regression, or cross-channel substitution');
+    }
   }
   for (const [sourceCommit, qualification] of Object.entries(state.qualifications)) {
     publicLedgerQualification(qualification, sourceCommit);
@@ -920,20 +951,26 @@ export function publicLedgerQualification(qualification, sourceCommit) {
   };
   if (qualification.mode === 'promotion') {
     const origin = qualification.promotionOrigin;
-    requireKeys(origin, ['allocationKey', 'releaseId', 'sourceCommit', 'setHash'], [], 'public ledger promotion qualification');
-    for (const field of ['allocationKey', 'setHash']) requireString(origin[field], hashPattern, 'public ledger promotion qualification hash');
+    requireKeys(origin, ['allocationKey', 'releaseId', 'sourceCommit', 'manifestSha256', 'envelopeSha256'],
+      [], 'public ledger promotion qualification');
+    for (const field of ['allocationKey', 'manifestSha256', 'envelopeSha256']) {
+      requireString(origin[field], hashPattern, 'public ledger promotion qualification hash');
+    }
     requireString(origin.sourceCommit, shaPattern, 'public ledger promotion qualification source');
     requireThat(origin && !Array.isArray(origin) &&
-      Object.keys(origin).sort().join() === ['allocationKey', 'releaseId', 'sourceCommit', 'setHash'].sort().join() &&
+      Object.keys(origin).sort().join() ===
+        ['allocationKey', 'releaseId', 'sourceCommit', 'manifestSha256', 'envelopeSha256'].sort().join() &&
       typeof origin.allocationKey === 'string' && /^[a-f0-9]{64}$/.test(origin.allocationKey) &&
-      typeof origin.setHash === 'string' && /^[a-f0-9]{64}$/.test(origin.setHash) &&
+      typeof origin.manifestSha256 === 'string' && /^[a-f0-9]{64}$/.test(origin.manifestSha256) &&
+      typeof origin.envelopeSha256 === 'string' && /^[a-f0-9]{64}$/.test(origin.envelopeSha256) &&
       typeof origin.sourceCommit === 'string' && shaPattern.test(origin.sourceCommit) &&
       typeof origin.releaseId === 'string' && origin.releaseId.startsWith('insider:') &&
       parseTag(`v${origin.releaseId.slice('insider:'.length)}`).channel === 'insider',
     'Invalid public ledger promotion qualification');
     result.promotionOrigin = {
       allocationKey: origin.allocationKey, releaseId: origin.releaseId,
-      sourceCommit: origin.sourceCommit, setHash: origin.setHash,
+      sourceCommit: origin.sourceCommit, manifestSha256: origin.manifestSha256,
+      envelopeSha256: origin.envelopeSha256,
     };
     const evidence = qualification.treeEvidence;
     requireKeys(evidence, ['schema', 'originTree', 'sourceTree', 'metadataChanges', 'diffSha256'],
@@ -970,11 +1007,15 @@ export function hotfixReasonDigest(reason) {
 
 export function validatePromotionOrigin(state, qualification) {
   const origin = qualification.promotionOrigin;
-  const candidate = state.reservations[origin.allocationKey];
-  requireThat(candidate?.set && candidate.setHash === origin.setHash && candidate.record.channel === 'insider' &&
-    candidate.record.sourceCommit === origin.sourceCommit && candidate.record.releaseId === origin.releaseId &&
+  const pointer = state.pointers.insider;
+  const candidate = pointer && state.reservations[pointer.allocationKey];
+  requireThat(candidate?.set && pointer.allocationKey === origin.allocationKey &&
+    pointer.releaseId === origin.releaseId && pointer.sourceCommit === origin.sourceCommit &&
+    pointer.manifestSha256 === origin.manifestSha256 && pointer.envelopeSha256 === origin.envelopeSha256 &&
+    candidate.record.channel === 'insider' && candidate.record.sourceCommit === origin.sourceCommit &&
+    candidate.record.releaseId === origin.releaseId &&
     qualification.sourceCommit !== origin.sourceCommit,
-  'Promotion requires a qualified immutable insider set and a distinct resulting main commit');
+  'Promotion requires a qualified immutable insider pointer and a distinct resulting main commit');
   return candidate;
 }
 
@@ -1000,7 +1041,10 @@ export function reserve(state, admission, created, protection, verifiedQualifica
   const existing = validateReservationAdmission(state, admission);
   if (existing) return existing;
   const key = allocationKey(admission);
-  const sequence = admission.channel === 'insider' ? (BigInt(state.counter) + 1n).toString() : undefined;
+  const sequence = admission.channel === 'insider'
+    ? ((BigInt(state.counter) > BigInt(state.channelSequences.insider)
+      ? BigInt(state.counter) : BigInt(state.channelSequences.insider)) + 1n).toString()
+    : undefined;
   const canonicalVersion = admission.baseVersion + (sequence ? `-${admission.stage}.${sequence}` : '');
   requireThat(!state.identities[canonicalVersion], 'Immutable identity already reserved');
   const previousStage = state.stages?.[admission.baseVersion];
@@ -1025,6 +1069,7 @@ export function reserve(state, admission, created, protection, verifiedQualifica
   state.identities[canonicalVersion] = key;
   if (sequence) {
     state.counter = sequence;
+    state.channelSequences.insider = sequence;
     state.stages ??= {};
     state.stages[admission.baseVersion] = canonicalVersion;
   }
@@ -1086,7 +1131,7 @@ export function validateCompleteSet(record, set) {
   writePublicSet(record, set);
 }
 
-export function advance(state, record, set, currentHead, expectedPointer) {
+export function advance(state, record, set, signed, currentHead, expectedPointer) {
   validateLedger(state, state.anchor);
   validateRecord(record);
   validateCompleteSet(record, set);
@@ -1094,22 +1139,55 @@ export function advance(state, record, set, currentHead, expectedPointer) {
   const reservation = state.reservations[record.allocationKey];
   requireThat(reservation && (reservation.identitySha256 || hash(reservation.record)) === hash(record), 'Unknown authorization');
   const pointer = state.pointers[record.channel];
-  requireThat((pointer?.setHash || '') === expectedPointer, 'Channel compare-and-set conflict');
+  requireThat((pointer?.manifestEnvelopeSha256 || '') === expectedPointer, 'Channel compare-and-set conflict');
+  const immutablePointer = signedReleasePointer(record, signed);
   const setHash = hash(writePublicSet(record, set));
   if (reservation.setHash) requireThat(reservation.setHash === setHash, 'Same identity, different bytes');
   if (pointer?.releaseId === record.releaseId) {
-    requireThat(pointer.setHash === setHash, 'Same identity, different bytes');
+    requireThat(hash(pointer) === hash(immutablePointer), 'Same identity, different bytes');
     return pointer;
   }
   if (pointer) requireThat(compareVersions(record.canonicalVersion, pointer.canonicalVersion) > 0,
     'Channel version regression');
+  const previousSequence = BigInt(state.channelSequences[record.channel]);
+  requireThat(previousSequence >= 0n, 'Invalid channel sequence');
+  if (record.channel === 'insider') {
+    requireThat(record.sequence === state.channelSequences.insider && BigInt(record.sequence) > 0n,
+      'Insider sequence replay, regression, or cross-channel substitution');
+  } else {
+    requireThat(previousSequence >= 0n, 'Stable sequence replay, regression, or cross-channel substitution');
+    state.channelSequences.stable = (previousSequence + 1n).toString();
+  }
   reservation.setHash = setHash;
   reservation.set = set;
-  state.pointers[record.channel] = {
-    releaseId: record.releaseId, canonicalVersion: record.canonicalVersion,
-    sourceCommit: record.sourceCommit, setHash, allocationKey: record.allocationKey,
-  };
+  state.pointers[record.channel] = immutablePointer;
   return state.pointers[record.channel];
+}
+
+export function signedReleasePointer(record, signed) {
+  requireObject(signed, 'signed release artifacts');
+  requireKeys(signed, ['serializedManifest', 'serializedEnvelope'], [], 'signed release artifacts');
+  requireThat(typeof signed.serializedEnvelope === 'string', 'Invalid serialized release manifest envelope');
+  let envelope;
+  try { envelope = JSON.parse(signed.serializedEnvelope); } catch {
+    throw new ReleasePolicyError('Malformed serialized release manifest envelope');
+  }
+  requireThat(signed.serializedEnvelope === JSON.stringify(envelope),
+    'Release manifest envelope serialization is not canonical');
+  const manifest = validateReleaseManifestBytes(signed.serializedManifest, envelope);
+  requireThat(manifest.identity.releaseId === record.releaseId &&
+    manifest.identity.canonicalVersion === record.canonicalVersion &&
+    manifest.identity.channel === record.channel &&
+    manifest.identity.sourceCommit === record.sourceCommit &&
+    manifest.identity.identitySha256 === hash(record),
+  'Signed release manifest identity does not match authorization');
+  const manifestSha256 = releaseManifestSha256(signed.serializedManifest);
+  const envelopeSha256 = releaseManifestSha256(signed.serializedEnvelope);
+  return {
+    releaseId: record.releaseId, canonicalVersion: record.canonicalVersion, channel: record.channel,
+    sourceCommit: record.sourceCommit, allocationKey: record.allocationKey, identitySha256: hash(record),
+    manifestSha256, envelopeSha256, manifestEnvelopeSha256: hash({ manifestSha256, envelopeSha256 }),
+  };
 }
 
 // A Git ref fast-forward is the transaction. Two sibling commits cannot both win.

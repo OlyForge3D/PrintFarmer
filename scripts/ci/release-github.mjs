@@ -10,7 +10,7 @@ import { evidenceCollection, evidenceBaseEndpoint, readEvidencePages } from './g
 
 // Schema 1 contains only these public maps, immutable references and scalar claims.
 export const publicLedgerFields = [
-  'schema', 'anchor', 'counter', 'lastHistoricalStable', 'reservations', 'identities', 'pointers', 'stages', 'qualifications',
+  'schema', 'anchor', 'counter', 'channelSequences', 'lastHistoricalStable', 'reservations', 'identities', 'pointers', 'stages', 'qualifications',
 ];
 
 function publicMap(value, project) {
@@ -51,6 +51,10 @@ export function publicLedger(state) {
     schema: 1,
     anchor: publicReference(state.anchor, shaPattern),
     counter: publicReference(state.counter, /^(0|[1-9][0-9]*)$/),
+    channelSequences: publicMap(state.channelSequences, (sequence, channel) => {
+      requireThat(['stable', 'insider'].includes(channel), 'Invalid public ledger sequence channel');
+      return publicReference(sequence, /^(0|[1-9][0-9]*)$/);
+    }),
     reservations: publicMap(state.reservations, publicReservation),
     identities: publicMap(state.identities, (key, version) => {
       parseTag(`v${version}`);
@@ -62,13 +66,17 @@ export function publicLedger(state) {
       requireThat(tag.channel === channel && pointer.releaseId === `${channel}:${tag.canonicalVersion}`,
         'Invalid public ledger pointer');
       requireThat(Object.keys(pointer).sort().join() ===
-        ['releaseId', 'canonicalVersion', 'sourceCommit', 'setHash', 'allocationKey'].sort().join(),
+        ['releaseId', 'canonicalVersion', 'channel', 'sourceCommit', 'allocationKey',
+          'identitySha256', 'manifestSha256', 'envelopeSha256', 'manifestEnvelopeSha256'].sort().join(),
       'Unknown public ledger pointer field');
       return {
-        releaseId: pointer.releaseId, canonicalVersion: tag.canonicalVersion,
+        releaseId: pointer.releaseId, canonicalVersion: tag.canonicalVersion, channel,
         sourceCommit: publicReference(pointer.sourceCommit, shaPattern),
-        setHash: publicReference(pointer.setHash, hashPattern),
         allocationKey: publicReference(pointer.allocationKey, hashPattern),
+        identitySha256: publicReference(pointer.identitySha256, hashPattern),
+        manifestSha256: publicReference(pointer.manifestSha256, hashPattern),
+        envelopeSha256: publicReference(pointer.envelopeSha256, hashPattern),
+        manifestEnvelopeSha256: publicReference(pointer.manifestEnvelopeSha256, hashPattern),
       };
     }),
     stages: publicMap(state.stages ?? {}, (version, base) => {
