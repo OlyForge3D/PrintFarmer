@@ -33,6 +33,7 @@ import {
   validateQualificationReceipt,
 } from '../release-transaction.mjs';
 import { publicIdentity, publicIdentityFields } from '../../../src/Web/ReactApp/public-release-identity.mjs';
+import { releaseNotes, validateReleaseNotesMetadata } from '../release-notes.mjs';
 
 const sha = 'a'.repeat(40);
 const newerSha = 'b'.repeat(40);
@@ -47,6 +48,28 @@ const context = (overrides = {}) => ({
   workflowIdentity: 'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development',
   workflowSha: sha, workflowBranch: 'development', buildId: '42', buildAttempt: '1',
   channel: 'insider', ...overrides,
+});
+
+test('release notes derive bounded merged PRs and mandatory version-controlled operational metadata', () => {
+  const metadata = {
+    schema: 1, version: '1.2.3', compatibility: 'API 1.x is required.', migration: 'Run provider migration.',
+    downtime: 'Restart services.', backup: 'Create a backup.', recovery: 'Restore the backup.',
+  };
+  const notes = releaseNotes({
+    version: '1.2.3-insider.9', sourceCommit: sha, previousTag: 'v1.2.2',
+    pullRequests: [{ number: 42, title: 'Release-safe change', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/42' }],
+    changelog: '### Features\n\n- New capability.\n\n### Fixes\n\n- Fixed behavior.\n\n### Breaking changes\n\n- None.',
+    metadata,
+  });
+  assert.match(notes, /Release range: v1\.2\.2\.\.\./);
+  assert.match(notes, /#42/);
+  assert.match(notes, /Run provider migration/);
+  for (const field of ['compatibility', 'migration', 'downtime', 'backup', 'recovery']) {
+    assert.throws(() => validateReleaseNotesMetadata({ ...metadata, [field]: '' }, '1.2.3'),
+      new RegExp(`requires ${field}`));
+  }
+  assert.throws(() => releaseNotes({ version: '1.2.3', sourceCommit: sha, previousTag: 'v1.2.2',
+    pullRequests: [], changelog: 'entry', metadata }), /at least one merged pull request/);
 });
 
 test('every docker publisher bash run block parses', () => {
@@ -3824,10 +3847,12 @@ test('executed signing commands preserve signed subjects and never let verificat
     docker.indexOf('Advance the complete channel pointer last'));
   const canonicalNotes = docker.split('      - name: Generate canonical release notes before signing\n')[1]
     .split('      - name: Validate complete immutable set')[0];
+  assert.match(canonicalNotes, /node scripts\/ci\/release-notes\.mjs/);
+  const generator = readFileSync('scripts/ci/release-notes.mjs', 'utf8');
   for (const section of ['Features', 'Fixes', 'Breaking changes', 'Compatibility', 'Migration', 'Downtime', 'Backup', 'Recovery']) {
-    assert.match(canonicalNotes, new RegExp(`### ${section}`));
+    assert.match(generator, new RegExp(section));
   }
-  assert.match(canonicalNotes, /None\.|N\/A/);
+  assert.match(generator, /require.*metadata|Release metadata/);
   const uploadedAuthorizationFiles = artifactUploads('.github/workflows/docker-publish.yml').flat()
     .filter(path => path.startsWith('.artifacts/release-authorization/'));
   const root = resolve('.artifacts', `sign-public-${process.pid}`);

@@ -282,48 +282,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .artifacts/release-authorization
-          cat > .artifacts/release-authorization/release-notes.md <<EOF
-          ## PrintFarmer $VERSION
-
-          Source commit: $SOURCE_COMMIT
-
-          ### Features
-
-          None.
-
-          ### Fixes
-
-          None.
-
-          ### Breaking changes
-
-          None.
-
-          ### Compatibility
-
-          This complete signed immutable release set supports the declared API,
-          service-platform, storage, and configuration compatibility in
-          \`release-manifest.json\`.
-
-          ### Migration
-
-          N/A: no release-specific migration instructions beyond the verified
-          provider metadata in \`release-manifest.json\`.
-
-          ### Downtime
-
-          N/A: no release-specific downtime beyond the manifest's declared
-          rolling service restart.
-
-          ### Backup
-
-          Required before any migration, as declared in \`release-manifest.json\`.
-
-          ### Recovery
-
-          Restore the verified backup and re-pin the verified image digests, as
-          declared in \`release-manifest.json\`.
-          EOF
+          RELEASE_NOTES_OUTPUT=.artifacts/release-authorization/release-notes.md \
+            node scripts/ci/release-notes.mjs
           printf 'RELEASE_NOTES_SHA256=%s\n' \
             "$(sha256sum .artifacts/release-authorization/release-notes.md | cut -d ' ' -f1)" \
             >> "$GITHUB_ENV"

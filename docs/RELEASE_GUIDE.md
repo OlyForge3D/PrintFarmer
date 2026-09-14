@@ -98,13 +98,18 @@ strictly publication-only: it cannot enable host outbound update checks,
 select a host channel, approve a host update plan, or enroll any installation
 in Auto-update.
 
-Canonical authenticated release notes are an asset in that same set. They are
-hashed in the signed manifest and presented before either journey installs.
+Canonical authenticated release notes are an asset in that same set. The
+single-dispatch pipeline generates them from the bounded previous-release-tag
+to selected-source range, associated merged PRs, the matching `CHANGELOG.md`
+entry, and `release-metadata/<canonical-version>.json`. They are hashed in the
+signed manifest and presented before either journey installs.
 Every release notes file has Features, Fixes, Breaking changes, Compatibility,
 Migration, Downtime, Backup, and Recovery sections. A release with no
-release-specific change must say `None.` or `N/A` explicitly; consumers must
-still read the signed compatibility and migration metadata rather than infer
-that an omitted section is safe.
+release-specific change must say `None.` or `N/A` explicitly. Compatibility,
+migration, downtime, backup, and recovery are mandatory non-empty,
+version-controlled metadata: missing data fails publication rather than
+defaulting to a generic safe claim. No routine user notes, signing input, or
+extra approval is accepted.
 
 TestFlight remains independent under `ios/vX.Y-{alpha,beta,rc}.N`. Historical
 `v1.0-beta.*` identities and their `ios/*` aliases retain their original objects.
