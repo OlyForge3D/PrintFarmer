@@ -13,7 +13,7 @@ import {
   parseTag, parseVersionFile, reserve as reserveRelease, transact, validateCandidate, validateCompleteSet,
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence, hotfixReasonDigest, ReleasePolicyError,
   validateRecord, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks, publisherWorkflowIdentity,
-  releaseManifest, releaseManifestEnvelope, validateReleaseManifestBytes, validateReleaseManifestEnvelope,
+  releaseManifest, releaseManifestEnvelope, validateReleaseManifest, validateReleaseManifestBytes, validateReleaseManifestEnvelope,
 } from '../release-policy.mjs';
 import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedger, publicLedgerFields, readTag, readVersion, verifyProtection,
   parseGithubTimestamp, verifyStableQualification, verifyReleaseChecks } from '../release-github.mjs';
@@ -3644,6 +3644,10 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
     assert.throws(() => validateReleaseManifestEnvelope(envelope, {
       ...manifest, completeSet: { ...manifest.completeSet, images: {} },
     }), ReleasePolicyError);
+    for (const completeSet of [undefined, null, [], 'forged']) {
+      assert.throws(() => validateReleaseManifest({ ...manifest, completeSet }),
+        /release manifest (fields|complete set)/);
+    }
     let tag;
     const store = memoryStore(ledger);
     await ensureSourceTag(async (endpoint, method, body) => {
@@ -3731,6 +3735,11 @@ test('executed signing commands preserve signed subjects and never let verificat
           ;;
         *) return 64 ;;
       esac
+    }
+    gh() {
+      [[ "$1 $2" == "release view" ]] || return 70
+      [[ "$GH_RELEASE_SCENARIO" == "absent" ]] && return 1
+      return 70
     }\n`;
     const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
     const witness = resolve(root, 'cosign-subjects.txt');
@@ -3744,7 +3753,7 @@ test('executed signing commands preserve signed subjects and never let verificat
       { cwd: root, encoding: 'utf8', env: {
         ...process.env, VERSION: identity.canonicalVersion, RELEASE_SIGNER_IDENTITY: publisherWorkflowIdentity,
         RELEASE_PUBLIC_IDENTITY: JSON.stringify(readReleaseManifest().manifest.identity),
-        COSIGN_WITNESS: witness,
+        COSIGN_WITNESS: witness, GH_TOKEN: '', GH_RELEASE_SCENARIO: 'absent', RUNNER_TEMP: resolve(root, 'runner-temp'),
       } });
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr);

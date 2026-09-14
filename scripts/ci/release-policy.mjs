@@ -300,6 +300,7 @@ export function validateReleaseManifest(manifest) {
     [], 'release manifest');
   requireThat(manifest.schema === 1, 'Invalid release manifest schema');
   validatePublicAuthorization(manifest.identity);
+  requireObject(manifest.completeSet, 'release manifest complete set');
   requireThat(hash(manifest.completeSet.identity) === hash(manifest.identity),
     'Release manifest identity mismatch');
   const canonicalSet = writePublicSet(manifest.completeSet.identity, manifest.completeSet,
