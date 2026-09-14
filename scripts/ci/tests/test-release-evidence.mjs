@@ -33,7 +33,8 @@ const trust = (overrides = {}) => ({
     issuer: 'https://token.actions.githubusercontent.com', certificateMaxAgeSeconds: 900,
     revocationEpoch: '2026-01-01T00:00:00.000Z', revokedReleaseIds: [], revokedSignerIdentities: [],
     signers: [{ identity: signer, validFrom: '2026-01-01T00:00:00.000Z', validUntil: '2027-01-01T00:00:00.000Z' }],
-  }, releaseId: 'insider:1.2.3-insider.1', trustedTime: '2026-09-14T22:50:00.000Z', ...overrides,
+  }, releaseId: 'insider:1.2.3-insider.1', createdTime: '2026-09-14T22:40:00.000Z',
+  trustedTime: '2026-09-14T22:50:00.000Z', ...overrides,
 });
 function signed(subject = digest, predicateValue = predicate) {
   const verification = {
@@ -79,6 +80,22 @@ test('rejects swapped signature subject, predicate, and platform', () => {
   assert.throws(() => normalizeEvidence({ subject: digest, platform: 'linux/s390x', ...signed() }), /platform/);
 });
 
+test('accepts only versioned Cosign signature download formats and rejects forged entries', () => {
+  const legacy = signed();
+  legacy.signatureBundleBytes = JSON.stringify([{ Base64Signature: 'signature', Payload: 'payload' }]);
+  assert.doesNotThrow(() => normalizeEvidence({ subject: digest, ...legacy }));
+
+  const invalid = signed();
+  invalid.signatureBundleBytes = JSON.stringify([{ payload: 'invented-lowercase', certificate: certificate }]);
+  assert.throws(() => normalizeEvidence({ subject: digest, ...invalid }), /signature download/);
+
+  const extra = signed();
+  extra.signatureBundleBytes = JSON.stringify([
+    ...JSON.parse(extra.signatureBundleBytes), JSON.parse(extra.signatureBundleBytes)[0],
+  ]);
+  assert.throws(() => normalizeEvidence({ subject: digest, ...extra }), /entry count/);
+});
+
 test('rejects stale, revoked, substituted, and out-of-window bundle trust before staging', () => {
   const completeSet = { images: { api: { digest, platforms: { 'linux/amd64': { digest } } } } };
   const collected = { api: { index: signed(), platforms: { 'linux/amd64': signed() } } };
@@ -88,6 +105,8 @@ test('rejects stale, revoked, substituted, and out-of-window bundle trust before
     assert.doesNotThrow(() => stageEvidence(path, completeSet, collected, trust()));
     assert.throws(() => stageEvidence(path, completeSet, collected,
       trust({ trustedTime: '2026-09-14T23:10:01.000Z' })), /expired|revoked/);
+    assert.throws(() => stageEvidence(path, completeSet, collected,
+      trust({ createdTime: '2026-09-14T22:51:00.000Z' })), /expired|revoked/);
     assert.throws(() => stageEvidence(path, completeSet, collected,
       trust({ policy: { ...trust().policy, revokedReleaseIds: [trust().releaseId] } })), /revoked/);
     assert.throws(() => stageEvidence(path, completeSet, collected,

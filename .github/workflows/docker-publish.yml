@@ -398,6 +398,7 @@ jobs:
         run: |
           set -euo pipefail
           evidence_path=.artifacts/release-authorization/release-crypto-evidence.json
+          export RELEASE_VERIFICATION_TIME="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
           node scripts/ci/release-set.mjs evidence --evidence "$evidence_path" \
             .artifacts/release-authorization/crypto-evidence
           node scripts/ci/release-set.mjs inspect --evidence "$evidence_path"

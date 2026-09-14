@@ -146,7 +146,8 @@ export function publishReleaseAliases(record, set, inspect, create) {
 export function inspectReleaseSet(record, set, evidencePath, releaseNotesSha256, metadataBytes,
   sourceArtifactBytes, root = '.') {
   const stagedEvidence = readEvidence(evidencePath, set, {
-    policy: loadReleaseTrustPolicy(), releaseId: record.releaseId, trustedTime: record.created,
+    policy: loadReleaseTrustPolicy(), releaseId: record.releaseId, createdTime: record.created,
+    trustedTime: process.env.RELEASE_VERIFICATION_TIME ?? record.created,
   });
   const cryptoEvidence = { ...stagedEvidence.set, sha256: stagedEvidence.sha256 };
   writeAuthorizationSet(record, set);
@@ -165,7 +166,8 @@ function main() {
       [name, readFileSync(`artifacts/digest-${name}/digest-${name}.txt`, 'utf8').trim()]));
     const set = inspectCompleteSet(record, digests);
     stageEvidenceFromFiles(evidencePath, set, process.argv[3] ?? '.artifacts/release-authorization/crypto-evidence', {
-      policy: loadReleaseTrustPolicy(), releaseId: record.releaseId, trustedTime: record.created,
+      policy: loadReleaseTrustPolicy(), releaseId: record.releaseId, createdTime: record.created,
+      trustedTime: process.env.RELEASE_VERIFICATION_TIME ?? record.created,
     });
   } else if (process.argv[2] === 'inspect') {
     requireThat(evidencePathIndex !== -1 && evidencePath, 'Explicit crypto evidence path is required');
