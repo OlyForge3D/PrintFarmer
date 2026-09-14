@@ -143,10 +143,12 @@ persistent recovery journal, offer a replay action, or demand attestations befor
 ordinary use. Any further movement is a new explicit operator request; database
 admission still coordinates concurrent commands.
 
-Updated clients are required. The five old Moonraker `/home`, `/homexy`, `/homez`,
-`/move`, and `/moveto` routes return `409 async_control_required` without sending
-anything. Other adapters and attempt-bound lifecycle controls retain their
-existing execution paths and share the same physical barrier.
+Updated clients are required. Clients select durable motion from the advertised
+`physicalControl.supportedOperations`, not a backend-name allowlist. For any
+adapter providing durable motion, the old `/home`, `/homexy`, `/homez`, `/move`,
+and `/moveto` routes return `409 async_control_required` without sending
+anything. Adapters without durable motion and attempt-bound lifecycle controls
+retain their existing execution paths and share the same physical barrier.
 OctoPrint manual home/jog passes cancellation through to its HTTP transport and
 does not retry ambiguous writes.
 

@@ -489,6 +489,7 @@ public sealed class PrinterControlOperationService(
             operation.CompletionEvidence = success ? PrinterControlEvidence.MotionQueueDrained : notSent ? PrinterControlEvidence.NotSent : PrinterControlEvidence.None;
             operation.FailureCode = failure;
             operation.FailureMessage = DescribeFailure(failure, notSent);
+            operation.CompletedAtUtc ??= DateTime.UtcNow;
         }
 
         await ReleaseInactiveManualAsync(operation, barrier, ct);
@@ -629,7 +630,7 @@ public sealed class PrinterControlOperationService(
             operation.State = operation.SendCommittedAtUtc.HasValue ? PrinterControlState.Unknown : PrinterControlState.Failed;
             operation.CompletionEvidence = operation.SendCommittedAtUtc.HasValue ? PrinterControlEvidence.None : PrinterControlEvidence.NotSent;
             operation.FailureCode ??= "sender_unavailable";
-            operation.FailureMessage = "The sender stopped or became unavailable; no physical command will be replayed.";
+            operation.FailureMessage ??= "The sender stopped or became unavailable; no physical command will be replayed.";
         }
 
         if (operation.State == PrinterControlState.Unknown &&

@@ -1452,6 +1452,119 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         Assert.Equal(sent ? PrinterControlEvidence.None : PrinterControlEvidence.NotSent, result.CompletionEvidence);
     }
 
+    [Theory]
+    [InlineData(PrinterControlState.Succeeded, false)]
+    [InlineData(PrinterControlState.Failed, false)]
+    [InlineData(PrinterControlState.Unknown, false)]
+    [InlineData(PrinterControlState.Succeeded, true)]
+    [InlineData(PrinterControlState.Failed, true)]
+    [InlineData(PrinterControlState.Unknown, true)]
+    public async Task SetOutcomeAsync_ReleaseDeferred_TimestampsTerminalReceiptBeforeBarrierCleanup(
+        PrinterControlState state, bool pendingEmergency)
+    {
+        Guid id = Guid.NewGuid();
+        Guid owner = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ClaimAsync(id, owner, default);
+            if (state != PrinterControlState.Failed)
+            {
+                await service.CommitSendAsync(id, owner, default);
+            }
+            if (pendingEmergency)
+            {
+                db.PrinterEmergencyStopAttempts.Add(new PrinterEmergencyStopAttempt
+                {
+                    Id = Guid.NewGuid(), OperationId = id, PrinterId = printerId,
+                    ActorSubject = userId.ToString(), ConfigurationIdentity = "test",
+                    CreatedAtUtc = DateTime.UtcNow, Delivery = PrinterEmergencyStopDelivery.Pending,
+                });
+            }
+            else
+            {
+                (await db.PrinterDispatchStates.SingleAsync()).ActiveJobId = Guid.NewGuid();
+            }
+            await db.SaveChangesAsync();
+        });
+        DateTime before = DateTime.UtcNow;
+        await ChangeAsync(async (_, service) =>
+            await service.SetOutcomeAsync(id, owner, state == PrinterControlState.Succeeded,
+                state == PrinterControlState.Succeeded ? null : "sender_interrupted", default));
+        PrinterControlOperationDto terminal = await GetAsync(id);
+        Assert.Equal(state, terminal.State);
+        Assert.True(terminal.BarrierHeld);
+        Assert.False(terminal.RequiresRecovery);
+        Assert.NotNull(terminal.CompletedAtUtc);
+        Assert.InRange(terminal.CompletedAtUtc.Value, before, DateTime.UtcNow);
+        Assert.Equal(state == PrinterControlState.Succeeded ? PrinterControlEvidence.MotionQueueDrained :
+            state == PrinterControlState.Failed ? PrinterControlEvidence.NotSent : PrinterControlEvidence.None,
+            terminal.CompletionEvidence);
+        await ChangeAsync(async (db, service) =>
+        {
+            Assert.Equal(terminal.CompletedAtUtc, (await db.PrinterControlOperations.SingleAsync()).CompletedAtUtc);
+            if (pendingEmergency)
+            {
+                (await db.PrinterEmergencyStopAttempts.SingleAsync()).Delivery = PrinterEmergencyStopDelivery.NotSent;
+            }
+            else
+            {
+                (await db.PrinterDispatchStates.SingleAsync()).ActiveJobId = null;
+            }
+            await db.SaveChangesAsync();
+            await service.ReconcileOrphansAsync(default);
+            await service.SetOutcomeAsync(id, owner, true, null, default);
+        });
+        PrinterControlOperationDto released = await GetAsync(id);
+        Assert.False(released.BarrierHeld);
+        Assert.Equal(state, released.State);
+        Assert.Equal(terminal.CompletedAtUtc, released.CompletedAtUtc);
+        Assert.Equal(terminal.CompletionEvidence, released.CompletionEvidence);
+    }
+
+    [Theory]
+    [InlineData(PrinterEmergencyStopDelivery.Accepted, false)]
+    [InlineData(PrinterEmergencyStopDelivery.NotSent, false)]
+    [InlineData(PrinterEmergencyStopDelivery.Unknown, false)]
+    [InlineData(PrinterEmergencyStopDelivery.Accepted, true)]
+    [InlineData(PrinterEmergencyStopDelivery.NotSent, true)]
+    [InlineData(PrinterEmergencyStopDelivery.Unknown, true)]
+    public async Task FinishEmergencyStopAsync_SenderIsolated_PreservesEmergencyDiagnosticsAfterRelease(
+        PrinterEmergencyStopDelivery delivery, bool motionSent)
+    {
+        Guid id = Guid.NewGuid();
+        Guid owner = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (_, service) =>
+        {
+            await service.ClaimAsync(id, owner, default);
+            if (motionSent)
+            {
+                await service.CommitSendAsync(id, owner, default);
+            }
+            PrinterEmergencyStopLease lease = (await service.PrepareEmergencyStopAsync(printerId, userId.ToString(), default))!;
+            if (delivery != PrinterEmergencyStopDelivery.NotSent)
+            {
+                Assert.True(await service.CommitEmergencyStopSendAsync(printerId, lease, userId.ToString(), default));
+            }
+            await service.MaintainOwnerAsync(id, owner, true, default);
+            Assert.True((await service.GetAsync(printerId, id, default)).BarrierHeld);
+            await service.FinishEmergencyStopAsync(printerId, lease, delivery, default);
+        });
+        PrinterControlOperationDto receipt = await GetAsync(id);
+        Assert.False(receipt.BarrierHeld);
+        Assert.NotNull(receipt.CompletedAtUtc);
+        Assert.Equal(motionSent ? PrinterControlState.Unknown : PrinterControlState.Failed, receipt.State);
+        Assert.Equal(delivery switch
+        {
+            PrinterEmergencyStopDelivery.Accepted => "emergency_stop_accepted",
+            PrinterEmergencyStopDelivery.NotSent => "emergency_stop_not_sent",
+            _ => "emergency_stop_outcome_unknown",
+        }, receipt.Failure?.Code);
+        Assert.Equal("Motion was interrupted. Check the printer; no command will be replayed.", receipt.Failure?.Message);
+        Assert.Equal(motionSent ? PrinterControlEvidence.None : PrinterControlEvidence.NotSent, receipt.CompletionEvidence);
+    }
+
     [Fact]
     public async Task SetOutcomeAsync_LateMatchingResponse_DoesNotRewriteSettledUnknown()
     {

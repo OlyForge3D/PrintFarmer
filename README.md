@@ -70,9 +70,11 @@ rules. Automated clearance-protected workflows retain their stricter policy.
 This does not enable unhomed-axis movement or out-of-envelope recovery moves.
 
 **Client upgrade required:** update the React frontend and iOS app alongside the
-API. Legacy Moonraker motion endpoints reject requests with
-`409 async_control_required` without moving the printer. Other printer backends
-retain their existing motion endpoints.
+API. Printers advertising durable motion through
+`physicalControl.supportedOperations` use the control-operations API, regardless
+of backend name. Their legacy motion endpoints reject requests with
+`409 async_control_required` without moving the printer. Backends without that
+capability retain their existing motion endpoints.
 
 If communication is lost after a command may have been sent, its historical
 outcome remains **Unknown** and it is never automatically replayed. Manual
