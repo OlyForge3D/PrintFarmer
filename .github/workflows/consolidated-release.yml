@@ -175,9 +175,6 @@ jobs:
       id-token: write
     with:
       transaction: ${{ needs.admit.outputs.transaction }}
-      source_sha: ${{ needs.admit.outputs.source_sha }}
-      channel: ${{ needs.admit.outputs.channel }}
-      approval_mode: ${{ needs.admit.outputs.approval_mode }}
     secrets: inherit
 
   summary:

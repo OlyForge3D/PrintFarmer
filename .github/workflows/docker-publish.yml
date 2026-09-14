@@ -7,18 +7,6 @@ on:
         description: Immutable same-run release transaction binding
         type: string
         required: true
-      source_sha:
-        description: Exact qualified source commit
-        type: string
-        required: true
-      channel:
-        description: Canonical release channel
-        type: string
-        required: true
-      approval_mode:
-        description: Approval policy captured before qualification
-        type: string
-        required: true
     outputs:
       public_identity:
         description: Redacted canonical release identity
@@ -31,14 +19,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-publication-${{ inputs.channel }}
+  group: release-publication-${{ fromJSON(inputs.transaction).channel == 'stable' && 'stable' || 'insider' }}
   cancel-in-progress: false
+
+env:
+  RELEASE_SIGNER_IDENTITY: https://github.com/OlyForge3D/PrintFarmer/.github/workflows/docker-publish.yml@refs/heads/development
 
 jobs:
   publish:
     name: Authorize and publish immutable release
     runs-on: ubuntu-latest
-    environment: release-${{ inputs.channel }}
+    environment: ${{ fromJSON(inputs.transaction).channel == 'stable' && 'release-stable' || 'release-insider' }}
     permissions:
       contents: read
       id-token: write
@@ -59,7 +50,7 @@ jobs:
       - name: Checkout exact qualified source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ fromJSON(inputs.transaction).sourceCommit }}
           path: source
           fetch-depth: 0
           persist-credentials: false
@@ -73,6 +64,10 @@ jobs:
         with:
           name: release-qualification-${{ github.run_id }}
           path: .artifacts/release-transaction
+      - name: Validate immutable release transaction before protected credentials
+        env:
+          RELEASE_TRANSACTION: ${{ inputs.transaction }}
+        run: node scripts/ci/release-transaction.mjs validate
       - name: Check selected source version base
         working-directory: source
         run: bash scripts/sync-monorepo-version.sh --check
@@ -111,10 +106,10 @@ jobs:
           RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
           RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
-          RELEASE_ADMITTED_APPROVAL_MODE: ${{ inputs.approval_mode }}
+          RELEASE_ADMITTED_APPROVAL_MODE: ${{ fromJSON(inputs.transaction).approvalMode }}
           RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
           RELEASE_TRANSACTION: ${{ inputs.transaction }}
-          RELEASE_SOURCE_COMMIT: ${{ inputs.source_sha }}
+          RELEASE_SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
         run: node scripts/ci/release-control.mjs authorize
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
@@ -145,7 +140,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
           RELEASE_TRANSACTION: ${{ inputs.transaction }}
-          RELEASE_SOURCE_COMMIT: ${{ inputs.source_sha }}
+          RELEASE_SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
         run: node scripts/ci/release-control.mjs consume
       - name: Validate all revocable controls before publication
@@ -159,7 +154,7 @@ jobs:
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
           RELEASE_TRANSACTION: ${{ inputs.transaction }}
-          RELEASE_SOURCE_COMMIT: ${{ inputs.source_sha }}
+          RELEASE_SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
         run: node scripts/ci/release-control.mjs preflight
       - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4
         with:
@@ -186,9 +181,9 @@ jobs:
           node scripts/compliance/create-license-inventory.mjs \
             --output compliance-artifacts/license-inventory.json \
             --version "$RELEASE_VERSION" \
-            --revision '${{ inputs.source_sha }}'
+            --revision '${{ fromJSON(inputs.transaction).sourceCommit }}'
           dockerfile="scripts/docker/dockerfiles/Dockerfile.multistage"
-          source_sha='${{ inputs.source_sha }}'
+          source_sha='${{ fromJSON(inputs.transaction).sourceCommit }}'
           build_component() {
             local image="$1" target="$2" platforms="$3"
             local repository="ghcr.io/olyforge3d/printfarmer-${image}"
@@ -200,9 +195,9 @@ jobs:
               --platform "$platforms" \
               --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
               --label "org.opencontainers.image.licenses=AGPL-3.0-only" \
-              --label "org.opencontainers.image.revision=${{ inputs.source_sha }}" \
+              --label "org.opencontainers.image.revision=${{ fromJSON(inputs.transaction).sourceCommit }}" \
               --label "org.opencontainers.image.version=${RELEASE_CONTAINER_VERSION}" \
-              --label "org.printfarmer.release-channel=${{ inputs.channel }}" \
+              --label "org.printfarmer.release-channel=${{ fromJSON(inputs.transaction).channel }}" \
               --label "org.printfarmer.identity-sha256=${RELEASE_IDENTITY_HASH}" \
               --build-arg "GIT_SHA=${source_sha}" \
               --build-arg "VITE_GIT_SHA=${source_sha}" \
@@ -256,9 +251,27 @@ jobs:
       - name: Validate complete immutable set
         env:
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
-          RELEASE_TRANSACTION: ${{ inputs.transaction }}
-          RELEASE_SOURCE_COMMIT: ${{ inputs.source_sha }}
         run: node scripts/ci/release-set.mjs inspect
+      - name: Verify every pushed digest signature and SPDX attestation
+        run: |
+          set -euo pipefail
+          for image in api frontend slicer-host printer-discovery orcaslicer-worker monolith; do
+            digest="$(tr -d '[:space:]' < "artifacts/digest-${image}/digest-${image}.txt")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            reference="ghcr.io/olyforge3d/printfarmer-${image}@${digest}"
+            registry_digest="$(
+              docker buildx imagetools inspect "$reference" |
+                sed -n 's/^Digest:[[:space:]]*//p'
+            )"
+            [[ "$registry_digest" == "$digest" ]]
+            cosign verify "$reference" \
+              --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+            cosign verify-attestation "$reference" \
+              --type spdxjson \
+              --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          done
       - name: Smoke test ARM64 image digests
         run: |
           set -euo pipefail
@@ -297,7 +310,7 @@ jobs:
           set -euo pipefail
           mkdir -p release-assets
           node scripts/compliance/create-source-bundle.mjs \
-            --revision '${{ inputs.source_sha }}' \
+            --revision '${{ fromJSON(inputs.transaction).sourceCommit }}' \
             --version "$VERSION" \
             --output release-assets
           cp LICENSE THIRD-PARTY-NOTICES.md release-assets/
@@ -333,7 +346,7 @@ jobs:
 
           cosign verify-blob \
             --bundle release-assets/release-identity.bundle.json \
-            --certificate-identity "https://github.com/${GITHUB_WORKFLOW_REF}" \
+            --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             release-assets/release-identity.json
 
@@ -392,9 +405,6 @@ jobs:
       - name: Promote validated digests
         env:
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
-          RELEASE_TRANSACTION: ${{ inputs.transaction }}
-          RELEASE_SOURCE_COMMIT: ${{ inputs.source_sha }}
-          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
         run: node scripts/ci/release-set.mjs tag
       - name: Advance the complete channel pointer last
         id: advance
@@ -406,7 +416,7 @@ jobs:
           RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
           RELEASE_TRANSACTION: ${{ inputs.transaction }}
-          RELEASE_SOURCE_COMMIT: ${{ inputs.source_sha }}
+          RELEASE_SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
           RELEASE_VERIFIED_BRANCH_HEAD: ${{ steps.preflight.outputs.verified_branch_head }}
           RELEASE_EXPECTED_POINTER: ${{ steps.preflight.outputs.expected_pointer }}

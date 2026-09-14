@@ -68,6 +68,10 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   requireThat(['admit', 'authorize', 'consume', 'preflight', 'advance'].includes(operation), 'Unknown release operation');
   const consumer = ['consume', 'preflight', 'advance'].includes(operation);
   const transaction = transactionFromEnvironment(env);
+  if (operation !== 'admit') {
+    requireThat(env.RELEASE_SOURCE_COMMIT === transaction.sourceCommit,
+      'Release source identity does not match the pinned release transaction');
+  }
   const privileged = ['authorize', 'preflight', 'advance'].includes(operation);
   if (privileged) {
     requireThat(env.RELEASE_PUBLISHER_TOKEN && env.RELEASE_PUBLISHER_TOKEN !== env.GH_TOKEN,
@@ -76,8 +80,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   const api = githubClient(privileged ? env.RELEASE_PUBLISHER_TOKEN : env.GH_TOKEN);
   const context = runContext(env, transaction);
   if (consumer) {
-    requireThat(env.RELEASE_SOURCE_COMMIT === transaction.sourceCommit &&
-      context.sourceCommit === transaction.sourceCommit,
+    requireThat(context.sourceCommit === transaction.sourceCommit,
     'Consumer source identity does not match the pinned release transaction');
   }
   const store = gitLedger(api, env.RELEASE_LEDGER_ANCHOR);

@@ -89,7 +89,8 @@ test('active Dockerfile variants propagate full commit metadata into production 
 });
 
 test('release workflow injects the full source commit into container builds', () => {
-  assert.match(publishWorkflow, /source_sha:\r?\n\s+description: Exact qualified source commit/);
+  assert.doesNotMatch(publishWorkflow, /^\s{6}(?:source_sha|channel):$/m);
+  assert.match(publishWorkflow, /source_sha='\$\{\{ fromJSON\(inputs\.transaction\)\.sourceCommit \}\}'/);
   assert.match(publishWorkflow, /--build-arg "GIT_SHA=\$\{source_sha\}"/);
   assert.match(publishWorkflow, /--build-arg "VITE_GIT_SHA=\$\{source_sha\}"/);
   assert.doesNotMatch(publishWorkflow, /git rev-parse --short HEAD/);

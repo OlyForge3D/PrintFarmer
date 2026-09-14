@@ -12,6 +12,7 @@ const checks = `commits/${sha}/check-runs?per_page=100`;
 const routes = [checks, `commits/${sha}/status?per_page=100`,
   `commits/${sha}/statuses?per_page=100`, `commits/${sha}/comments?per_page=100`,
   'pulls/60/reviews?per_page=100', 'actions/runs/10/attempts/1/jobs?per_page=100',
+  'actions/runs/10/attempts/17/jobs?per_page=100',
   `actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`,
   'actions/workflows/qualify-canonical-release.yml/runs?created=%3E%3D2026-09-13T05%3A00%3A00Z&per_page=100'];
 
@@ -301,7 +302,8 @@ test('page allowlists preserve exact source, attempt, method and collection cons
     assert.equal(qualificationRequestUrl(`${endpoint}&page=2`), `${root}${endpoint}&page=2`);
   }
   assert.equal(githubRequestUrl(`${checks}&page=2`, 'GET'), `${root}${checks}&page=2`);
-  for (const endpoint of [`actions/runs/10/attempts/2/jobs?per_page=100&page=2`,
+  for (const endpoint of [`actions/runs/10/attempts/0/jobs?per_page=100&page=2`,
+    `actions/runs/10/attempts/01/jobs?per_page=100&page=2`,
     `${checks}&page=0`, `${checks}&page=-1`, `${checks}&page=02`, `${checks}&page=2&page=3`,
     'rules/branches/main?per_page=100&page=2']) {
     assert.throws(() => qualificationRequestUrl(endpoint));

@@ -48,7 +48,7 @@ export function qualificationRequestUrl(endpoint, method = 'GET', allowStatus = 
   const reads = [
     /^$/,
     /^git\/ref\/heads\/(?:main|development)$/,
-    /^actions\/runs\/[1-9][0-9]*(?:\/attempts\/1\/jobs\?per_page=100)?$/,
+    /^actions\/runs\/[1-9][0-9]*(?:\/attempts\/[1-9][0-9]*\/jobs\?per_page=100)?$/,
     /^actions\/workflows\/(?:ci|qualify-canonical-release|record-canonical-qualification)\.yml$/,
     /^actions\/workflows\/(?:ci|qualify-canonical-release)\.yml\/runs\?head_sha=[a-f0-9]{40}&per_page=100$/,
     /^actions\/workflows\/qualify-canonical-release\.yml\/runs\?created=%3E%3D(?:[0-9TZ.-]|%3A)+&per_page=100$/,

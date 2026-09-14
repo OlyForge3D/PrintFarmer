@@ -12,7 +12,7 @@ import {
   admit, advance, allocationKey, compareVersions, components, hash, identityLabels,
   parseTag, parseVersionFile, reserve as reserveRelease, transact, validateCandidate, validateCompleteSet,
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence, hotfixReasonDigest, ReleasePolicyError,
-  validateRecord, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks,
+  validateRecord, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks, publisherWorkflowIdentity,
 } from '../release-policy.mjs';
 import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedger, publicLedgerFields, readTag, readVersion, verifyProtection,
   parseGithubTimestamp, verifyStableQualification, verifyReleaseChecks } from '../release-github.mjs';
@@ -2281,8 +2281,10 @@ test('release workflow explicitly wires approval mode and confines reviewer evid
   assert.match(admissionJob, /RELEASE_APPROVAL_MODE: \$\{\{ vars\.RELEASE_APPROVAL_MODE \}\}/);
   assert.doesNotMatch(admissionJob, /RELEASE_OWNER_APPROVED_REVIEWERS/);
   assert.match(admissionJob, /approval_mode: \$\{\{ steps\.admit\.outputs\.approval_mode \}\}/);
-  assert.match(publisher, /RELEASE_ADMITTED_APPROVAL_MODE: \$\{\{ inputs\.approval_mode \}\}/);
-  assert.match(publisher, /environment: release-\$\{\{ inputs\.channel \}\}/);
+  assert.match(publisher,
+    /RELEASE_ADMITTED_APPROVAL_MODE: \$\{\{ fromJSON\(inputs\.transaction\)\.approvalMode \}\}/);
+  assert.match(publisher,
+    /environment: \$\{\{ fromJSON\(inputs\.transaction\)\.channel == 'stable' && 'release-stable' \|\| 'release-insider' \}\}/);
   assert.match(publisher,
     /RELEASE_OWNER_APPROVED_REVIEWERS: \$\{\{ secrets\.RELEASE_OWNER_APPROVED_REVIEWERS \}\}/);
   assert.match(admissionJob, /statuses: read/);
@@ -2411,6 +2413,7 @@ test('normalized attestation and artifact writers reject raw, unknown and weaken
     assert.doesNotMatch(readFileSync(privateSetPath, 'utf8'), privateFields);
     assert.deepEqual(JSON.parse(readFileSync(privateSetPath, 'utf8')), completeSet(identity));
     const env = { GITHUB_REPOSITORY: context().repository, GITHUB_REF: context().ref,
+      RELEASE_SIGNER_IDENTITY: publisherWorkflowIdentity,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
     const changed = structuredClone(identity);
     changed.protection.claims.canonicalTagsImmutable = false;
@@ -2531,6 +2534,7 @@ function authorizationFixture(initial = state(), settings = {}) {
     GITHUB_REF: selected.ref, GITHUB_SHA: workflowCommit,
     GITHUB_WORKFLOW_REF: selected.workflowIdentity, GITHUB_WORKFLOW_SHA: workflowCommit,
     GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '1', RELEASE_CHANNEL: channel,
+    RELEASE_SIGNER_IDENTITY: publisherWorkflowIdentity,
   };
   const transaction = {
     kind: 'release-transaction',
@@ -3295,7 +3299,7 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
   const verify = (file, args) => {
     assert.equal(file, 'cosign');
     assert.deepEqual(args, ['verify-blob', '--bundle', authorizationBundle,
-      '--certificate-identity', `https://github.com/${context().workflowIdentity}`,
+      '--certificate-identity', publisherWorkflowIdentity,
       '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com', authorizationPath]);
   };
   try {
@@ -3315,6 +3319,12 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
       }
     }
     assert.equal(fixture.calls.length, 0, 'Missing App credential must fail before API calls');
+    await assert.rejects(runFixtureControl('authorize', fixture, {
+      ...fixture.env,
+      RELEASE_SOURCE_COMMIT: newerSha,
+    }), /source identity does not match/);
+    assert.equal(fixture.calls.length, 0,
+      'Mismatched redundant source identity must fail before API calls');
     const denied = { ...fixture.env, RELEASE_PUBLISHER_TOKEN: 'not-authorized-fixture' };
     await assert.rejects(runFixtureControl('authorize', fixture, denied), /HTTP 403/);
     assert.ok(fixture.calls.every(call => call.method === 'GET'), '403 must not allocate or tag');
@@ -3520,7 +3530,7 @@ test('workflow wiring keeps authorization and every publisher consumer in one pr
   const authority = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
   const publishJob = docker.split('\n  publish:')[1];
-  assert.match(publishJob, /environment: release-/);
+  assert.match(publishJob, /environment: .+release-stable.+release-insider/);
   assert.ok(publishJob.indexOf('actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349') <
     publishJob.indexOf('release-control.mjs authorize'));
   assert.ok(publishJob.indexOf('release-control.mjs authorize') <
@@ -3552,13 +3562,14 @@ test('signed-artifact verification fails closed without logging payloads or acce
     const identity = await authorizedRecord();
     writeAuthorization(identity);
     const env = { GITHUB_REPOSITORY: context().repository, GITHUB_REF: context().ref,
+      RELEASE_SIGNER_IDENTITY: publisherWorkflowIdentity,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
     assert.throws(() => verifyAuthorization(env, () => { throw new Error(JSON.stringify(identity)); }),
       error => error.message === 'Authorization signature verification failed');
     const verify = (file, args) => {
       assert.equal(file, 'cosign');
       assert.ok(args.includes(authorizationPath) && args.includes(authorizationBundle));
-      assert.ok(args.includes(`https://github.com/${identity.workflowIdentity}`));
+      assert.ok(args.includes(publisherWorkflowIdentity));
       assert.doesNotMatch(JSON.stringify(args), /privateMarker|private-value/);
     };
     assert.deepEqual(verifyAuthorization(env, verify), identity);
@@ -3573,6 +3584,10 @@ test('signed-artifact verification fails closed without logging payloads or acce
       ...publicAuthorization(identity), futurePrivate: 'private-value',
     }) }, verify), /Invalid public authorization/);
     assert.throws(() => verifyAuthorization({ ...env, GITHUB_REF: 'refs/heads/attacker' }, verify), /Untrusted/);
+    assert.throws(() => verifyAuthorization({
+      ...env,
+      RELEASE_SIGNER_IDENTITY: `https://github.com/${identity.workflowIdentity}`,
+    }, verify), /Untrusted/);
   } finally {
     process.chdir(cwd);
     rmSync(root, { recursive: true, force: true });

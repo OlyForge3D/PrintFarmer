@@ -77,7 +77,7 @@
       "path": ".github/workflows/docker-publish.yml",
       "contains": [
         "org.opencontainers.image.licenses=AGPL-3.0-only",
-        "org.opencontainers.image.revision=${{ inputs.source_sha }}",
+        "org.opencontainers.image.revision=${{ fromJSON(inputs.transaction).sourceCommit }}",
         "bash scripts/sync-monorepo-version.sh --check",
         "node scripts/ci/release-control.mjs authorize",
         "cosign sign-blob --yes",

@@ -4,6 +4,9 @@ import { publicIdentityFields } from '../../src/Web/ReactApp/public-release-iden
 
 export const repository = 'OlyForge3D/PrintFarmer';
 export const workflow = '.github/workflows/consolidated-release.yml';
+export const publisherWorkflow = '.github/workflows/docker-publish.yml';
+export const publisherWorkflowIdentity =
+  `https://github.com/${repository}/${publisherWorkflow}@refs/heads/development`;
 export const ledgerBranch = 'release-ledger';
 export const releaseBuildChecks = ['CI tooling tests', '.NET build', 'Frontend build & tests'];
 export const releaseReviewStatus = 'squad/pre-pr-verdict';

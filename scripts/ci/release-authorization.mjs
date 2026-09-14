@@ -4,7 +4,8 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import {
-  requireThat, validateCompleteSet, validateRecord, publicAuthorization, validatePublicAuthorization, writePublicSet,
+  publisherWorkflowIdentity, requireThat, validateCompleteSet, validateRecord, publicAuthorization,
+  validatePublicAuthorization, writePublicSet,
 } from './release-policy.mjs';
 export { publicAuthorization, writePublicSet } from './release-policy.mjs';
 
@@ -55,14 +56,15 @@ export function verifyAuthorization(env, run) {
   requireThat(!env.RELEASE_IDENTITY, 'Full identity environment transport is forbidden');
   const projected = JSON.parse(env.RELEASE_PUBLIC_IDENTITY || '{}');
   validatePublicAuthorization(projected);
-  const identity = `${env.GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@${env.GITHUB_REF}`;
+  const controlIdentity = `${env.GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@${env.GITHUB_REF}`;
   requireThat(env.GITHUB_REPOSITORY === 'OlyForge3D/PrintFarmer' &&
     ['refs/heads/main', 'refs/heads/development'].includes(env.GITHUB_REF) &&
-    projected.workflowIdentity === identity, 'Untrusted authorization signer');
+    projected.workflowIdentity === controlIdentity &&
+    env.RELEASE_SIGNER_IDENTITY === publisherWorkflowIdentity, 'Untrusted authorization signer');
   // Never return command output: verification tools may echo signed payloads.
   try {
     run('cosign', ['verify-blob', '--bundle', authorizationBundle,
-      '--certificate-identity', `https://github.com/${identity}`,
+      '--certificate-identity', publisherWorkflowIdentity,
       '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com', authorizationPath]);
   } catch {
     throw new Error('Authorization signature verification failed');

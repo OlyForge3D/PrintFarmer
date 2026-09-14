@@ -319,9 +319,7 @@ test('single authority has direct dependencies, one approval, and no alternate c
   assert.deepEqual(Object.keys(workflow.jobs),
     ['schedule-insider', 'admit', 'qualification', 'collect-qualification', 'publish', 'summary']);
   assert.equal(workflow.jobs.publish.with.transaction, '${{ needs.admit.outputs.transaction }}');
-  assert.equal(workflow.jobs.publish.with.source_sha, '${{ needs.admit.outputs.source_sha }}');
-  assert.equal(workflow.jobs.publish.with.channel, '${{ needs.admit.outputs.channel }}');
-  assert.equal(workflow.jobs.publish.with.approval_mode, '${{ needs.admit.outputs.approval_mode }}');
+  assert.deepEqual(Object.keys(workflow.jobs.publish.with), ['transaction']);
   assert.equal(workflow.jobs.publish.with.verified_branch_head, undefined);
   assert.match(JSON.stringify(workflow.jobs['schedule-insider']), /--ref development/);
   assert.doesNotMatch(JSON.stringify(workflow.jobs['schedule-insider']), /mode=/);
@@ -340,15 +338,28 @@ test('legacy qualifier and recorder remain reachable without an alternate releas
 
 test('publisher has exactly one protected deployment containing every credential and mutation', () => {
   const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
+  assert.deepEqual(Object.keys(publisher.on.workflow_call.inputs), ['transaction']);
   assert.deepEqual(Object.keys(publisher.jobs), ['publish']);
   const environments = Object.values(publisher.jobs).filter(job => job.environment).map(job => job.environment);
-  assert.deepEqual(environments, ['release-${{ inputs.channel }}']);
+  assert.deepEqual(environments, [
+    "${{ fromJSON(inputs.transaction).channel == 'stable' && 'release-stable' || 'release-insider' }}",
+  ]);
+  assert.equal(publisher.concurrency.group,
+    "release-publication-${{ fromJSON(inputs.transaction).channel == 'stable' && 'stable' || 'insider' }}");
+  assert.equal(publisher.jobs.publish.steps[1].with.ref,
+    '${{ fromJSON(inputs.transaction).sourceCommit }}');
   const job = JSON.stringify(publisher.jobs.publish);
+  assert.doesNotMatch(job, /inputs\.(?:channel|source_sha|approval_mode)/);
+  for (const value of job.matchAll(/"RELEASE_SOURCE_COMMIT":"([^"]+)"/g)) {
+    assert.equal(value[1], '${{ fromJSON(inputs.transaction).sourceCommit }}');
+  }
   assert.match(job, /RELEASE_PUBLISHER_PRIVATE_KEY/);
   assert.match(job, /RELEASE_REGISTRY_TOKEN/);
   assert.match(job, /release-control\.mjs authorize/);
   assert.match(job, /release-set\.mjs tag/);
   assert.match(job, /release-control\.mjs advance/);
+  assert.ok(job.indexOf('release-transaction.mjs validate') <
+    job.indexOf('actions/create-github-app-token@'));
 });
 
 test('publisher completes revocable preflight before registry login and image publication', () => {
@@ -363,7 +374,28 @@ test('publisher completes revocable preflight before registry login and image pu
   assert.ok(named('Build, attest and sign the complete immutable image set') <
     named('Validate complete immutable set'));
   assert.ok(named('Validate complete immutable set') <
+    named('Verify every pushed digest signature and SPDX attestation'));
+  assert.ok(named('Verify every pushed digest signature and SPDX attestation') <
     named('Publish and verify public corresponding-source assets'));
+  assert.ok(named('Validate complete immutable set') <
+    named('Publish and verify public corresponding-source assets'));
+});
+
+test('publisher uses one reusable-workflow signer identity for every verification path', () => {
+  const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
+  const expected =
+    'https://github.com/OlyForge3D/PrintFarmer/.github/workflows/docker-publish.yml@refs/heads/development';
+  assert.equal(publisher.env.RELEASE_SIGNER_IDENTITY, expected);
+  const job = JSON.stringify(publisher.jobs.publish);
+  assert.equal((job.match(/--certificate-identity \\"?\$RELEASE_SIGNER_IDENTITY/g) || []).length, 3);
+  assert.match(job, /cosign verify \\"\$reference\\"/);
+  assert.match(job, /cosign verify-attestation \\"\$reference\\"/);
+  assert.match(job, /--type spdxjson/);
+  assert.match(job, /registry_digest/);
+  assert.ok(job.indexOf('cosign verify \\"$reference\\"') <
+    job.indexOf('release-set.mjs tag'));
+  assert.ok(job.indexOf('cosign verify-attestation \\"$reference\\"') <
+    job.indexOf('release-control.mjs advance'));
 });
 
 test('every docker publisher release-control consumer follows one immutable workflow checkout in its job', () => {
