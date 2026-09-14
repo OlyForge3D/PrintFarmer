@@ -64,6 +64,13 @@ test('release notes derive bounded merged PRs and mandatory version-controlled o
   assert.match(notes, /Release range: v1\.2\.2\.\.\./);
   assert.match(notes, /#42/);
   assert.match(notes, /Run provider migration/);
+  for (const body of ['None.', 'N/A']) {
+    assert.doesNotThrow(() => releaseNotes({
+      version: '1.2.3', sourceCommit: sha, previousTag: 'v1.2.2',
+      pullRequests: [{ number: 1, title: 'Entry', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/1' }],
+      changelog: `### Features\n\n${body}\n\n### Fixes\n\n${body}\n\n### Breaking changes\n\n${body}`, metadata,
+    }));
+  }
   for (const field of ['compatibility', 'migration', 'downtime', 'backup', 'recovery']) {
     assert.throws(() => validateReleaseNotesMetadata({ ...metadata, [field]: '' }, '1.2.3'),
       new RegExp(`requires ${field}`));
@@ -3842,8 +3849,10 @@ test('executed signing commands preserve signed subjects and never let verificat
   assert.ok(docker.indexOf('Publish and verify public corresponding-source assets') <
     docker.indexOf('Promote validated immutable image tags'));
   assert.ok(docker.indexOf('Promote validated immutable image tags') <
-    docker.indexOf('Publish and verify signed manifest immediately before pointer'));
-  assert.ok(docker.indexOf('Publish and verify signed manifest immediately before pointer') <
+    docker.indexOf('Publish and verify signed manifest before mutable aliases'));
+  assert.ok(docker.indexOf('Publish and verify signed manifest before mutable aliases') <
+    docker.indexOf('Publish channel-isolated verified image aliases'));
+  assert.ok(docker.indexOf('Publish channel-isolated verified image aliases') <
     docker.indexOf('Advance the complete channel pointer last'));
   const canonicalNotes = docker.split('      - name: Generate canonical release notes before signing\n')[1]
     .split('      - name: Validate complete immutable set')[0];

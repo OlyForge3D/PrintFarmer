@@ -44,11 +44,12 @@ export function releaseNotes({ version, sourceCommit, previousTag, pullRequests,
 }
 
 function changelogEntry(changelog, version) {
-  const match = changelog.match(new RegExp(`^## \\[?${version.replace(/[.]/g, '\\.')}\\]?[^\\n]*\\n([\\s\\S]*?)(?=^## |\\z)`, 'm'));
+  const match = changelog.match(new RegExp(`^## \\[?${version.replace(/[.]/g, '\\.')}\\]?[^\\n]*\\n([\\s\\S]*?)(?=^## |$)`, 'm'));
   requireThat(match, `Release notes require a ${version} CHANGELOG entry`);
   const entry = match[1].trim();
   for (const heading of ['Features', 'Fixes', 'Breaking changes']) {
-    requireThat(new RegExp(`^### ${heading}\\s*$`, 'm').test(entry),
+    const section = entry.match(new RegExp(`^### ${heading}\\s*$\\n([\\s\\S]*?)(?=^### |$)`, 'm'));
+    requireThat(section && (section[1].trim() === 'None.' || section[1].trim() === 'N/A' || section[1].trim().length > 0),
       `Release notes CHANGELOG entry requires ${heading}`);
   }
   return entry;
@@ -64,6 +65,7 @@ function main() {
   const repository = process.env.GITHUB_REPOSITORY;
   const output = process.env.RELEASE_NOTES_OUTPUT;
   requireText(version, 'VERSION'); requireText(repository, 'GITHUB_REPOSITORY'); requireText(output, 'RELEASE_NOTES_OUTPUT');
+  requireThat(/^[a-f0-9]{40}$/.test(sourceCommit || ''), 'Release notes require the exact source commit');
   const tags = command('git', ['for-each-ref', '--merged', sourceCommit, '--sort=-v:refname',
     '--format=%(refname:strip=2)', 'refs/tags']).trim().split(/\r?\n/);
   const previousTag = tags.find(tag => tag !== `v${version}` && /^v\d+\.\d+\.\d+/.test(tag));
