@@ -5,7 +5,8 @@ import {
   identityLabels, parseTag, verifyProtectionEvidence, validateReservationAdmission, validateApprovalMode,
 } from './release-policy.mjs';
 import {
-  branchHead, command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion, verifyProtection,
+  command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion,
+  verifyCanonicalSource, verifyProtection,
   verifyStableQualification, verifyReleaseChecks,
 } from './release-github.mjs';
 import { emitBuildIdentity } from './release-metadata.mjs';
@@ -13,16 +14,24 @@ import { qualificationClient, verifyCanonicalReleaseEvidence } from './canonical
 import {
   privateSetPath, publicAuthorization, readPrivateAuthorization, readPrivateJson, verifyAuthorization, writeAuthorization, writePublicSet,
 } from './release-authorization.mjs';
+import {
+  readQualificationReceipt, transactionFromEnvironment,
+  verifyTransactionQualification,
+} from './release-transaction.mjs';
 
-export function runContext(env = process.env) {
+export function runContext(env = process.env, transaction = transactionFromEnvironment(env)) {
   const ref = env.GITHUB_REF;
   return {
     repository: env.GITHUB_REPOSITORY, event: env.GITHUB_EVENT_NAME,
-    ref, eventSha: env.GITHUB_SHA,
-    workflowIdentity: env.GITHUB_WORKFLOW_REF, workflowSha: env.GITHUB_WORKFLOW_SHA,
+    ref, eventSha: transaction?.sourceCommit ?? env.GITHUB_SHA,
+    sourceCommit: transaction?.sourceCommit ?? env.GITHUB_SHA,
+    workflowIdentity: transaction?.workflowIdentity ?? env.GITHUB_WORKFLOW_REF,
+    workflowSha: transaction?.workflowCommit ?? env.GITHUB_WORKFLOW_SHA,
     workflowBranch: ref?.replace('refs/heads/', ''),
-    buildId: env.GITHUB_RUN_ID, buildAttempt: env.GITHUB_RUN_ATTEMPT,
-    channel: env.RELEASE_CHANNEL,
+    observedBranchHead: transaction?.observedBranchHead,
+    buildId: transaction?.runId ?? env.GITHUB_RUN_ID,
+    buildAttempt: transaction?.runAttempt ?? env.GITHUB_RUN_ATTEMPT,
+    channel: transaction?.channel ?? env.RELEASE_CHANNEL,
     stage: env.RELEASE_STAGE && env.RELEASE_STAGE !== 'none' ? env.RELEASE_STAGE : undefined,
     requestedTag: env.RELEASE_TAG || undefined,
   };
@@ -56,14 +65,24 @@ export function output(name, value) {
 }
 
 export async function runReleaseControl(operation, env = process.env, verify = command) {
-  requireThat(['admit', 'authorize', 'consume', 'advance'].includes(operation), 'Unknown release operation');
-  const writes = ['authorize', 'advance'].includes(operation);
-  if (writes) {
+  requireThat(['admit', 'authorize', 'consume', 'preflight', 'advance'].includes(operation), 'Unknown release operation');
+  const consumer = ['consume', 'preflight', 'advance'].includes(operation);
+  const transaction = transactionFromEnvironment(env);
+  if (operation !== 'admit') {
+    requireThat(env.RELEASE_SOURCE_COMMIT === transaction.sourceCommit,
+      'Release source identity does not match the pinned release transaction');
+  }
+  const privileged = ['authorize', 'preflight', 'advance'].includes(operation);
+  if (privileged) {
     requireThat(env.RELEASE_PUBLISHER_TOKEN && env.RELEASE_PUBLISHER_TOKEN !== env.GH_TOKEN,
       'Protected publisher App token required; github.token cannot verify Administration or publish');
   }
-  const api = githubClient(writes ? env.RELEASE_PUBLISHER_TOKEN : env.GH_TOKEN);
-  const context = runContext(env);
+  const api = githubClient(privileged ? env.RELEASE_PUBLISHER_TOKEN : env.GH_TOKEN);
+  const context = runContext(env, transaction);
+  if (consumer) {
+    requireThat(context.sourceCommit === transaction.sourceCommit,
+    'Consumer source identity does not match the pinned release transaction');
+  }
   const store = gitLedger(api, env.RELEASE_LEDGER_ANCHOR);
   if (['admit', 'authorize'].includes(operation)) {
     validateApprovalMode(env.RELEASE_APPROVAL_MODE);
@@ -71,32 +90,40 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       validateApprovalMode(env.RELEASE_ADMITTED_APPROVAL_MODE);
       requireThat(env.RELEASE_ADMITTED_APPROVAL_MODE === env.RELEASE_APPROVAL_MODE,
         'Approval mode changed after admission; align repository and environment policy and rerun all jobs');
+      requireThat(transaction.approvalMode === env.RELEASE_APPROVAL_MODE,
+        'Approval mode changed after transaction selection; rerun all jobs');
     }
-    const channel = context.event === 'schedule' ? 'insider' : context.channel;
+    const channel = transaction.channel;
     const branch = channel === 'stable' ? 'main' : 'development';
     const { state } = await store.read();
-    const selectedHead = await branchHead(api, branch);
+    const selectedHead = transaction.sourceCommit;
+    await verifyCanonicalSource(api, branch, selectedHead);
     const admission = admit(context, selectedHead, await readVersion(api, selectedHead));
     validateReservationAdmission(state, admission);
-    await verifyCanonicalReleaseEvidence(qualificationClient(env.GH_TOKEN),
-      selectedHead, admission.channel, env.RELEASE_APPROVAL_MODE);
-    if (operation === 'admit') await verifyReleaseChecks(api, selectedHead);
-    requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift before authorization');
+    if (operation === 'admit') {
+      await verifyCanonicalReleaseEvidence(qualificationClient(env.GH_TOKEN),
+        selectedHead, admission.channel, env.RELEASE_APPROVAL_MODE, Date.now(),
+        transaction.workflowCommit);
+      await verifyReleaseChecks(api, selectedHead);
+      await verifyCanonicalSource(api, branch, selectedHead);
+    }
     output('source_sha', context.eventSha);
     output('channel', admission.channel);
     if (operation === 'admit') {
       output('approval_mode', env.RELEASE_APPROVAL_MODE);
-      return;
+      return admission;
     }
+    readQualificationReceipt(transaction);
+    await verifyTransactionQualification(transaction, api);
+    await verifyCanonicalSource(api, branch, selectedHead);
     const protection = await verifyProtection(api, admission.channel, env.RELEASE_PUBLISHER_APP_ID,
       env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, selectedHead);
     const record = await transact(store, async state => {
       const existing = validateReservationAdmission(state, admission);
-      await verifyCanonicalReleaseEvidence(qualificationClient(env.GH_TOKEN),
-        selectedHead, admission.channel, env.RELEASE_APPROVAL_MODE);
-      requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during allocation retry');
+      readQualificationReceipt(transaction);
+      await verifyTransactionQualification(transaction, api);
       const qualification = await verifyStableQualification(api, state, admission);
-      requireThat(await branchHead(api, branch) === selectedHead, 'HEAD drift during qualification');
+      await verifyCanonicalSource(api, branch, selectedHead);
       if (existing?.identitySha256) {
         // A lost private artifact cannot be reconstructed from public ledger data.
         const saved = readPrivateAuthorization();
@@ -115,7 +142,8 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     await ensureSourceTag(api, store, record, transact);
     writeAuthorization(record);
     output('public_identity', JSON.stringify(publicAuthorization(record)));
-    return;
+    output('verified_branch_head', await verifyCanonicalSource(api, branch, selectedHead));
+    return record;
   }
 
   const record = verifyAuthorization(env, verify);
@@ -143,11 +171,29 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     requireThat(!component || ['api', 'frontend', 'printer-discovery', 'slicer-host', 'orcaslicer-worker'].includes(component),
       'Unknown release component');
     output('sbom_url', `https://github.com/${record.repository}/releases/download/${record.sourceTag}/printfarmer-${component ? `${component}-` : ''}${record.sourceTag}.spdx.json`);
+  } else if (operation === 'preflight') {
+    requireThat(transaction.sourceCommit === record.sourceCommit,
+      'Publication preflight transaction binding mismatch');
+    const currentBranchHead = await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
+    await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
+      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
+    const expectedPointer = state.pointers[record.channel]?.setHash || '';
+    output('verified_branch_head', currentBranchHead);
+    output('expected_pointer', expectedPointer);
   } else if (operation === 'advance') {
     const set = readPrivateJson(privateSetPath);
-    const expectedPointer = state.pointers[record.channel]?.setHash || '';
+    const expectedPointer = env.RELEASE_EXPECTED_POINTER ?? '';
+    requireThat((state.pointers[record.channel]?.setHash || '') === expectedPointer,
+      'Channel pointer changed after publication preflight');
+    requireThat(transaction.sourceCommit === record.sourceCommit,
+      'Pointer transaction binding mismatch');
+    await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
+    await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
+      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
+    requireThat(/^[a-f0-9]{40}$/.test(env.RELEASE_VERIFIED_BRANCH_HEAD || ''),
+      'Missing publication preflight branch evidence');
     await transact(store, async latest => advance(latest, record, set,
-      await branchHead(api, record.sourceBranch), expectedPointer));
+      await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit), expectedPointer));
     output('set_hash', hash(writePublicSet(record, set)));
   } else {
     throw new Error(`Unknown operation: ${operation}`);

@@ -2553,6 +2553,8 @@ _check_drift_full_job_snapshot() {
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ env.CI_SOURCE_SHA }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6

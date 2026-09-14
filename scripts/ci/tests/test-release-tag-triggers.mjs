@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
-import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync,
+  symlinkSync, writeFileSync,
+} from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import test from 'node:test';
 import { canonicalAuthorizationFixture } from './fixtures/canonical-qualification.mjs';
 import { canonicalValidationChecks } from '../canonical-qualification.mjs';
@@ -9,22 +12,28 @@ import {
   admit, advance, allocationKey, compareVersions, components, hash, identityLabels,
   parseTag, parseVersionFile, reserve as reserveRelease, transact, validateCandidate, validateCompleteSet,
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence, hotfixReasonDigest, ReleasePolicyError,
-  validateRecord, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks,
+  validateRecord, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks, publisherWorkflowIdentity,
 } from '../release-policy.mjs';
 import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedger, publicLedgerFields, readTag, readVersion, verifyProtection,
-  verifyStableQualification, verifyReleaseChecks } from '../release-github.mjs';
+  parseGithubTimestamp, verifyStableQualification, verifyReleaseChecks } from '../release-github.mjs';
 import { buildMetadata, emitBuildIdentity } from '../release-metadata.mjs';
-import { runContext, runReleaseControl, output } from '../release-control.mjs';
+import { runReleaseControl, output } from '../release-control.mjs';
 import { inspectCompleteSet, publishImmutableTags } from '../release-set.mjs';
 import {
   authorizationPath, authorizationBundle, privateSetPath, publicAuthorization, verifyAuthorization,
   writeAuthorization, writeAuthorizationSet, writePublicSet, emitPublicReleaseAssets, readPrivateJson,
 } from '../release-authorization.mjs';
+import {
+  qualificationJobNamespace, qualificationLifetimeMs, qualificationPath,
+  validateQualificationReceipt,
+} from '../release-transaction.mjs';
 import { publicIdentity, publicIdentityFields } from '../../../src/Web/ReactApp/public-release-identity.mjs';
 
 const sha = 'a'.repeat(40);
 const newerSha = 'b'.repeat(40);
 const anchor = 'c'.repeat(40);
+const workflowControlSha = '9'.repeat(40);
+const currentCanonicalSha = '8'.repeat(40);
 const created = '2026-09-12T20:00:00.000Z';
 const context = (overrides = {}) => ({
   repository: 'OlyForge3D/PrintFarmer', event: 'workflow_dispatch',
@@ -32,6 +41,50 @@ const context = (overrides = {}) => ({
   workflowIdentity: 'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development',
   workflowSha: sha, workflowBranch: 'development', buildId: '42', buildAttempt: '1',
   channel: 'insider', ...overrides,
+});
+
+test('transaction-bound release operations reject missing transactions before verification or network access', async () => {
+  for (const operation of ['admit', 'authorize', 'advance', 'consume', 'preflight']) {
+    let verified = false;
+    await assert.rejects(runReleaseControl(operation, {
+      GH_TOKEN: 'github-fixture',
+      RELEASE_PUBLISHER_TOKEN: 'publisher-fixture',
+    }, () => { verified = true; }), /Missing release transaction/);
+    assert.equal(verified, false, operation);
+  }
+});
+
+test('admission and authorization reject blank, malformed and invalid transactions before API or artifact mutation', async () => {
+  const previous = globalThis.fetch;
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `invalid-authorization-transaction-${process.pid}`);
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  globalThis.fetch = () => assert.fail('Invalid transaction must fail before network access');
+  try {
+    for (const operation of ['admit', 'authorize']) {
+      for (const [transaction, expected] of [
+        ['', /Missing release transaction/],
+        ['   ', /Missing release transaction/],
+        ['{', /^Release transaction is malformed$/],
+        ['null', /release transaction/],
+        ['{}', /release transaction/],
+        [JSON.stringify({ kind: 'release-transaction', schema: 2 }), /release transaction/],
+      ]) {
+        await assert.rejects(runReleaseControl(operation, {
+          GH_TOKEN: 'github-fixture',
+          RELEASE_PUBLISHER_TOKEN: 'publisher-fixture',
+          RELEASE_TRANSACTION: transaction,
+        }), error => error instanceof ReleasePolicyError && expected.test(error.message));
+        assert.equal(existsSync(authorizationPath), false);
+        assert.equal(existsSync(qualificationPath), false);
+      }
+    }
+  } finally {
+    globalThis.fetch = previous;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 const state = () => ({ schema: 1, anchor, counter: '0', reservations: {}, identities: {}, pointers: {}, stages: {}, qualifications: {} });
 const hotfixQualification = () => ({
@@ -58,8 +111,7 @@ const reserve = (ledger, admitted, timestamp, protection = fixtureProtection(adm
   reserveRelease(ledger, admitted, timestamp, protection, qualification);
 const admission = (overrides = {}) => admit(context(overrides), overrides.eventSha || sha, 'v1.2.3\n', '1.2.2');
 const stableAdmission = (baseVersion = '1.2.3', overrides = {}) => admit(context({
-  channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
-  workflowIdentity: context().workflowIdentity.replace('/development', '/main'), ...overrides,
+  channel: 'stable', ...overrides,
 }), sha, `v${baseVersion}\n`);
 function stableFloorLedger(kind, floor) {
   const ledger = state();
@@ -82,6 +134,75 @@ const completeSet = identity => ({
   }])),
 });
 const publicSetHash = set => hash(writePublicSet(set.identity, set));
+const releaseTransaction = identity => ({
+  kind: 'release-transaction',
+  schema: 2,
+  repository: identity.repository,
+  channel: identity.channel,
+  sourceBranch: identity.sourceBranch,
+  sourceCommit: identity.sourceCommit,
+  observedBranchHead: identity.authorizedBranchHead,
+  workflowIdentity: identity.workflowIdentity,
+  workflowCommit: identity.workflowCommit,
+  runId: identity.buildId,
+  runAttempt: '1',
+  approvalMode: identity.protection.approvalMode,
+});
+const qualificationJobs = [
+  ...releaseRequiredChecks.filter(name => name !== releaseReviewStatus),
+  ...canonicalValidationChecks,
+];
+
+function writeQualificationFixture(transaction) {
+  const now = Date.now();
+  const checkedAt = new Date(now).toISOString();
+  const startedAt = new Date(now - 4 * 60_000).toISOString();
+  const completedAt = new Date(now - 2 * 60_000).toISOString();
+  const receipt = {
+    kind: 'release-qualification',
+    schema: 2,
+    transaction,
+    checkedAt,
+    expiresAt: new Date(now + qualificationLifetimeMs).toISOString(),
+    qualifiedBranchHead: transaction.observedBranchHead,
+    run: {
+      id: transaction.runId,
+      attempt: transaction.runAttempt,
+      checkSuiteId: '100',
+      url: `https://github.com/${transaction.repository}/actions/runs/${transaction.runId}`,
+      startedAt,
+      completedAt,
+    },
+    jobs: qualificationJobs.map(name => ({
+      name: `${qualificationJobNamespace} / ${name}`,
+      url: `https://github.com/${transaction.repository}/actions/runs/${transaction.runId}`,
+      startedAt,
+      completedAt,
+      checkCompletedAt: completedAt,
+    })),
+    sourceEvidence: {
+      sourceCommit: transaction.sourceCommit,
+      reviewUrl: `https://github.com/${transaction.repository}/actions/runs/30`,
+      collectedAt: checkedAt,
+      checks: releaseRequiredChecks.map(context => ({
+        context,
+        ...(context === releaseReviewStatus
+          ? { statusId: 1, createdAt: completedAt, updatedAt: completedAt }
+          : { checkId: 1, completedAt }),
+      })),
+    },
+  };
+  validateQualificationReceipt(receipt, transaction, now);
+  mkdirSync(dirname(qualificationPath), { recursive: true });
+  writeFileSync(qualificationPath, JSON.stringify(receipt));
+}
+
+async function runFixtureControl(operation, fixture, env = fixture.env, verify) {
+  if (operation === 'authorize') {
+    writeQualificationFixture(JSON.parse(env.RELEASE_TRANSACTION));
+  }
+  return runReleaseControl(operation, env, verify);
+}
 function promotionQualification(identity, set, sourceCommit = newerSha) {
   const tree = { schema: 1, originTree: 'd'.repeat(40), sourceTree: 'd'.repeat(40), metadataChanges: [] };
   return {
@@ -160,6 +281,8 @@ test('release API client permits only canonical repository routes and rejects re
       `contents/VERSION?ref=${sha}&path=private`, `git/trees/${sha}?recursive=2`,
       `git/commits/${sha}#fragment`, `git\\commits\\${sha}`, 'git/ref/heads/feature',
       'rulesets/0', 'rulesets/01', 'rulesets?per_page=100&page=2', 'releases',
+      'environments/release-publisher-stable',
+      'environments/release-publisher-insider/deployment-branch-policies',
     ]) await assert.rejects(api(endpoint), ReleasePolicyError, endpoint);
     for (const method of ['DELETE', 'PUT', 'PATCH', 'POST', 'GET\r\n']) {
       await assert.rejects(api(`git/commits/${sha}`, method), ReleasePolicyError);
@@ -273,8 +396,6 @@ test('authorization artifacts reject traversal, linked directories and hardlinke
 });
 
 test('strict canonical grammar accepts beta/RC and rejects every malformed numeric form', () => {
-  assert.equal(runContext({ RELEASE_STAGE: 'none' }).stage, undefined);
-  assert.equal(runContext({ RELEASE_STAGE: 'rc' }).stage, 'rc');
   for (const tag of ['v0.0.0', 'v1.2.3', 'v1.2.3-insider.1', 'v1.2.3-beta.9', 'v1.2.3-rc.10']) {
     assert.equal(parseTag(tag).channel, tag.includes('-') ? 'insider' : 'stable');
   }
@@ -311,30 +432,29 @@ test('admission denies untrusted events, caller spoofing, source drift and swapp
   assert.throws(() => admit(context(), sha, 'v1.2.2', '1.2.2'), /exceed/);
   assert.equal(admission({ event: 'schedule' }).channel, 'insider');
   const stable = context({
-    channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
-    workflowIdentity: context().workflowIdentity.replace('/development', '/main'),
+    channel: 'stable',
     requestedTag: 'v1.2.3',
   });
   assert.equal(admit(stable, sha, 'v1.2.3').channel, 'stable');
   assert.throws(() => admit({ ...stable, event: 'schedule' }, sha, 'v1.2.3'));
 });
 
-test('durable reservation preserves retries and increases N across attempts/bases but rejects arbitrary workflow migration', async () => {
+test('durable reservation reuses identity across same-run attempts and increases N across runs/bases', async () => {
   const store = memoryStore();
   const first = await transact(store, state => reserve(state, admission(), created).record);
   const retry = await transact(store, state => reserve(state, admission(), 'later').record);
   assert.deepEqual(retry, first);
   const second = await transact(store, state => reserve(state, admission({ buildAttempt: '2' }), created).record);
-  assert.equal(second.sequence, '2');
+  assert.deepEqual(second, first);
   const baseBump = { ...admission({ buildId: '43' }), baseVersion: '1.3.0' };
   const migrated = { ...baseBump, workflowIdentity: 'owner-approved-replacement' };
   assert.throws(() => reserve(state(), migrated, created), /workflow/);
   const next = await transact(store, state => reserve(state, baseBump, created).record);
-  assert.equal(next.sequence, '3');
+  assert.equal(next.sequence, '2');
   assert.notEqual(allocationKey(baseBump), allocationKey(migrated));
   const { state: persisted } = await store.read();
   const resumedStore = memoryStore(persisted);
-  assert.equal((await transact(resumedStore, state => reserve(state, baseBump, created).record)).sequence, '3');
+  assert.equal((await transact(resumedStore, state => reserve(state, baseBump, created).record)).sequence, '2');
   assert.equal(persisted.reservations[first.allocationKey].record.sequence, '1');
 });
 
@@ -355,7 +475,7 @@ test('every new stable and insider reservation exceeds the historical or current
     for (const channel of ['stable', 'insider']) {
       for (const baseVersion of ['1.2.3', '1.2.4']) {
         const initial = stableFloorLedger(kind, '1.2.4');
-        const selected = channel === 'stable' ? stableAdmission(baseVersion, { buildAttempt: '2' })
+        const selected = channel === 'stable' ? stableAdmission(baseVersion, { buildId: '43' })
           : { ...admission(), baseVersion };
         const store = memoryStore(initial);
         await assert.rejects(transact(store, next => reserve(next, selected, created, undefined, hotfixQualification())),
@@ -404,7 +524,7 @@ test('exact stable and insider reservation retries survive a later stable floor 
   const insider = record(ledger);
   const admittedStable = stableAdmission();
   const stable = reserve(ledger, admittedStable, created, undefined, hotfixQualification()).record;
-  const newer = reserve(ledger, stableAdmission('1.2.4', { buildAttempt: '2' }),
+  const newer = reserve(ledger, stableAdmission('1.2.4', { buildId: '43' }),
     created, undefined, hotfixQualification()).record;
   advance(ledger, newer, completeSet(newer), sha, '');
   for (const original of [ledger, publicLedger(ledger)]) {
@@ -414,7 +534,7 @@ test('exact stable and insider reservation retries survive a later stable floor 
       assert.deepEqual(retried, original.reservations[identity.allocationKey]);
     }
     await assert.rejects(transact(store, next => reserve(next, admission({ stage: 'rc' }), created)),
-      /changed its admission/);
+      /changed its admission|effective stable floor/);
     assert.deepEqual((await store.read()).state, original);
   }
 });
@@ -437,7 +557,8 @@ test('beta/ordinary insider/RC share N and enforce nonregressing SemVer stage pr
   assert.equal(record(ledger, { buildId: '43' }).canonicalVersion, '1.2.3-insider.2');
   assert.equal(record(ledger, { buildId: '44', stage: 'rc' }).canonicalVersion, '1.2.3-rc.3');
   assert.throws(() => record(ledger, { buildId: '45' }), /Stage regression/);
-  assert.throws(() => record(ledger, { stage: 'rc' }), /changed its admission/);
+  assert.equal(record(ledger, { stage: 'rc' }).canonicalVersion, '1.2.3-rc.4',
+    'A distinct run allocates the next RC identity');
 });
 
 test('annotated and lightweight refs peel exactly; moved, deleted and recreated tags are rejected', async () => {
@@ -481,10 +602,11 @@ test('source tag is authorized in durable state before public ref creation and n
   await assert.rejects(ensureSourceTag(api, store, identity, transact), /never recreate/);
 });
 
-test('record consumers reject direct tags, foreign run/attempt and changed signed identity', () => {
+test('record consumers reject foreign callers while allowing same-run retry attempts', () => {
   const identity = record();
   verifyConsumer(identity, identity, context());
-  for (const override of [{ event: 'push' }, { buildAttempt: '2' }, { repository: 'fork/repo' },
+  assert.doesNotThrow(() => verifyConsumer(identity, identity, context({ buildAttempt: '2' })));
+  for (const override of [{ event: 'push' }, { repository: 'fork/repo' },
     { workflowIdentity: 'caller-forgery' }, { workflowSha: newerSha }]) {
     assert.throws(() => verifyConsumer(identity, identity, context(override)));
   }
@@ -496,7 +618,7 @@ test('record consumers reject direct tags, foreign run/attempt and changed signe
   }
 });
 
-test('complete-set CAS rejects mixed/missing platforms and stale-source high-N reruns', async () => {
+test('complete-set CAS accepts forward branch movement but rejects version and byte regressions', async () => {
   const ledger = state();
   const old = record(ledger);
   const current = record(ledger, { buildId: '43', eventSha: newerSha, workflowSha: newerSha });
@@ -504,8 +626,8 @@ test('complete-set CAS rejects mixed/missing platforms and stale-source high-N r
   assert.throws(() => validateCompleteSet(current, { ...set, managedEligible: true }), /managed eligibility/);
   advance(ledger, current, set, newerSha, '');
   const previous = structuredClone(ledger.pointers);
-  const highOld = record(ledger, { buildAttempt: '2' });
-  assert.throws(() => advance(ledger, highOld, completeSet(highOld), newerSha, publicSetHash(set)), /Stale source/);
+  assert.equal(advance(ledger, current, set, 'd'.repeat(40), publicSetHash(set)).setHash, publicSetHash(set));
+  assert.throws(() => advance(ledger, old, completeSet(old), 'd'.repeat(40), publicSetHash(set)), /version regression/);
   assert.throws(() => advance(ledger, old, completeSet(old), sha, ''), /compare-and-set/);
   assert.deepEqual(ledger.pointers, previous);
   const missing = completeSet(current);
@@ -635,8 +757,7 @@ test('stable promotion requires exact-main qualification and never reuses inside
   const insider = record(ledger);
   const set = completeSet(insider);
   advance(ledger, insider, set, sha, '');
-  const stable = admission({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
-    eventSha: newerSha, workflowSha: newerSha, workflowIdentity: context().workflowIdentity.replace('/development', '/main') });
+  const stable = admission({ channel: 'stable', eventSha: newerSha, workflowSha: newerSha });
   assert.throws(() => reserve(ledger, stable, created), /qualification/);
   ledger.qualifications[newerSha] = promotionQualification(insider, set);
   for (const [field, value] of Object.entries({
@@ -664,8 +785,7 @@ test('promotion authorization reproduces full Git trees and rejects unqualified 
   const set = completeSet(insider);
   advance(ledger, insider, set, sha, '');
   ledger.qualifications[newerSha] = promotionQualification(insider, set);
-  const stable = admission({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
-    eventSha: newerSha, workflowSha: newerSha, workflowIdentity: context().workflowIdentity.replace('/development', '/main') });
+  const stable = admission({ channel: 'stable', eventSha: newerSha, workflowSha: newerSha });
   for (const options of [
     { mutate: entries => { entries[1].sha = '1'.repeat(40); } },
     { mutate: entries => { entries[1].mode = '100755'; } },
@@ -703,8 +823,7 @@ test('hotfix qualification requires a normalized non-secret rationale digest, ne
   for (const invalid of [undefined, true, '', 'hotfix', 'reason\rspoof', 'reason\nspoof']) {
     assert.throws(() => hotfixReasonDigest(invalid), ReleasePolicyError);
   }
-  const stable = admission({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
-    workflowIdentity: context().workflowIdentity.replace('/development', '/main') });
+  const stable = admission({ channel: 'stable' });
   for (const reasonSha256 of [undefined, true, 'approved', '', 'f'.repeat(63), `${'f'.repeat(64)}\r`]) {
     const ledger = state();
     ledger.qualifications[sha] = { ...hotfixQualification(), reasonSha256 };
@@ -745,8 +864,7 @@ test('all private/projected reservation variants reject every required nested de
   advance(insiderState, insider, insiderSet, sha, '');
   const hotfixState = state();
   hotfixState.qualifications[sha] = hotfixQualification();
-  const stableAdmission = admission({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
-    workflowIdentity: context().workflowIdentity.replace('/development', '/main') });
+  const stableAdmission = admission({ channel: 'stable' });
   const hotfix = reserve(hotfixState, stableAdmission, created, undefined, hotfixQualification()).record;
   const promotionState = structuredClone(insiderState);
   promotionState.qualifications[newerSha] = promotionQualification(insider, insiderSet);
@@ -807,7 +925,7 @@ test('source tagging preflights unrelated qualification, set, reservation and po
   const initial = state();
   const previous = record(initial);
   advance(initial, previous, completeSet(previous), sha, '');
-  const identity = record(initial, { buildAttempt: '2' });
+  const identity = record(initial, { buildId: '43' });
   initial.qualifications[sha] = hotfixQualification();
   const clean = publicLedger(initial);
   for (const mutate of [
@@ -847,7 +965,8 @@ test('well-typed record and admission substitutions cannot break canonical or ha
     const overrides = {
       repository: 'other/repository', channel: 'stable', baseVersion: '1.2.4', sourceBranch: 'main',
       sourceCommit: newerSha, authorizedBranchHead: newerSha, workflowCommit: newerSha,
-      buildId: '43', buildAttempt: '2', workflowIdentity: context().workflowIdentity.replace('/development', '/main'),
+      buildId: '43', buildAttempt: '2',
+      workflowIdentity: 'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main',
       releaseId: 'insider:1.2.4-insider.1', canonicalVersion: '1.2.4-insider.1',
       sourceTag: 'v1.2.4-insider.1', stage: 'rc', sequence: '2', allocationKey: 'f'.repeat(64),
       created: '2026-09-12T19:00:00.000Z',
@@ -876,8 +995,7 @@ test('well-typed record and admission substitutions cannot break canonical or ha
   }
   const stableLedger = state();
   stableLedger.qualifications[sha] = hotfixQualification();
-  const stableAdmission = admission({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
-    workflowIdentity: context().workflowIdentity.replace('/development', '/main') });
+  const stableAdmission = admission({ channel: 'stable' });
   const stable = reserve(stableLedger, stableAdmission, created, undefined, hotfixQualification()).record;
   validateRecord(stable);
   for (const field of ['stage', 'sequence']) {
@@ -926,15 +1044,17 @@ test('workflow entry points have no direct tag/manual Docker bypass; iOS namespa
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
   assert.match(docker, /workflow_call:/);
   assert.doesNotMatch(docker, /^\s{2}(push|workflow_dispatch|schedule):/m);
-  assert.match(docker, /uses: actions\/download-artifact@v8/);
-  assert.match(docker, /cosign verify-blob/);
+  assert.match(docker, /uses: actions\/download-artifact@[0-9a-f]{40}\s+# v8/);
+  assert.match(docker, /release-control\.mjs consume/);
   assert.doesNotMatch(docker, /^\s+(?:packages|contents): write$/m);
   assert.match(docker, /password: \$\{\{ secrets\.RELEASE_REGISTRY_TOKEN \}\}/);
-  assert.match(docker, /Publish and verify public corresponding-source assets\n\s+env:\n\s+GH_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
+  assert.match(docker, /Publish and verify public corresponding-source assets\r?\n\s+working-directory: source\r?\n\s+env:\r?\n\s+GH_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
   for (const step of docker.split(/^\s{6}- /m)) {
     if (!/uses: actions\/(?:upload|download)-artifact@/.test(step)) continue;
     const selector = step.match(/^\s{10}(?:name|pattern): (.+)$/m)?.[1];
-    assert.ok(selector?.includes('github.run_attempt'), `Artifact crosses attempt boundary: ${selector}`);
+    assert.ok(selector?.includes('github.run_id') ||
+      selector === 'release-authorization-${{ github.run_attempt }}',
+    `Artifact is not bound to this run or attempt: ${selector}`);
   }
   assert.doesNotMatch(docker, /sort -V|promotion-tags\.txt|release-sha-|manual-\{\{sha\}\}/);
   assert.match(readFileSync('.github/workflows/consolidated-release.yml', 'utf8'),
@@ -946,26 +1066,14 @@ test('workflow entry points have no direct tag/manual Docker bypass; iOS namespa
   }
 });
 
-test('standalone and monolith production frontend builds require the verified consumer output for both channels', () => {
+test('single protected publisher requires verified frontend identity for every production build', () => {
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
-  const frontend = docker.split('  build-frontend:')[1].split('\n  ensure-orca-base:')[0];
-  assert.match(frontend, /Consume canonical frontend identity\n\s+id: frontend_identity\n[\s\S]*?uses: \.\/\.github\/actions\/release-authorization/);
-  assert.match(frontend, /PRINTFARMER_RELEASE_IDENTITY: \$\{\{ steps\.frontend_identity\.outputs\.frontend_identity \}\}/);
-  assert.match(frontend, /test -n "\$PRINTFARMER_RELEASE_IDENTITY"\n\s+npm run build/);
-  assert.doesNotMatch(frontend, /^\s+if:/m, 'Neither channel may skip the consumer or build input');
-  const action = readFileSync('.github/actions/release-authorization/action.yml', 'utf8');
-  assert.match(action, /frontend_identity:\r?\n\s+value: \$\{\{ steps\.consume\.outputs\.frontend_identity \}\}/);
-  assert.match(action, /node scripts\/ci\/release-control\.mjs consume/);
-
-  const monolith = docker.split('\n  build-monolith:')[1].split(/\n  [\w-]+:/)[0];
-  assert.match(monolith, /id: source\n[\s\S]*?uses: \.\/\.github\/actions\/release-authorization/);
-  assert.match(monolith, /PRINTFARMER_RELEASE_IDENTITY: \$\{\{ steps\.source\.outputs\.frontend_identity \}\}\n\s+run: test -n "\$PRINTFARMER_RELEASE_IDENTITY"/);
-  assert.ok(monolith.indexOf('Require canonical monolith frontend identity') <
-    monolith.indexOf('uses: docker/build-push-action@'));
-  assert.match(monolith, /file: scripts\/docker\/dockerfiles\/Dockerfile\.multistage\n\s+target: monolith-runtime/);
-  assert.match(monolith, /PRINTFARMER_RELEASE_IDENTITY=\$\{\{ steps\.source\.outputs\.frontend_identity \}\}/);
-  assert.match(monolith, /BUILD_VERSION=\$\{\{ fromJSON\(inputs\.identity\)\.canonicalVersion \}\}/);
-  assert.doesNotMatch(monolith, /^\s+if:/m, 'Neither channel may skip monolith validation');
+  assert.match(docker, /id: consume[\s\S]*?release-control\.mjs consume/);
+  assert.match(docker,
+    /PRINTFARMER_RELEASE_IDENTITY: \$\{\{ steps\.consume\.outputs\.frontend_identity \}\}/);
+  assert.match(docker, /--build-arg "PRINTFARMER_RELEASE_IDENTITY=\$\{PRINTFARMER_RELEASE_IDENTITY\}"/);
+  assert.match(docker, /build_component frontend frontend-runtime linux\/amd64,linux\/arm64/);
+  assert.match(docker, /build_component monolith monolith-runtime linux\/amd64,linux\/arm64/);
 
   const multistage = readFileSync('scripts/docker/dockerfiles/Dockerfile.multistage', 'utf8').replace(/\r\n/g, '\n');
   const stage = multistage.split(' AS frontend-build\n')[1].split('\nFROM ')[0];
@@ -975,16 +1083,10 @@ test('standalone and monolith production frontend builds require the verified co
   assert.ok(stage.indexOf('test -n "$PRINTFARMER_RELEASE_IDENTITY"') < stage.indexOf('npm run build'));
   assert.match(multistage.split(' AS monolith-runtime\n')[1], /COPY --from=frontend-build \/app\/dist \.\/wwwroot\//);
   assert.match(stage, /if \[ "\$build_status" -ne 0 \]; then[\s\S]*?exit \$build_status/);
-  assert.equal((docker.match(/npm run build/g) || []).length, 1, 'New native frontend paths need identity coverage');
   assert.equal((multistage.match(/npm run build/g) || []).length, 1, 'New Docker frontend paths need identity coverage');
 });
 
-test('actual native and Docker frontend guards reject missing identity before building published versions', () => {
-  const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
-  const native = docker.split('\n  build-frontend:')[1].split('\n  ensure-orca-base:')[0];
-  const nativeGuard = native.match(/test -n "\$PRINTFARMER_RELEASE_IDENTITY"/)?.[0];
-  const monolith = docker.split('\n  build-monolith:')[1].split(/\n  [\w-]+:/)[0];
-  const monolithGuard = monolith.match(/run: (test -n "\$PRINTFARMER_RELEASE_IDENTITY")/)?.[1];
+test('Docker frontend guard rejects missing identity before building published versions', () => {
   const multistage = readFileSync('scripts/docker/dockerfiles/Dockerfile.multistage', 'utf8').replace(/\r\n/g, '\n');
   const dockerGuard = multistage.split(' AS frontend-build\n')[1].match(/^RUN (if .*; fi)$/m)?.[1];
   const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
@@ -992,7 +1094,7 @@ test('actual native and Docker frontend guards reject missing identity before bu
   stableLedger.qualifications[sha] = hotfixQualification();
   const stable = reserve(stableLedger, stableAdmission(), created, undefined, hotfixQualification()).record;
   const insider = reserve(state(), admission(), created).record;
-  for (const guard of [nativeGuard, monolithGuard, dockerGuard]) {
+  for (const guard of [dockerGuard]) {
     assert.ok(guard);
     for (const version of ['1.2.3', '1.2.3-insider.42', '']) {
       for (const identity of ['', buildMetadata(
@@ -1141,14 +1243,13 @@ test('all executable scripts, actions and workflows have only the reviewed relea
     .split('\0').filter(entry => entry.startsWith('100755 ')).map(entry => entry.split('\t')[1]));
   const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
     gitOptions).split('\0').filter(file =>
+    existsSync(file) &&
     (executables.has(file) || /\.(?:sh|bash|ps1|py|rb|js|mjs|cjs)$/.test(file) || /(?:^|\/)Fastfile$/.test(file) ||
       /^(?:scripts|tools|mobile\/scripts|\.github\/scripts)\/(?:[^/]+\/)*[^/.]+$/.test(file) ||
       /^\.github\/.*\.ya?ml$/.test(file) || /^(?:scripts|tools|\.github|\.squad)\/.*\.ts$/.test(file)) &&
     !/(?:^|\/)(?:tests?|__tests__|e2e|node_modules)(?:\/|$)|(?:^|\/)test-[^/]+$|\.(?:test|spec)\./.test(file));
   const approved = {
     'scripts/ci/release-github.mjs': ['tag-write'],
-    'scripts/ci/release-rehearsal-probes.mjs': ['tag-write'],
-    'scripts/ci/release-rehearsal-fixture.mjs': ['tag-write'],
     '.github/workflows/docker-publish.yml': ['release-write'],
     '.github/workflows/testflight-beta.yml': ['tag-write', 'release-write'],
     'mobile/scripts/release-beta.sh': ['tag-write'],
@@ -1372,7 +1473,7 @@ test('history rejects valid-schema new reservations at or below the preceding st
         const isolated = state();
         isolated.counter = previous.counter;
         isolated.qualifications[sha] = hotfixQualification();
-        const selected = channel === 'stable' ? stableAdmission(baseVersion, { buildAttempt: '2' })
+        const selected = channel === 'stable' ? stableAdmission(baseVersion, { buildId: '43' })
           : { ...admission(), baseVersion };
         const identity = reserve(isolated, selected, created, undefined, hotfixQualification()).record;
         const added = publicLedger(isolated);
@@ -1409,8 +1510,7 @@ test('every counter edge requires exactly one matching insider reservation and n
   };
   const addStable = (next, baseVersion = '1.2.3') => {
     next.qualifications[sha] = hotfixQualification();
-    const admitted = admit(context({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
-      workflowIdentity: context().workflowIdentity.replace('/development', '/main') }),
+    const admitted = admit(context({ channel: 'stable' }),
     sha, `v${baseVersion}\n`, '1.2.2');
     reserve(next, admitted, created, undefined, hotfixQualification());
   };
@@ -1470,18 +1570,17 @@ test('valid every-edge allocations preserve seed floors, stable semantics and no
     append(next => { next.reservations[insider.allocationKey].tagPublished = true; });
     append(next => advance(next, insider, completeSet(insider), sha, ''));
     append(next => { next.qualifications[sha] = hotfixQualification(); });
-    const stableAdmission = admission({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
-      workflowIdentity: context().workflowIdentity.replace('/development', '/main') });
+    const stableAdmission = admission({ channel: 'stable' });
     const stable = append(next => reserve(next, stableAdmission, created, undefined, hotfixQualification()).record);
     append(next => reserve(next, stableAdmission, created, undefined, hotfixQualification()));
     append(next => advance(next, stable, completeSet(stable), sha, ''));
     assert.equal(ledger.counter, insider.sequence, 'Stable allocations and pointer updates consume no sequence');
     append(next => reserve(next, admission(), created));
     append(next => reserve(next, stableAdmission, created));
-    const rcAdmission = admit(context({ buildAttempt: '2', stage: 'rc' }), sha, 'v1.2.4\n', '1.2.3');
+    const rcAdmission = admit(context({ buildId: '43', buildAttempt: '2', stage: 'rc' }), sha, 'v1.2.4\n', '1.2.3');
     const rc = append(next => reserve(next, rcAdmission, created).record);
     assert.equal(rc.sequence, '9007199254740995');
-    const betaAdmission = admit(context({ buildAttempt: '3', stage: 'beta' }), sha, 'v1.2.5\n', '1.2.3');
+    const betaAdmission = admit(context({ buildId: '44', buildAttempt: '3', stage: 'beta' }), sha, 'v1.2.5\n', '1.2.3');
     const beta = append(next => reserve(next, betaAdmission, created).record);
     assert.equal(beta.sequence, '9007199254740996');
     const fixture = ledgerHistoryFixture(snapshots);
@@ -1502,7 +1601,8 @@ for (const mode of ['promotion', 'hotfix']) {
       const insider = record(seed);
       const insiderSet = completeSet(insider);
       advance(seed, insider, insiderSet, sha, '');
-      const alternative = record(seed, { buildAttempt: '2', eventSha: 'f'.repeat(40), workflowSha: 'f'.repeat(40) });
+      const alternative = record(seed, { buildId: '43', buildAttempt: '2',
+        eventSha: 'f'.repeat(40), workflowSha: 'f'.repeat(40) });
       const alternativeSet = completeSet(alternative);
       advance(seed, alternative, alternativeSet, alternative.sourceCommit, publicSetHash(insiderSet));
       const promotion = promotionQualification(insider, insiderSet);
@@ -1515,8 +1615,7 @@ for (const mode of ['promotion', 'hotfix']) {
       seed.qualifications[newerSha] = Object.fromEntries(Object.entries(qualification).reverse());
       let identity = insider;
       if (consumed) {
-        const stableAdmission = admission({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
-          workflowIdentity: context().workflowIdentity.replace('/development', '/main'),
+        const stableAdmission = admission({ channel: 'stable',
           eventSha: newerSha, workflowSha: newerSha });
         identity = reserve(seed, stableAdmission, created, undefined, mode === 'promotion' ? promotion : hotfix).record;
       }
@@ -1613,7 +1712,7 @@ test('every continuity invariant is enforced before writes across older history 
   seed.reservations[first.allocationKey].tagObject = 'd'.repeat(40);
   seed.reservations[first.allocationKey].tagPublished = true;
   advance(seed, first, completeSet(first), sha, '');
-  const second = record(seed, { buildAttempt: '2' });
+  const second = record(seed, { buildId: '43' });
   advance(seed, second, completeSet(second), sha, publicSetHash(completeSet(first)));
   seed.counter = '10';
   const previous = publicLedger(seed);
@@ -1822,7 +1921,9 @@ function protectionFixture(channel = 'insider', approvalMode = 'separation-of-du
     if (endpoint === `rules/branches/${branch}?per_page=100`) return branchRules;
     if (endpoint === 'rulesets/5') return branchRuleset;
     if (endpoint === `environments/release-${channel}`) return environment;
-    if (endpoint.endsWith('/deployment-branch-policies')) return { branch_policies: [{ name: branch, type: 'branch' }] };
+    if (endpoint === `environments/release-${channel}/deployment-branch-policies`) {
+      return { branch_policies: [{ name: 'development', type: 'branch' }] };
+    }
     if (endpoint === 'rulesets?per_page=100') return rulesets;
     if (endpoint.startsWith('rulesets/')) return rulesets.find(rule => rule.id === Number(endpoint.split('/')[1]));
     throw new Error(endpoint);
@@ -1867,7 +1968,7 @@ for (const channel of ['stable', 'insider']) {
             /explicitly disable administrator bypass/);
           const fixture = authorizationFixture(state(), { channel, approvalMode: mode, mutateEnvironment });
           globalThis.fetch = fixture.fetch;
-          await assert.rejects(runReleaseControl('authorize', fixture.env),
+          await assert.rejects(runFixtureControl('authorize', fixture),
             /explicitly disable administrator bypass/);
           assert.ok(fixture.calls.some(call => call.admin && call.publisher));
           assert.ok(fixture.calls.every(call => call.method === 'GET'), 'No reservation or source-tag write');
@@ -1994,7 +2095,8 @@ for (const channel of ['stable', 'insider']) {
         for (const mutatePolicy of mutations) {
           const fixture = authorizationFixture(state(), { channel, approvalMode: mode, mutatePolicy });
           globalThis.fetch = fixture.fetch;
-          await assert.rejects(runReleaseControl('authorize', fixture.env), /Owner blocker|Incomplete/);
+          await assert.rejects(runFixtureControl('authorize', fixture),
+            /Owner blocker|Incomplete|Missing successful exact-SHA required qualification/);
           assert.ok(fixture.calls.every(call => call.method === 'GET'));
           assert.deepEqual(fixture.ledgerWrites, []);
         }
@@ -2065,7 +2167,7 @@ test('exact-SHA status and check failures deny admission and authorization befor
         for (const mutation of mutations) {
           const fixture = authorizationFixture(state(), { approvalMode, ...mutation });
           globalThis.fetch = fixture.fetch;
-          await assert.rejects(runReleaseControl(operation, fixture.env), /qualification|evidence/);
+          await assert.rejects(runFixtureControl(operation, fixture), /Invalid|qualification|evidence|stale/);
           assert.ok(fixture.calls.every(call => call.method === 'GET'));
           assert.deepEqual(fixture.ledgerWrites, []);
         }
@@ -2075,15 +2177,19 @@ test('exact-SHA status and check failures deny admission and authorization befor
 });
 
 test('additional configured checks enforce latest exact run and integration binding without inventing status fields', async () => {
+  const evidenceAt = new Date().toISOString();
   const checks = { total_count: 2, check_runs: [
-    { id: 1, name: 'extra', head_sha: sha, status: 'completed', conclusion: 'failure', app: { id: 123 } },
-    { id: 2, name: 'extra', head_sha: sha, status: 'completed', conclusion: 'success', app: { id: 123 } },
+    { id: 1, name: 'extra', head_sha: sha, status: 'completed', conclusion: 'failure',
+      completed_at: evidenceAt, app: { id: 123 } },
+    { id: 2, name: 'extra', head_sha: sha, status: 'completed', conclusion: 'success',
+      completed_at: evidenceAt, app: { id: 123 } },
   ] };
   const statuses = { sha, total_count: 0, statuses: [] };
   const api = async endpoint => endpoint.includes('/check-runs?') ? checks : statuses;
   await verifyReleaseChecks(api, sha, [{ context: 'extra', integration_id: 123 }]);
   await assert.rejects(verifyReleaseChecks(api, sha, [{ context: 'extra', integration_id: 999 }]), /qualification/);
-  statuses.statuses.push({ id: 1, context: 'extra', state: 'failure' }); statuses.total_count++;
+  statuses.statuses.push({ id: 1, context: 'extra', state: 'failure',
+    created_at: evidenceAt, updated_at: evidenceAt }); statuses.total_count++;
   await assert.rejects(verifyReleaseChecks(api, sha, [{ context: 'extra' }]), /qualification/);
   statuses.statuses[0].state = 'success';
   await verifyReleaseChecks(api, sha, [{ context: 'extra' }]);
@@ -2096,9 +2202,39 @@ test('additional configured checks enforce latest exact run and integration bind
       fixture.branchRules[3].parameters.required_status_checks.push({ context: 'extra' });
     } });
     globalThis.fetch = fixture.fetch;
-    await assert.rejects(runReleaseControl('authorize', fixture.env), /qualification/);
+    await assert.rejects(runFixtureControl('authorize', fixture), /qualification/);
     assert.deepEqual(fixture.ledgerWrites, []);
   } finally { globalThis.fetch = previous; }
+});
+
+test('GitHub evidence timestamps accept seconds or milliseconds and reject unsupported REST shapes', async () => {
+  const collectedAt = Date.parse('2026-09-13T20:00:00.000Z');
+  for (const value of ['2026-09-13T19:30:00Z', '2026-09-13T19:30:00.123Z']) {
+    assert.equal(parseGithubTimestamp(value), Date.parse(value));
+    const checks = { total_count: 1, check_runs: [{
+      id: 1, name: 'extra', head_sha: sha, status: 'completed', conclusion: 'success',
+      completed_at: value, app: { id: 123 },
+    }] };
+    const statuses = { sha, total_count: 0, statuses: [] };
+    await verifyReleaseChecks(
+      async endpoint => endpoint.includes('/check-runs?') ? checks : statuses,
+      sha,
+      [{ context: 'extra', integration_id: 123 }],
+      collectedAt,
+    );
+  }
+  for (const value of [
+    '2026-09-13T19:30:00+00:00',
+    '2026-09-13T19:30:00-07:00',
+    '2026-09-13T19:30:00.1234Z',
+    '2026-09-13T19:30:00.Z',
+    '2026-02-30T19:30:00Z',
+    '2026-09-13T24:00:00Z',
+    '0000-09-13T19:30:00Z',
+    '2026-09-13T19:30:00',
+    '2026-09-13t19:30:00z',
+    '',
+  ]) assert.throws(() => parseGithubTimestamp(value), /Invalid GitHub timestamp/);
 });
 
 test('release admission rejects PR-head self-attestation, carried review and owner override as canonical evidence', async () => {
@@ -2129,7 +2265,9 @@ test('missing or unknown approval mode cannot read policy or admit or authorize 
       await assert.rejects(verifyProtection(() => assert.fail('No policy read'), 'insider', '123', mode),
         /RELEASE_APPROVAL_MODE/);
       for (const operation of ['admit', 'authorize']) {
-        await assert.rejects(runReleaseControl(operation, { ...fixture.env, RELEASE_APPROVAL_MODE: mode }),
+        await assert.rejects(runFixtureControl(operation, fixture, {
+          ...fixture.env, RELEASE_APPROVAL_MODE: mode,
+        }),
           /RELEASE_APPROVAL_MODE/);
       }
     }
@@ -2137,21 +2275,20 @@ test('missing or unknown approval mode cannot read policy or admit or authorize 
 });
 
 test('release workflow explicitly wires approval mode and confines reviewer evidence to protected authorization', () => {
-  const text = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
-  const admissionJob = text.split('  admit:')[1].split('  authorize:')[0];
-  const authorizationJob = text.split('  authorize:')[1].split('  publish:')[0];
-  for (const job of [admissionJob, authorizationJob]) {
-    assert.match(job, /RELEASE_APPROVAL_MODE: \$\{\{ vars\.RELEASE_APPROVAL_MODE \}\}/);
-  }
+  const authority = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
+  const publisher = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
+  const admissionJob = authority.split('  admit:')[1].split('  qualification:')[0];
+  assert.match(admissionJob, /RELEASE_APPROVAL_MODE: \$\{\{ vars\.RELEASE_APPROVAL_MODE \}\}/);
   assert.doesNotMatch(admissionJob, /RELEASE_OWNER_APPROVED_REVIEWERS/);
   assert.match(admissionJob, /approval_mode: \$\{\{ steps\.admit\.outputs\.approval_mode \}\}/);
-  assert.match(authorizationJob,
-    /RELEASE_ADMITTED_APPROVAL_MODE: \$\{\{ needs\.admit\.outputs\.approval_mode \}\}/);
-  assert.match(authorizationJob, /environment: release-\$\{\{ needs\.admit\.outputs\.channel \}\}/);
-  assert.match(authorizationJob,
+  assert.match(publisher,
+    /RELEASE_ADMITTED_APPROVAL_MODE: \$\{\{ fromJSON\(inputs\.transaction\)\.approvalMode \}\}/);
+  assert.match(publisher,
+    /environment: \$\{\{ fromJSON\(inputs\.transaction\)\.channel == 'stable' && 'release-stable' \|\| 'release-insider' \}\}/);
+  assert.match(publisher,
     /RELEASE_OWNER_APPROVED_REVIEWERS: \$\{\{ secrets\.RELEASE_OWNER_APPROVED_REVIEWERS \}\}/);
   assert.match(admissionJob, /statuses: read/);
-  assert.match(authorizationJob, /permission-statuses: read/);
+  assert.match(publisher, /permission-statuses: read/);
 });
 
 test('authorization fails closed on missing, invalid or divergent admitted approval mode before API access', async () => {
@@ -2162,7 +2299,7 @@ test('authorization fails closed on missing, invalid or divergent admitted appro
       const fixture = authorizationFixture(state(), { approvalMode: mode });
       for (const admittedMode of [undefined, '', 'unknown', `${mode} `,
         mode === 'single-maintainer' ? 'separation-of-duties' : 'single-maintainer']) {
-        await assert.rejects(runReleaseControl('authorize', {
+        await assert.rejects(runFixtureControl('authorize', fixture, {
           ...fixture.env, RELEASE_ADMITTED_APPROVAL_MODE: admittedMode,
         }), /RELEASE_APPROVAL_MODE|Approval mode changed after admission/);
         assert.deepEqual(fixture.ledgerWrites, []);
@@ -2183,7 +2320,7 @@ test('single-maintainer authorization rejects unapproved, automatic and conflict
     ]) {
       const fixture = authorizationFixture(state(), { approvalMode: 'single-maintainer', mutateEnvironment });
       globalThis.fetch = fixture.fetch;
-      await assert.rejects(runReleaseControl('authorize', fixture.env), /Owner blocker/);
+      await assert.rejects(runFixtureControl('authorize', fixture), /Owner blocker/);
       assert.ok(fixture.calls.length > 0);
       assert.ok(fixture.calls.every(call => call.method === 'GET'));
       assert.deepEqual(fixture.ledgerWrites, []);
@@ -2213,25 +2350,27 @@ function artifactUploads(workflow) {
 test('every release artifact upload path is explicitly inventoried, including both signed handoffs', () => {
   const authority = '.github/workflows/consolidated-release.yml';
   const docker = '.github/workflows/docker-publish.yml';
-  assert.deepEqual(artifactUploads(authority), [[
-    authorizationPath, authorizationBundle,
-    '.artifacts/release-authorization/public-identity.json',
-    '.artifacts/release-authorization/public-identity.bundle.json',
-  ]]);
+  assert.deepEqual(artifactUploads(authority), [
+    ['.artifacts/release-transaction/transaction.json'],
+    ['.artifacts/release-transaction/qualification.json'],
+  ]);
   assert.deepEqual(artifactUploads(docker), [
-    ['./publish/slicer-host'], ['./publish/api'], ['./publish/orcaslicer-worker'],
-    ['./publish/printer-discovery'], ['./publish/compliance/license-inventory.json'],
-    ['src/Web/ReactApp/dist'], ['release-artifacts/*.spdx.json'],
-    ['release-artifacts/digest-*.txt'], ['release-artifacts/*.spdx.json'],
-    ['release-artifacts/digest-monolith.txt'], [authorizationPath, authorizationBundle, privateSetPath],
+    [
+      authorizationPath, authorizationBundle,
+      '.artifacts/release-authorization/public-identity.json',
+      '.artifacts/release-authorization/public-identity.bundle.json',
+    ],
+    [authorizationPath, authorizationBundle, privateSetPath],
   ]);
   // Keep the call graph closed: a new reusable workflow/action must be inventoried too.
-  const action = '.github/actions/release-authorization/action.yml';
-  for (const file of [authority, docker, action]) {
+  for (const file of [authority, docker]) {
     const text = readFileSync(file, 'utf8');
     assert.equal(artifactUploads(file).length, (text.match(/uses:\s*actions\/upload-artifact@/g) || []).length);
     for (const [, local] of text.matchAll(/uses: \.\/([^\s]+)/g)) {
-      assert.ok(['.github/workflows/docker-publish.yml', '.github/actions/release-authorization'].includes(local), local);
+      assert.ok([
+        '.github/workflows/ci.yml',
+        '.github/workflows/docker-publish.yml',
+      ].includes(local), local);
     }
     assert.doesNotMatch(text, /(?:gh api|curl).*(?:rulesets|environments|rules\/branches)|sign\.log/);
   }
@@ -2274,6 +2413,7 @@ test('normalized attestation and artifact writers reject raw, unknown and weaken
     assert.doesNotMatch(readFileSync(privateSetPath, 'utf8'), privateFields);
     assert.deepEqual(JSON.parse(readFileSync(privateSetPath, 'utf8')), completeSet(identity));
     const env = { GITHUB_REPOSITORY: context().repository, GITHUB_REF: context().ref,
+      RELEASE_SIGNER_IDENTITY: publisherWorkflowIdentity,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
     const changed = structuredClone(identity);
     changed.protection.claims.canonicalTagsImmutable = false;
@@ -2295,8 +2435,7 @@ test('stable artifact qualification retains pass claims but never owner free tex
     ...protection, channel: 'stable', branch: 'main',
   };
   const stableProtection = { ...payload, policyDigest: hash(payload) };
-  const stable = admit(context({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
-    workflowIdentity: context().workflowIdentity.replace('/development', '/main') }), sha, 'v1.2.3');
+  const stable = admit(context({ channel: 'stable' }), sha, 'v1.2.3');
   const ledger = state();
   ledger.qualifications[sha] = hotfixQualification();
   const qualification = await verifyStableQualification(() => assert.fail('No hotfix tree lookup'), ledger, stable);
@@ -2349,10 +2488,14 @@ test('raw policy identity changes do not affect normalized digests and API error
 function authorizationFixture(initial = state(), settings = {}) {
   const channel = settings.channel ?? 'insider';
   const sourceCommit = settings.sourceCommit ?? sha;
+  const observedBranchHead = settings.observedBranchHead ?? sourceCommit;
+  const workflowCommit = settings.workflowCommit ?? workflowControlSha;
+  const currentBranchHead = settings.currentBranchHead ?? observedBranchHead;
   const branch = channel === 'stable' ? 'main' : 'development';
-  const selected = context({ channel, eventSha: sourceCommit, workflowSha: sourceCommit,
-    ref: `refs/heads/${branch}`, workflowBranch: branch,
-    workflowIdentity: context().workflowIdentity.replace('/development', `/${branch}`) });
+  const selected = context({
+    channel, eventSha: sourceCommit, workflowSha: workflowCommit, observedBranchHead,
+    ref: 'refs/heads/development', workflowBranch: 'development',
+  });
   const policy = protectionFixture(channel, settings.approvalMode);
   const { api: policies, environment, branchRules } = policy;
   branchRules.find(rule => rule.type === 'required_status_checks').parameters.required_status_checks
@@ -2378,6 +2521,8 @@ function authorizationFixture(initial = state(), settings = {}) {
   for (const snapshot of settings.history ?? [initial]) appendSnapshot(snapshot);
   let advanced = false;
   let tag;
+  let canonicalHead = currentBranchHead;
+  let canonicalComparison = { status: 'ahead', merge_base_commit: { sha: sourceCommit } };
   const calls = [];
   const ledgerWrites = [];
   const env = {
@@ -2386,14 +2531,51 @@ function authorizationFixture(initial = state(), settings = {}) {
     RELEASE_APPROVAL_MODE: settings.approvalMode ?? 'separation-of-duties',
     RELEASE_ADMITTED_APPROVAL_MODE: settings.approvalMode ?? 'separation-of-duties',
     GITHUB_REPOSITORY: selected.repository, GITHUB_EVENT_NAME: selected.event,
-    GITHUB_REF: selected.ref, GITHUB_SHA: sourceCommit,
-    GITHUB_WORKFLOW_REF: selected.workflowIdentity, GITHUB_WORKFLOW_SHA: sourceCommit,
+    GITHUB_REF: selected.ref, GITHUB_SHA: workflowCommit,
+    GITHUB_WORKFLOW_REF: selected.workflowIdentity, GITHUB_WORKFLOW_SHA: workflowCommit,
     GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '1', RELEASE_CHANNEL: channel,
+    RELEASE_SIGNER_IDENTITY: publisherWorkflowIdentity,
   };
-  const canonical = canonicalAuthorizationFixture(sourceCommit, channel, env.RELEASE_APPROVAL_MODE);
+  const transaction = {
+    kind: 'release-transaction',
+    schema: 2,
+    repository: selected.repository,
+    channel,
+    sourceBranch: branch,
+    sourceCommit,
+    observedBranchHead,
+    workflowIdentity: selected.workflowIdentity,
+    workflowCommit,
+    runId: '42',
+    runAttempt: '1',
+    approvalMode: env.RELEASE_APPROVAL_MODE,
+  };
+  env.RELEASE_TRANSACTION = JSON.stringify(transaction);
+  env.RELEASE_SOURCE_COMMIT = sourceCommit;
+  const canonical = canonicalAuthorizationFixture(
+    sourceCommit, channel, env.RELEASE_APPROVAL_MODE, workflowCommit);
+  const qualificationStartedAt = new Date(Date.now() - 4 * 60_000).toISOString();
+  const qualificationCompletedAt = new Date(Date.now() - 2 * 60_000).toISOString();
+  const qualificationRunUrl = `https://github.com/${selected.repository}/actions/runs/42`;
+  const transactionJobs = qualificationJobs.map((name, index) => ({
+    id: 1000 + index,
+    name: `${qualificationJobNamespace} / ${name}`,
+    run_id: 42,
+    run_attempt: 1,
+    head_sha: workflowCommit,
+    status: 'completed',
+    conclusion: 'success',
+    started_at: qualificationStartedAt,
+    completed_at: qualificationCompletedAt,
+    check_run_url:
+      `https://api.github.com/repos/${selected.repository}/check-runs/${1000 + index}`,
+    html_url: `${qualificationRunUrl}/job/${1000 + index}`,
+  }));
   return {
     env, calls, ledgerWrites, environment, branchRules,
     deleteTag() { tag = undefined; },
+    setCanonicalHead(value) { canonicalHead = value; },
+    setCanonicalComparison(value) { canonicalComparison = value; },
     async fetch(url, options) {
       const endpoint = url.replace(/^https:\/\/api\.github\.com\/repos\/OlyForge3D\/PrintFarmer\/?/, '');
       assert.notEqual(endpoint, url, `Unexpected API host/path: ${url}`);
@@ -2413,22 +2595,85 @@ function authorizationFixture(initial = state(), settings = {}) {
       }
       if (endpoint === `git/ref/heads/${branch}`) return response({
         ref: `refs/heads/${branch}`,
-        object: { type: 'commit', sha: settings.headDriftAfterTree && comparedTree ? 'f'.repeat(40) : sourceCommit },
+        object: { type: 'commit', sha: settings.headDriftAfterTree && comparedTree ? 'f'.repeat(40) : canonicalHead },
       });
       if (endpoint === 'git/ref/heads/development') return response({
-        ref: 'refs/heads/development', object: { type: 'commit', sha: sourceCommit },
+        ref: 'refs/heads/development', object: { type: 'commit', sha: workflowCommit },
       });
       if (endpoint === 'git/ref/heads/release-ledger') return response({ object: { sha: head } });
+      if (endpoint === `compare/${sourceCommit}...${canonicalHead}`) return response(canonicalComparison);
       if (endpoint.startsWith('compare/')) return response({ status: 'ahead' });
       if (endpoint.startsWith('contents/VERSION?')) {
         return response({ encoding: 'base64', content: Buffer.from('v1.2.3\n').toString('base64') });
       }
+      if (endpoint === 'actions/workflows/consolidated-release.yml') {
+        return response({
+          id: 9,
+          path: '.github/workflows/consolidated-release.yml',
+          state: 'active',
+        });
+      }
+      if (endpoint === 'actions/runs/42') {
+        return response({
+          id: 42,
+          run_attempt: 1,
+          path: '.github/workflows/consolidated-release.yml',
+          workflow_id: 9,
+          repository: { full_name: selected.repository },
+          head_repository: { full_name: selected.repository },
+          head_branch: 'development',
+          head_sha: workflowCommit,
+          event: 'workflow_dispatch',
+          html_url: qualificationRunUrl,
+          status: 'in_progress',
+          conclusion: undefined,
+          check_suite_id: 100,
+          run_started_at: qualificationStartedAt,
+          updated_at: qualificationCompletedAt,
+        });
+      }
+      if (endpoint === 'actions/runs/42/attempts/1/jobs?per_page=100') {
+        return response({ total_count: transactionJobs.length, jobs: transactionJobs });
+      }
+      if (workflowCommit !== sourceCommit &&
+        endpoint.startsWith(`commits/${workflowCommit}/check-runs`)) {
+        const checks = {
+          total_count: transactionJobs.length,
+          check_runs: transactionJobs.map(job => ({
+            id: job.id,
+            name: job.name,
+            head_sha: workflowCommit,
+            status: 'completed',
+            conclusion: 'success',
+            completed_at: qualificationCompletedAt,
+            app: { id: 15368, slug: 'github-actions' },
+            check_suite: { id: 100 },
+            url: job.check_run_url,
+          })),
+        };
+        return response(checks);
+      }
       if (endpoint.startsWith(`commits/${sourceCommit}/check-runs`)) {
         const names = [...releaseBuildChecks, ...canonicalValidationChecks];
-        const checks = { total_count: names.length, check_runs: names
+        const checkRuns = names
           .map((name, id) => ({ name, id: id + 1, head_sha: sourceCommit, status: 'completed',
             conclusion: 'success', app: { slug: 'github-actions' }, check_suite: { id: 100 },
-            url: `https://api.github.com/repos/OlyForge3D/PrintFarmer/check-runs/${id + 1}` })) };
+            completed_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+            url: `https://api.github.com/repos/OlyForge3D/PrintFarmer/check-runs/${id + 1}` }));
+        if (workflowCommit === sourceCommit) {
+          checkRuns.push(...transactionJobs.map(job => ({
+            id: job.id,
+            name: job.name,
+            head_sha: workflowCommit,
+            status: 'completed',
+            conclusion: 'success',
+            completed_at: qualificationCompletedAt,
+            app: { id: 15368, slug: 'github-actions' },
+            check_suite: { id: 100 },
+            url: job.check_run_url,
+          })));
+        }
+        const checks = { total_count: checkRuns.length, check_runs: checkRuns };
         settings.mutateChecks?.(checks);
         return response(checks);
       }
@@ -2480,6 +2725,92 @@ function authorizationFixture(initial = state(), settings = {}) {
   };
 }
 
+test('executed admission pins transaction source while workflow control and canonical heads differ', async () => {
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `distinct-admission-identity-${process.pid}`);
+  const savedFetch = globalThis.fetch;
+  const savedOutput = process.env.GITHUB_OUTPUT;
+  const savedRunnerTemp = process.env.RUNNER_TEMP;
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  try {
+    const runnerTemp = resolve('runner');
+    const outputDirectory = resolve(runnerTemp, '_runner_file_commands');
+    const outputPath = resolve(outputDirectory, 'set_output_12345678-1234-1234-1234-123456789abc');
+    mkdirSync(outputDirectory, { recursive: true });
+    writeFileSync(outputPath, '');
+    process.env.RUNNER_TEMP = runnerTemp;
+    process.env.GITHUB_OUTPUT = outputPath;
+    const stable = authorizationFixture(state(), {
+      channel: 'stable',
+      sourceCommit: sha,
+      observedBranchHead: sha,
+      workflowCommit: workflowControlSha,
+      currentBranchHead: sha,
+    });
+    globalThis.fetch = stable.fetch;
+    const stableAdmission = await runFixtureControl('admit', stable);
+    assert.equal(stable.env.GITHUB_SHA, workflowControlSha);
+    assert.equal(stableAdmission.sourceCommit, sha);
+    assert.equal(stableAdmission.workflowCommit, workflowControlSha);
+    assert.equal(stableAdmission.channel, 'stable');
+    assert.match(readFileSync(outputPath, 'utf8'), new RegExp(`^source_sha=${sha}$`, 'm'));
+
+    const insider = authorizationFixture(state(), {
+      sourceCommit: sha,
+      observedBranchHead: newerSha,
+      workflowCommit: workflowControlSha,
+      currentBranchHead: currentCanonicalSha,
+    });
+    globalThis.fetch = insider.fetch;
+    const insiderAdmission = await runFixtureControl('admit', insider);
+    assert.equal(insiderAdmission.sourceCommit, sha);
+    assert.equal(insiderAdmission.authorizedBranchHead, newerSha);
+    assert.equal(insiderAdmission.workflowCommit, workflowControlSha);
+    assert.equal(insiderAdmission.channel, 'insider');
+  } finally {
+    globalThis.fetch = savedFetch;
+    if (savedOutput === undefined) delete process.env.GITHUB_OUTPUT;
+    else process.env.GITHUB_OUTPUT = savedOutput;
+    if (savedRunnerTemp === undefined) delete process.env.RUNNER_TEMP;
+    else process.env.RUNNER_TEMP = savedRunnerTemp;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('executed admission and authorization use identical immutable transaction bindings', async () => {
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `transaction-binding-${process.pid}`);
+  const savedFetch = globalThis.fetch;
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  try {
+    const fixture = authorizationFixture(state(), {
+      sourceCommit: sha,
+      observedBranchHead: newerSha,
+      workflowCommit: workflowControlSha,
+      currentBranchHead: currentCanonicalSha,
+    });
+    globalThis.fetch = fixture.fetch;
+    const admitted = await runFixtureControl('admit', fixture);
+    const authorized = await runFixtureControl('authorize', fixture);
+    assert.deepEqual(
+      Object.fromEntries(['sourceCommit', 'channel', 'sourceBranch', 'buildId', 'buildAttempt',
+        'workflowIdentity', 'workflowCommit'].map(field => [field, admitted[field]])),
+      Object.fromEntries(['sourceCommit', 'channel', 'sourceBranch', 'buildId', 'buildAttempt',
+        'workflowIdentity', 'workflowCommit'].map(field => [field, authorized[field]])),
+    );
+    assert.equal(authorized.sourceCommit, sha);
+    assert.equal(authorized.authorizedBranchHead, newerSha);
+    assert.equal(authorized.workflowCommit, workflowControlSha);
+  } finally {
+    globalThis.fetch = savedFetch;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('executed authority rejects initial and newly advanced stable floors before any source or publication write', async () => {
   const cwd = process.cwd();
   const root = resolve('.artifacts', `stable-floor-authority-${process.pid}`);
@@ -2495,7 +2826,7 @@ test('executed authority rejects initial and newly advanced stable floors before
         for (const operation of ['admit', 'authorize']) {
           const fixture = authorizationFixture(initial, { channel });
           globalThis.fetch = fixture.fetch;
-          await assert.rejects(runReleaseControl(operation, fixture.env), /effective stable floor/);
+          await assert.rejects(runFixtureControl(operation, fixture), /effective stable floor/);
           assert.ok(fixture.calls.every(call => call.method === 'GET'));
           assert.equal(fixture.ledgerWrites.length, 0);
           assert.equal(existsSync(authorizationPath), false);
@@ -2503,13 +2834,13 @@ test('executed authority rejects initial and newly advanced stable floors before
       }
       for (const timing of ['advanceBeforeAllocation', 'advanceOnCas']) {
         const initial = stableFloorLedger('historical', '1.2.2');
-        const stable = reserve(initial, stableAdmission('1.2.4', { buildAttempt: '2' }),
+        const stable = reserve(initial, stableAdmission('1.2.4', { buildId: '43' }),
           created, undefined, hotfixQualification()).record;
         const advanced = structuredClone(initial);
         advance(advanced, stable, completeSet(stable), sha, '');
         const fixture = authorizationFixture(publicLedger(initial), { channel, [timing]: publicLedger(advanced) });
         globalThis.fetch = fixture.fetch;
-        await assert.rejects(runReleaseControl('authorize', fixture.env), /effective stable floor/);
+        await assert.rejects(runFixtureControl('authorize', fixture), /effective stable floor/);
         const writes = fixture.calls.filter(call => call.method !== 'GET');
         if (timing === 'advanceBeforeAllocation') {
           assert.deepEqual(writes, []);
@@ -2537,7 +2868,7 @@ test('executed authority preserves existing exact reservations after stable adva
   const ledger = stableFloorLedger('historical', '1.2.2');
   const insider = record(ledger);
   const stable = reserve(ledger, stableAdmission(), created, undefined, hotfixQualification()).record;
-  const newer = reserve(ledger, stableAdmission('1.2.4', { buildAttempt: '2' }),
+  const newer = reserve(ledger, stableAdmission('1.2.4', { buildId: '43' }),
     created, undefined, hotfixQualification()).record;
   advance(ledger, newer, completeSet(newer), sha, '');
   const cwd = process.cwd();
@@ -2551,10 +2882,13 @@ test('executed authority preserves existing exact reservations after stable adva
     for (const identity of [insider, stable]) {
       writeAuthorization(identity);
       const original = readFileSync(authorizationPath, 'utf8');
-      const fixture = authorizationFixture(publicLedger(ledger), { channel: identity.channel });
+      const fixture = authorizationFixture(publicLedger(ledger), {
+        channel: identity.channel,
+        workflowCommit: identity.workflowCommit,
+      });
       globalThis.fetch = fixture.fetch;
       await runReleaseControl('admit', fixture.env);
-      await runReleaseControl('authorize', fixture.env);
+      await runFixtureControl('authorize', fixture);
       assert.equal(readFileSync(authorizationPath, 'utf8'), original);
       for (const snapshot of fixture.ledgerWrites) {
         assert.equal(snapshot.counter, ledger.counter);
@@ -2582,7 +2916,7 @@ test('executed admission and authorization reject multi-commit evidence rewrites
     for (const operation of ['admit', 'authorize']) {
       const fixture = authorizationFixture(previous, { history: [previous, changed, changed] });
       globalThis.fetch = fixture.fetch;
-      await assert.rejects(runReleaseControl(operation, fixture.env), /immutable qualification/);
+      await assert.rejects(runFixtureControl(operation, fixture), /immutable qualification/);
       assert.equal(fixture.calls.filter(call => call.method === 'POST' || call.method === 'PATCH').length, 0);
       assert.equal(fixture.ledgerWrites.length, 0);
     }
@@ -2616,7 +2950,7 @@ test('executed admission and authorization reject historical floor and unbound c
         for (const operation of ['admit', 'authorize']) {
           const fixture = authorizationFixture(previous, { history });
           globalThis.fetch = fixture.fetch;
-          await assert.rejects(runReleaseControl(operation, fixture.env), ReleasePolicyError,
+          await assert.rejects(runFixtureControl(operation, fixture), ReleasePolicyError,
             `${name}, ${historyName}: ${operation}`);
           assert.equal(fixture.calls.filter(call => call.method === 'POST' || call.method === 'PATCH').length, 0);
           assert.equal(fixture.ledgerWrites.length, 0);
@@ -2647,11 +2981,11 @@ test('stable authority verifies tree evidence and rechecks main HEAD before any 
       const fixture = authorizationFixture(publicLedger(ledger), { channel: 'stable', sourceCommit: newerSha, ...options });
       globalThis.fetch = fixture.fetch;
       if (Object.keys(options).length) {
-        await assert.rejects(runReleaseControl('authorize', fixture.env), ReleasePolicyError);
+        await assert.rejects(runFixtureControl('authorize', fixture), ReleasePolicyError);
         assert.ok(fixture.calls.every(call => call.method === 'GET'));
         assert.equal(existsSync(authorizationPath), false);
       } else {
-        await runReleaseControl('authorize', fixture.env);
+        await runFixtureControl('authorize', fixture);
         const firstWrite = fixture.calls.findIndex(call => call.method !== 'GET');
         const preflight = fixture.calls.slice(0, firstWrite);
         assert.equal(preflight.filter(call => call.endpoint.includes('?recursive=1')).length, 2);
@@ -2726,10 +3060,10 @@ test('every transaction rejects private qualification seed fields before any Git
   const identity = record(seed);
   const set = completeSet(identity);
   advance(seed, identity, set, sha, '');
-  const nextIdentity = record(seed, { buildAttempt: '2' });
+  const nextIdentity = record(seed, { buildId: '43' });
   const clean = publicLedger(seed);
   const operations = [
-    current => reserve(current, admission({ buildAttempt: '3' }), created),
+    current => reserve(current, admission({ buildId: '44', buildAttempt: '3' }), created),
     current => reserve(current, admission(), created),
     current => { current.reservations[identity.allocationKey].tagObject = newerSha; },
     current => { Object.assign(current.reservations[identity.allocationKey], { tagObject: newerSha, tagPublished: true }); },
@@ -2852,10 +3186,10 @@ test('every ledger write path rejects poisoned stored public sets before Git blo
   const identity = record(seed);
   const set = completeSet(identity);
   advance(seed, identity, set, sha, '');
-  const nextIdentity = record(seed, { buildAttempt: '2' });
+  const nextIdentity = record(seed, { buildId: '43' });
   const clean = publicLedger(seed);
   const operations = [
-    current => reserve(current, admission({ buildAttempt: '3' }), created),
+    current => reserve(current, admission({ buildId: '44', buildAttempt: '3' }), created),
     current => reserve(current, admission(), created),
     current => { current.reservations[identity.allocationKey].tagObject = newerSha; },
     current => { Object.assign(current.reservations[identity.allocationKey], { tagObject: newerSha, tagPublished: true }); },
@@ -2922,8 +3256,7 @@ test('public ledger schema rejects malformed maps and typed references; stable o
     malformed[field] = [{ ownerNotes: 'private-value' }];
     assert.throws(() => publicLedger(malformed));
   }
-  const stable = admit(context({ channel: 'stable', ref: 'refs/heads/main', workflowBranch: 'main',
-    workflowIdentity: context().workflowIdentity.replace('/development', '/main') }), sha, 'v1.2.3');
+  const stable = admit(context({ channel: 'stable' }), sha, 'v1.2.3');
   for (const field of ['reviewed', 'tests', 'compatibility', 'migrations', 'recovery', 'reasonSha256']) {
     for (const invalid of [false, 'true', { private: 'private-value' }, undefined]) {
       const ledger = state();
@@ -2966,7 +3299,7 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
   const verify = (file, args) => {
     assert.equal(file, 'cosign');
     assert.deepEqual(args, ['verify-blob', '--bundle', authorizationBundle,
-      '--certificate-identity', `https://github.com/${context().workflowIdentity}`,
+      '--certificate-identity', publisherWorkflowIdentity,
       '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com', authorizationPath]);
   };
   try {
@@ -2977,16 +3310,26 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     fixture.calls.length = 0;
     for (const operation of ['authorize', 'advance']) {
       for (const token of [undefined, fixture.env.GH_TOKEN]) {
-        await assert.rejects(runReleaseControl(operation, { ...fixture.env, RELEASE_PUBLISHER_TOKEN: token }),
+        const transaction = operation === 'advance' ?
+          { RELEASE_TRANSACTION: JSON.stringify(releaseTransaction(record())) } : {};
+        await assert.rejects(runFixtureControl(operation, fixture, {
+          ...fixture.env, ...transaction, RELEASE_PUBLISHER_TOKEN: token,
+        }),
           /Protected publisher App token required/);
       }
     }
     assert.equal(fixture.calls.length, 0, 'Missing App credential must fail before API calls');
+    await assert.rejects(runFixtureControl('authorize', fixture, {
+      ...fixture.env,
+      RELEASE_SOURCE_COMMIT: newerSha,
+    }), /source identity does not match/);
+    assert.equal(fixture.calls.length, 0,
+      'Mismatched redundant source identity must fail before API calls');
     const denied = { ...fixture.env, RELEASE_PUBLISHER_TOKEN: 'not-authorized-fixture' };
-    await assert.rejects(runReleaseControl('authorize', denied), /HTTP 403/);
+    await assert.rejects(runFixtureControl('authorize', fixture, denied), /HTTP 403/);
     assert.ok(fixture.calls.every(call => call.method === 'GET'), '403 must not allocate or tag');
     fixture.calls.length = 0;
-    await runReleaseControl('authorize', fixture.env);
+    await runFixtureControl('authorize', fixture);
     const identity = JSON.parse(readFileSync(authorizationPath, 'utf8'));
     verifyProtectionEvidence(identity.protection, 'insider');
     assert.equal(identity.protection.approvalMode, approvalMode);
@@ -2995,7 +3338,7 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     assert.ok(adminCalls.length >= 8 && adminCalls.every(call => call.publisher));
     assert.ok(fixture.calls.slice(firstWrite).every(call => !call.admin), 'Protection must precede allocation');
     const signedBytes = readFileSync(authorizationPath, 'utf8');
-    await runReleaseControl('authorize', fixture.env);
+    await runFixtureControl('authorize', fixture);
     assert.equal(readFileSync(authorizationPath, 'utf8'), signedBytes, 'Retry retains original evidence bytes');
     const changedMode = approvalMode === 'single-maintainer' ? 'separation-of-duties' : 'single-maintainer';
     const originalRules = structuredClone(fixture.environment.protection_rules);
@@ -3003,15 +3346,23 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     fixture.environment.protection_rules = protectionFixture('insider', changedMode).environment.protection_rules;
     fixture.branchRules[2].parameters = protectionFixture('insider', changedMode).branchRules[2].parameters;
     fixture.calls.length = 0;
-    await assert.rejects(runReleaseControl('authorize', { ...fixture.env, RELEASE_APPROVAL_MODE: changedMode,
-      RELEASE_ADMITTED_APPROVAL_MODE: changedMode }),
-      /Qualification approval mode mismatch/);
+    await assert.rejects(runFixtureControl('authorize', fixture, {
+      ...fixture.env,
+      RELEASE_APPROVAL_MODE: changedMode,
+      RELEASE_ADMITTED_APPROVAL_MODE: changedMode,
+    }),
+      /Approval mode changed after transaction selection/);
     assert.ok(fixture.calls.every(call => call.method === 'GET'));
     fixture.environment.protection_rules = originalRules;
     fixture.branchRules[2].parameters = originalBranchPolicy;
     fixture.calls.length = 0;
-    const consumer = { ...fixture.env, RELEASE_PUBLISHER_TOKEN: undefined, RELEASE_PUBLISHER_APP_ID: undefined,
-      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
+    const consumer = {
+      ...fixture.env,
+      RELEASE_PUBLISHER_TOKEN: undefined,
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_TRANSACTION: JSON.stringify(releaseTransaction(identity)),
+      RELEASE_SOURCE_COMMIT: identity.sourceCommit,
+    };
     await runReleaseControl('consume', consumer, verify);
     const frontendOutput = readFileSync(process.env.GITHUB_OUTPUT, 'utf8')
       .split('\n').find(line => line.startsWith('frontend_identity='));
@@ -3025,18 +3376,37 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     assert.equal(JSON.parse(publicIdentity).identitySha256, hash(identity));
     fixture.calls.length = 0;
     writeFileSync(privateSetPath, JSON.stringify(completeSet(identity)));
-    await runReleaseControl('advance', { ...fixture.env, RELEASE_PUBLIC_IDENTITY: consumer.RELEASE_PUBLIC_IDENTITY }, verify);
+    fixture.calls.length = 0;
+    await runReleaseControl('preflight', {
+      ...fixture.env,
+      RELEASE_PUBLIC_IDENTITY: consumer.RELEASE_PUBLIC_IDENTITY,
+      RELEASE_TRANSACTION: consumer.RELEASE_TRANSACTION,
+      RELEASE_SOURCE_COMMIT: identity.sourceCommit,
+    }, verify);
+    const preflightOutputs = readFileSync(process.env.GITHUB_OUTPUT, 'utf8');
+    assert.match(preflightOutputs, new RegExp(`^verified_branch_head=${identity.sourceCommit}$`, 'm'));
+    assert.match(preflightOutputs, /^expected_pointer=$/m);
+    assert.ok(fixture.calls.every(call => call.method === 'GET'),
+      'Publication preflight must remain read-only');
+    fixture.calls.length = 0;
+    await runReleaseControl('advance', {
+      ...fixture.env,
+      RELEASE_PUBLIC_IDENTITY: consumer.RELEASE_PUBLIC_IDENTITY,
+      RELEASE_TRANSACTION: consumer.RELEASE_TRANSACTION,
+      RELEASE_SOURCE_COMMIT: identity.sourceCommit,
+      RELEASE_VERIFIED_BRANCH_HEAD: identity.sourceCommit,
+      RELEASE_EXPECTED_POINTER: '',
+    }, verify);
     assert.ok(fixture.calls.some(call => call.method === 'PATCH'));
-    assert.ok(fixture.calls.every(call => call.publisher && !call.admin),
-      'Pointer writer needs the App, not Administration permission');
+    assert.ok(fixture.calls.every(call => call.publisher),
+      'Pointer writer and final protection revalidation require only the publisher App');
     fixture.calls.length = 0;
     const changed = structuredClone(identity);
     changed.protection.claims.exclusiveApprovedPublisher = false;
     writeFileSync(authorizationPath, JSON.stringify(changed));
     await assert.rejects(runReleaseControl('consume', consumer, verify), /differs from public identity/);
     writeFileSync(authorizationPath, signedBytes);
-    await assert.rejects(runReleaseControl('consume', { ...consumer, GITHUB_RUN_ATTEMPT: '2' }, verify),
-      /Unauthorized consumer/);
+    await assert.doesNotReject(runReleaseControl('consume', { ...consumer, GITHUB_RUN_ATTEMPT: '2' }, verify));
     fixture.deleteTag();
     await assert.rejects(runReleaseControl('consume', consumer, verify), /tag missing/);
     assert.ok(fixture.calls.every(call => call.method === 'GET'));
@@ -3059,6 +3429,57 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
   }
 });
 }
+
+test('publication preflight accepts canonical ancestry and rejects branch drift before writes', async () => {
+  const fixture = authorizationFixture();
+  const originalFetch = globalThis.fetch;
+  const cwd = process.cwd();
+  const previousOutput = process.env.GITHUB_OUTPUT;
+  const previousRunner = process.env.RUNNER_TEMP;
+  const root = resolve('.artifacts', `preflight-${process.pid}`);
+  mkdirSync(resolve(root, 'runner', '_runner_file_commands'), { recursive: true });
+  process.chdir(root);
+  process.env.RUNNER_TEMP = resolve('runner');
+  process.env.GITHUB_OUTPUT = resolve('runner', '_runner_file_commands',
+    'set_output_00000000-0000-0000-0000-000000000000');
+  writeFileSync(process.env.GITHUB_OUTPUT, '');
+  globalThis.fetch = fixture.fetch;
+  try {
+    await runFixtureControl('authorize', fixture);
+    const identity = JSON.parse(readFileSync(authorizationPath, 'utf8'));
+    writeFileSync(privateSetPath, JSON.stringify(completeSet(identity)));
+    const env = {
+      ...fixture.env,
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_TRANSACTION: JSON.stringify(releaseTransaction(identity)),
+      RELEASE_SOURCE_COMMIT: identity.sourceCommit,
+    };
+    fixture.calls.length = 0;
+    fixture.setCanonicalHead(newerSha);
+    await runReleaseControl('preflight', env, () => {});
+    const outputs = readFileSync(process.env.GITHUB_OUTPUT, 'utf8');
+    assert.match(outputs, new RegExp(`^verified_branch_head=${newerSha}$`, 'm'));
+    assert.match(outputs, /^expected_pointer=$/m);
+    assert.ok(fixture.calls.every(call => call.method === 'GET'));
+    fixture.calls.length = 0;
+    fixture.setCanonicalHead('f'.repeat(40));
+    fixture.setCanonicalComparison({
+      status: 'diverged',
+      merge_base_commit: { sha: anchor },
+    });
+    await assert.rejects(runReleaseControl('preflight', env, () => {}),
+      /trusted canonical branch history/);
+    assert.ok(fixture.calls.every(call => call.method === 'GET'));
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousOutput === undefined) delete process.env.GITHUB_OUTPUT;
+    else process.env.GITHUB_OUTPUT = previousOutput;
+    if (previousRunner === undefined) delete process.env.RUNNER_TEMP;
+    else process.env.RUNNER_TEMP = previousRunner;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('missing, malformed and weakened signed protection evidence always fails closed', async () => {
   const evidence = await verifyProtection(protectionFixture().api, 'insider', '123', 'separation-of-duties');
@@ -3090,7 +3511,11 @@ test('missing, malformed and weakened signed protection evidence always fails cl
   globalThis.fetch = fixture.fetch;
   try {
     await assert.rejects(runReleaseControl('consume', {
-      ...fixture.env, RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)), RELEASE_PUBLISHER_TOKEN: undefined,
+      ...fixture.env,
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_PUBLISHER_TOKEN: undefined,
+      RELEASE_TRANSACTION: JSON.stringify(releaseTransaction({ ...identity, protection: fixtureProtection('insider') })),
+      RELEASE_SOURCE_COMMIT: identity.sourceCommit,
     }, () => {}), /authorization fields/);
     assert.ok(fixture.calls.every(call => !call.admin && call.method === 'GET'));
     assert.ok(!fixture.calls.some(call => call.endpoint.startsWith('git/ref/tags/')));
@@ -3101,49 +3526,29 @@ test('missing, malformed and weakened signed protection evidence always fails cl
   }
 });
 
-test('workflow wiring transports only public outputs and each consumer verifies the normalized artifact', () => {
+test('workflow wiring keeps authorization and every publisher consumer in one protected job', () => {
   const authority = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
-  const action = readFileSync('.github/actions/release-authorization/action.yml', 'utf8');
-  const authorize = authority.split('\n  authorize:')[1].split('\n  publish:')[0];
-  assert.match(authorize, /environment: release-/);
-  assert.ok(authorize.indexOf('uses: actions/create-github-app-token@v2') <
-    authorize.indexOf('node scripts/ci/release-control.mjs authorize'));
-  assert.match(authorize, /permission-administration: read/);
-  assert.match(authorize, /GH_TOKEN: \$\{\{ github\.token \}\}\n\s+RELEASE_PUBLISHER_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
-  assert.doesNotMatch(authority.split('\n  admit:')[1].split('\n  authorize:')[0], /permission-administration|RELEASE_PUBLISHER_TOKEN/);
-  const jobs = Object.fromEntries([...docker.matchAll(/^  ([\w-]+):\n([\s\S]*?)(?=^  [\w-]+:\n|(?![\s\S]))/gm)]
-    .map(match => [match[1], match[2]]));
-  const gated = name => name === 'admission' || (jobs[name]?.match(/^    needs: (.+)$/m)?.[1]
-    .replace(/[[\]]/g, '').split(',').map(item => item.trim()).some(gated) ?? false);
-  for (const [name, job] of Object.entries(jobs)) {
-    if (/uses: \.\/\.github\/actions\/release-authorization|release-control\.mjs advance|RELEASE_REGISTRY_TOKEN/.test(job)) {
-      assert.ok(gated(name), `${name} can bypass signature admission`);
-    }
-  }
-  assert.match(authority, /public_identity: \$\{\{ steps\.authorize\.outputs\.public_identity \}\}/);
-  assert.match(authority, /identity: \$\{\{ needs\.authorize\.outputs\.public_identity \}\}/);
-  for (const match of (authority + docker + action).matchAll(/\b([A-Z_]*RELEASE_IDENTITY)\s*[:=]/g)) {
+  const publishJob = docker.split('\n  publish:')[1];
+  assert.match(publishJob, /environment: .+release-stable.+release-insider/);
+  assert.ok(publishJob.indexOf('actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349') <
+    publishJob.indexOf('release-control.mjs authorize'));
+  assert.ok(publishJob.indexOf('release-control.mjs authorize') <
+    publishJob.indexOf('RELEASE_REGISTRY_TOKEN'));
+  assert.ok(publishJob.indexOf('release-set.mjs tag') <
+    publishJob.indexOf('release-control.mjs advance'));
+  const preApproval = authority.split('\n  admit:')[1].split('\n  publish:')[0];
+  assert.doesNotMatch(preApproval,
+    /RELEASE_PUBLISHER_PRIVATE_KEY|RELEASE_REGISTRY_TOKEN|create-github-app-token|contents: write|packages: write|id-token: write/);
+  for (const match of (authority + docker).matchAll(/\b([A-Z_]*RELEASE_IDENTITY)\s*[:=]/g)) {
     assert.equal(match[1], 'PRINTFARMER_RELEASE_IDENTITY', 'Only the public frontend identity may be transported');
   }
-  assert.doesNotMatch(authority + docker + action, /outputs\.identity\b/);
-  assert.doesNotMatch(docker, /cp (?:release-identity|release-set|\.artifacts\/release-authorization\/release-identity)/);
-  assert.match(docker, /cp \.artifacts\/release-authorization\/public-identity\.bundle\.json release-assets\/release-identity\.bundle\.json/);
-  assert.match(authority, /--bundle \.artifacts\/release-authorization\/public-identity\.bundle\.json \\\n\s+\.artifacts\/release-authorization\/public-identity\.json/);
-  assert.match(docker, /cmp -s release-assets\/release-identity\.json \.artifacts\/release-authorization\/public-identity\.json/);
-  for (const match of docker.matchAll(/fromJSON\(inputs\.identity\)\.(\w+)/g)) {
-    assert.ok([...publicIdentityFields, 'identitySha256', 'buildTime'].includes(match[1]), match[1]);
-  }
-  for (const match of (authority + docker + action).matchAll(/steps\.(?:authorize|consume)\.outputs\.(\w+)/g)) {
-    assert.ok(['public_identity', 'frontend_identity', 'version', 'container_version', 'channel', 'identity_hash',
+  assert.doesNotMatch(authority + docker, /outputs\.identity\b/);
+  for (const match of (authority + docker).matchAll(/steps\.(?:authorize|consume)\.outputs\.(\w+)/g)) {
+    assert.ok(['public_identity', 'verified_branch_head', 'frontend_identity', 'version', 'container_version', 'channel', 'identity_hash',
       'source_archive_url', 'sbom_url'].includes(match[1]), match[1]);
   }
-  assert.match(action, /name: release-authorization-\$\{\{ github.run_attempt \}\}/);
-  assert.match(action, /path: \.artifacts\/release-authorization/);
-  assert.ok(action.indexOf('actions/download-artifact') < action.indexOf('release-control.mjs consume'));
-  assert.ok(action.indexOf('cosign-installer') < action.indexOf('release-control.mjs consume'));
-  assert.equal((docker.match(/uses: \.\/\.github\/actions\/release-authorization/g) || []).length, 6);
-  assert.doesNotMatch(docker, /run: node scripts\/ci\/release-control\.mjs consume/);
+  assert.match(docker, /run: node scripts\/ci\/release-control\.mjs consume/);
   assert.match(readFileSync('.dockerignore', 'utf8'), /\*\*\/\.artifacts\//);
   assert.match(readFileSync('.gitignore', 'utf8'), /^\.artifacts\/$/m);
 });
@@ -3157,13 +3562,14 @@ test('signed-artifact verification fails closed without logging payloads or acce
     const identity = await authorizedRecord();
     writeAuthorization(identity);
     const env = { GITHUB_REPOSITORY: context().repository, GITHUB_REF: context().ref,
+      RELEASE_SIGNER_IDENTITY: publisherWorkflowIdentity,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
     assert.throws(() => verifyAuthorization(env, () => { throw new Error(JSON.stringify(identity)); }),
       error => error.message === 'Authorization signature verification failed');
     const verify = (file, args) => {
       assert.equal(file, 'cosign');
       assert.ok(args.includes(authorizationPath) && args.includes(authorizationBundle));
-      assert.ok(args.includes(`https://github.com/${identity.workflowIdentity}`));
+      assert.ok(args.includes(publisherWorkflowIdentity));
       assert.doesNotMatch(JSON.stringify(args), /privateMarker|private-value/);
     };
     assert.deepEqual(verifyAuthorization(env, verify), identity);
@@ -3178,6 +3584,10 @@ test('signed-artifact verification fails closed without logging payloads or acce
       ...publicAuthorization(identity), futurePrivate: 'private-value',
     }) }, verify), /Invalid public authorization/);
     assert.throws(() => verifyAuthorization({ ...env, GITHUB_REF: 'refs/heads/attacker' }, verify), /Untrusted/);
+    assert.throws(() => verifyAuthorization({
+      ...env,
+      RELEASE_SIGNER_IDENTITY: `https://github.com/${identity.workflowIdentity}`,
+    }, verify), /Untrusted/);
   } finally {
     process.chdir(cwd);
     rmSync(root, { recursive: true, force: true });
@@ -3245,16 +3655,18 @@ test('the shared public field projection rejects wrong types rather than coercin
 });
 
 test('executed signing and asset-copy commands keep normalized authorization separate from public projection', async () => {
-  const authority = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
-  const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
-  const signing = authority.split('      - name: Sign immutable source and App-verified protection attestation\n')[1]
+  const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8').replace(/\r\n/g, '\n');
+  const signing = docker.split('      - name: Sign immutable authorization\n')[1]
     .split('      - uses: actions/upload-artifact')[0].split('        run: |\n')[1]
     .split('\n').map(line => line.replace(/^          /, '')).join('\n');
   const publication = docker.split('\n').filter(line =>
-    /^\s+(cmp -s release-assets\/release-identity|cp \.artifacts\/release-authorization\/public-identity)/.test(line))
-    .map(line => line.trim()).join('\n');
-  const uploadedAuthorizationFiles = [...artifactUploads('.github/workflows/consolidated-release.yml'),
-    ...artifactUploads('.github/workflows/docker-publish.yml')].flat()
+    /^\s+cp \.\.\/\.artifacts\/release-authorization\/public-identity/.test(line))
+    .map(line => line.trim());
+  assert.deepEqual(publication, [
+    'cp ../.artifacts/release-authorization/public-identity.json release-assets/release-identity.json',
+    'cp ../.artifacts/release-authorization/public-identity.bundle.json release-assets/release-identity.bundle.json',
+  ]);
+  const uploadedAuthorizationFiles = artifactUploads('.github/workflows/docker-publish.yml').flat()
     .filter(path => path.startsWith('.artifacts/release-authorization/'));
   const root = resolve('.artifacts', `sign-public-${process.pid}`);
   const cwd = process.cwd();
@@ -3276,10 +3688,14 @@ test('executed signing and asset-copy commands keep normalized authorization sep
       cp "$source" "$bundle"
     }\n`;
     const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
-    const result = spawnSync(shell, ['-c', `${mock}${signing}\n${publication}`],
+    const result = spawnSync(shell, ['-c', `${mock}${signing}`],
       { cwd: root, encoding: 'utf8' });
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr);
+    copyFileSync('.artifacts/release-authorization/public-identity.json',
+      'release-assets/release-identity.json');
+    copyFileSync('.artifacts/release-authorization/public-identity.bundle.json',
+      'release-assets/release-identity.bundle.json');
     assert.doesNotMatch(result.stdout + result.stderr, /private-publisher|private-future/);
     const bundle = readFileSync('release-assets/release-identity.bundle.json', 'utf8');
     assert.deepEqual(JSON.parse(bundle), publicAuthorization(identity));

@@ -20,8 +20,10 @@ const url = id => `https://github.com/${repository}/actions/runs/${id}`;
 const read = path => readFileSync(fileURLToPath(new URL(`../../../${path}`, import.meta.url)), 'utf8');
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const shell = resolveBash();
-const canonicalDispatch = "github.event_name == 'workflow_dispatch' && " +
+const canonicalDispatch = 'inputs.release_qualification';
+const canonicalManualDispatch = "github.event_name == 'workflow_dispatch' && " +
   "(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')";
+const canonicalProducer = `${canonicalDispatch} || ${canonicalManualDispatch}`;
 const forbiddenJobCapabilities = /secrets|\bpackages\b|id-token|create-github-app-token|download-artifact/;
 
 function resolveBash() {
@@ -537,13 +539,14 @@ test('malformed run titles and unknown/native mode combinations fail closed', ()
   assert.throws(() => qualificationTitle('insider', '10', '50', '60', 'single-maintainer'));
 });
 
-test('workflow trust/permissions and release gates remain separate from publishing', () => {
+test('legacy qualification evidence remains reachable and separate from transaction-only publishing', () => {
   const qualify = load(read('.github/workflows/qualify-canonical-release.yml'));
   const writer = load(read('.github/workflows/record-canonical-qualification.yml'));
   assert.deepEqual(Object.keys(qualify.on), ['workflow_dispatch']);
   assert.deepEqual(Object.keys(writer.on), ['workflow_run']);
   assert.equal(qualify.permissions.contents, 'read');
   assert.equal(qualify.jobs.verify.permissions.statuses, undefined);
+  assert.match(writer.jobs.record.if, /workflow_run\.event/);
   assert.deepEqual(Object.entries(writer.jobs.record.permissions).filter(([, value]) => value === 'write'),
     [['statuses', 'write']]);
   for (const [path, workflow] of [[qualificationWorkflow, qualify], [evidenceWorkflow, writer]]) {
@@ -555,13 +558,19 @@ test('workflow trust/permissions and release gates remain separate from publishi
     }
   }
   const control = read('scripts/ci/release-control.mjs');
-  assert.equal((control.match(/await verifyCanonicalReleaseEvidence/g) ?? []).length, 2);
+  assert.equal((control.match(/await verifyCanonicalReleaseEvidence/g) ?? []).length, 1);
   assert.match(control, /qualificationClient\(env\.GH_TOKEN\)/);
+  assert.doesNotMatch(control, /if \(!transaction\)/);
+  assert.match(control, /const transaction = transactionFromEnvironment\(env\)/);
+  assert.ok(control.indexOf('await verifyCanonicalReleaseEvidence') >
+    control.indexOf("if (operation === 'admit')"));
+  assert.doesNotMatch(control, /sourceCommit: transaction\?\.sourceCommit \?\? env\.RELEASE_SOURCE_COMMIT/);
+  assert.doesNotMatch(control, /if \(env\.RELEASE_TRANSACTION\) \{[\s\S]*?advance\(/);
   assert.match(read('.github/workflows/ci.yml'), /test-canonical-qualification\.mjs/);
   assert.match(read('.github/workflows/ci.yml'), /test-github-evidence-pages\.mjs/);
 });
 
-test('manual CI executes equivalent required checks without shadowing PR check names', () => {
+test('trusted release qualification and canonical manual refs exclusively own canonical check names', () => {
   const ci = load(read('.github/workflows/ci.yml'));
   const path = load(read('.github/workflows/enforce-path-casing.yml')).jobs['path-casing'];
   const drift = load(read('.github/workflows/contract-drift.yml')).jobs['contract-drift'];
@@ -574,8 +583,12 @@ test('manual CI executes equivalent required checks without shadowing PR check n
   assert.deepEqual(ci.permissions, { contents: 'read' });
   for (const [id, name, original, skippedName] of expected) {
     const job = ci.jobs[id];
-    assert.equal(job.if, canonicalDispatch);
-    assert.equal(job.name, `\${{ ${canonicalDispatch} && '${name}' || '${skippedName}' }}`);
+    assert.equal(job.if, canonicalProducer);
+    assert.ok(job.name.includes(canonicalDispatch));
+    assert.ok(job.name.includes(canonicalManualDispatch));
+    assert.ok(job.name.includes(`'${name}'`));
+    assert.ok(job.name.includes('(manual ref not eligible)'));
+    assert.ok(job.name.includes(`'${skippedName}'`));
     assert.equal(job['runs-on'], original['runs-on']);
     assert.ok(Number.isInteger(job['timeout-minutes']) && job['timeout-minutes'] > 0 && job['timeout-minutes'] <= 45);
     assert.ok(ci.jobs.summary.needs.includes(id));
@@ -583,7 +596,7 @@ test('manual CI executes equivalent required checks without shadowing PR check n
     assert.equal(job.environment, undefined);
     assert.equal(job['continue-on-error'], undefined);
     const checkout = job.steps.find(step => step.uses?.startsWith('actions/checkout@'));
-    assert.equal(checkout.with.ref, '${{ github.sha }}');
+    assert.equal(checkout.with.ref, '${{ env.CI_SOURCE_SHA }}');
     assert.equal(checkout.with['persist-credentials'], false);
     for (const step of job.steps.filter(step => step.uses)) {
       assert.match(step.uses, /@[a-f0-9]{40}$/);
@@ -600,16 +613,16 @@ test('manual CI executes equivalent required checks without shadowing PR check n
   const diff = ci.jobs['canonical-contract-drift'].steps.find(step => step.id === 'diff');
   assert.equal(diff.run, 'bash scripts/ci/compute-change-set.sh');
   assert.equal(diff.env.EVENT_NAME, 'push');
-  assert.equal(diff.env.BEFORE_SHA, '${{ github.sha }}^1');
-  assert.equal(diff.env.AFTER_SHA, '${{ github.sha }}');
+  assert.equal(diff.env.BEFORE_SHA, '${{ env.CI_SOURCE_SHA }}^1');
+  assert.equal(diff.env.AFTER_SHA, '${{ env.CI_SOURCE_SHA }}');
   const guard = ci.jobs['canonical-contract-drift'].steps.find(step => step.if);
   assert.equal(guard.if, "steps.diff.outputs.force_full_safe != ''");
   assert.match(guard.run, /exit 1/);
   const iosBuild = ci.jobs['canonical-ios-build'];
   assert.deepEqual(iosBuild.defaults, ios.defaults);
   assert.ok(iosBuild.steps.every(step => !step.if && !step['continue-on-error']));
-  const summary = ci.jobs.summary.steps.find(step => step.name === 'Require all manual canonical checks');
-  assert.equal(summary.if, canonicalDispatch);
+  const summary = ci.jobs.summary.steps.find(step => step.name === 'Require all release qualification checks');
+  assert.equal(summary.if, canonicalProducer);
   for (const key of ['PATH_CASING_RESULT', 'CONTRACT_DRIFT_RESULT', 'IOS_BUILD_RESULT']) {
     assert.ok(summary.run.includes(`test "$${key}" = success`));
   }
@@ -622,35 +635,56 @@ test('canonical job privilege matcher detects package permissions in parsed YAML
   }
 });
 
-for (const ref of [
-  'refs/heads/main', 'refs/heads/development', 'refs/heads/feature/pr-head',
-  'refs/heads/release/v1.2.3', 'refs/heads/main-feature', 'refs/heads/development/feature',
-  'refs/tags/main', 'refs/tags/development', 'refs/pull/2688/head', 'refs/pull/2688/merge',
-]) {
-  for (const event of ['workflow_dispatch', 'pull_request', 'push']) {
-    test(`${event} on ${ref} cannot shadow required PR contexts outside canonical dispatch`, () => {
-      const ci = load(read('.github/workflows/ci.yml'));
-      const selected = event === 'workflow_dispatch' && ['refs/heads/main', 'refs/heads/development'].includes(ref);
-      // These conditions use only JS-compatible equality/boolean operators.
-      const evaluate = expression => runInNewContext(expression.replace(/^\$\{\{\s*|\s*\}\}$/g, ''),
-        { github: { event_name: event, ref, sha: stableSha } });
-      for (const id of ['canonical-path-casing', 'canonical-contract-drift', 'canonical-ios-build']) {
-        const job = ci.jobs[id];
-        assert.equal(evaluate(job.if), selected, `${id}: execution guard`);
-        const name = evaluate(job.name);
-        assert.equal(canonicalValidationChecks.includes(name), selected, `${id}: emitted check name`);
-        if (!selected) assert.match(name, /^Canonical .+ \(not selected\)$/);
-      }
-      const summary = ci.jobs.summary.steps.find(step => step.name === 'Require all manual canonical checks');
-      assert.equal(evaluate(summary.if), selected, 'manual summary follows the same ref boundary');
-    });
+test('canonical check ownership rejects noncanonical manual refs without weakening trusted qualification', () => {
+  const ci = load(read('.github/workflows/ci.yml'));
+  const jobs = ['canonical-path-casing', 'canonical-contract-drift', 'canonical-ios-build'];
+  const summary = ci.jobs.summary.steps.find(step => step.name === 'Require all release qualification checks');
+  const evaluate = (expression, releaseQualification, eventName, ref) =>
+    runInNewContext(expression.replace(/^\$\{\{\s*|\s*\}\}$/g, ''),
+      { inputs: { release_qualification: releaseQualification }, github: { event_name: eventName, ref } });
+  for (const ref of ['refs/heads/main', 'refs/heads/development']) {
+    for (const id of jobs) {
+      assert.equal(evaluate(ci.jobs[id].if, false, 'workflow_dispatch', ref), true, `${id}: ${ref}`);
+      assert.ok(canonicalValidationChecks.includes(
+        evaluate(ci.jobs[id].name, false, 'workflow_dispatch', ref)), `${id}: ${ref}`);
+    }
+    assert.equal(evaluate(summary.if, false, 'workflow_dispatch', ref), true, `summary: ${ref}`);
   }
-}
+  for (const ref of [
+    'refs/heads/feature/check-shadow',
+    'refs/pull/2705/head',
+    'refs/tags/v1.2.3',
+    'refs/heads/release/1.2.3',
+    'refs/heads/release',
+    'refs/heads/hotfix/urgent',
+  ]) {
+    for (const id of jobs) {
+      assert.equal(evaluate(ci.jobs[id].if, false, 'workflow_dispatch', ref), false, `${id}: ${ref}`);
+      const name = evaluate(ci.jobs[id].name, false, 'workflow_dispatch', ref);
+      assert.equal(canonicalValidationChecks.includes(name), false, `${id}: ${ref}`);
+      assert.match(name, /^Canonical .+ \(manual ref not eligible\)$/);
+    }
+    assert.equal(evaluate(summary.if, false, 'workflow_dispatch', ref), false, `summary: ${ref}`);
+  }
+  for (const ref of ['refs/heads/feature/check-shadow', 'refs/pull/2705/head', 'refs/tags/v1.2.3']) {
+    for (const id of jobs) {
+      assert.equal(evaluate(ci.jobs[id].if, true, 'workflow_call', ref), true, `${id}: trusted ${ref}`);
+      assert.ok(canonicalValidationChecks.includes(
+        evaluate(ci.jobs[id].name, true, 'workflow_call', ref)), `${id}: trusted ${ref}`);
+    }
+    assert.equal(evaluate(summary.if, true, 'workflow_call', ref), true, `summary: trusted ${ref}`);
+  }
+  for (const id of jobs) {
+    assert.equal(evaluate(ci.jobs[id].if, false, 'push', 'refs/heads/development'), false);
+    assert.match(evaluate(ci.jobs[id].name, false, 'push', 'refs/heads/development'),
+      /^Canonical .+ \(not selected\)$/);
+  }
+});
 
-test('manual summary executes fail-closed for failed, cancelled, missing or skipped canonical checks', t => {
+test('release qualification summary fails closed for failed, cancelled, missing or skipped checks', t => {
   const cwd = scratch(t);
   const ci = load(read('.github/workflows/ci.yml'));
-  const summary = ci.jobs.summary.steps.find(step => step.name === 'Require all manual canonical checks');
+  const summary = ci.jobs.summary.steps.find(step => step.name === 'Require all release qualification checks');
   const base = { PATH_CASING_RESULT: 'success', CONTRACT_DRIFT_RESULT: 'success', IOS_BUILD_RESULT: 'success' };
   const execute = overrides => spawnSync(shell, ['-e', '-o', 'pipefail', '-s'], {
     cwd, input: summary.run, encoding: 'utf8',
@@ -664,7 +698,7 @@ test('manual summary executes fail-closed for failed, cancelled, missing or skip
   }
 });
 
-test('manual contract gate examines real first-parent fixture changes and rejects missing ancestry', t => {
+test('release contract gate examines the selected source first-parent delta and rejects missing ancestry', t => {
   const cwd = scratch(t);
   const git = args => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   git(['init']);
@@ -685,7 +719,7 @@ test('manual contract gate examines real first-parent fixture changes and reject
   const diff = steps.find(step => step.id === 'diff');
   const runDiff = head => {
     const env = Object.fromEntries(Object.entries(diff.env).map(([key, value]) =>
-      [key, value.replaceAll('${{ github.sha }}', head)]));
+      [key, value.replaceAll('${{ env.CI_SOURCE_SHA }}', head)]));
     writeFileSync(join(cwd, 'outputs'), '');
     return spawnSync(shell, ['-s'], {
       cwd, encoding: 'utf8', input: read('scripts/ci/compute-change-set.sh'),

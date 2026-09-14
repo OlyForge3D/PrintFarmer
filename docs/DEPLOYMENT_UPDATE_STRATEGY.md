@@ -83,14 +83,14 @@ live rulesets/environments/ledger/publisher setup. #2660 still owns signed
 managed eligibility, image aliases and generated installer references; no
 source-only release or unsigned candidate pointer is an update candidate.
 
-**Canonical qualification (#2686):** the
-[non-publishing qualification path](RELEASE_GUIDE.md#non-publishing-canonical-qualification)
-requires new full-safe manual CI on live `main`/`development` HEAD and a fresh
-commit/run-bound review confirmation. Default-branch verification and a separate
-bounded status writer establish a live, completed audit chain; no PR verdict is
-copied to a squash SHA and no tree-equality review inference is permitted.
-Manual CI includes the genuine `path-casing`, `Contract drift gate` and unsigned
-`Build (iOS)` archive executions in that same run/check suite (#2688).
+**Canonical qualification (#2686):** `consolidated-release.yml` automatically
+runs full-safe qualification for the exact selected `main`/`development` source
+before protected publication and binds the resulting job/check evidence to the
+immutable transaction. The
+[retired manual qualification path](RELEASE_GUIDE.md#retired-manual-canonical-qualification-history)
+is historical context only. Automatic qualification includes the genuine
+`path-casing`, `Contract drift gate` and unsigned `Build (iOS)` archive
+executions in the same run/check suite (#2688).
 External same-name green checks cannot substitute. The archive runs on macOS;
 this graph makes no Windows-build or iOS-simulator-test claim. Evidence expires
 24 hours after CI creation, including queue time; a new graph requires new CI.
@@ -101,8 +101,8 @@ Newer runs, reruns, mode drift, edited review, failed checks or HEAD movement
 invalidate qualification. Publication admission revalidates the chain before
 reservation and each CAS retry rather than trusting a green status alone.
 Qualification has no release credentials, environments, OIDC or ledger writes.
-It does not complete #2668 activation: ledger/package rehearsals and private
-owner publisher-credential provisioning remain separate.
+Private owner publisher-credential provisioning remains separate from the
+automated release path.
 
 **Approval corrections (#2682, #2684):** activation under #2668 requires the
 explicit `RELEASE_APPROVAL_MODE` policy. `single-maintainer`
@@ -126,8 +126,9 @@ The current review producer targets open PR heads, not subsequent squash commits
 canonical-SHA review evidence remains an explicit #2668 activation prerequisite,
 never a status copied from another SHA or a fabricated independent approver.
 See [approval configuration](RELEASE_GUIDE.md#explicit-release-approval-configuration)
-for private delegation evidence and cutover. All other #2679 controls, including
-package ACL isolation and negative rehearsals, remain unchanged.
+for private delegation evidence and cutover. All other #2679 controls,
+including package ACL isolation and automated negative-path tests, remain
+unchanged.
 
 The local #2668 implementation establishes the following publication policy,
 as documented in the [release guide](RELEASE_GUIDE.md#release-channels-and-branches):
@@ -961,8 +962,9 @@ production validation runs are implied by this design document.
   non-publishing stabilization lifecycle and executable event-validation tests.
   Preserve `docs\RELEASE_GUIDE.md`'s disjoint container and TestFlight tag guidance.
   Gate cutover on historical tag inventory, allocator continuity, live
-  protections and a credential-free negative-event rehearsal; legacy artifacts
-  remain immutable and cannot become managed candidates through relabeling.
+  protections and credential-free automated negative-event tests; legacy
+  artifacts remain immutable and cannot become managed candidates through
+  relabeling.
 
 ### I2 — Complete release contract and publication
 

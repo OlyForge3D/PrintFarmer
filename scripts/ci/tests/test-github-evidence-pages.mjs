@@ -4,7 +4,6 @@ import { repository } from '../release-policy.mjs';
 import { evidenceBaseEndpoint, evidenceCollection, readEvidencePages } from '../github-evidence-pages.mjs';
 import { qualificationClient, qualificationRequestUrl } from '../canonical-qualification.mjs';
 import { githubClient, githubRequestUrl, verifyReleaseChecks } from '../release-github.mjs';
-import { readOnlyClient } from '../release-rehearsal.mjs';
 
 const sha = 'a'.repeat(40);
 const root = `https://api.github.com/repos/${repository}/`;
@@ -13,6 +12,7 @@ const checks = `commits/${sha}/check-runs?per_page=100`;
 const routes = [checks, `commits/${sha}/status?per_page=100`,
   `commits/${sha}/statuses?per_page=100`, `commits/${sha}/comments?per_page=100`,
   'pulls/60/reviews?per_page=100', 'actions/runs/10/attempts/1/jobs?per_page=100',
+  'actions/runs/10/attempts/17/jobs?per_page=100',
   `actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`,
   'actions/workflows/qualify-canonical-release.yml/runs?created=%3E%3D2026-09-13T05%3A00%3A00Z&per_page=100'];
 
@@ -265,7 +265,6 @@ test('array without terminal evidence exhausts bounded page budget', async () =>
 for (const [name, client] of [
   ['qualification', fetcher => qualificationClient('test-only', false, fetcher)],
   ['release', fetcher => githubClient('test-only', fetcher)],
-  ['rehearsal read-only', fetcher => readOnlyClient('test-only', fetcher)],
 ]) {
   test(`${name} transport collects 141 checks with numeric links and exact source routes`, async () => {
     const f = pages(checks, 141, numericRoot);
@@ -303,7 +302,8 @@ test('page allowlists preserve exact source, attempt, method and collection cons
     assert.equal(qualificationRequestUrl(`${endpoint}&page=2`), `${root}${endpoint}&page=2`);
   }
   assert.equal(githubRequestUrl(`${checks}&page=2`, 'GET'), `${root}${checks}&page=2`);
-  for (const endpoint of [`actions/runs/10/attempts/2/jobs?per_page=100&page=2`,
+  for (const endpoint of [`actions/runs/10/attempts/0/jobs?per_page=100&page=2`,
+    `actions/runs/10/attempts/01/jobs?per_page=100&page=2`,
     `${checks}&page=0`, `${checks}&page=-1`, `${checks}&page=02`, `${checks}&page=2&page=3`,
     'rules/branches/main?per_page=100&page=2']) {
     assert.throws(() => qualificationRequestUrl(endpoint));
@@ -316,6 +316,7 @@ for (const failed of [false, true]) {
   test(`release consumer reconciles required checks and statuses beyond page one: failed=${failed}`, async () => {
     const statuses = `commits/${sha}/status?per_page=100`;
     const collections = new Map([checks, statuses].map(endpoint => [endpoint, pages(endpoint, 139)]));
+    const evidenceAt = new Date().toISOString();
     const api = githubClient('test-only', async url => {
       const path = url.slice(root.length);
       const endpoint = path.replace(/&page=\d+$/, '');
@@ -327,6 +328,9 @@ for (const failed of [false, true]) {
         entry.status = 'completed';
         entry.conclusion = 'success';
         entry.state = failed && entry.id === 139 ? 'failure' : 'success';
+        entry.completed_at = evidenceAt;
+        entry.created_at = evidenceAt;
+        entry.updated_at = evidenceAt;
       }
       return new Response(JSON.stringify(result.data), { headers: { link: result.link } });
     });

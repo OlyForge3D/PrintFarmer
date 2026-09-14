@@ -104,6 +104,9 @@ export function githubRequestUrl(endpoint, method) {
     /^contents\/VERSION\?ref=[a-f0-9]{40}$/,
     /^commits\/[a-f0-9]{40}\/check-runs\?per_page=100$/,
     /^commits\/[a-f0-9]{40}\/status\?per_page=100$/,
+    /^actions\/runs\/[1-9][0-9]*$/,
+    /^actions\/runs\/[1-9][0-9]*\/attempts\/[1-9][0-9]*\/jobs\?per_page=100$/,
+    /^actions\/workflows\/consolidated-release\.yml$/,
     /^rules\/branches\/(?:main|development)\?per_page=100$/,
     /^environments\/release-(?:stable|insider)(?:\/deployment-branch-policies)?$/,
     /^rulesets(?:\/[1-9][0-9]*|\?per_page=100)$/,
@@ -116,7 +119,13 @@ export function githubRequestUrl(endpoint, method) {
   const [path, query] = endpoint.split('?');
   const encodedPath = path.split('/').map(encodeURIComponent).join('/');
   const search = query ? `?${new URLSearchParams(query)}` : '';
-  return `https://api.github.com/repos/${repository}/${encodedPath}${search}`;
+  const repositoryRoot = new URL(`https://api.github.com/repos/${repository}/`);
+  const requestUrl = new URL(`${encodedPath}${search}`, repositoryRoot);
+  requireThat(requestUrl.origin === repositoryRoot.origin &&
+    requestUrl.pathname.startsWith(repositoryRoot.pathname) &&
+    requestUrl.username === '' && requestUrl.password === '' && requestUrl.hash === '',
+  'Release API URL escaped the trusted repository origin');
+  return requestUrl.href;
 }
 
 export function githubClient(token = process.env.GH_TOKEN, fetcher = fetch) {
@@ -152,6 +161,18 @@ export async function branchHead(api, branch) {
   const sha = (await api(`git/ref/heads/${branch}`)).object.sha;
   requireString(sha, shaPattern, 'release branch head');
   return sha;
+}
+
+export async function verifyCanonicalSource(api, branch, sourceCommit) {
+  requireThat(['main', 'development'].includes(branch), 'Invalid canonical branch');
+  requireString(sourceCommit, shaPattern, 'canonical source commit');
+  const currentHead = await branchHead(api, branch);
+  if (currentHead === sourceCommit) return currentHead;
+  const comparison = await api(`compare/${sourceCommit}...${currentHead}`);
+  requireThat(comparison?.status === 'ahead' &&
+    comparison.merge_base_commit?.sha === sourceCommit,
+  'Pinned source is no longer trusted canonical branch history');
+  return currentHead;
 }
 
 export async function readVersion(api, sha) {
@@ -293,8 +314,16 @@ export function gitLedger(api, anchor) {
   };
 }
 
-export async function verifyReleaseChecks(api, sourceCommit, required = releaseRequiredChecks.map(context => ({ context }))) {
+export async function verifyReleaseChecks(
+  api,
+  sourceCommit,
+  required = releaseRequiredChecks.map(context => ({ context })),
+  collectedAt = Date.now(),
+  maximumAgeMs = 24 * 60 * 60 * 1000,
+) {
   requireString(sourceCommit, shaPattern, 'qualification source commit');
+  requireThat(Number.isFinite(collectedAt) && Number.isSafeInteger(maximumAgeMs) && maximumAgeMs > 0,
+    'Invalid evidence collection window');
   const checks = await api(`commits/${sourceCommit}/check-runs?per_page=100`);
   const statuses = await api(`commits/${sourceCommit}/status?per_page=100`);
   requireThat(Number.isSafeInteger(checks?.total_count) && checks.total_count >= 0 &&
@@ -304,6 +333,14 @@ export async function verifyReleaseChecks(api, sourceCommit, required = releaseR
     statuses.total_count >= 0 &&
     Array.isArray(statuses.statuses) && statuses.statuses.length === statuses.total_count,
   'Status evidence malformed, truncated or not bound to exact SHA');
+  const evidenceTimestamp = (value, description) => {
+    const parsed = parseGithubTimestamp(value, description);
+    requireThat(
+      parsed <= collectedAt && collectedAt - parsed <= maximumAgeMs,
+    `${description} is missing, stale, future-dated, or post-collection`);
+    return parsed;
+  };
+  const evidence = [];
   for (const policy of required) {
     const context = policy.context;
     const matchingChecks = checks.check_runs.filter(check => check?.name === context &&
@@ -314,6 +351,15 @@ export async function verifyReleaseChecks(api, sourceCommit, required = releaseR
     requireThat(validIds(matchingChecks) && validIds(matchingStatuses), 'Malformed qualification evidence ID');
     const latestCheck = matchingChecks.sort((a, b) => b.id - a.id)[0];
     const latestStatus = matchingStatuses.sort((a, b) => b.id - a.id)[0];
+    const checkCompletedAt = latestCheck?.completed_at;
+    const statusCreatedAt = latestStatus?.created_at;
+    const statusUpdatedAt = latestStatus?.updated_at;
+    if (latestCheck) evidenceTimestamp(checkCompletedAt, `${context} check completion`);
+    if (latestStatus) {
+      const created = evidenceTimestamp(statusCreatedAt, `${context} status creation`);
+      const updated = evidenceTimestamp(statusUpdatedAt, `${context} status update`);
+      requireThat(updated >= created, `${context} status timestamps are reversed`);
+    }
     const checkPassed = latestCheck?.head_sha === sourceCommit && latestCheck.status === 'completed' &&
       latestCheck.conclusion === 'success';
     // Commit statuses have no integration_id or check_suite. Never substitute a green workflow job.
@@ -328,7 +374,37 @@ export async function verifyReleaseChecks(api, sourceCommit, required = releaseR
         latestCheck || latestStatus;
     requireThat(requiredPassed && (!latestCheck || checkPassed) && (!latestStatus || statusPassed),
     'Missing successful exact-SHA required qualification');
+    evidence.push({
+      context,
+      ...(latestCheck ? { checkId: latestCheck.id, completedAt: checkCompletedAt } : {}),
+      ...(latestStatus ? {
+        statusId: latestStatus.id,
+        createdAt: statusCreatedAt,
+        updatedAt: statusUpdatedAt,
+      } : {}),
+    });
   }
+  const review = statuses.statuses
+    .filter(status => status?.context === releaseReviewStatus)
+    .sort((a, b) => b.id - a.id)[0];
+  return {
+    sourceCommit,
+    reviewUrl: review?.target_url,
+    collectedAt: new Date(collectedAt).toISOString(),
+    checks: evidence,
+  };
+}
+
+export function parseGithubTimestamp(value, description = 'GitHub timestamp') {
+  const match = typeof value === 'string' &&
+    /^(\d{4})-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.exec(value);
+  const parsed = match ? Date.parse(value) : Number.NaN;
+  const canonical = Number.isFinite(parsed) ? new Date(parsed).toISOString() : '';
+  const expectedCanonical = typeof value === 'string' && value.endsWith('Z') && !value.includes('.') ?
+    value.replace(/Z$/, '.000Z') : value;
+  requireThat(Boolean(match) && match[1] !== '0000' && Number.isFinite(parsed) &&
+    canonical === expectedCanonical, `Invalid ${description}`);
+  return parsed;
 }
 
 export async function verifyProtection(api, channel, publisherAppId, approvalMode, ownerApprovedReviewers, sourceCommit) {
@@ -364,7 +440,8 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
     rulesets.push(detail);
   }
   const evidence = { schema: 1, repository, channel, branch, publisherAppId,
-    verifiedAt: new Date().toISOString(), branchRules, branchRulesets, environment, branchPolicies, rulesets };
+    verifiedAt: new Date().toISOString(), branchRules, branchRulesets, environment, branchPolicies,
+    rulesets };
   const normalized = normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers);
   if (sourceCommit !== undefined) {
     const required = branchRules.filter(rule => rule.type === 'required_status_checks')

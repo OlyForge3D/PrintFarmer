@@ -4,6 +4,9 @@ import { publicIdentityFields } from '../../src/Web/ReactApp/public-release-iden
 
 export const repository = 'OlyForge3D/PrintFarmer';
 export const workflow = '.github/workflows/consolidated-release.yml';
+export const publisherWorkflow = '.github/workflows/docker-publish.yml';
+export const publisherWorkflowIdentity =
+  `https://github.com/${repository}/${publisherWorkflow}@refs/heads/development`;
 export const ledgerBranch = 'release-ledger';
 export const releaseBuildChecks = ['CI tooling tests', '.NET build', 'Frontend build & tests'];
 export const releaseReviewStatus = 'squad/pre-pr-verdict';
@@ -91,16 +94,21 @@ export function admit(context, selectedHead, versionText, lastStable) {
   requireObject(context, 'release admission context');
   requireThat(context.repository === repository, 'Untrusted repository');
   requireThat(['workflow_dispatch', 'schedule'].includes(context.event), 'Event cannot authorize publication');
-  requireThat(context.workflowIdentity === `${repository}/${workflow}@refs/heads/${context.workflowBranch}`,
+  requireThat(context.workflowIdentity === `${repository}/${workflow}@refs/heads/development`,
     'Untrusted workflow/caller identity');
-  requireThat(context.workflowSha === context.eventSha, 'Workflow SHA mismatch');
+  requireString(context.workflowSha, shaPattern, 'workflow commit');
+  if (context.observedBranchHead === undefined) {
+    requireThat(context.workflowSha === context.eventSha, 'Workflow SHA mismatch');
+  }
   const channel = context.event === 'schedule' ? 'insider' : context.channel;
   const sourceBranch = channel === 'stable' ? 'main' : 'development';
   requireThat(['stable', 'insider'].includes(channel), 'Invalid channel');
-  requireThat(context.ref === `refs/heads/${sourceBranch}`, 'Branch/channel mismatch');
-  requireThat(context.workflowBranch === sourceBranch, 'Workflow/source branch mismatch');
+  requireThat(context.ref === 'refs/heads/development', 'Release control must run from development');
+  requireThat(context.workflowBranch === 'development', 'Workflow definition must remain on development');
   requireThat(shaPattern.test(selectedHead) && context.eventSha === selectedHead,
-    'Source must equal canonical branch HEAD at admission; reselect and requalify');
+    'Source transaction does not match the pinned canonical HEAD selection at admission');
+  const authorizedBranchHead = context.observedBranchHead ?? selectedHead;
+  requireString(authorizedBranchHead, shaPattern, 'observed canonical branch HEAD');
   for (const field of ['buildId', 'buildAttempt']) {
     requireString(context[field], positivePattern, field);
   }
@@ -119,7 +127,7 @@ export function admit(context, selectedHead, versionText, lastStable) {
   }
   return {
     repository, channel, baseVersion, sourceBranch, ...(stage ? { stage } : {}),
-    sourceCommit: selectedHead, authorizedBranchHead: selectedHead,
+    sourceCommit: selectedHead, authorizedBranchHead,
     buildId: context.buildId, buildAttempt: context.buildAttempt,
     workflowIdentity: context.workflowIdentity, workflowCommit: context.workflowSha,
   };
@@ -127,7 +135,7 @@ export function admit(context, selectedHead, versionText, lastStable) {
 
 export function allocationKey(admission) {
   return hash([admission.repository, admission.workflowIdentity, admission.buildId,
-    admission.buildAttempt, admission.sourceCommit, admission.baseVersion]);
+    admission.channel, admission.stage ?? '', admission.sourceCommit, admission.baseVersion]);
 }
 
 const admissionFields = [
@@ -146,11 +154,11 @@ export function validateAdmission(admission) {
   requireThat(parseTag(`v${admission.baseVersion}`).channel === 'stable', 'Invalid ledger admission base version');
   const branch = admission.channel === 'stable' ? 'main' : 'development';
   requireThat(admission.sourceBranch === branch &&
-    admission.workflowIdentity === `${repository}/${workflow}@refs/heads/${branch}`,
+    admission.workflowIdentity === `${repository}/${workflow}@refs/heads/development`,
   'Invalid ledger admission workflow/branch');
-  requireString(admission.sourceCommit, shaPattern, 'ledger admission source commit');
-  requireThat(admission.authorizedBranchHead === admission.sourceCommit &&
-    admission.workflowCommit === admission.sourceCommit, 'Invalid ledger admission commit binding');
+  for (const field of ['sourceCommit', 'authorizedBranchHead', 'workflowCommit']) {
+    requireString(admission[field], shaPattern, `ledger admission ${field}`);
+  }
   for (const field of ['buildId', 'buildAttempt']) requireString(admission[field], positivePattern, `ledger admission ${field}`);
   requireThat(admission.channel === 'stable' || ['insider', 'beta', 'rc'].includes(admission.stage),
     'Invalid ledger admission stage');
@@ -205,12 +213,16 @@ export function validatePublicAuthorization(identity) {
   requireThat(identity.canonicalVersion === tag.canonicalVersion && identity.baseVersion === tag.baseVersion &&
     identity.channel === tag.channel && identity.releaseId === `${tag.channel}:${tag.canonicalVersion}`,
   'Invalid public authorization canonical identity');
-  validateAdmission({
-    repository, channel: identity.channel, baseVersion: identity.baseVersion, sourceBranch: identity.sourceBranch,
-    sourceCommit: identity.sourceCommit, authorizedBranchHead: identity.authorizedBranchHead,
-    buildId: identity.buildId, buildAttempt: identity.buildAttempt, workflowIdentity: identity.workflowIdentity,
-    workflowCommit: identity.sourceCommit, ...(tag.stage ? { stage: tag.stage } : {}),
-  });
+  const branch = identity.channel === 'stable' ? 'main' : 'development';
+  requireThat(identity.sourceBranch === branch &&
+    identity.workflowIdentity === `${repository}/${workflow}@refs/heads/development`,
+  'Invalid public authorization workflow/branch');
+  for (const field of ['sourceCommit', 'authorizedBranchHead']) {
+    requireString(identity[field], shaPattern, `public authorization ${field}`);
+  }
+  for (const field of ['buildId', 'buildAttempt']) {
+    requireString(identity[field], positivePattern, `public authorization ${field}`);
+  }
   requireTimestamp(identity.buildTime, 'authorization timestamp');
   requireString(identity.identitySha256, hashPattern, 'public authorization identity hash');
 }
@@ -302,7 +314,10 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
     /^[1-9][0-9]*$/.test(publisherAppId || '') && evidence.publisherAppId === publisherAppId &&
     Number.isFinite(Date.parse(evidence.verifiedAt)),
   'Missing or mismatched publisher protection evidence');
-  const { branchRules: rules, branchRulesets, environment, branchPolicies: policies, rulesets } = evidence;
+  const {
+    branchRules: rules, branchRulesets, environment, branchPolicies: policies,
+    rulesets,
+  } = evidence;
   requireThat(Array.isArray(rules) && rules.length > 0 && rules.length < 100 &&
     rules.every(rule => rule && typeof rule.type === 'string' &&
       Number.isSafeInteger(rule.ruleset_id) && rule.ruleset_id > 0) &&
@@ -356,8 +371,8 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
   requireThat(environment.can_admins_bypass === false,
     'Owner blocker: publishing environment must explicitly disable administrator bypass');
   requireThat(policies?.branch_policies?.length === 1 &&
-    policies.branch_policies[0].name === branch && policies.branch_policies[0].type === 'branch',
-  'Owner blocker: publishing environment must allow only its canonical branch');
+    policies.branch_policies[0].name === 'development' && policies.branch_policies[0].type === 'branch',
+  'Owner blocker: publishing environment must allow only the immutable release-control branch');
   const reviewerRules = Array.isArray(environment.protection_rules)
     ? environment.protection_rules.filter(rule => rule.type === 'required_reviewers') : [];
   requireThat(reviewerRules.length === 1 && Array.isArray(reviewerRules[0].reviewers) &&
@@ -619,7 +634,10 @@ export function validateReservationAdmission(state, admission) {
   validateAdmission(admission);
   const existing = state.reservations[allocationKey(admission)];
   if (existing) {
-    requireThat(hash(existing.admission) === hash(admission), 'Same allocation key changed its admission');
+    const retryIdentity = value => Object.fromEntries(
+      Object.entries(value).filter(([key]) => key !== 'buildAttempt'));
+    requireThat(hash(retryIdentity(existing.admission)) === hash(retryIdentity(admission)),
+      'Same allocation key changed its admission');
     return existing;
   }
   const stableFloor = state.pointers.stable?.canonicalVersion ?? state.lastHistoricalStable;
@@ -679,18 +697,18 @@ export function verifyConsumer(record, stored, context, identitySha256 = hash(st
     record.channel === tag.channel && record.stage === tag.stage && record.sequence === tag.sequence &&
     record.releaseId === `${tag.channel}:${tag.canonicalVersion}` &&
     record.allocationKey === allocationKey(record) &&
-    shaPattern.test(record.sourceCommit) && record.workflowCommit === record.sourceCommit &&
-    record.workflowIdentity === `${repository}/${workflow}@refs/heads/${record.sourceBranch}`,
+    shaPattern.test(record.sourceCommit) && shaPattern.test(record.workflowCommit) &&
+    record.workflowIdentity === `${repository}/${workflow}@refs/heads/development`,
   'Invalid canonical record identity');
   requireThat(context.repository === repository &&
     context.workflowIdentity === record.workflowIdentity &&
     context.workflowSha === record.workflowCommit &&
     context.eventSha === record.sourceCommit &&
-    context.ref === `refs/heads/${record.sourceBranch}` &&
-    record.authorizedBranchHead === record.sourceCommit &&
+    context.ref === 'refs/heads/development' &&
+    shaPattern.test(record.authorizedBranchHead) &&
     record.sourceBranch === (record.channel === 'stable' ? 'main' : 'development') &&
     ['stable', 'insider'].includes(record.channel) &&
-    context.buildId === record.buildId && context.buildAttempt === record.buildAttempt &&
+    context.buildId === record.buildId &&
     ['workflow_dispatch', 'schedule'].includes(context.event),
   'Unauthorized consumer/caller/run/attempt');
 }
@@ -724,7 +742,7 @@ export function advance(state, record, set, currentHead, expectedPointer) {
   validateLedger(state, state.anchor);
   validateRecord(record);
   validateCompleteSet(record, set);
-  requireThat(record.sourceCommit === currentHead, 'Stale source cannot advance channel, regardless of N');
+  requireString(currentHead, shaPattern, 'verified canonical branch HEAD');
   const reservation = state.reservations[record.allocationKey];
   requireThat(reservation && (reservation.identitySha256 || hash(reservation.record)) === hash(record), 'Unknown authorization');
   const pointer = state.pointers[record.channel];

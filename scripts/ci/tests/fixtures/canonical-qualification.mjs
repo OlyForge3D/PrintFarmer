@@ -2,7 +2,7 @@ import { repository, releaseBuildChecks, releaseReviewStatus } from '../../relea
 import { confirmationBody, qualificationTitle, qualificationDescription,
   qualificationWorkflow, evidenceWorkflow, canonicalValidationChecks } from '../../canonical-qualification.mjs';
 
-export function canonicalAuthorizationFixture(sha, channel, mode) {
+export function canonicalAuthorizationFixture(sha, channel, mode, workflowCommit = sha) {
   const at = minutes => new Date(Date.now() - minutes * 60_000).toISOString();
   const branch = channel === 'stable' ? 'main' : 'development';
   const definitions = [
@@ -13,7 +13,9 @@ export function canonicalAuthorizationFixture(sha, channel, mode) {
   const runs = definitions.map((definition, index) => ({
     id: (index + 1) * 10, workflow_id: definition.id, path: definition.path,
     repository: { full_name: repository }, head_repository: { full_name: repository },
-    head_branch: index === 0 ? branch : 'development', head_sha: sha, run_attempt: 1,
+    head_branch: index === 0 ? branch : 'development',
+    head_sha: index === 0 ? sha : workflowCommit,
+    run_attempt: 1,
     event: index === 2 ? 'workflow_run' : 'workflow_dispatch',
     html_url: `https://github.com/${repository}/actions/runs/${(index + 1) * 10}`,
     status: 'completed', conclusion: 'success', actor: { login: 'jpapiez' }, triggering_actor: { login: 'jpapiez' },
@@ -30,7 +32,8 @@ export function canonicalAuthorizationFixture(sha, channel, mode) {
   const reviewer = mode === 'single-maintainer' ? 'jpapiez' : 'native-reviewer';
   const stamp = at(22);
   const status = { id: 1, context: releaseReviewStatus, state: 'success',
-    creator: { login: 'github-actions[bot]' }, target_url: runs[2].html_url, created_at: at(8),
+    creator: { login: 'github-actions[bot]' }, target_url: runs[2].html_url,
+    created_at: at(8), updated_at: at(8),
     description: qualificationDescription({ approvalMode: mode, sourceCommit: sha }) };
   const values = new Map([
     ['', { full_name: repository, default_branch: 'development' }],
@@ -55,7 +58,7 @@ export function canonicalAuthorizationFixture(sha, channel, mode) {
     values.set(`actions/workflows/${run.path.split('/').at(-1)}`, definitions[index]);
     values.set(`actions/runs/${run.id}/attempts/1/jobs?per_page=100`, {
       total_count: names[index].length, jobs: names[index].map((name, i) => ({
-        id: run.id * 100 + i, run_id: run.id, run_attempt: 1, head_sha: sha,
+        id: run.id * 100 + i, run_id: run.id, run_attempt: 1, head_sha: run.head_sha,
         check_run_url: `https://api.github.com/repos/${repository}/check-runs/${i + 1}`,
         status: 'completed', conclusion: 'success', name,
       })),

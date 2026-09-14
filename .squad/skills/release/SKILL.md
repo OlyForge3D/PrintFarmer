@@ -8,7 +8,10 @@ confidence: high
 
 Read [the release guide](../../../docs/RELEASE_GUIDE.md) before attempting
 publication. `.github/workflows/consolidated-release.yml` is the sole server
-release entry point: stable runs on `main`, insider on `development`.
+release entry point. Stable selects source from `main`; insider selects source
+from `development`.
+The workflow itself is always dispatched from `development`; the selected
+channel determines whether build source is pinned from `main` or `development`.
 Branch pushes, direct tag pushes and stabilization branches do not publish.
 The reusable Docker workflow is an authorized consumer, not a second entry point.
 
@@ -25,15 +28,24 @@ The reusable Docker workflow is an authorized consumer, not a second entry point
 
 ## Publication
 
-Dispatch `consolidated-release.yml` on the selected canonical branch with the
-matching channel. Leave `version` unset for normal allocation; it is only an
-assertion against the durable result. Stable selects no stage; insider defaults
-to `insider` and also supports the guide's beta/RC progression.
+Dispatch `consolidated-release.yml` only from `development` and select the
+matching channel. Leave `source_sha` blank to pin that channel branch HEAD once or enter
+that full SHA or a trusted ancestor. The workflow definition commit remains a
+separate binding. Do not provide a mode or version;
+tag, allocator value, CI run ID, comment ID or formatted attestation. Approve
+the single `release-<channel>` transaction environment. The workflow starts
+canonical qualification, collects evidence, allocates identity and publishes
+automatically.
 
-Follow that run through authorization, immutable source/tag/assets and complete
-image-set verification. A successful source-only release is not a managed-update
-candidate. Record the workflow run, source SHA and resulting canonical identity.
-TestFlight remains independent in the `ios/` namespace.
+Qualification receipts are bound to the dispatch run, immutable attempt-one
+transaction, workflow commit, GitHub Actions check suite, namespaced jobs,
+exact source checks, evidence timestamps and live branch policy. They expire
+after 30 minutes and are reverified after approval.
+`release-stable` and `release-insider` are the only publication environments.
+The dispatch has only channel and optional source SHA, and the selected
+environment supplies the single approval for the complete protected
+transaction. No rehearsal or alternate live diagnostic path exists; validation
+uses automated tests, static analysis, code review and fail-closed checks.
 
 ## Retired paths and recovery
 
@@ -43,7 +55,8 @@ snapshot, tag creation, force push, release creation or asset/container upload.
 Do not restore their former dual-history or `--clean-history` behavior.
 
 Never bypass a denial with manual canonical tags, GitHub release commands,
-history rewrites or counter resets. Exact existing reservations may retry
-without changing their identity; new attempts cannot reuse a reserved stable
-identity. Follow the release guide's owner-only continuity recovery procedure
-when evidence is missing or invalid.
+history rewrites or counter resets. Same-run reruns recover the immutable
+attempt-one transaction and exact existing reservation bytes. Missing or
+mismatched recovery artifacts fail closed; reruns never allocate a second
+identity or skip qualification/approval. Follow the release guide's owner-only
+continuity recovery procedure when evidence is missing or invalid.

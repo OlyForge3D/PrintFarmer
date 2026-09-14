@@ -9,14 +9,10 @@ on:
         options: [stable, insider]
         default: stable
         required: true
-      stage:
-        description: Insider stage; choose none for stable
-        type: choice
-        options: [none, insider, beta, rc]
-        default: none
-      version:
-        description: Optional exact tag assertion; N is allocated, never caller-selected
+      source_sha:
+        description: Optional full selected-channel ancestor SHA; blank pins that branch HEAD once
         type: string
+        required: false
   schedule:
     - cron: '27 9 * * *'
 
@@ -35,16 +31,16 @@ jobs:
       actions: write
       contents: read
     steps:
-      - name: Dispatch the same authority on development
+      - name: Dispatch the fixed release authority on development
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh workflow run consolidated-release.yml --repo "$GITHUB_REPOSITORY" \
-            --ref development -f channel=insider -f stage=insider
+            --ref development -f channel=insider
 
   admit:
     if: github.event_name != 'schedule'
-    name: Read-only release admission
+    name: Pin release transaction
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -56,111 +52,164 @@ jobs:
       source_sha: ${{ steps.admit.outputs.source_sha }}
       channel: ${{ steps.admit.outputs.channel }}
       approval_mode: ${{ steps.admit.outputs.approval_mode }}
+      transaction: ${{ steps.select.outputs.transaction }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.workflow_sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
-      - name: Admit exact canonical branch HEAD
+      - name: Recover immutable original transaction for a same-run rerun
+        if: github.run_attempt > 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh run download "$GITHUB_RUN_ID"
+          --name "release-transaction-${GITHUB_RUN_ID}-1"
+          --dir .artifacts/release-transaction
+      - name: Resolve and bind canonical source once
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+        run: |
+          set -euo pipefail
+          transaction="$(node scripts/ci/release-transaction.mjs select)"
+          echo "transaction=$transaction" >> "$GITHUB_OUTPUT"
+      - name: Admit immutable release transaction
         id: admit
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_CHANNEL: ${{ inputs.channel }}
-          RELEASE_STAGE: ${{ inputs.stage }}
-          RELEASE_TAG: ${{ inputs.version }}
+          RELEASE_TRANSACTION: ${{ steps.select.outputs.transaction }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
         run: node scripts/ci/release-control.mjs admit
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: release-transaction-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/release-transaction/transaction.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
 
-  authorize:
-    name: Reserve and authorize immutable source
+  qualification:
+    name: Automatic exact-source qualification
     needs: admit
-    runs-on: ubuntu-latest
-    environment: release-${{ needs.admit.outputs.channel }}
+    uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
-      id-token: write
+    with:
+      release_qualification: true
+      source_sha: ${{ needs.admit.outputs.source_sha }}
+      source_branch: ${{ needs.admit.outputs.channel == 'stable' && 'main' || 'development' }}
+
+  collect-qualification:
+    name: Collect genuine qualification evidence
+    needs: [admit, qualification]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
       actions: read
       checks: read
       statuses: read
-      pull-requests: read
     outputs:
-      public_identity: ${{ steps.authorize.outputs.public_identity }}
+      run_url: ${{ steps.evidence.outputs.run_url }}
+      review_url: ${{ steps.evidence.outputs.review_url }}
+      expires_at: ${{ steps.evidence.outputs.expires_at }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ needs.admit.outputs.source_sha }}
-          fetch-depth: 0
+          ref: ${{ fromJSON(needs.admit.outputs.transaction).workflowCommit }}
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
-      - name: Check sole authored version base
-        run: bash scripts/sync-monorepo-version.sh --check
-      - name: Require owner-provisioned registry authority before reservation
-        env:
-          REGISTRY_USER: ${{ vars.RELEASE_REGISTRY_USER }}
-          REGISTRY_TOKEN: ${{ secrets.RELEASE_REGISTRY_TOKEN }}
-        run: test -n "$REGISTRY_USER" && test -n "$REGISTRY_TOKEN"
-      - name: Obtain protected publisher app token
-        id: publisher
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
-          private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
-          permission-contents: write
-          permission-checks: read
-          permission-statuses: read
-          permission-administration: read
-          permission-actions: read
-      - name: Reserve sequence before source tag
-        id: authorize
+      - name: Verify exact-SHA checks and review evidence
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
-          RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
-          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
-          RELEASE_ADMITTED_APPROVAL_MODE: ${{ needs.admit.outputs.approval_mode }}
-          RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
-          RELEASE_CHANNEL: ${{ inputs.channel }}
-          RELEASE_STAGE: ${{ inputs.stage }}
-          RELEASE_TAG: ${{ inputs.version }}
-          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
-        run: node scripts/ci/release-control.mjs authorize
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v4.1.2
-      - name: Sign immutable source and App-verified protection attestation
+          RELEASE_TRANSACTION: ${{ needs.admit.outputs.transaction }}
         run: |
           set -euo pipefail
           umask 077
-          cosign sign-blob --yes \
-            --bundle .artifacts/release-authorization/release-identity.bundle.json \
-            .artifacts/release-authorization/release-identity.json
-          cosign sign-blob --yes \
-            --bundle .artifacts/release-authorization/public-identity.bundle.json \
-            .artifacts/release-authorization/public-identity.json
-      - uses: actions/upload-artifact@v7
+          qualification="$(node scripts/ci/release-transaction.mjs qualify)"
+          qualification_bytes="$(printf '%s' "$qualification" | wc -c)"
+          if [[ "$qualification_bytes" -le 0 || "$qualification_bytes" -gt 1048576 ]]; then
+            echo "Qualification evidence is empty or oversized"
+            exit 1
+          fi
+          mkdir -p .artifacts/release-transaction
+          if [[ -e .artifacts/release-transaction/qualification.json ]]; then
+            echo "Qualification evidence path already exists"
+            exit 1
+          fi
+          printf '%s\n' "$qualification" > .artifacts/release-transaction/qualification.json
+          node -e "JSON.parse(require('fs').readFileSync('.artifacts/release-transaction/qualification.json', 'utf8'))"
+      - name: Export bounded qualification references
+        id: evidence
+        run: |
+          set -euo pipefail
+          echo "run_url=$(jq -r '.run.url' .artifacts/release-transaction/qualification.json)" >> "$GITHUB_OUTPUT"
+          echo "review_url=$(jq -r '.sourceEvidence.reviewUrl' .artifacts/release-transaction/qualification.json)" >> "$GITHUB_OUTPUT"
+          echo "expires_at=$(jq -r '.expiresAt' .artifacts/release-transaction/qualification.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: release-authorization-${{ github.run_attempt }}
-          path: |
-            .artifacts/release-authorization/release-identity.json
-            .artifacts/release-authorization/release-identity.bundle.json
-            .artifacts/release-authorization/public-identity.json
-            .artifacts/release-authorization/public-identity.bundle.json
+          name: release-qualification-${{ github.run_id }}
+          overwrite: true
+          path: .artifacts/release-transaction/qualification.json
           include-hidden-files: true
           if-no-files-found: error
+          retention-days: 30
 
   publish:
-    needs: authorize
+    name: Approve and publish immutable release
+    needs: [admit, qualification, collect-qualification]
     uses: ./.github/workflows/docker-publish.yml
     permissions:
-      actions: write
+      actions: read
       contents: read
       packages: read
       id-token: write
     with:
-      identity: ${{ needs.authorize.outputs.public_identity }}
+      transaction: ${{ needs.admit.outputs.transaction }}
     secrets: inherit
+
+  summary:
+    name: Release transaction summary
+    if: always() && github.event_name != 'schedule'
+    needs: [admit, qualification, collect-qualification, publish]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Write bounded result
+        env:
+          CHANNEL: ${{ inputs.channel }}
+          SOURCE_SHA: ${{ needs.admit.outputs.source_sha }}
+          QUALIFICATION: ${{ needs.qualification.result }}
+          EVIDENCE: ${{ needs.collect-qualification.result }}
+          PUBLICATION: ${{ needs.publish.result }}
+          PUBLIC_IDENTITY: ${{ needs.publish.outputs.public_identity }}
+          QUALIFICATION_URL: ${{ needs.collect-qualification.outputs.run_url }}
+          REVIEW_URL: ${{ needs.collect-qualification.outputs.review_url }}
+          QUALIFICATION_EXPIRES: ${{ needs.collect-qualification.outputs.expires_at }}
+          PUBLISHED_SET_DIGEST: ${{ needs.publish.outputs.published_set_digest }}
+        run: |
+          {
+            echo "## Release transaction"
+            echo "- channel: \`$CHANNEL\`"
+            echo "- source: \`$SOURCE_SHA\`"
+            echo "- qualification: \`$QUALIFICATION\`"
+            echo "- evidence: \`$EVIDENCE\`"
+            echo "- publication: \`$PUBLICATION\`"
+            echo "- qualification run: ${QUALIFICATION_URL:-unavailable}"
+            echo "- review evidence: ${REVIEW_URL:-unavailable}"
+            echo "- qualification expires: \`${QUALIFICATION_EXPIRES:-unavailable}\`"
+            echo "- canonical identity: \`${PUBLIC_IDENTITY:-not-authorized}\`"
+            echo "- published set digest: \`${PUBLISHED_SET_DIGEST:-not-published}\`"
+            if [ "$PUBLICATION" != success ]; then
+              echo "- action: inspect the failed admission, qualification, approval, authorization, or publication job above; no secret values are included here"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
