@@ -18,19 +18,18 @@ const dailyValidationSmoke = readFileSync(
 );
 const splitTopologySmoke = readFileSync('tests/test-split-topology-route-smoke.sh', 'utf8');
 const publishWorkflow = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
-const buildMetadataPath = path.resolve('scripts/build-metadata.sh');
-const repositoryRoot = process.cwd();
+const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+const bashPath = value => value.replaceAll('\\', '/');
+const buildMetadataPath = bashPath(path.resolve('scripts/build-metadata.sh'));
+const repositoryRoot = bashPath(process.cwd());
 
 function resolveLocalBuildGitSha(requestedSha = '') {
   return execFileSync(
-    'bash',
+    shell,
     [
-      '-c',
-      'source "$1" >/dev/null; resolve_local_build_git_sha "$2" "$3"',
-      'resolve-local-build-git-sha',
-      buildMetadataPath,
-      repositoryRoot,
-      requestedSha,
+      '-lc',
+      `source '${buildMetadataPath}' >/dev/null; ` +
+        `resolve_local_build_git_sha '${repositoryRoot}' '${requestedSha}'`,
     ],
     { encoding: 'utf8' },
   ).trim();
@@ -42,12 +41,10 @@ test('local build SHA resolution binds supplied metadata to repository HEAD', ()
   assert.equal(resolveLocalBuildGitSha(head.toUpperCase()), head);
   assert.equal(
     execFileSync(
-      'bash',
+      shell,
       [
-        '-c',
-        'SCRIPT_DIR=caller-directory; source "$1"; printf %s "$SCRIPT_DIR"',
-        'source-build-metadata',
-        buildMetadataPath,
+        '-lc',
+        `SCRIPT_DIR=caller-directory; source '${buildMetadataPath}'; printf %s "$SCRIPT_DIR"`,
       ],
       { encoding: 'utf8' },
     ),
@@ -55,14 +52,11 @@ test('local build SHA resolution binds supplied metadata to repository HEAD', ()
   );
 
   const mismatch = spawnSync(
-    'bash',
+    shell,
     [
-      '-c',
-      'source "$1" >/dev/null; resolve_local_build_git_sha "$2" "$3"',
-      'resolve-local-build-git-sha',
-      buildMetadataPath,
-      repositoryRoot,
-      'a'.repeat(40),
+      '-lc',
+      `source '${buildMetadataPath}' >/dev/null; ` +
+        `resolve_local_build_git_sha '${repositoryRoot}' '${'a'.repeat(40)}'`,
     ],
     { encoding: 'utf8' },
   );
@@ -95,9 +89,9 @@ test('active Dockerfile variants propagate full commit metadata into production 
 });
 
 test('release workflow injects the full source commit into container builds', () => {
-  assert.match(publishWorkflow, /echo "full=\$\(git rev-parse HEAD\)"/);
-  assert.match(publishWorkflow, /GIT_SHA=\$\{\{ steps\.gitsha\.outputs\.full \}\}/);
-  assert.match(publishWorkflow, /VITE_GIT_SHA=\$\{\{ steps\.gitsha\.outputs\.full \}\}/);
+  assert.match(publishWorkflow, /source_sha:\r?\n\s+description: Exact qualified source commit/);
+  assert.match(publishWorkflow, /--build-arg "GIT_SHA=\$\{source_sha\}"/);
+  assert.match(publishWorkflow, /--build-arg "VITE_GIT_SHA=\$\{source_sha\}"/);
   assert.doesNotMatch(publishWorkflow, /git rev-parse --short HEAD/);
 });
 
